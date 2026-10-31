@@ -685,6 +685,19 @@ class TestBuildStatus:
         s = _status([_pr("a"), _pr("b")], [])
         assert s["mode"] == "off" and s["runs"] == [] and s["targets"] == []
 
+    def test_malformed_depends_on_reads_as_absent(self):
+        """A hand-edited scalar ``depends_on`` is no list of ids.
+
+        ``project.yaml`` is hand-editable state: ``for d in 5`` raised
+        ``TypeError`` out of ``transitive_deps`` / ``build_status``, the
+        status the TUI polls every tick.
+        """
+        prs = [_pr("a", status="in_progress"), _pr("b")]
+        prs[1]["depends_on"] = 5
+        assert st.transitive_deps(prs, "b") == set()
+        s = _status(prs, ["b"], windows={"a": "@1"})
+        assert _run(s, "b")["depends_on"] == []
+
     def test_shared_dep_listed_once_needed_by_both(self):
         prs = [_pr("d", status="in_progress"), _pr("a", deps=["d"]),
                _pr("b", deps=["d"])]

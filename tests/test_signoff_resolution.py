@@ -1,0 +1,6815 @@
+"""Metadata-only integration conflicts are resolved at sign-off (pr-5cee3d5).
+
+Real git repositories + real project.yaml throughout.  PR #250's trigger —
+master and a feature branch independently appending records — must resolve by
+stable record id, keep every record, allow the unaffected review/QA evidence
+to be reused explicitly, and still require a fresh sign-off report tied to
+the exact resolved candidate.  Real field, deletion/edit and ambiguity
+conflicts are never silently resolved, and the merge step only publishes the
+approved candidate.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import subprocess
+import threading
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import pytest
+import yaml
+from click.testing import CliRunner
+
+from pm_core import integration, prompt_gen, signoff, store
+from pm_core.cli import pr as pr_mod
+from pm_core.signoff import (SIGNOFF_BLOCKED, SIGNOFF_IMPL, SIGNOFF_MERGE,
+                             SIGNOFF_REQA, SIGNOFF_REVIEW)
+
+PR = "pr-200"
+BRANCH = "pm/pr-200"
+
+
+def git(cwd: Path, *args: str) -> str:
+    return subprocess.run(["/usr/bin/git", *args], cwd=cwd, check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def commit(cwd: Path, name: str, text: str, msg: str) -> str:
+    (cwd / name).write_text(text)
+    git(cwd, "add", name)
+    git(cwd, "commit", "-q", "-m", msg)
+    return git(cwd, "rev-parse", "HEAD")
+
+
+def project_doc(repo: Path, prs: list[dict] | None = None) -> dict:
+    return {
+        "project": {"name": "p", "repo": str(repo), "base_branch": "master",
+                    "backend": "local"},
+        "prs": prs if prs is not None else [
+            {"id": "pr-100", "title": "Base one", "branch": "pm/base",
+             "status": "merged"},
+            {"id": PR, "title": "Feature", "branch": BRANCH,
+             "status": "sign_off"},
+        ],
+        "plans": [],
+    }
+
+
+def append_records(pm_dir: Path, repo: Path, ids: list[str],
+                   status: str = "pending") -> None:
+    data = store.load(pm_dir)
+    for rec_id in ids:
+        data["prs"].append({"id": rec_id, "title": f"Record {rec_id}",
+                            "branch": f"pm/{rec_id}", "status": status})
+    store.save(data, pm_dir)
+
+
+def pr_ids(pm_dir: Path) -> list[str]:
+    return [p["id"] for p in store.load(pm_dir)["prs"]]
+
+
+@pytest.fixture
+def w(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    for k, v in {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                 "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}.items():
+        monkeypatch.setenv(k, v)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "master")
+    base_pm = repo / "pm"
+    base_pm.mkdir()
+    store.save(project_doc(repo), base_pm)
+    (repo / "keep.txt").write_text("keep\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "init")
+
+    wd = tmp_path / "home" / ".pm" / "workdirs" / "proj" / PR
+    git(tmp_path, "clone", "-q", str(repo), str(wd))
+    git(wd, "checkout", "-q", "-b", BRANCH)
+    head = commit(wd, "feature.txt", "feature\n", "feature")
+
+    state = tmp_path / "state"
+    state.mkdir()
+    store.save(project_doc(repo, prs=[
+        {"id": PR, "title": "Feature", "branch": BRANCH,
+         "status": "sign_off", "workdir": str(wd)},
+    ]), state)
+    croot = tmp_path / "captures"
+    tdir = tmp_path / "tdir"
+    tdir.mkdir()
+    with patch("pm_core.paths.captures_root", return_value=croot):
+        yield SimpleNamespace(repo=repo, wd=wd, pm_dir=state, head=head,
+                              croot=croot, tdir=tdir, tmp=tmp_path,
+                              base_pm=base_pm)
+
+
+def pr_entry(w) -> dict:
+    return store.get_pr(store.load(w.pm_dir), PR)
+
+
+def write_report(w, rec: dict, verdict: str = SIGNOFF_MERGE, *,
+                 candidate: bool = True, evidence: bool = True,
+                 reason: bool = True, checks: bool = False,
+                 head: str | None = None,
+                 base: str | None = None) -> None:
+    (w.croot / PR).mkdir(parents=True, exist_ok=True)
+    extra = ""
+    if candidate:
+        extra += (f'<meta name="pm-signoff-candidate" '
+                  f'content="{rec.get("candidate_tree") or ""}">')
+    if evidence:
+        extra += ('<meta name="pm-signoff-evidence" '
+                  'content="review@aaaaaaa,qa@bbbbbbb">')
+    if reason:
+        extra += ('<meta name="pm-signoff-evidence-reason" '
+                  'content="only independent project.yaml records changed">')
+    if checks:
+        extra += ('<meta name="pm-signoff-checks" '
+                  'content="ran the resolver tests against the merged tree">')
+    (w.croot / PR / "report.html").write_text(
+        f'<html><head><meta name="pm-signoff-verdict" content="{verdict}">'
+        f'<meta name="pm-signoff-head" content="{head or rec.get("head")}">'
+        f'<meta name="pm-signoff-base" content="{base or rec.get("base_sha")}">'
+        f'{extra}</head><body/></html>')
+
+
+def record_merge(w, rec: dict) -> None:
+    write_report(w, rec)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, rec["head"], "manual",
+        integration=integration.binding(rec))
+
+
+def merge(w, *extra):
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"), \
+         patch.object(pr_mod, "trigger_tui_restart"), \
+         patch.object(pr_mod, "_launch_merge_window") as launch, \
+         patch.object(pr_mod, "_finalize_merge") as finalize:
+        result = CliRunner().invoke(pr_mod.pr, ["merge", *extra, PR])
+    return result, launch.call_args_list, finalize.called
+
+
+# --- resolver unit coverage -------------------------------------------------
+
+BASE_YAML = """project:
+  name: p
+prs:
+- id: pr-100
+  title: Base one
+  status: merged
+- id: pr-200
+  title: Feature
+  status: sign_off
+"""
+
+
+def resolve(ours_extra: str = "", theirs_extra: str = ""):
+    ours = BASE_YAML.rstrip() + ours_extra
+    theirs = BASE_YAML.rstrip() + theirs_extra
+    return integration.resolve_project_yaml(BASE_YAML, ours, theirs)
+
+
+def test_independent_additions_from_both_sides_survive():
+    merged, details = resolve(
+        "\n- id: pr-300\n  title: Feat\n  status: pending\n",
+        "\n- id: pr-250\n  title: Base\n  status: merged\n")
+    assert merged is not None, details
+    assert "pr-250" in merged and "pr-300" in merged
+    actions = details["actions"]["prs"]
+    assert actions["added"]["PR branch"] == ["pr-300"]
+    assert actions["added"]["new base"] == ["pr-250"]
+
+
+def test_an_identical_nan_on_both_sides_is_not_a_conflict():
+    """``nan != nan``, but two identical hand-edited ``.nan`` are one value.
+
+    YAML parses an unquoted ``.nan`` to ``float('nan')``, which is unequal to
+    itself, so the resolver saw "changed differently on both sides" for a
+    value neither side touched and refused the whole document — including the
+    independent record additions the feature exists to merge.
+    """
+    base = BASE_YAML + "  model: .nan\n"
+    ours = BASE_YAML + "  model: .nan\n  reviewed_at: 2026-01-01\n"
+    theirs = BASE_YAML + "  model: .nan\n  started_at: 2026-01-01\n"
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is not None, details
+    assert "model: .nan" in merged
+    assert "reviewed_at" in merged and "started_at" in merged
+    # A *different* value is still a conflict.
+    merged, details = integration.resolve_project_yaml(
+        BASE_YAML, BASE_YAML + "  model: .nan\n",
+        BASE_YAML + "  model: .inf\n")
+    assert merged is None
+
+
+def test_same_record_field_conflict_is_refused():
+    ours = BASE_YAML.replace("status: sign_off", "status: qa")
+    theirs = BASE_YAML.replace("status: sign_off", "status: merged")
+    merged, details = integration.resolve_project_yaml(
+        BASE_YAML, ours, theirs)
+    assert merged is None
+    assert any("pr-200].status" in c for c in details["conflicts"])
+
+
+def test_deletion_vs_edit_is_refused():
+    ours = BASE_YAML.replace(
+        "- id: pr-200\n  title: Feature\n  status: sign_off\n", "")
+    theirs = BASE_YAML.replace("status: sign_off", "status: qa")
+    merged, details = integration.resolve_project_yaml(
+        BASE_YAML, ours, theirs)
+    assert merged is None
+    assert any("deleted on the PR branch" in c for c in details["conflicts"])
+
+
+def test_same_id_added_differently_on_both_sides_is_ambiguous():
+    merged, details = resolve(
+        "\n- id: pr-900\n  title: One\n  status: pending\n",
+        "\n- id: pr-900\n  title: Two\n  status: pending\n")
+    assert merged is None
+    assert any("added on both sides" in c for c in details["conflicts"])
+
+
+def test_duplicate_ids_are_ambiguous():
+    ours = BASE_YAML.rstrip() + "\n- id: pr-100\n  title: dup\n"
+    merged, details = integration.resolve_project_yaml(BASE_YAML, ours,
+                                                       BASE_YAML)
+    assert merged is None
+    assert any("duplicate record id" in c for c in details["conflicts"])
+
+
+def test_non_string_record_id_is_a_conflict_not_a_crash():
+    """A malformed id must fail the resolution, not raise out of it."""
+    base = "project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+    ours = base + "- id: [1]\n  status: pending\n"
+    theirs = base + "- id: pr-2\n  status: pending\n"
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert details.get("conflicts") or details.get("error")
+
+
+def test_non_id_list_changed_on_both_sides_is_a_conflict():
+    base = "project:\n  name: p\nprs:\n- id: pr-1\n  depends_on: []\n"
+    ours = base.replace("depends_on: []", "depends_on: [pr-a]")
+    theirs = base.replace("depends_on: []", "depends_on: [pr-b]")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("changed differently" in c for c in details["conflicts"])
+
+
+def test_one_sided_reorder_is_preserved():
+    base = ("project:\n  name: p\nprs:\n"
+            "- id: pr-1\n  status: pending\n"
+            "- id: pr-2\n  status: pending\n")
+    ours = ("project:\n  name: p\nprs:\n"
+            "- id: pr-2\n  status: pending\n"
+            "- id: pr-1\n  status: pending\n")
+    merged, details = integration.resolve_project_yaml(base, ours, base)
+    assert merged is not None, details
+    assert merged.index("id: pr-2") < merged.index("id: pr-1")
+
+
+def test_id_list_absent_from_the_base_merges_like_an_empty_one():
+    """A nested list the merge base never had still merges by record id."""
+    base = "project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+    ours = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+            "  notes:\n  - id: note-a\n    text: branch\n")
+    theirs = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+              "  notes:\n  - id: note-b\n    text: base\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is not None, details
+    assert "note-a" in merged and "note-b" in merged
+    # The same id added on both sides with different content stays ambiguous.
+    other = ours.replace("branch", "other")
+    merged, details = integration.resolve_project_yaml(base, ours, other)
+    assert merged is None
+    assert any("added on both sides" in c for c in details["conflicts"])
+
+
+def test_a_record_deleted_by_both_sides_is_removed():
+    """Deleting the same record on both sides is agreement, not a conflict."""
+    base = ("project:\n  name: p\nprs:\n"
+            "- id: pr-1\n  status: pending\n"
+            "- id: pr-2\n  status: pending\n")
+    ours = ("project:\n  name: p\nprs:\n"
+            "- id: pr-1\n  status: pending\n"
+            "- id: pr-3\n  status: pending\n")
+    theirs = ("project:\n  name: p\nprs:\n"
+              "- id: pr-1\n  status: pending\n"
+              "- id: pr-4\n  status: pending\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is not None, details
+    assert "pr-2" not in merged
+    assert "pr-3" in merged and "pr-4" in merged
+
+
+def test_preservation_catches_a_lost_record(monkeypatch):
+    """The preservation net also covers id-keyed records, not only scalars."""
+    base = ("project:\n  name: p\nprs:\n"
+            "- id: pr-1\n  status: pending\n"
+            "- id: pr-2\n  status: pending\n")
+    ours = base.replace(
+        "- id: pr-2\n  status: pending\n",
+        "- id: pr-2\n  status: pending\n- id: pr-3\n  status: pending\n")
+    theirs = base.replace(
+        "- id: pr-2\n  status: pending\n",
+        "- id: pr-2\n  status: pending\n- id: pr-4\n  status: pending\n")
+    real = integration._merge_id_list
+
+    def lossy(b, o, t, path, actions):
+        value, conflicts = real(b, o, t, path, actions)
+        if path == "prs" and value is not None:
+            value = [e for e in value if e["id"] != "pr-3"]
+        return value, conflicts
+
+    monkeypatch.setattr(integration, "_merge_id_list", lossy)
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("PR branch record lost: prs[pr-3]" in c
+               for c in details["conflicts"])
+
+
+def test_resolved_text_uses_pm_writer_and_reparses():
+    merged, _ = resolve("\n- id: pr-300\n  title: Feat\n  status: pending\n")
+    assert merged.startswith(store._YAML_HEADER)
+    data = yaml.safe_load(merged)
+    assert [p["id"] for p in data["prs"]] == ["pr-100", "pr-200", "pr-300"]
+
+
+# --- #250 end-to-end -------------------------------------------------------
+
+def _status_conflict(w) -> dict:
+    """Make the PR branch and the base change the same field differently."""
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    data = store.load(w.wd / "pm")
+    store.get_pr(data, PR)["status"] = "qa"
+    store.save(data, w.wd / "pm")
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature edits status")
+    data = store.load(w.base_pm)
+    store.get_pr(data, PR)["status"] = "merged"
+    store.save(data, w.base_pm)
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base edits status")
+    return integration.check_integration(w.pm_dir, PR)
+
+
+def _metadata_conflict(w, *, branch_ids=("pr-300", "pr-301"),
+                       base_ids=("pr-250", "pr-251")) -> dict:
+    append_records(w.wd / "pm", w.repo, list(branch_ids))
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    original_head = git(w.wd, "rev-parse", "HEAD")
+    append_records(w.base_pm, w.repo, list(base_ids), status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    rec = integration.prepare(w.pm_dir, PR)
+    rec["_original_head"] = original_head
+    return rec
+
+
+def test_250_metadata_conflict_resolves_and_all_records_survive(w):
+    rec = _metadata_conflict(w)
+    original_head = rec["_original_head"]
+
+    assert rec["status"] == integration.UP_TO_DATE, rec
+    resolution = rec["resolution"]
+    assert resolution["applied_merge_sha"]
+    assert resolution["resolved_from"]["head"] == original_head
+    entry = resolution["paths"][0]
+    assert entry["path"] == "pm/project.yaml"
+    assert entry["added_ours"] == ["pr-300", "pr-301"]
+    assert entry["added_theirs"] == ["pr-250", "pr-251"]
+    # The branch now carries the resolved merge, and its tree is the
+    # approved candidate exactly.
+    assert git(w.wd, "rev-parse", "HEAD") == resolution["applied_merge_sha"]
+    assert git(w.wd, "rev-parse", "HEAD^{tree}") == rec["candidate_tree"]
+    assert sorted(pr_ids(w.wd / "pm")) == [
+        "pr-100", PR, "pr-250", "pr-251", "pr-300", "pr-301"]
+    # The isolated delta is inspectable.
+    diff_path = Path(resolution["diff_path"])
+    assert diff_path.is_file()
+    assert "resolved" in diff_path.read_text()
+    # The full artifact must carry the digest of the resolution it records,
+    # and the pointer to the delta it describes.
+    artifact = json.loads((w.croot / PR / "integration.json").read_text())
+    assert artifact.get("resolution_digest") == rec["resolution_digest"], (
+        artifact.get("resolution_digest"), rec["resolution_digest"])
+    assert artifact["resolution"]["diff_path"] == str(diff_path)
+
+    # QA evidence revision is captured from the QA run's resume snapshot.
+    qa_dir = w.tmp / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-abcd"
+    qa_dir.mkdir(parents=True)
+    (qa_dir / "qa_status.json").write_text(json.dumps(
+        {"pr_id": PR, "overall": "PASS", "scenarios": []}))
+    (qa_dir / "qa_resume.json").write_text(json.dumps(
+        {"planner_head": original_head, "planner_code_changes": []}))
+
+    # A fresh sign-off is still required: no approval -> merge refused.
+    refusal = signoff.merge_gate_refusal(pr_entry(w), rec["head"], "master")
+    assert refusal and "no sign-off verdict" in refusal
+    result, _, finalized = merge(w)
+    assert result.exit_code != 0 and not finalized
+
+    # Approval without the explicit candidate/evidence statement is refused.
+    write_report(w, rec, candidate=False)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(pr_mod.pr, ["signoff", "record", PR])
+    assert r.exit_code != 0 and "pm-signoff-candidate" in r.output
+
+    record_merge(w, rec)
+    p = pr_entry(w)
+    assert p["signoff"]["integration"]["resolution_digest"] == \
+        rec["resolution_digest"]
+    evidence = p["signoff"]["evidence"]
+    assert evidence["resolved_from"]["head"] == original_head
+    assert evidence["qa"]["planner_head"] == original_head
+    # QA recorded no code changes, so review saw the same revision.
+    assert evidence["review"]["sha"] == original_head
+    assert "qa@bbbbbbb" in evidence["reused"]
+    assert evidence["reason"]
+    assert evidence["required_return_stage"] == "merge"
+    assert signoff.merge_gate_refusal(p, rec["head"], "master") is None
+
+    result, windows, finalized = merge(w)
+    assert result.exit_code == 0, result.output
+    assert finalized and windows == []
+    tip = git(w.repo, "rev-parse", "master")
+    assert git(w.repo, "rev-parse", "master^{tree}") == rec["candidate_tree"]
+    parents = git(w.repo, "rev-list", "--parents", "-n1", tip).split()[1:]
+    assert parents == [rec["base_sha"], rec["head"]]
+    assert sorted(pr_ids(w.repo / "pm")) == [
+        "pr-100", PR, "pr-250", "pr-251", "pr-300", "pr-301"]
+    # The PR workdir was not rewritten by the merge step.
+    assert git(w.wd, "rev-parse", "HEAD") == rec["head"]
+
+
+def test_notes_appended_to_the_same_record_on_both_sides_survive(w):
+    """#250 also appends notes inside an existing PR record, not just PRs."""
+    def add_note(pm_dir: Path, note_id: str, text: str) -> None:
+        data = store.load(pm_dir)
+        store.get_pr(data, PR)["notes"] = [{
+            "id": note_id, "text": text,
+            "created_at": "2026-01-01T00:00:00Z"}]
+        store.save(data, pm_dir)
+
+    add_note(w.wd / "pm", "note-branch", "from the branch")
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "branch note")
+    original_head = git(w.wd, "rev-parse", "HEAD")
+    add_note(w.base_pm, "note-base", "from the base")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base note")
+
+    rec = integration.prepare(w.pm_dir, PR)
+    assert rec["status"] == integration.UP_TO_DATE, rec
+    entry = rec["resolution"]["paths"][0]
+    # The nested ids are named with their list path: a notes-only resolution
+    # must not look like "nothing happened".
+    assert entry["added_ours"] == [f"prs[{PR}].notes:note-branch"]
+    assert entry["added_theirs"] == [f"prs[{PR}].notes:note-base"]
+    # The resolved summary counts the nested records, not just top-level PRs.
+    assert "1 added from PR, 1 from base" in integration.summary(
+        dict(rec, status=integration.RESOLVED))
+
+    notes = [n["id"]
+             for n in store.get_pr(store.load(w.wd / "pm"), PR)["notes"]]
+    assert notes == ["note-branch", "note-base"]
+    assert git(w.wd, "rev-parse", "HEAD^{tree}") == rec["candidate_tree"]
+    assert rec["resolution"]["resolved_from"]["head"] == original_head
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert f"prs[{PR}].notes:note-branch" in text
+    assert f"prs[{PR}].notes:note-base" in text
+
+
+def test_notes_added_through_the_real_note_path_still_merge(w):
+    """``pm pr note add`` also bumps ``updated_at`` (real path, #250).
+
+    The previous test writes notes straight through ``store.save``; the
+    command a session actually runs also rewrites ``updated_at`` via
+    ``_record_status_timestamp``, so both sides change that bookkeeping field
+    to different values.  That must not defeat the metadata resolution.
+    """
+    from pm_core.cli.helpers import _record_status_timestamp
+
+    def add_note(pm_dir: Path, note_id: str, text: str) -> None:
+        data = store.load(pm_dir)
+        rec = store.get_pr(data, PR)
+        rec.setdefault("notes", []).append({
+            "id": note_id, "text": text,
+            "created_at": "2026-01-01T00:00:00Z",
+            "last_edited": "2026-01-01T00:00:00Z"})
+        _record_status_timestamp(rec)
+        store.save(data, pm_dir)
+
+    add_note(w.wd / "pm", "note-branch", "from the branch")
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "branch note")
+    original_head = git(w.wd, "rev-parse", "HEAD")
+    add_note(w.base_pm, "note-base", "from the base")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base note")
+
+    rec = integration.prepare(w.pm_dir, PR)
+    assert rec["status"] == integration.UP_TO_DATE, rec
+    notes = [n["id"]
+             for n in store.get_pr(store.load(w.wd / "pm"), PR)["notes"]]
+    assert notes == ["note-branch", "note-base"]
+    assert git(w.wd, "rev-parse", "HEAD^{tree}") == rec["candidate_tree"]
+    assert rec["resolution"]["resolved_from"]["head"] == original_head
+
+
+def test_same_field_conflict_routes_to_impl_and_changes_nothing(w):
+    rec = _status_conflict(w)
+    head = git(w.wd, "rev-parse", "HEAD")
+    assert rec["status"] == integration.CONFLICT
+    assert rec["resolution"]["unresolved"]
+    assert any("status" in c for c in rec["resolution"]["unresolved"][0]["conflicts"])
+    assert git(w.wd, "rev-parse", "HEAD") == head      # untouched
+    verdict, why = signoff.effective_verdict(
+        SIGNOFF_MERGE, pr_entry(w)["integration"], head)
+    assert verdict == SIGNOFF_IMPL and "conflicts" in why
+
+
+def test_deletion_vs_edit_is_not_resolved(w):
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    data = store.load(w.base_pm)
+    data["prs"] = [p for p in data["prs"] if p["id"] != PR]
+    store.save(data, w.base_pm)
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base deletes PR")
+
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CONFLICT
+    assert any("deleted" in c for c in
+               rec["resolution"]["unresolved"][0]["conflicts"])
+
+
+def test_code_conflict_is_never_auto_resolved(w):
+    commit(w.wd, "shared.txt", "pr\n", "pr edits shared")
+    commit(w.repo, "shared.txt", "base\nmore\n", "base edits shared")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CONFLICT
+    assert rec["resolution"] is None
+    assert "shared.txt" in rec["conflicts"]
+
+
+def test_clean_base_behavior_change_requires_justification(w):
+    data = store.load(w.base_pm)
+    data["project"]["model_config"] = {
+        "session_models": {"impl": "model-new"}}
+    store.save(data, w.base_pm)
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base changes model")
+
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN
+    assert any("model_config" in c for c in rec["base_behavior_changes"])
+    head = rec["head"]
+
+    # A report without the reuse/checks statement is not an approval.
+    write_report(w, rec, evidence=False)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(pr_mod.pr, ["signoff", "record", PR])
+    assert r.exit_code != 0 and "pm-signoff-evidence" in r.output
+
+    write_report(w, rec)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(pr_mod.pr, ["signoff", "record", PR])
+    assert r.exit_code == 0, r.output
+    assert signoff.merge_gate_refusal(pr_entry(w), head, "master") is None
+
+
+def test_a_reuse_statement_for_another_base_is_not_evidence(w):
+    """The statement must be about the base the approval binds to.
+
+    A report left over from an earlier base names that base; its evidence
+    statement says nothing about the behaviour-relevant changes the new base
+    brings, so it cannot justify a MERGE of the new candidate.
+    """
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+    # The report's reuse statement was written for another base revision.
+    write_report(w, rec, base="0" * 40)
+    problem = signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], rec["head"])
+    assert problem and "base" in problem
+    # The report written for this base is still accepted.
+    write_report(w, rec)
+    assert signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], rec["head"]) is None
+
+
+def test_the_recorded_evidence_is_not_attributed_to_another_base(w):
+    """The evidence block follows the same base rule as the merge gate.
+
+    A statement is only this decision's when the report assessed the same
+    base the check did.  Recording it from a report left over from another
+    base made ``pm pr show`` print a reuse statement the agent wrote about
+    different behaviour-relevant changes — an audit trail that claims more
+    than the decision holds.  (The gate refuses such a MERGE outright; this
+    covers the *recorded* block, which is what a person reads.)
+    """
+    rec = _metadata_conflict(w)
+    stored = integration.binding(pr_entry(w)["integration"])
+
+    write_report(w, rec, base="0" * 40)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, rec["head"], "manual",
+        integration=stored)
+    ev = pr_entry(w)["signoff"]["evidence"]
+    assert ev["reused"] == []
+    assert ev["reason"] is None
+    assert ev["report_base"] is None
+
+    # The same report, written for the base the check assessed, is recorded.
+    write_report(w, rec)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, rec["head"], "manual",
+        integration=stored)
+    ev = pr_entry(w)["signoff"]["evidence"]
+    assert ev["reused"] == ["review@aaaaaaa", "qa@bbbbbbb"]
+    assert ev["reason"]
+
+
+def test_a_non_string_reviewed_head_does_not_crash_the_evidence_read(w):
+    """``reviewed_head`` reaches the reader from hand-editable state.
+
+    ``record_signoff_verdict`` takes the revision as an argument; a caller
+    that hands it a non-string (an int) made ``.startswith`` raise out of the
+    record write instead of reading it as absent.
+    """
+    rec = _metadata_conflict(w)
+    write_report(w, rec)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, 5, "manual",
+        integration=integration.binding(pr_entry(w)["integration"]))
+    ev = pr_entry(w)["signoff"]["evidence"]
+    # Nothing is attributable to a value that is not a revision.
+    assert ev["reused"] == []
+    assert ev["reason"] is None
+
+
+def test_a_targeted_checks_statement_satisfies_the_reuse_requirement(w):
+    """The report may state targeted checks instead of reused evidence.
+
+    The gate accepts either an explicit reuse statement (evidence + reason)
+    or the checks the agent actually ran; a checks-only report is a recorded
+    act, not an invented approval.
+    """
+    rec = _metadata_conflict(w)
+    write_report(w, rec, evidence=False, reason=False, checks=True)
+    assert signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], rec["head"]) is None
+    # And it records as a valid approval (the gate agrees).
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, rec["head"], "manual",
+        integration=integration.binding(pr_entry(w)["integration"]))
+    assert pr_entry(w)["signoff"]["evidence"]["checks"]
+    assert signoff.merge_gate_refusal(pr_entry(w), rec["head"], "master") is None
+
+
+def test_evidence_records_the_prior_decision_and_an_honest_review_revision(w):
+    """R6 provenance: the block names the prior sign-off and never invents a
+    review revision when QA committed code after the review ran."""
+    rec = _metadata_conflict(w)
+    write_report(w, rec, verdict=SIGNOFF_REVIEW)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_REVIEW, rec["head"], "manual",
+        integration=integration.binding(pr_entry(w)["integration"]))
+    first = pr_entry(w)["signoff"]["evidence"]
+    assert first["prior_signoff"] is None       # nothing preceded it
+    assert first["required_return_stage"] == "review"
+
+    qa_dir = w.tmp / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-abcd"
+    qa_dir.mkdir(parents=True)
+    (qa_dir / "qa_status.json").write_text(json.dumps(
+        {"pr_id": PR, "overall": "PASS", "scenarios": []}))
+    (qa_dir / "qa_resume.json").write_text(json.dumps(
+        {"planner_head": "f" * 40, "planner_code_changes": ["fix.py"]}))
+
+    write_report(w, rec, verdict=SIGNOFF_MERGE)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, rec["head"], "manual",
+        integration=integration.binding(pr_entry(w)["integration"]))
+    ev = pr_entry(w)["signoff"]["evidence"]
+    stored_integ = pr_entry(w)["integration"]
+    assert ev["reviewed_head"] == rec["head"]
+    assert ev["required_return_stage"] == "merge"
+    # The block names the candidate the decision reviewed.
+    assert ev["candidate_tree"] == stored_integ["candidate_tree"]
+    resolved_from = rec["resolution"]["resolved_from"]
+    assert ev["resolved_from"]["head"] == resolved_from["head"]
+    assert ev["prior_signoff"]["verdict"] == SIGNOFF_REVIEW
+    assert ev["prior_signoff"]["sha"] == rec["head"]
+    assert ev["prior_signoff"]["origin"] == "manual"
+    # QA recorded code changes, so pm does not claim the review saw that
+    # revision — it says so instead of guessing.
+    assert ev["review"]["sha"] is None
+    assert ev["review"]["sha_source"] is None
+    assert "does not record" in ev["review"]["note"]
+    assert ev["qa"]["planner_head"] == "f" * 40
+    assert ev["qa"]["planner_code_changes"] == ["fix.py"]
+
+
+def test_evidence_does_not_attribute_another_revisions_candidate(w):
+    """A decision recorded for a revision the stored check does not describe
+    must not inherit that check's candidate tree or resolution.
+
+    Otherwise the recorded provenance would claim pm confirmed a candidate
+    for a HEAD it never checked.
+    """
+    rec = _metadata_conflict(w)
+    stored = pr_entry(w)["integration"]
+    assert stored["candidate_tree"] and stored["resolved_from"]
+    assert stored["head"] == rec["head"]
+
+    # A decision for another revision, recorded without an integration
+    # binding (the stored check is not of that revision).
+    signoff.record_signoff_verdict(w.pm_dir, PR, SIGNOFF_REVIEW, "a" * 40,
+                                   "manual")
+    ev = pr_entry(w)["signoff"]["evidence"]
+    assert ev["reviewed_head"] == "a" * 40
+    assert ev["candidate_tree"] is None
+    assert ev["resolved_from"] is None
+
+    # A verdict recorded without any revision must not inherit a *headless*
+    # stored check either: ``None != None`` is false, so the head comparison
+    # alone would keep its candidate/resolution.
+    def _headless(d):
+        store.get_pr(d, PR)["integration"] = {
+            "status": "error", "head": None, "base_sha": None,
+            "candidate_tree": "c" * 40,
+            "resolution": {"applied_merge_sha": "d" * 40,
+                           "resolved_from": {"head": "e" * 40}}}
+    store.locked_update(w.pm_dir, _headless)
+    signoff.record_signoff_verdict(w.pm_dir, PR, SIGNOFF_REVIEW, None,
+                                   "manual")
+    ev = pr_entry(w)["signoff"]["evidence"]
+    assert ev["reviewed_head"] is None
+    assert ev["candidate_tree"] is None
+    assert ev["resolved_from"] is None
+
+
+def test_malformed_qa_evidence_does_not_crash_the_record(w):
+    """A corrupt QA snapshot is reported, not raised out of sign-off."""
+    qa_dir = w.tmp / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-abcd"
+    qa_dir.mkdir(parents=True)
+    (qa_dir / "qa_status.json").write_text(json.dumps(["not", "a", "mapping"]))
+    (qa_dir / "qa_resume.json").write_text(json.dumps(
+        {"planner_head": "f" * 40, "planner_code_changes": 5}))
+
+    evidence = signoff.qa_evidence(PR)
+    assert evidence["overall"] is None
+    assert evidence["planner_code_changes"] == []
+    assert evidence["planner_code_changes_error"] == "malformed"
+    rec = integration.check_integration(w.pm_dir, PR)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_REVIEW, rec["head"], "manual",
+        integration=integration.binding(rec))
+    evidence_block = pr_entry(w)["signoff"]["evidence"]
+    assert evidence_block["qa"]["planner_code_changes"] == []
+    # A malformed change list is not proof that QA committed nothing: the
+    # review revision must not be inferred from it (that would record a
+    # revision pm cannot confirm).
+    assert evidence_block["review"]["sha"] is None
+    assert evidence_block["review"]["sha_source"] is None
+
+    # An unparseable qa_status.json must not discard the revision the
+    # sibling resume snapshot records: it is still the evidence's revision.
+    (qa_dir / "qa_status.json").write_text("{not json")
+    evidence = signoff.qa_evidence(PR)
+    assert evidence["error"] == "unreadable"
+    assert evidence["planner_head"] == "f" * 40
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(store.load(w.pm_dir), PR)
+    assert f"qa@{'f' * 12}" in text
+    assert f"review@{'f' * 12}" not in text
+    assert "cannot tell whether QA committed changes" in text
+
+    # A *present* null is malformed too (pm always writes the key as a list):
+    # treating it as "QA recorded no changes" would infer a review revision
+    # from a value pm cannot read.  An *absent* key is the documented
+    # "not recorded" shape the inference may use.
+    (qa_dir / "qa_status.json").write_text(json.dumps({"overall": "PASS"}))
+    (qa_dir / "qa_resume.json").write_text(json.dumps(
+        {"planner_head": "f" * 40, "planner_code_changes": None}))
+    evidence = signoff.qa_evidence(PR)
+    assert evidence["planner_code_changes_error"] == "malformed"
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_REVIEW, rec["head"], "manual",
+        integration=integration.binding(rec))
+    block = pr_entry(w)["signoff"]["evidence"]
+    assert block["review"]["sha"] is None
+    (qa_dir / "qa_resume.json").write_text(json.dumps({"planner_head": "f" * 40}))
+    evidence = signoff.qa_evidence(PR)
+    assert "planner_code_changes_error" not in evidence
+    assert evidence["planner_code_changes"] == []
+
+
+def test_malformed_qa_status_does_not_crash_the_signoff_prompt(w):
+    """A valid-JSON non-mapping qa_status.json must not raise out of the prompt.
+
+    The record path already treats such a file as malformed evidence; the
+    sign-off prompt's QA block must do the same instead of calling ``.get``
+    on a list.
+    """
+    qa_dir = w.tmp / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-abcd"
+    qa_dir.mkdir(parents=True)
+    (qa_dir / "qa_status.json").write_text(json.dumps(["not", "a", "mapping"]))
+    (qa_dir / "qa_resume.json").write_text(json.dumps(
+        {"planner_head": "f" * 40, "planner_code_changes": []}))
+
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(store.load(w.pm_dir), PR)
+    assert "qa_status.json malformed" in text
+
+
+def test_malformed_qa_scenarios_does_not_crash_the_signoff_prompt(w):
+    """A non-list ``scenarios`` member is malformed evidence, not iterable.
+
+    The QA block lists the per-scenario verdicts; a hand-edited scalar would
+    raise ``TypeError`` out of the sign-off prompt, which the malformed-
+    evidence contract forbids just like the non-mapping top level.
+    """
+    qa_dir = w.tmp / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-abcd"
+    qa_dir.mkdir(parents=True)
+    (qa_dir / "qa_status.json").write_text(json.dumps(
+        {"overall": "PASS", "scenarios": 5}))
+    (qa_dir / "qa_resume.json").write_text(json.dumps(
+        {"planner_head": "f" * 40, "planner_code_changes": []}))
+
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(store.load(w.pm_dir), PR)
+    assert "Overall QA verdict: **PASS**" in text
+
+
+def test_a_non_string_scenario_reason_does_not_crash_the_signoff_prompt(w):
+    """A scenario member that is not text must render, not raise.
+
+    ``verdict_reason`` is normalised with ``" ".join(...)``; a hand-edited
+    non-string value would raise ``TypeError`` out of the sign-off prompt — the
+    same malformed-evidence contract the non-list ``scenarios`` guard follows
+    (the title already renders through ``str``).
+    """
+    qa_dir = w.tmp / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-abcd"
+    qa_dir.mkdir(parents=True)
+    (qa_dir / "qa_status.json").write_text(json.dumps(
+        {"overall": "PASS", "scenarios": [
+            {"index": 1, "title": "a scenario",
+             "verdict": "PASS", "verdict_reason": ["not", "text"]}]}))
+    (qa_dir / "qa_resume.json").write_text(json.dumps(
+        {"planner_head": "f" * 40, "planner_code_changes": []}))
+
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(store.load(w.pm_dir), PR)
+    assert "Scenario 1 — a scenario: **PASS**" in text
+
+
+def test_malformed_qa_resume_revision_does_not_crash_the_prompt(w):
+    """A non-string ``planner_head`` is malformed evidence, not a revision.
+
+    The evidence block and the prompt slice/print that value; an int (or a
+    list) would raise out of the sign-off launch, which the QA contract
+    forbids ("no crash from malformed evidence").
+    """
+    qa_dir = w.tmp / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-abcd"
+    qa_dir.mkdir(parents=True)
+    (qa_dir / "qa_status.json").write_text(json.dumps({"overall": "PASS"}))
+    (qa_dir / "qa_resume.json").write_text(json.dumps(
+        {"planner_head": 123, "planner_code_changes": []}))
+
+    evidence = signoff.qa_evidence(PR)
+    assert evidence["planner_head"] is None
+    rec = integration.check_integration(w.pm_dir, PR)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_REVIEW, rec["head"], "manual",
+        integration=integration.binding(rec))
+    assert pr_entry(w)["signoff"]["evidence"]["qa"]["planner_head"] is None
+
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(store.load(w.pm_dir), PR)
+    assert "no recorded revision" in text
+    assert "qa@123" not in text
+
+
+def test_behavioral_changes_are_focused_on_this_pr_and_its_dependencies(w):
+    data = store.load(w.base_pm)
+    data["prs"].append({"id": "pr-999", "title": "Other", "status": "merged"})
+    store.get_pr(data, "pr-100")["status"] = "merged"
+    store.save(data, w.base_pm)
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base merges unrelated work")
+
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN
+    # Unrelated PR churn is not this PR's behavioural change.
+    assert rec["base_behavior_changes"] == []
+
+    def _dep(d):
+        store.get_pr(d, PR)["depends_on"] = ["pr-100"]
+    store.locked_update(w.pm_dir, _dep)
+    data = store.load(w.base_pm)
+    store.get_pr(data, "pr-100")["status"] = "closed"
+    store.save(data, w.base_pm)
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "dependency changes status")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN
+    assert any("pr-100.status" in c for c in rec["base_behavior_changes"])
+
+
+def test_resolved_approval_is_invalidated_when_the_base_moves(w):
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+    commit(w.repo, "late.txt", "late\n", "base moves after sign-off")
+
+    result, _, finalized = merge(w)
+    assert result.exit_code != 0
+    assert "moved since sign-off" in result.output
+    assert not finalized
+    assert pr_entry(w)["signoff"]["invalidated"]
+
+
+def test_resolved_approval_is_refused_when_the_recorded_candidate_changed(w):
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+
+    def _tamper(d):
+        store.get_pr(d, PR)["integration"]["candidate_tree"] = "0" * 40
+    store.locked_update(w.pm_dir, _tamper)
+    refusal = signoff.merge_gate_refusal(
+        pr_entry(w), signoff.head_sha(str(w.wd)), "master")
+    assert refusal and "candidate changed" in refusal
+
+
+def test_merge_gate_refuses_a_rechecked_record_for_another_head(w):
+    """Defense in depth: the approval's HEAD must match the current record."""
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+
+    def _tamper(d):
+        store.get_pr(d, PR)["integration"]["head"] = "f" * 40
+    store.locked_update(w.pm_dir, _tamper)
+    refusal = signoff.merge_gate_refusal(
+        pr_entry(w), signoff.head_sha(str(w.wd)), "master")
+    assert refusal and "another HEAD" in refusal
+
+
+def test_merge_gate_refuses_a_clean_approval_without_the_evidence_statement(w):
+    """A clean base change needs the statement even without a resolution."""
+    data = store.load(w.base_pm)
+    data["project"]["model_config"] = {"session_models": {"impl": "model-new"}}
+    store.save(data, w.base_pm)
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base changes model")
+
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN
+    assert rec["base_behavior_changes"]
+    assert not (rec.get("resolution") or {}), "this case has no resolution"
+
+    write_report(w, rec)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, rec["head"], "manual",
+        integration=integration.binding(rec))
+    assert signoff.merge_gate_refusal(pr_entry(w), rec["head"], "master") is None
+
+    write_report(w, rec, evidence=False)
+    refusal = signoff.merge_gate_refusal(pr_entry(w), rec["head"], "master")
+    assert refusal and "behavioural changes" in refusal
+
+
+def test_merge_gate_refuses_an_approval_bound_to_an_unapplied_resolution(w):
+    """A bound resolution that was never applied cannot be published."""
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    head = git(w.wd, "rev-parse", "HEAD")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED
+    assert not rec["resolution"].get("applied_merge_sha")
+
+    # Record the approval directly (the manual/CLI paths refuse it): the gate
+    # is the last line and must refuse it on its own.
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, head, "manual",
+        integration=integration.binding(rec))
+    refusal = signoff.merge_gate_refusal(pr_entry(w), head, "master")
+    assert refusal and "was not applied" in refusal
+
+
+def test_merge_gate_refuses_an_approval_bound_to_unresolved_resolution(w):
+    """An approval recorded against an ambiguous resolution never publishes."""
+    head = git(w.wd, "rev-parse", "HEAD")
+    resolution = {
+        "paths": [{"path": "pm/project.yaml"}],
+        "unresolved": [{"path": "pm/project.yaml",
+                        "conflicts": ["ambiguous record"]}],
+    }
+    rec = {"status": integration.RESOLVED, "head": head,
+           "base_branch": "master",
+           "base_sha": git(w.repo, "rev-parse", "master"),
+           "candidate_tree": git(w.wd, "rev-parse", "HEAD^{tree}"),
+           "resolution": resolution,
+           "resolution_digest": integration._resolution_digest(resolution)}
+
+    def _set(d):
+        store.get_pr(d, PR)["integration"] = integration.compact(rec)
+    store.locked_update(w.pm_dir, _set)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, head, "manual",
+        integration=integration.binding(rec))
+    refusal = signoff.merge_gate_refusal(pr_entry(w), head, "master")
+    assert refusal and "unresolved" in refusal
+
+
+def test_resolution_digest_survives_a_benign_recheck(w):
+    """A re-check after the apply must not look like a changed resolution.
+
+    The applied merge makes the branch up to date, so the re-check carries
+    the *compact* resolution forward (``_record_check``).  The digest is
+    computed over that same compact projection, so an approval recorded
+    before the re-check stays valid.
+    """
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE
+    assert again["resolution_digest"] == rec["resolution_digest"]
+    assert again["resolution"]["applied_merge_sha"] == \
+        rec["resolution"]["applied_merge_sha"]
+    assert signoff.merge_gate_refusal(
+        pr_entry(w), again["head"], "master") is None
+    # The artifact keeps the human-readable delta through a re-check.
+    artifact = json.loads((w.croot / PR / "integration.json").read_text())
+    assert "resolved" in artifact["resolution"]["diff"]
+
+
+def test_a_concurrent_apply_does_not_overwrite_the_applied_record(
+        w, monkeypatch):
+    """The loser of two simultaneous ``--apply`` runs must not clobber the
+    winner's applied record with its stale resolved check.
+
+    Its apply fails with "PR HEAD moved"; recording that stale record would
+    drop the applied revision and the resolution provenance (and a later
+    ``--record`` could not restore them once the branch carries the base).
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    stale_head = git(w.wd, "rev-parse", "HEAD")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    # Winner: applies the resolution and records the applied revision.
+    won = integration.prepare(w.pm_dir, PR)
+    assert won["status"] == integration.UP_TO_DATE
+    applied = won["resolution"]["applied_merge_sha"]
+    assert pr_entry(w)["integration"]["resolution"]["applied_merge_sha"] == \
+        applied
+
+    # Loser: its check ran before the winner applied, and its own apply now
+    # finds the HEAD moved.
+    stale = dict(won)
+    stale.update(status=integration.RESOLVED, head=stale_head)
+    stale.pop("resolution", None)
+    stale.pop("resolution_digest", None)
+    monkeypatch.setattr(integration, "check_integration",
+                        lambda *a, **k: dict(stale))
+    monkeypatch.setattr(integration, "apply_integration",
+                        lambda *a, **k: (None, integration.HEAD_MOVED))
+
+    lost = integration.prepare(w.pm_dir, PR)
+    assert lost["status"] == integration.UP_TO_DATE, lost
+    assert lost["head"] == git(w.wd, "rev-parse", "HEAD")
+    assert lost["resolution"]["applied_merge_sha"] == applied
+    assert not lost.get("apply_error")
+    stored = pr_entry(w)["integration"]
+    assert stored["status"] == integration.UP_TO_DATE
+    assert stored["head"] == git(w.wd, "rev-parse", "HEAD")
+    assert stored["resolution"]["applied_merge_sha"] == applied
+    assert not stored.get("apply_error")
+
+
+def test_record_check_carries_the_applied_resolution_under_the_lock(
+        w, monkeypatch):
+    """The carry-forward is decided on the state actually stored.
+
+    A concurrent writer can store an applied record between this check's
+    read and its write; the write must still carry that applied resolution
+    (otherwise a plain up-to-date re-check would drop it).
+    """
+    rec = _metadata_conflict(w)
+    applied = rec["resolution"]["applied_merge_sha"]
+    real_load = store.load
+    calls = {"n": 0}
+
+    def stale_first_load(root, **kwargs):
+        data = real_load(root, **kwargs)
+        if calls["n"] == 0:
+            # The pre-lock read predates the winner's write.
+            p = store.get_pr(data, PR)
+            if p is not None:
+                p["integration"] = {
+                    k: v for k, v in (p.get("integration") or {}).items()
+                    if k != "resolution"}
+        calls["n"] += 1
+        return data
+
+    monkeypatch.setattr(store, "load", stale_first_load)
+    head = git(w.wd, "rev-parse", "HEAD")
+    bare = {"status": integration.UP_TO_DATE, "head": head,
+            "base_sha": rec["base_sha"], "base_branch": "master",
+            "target_repo": str(w.repo),
+            "candidate_tree": rec["candidate_tree"]}
+    out = integration._record_check(w.pm_dir, PR, bare)
+    assert out["resolution"]["applied_merge_sha"] == applied
+    stored = pr_entry(w)["integration"]
+    assert stored["head"] == head
+    assert stored["resolution"]["applied_merge_sha"] == applied
+
+
+def test_a_newer_applied_resolution_beats_the_pre_lock_carry(w, monkeypatch):
+    """The in-lock carry starts from the record this check computed.
+
+    ``_record_check`` carries provenance twice: once before the lock (for the
+    caller's view) and once inside it (for what is stored).  The carry only
+    fills a record with no resolution of its own, so a resolution carried from
+    the *pre-lock* read suppressed the newer one in the record the lock
+    actually found: an applied resolution a concurrent apply had recorded was
+    replaced by an older one, leaving ``base_sha`` and ``resolved_from``
+    describing different merges (and a digest bound to the wrong resolution).
+    """
+    rec = _metadata_conflict(w)
+    newer = rec["resolution"]["applied_merge_sha"]
+    older_applied = git(w.wd, "rev-parse", "HEAD^")
+    assert older_applied != newer
+    real_load = store.load
+    calls = {"n": 0}
+
+    def stale_first_load(root, **kwargs):
+        data = real_load(root, **kwargs)
+        if calls["n"] == 0:
+            # The pre-lock read predates the winner's write: it holds an
+            # *earlier* applied resolution (an ancestor of HEAD).
+            p = store.get_pr(data, PR)
+            if p is not None:
+                p["integration"] = dict(
+                    p.get("integration") or {},
+                    resolution={"paths": [{"path": "pm/project.yaml",
+                                           "blob": "1" * 40}],
+                                "unresolved": [],
+                                "applied_merge_sha": older_applied,
+                                "resolved_from": {"head": older_applied,
+                                                  "base_sha": "a" * 40,
+                                                  "merge_base": "b" * 40,
+                                                  "status": "conflict"}})
+        calls["n"] += 1
+        return data
+
+    monkeypatch.setattr(store, "load", stale_first_load)
+    head = git(w.wd, "rev-parse", "HEAD")
+    bare = {"status": integration.UP_TO_DATE, "head": head,
+            "base_sha": rec["base_sha"], "base_branch": "master",
+            "target_repo": str(w.repo),
+            "candidate_tree": rec["candidate_tree"]}
+    out = integration._record_check(w.pm_dir, PR, bare)
+    assert out["resolution"]["applied_merge_sha"] == newer
+    stored = pr_entry(w)["integration"]
+    assert stored["resolution"]["applied_merge_sha"] == newer
+    # The stored digest names the resolution that was kept, so a later
+    # approval binds to the newest applied merge rather than the older one.
+    assert stored["resolution_digest"] == integration._resolution_digest(
+        stored["resolution"])
+
+
+def test_a_transient_recheck_yields_to_the_winners_record_under_the_lock(w):
+    """A failed re-check of the branch's current revision is not news.
+
+    ``prepare``'s lost-apply-race path decides *outside* the store lock that
+    the branch's current revision has no record yet and re-records it.  The
+    winner can store a mergeable record of that same revision in between, and
+    ``_check_is_stale`` cannot drop this one (it describes the same revision).
+    ``keep_recorded_head`` re-evaluates the rule under the lock, so the
+    loser's transient failure does not replace the applied record — and with
+    it the approval — until another check re-runs it.
+    """
+    rec = _metadata_conflict(w)
+    applied = rec["resolution"]["applied_merge_sha"]
+    head = git(w.wd, "rev-parse", "HEAD")
+    failed = {"status": integration.ERROR, "error": "base fetch failed",
+              "head": head, "base_sha": rec["base_sha"],
+              "base_branch": "master", "target_repo": str(w.repo)}
+
+    out = integration._record_check(w.pm_dir, PR, dict(failed),
+                                    keep_recorded_head=head)
+    assert out["status"] == integration.UP_TO_DATE
+    stored = pr_entry(w)["integration"]
+    assert stored["status"] == integration.UP_TO_DATE
+    assert stored["head"] == head
+    assert stored["resolution"]["applied_merge_sha"] == applied
+
+    # Without the guard the very same failed check of the same revision
+    # replaces the mergeable record: that is what the re-check under the lock
+    # prevents.  (The provenance is carried, so nothing is lost outright, but
+    # the record stops being mergeable until another check runs.)
+    integration._record_check(w.pm_dir, PR, dict(failed))
+    stored = pr_entry(w)["integration"]
+    assert stored["status"] == integration.ERROR
+    assert stored["resolution"]["applied_merge_sha"] == applied
+
+
+def test_a_genuine_conflict_is_still_recorded_when_the_winner_guard_is_passed(
+        w):
+    """The guard only yields to a record of the *same* revision.
+
+    A record of another revision is not the winner of this race: the fresh,
+    non-mergeable check describes the revision the branch actually has and
+    must replace it.
+    """
+    rec = _metadata_conflict(w)
+    head = git(w.wd, "rev-parse", "HEAD")
+    conflict = {"status": integration.CONFLICT, "head": head,
+                "base_sha": rec["base_sha"], "base_branch": "master",
+                "target_repo": str(w.repo), "conflicts": ["pm/shared.txt"]}
+
+    def _older_record(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ["head"] = "0" * 40
+        integ["status"] = integration.UP_TO_DATE
+    store.locked_update(w.pm_dir, _older_record)
+    integration._record_check(w.pm_dir, PR, conflict, keep_recorded_head=head)
+    stored = pr_entry(w)["integration"]
+    assert stored["status"] == integration.CONFLICT
+    assert stored["head"] == head
+
+
+def test_prepare_passes_the_winner_guard_for_a_non_mergeable_recheck(
+        w, monkeypatch):
+    """The lost-apply-race path hands the guard to ``_record_check``.
+
+    The "a revision that already has a stored record is the winner's" rule is
+    decided outside the lock, so the write must re-evaluate it under the lock
+    (see ``test_a_transient_recheck_yields_to_the_winners_record_under_the_
+    lock``).
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    (w.base_pm / "shared.txt").write_text("base\n")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    def _concurrent_apply(root, pr_id, record=None, *, data=None):
+        # A concurrent commit lands on the branch between the check and the
+        # apply, and it conflicts with the base outside project.yaml.
+        commit(w.wd, "pm/shared.txt", "branch\n", "concurrent work")
+        return None, integration.HEAD_MOVED
+
+    monkeypatch.setattr(integration, "apply_integration", _concurrent_apply)
+    seen = {}
+    real = integration._record_check
+
+    def spy(root, pr_id, record, *, keep_recorded_head=None):
+        seen["keep"] = keep_recorded_head
+        return real(root, pr_id, record, keep_recorded_head=keep_recorded_head)
+
+    monkeypatch.setattr(integration, "_record_check", spy)
+    rec = integration.prepare(w.pm_dir, PR)
+    assert rec["status"] == integration.CONFLICT, rec
+    assert seen["keep"] == rec["head"]
+
+
+def test_a_stale_check_does_not_replace_the_record_for_the_current_head(w):
+    """A check that started before a concurrent apply reads the old HEAD but
+    can finish after it; recording it would describe a revision the branch no
+    longer has and drop the applied provenance."""
+    rec = _metadata_conflict(w)
+    applied = rec["resolution"]["applied_merge_sha"]
+    old_head = rec["resolution"]["resolved_from"]["head"]
+    assert old_head != rec["head"]
+    stale = {"status": integration.RESOLVED, "head": old_head,
+             "base_sha": rec["base_sha"], "base_branch": "master",
+             "target_repo": str(w.repo),
+             "candidate_tree": rec["candidate_tree"],
+             "conflicts": ["pm/project.yaml"]}
+    out = integration._record_check(w.pm_dir, PR, stale)
+    assert out["head"] == rec["head"]
+    stored = pr_entry(w)["integration"]
+    assert stored["status"] == integration.UP_TO_DATE
+    assert stored["head"] == rec["head"]
+    assert stored["resolution"]["applied_merge_sha"] == applied
+
+
+def test_a_stale_check_is_dropped_when_the_recorded_workdir_is_not_visible(
+        w, monkeypatch):
+    """The container case: the host workdir path does not exist here.
+
+    ``run_check`` falls back to the current checkout, so ``_check_is_stale``
+    must resolve HEAD the same way — otherwise a loser's stale record
+    overwrites the winner's applied one and drops the provenance.
+    """
+    rec = _metadata_conflict(w)
+    applied = rec["resolution"]["applied_merge_sha"]
+    old_head = rec["resolution"]["resolved_from"]["head"]
+    stale = {"status": integration.RESOLVED, "head": old_head,
+             "base_sha": rec["base_sha"], "base_branch": "master",
+             "target_repo": str(w.repo),
+             "candidate_tree": rec["candidate_tree"],
+             "conflicts": ["pm/project.yaml"]}
+
+    def _hide(d):
+        store.get_pr(d, PR)["workdir"] = str(w.tmp / "host-only" / "gone")
+    store.locked_update(w.pm_dir, _hide)
+    monkeypatch.chdir(w.wd)          # the process runs in the PR checkout
+    out = integration._record_check(w.pm_dir, PR, stale)
+    assert out["head"] == rec["head"]
+    stored = pr_entry(w)["integration"]
+    assert stored["status"] == integration.UP_TO_DATE
+    assert stored["head"] == rec["head"]
+    assert stored["resolution"]["applied_merge_sha"] == applied
+
+
+def test_a_transient_check_without_a_head_keeps_the_applied_resolution(w):
+    """A re-check that cannot resolve HEAD must not lose what was applied.
+
+    The record is ``error`` (never mergeable), and a later successful check
+    re-verifies the ancestry before anything can bind to it.
+    """
+    rec = _metadata_conflict(w)
+    applied = rec["resolution"]["applied_merge_sha"]
+    out = integration._record_check(
+        w.pm_dir, PR,
+        {"status": integration.ERROR, "error": "no PR workdir", "head": None,
+         "base_sha": None, "target_repo": str(w.repo),
+         "base_branch": "master"})
+    assert out["status"] == integration.ERROR
+    assert out["resolution"]["applied_merge_sha"] == applied
+    assert out["resolution_digest"] == rec["resolution_digest"]
+    stored = pr_entry(w)["integration"]
+    assert stored["status"] == integration.ERROR
+    assert stored["resolution"]["applied_merge_sha"] == applied
+
+
+def test_prepare_records_the_recheck_once_with_the_resolution(w, monkeypatch):
+    """The post-apply re-check is written once, already carrying the
+    resolution.
+
+    An intermediate record without the resolution would lose the applied
+    provenance (and with it the explicit-reuse requirement) if pm died
+    between the two writes.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    calls = []
+    real = integration._record_check
+
+    def spy(root, pr_id, record):
+        # Keep the object: ``_record_check`` adds the digest it writes.
+        calls.append(record)
+        return real(root, pr_id, record)
+
+    monkeypatch.setattr(integration, "_record_check", spy)
+    rec = integration.prepare(w.pm_dir, PR)
+    assert rec["status"] == integration.UP_TO_DATE
+    assert [c["status"] for c in calls] == [integration.RESOLVED,
+                                            integration.UP_TO_DATE]
+    assert calls[-1]["resolution"]["applied_merge_sha"]
+    assert calls[-1]["resolution_digest"] == rec["resolution_digest"]
+
+
+def test_a_lost_apply_race_records_the_revision_the_branch_now_has(
+        w, monkeypatch):
+    """A concurrent commit that conflicts must not leave a stale ``resolved``.
+
+    The apply loses the HEAD race (``HEAD_MOVED``) and the revision the branch
+    now has does not merge cleanly: recording the loser's stale ``resolved``
+    check would describe a revision that no longer exists (``_check_is_stale``
+    cannot drop it, because the stored record *is* that stale one).  The fresh,
+    non-mergeable check is recorded instead.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    (w.base_pm / "shared.txt").write_text("base\n")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    base_sha = git(w.repo, "rev-parse", "HEAD")
+
+    def _concurrent_apply(root, pr_id, record=None, *, data=None):
+        # A concurrent commit lands on the branch between the check and the
+        # apply, and it conflicts with the base outside project.yaml.
+        commit(w.wd, "pm/shared.txt", "branch\n", "concurrent work")
+        return None, integration.HEAD_MOVED
+
+    monkeypatch.setattr(integration, "apply_integration", _concurrent_apply)
+    rec = integration.prepare(w.pm_dir, PR)
+    now_head = git(w.wd, "rev-parse", "HEAD")
+    assert rec["status"] == integration.CONFLICT, rec
+    assert rec["head"] == now_head
+    assert rec["base_sha"] == base_sha
+    stored = pr_entry(w)["integration"]
+    assert stored["status"] == integration.CONFLICT
+    assert stored["head"] == now_head
+
+
+def test_carry_forward_uses_the_checkout_the_check_used(w, monkeypatch):
+    """A check from the current checkout (recorded workdir not visible) keeps
+    the applied resolution instead of silently dropping its provenance."""
+    rec = _metadata_conflict(w)
+
+    def _drop_workdir(d):
+        store.get_pr(d, PR)["workdir"] = "/nonexistent/pr-workdir"
+    store.locked_update(w.pm_dir, _drop_workdir)
+    monkeypatch.chdir(w.wd)
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE
+    assert again["resolution_digest"] == rec["resolution_digest"]
+    assert again["resolution"]["applied_merge_sha"] == \
+        rec["resolution"]["applied_merge_sha"]
+
+
+def test_approval_rejects_a_head_tag_too_short_to_identify_the_head(w):
+    rec = _metadata_conflict(w)
+    (w.croot / PR).mkdir(parents=True, exist_ok=True)
+    (w.croot / PR / "report.html").write_text(
+        '<html><head><meta name="pm-signoff-head" content="abc">'
+        f'<meta name="pm-signoff-candidate" '
+        f'content="{rec["candidate_tree"]}">'
+        '<meta name="pm-signoff-checks" content="ran the resolver tests">'
+        '<meta name="pm-signoff-evidence" content="review@deadbee,qa@cafef00">'
+        '</head><body/></html>')
+    problem = signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], rec["head"])
+    assert problem and "pm-signoff-head" in problem
+    # A tag that cannot identify the revision is not attributed as evidence.
+    assert signoff._report_evidence(PR, rec["head"])["reused"] == []
+
+
+def test_approval_rejects_a_candidate_tag_too_short_to_identify_the_tree(w):
+    rec = _metadata_conflict(w)
+    (w.croot / PR).mkdir(parents=True, exist_ok=True)
+    (w.croot / PR / "report.html").write_text(
+        f'<html><head><meta name="pm-signoff-head" content="{rec["head"]}">'
+        f'<meta name="pm-signoff-candidate" '
+        f'content="{rec["candidate_tree"][:3]}">'
+        '<meta name="pm-signoff-evidence" content="review@deadbee,qa@cafef00">'
+        '<meta name="pm-signoff-evidence-reason" content="records only">'
+        '</head><body/></html>')
+    problem = signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], rec["head"])
+    assert problem and "pm-signoff-candidate" in problem and "usable" in problem
+
+
+def test_approval_rejects_a_candidate_tag_for_another_tree(w):
+    """A long-enough tag that names a different tree is not the approval."""
+    rec = _metadata_conflict(w)
+    (w.croot / PR).mkdir(parents=True, exist_ok=True)
+    (w.croot / PR / "report.html").write_text(
+        f'<html><head><meta name="pm-signoff-head" content="{rec["head"]}">'
+        f'<meta name="pm-signoff-candidate" content="{"z" * 40}">'
+        '<meta name="pm-signoff-evidence" content="review@deadbee,qa@cafef00">'
+        '<meta name="pm-signoff-evidence-reason" content="records only">'
+        '</head><body/></html>')
+    problem = signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], rec["head"])
+    assert problem and "does not name the approved candidate" in problem
+
+
+def test_justification_is_honest_when_the_check_lost_its_candidate(w):
+    """A failed/superseded re-check cannot name the approved tree.
+
+    The refusal must say pm cannot confirm the candidate — not blame the
+    report for a tree the record no longer carries.
+    """
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+
+    def _drop(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ.pop("candidate_tree", None)
+        integ.pop("base_sha", None)
+    store.locked_update(w.pm_dir, _drop)
+    refusal = signoff.merge_gate_refusal(
+        pr_entry(w), signoff.head_sha(str(w.wd)), "master")
+    assert refusal and "does not record a candidate tree" in refusal
+
+
+def test_resolved_approval_is_stale_when_head_moves_after_the_apply(w):
+    """A commit after the applied resolution needs a fresh sign-off."""
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+    commit(w.wd, "after.txt", "after\n", "commit after the resolution")
+    moved = git(w.wd, "rev-parse", "HEAD")
+    refusal = signoff.merge_gate_refusal(pr_entry(w), moved, "master")
+    assert refusal and "stale" in refusal
+    result, _, finalized = merge(w)
+    assert result.exit_code != 0 and not finalized
+
+
+def test_compact_resolution_bounds_records_and_is_idempotent():
+    """Re-compacting a compact resolution is a fixed point (digest stable)."""
+    records = {f"prs[pr-{i}].notes": {"added_ours": 1, "added_theirs": 0,
+                                      "changed": 0, "removed": 0}
+               for i in range(60)}
+    resolution = {
+        "resolver": "project-yaml-records/v1",
+        "paths": [{"path": "pm/project.yaml", "records": records}],
+        "unresolved": [{"path": "pm/project.yaml", "conflicts": ["c"]}] * 50,
+    }
+    compact = integration._compact_resolution(resolution)
+    entry = compact["paths"][0]
+    assert len(entry["records"]) == integration._YAML_LIST_LIMIT
+    assert entry["records_total"] == 60
+    assert compact["unresolved_total"] == 50
+    assert integration._compact_resolution(compact) == compact
+    assert integration._resolution_digest(resolution) == \
+        integration._resolution_digest(compact)
+
+
+def test_a_non_finite_count_reads_as_no_count():
+    """``.inf`` is a hand-editable count YAML parses to a float.
+
+    ``int(float('inf'))`` raises ``OverflowError`` — not ``ValueError`` — so
+    ``_as_int``'s guard missed it and one hand-edited count raised out of
+    ``compact`` (and so out of every recorded integration check, inside the
+    store lock), ``summary`` / ``pm pr show``, and the ``paths_total`` guard
+    ``_apply_resolution`` runs before it touches the workdir.  All of those
+    promise a readable result, never a traceback.
+    """
+    assert integration._as_int(float("inf")) == 0
+    assert integration._as_int(float("-inf")) == 0
+    assert integration._as_int(float("nan")) == 0
+    compact = integration.compact(
+        {"status": integration.CLEAN, "base_files_count": float("inf"),
+         "overlap_total": float("inf")})
+    # Not a count, so the compact record carries no count (the prompt then
+    # omits the "(N file(s))" hint) instead of raising or inventing a number.
+    assert compact.get("base_files_count") in (None, 0)
+    assert integration.summary(
+        {"status": integration.RESOLVED,
+         "resolution": {"paths": [{"path": "pm/project.yaml",
+                                   "records": {"prs": {
+                                       "added_ours": float("inf")}}}]}})
+
+
+def test_a_recursive_hand_edited_resolution_hashes_instead_of_raising():
+    """A YAML alias cycle is hand-editable state, like any other malformed value.
+
+    ``yaml.load`` builds a self-referential member happily and ``yaml.dump``
+    round-trips it as an anchor, so ``resolved_from: &r {self: *r}`` inside a
+    PR's ``integration.resolution`` reaches the digest.  Walking it unguarded
+    raised ``RecursionError`` out of ``compact`` — i.e. out of every recorded
+    integration check (inside the store lock), ``pm pr show`` and the merge
+    gate's digest comparison — where the contract is "a stable hash, never
+    crash the command that touches it".
+    """
+    doc = yaml.safe_load("""
+prs:
+- id: pr-1
+  status: pending
+  integration:
+    status: resolved
+    resolution: &r
+      paths:
+      - path: pm/project.yaml
+        records: {pm/project.yaml: *r}
+      resolved_from: *r
+""")
+    rec = doc["prs"][0]["integration"]
+    assert rec["resolution"]["resolved_from"] is rec["resolution"]
+    # ``compact`` and the digest both promise a readable result.
+    compact = integration.compact(rec)
+    digest = integration._resolution_digest(rec["resolution"])
+    assert isinstance(digest, str) and len(digest) == 64
+    # Stable and deterministic: the same document hashes the same every time,
+    # and the compact form re-hashes to the same value (a benign re-check must
+    # not look like a changed resolution and invalidate an approval).
+    assert integration._resolution_digest(rec["resolution"]) == digest
+    assert integration._resolution_digest(compact["resolution"]) == digest
+    # A plain shared alias (the same object reachable twice, no cycle) is not
+    # a cycle: it still expands at both places, so a well-formed resolution's
+    # digest is unchanged by the guard.
+    shared = {"x": 1}
+    assert integration._digest_payload({"a": shared, "b": shared}) == \
+        {"a": {"x": 1}, "b": {"x": 1}}
+
+
+def test_a_mapping_key_that_changes_scalar_kind_is_not_silently_resolved():
+    """``1``, ``true`` and ``1.0`` are three YAML scalars but one Python key.
+
+    ``==`` conflates them, so ``key in other`` made a side that changed a
+    key's *kind* look "unchanged" — the other side's change won silently, and
+    the preservation check (comparing the same way) agreed.  A mapping cannot
+    hold both kinds, so the merge cannot represent the combination: it is a
+    refusal, never a side selection.
+    """
+    # ``1 == True == 1.0`` in Python, so compare the key's *kind*: a plain
+    # ``==`` assertion would pass for any of the three.
+    def kinds(doc):
+        return [(type(k).__name__, k) for k in doc["project"]]
+
+    # One side changed the key's kind; the unchanged side must not win.
+    merged, detail = integration.resolve_project_yaml(
+        "project:\n  name: p\n  1: a\nprs: []\n",
+        "project:\n  name: p\n  1: a\nprs: []\n",       # PR branch unchanged
+        "project:\n  name: p\n  true: a\nprs: []\n")   # new base changed it
+    assert merged is not None, detail
+    assert kinds(yaml.safe_load(merged)) == [("str", "name"), ("bool", True)], \
+        kinds(yaml.safe_load(merged))
+
+    # Both sides changed the same key to *different* kinds: a real conflict.
+    merged, detail = integration.resolve_project_yaml(
+        "project:\n  name: p\n  1: a\nprs: []\n",
+        "project:\n  name: p\n  true: a\nprs: []\n",
+        "project:\n  name: p\n  1.0: a\nprs: []\n")
+    assert merged is None, merged
+    assert "changed scalar kind" in detail["conflicts"][0], detail
+
+    # A key changed on one side only is still a one-sided change (the kind
+    # rule must not turn it into a conflict), in both directions.
+    for ours_key, theirs_key, expected in (("1", "1.0", ("float", 1.0)),
+                                          ("true", "1", ("bool", True))):
+        merged, detail = integration.resolve_project_yaml(
+            "project:\n  name: p\n  1: a\nprs: []\n",
+            f"project:\n  name: p\n  {ours_key}: a\nprs: []\n",
+            f"project:\n  name: p\n  {theirs_key}: a\nprs: []\n")
+        assert merged is not None, (ours_key, theirs_key, detail)
+        assert kinds(yaml.safe_load(merged)) == [("str", "name"), expected], \
+            kinds(yaml.safe_load(merged))
+
+    # The guard is narrow: the same kind on every side still merges, and a
+    # string-keyed document (what pm writes) is untouched.
+    merged, detail = integration.resolve_project_yaml(
+        "project:\n  name: p\n  1: a\nprs: []\n",
+        "project:\n  name: p\n  1: a\nprs: []\n",
+        "project:\n  name: p\n  1: a\nprs: []\n")
+    assert merged is not None, detail
+    assert not integration._same({1: "a"}, {True: "a"})
+    assert integration._same({"a": 1}, {"a": 1})
+
+
+def test_a_recursive_document_is_refused_not_raised():
+    """A YAML alias cycle is a malformed document, not an exception.
+
+    ``yaml.load`` builds ``project: &p {self: *p}`` happily, and the resolver
+    walks the document recursively.  ``RecursionError`` is not a "conflict",
+    so it escaped ``(None, details)`` — the callers catch it, but the function
+    promises a refusal.
+    """
+    cyclic = "project: &p\n  name: p\n  self: *p\nprs: []\n"
+    merged, detail = integration.resolve_project_yaml(cyclic, cyclic, cyclic)
+    assert merged is None
+    assert "recursive" in (detail.get("conflicts") or [""])[0]
+    # A cycle on one side only is refused the same way (it is not mergeable).
+    clean = "project:\n  name: p\nprs: []\n"
+    merged, detail = integration.resolve_project_yaml(clean, cyclic, clean)
+    assert merged is None
+    assert "recursive" in (detail.get("conflicts") or [""])[0]
+
+
+def test_a_truncated_path_list_records_its_total_and_apply_refuses_it(w):
+    """``compact`` bounds ``paths``; an apply from the stored record refuses.
+
+    A resolution has one path entry per conflicted file, so more than
+    ``_YAML_LIST_LIMIT`` is unusual — but the stored list is what a sign-off
+    bounce applies from, and reconciling only the paths it can see would abort
+    mid-merge ("unexpected conflict in …") on the first missing one.  The
+    record says how many it describes, and the apply refuses up front.
+    """
+    limit = integration._YAML_LIST_LIMIT
+    paths = [{"path": f"d{i}/project.yaml", "resolver": "r", "blob": "b" * 40}
+             for i in range(limit + 1)]
+    record = {"status": integration.RESOLVED, "head": "a" * 40,
+              "base_sha": "b" * 40, "candidate_tree": "c" * 40,
+              "resolution": {"paths": paths, "unresolved": []}}
+    compact = integration.compact(record)
+    assert len(compact["resolution"]["paths"]) == limit
+    assert compact["resolution"]["paths_total"] == limit + 1
+    # Re-compacting keeps the total, so the digest stays stable.
+    assert integration.compact(compact)["resolution"]["paths_total"] == limit + 1
+    assert integration._resolution_digest(
+        integration.compact(compact)["resolution"]) == \
+        integration._resolution_digest(compact["resolution"])
+    # The apply refuses the partial resolution instead of aborting mid-merge.
+    merged, err = integration._apply_resolution(
+        compact, str(w.wd), git(w.wd, "rev-parse", "HEAD"),
+        git(w.repo, "rev-parse", "master"), "Integrate master")
+    assert merged is None
+    assert "covers only" in err, err
+    # A complete record is unaffected (the launch path applies it).
+    full = dict(record, resolution={"paths": paths[:2], "unresolved": []})
+    assert integration._compact_resolution(full["resolution"]).get(
+        "paths_total") is None
+
+
+def test_resolution_id_lists_name_what_they_omit():
+    """A truncated id list records its real total and the prompt says so.
+
+    ``compact`` keeps at most 20 ids per list; the prompt shows 10.  Neither
+    may drop ids silently — the same "the marker must describe what was
+    dropped" rule the overlap/conflicts lists follow.
+    """
+    entry = {"path": "pm/project.yaml",
+             "added_ours": [f"pr-{i}" for i in range(25)],
+             "added_theirs": [], "merged_fields": [], "removed": []}
+    compact = integration._compact_resolution(
+        {"paths": [entry], "unresolved": []})
+    stored = compact["paths"][0]
+    assert len(stored["added_ours"]) == 20
+    assert stored["added_ours_total"] == 25
+    # Re-compaction is a fixed point, so the digest stays stable.
+    assert integration._compact_resolution(compact) == compact
+    assert integration._resolution_digest({"paths": [entry]}) == \
+        integration._resolution_digest(compact)
+    pr = {"id": PR, "integration": {
+        "status": integration.RESOLVED, "base_branch": "master",
+        "base_sha": "a" * 40, "head": "b" * 40,
+        "candidate_tree": "c" * 40, "resolution": compact}}
+    block = prompt_gen._signoff_integration_block(pr, PR)
+    assert "… 15 more" in block
+
+
+def test_summary_counts_records_beyond_the_bounded_id_lists():
+    """The summary count comes from the per-path counts, not the capped ids."""
+    entry = {"path": "pm/project.yaml",
+             "added_ours": [f"pr-{i}" for i in range(20)],
+             "records": {"prs": {"added_ours": 45, "added_theirs": 3,
+                                 "changed": 0, "removed": 0}}}
+    rec = {"status": integration.RESOLVED, "base_branch": "master",
+           "base_sha": "a" * 40, "resolution": {"paths": [entry]}}
+    summary = integration.summary(rec)
+    assert "45 added from PR" in summary
+    assert "3 from base" in summary
+
+
+def test_compact_bounds_base_behavior_changes():
+    """The behavioural summary is bounded in project.yaml like the rest."""
+    record = {"status": integration.CLEAN, "base_sha": "a" * 40,
+              "base_behavior_changes": [f"change {i}" for i in range(50)]}
+    out = integration.compact(record)
+    assert len(out["base_behavior_changes"]) == integration._BEHAVIOR_LIMIT
+    assert out["base_behavior_count"] == 50
+
+
+def test_recompacting_a_compact_record_keeps_the_base_file_count():
+    """A bounce re-compacts the compact record (see _record_applied_integration).
+
+    The full ``base_files`` list is gone there; resetting ``base_files_count``
+    to 0 would tell the prompt the base changed nothing.
+    """
+    record = {"status": integration.RESOLVED, "base_sha": "a" * 40,
+              "candidate_tree": "b" * 40, "base_files": ["x", "y"],
+              "pr_files": [], "resolution": {"paths": []}}
+    once = integration.compact(record)
+    assert once["base_files_count"] == 2
+    assert integration.compact(once)["base_files_count"] == 2
+
+
+def test_artifact_write_tolerates_a_non_json_carried_value(w):
+    """integration.json must not raise on a hand-edited YAML value.
+
+    ``base_behavior_changes`` is hand-editable project.yaml state and is
+    carried forward onto later records.  An unquoted YAML date (or a ``!!set``)
+    parses as a non-JSON type; ``json.dumps`` raised ``TypeError`` out of every
+    integration check — and out of the sign-off launch, which then reported
+    only "Integration check failed" — even though the state record had already
+    been written.  The artifact renders it instead.
+    """
+    import datetime
+    record = {"status": integration.UP_TO_DATE, "base_sha": "a" * 40,
+              "head": "b" * 40,
+              "base_behavior_changes": [datetime.date(2026, 1, 2)]}
+    integration._write_artifacts(PR, record)
+    path = integration.integration_json_path(PR)
+    assert path is not None and path.is_file()
+    written = json.loads(path.read_text())
+    assert written["base_behavior_changes"] == ["2026-01-02"]
+
+
+def test_recorded_evidence_lists_are_bounded(w):
+    """The evidence block is rewritten into project.yaml: bound its lists."""
+    rec = _metadata_conflict(w)
+    (w.croot / PR).mkdir(parents=True, exist_ok=True)
+    tokens = ",".join(f"review@{i:040x}" for i in range(50))
+    (w.croot / PR / "report.html").write_text(
+        f'<html><head><meta name="pm-signoff-head" content="{rec["head"]}">'
+        f'<meta name="pm-signoff-evidence" content="{tokens}">'
+        '<meta name="pm-signoff-evidence-reason" content="records only">'
+        '</head><body/></html>')
+    qa_dir = w.tmp / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-abcd"
+    qa_dir.mkdir(parents=True)
+    (qa_dir / "qa_status.json").write_text(json.dumps({"overall": "PASS"}))
+    (qa_dir / "qa_resume.json").write_text(json.dumps({
+        "planner_head": rec["head"],
+        "planner_code_changes": [f"f{i}.py" for i in range(50)]}))
+    block = signoff._evidence_block(
+        pr_entry(w), rec["head"], integration.binding(rec),
+        verdict=SIGNOFF_MERGE)
+    limit = signoff._EVIDENCE_LIST_LIMIT
+    assert len(block["reused"]) == limit
+    assert block["reused_total"] == 50
+    assert len(block["qa"]["planner_code_changes"]) == limit
+    assert block["qa"]["planner_code_changes_total"] == 50
+
+
+def test_resolution_preserves_workdir_files_and_evidence(w):
+    evidence_file = w.croot / PR / "scenarios" / "1" / "note.txt"
+    evidence_file.parent.mkdir(parents=True)
+    evidence_file.write_text("keep me\n")
+    untracked = w.wd / "scratch.txt"
+    untracked.write_text("local work\n")
+
+    rec = _metadata_conflict(w)
+    assert rec["status"] == integration.UP_TO_DATE
+    assert evidence_file.read_text() == "keep me\n"
+    assert untracked.read_text() == "local work\n"
+
+
+def test_dirty_workdir_keeps_the_isolated_resolution_unapplied(w):
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    head = git(w.wd, "rev-parse", "HEAD")
+    (w.wd / "keep.txt").write_text("uncommitted\n")
+
+    rec = integration.prepare(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED
+    assert rec.get("apply_error")
+    assert not (rec.get("resolution") or {}).get("applied_merge_sha")
+    assert git(w.wd, "rev-parse", "HEAD") == head
+    assert (w.wd / "keep.txt").read_text() == "uncommitted\n"
+    verdict, why = signoff.effective_verdict(
+        SIGNOFF_MERGE, pr_entry(w)["integration"], head)
+    assert verdict == SIGNOFF_BLOCKED and "could not be applied" in why
+    # Even a report that names everything cannot approve an unapplied merge.
+    write_report(w, rec)
+    problem = signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], head)
+    assert problem and "not applied" in problem
+
+
+def test_an_already_integrated_branch_is_not_committed_over(w):
+    """A concurrent apply that already merged the base is not reset away."""
+    base_sha = git(w.repo, "rev-parse", "master")
+    head = git(w.wd, "rev-parse", "HEAD")
+    tree = git(w.wd, "rev-parse", "HEAD^{tree}")
+    record = {"status": integration.RESOLVED, "head": head,
+              "base_sha": base_sha, "candidate_tree": tree,
+              "resolution": {"paths": [{"path": "pm/project.yaml"}]}}
+    merged, err = integration._apply_resolution(
+        record, str(w.wd), head, base_sha, "Integrate master")
+    assert err is None, err
+    assert merged == head
+    assert git(w.wd, "rev-parse", "HEAD") == head
+    assert git(w.wd, "rev-parse", "HEAD^{tree}") == tree
+
+
+def test_bounce_to_review_applies_the_resolved_candidate(w):
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    original_head = git(w.wd, "rev-parse", "HEAD")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED
+
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, git(w.wd, "rev-parse", "HEAD"),
+                                 rec["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1",
+        retire=lambda *a: None)
+    assert res.hop == "review"
+    p = pr_entry(w)
+    ret = p["signoff_return"]
+    assert ret["applied"]["from_head"] == original_head
+    assert ret["integration"]["resolution"]["applied_merge_sha"] \
+        == ret["applied"]["merge_sha"]
+    # The next stage also sees the revisions the resolution combined.
+    assert ret["integration"]["resolution"]["resolved_from"]["head"] \
+        == original_head
+    assert ret["integration"]["resolution"]["resolved_from"]["base_sha"] \
+        == rec["base_sha"]
+    assert git(w.wd, "rev-parse", "HEAD") == ret["applied"]["merge_sha"]
+    assert git(w.wd, "rev-parse", "HEAD^{tree}") == rec["candidate_tree"]
+    assert git(w.wd, "rev-parse", "--abbrev-ref", "HEAD") == BRANCH
+    assert "pm resolved the metadata conflict" in \
+        signoff.format_signoff_return(p)
+
+
+def test_a_review_bounce_after_the_launch_apply_gets_the_diff_hint(w):
+    """``prepare`` applied the base at launch, so the bounce has nothing left
+    to apply — but the routed step must still diff against the new base.
+
+    The workdir's own base refs are stale after the apply, so the usual
+    ``<base>...HEAD`` diff would list the merged base commits as PR changes.
+    """
+    rec = _metadata_conflict(w)
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, rec["head"], rec["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+    ret = pr_entry(w)["signoff_return"]
+    assert not ret.get("applied")
+    assert ret["integration"]["resolution"]["applied_merge_sha"]
+    text = signoff.format_signoff_return(pr_entry(w))
+    assert f"git diff {rec['base_sha'][:12]} HEAD" in text
+
+
+def test_driver_blocks_a_resolved_merge_without_the_evidence_statement(w):
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    rec = integration.prepare(w.pm_dir, PR)
+    assert rec["status"] == integration.UP_TO_DATE
+    merged = rec["resolution"]["applied_merge_sha"]
+
+    write_report(w, rec, evidence=False)
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, merged, rec["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_MERGE,
+        window_pane=lambda s, p: "%1",
+        retire=lambda *a: None)
+    assert res.hop == "blocked"
+    assert res.verdict == SIGNOFF_BLOCKED
+    assert "pm-signoff-evidence" in res.coerced
+    p = pr_entry(w)
+    assert p["status"] == "sign_off"
+    assert p["signoff"]["original_verdict"] == SIGNOFF_MERGE
+
+
+# --- prompt + CLI surfaces --------------------------------------------------
+
+def test_signoff_prompt_shows_the_resolution_and_evidence_contract(w):
+    rec = _metadata_conflict(w)
+    original_head = rec["resolution"]["resolved_from"]["head"]
+    qa_dir = w.tmp / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-abcd"
+    qa_dir.mkdir(parents=True)
+    (qa_dir / "qa_status.json").write_text(json.dumps(
+        {"pr_id": PR, "overall": "PASS", "scenarios": []}))
+    (qa_dir / "qa_resume.json").write_text(json.dumps(
+        {"planner_head": original_head, "planner_code_changes": []}))
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "Metadata conflict resolution (pm, by record id)" in text
+    assert "added from the PR" in text and "pr-300" in text
+    assert "added from the base" in text and "pr-250" in text
+    assert "Applied to the PR branch" in text
+    assert "pm-signoff-candidate" in text
+    assert "pm-signoff-evidence" in text
+    assert "metadata is not an automatic exemption" in text
+    # The base-interaction judgment guidance stays in the prompt: it is why
+    # sign-off reads the base diff at all.  Normalize the wrapping so the
+    # assertion is about the instruction, not the line breaks.
+    flat = " ".join(text.split())
+    assert "judge whether it interacts" in flat
+    assert "semantic overlap" in flat
+    assert "Line/file counts alone are not the rule" in flat
+    # The applied-resolution diff is described honestly: it shows the whole
+    # base merge, not only the resolution.
+    assert "shows exactly what the resolution added" not in text
+    assert "whole base merge as applied" in text
+    # The evidence revisions the reuse statement must name are surfaced.
+    assert f"qa@{original_head[:12]}" in text
+    assert f"review@{original_head[:12]}" in text
+
+
+def test_signoff_prompt_diffs_against_the_applied_base(w):
+    """After a launch apply the workdir's own base ref is stale.
+
+    ``git diff master...HEAD`` would then list the merged base commits as PR
+    changes, so the prompt's primary diff command must name the exact base
+    revision the resolution was applied on.
+    """
+    rec = _metadata_conflict(w)
+    # The workdir's own base ref still points at the pre-base commit.
+    assert git(w.wd, "rev-parse", "master") != rec["base_sha"]
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert f"git diff {rec['base_sha'][:12]}...HEAD" in text
+    assert "git diff master...HEAD" not in text
+    # The base is inside HEAD now: never an empty `base..base` range that
+    # claims the base changed nothing.
+    assert "0 file(s)" not in text
+
+
+def test_signoff_prompt_diffs_against_the_base_after_a_clean_bounce(w):
+    """A clean base merged by a bounce is inside the branch too.
+
+    The bounce applied the base, so the next sign-off's ``<base>...HEAD``
+    diff against the workdir's stale base ref would list the merged base
+    commits as PR changes.
+    """
+    commit(w.repo, "base.txt", "base\n", "base moves ahead")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, rec["head"], rec["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+
+    # Sign-off re-runs after the review: prepare re-checks the integrated
+    # branch (up to date) and the prompt must diff against the recorded base.
+    again = integration.prepare(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE
+    assert again["base_sha"] == rec["base_sha"]
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert f"git diff {again['base_sha'][:12]}...HEAD" in text
+    assert "git diff master...HEAD" not in text
+
+
+def test_signoff_prompt_falls_back_to_the_base_branch_for_an_unmerged_base(w):
+    """A base that is not in the branch keeps the usual base-branch diff."""
+    commit(w.repo, "base.txt", "base\n", "base moves ahead")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "git diff master...HEAD" in text
+    assert "0 file(s)" not in text
+
+
+def test_prompt_base_range_after_the_base_moves_past_an_applied_resolution(w):
+    """A later base move is not re-described as the whole pre-apply range.
+
+    The applied resolution is carried forward, but the recorded merge base is
+    now the applied base.  The "base changes" range must start there: using
+    the pre-apply merge base would list the commits the resolution already
+    merged as new base changes, and the recorded file count (computed over
+    the current range) would no longer match.
+    """
+    rec = _metadata_conflict(w)
+    applied_base = rec["base_sha"]
+    pre_merge_base = rec["resolution"]["resolved_from"]["merge_base"]
+    assert pre_merge_base != applied_base
+
+    # The base moves on cleanly: nothing for the resolution to reconcile.
+    commit(w.repo, "base_only.txt", "base\n", "base moves ahead")
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.CLEAN, again
+    assert again["merge_base"] == applied_base
+    assert again["resolution"]["applied_merge_sha"]
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert (f"git log --oneline {applied_base[:12]}.."
+            f"{again['base_sha'][:12]}") in text
+    assert f"{pre_merge_base[:12]}.." not in text
+    assert "(1 file(s))" in text
+
+
+def test_base_range_starts_at_the_applied_base_after_a_newer_base_is_merged(w):
+    """A newer base merged past an applied resolution keeps the right range.
+
+    The resolution applied base B1; a bounce then merged B2.  The next check's
+    merge base is B2 itself (the base is inside HEAD), so the pre-apply merge
+    base (the branch point) must not be used as the range start: it would list
+    the commits the resolution already merged as new base changes, and it
+    would disagree with the recorded file count (computed over B1..B2).
+    """
+    rec = _metadata_conflict(w)
+    b1 = rec["base_sha"]
+    commit(w.repo, "base_only.txt", "base\n", "base moves ahead")
+    b2 = git(w.repo, "rev-parse", "HEAD")
+    clean = integration.check_integration(w.pm_dir, PR)
+    assert clean["status"] == integration.CLEAN, clean
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, clean["head"], clean["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+    again = integration.prepare(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    assert again["base_sha"] == b2
+    pre_merge_base = again["resolution"]["resolved_from"]["merge_base"]
+    assert pre_merge_base not in (b1, b2)
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert f"git log --oneline {b1[:12]}..{b2[:12]}" in text
+    assert f"{pre_merge_base[:12]}.." not in text
+    assert "(1 file(s))" in text
+
+
+def test_a_clean_bounce_keeps_the_merge_that_applied_the_resolution(w):
+    """A later clean base merge does not claim it applied the resolution.
+
+    The ``CLEAN`` record carries the earlier applied resolution
+    (``_carry_forward``); the bounce's merge only brought in the newer base.
+    Rewriting ``applied_merge_sha`` would make ``resolved_from`` (the
+    pre-apply head/base) and the recorded merge disagree, and every surface
+    that names the applied merge would point at a merge the resolution is not
+    part of.
+    """
+    rec = _metadata_conflict(w)
+    applied = rec["resolution"]["applied_merge_sha"]
+    commit(w.repo, "base_only.txt", "base\n", "base moves ahead")
+    clean = integration.check_integration(w.pm_dir, PR)
+    assert clean["status"] == integration.CLEAN
+    # The clean record still names the merge that applied the resolution.
+    assert clean["resolution"]["applied_merge_sha"] == applied
+    digest = clean["resolution_digest"]
+
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, clean["head"], clean["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+
+    stored = pr_entry(w)["integration"]
+    assert stored["head"] != applied          # the bounce merged the new base
+    assert stored["resolution"]["applied_merge_sha"] == applied
+    assert stored["resolution_digest"] == digest
+    assert integration.is_ancestor(w.wd, applied, stored["head"])
+    ret = pr_entry(w)["signoff_return"]
+    assert ret["applied"]["merge_sha"] == stored["head"]
+    assert ret["integration"]["resolution"]["applied_merge_sha"] == applied
+
+
+def test_the_post_apply_record_keeps_the_base_overlap_and_file_count(w):
+    """The re-check after the apply sees no base diff — the prompt still shows
+    which files both sides changed and how many the base touched.
+
+    ``prepare`` applies the resolved candidate, then re-checks the integrated
+    head, whose merge base is the base itself: its own ``base_files`` and
+    ``overlap`` are empty.  Losing them would drop the base interaction the
+    agent must weigh (the same file changed on both sides) from the sign-off
+    prompt, and the base-changes range would lose its file count.
+    """
+    rec = _metadata_conflict(w)
+    assert rec["status"] == integration.UP_TO_DATE
+    assert rec["base_files"] == ["pm/project.yaml"], rec
+    assert "pm/project.yaml" in rec["overlap"], rec
+
+    stored = pr_entry(w)["integration"]
+    assert stored["base_files_count"] == 1
+    assert "pm/project.yaml" in stored["overlap"]
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "Files changed on both sides: `pm/project.yaml`" in text
+    assert "(1 file(s))" in text
+
+    # A later sign-off launch re-checks the integrated head and carries the
+    # compact record forward: the count and the overlap must survive it.
+    again = integration.prepare(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE
+    kept = pr_entry(w)["integration"]
+    assert kept["base_files_count"] == 1, kept
+    assert "pm/project.yaml" in kept["overlap"], kept
+
+
+def test_a_hand_edited_base_file_count_is_not_rendered_as_a_count(w):
+    """A non-integer ``base_files_count`` is not a file count.
+
+    ``project.yaml`` is hand-editable state and the prompt interpolated the
+    value directly, so a hand-edited ``"many"`` printed as
+    "``(many file(s))``" — a number the agent is told to weigh — and ``True``
+    (an ``int`` to ``isinstance``) printed as "``(True file(s))``".  The range
+    itself is still shown; only the count it cannot read is omitted.
+    """
+    _metadata_conflict(w)
+    for bad in ("many", True, {"n": 1}):
+        def _mangle(d, bad=bad):
+            store.get_pr(d, PR)["integration"]["base_files_count"] = bad
+        store.locked_update(w.pm_dir, _mangle)
+        data = store.load(w.pm_dir)
+        with patch("pm_core.prompt_gen.store.find_project_root",
+                   side_effect=FileNotFoundError):
+            text = prompt_gen.generate_signoff_prompt(data, PR)
+        line = [l for l in text.splitlines()
+                if "Base changes since this PR branched" in l]
+        assert line, text
+        assert "file(s)" not in line[0], (bad, line[0])
+
+
+def test_review_and_qa_prompts_diff_against_the_applied_base(w):
+    """Review/QA prompts must not list the merged base commits as PR changes.
+
+    A resolved metadata conflict is applied at sign-off launch, so by the time
+    review/QA run the branch already contains the base while the workdir's own
+    base ref still points before it.  Their primary diff command must use the
+    exact applied base, not the stale base branch.
+    """
+    rec = _metadata_conflict(w)
+    applied_base = rec["resolution"]["resolved_from"]["base_sha"]
+    assert applied_base == rec["base_sha"]
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        review = prompt_gen.generate_review_prompt(data, PR)
+        planner = prompt_gen.generate_qa_planner_prompt(data, PR)
+    assert f"git diff {applied_base[:12]}...HEAD" in review
+    assert "git diff master...HEAD" not in review
+    assert f"git diff {applied_base[:12]}...HEAD" in planner
+    assert "git diff master...HEAD" not in planner
+
+
+def test_qa_spec_prompt_diffs_against_the_base_the_branch_contains(w):
+    """The QA *spec* prompt is another PR-diff surface.
+
+    ``pm pr spec <pr> qa`` (and the spec-approve flow) tells the agent to run
+    ``git diff <base>...HEAD``.  Once the branch carries the base — a
+    resolution applied at sign-off, or a clean base merged by a bounce — the
+    workdir's own base ref is stale, so that command would list the merged
+    base commits as the PR's own changes.  It must name the exact base the
+    branch contains, like the review / QA-planner / sign-off prompts.
+    """
+    from pm_core import spec_gen
+    rec = _metadata_conflict(w)
+    applied_base = rec["resolution"]["resolved_from"]["base_sha"]
+    assert git(w.wd, "rev-parse", "master") != applied_base
+    data = store.load(w.pm_dir)
+    pr = store.get_pr(data, PR)
+    with patch("pm_core.spec_gen.get_global_setting_value",
+               return_value="prompt"):
+        prompt = spec_gen._build_spec_prompt(data, pr, "qa")
+    assert f"git diff {applied_base[:12]}...HEAD" in prompt
+    assert "git diff master...HEAD" not in prompt
+
+
+def test_contained_base_reads_malformed_state_as_absent(w):
+    """A hand-edited record must not crash a prompt or the review window.
+
+    ``contained_base`` is called by every prompt that names the PR's diff and
+    by the review window's diff pane.  A malformed ``integration`` /
+    ``signoff_return`` value (or a non-string revision) reads as absent — the
+    usual base-branch diff — instead of raising out of the launch.
+    """
+    assert integration.contained_base(
+        {"id": PR, "workdir": str(w.wd), "integration": "garbage",
+         "signoff_return": ["not", "a", "mapping"]}) is None
+    assert integration.contained_base(
+        {"id": PR, "workdir": ["not", "a", "path"],
+         "integration": "garbage"}) is None
+    assert integration.contained_base(
+        {"id": PR, "workdir": str(w.wd),
+         "integration": {"status": "up_to_date",
+                         "base_sha": ["not", "a", "sha"],
+                         "resolution": "garbage", "merge_base": {"x": 1}},
+         "signoff_return": {"applied": "garbage"}}) is None
+    # The well-formed shape still resolves (the normal path is not weakened).
+    assert integration.contained_base(
+        {"id": PR, "workdir": str(w.wd),
+         "integration": {"status": "up_to_date", "base_sha": "a" * 40}}) \
+        == "a" * 40
+    # A value that is not a git object name must never become the diff ref:
+    # prompt builders interpolate it into a command the agent is told to run.
+    assert integration.contained_base(
+        {"id": PR, "workdir": str(w.wd),
+         "integration": {"status": "up_to_date",
+                         "base_sha": "abc; touch /tmp/pwned"}}) is None
+
+
+def test_malformed_resolution_state_reads_as_absent(w):
+    """A hand-edited ``resolution`` must not crash the prompt or the gate.
+
+    ``integration``/``resolution`` live in the git-tracked, hand-editable
+    project.yaml.  A value that is not a mapping (or a mapping with malformed
+    members) reads as absent — no resolution to show, no digest, no path list
+    — instead of raising out of prompt generation (the sign-off window could
+    not launch) or ``pm pr merge``.
+    """
+    bad_values = [
+        "garbage", ["not", "a", "mapping"], 42,
+        {"paths": "garbage", "unresolved": "garbage",
+         "resolved_from": "garbage", "applied_merge_sha": 5},
+        {"paths": ["garbage", 7], "unresolved": ["garbage", 7]},
+        # A YAML integer key beside pm's string keys, inside a *member* of
+        # the compact projection: the digest must still be computable.
+        {"resolved_from": {1: "x", "head": "a" * 40}},
+    ]
+    for bad in bad_values:
+        rec = {"head": "a" * 40, "base_sha": "b" * 40, "status": "resolved",
+               "candidate_tree": "c" * 40, "merge_base": "b" * 40,
+               "resolution": bad}
+        expected = bad if isinstance(bad, dict) else {}
+        assert integration.resolution_of(rec) == expected
+        assert integration.unresolved_paths(rec) == set()
+        assert integration.carried_applied_resolution(rec) is False
+        assert isinstance(integration.summary(rec), str)
+        # The compact state never carries a malformed *member* through: a
+        # non-mapping resolution is dropped and a malformed list member
+        # sanitized.  A truthy ``unresolved`` that names no mapping is the
+        # exception — it is the record's refusal marker, so it survives the
+        # rewrite whether or not it is a list (see
+        # test_a_benign_recheck_does_not_launder_a_malformed_unresolved and
+        # ..._unresolved_list).
+        compacted = integration.compact(rec)
+        if isinstance(bad, dict):
+            assert compacted["resolution"]["paths"] == []
+            raw_unresolved = bad.get("unresolved")
+            if raw_unresolved \
+                    and not integration.resolution_entries(bad, "unresolved"):
+                assert compacted["resolution"]["unresolved"] \
+                    == raw_unresolved
+            else:
+                assert compacted["resolution"]["unresolved"] == []
+            assert "applied_merge_sha" not in compacted["resolution"]
+        else:
+            assert "resolution" not in compacted
+        integration.valid_for(rec, "a" * 40)
+        integration._resolution_digest(rec["resolution"])
+        signoff.approval_justification_problem(PR, rec, "a" * 40)
+        signoff.effective_verdict(SIGNOFF_MERGE, rec, "a" * 40)
+        signoff.merge_gate_refusal(
+            {"id": PR, "integration": rec,
+             "signoff": {"verdict": SIGNOFF_MERGE, "sha": "a" * 40,
+                         "integration": integration.binding(rec)}},
+            "a" * 40, "master")
+        assert integration.contained_base(
+            {"id": PR, "integration": rec, "workdir": None}) is None
+
+    # The prompt path (which crashed on a non-mapping resolution before) reads
+    # the record from the store like a real launch does.
+    rec = _metadata_conflict(w)
+
+    def _blank(d):
+        store.get_pr(d, PR)["integration"]["resolution"] = "garbage"
+    store.locked_update(w.pm_dir, _blank)
+    data = store.load(w.pm_dir)
+    pr = store.get_pr(data, PR)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+        review = prompt_gen.generate_review_prompt(data, PR)
+    assert "Result:" in text and review.strip()
+    # The malformed resolution is not presented as a resolution.
+    assert "Metadata conflict resolution" not in text
+    signoff.format_signoff_return(pr)
+    signoff.merge_gate_refusal(pr, rec["head"], "master")
+
+
+def test_a_mixed_key_resolution_member_still_hashes(w):
+    """A hand-edited nested mapping must not break the resolution digest.
+
+    ``compact`` filters non-string keys at the top of a ``records`` mapping,
+    but ``resolved_from``, an ``unresolved`` entry and a ``records`` *value*
+    are carried as they are.  A YAML integer key beside pm's string keys made
+    ``json.dumps(..., sort_keys=True)`` raise ``TypeError`` — out of
+    ``compact`` (every recorded check, the sign-off launch) and out of the
+    merge gate's digest comparison (``pm pr merge``).  The digest must be a
+    stable hash of whatever the record holds.
+    """
+    malformed = [
+        {"resolved_from": {1: "x", "head": "a" * 40}},
+        {"unresolved": [{"path": "p", 1: "x", "conflicts": ["c"]}]},
+        {"paths": [{"path": "p", "records": {"p": {1: "x", "added_ours": 2}}}]},
+    ]
+    for member in malformed:
+        res = dict(member)
+        digest = integration._resolution_digest(res)
+        assert isinstance(digest, str) and len(digest) == 64
+        # ``compact`` computes the same digest, so a recorded check and a
+        # gate re-computation agree (a malformed record is refused elsewhere,
+        # never made to look like a changed resolution).
+        rec = {"head": "a" * 40, "base_sha": "b" * 40, "status": "resolved",
+               "candidate_tree": "c" * 40, "merge_base": "b" * 40,
+               "resolution": res}
+        assert integration.compact(rec)["resolution_digest"] == digest
+
+    # A well-formed resolution keeps the exact digest the pre-fix formula
+    # produced (all keys are strings), so this hardening does not invalidate
+    # an approval already recorded against one.
+    res = {
+        "resolver": "project-yaml-records/v1", "base_tree": "a" * 40,
+        "head_tree": "b" * 40, "candidate_tree": "c" * 40,
+        "applied_merge_sha": "d" * 40,
+        "resolved_from": {"head": "e" * 40, "base_sha": "f" * 40,
+                          "merge_base": "0" * 40, "status": "resolved"},
+        "paths": [{"path": "pm/project.yaml", "resolver": "r",
+                   "blob": "1" * 40,
+                   "records": {"pm/project.yaml": {
+                       "added_ours": 1, "added_theirs": 2,
+                       "changed": 0, "removed": 0}},
+                   "added_ours": ["pr-1"], "added_theirs": ["pr-2"],
+                   "merged_fields": [], "removed": []}],
+        "unresolved": [],
+    }
+    expected = hashlib.sha256(json.dumps(
+        integration._compact_resolution(res), sort_keys=True,
+        default=str).encode()).hexdigest()
+    assert integration._resolution_digest(res) == expected
+
+
+def test_malformed_resolution_list_members_read_as_absent(w):
+    """A scalar ``paths``/``unresolved`` reads as absent, never raises.
+
+    The earlier hardening filtered non-mapping *entries*; a hand-edited scalar
+    in place of the list (``paths: 5``) still raised ``TypeError`` from every
+    reader that iterated it (the sign-off prompt, the return text, the merge
+    gate, the router and ``summary``), and a malformed member inside a
+    well-formed entry raised in ``compact`` (``list(5)``) or silently split a
+    string into characters (``list("abc")``).
+    """
+    for bad in (5, 7.5, "garbage", {"a": 1}):
+        rec = {"head": "a" * 40, "base_sha": "b" * 40, "status": "resolved",
+               "candidate_tree": "c" * 40, "merge_base": "b" * 40,
+               "resolution": {"paths": bad, "unresolved": bad}}
+        assert isinstance(integration.summary(rec), str)
+        assert integration.unresolved_paths(rec) == set()
+        compacted = integration.compact(rec)
+        assert compacted["resolution"]["paths"] == []
+        # A truthy non-list ``unresolved`` is the refusal marker, not a member
+        # to sanitize: dropping it would let the next record write turn the
+        # refusal into a clean resolution.
+        assert compacted["resolution"]["unresolved"] == bad
+        signoff.effective_verdict(SIGNOFF_REVIEW, rec, "a" * 40)
+        signoff.merge_gate_refusal(
+            {"id": PR, "integration": rec,
+             "signoff": {"verdict": SIGNOFF_MERGE, "sha": "a" * 40,
+                         "integration": integration.binding(rec)}},
+            "a" * 40, "master")
+        signoff.format_signoff_return(
+            {"id": PR, "integration": rec,
+             "signoff_return": {"verdict": SIGNOFF_REVIEW, "hop": "review",
+                                "reason": "r", "reviewed_head": "a" * 40}})
+
+    # The justification check reads the member too (a report that matches the
+    # reviewed head/candidate, so it reaches the resolution branch).  A
+    # malformed value is a refusal, never evidence of a clean resolution.
+    rec = {"head": "a" * 40, "base_sha": "b" * 40, "status": "resolved",
+           "candidate_tree": "c" * 40, "merge_base": "b" * 40,
+           "resolution": {"paths": 5, "unresolved": 7,
+                          "applied_merge_sha": "d" * 40}}
+    write_report(w, rec)
+    problem = signoff.approval_justification_problem(PR, rec, "a" * 40)
+    assert problem and "unresolved" in problem
+
+    entry = {"path": "pm/project.yaml", "added_ours": 5,
+             "added_theirs": "abc", "merged_fields": 7.5,
+             "removed": {"k": 1}, "records": 5, "blob": 3}
+    item = integration._compact_resolution({"paths": [entry]})["paths"][0]
+    for key in ("added_ours", "added_theirs", "merged_fields", "removed"):
+        assert item[key] == [], (key, item)
+    assert item["records"] == {} and item["blob"] is None
+
+    # The real surfaces: a launch reads the record from the store, and a later
+    # re-check compacts it (the carry-forward path).
+    rec = _metadata_conflict(w)
+
+    def _blank(d):
+        resolution = store.get_pr(d, PR)["integration"]["resolution"]
+        resolution["paths"] = 5
+        resolution["unresolved"] = 7
+    store.locked_update(w.pm_dir, _blank)
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "Result:" in text
+    signoff.format_signoff_return(store.get_pr(data, PR))
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+
+
+def test_a_malformed_resolution_path_member_does_not_raise(w):
+    """A ``path`` that is not a string is unhashable, not a path.
+
+    ``unresolved_paths`` builds a set and the CLI / sign-off launch test
+    membership in it, so a hand-edited list/mapping ``path`` inside a
+    well-formed entry raised ``TypeError`` (unhashable) out of
+    ``pm pr signoff integrate`` and the launch — the same hand-editable-state
+    contract the non-list members follow.
+    """
+    _metadata_conflict(w)
+
+    def _malformed(d):
+        res = store.get_pr(d, PR)["integration"]["resolution"]
+        res["paths"][0]["path"] = ["not", "a", "path"]
+        res["unresolved"] = [{"path": {"not": "a path"}, "conflicts": ["c"]}]
+    store.locked_update(w.pm_dir, _malformed)
+
+    pr = store.get_pr(store.load(w.pm_dir), PR)
+    # Only strings are paths: building the set used to raise.
+    assert integration.unresolved_paths(pr["integration"]) == set()
+
+    # Every surface that reads the stored record still renders.
+    pr["signoff_return"] = signoff.build_return_record(
+        pr, SIGNOFF_REVIEW, "review", reviewed_head=pr["integration"]["head"])
+    text = signoff.format_signoff_return(pr)
+    assert "pm could not resolve the metadata conflict" in text
+    # The malformed entry still renders (it is not dropped and nothing
+    # raises), but a non-string path is not a path: it names ``project.yaml``
+    # like every other surface rather than presenting the hand-edited value
+    # as the file pm attempted.
+    assert "`project.yaml`: ['c']" in text
+    assert "{'not': 'a path'}" not in text
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        assert "Result:" in prompt_gen.generate_signoff_prompt(data, PR)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    # ``--record`` carries the stored resolution forward and prints it.
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(pr_mod.pr,
+                               ["signoff", "integrate", PR, "--record"])
+    assert r.exit_code == 0, r.output
+    assert "Traceback" not in r.output
+    assert "resolved:" in r.output
+
+
+def test_an_unhashable_behaviour_change_is_carried_not_raised(w):
+    """A nested value in ``base_behavior_changes`` must not crash a check.
+
+    The list is hand-editable project.yaml state and is carried forward with
+    an order-preserving de-duplication; ``dict.fromkeys`` raised ``TypeError``
+    (unhashable) out of every integration check, so the sign-off launch
+    recorded nothing and the merge gate lost the requirement.
+    """
+    _metadata_conflict(w)
+
+    def _malformed(d):
+        store.get_pr(d, PR)["integration"]["base_behavior_changes"] = [
+            {"nested": "change"}, "plain"]
+    store.locked_update(w.pm_dir, _malformed)
+
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    assert {"nested": "change"} in again["base_behavior_changes"]
+    assert "plain" in again["base_behavior_changes"]
+    # The clean-bounce carry path (no resolution to carry) is guarded too.
+    target = {"base_sha": "a" * 40, "merge_base": "a" * 40}
+    integration._carry_base_interaction(
+        target, {"base_sha": "a" * 40, "merge_base": "b" * 40,
+                 "base_behavior_changes": [["nested"]]})
+    assert target["base_behavior_changes"] == [["nested"]]
+    # And the prompt / return text render it (no ``join``/format raise).
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "nested" in text
+
+
+def test_pr_show_renders_the_resolution(w):
+    """``pm pr show`` is the reader the omission markers point at.
+
+    A resolved candidate must not be a dead end there: the reader names the
+    candidate tree, which records pm combined, the applied merge and the
+    delta — and names the ids the yaml copy omits.
+    """
+    rec = _metadata_conflict(w)
+
+    def _record(d):
+        store.get_pr(d, PR)["integration"] = integration.compact(rec)
+    store.locked_update(w.pm_dir, _record)
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert f"Candidate tree: {rec['candidate_tree']}" in r.output
+    assert "Resolved: pm/project.yaml" in r.output
+    assert "added from PR: pr-300, pr-301" in r.output
+    assert "added from base: pr-250, pr-251" in r.output
+    assert ("Applied merge: "
+            f"{rec['resolution']['applied_merge_sha']}") in r.output
+    assert "Resolution digest: " in r.output
+    assert "Resolution delta: integration-resolution.diff" in r.output
+
+    # A truncated id list names the remainder instead of dropping it.
+    def _bounded(d):
+        entry = store.get_pr(d, PR)["integration"]["resolution"]["paths"][0]
+        entry["added_ours"] = [f"pr-{i}" for i in range(20)]
+        entry["added_ours_total"] = 27
+    store.locked_update(w.pm_dir, _bounded)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert ", … 17 more" in r.output
+
+
+def test_pr_show_prints_the_recorded_signoff_evidence(w):
+    """The evidence block is what makes the reuse decision auditable.
+
+    ``record_signoff_verdict`` records the reviewed head, the candidate, the
+    review/QA revisions and the agent's reuse statement so a person can assess
+    the approval.  ``pm pr show`` is the reader every other abbreviated
+    surface of this feature points at, so the block must not exist only in
+    ``project.yaml``.
+    """
+    rec = _metadata_conflict(w)
+
+    def _record(d):
+        store.get_pr(d, PR)["integration"] = integration.compact(rec)
+    store.locked_update(w.pm_dir, _record)
+    write_report(w, rec)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, rec["head"], "manual",
+        integration=integration.binding(rec))
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert "## Sign-off" in r.output
+    assert f"Verdict: {SIGNOFF_MERGE} (manual, " in r.output
+    assert f"Approved head: {rec['head'][:12]}" in r.output
+    # The base the approval was bound to (the verdict binds to that candidate),
+    # not the current check's base.
+    assert (f"Approved base: {rec['base_branch']}@{rec['base_sha'][:12]}"
+            in r.output)
+    assert f"Candidate tree: {rec['candidate_tree'][:12]}" in r.output
+    # pm does not invent a review revision it cannot confirm.
+    assert "pm does not record the revision the review ran on" in r.output
+    assert "Reused evidence: review@aaaaaaa, qa@bbbbbbb" in r.output
+    assert ("Reuse reason: only independent project.yaml records changed"
+            in r.output)
+    assert "Required return stage: merge" in r.output
+
+    # Hand-edited state: a non-mapping record member reads as absent instead
+    # of raising out of the reader the prompts point sessions at.
+    def _malformed(d):
+        store.get_pr(d, PR)["signoff"] = {
+            "verdict": SIGNOFF_MERGE, "sha": 5, "ts": 7,
+            "evidence": {"reviewed_head": ["nope"], "candidate_tree": 3,
+                         "resolved_from": "garbage", "review": "garbage",
+                         "qa": ["x"], "reused": "review@abc",
+                         "reused_total": "many", "reason": 9,
+                         "checks": ["x"], "required_return_stage": None,
+                         "prior_signoff": 4},
+        }
+    store.locked_update(w.pm_dir, _malformed)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert "Verdict: SIGNOFF_MERGE" in r.output
+    # The malformed members contribute nothing (the integration section above
+    # still prints its own candidate tree, so it is not in this list).
+    for absent in ("Approved head", "Approved base", "Reused evidence",
+                   "Reuse reason", "Required return stage", "Prior sign-off"):
+        assert absent not in r.output
+
+
+def test_a_carried_resolution_with_a_malformed_delta_path_does_not_raise(w):
+    """A hand-edited ``diff_path`` must not take the integration check down.
+
+    ``_carry_forward`` reads the recorded delta back through that pointer; a
+    non-string value made ``Path(...)`` raise ``TypeError`` out of every later
+    check (the sign-off launch reported "Integration check failed" and the
+    merge was blocked without ever naming the real problem).  It now reads as
+    absent, and the resolution's other provenance is still carried.
+    """
+    _metadata_conflict(w)
+
+    def _blank(d):
+        store.get_pr(d, PR)["integration"]["resolution"]["diff_path"] = [
+            "not", "a", "path"]
+    store.locked_update(w.pm_dir, _blank)
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    kept = pr_entry(w)["integration"]
+    assert kept["resolution"]["applied_merge_sha"], kept
+    assert kept["resolution"]["resolved_from"], kept
+    assert "diff_path" not in kept["resolution"], kept
+
+
+def test_a_carried_resolution_with_an_unreadable_delta_path_does_not_raise(w):
+    """A *string* ``diff_path`` that cannot be read must not crash a check.
+
+    ``_carry_forward`` reads the recorded delta back through that pointer.  A
+    non-UTF-8 file raises ``UnicodeDecodeError`` and a null byte raises
+    ``ValueError`` out of ``open`` — neither is an ``OSError``, so the old
+    guard let both escape and took every later integration check down (the
+    sign-off launch reported "Integration check failed").  An unreadable
+    delta now reads as absent and the resolution's provenance is still
+    carried.
+    """
+    _metadata_conflict(w)
+    binary = w.croot / PR / "not-a-delta.bin"
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    binary.write_bytes(b"\xff\xfe\x00 not utf-8")
+
+    def _point_at_binary(d):
+        store.get_pr(d, PR)["integration"]["resolution"]["diff_path"] = str(
+            binary)
+    store.locked_update(w.pm_dir, _point_at_binary)
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    kept = pr_entry(w)["integration"]
+    assert kept["resolution"]["applied_merge_sha"], kept
+    assert kept["resolution"]["resolved_from"], kept
+
+    def _null_byte(d):
+        store.get_pr(d, PR)["integration"]["resolution"]["diff_path"] = \
+            "bad\x00path"
+    store.locked_update(w.pm_dir, _null_byte)
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    kept = pr_entry(w)["integration"]
+    assert kept["resolution"]["applied_merge_sha"], kept
+
+
+def test_a_resolution_with_nothing_to_write_does_not_name_a_delta(w):
+    """A record with no delta must not name a delta file.
+
+    A carried resolution whose delta could not be read back (the file lives
+    on another host, or is unreadable) has a ``diff_path`` but no ``diff``.
+    The old code re-pointed the record at the local delta path and returned
+    it, so ``$CAP/integration.json`` and the read-only
+    ``pm pr signoff integrate`` output named a file that does not exist — and
+    the recorded pointer, where the delta actually lives, was overwritten.
+    Only a delta this call wrote is a delta path.
+    """
+    local = w.croot / PR / "integration-resolution.diff"
+    carried = {"status": "up_to_date",
+               "resolution": {"paths": [], "unresolved": [],
+                              "diff_path": "/elsewhere/host.diff"}}
+    with patch("pm_core.paths.captures_root", return_value=w.croot):
+        returned = integration.write_resolution_delta(PR, carried)
+        assert returned == "/elsewhere/host.diff", carried
+        assert carried["resolution"]["diff_path"] == "/elsewhere/host.diff"
+        assert not local.exists()
+
+        # No pointer at all: nothing is invented.
+        bare = {"status": "up_to_date",
+                "resolution": {"paths": [], "unresolved": []}}
+        assert integration.write_resolution_delta(PR, bare) is None
+        assert "diff_path" not in bare["resolution"]
+
+        # A malformed (non-string) pointer is not a path, and is not returned.
+        malformed = {"status": "up_to_date",
+                     "resolution": {"paths": [], "unresolved": [],
+                                    "diff_path": ["not", "a", "path"]}}
+        assert integration.write_resolution_delta(PR, malformed) is None
+
+        # A real delta is written and named.
+        written = {"status": "resolved",
+                   "resolution": {"paths": [], "unresolved": [],
+                                  "diff": "--- a\n+++ b\n"}}
+        path = integration.write_resolution_delta(PR, written)
+        assert path and Path(path).is_file()
+        assert written["resolution"]["diff_path"] == path
+
+
+def test_an_unreadable_carried_delta_keeps_its_recorded_pointer(w):
+    """The carried pointer must not be replaced by a local file that is absent.
+
+    ``_record_check`` rewrites the record through ``_write_artifacts``; with
+    an unreadable delta there is nothing to write, so the pointer must stay
+    where the delta actually is rather than be re-pointed at the (empty)
+    local captures path.
+    """
+    _metadata_conflict(w)
+    binary = w.croot / PR / "not-a-delta.bin"
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    binary.write_bytes(b"\xff\xfe\x00 not utf-8")
+
+    def _point_at_binary(d):
+        store.get_pr(d, PR)["integration"]["resolution"]["diff_path"] = str(
+            binary)
+    store.locked_update(w.pm_dir, _point_at_binary)
+    # The original resolution wrote the local delta; remove it so the check
+    # below proves the re-check does not name a file it did not write.
+    (w.croot / PR / "integration-resolution.diff").unlink()
+    integration.check_integration(w.pm_dir, PR)
+    kept = pr_entry(w)["integration"]
+    assert kept["resolution"]["diff_path"] == str(binary), kept
+    assert not (w.croot / PR / "integration-resolution.diff").exists()
+    # ``$CAP/integration.json`` is what the prompt/CLI pointer leads to; the
+    # artifact write must not re-point it either.
+    artifact = json.loads((w.croot / PR / "integration.json").read_text())
+    assert artifact["resolution"]["diff_path"] == str(binary), artifact
+
+
+def test_malformed_return_state_does_not_crash_the_prompts(w):
+    """A hand-edited ``signoff_return`` must not crash a prompt or the driver.
+
+    The return record is read on every prompt build and on every
+    auto-sequence tick (``return_awaiting``); a value that is not a mapping —
+    or a mapping with malformed members — reads as absent.
+    """
+    _metadata_conflict(w)
+    for bad in ("garbage", ["not", "a", "mapping"], 42,
+                {"applied": "garbage"},
+                {"applied": {"merge_sha": 5, "base_sha": 7}},
+                {"verdict": SIGNOFF_REVIEW, "integration": "garbage"}):
+        def _blank(d, bad=bad):
+            store.get_pr(d, PR)["signoff_return"] = bad
+        store.locked_update(w.pm_dir, _blank)
+        data = store.load(w.pm_dir)
+        pr = store.get_pr(data, PR)
+        with patch("pm_core.prompt_gen.store.find_project_root",
+                   side_effect=FileNotFoundError):
+            assert prompt_gen.generate_signoff_prompt(data, PR)
+            assert prompt_gen.generate_review_prompt(data, PR)
+        signoff.format_signoff_return(pr)
+        assert signoff.return_awaiting(pr) is None
+        if not isinstance(bad, dict):
+            assert signoff.open_return(pr) is None
+        else:
+            # A mapping with a verdict is a (malformed) open return: it is
+            # returned, not raised on.
+            signoff.open_return(pr)
+
+
+def test_a_malformed_reviewed_head_does_not_crash_the_return_text():
+    """A hand-edited non-string ``reviewed_head`` is not a revision.
+
+    ``format_signoff_return`` slices it into every prompt that carries the
+    return block; slicing an int raised ``TypeError`` out of prompt
+    generation.  It must read as an unknown revision instead.
+    """
+    pr = {"id": PR, "signoff_return": {
+        "verdict": SIGNOFF_REVIEW, "hop": "review", "reviewed_head": 123}}
+    text = signoff.format_signoff_return(pr)
+    assert "after reviewing HEAD `?`" in text
+    assert signoff.format_signoff_return(pr, for_signoff=True)
+
+
+def test_a_malformed_signoff_record_does_not_crash_the_merge_gate(w):
+    """``pm pr merge`` must refuse a malformed approval, never raise.
+
+    ``pr["signoff"]`` is hand-editable state; a value that is not a mapping
+    (or a mapping whose integration binding carries non-string revisions)
+    must read as absent so the gate returns a refusal.
+    """
+    for bad in ("garbage", ["not", "a", "mapping"], 42):
+        pr = {"id": PR, "signoff": bad, "integration": {}}
+        assert isinstance(signoff.merge_gate_refusal(pr, "a" * 40, "master"),
+                          str)
+        assert signoff.fresh_recorded_verdict(pr, "a" * 40) is None
+        assert signoff.latest_signoff_verdict(pr) is None
+        assert signoff.is_legacy_approval(bad) is False
+    # A binding with a non-string revision/tree cannot name the approved
+    # candidate: refused like an absent one, and the differing-value messages
+    # (which slice it) are never reached with a non-string.
+    for bad_bound in ({"status": "clean", "base_sha": 123,
+                       "candidate_tree": "c" * 40},
+                      {"status": "clean", "base_sha": "b" * 40,
+                       "candidate_tree": 123}):
+        pr = {"id": PR,
+              "integration": dict(bad_bound, head="a" * 40),
+              "signoff": {"verdict": SIGNOFF_MERGE, "sha": "a" * 40,
+                          "integration": bad_bound}}
+        refusal = signoff.merge_gate_refusal(pr, "a" * 40, "master")
+        assert "not bound to a conflict-free integration" in refusal, refusal
+    # A malformed *current* record whose head/tree differ from the bound one
+    # is compared without slicing the non-string member.
+    bound = {"status": "clean", "head": "a" * 40, "base_sha": "b" * 40,
+             "candidate_tree": "c" * 40, "base_branch": "master"}
+    for bad_current in (dict(bound, head=123),
+                        dict(bound, candidate_tree=123)):
+        pr = {"id": PR, "integration": bad_current,
+              "signoff": {"verdict": SIGNOFF_MERGE, "sha": "a" * 40,
+                          "integration": bound}}
+        assert isinstance(signoff.merge_gate_refusal(pr, "a" * 40, "master"),
+                          str)
+
+
+def test_a_malformed_conflict_record_does_not_crash_the_router():
+    """``effective_verdict`` reads the hand-editable integration record."""
+    rec = {"status": integration.CONFLICT, "head": "a" * 40, "base_sha": 123,
+           "base_branch": "master", "conflicts": [1, "pm/project.yaml"]}
+    verdict, reason = signoff.effective_verdict(SIGNOFF_MERGE, rec, "a" * 40)
+    assert verdict == SIGNOFF_IMPL
+    assert "conflicts" in reason
+
+
+def test_a_malformed_signoff_record_does_not_crash_the_tui():
+    """The TUI readers of ``pr["signoff"]`` follow the same contract.
+
+    The tech-tree layout signature runs on every render and the auto-merge
+    path runs in the TUI loop: a non-mapping ``signoff`` value must read as
+    absent there too, not raise ``AttributeError`` out of the render/tick.
+    """
+    from pm_core.tui import auto_start, review_loop_ui
+    from pm_core.tui.tech_tree import TechTree
+
+    tree = TechTree(prs=[{"id": PR, "status": "sign_off", "signoff": 5,
+                          "depends_on": 5}])
+    assert tree._signature()  # no AttributeError
+
+    class _App:
+        def log_message(self, *args, **kwargs):
+            pass
+
+    with patch.object(auto_start, "is_enabled", lambda app: True), \
+         patch.object(auto_start, "in_scope", lambda app, pr_id: True), \
+         patch.object(review_loop_ui, "_signoff_gate",
+                      lambda app, pr_id: ("a" * 40, "refused",
+                                          {"id": pr_id, "status": "sign_off",
+                                           "signoff": 5})):
+        review_loop_ui._maybe_auto_merge(_App(), PR)  # no AttributeError
+
+
+def test_a_malformed_signoff_record_does_not_break_the_status_snapshot():
+    """``collect_status_inputs`` runs on the TUI event loop (runs popup).
+
+    It read ``pr["signoff"]`` with ``.get`` on whatever the field held, so a
+    hand-edited non-mapping value raised ``AttributeError`` out of the status
+    snapshot and the popup showed "status failed" instead of the run.  It
+    reads as absent now — the same contract the tech-tree signature and the
+    auto-merge path follow.
+    """
+    from pm_core.tui import auto_start
+
+    class _App:
+        _data = {"project": {}, "prs": [
+            {"id": PR, "status": "sign_off", "signoff": 5,
+             "depends_on": []}]}
+        _auto_start = True
+        _auto_start_all = True
+        _auto_start_run_id = None
+        _auto_start_targets: dict = {}
+        _session_name = None
+        _review_loops: dict = {}
+        _qa_loops: dict = {}
+        _pane_idle_tracker = None
+        _pending_merge_prs: set = set()
+
+    inp = auto_start.collect_status_inputs(_App())
+    assert PR in inp["signoff"]
+    assert inp["signoff"][PR]["verdict"] is None
+    assert inp["signoff"][PR]["fresh"] is False
+
+
+def test_a_malformed_verdict_is_not_published_as_a_decision():
+    """A non-string ``verdict`` is no verdict in the status snapshot either.
+
+    ``fresh_recorded_verdict`` reads it as absent, so the snapshot must not
+    publish the raw mapping: the runs popup rendered it as
+    "routed {'SIGNOFF_MERGE': True} stale (HEAD moved)" — an invented
+    explanation for malformed state.
+    """
+    from pm_core.tui import auto_start
+
+    class _App:
+        _data = {"project": {}, "prs": [
+            {"id": PR, "status": "sign_off", "depends_on": [],
+             "signoff": {"verdict": {"SIGNOFF_MERGE": True},
+                         "sha": "a" * 40}}]}
+        _auto_start = True
+        _auto_start_all = True
+        _auto_start_run_id = None
+        _auto_start_targets: dict = {}
+        _session_name = None
+        _review_loops: dict = {}
+        _qa_loops: dict = {}
+        _pane_idle_tracker = None
+        _pending_merge_prs: set = set()
+
+    inp = auto_start.collect_status_inputs(_App())
+    assert inp["signoff"][PR]["verdict"] is None
+    assert "stale_reason" not in inp["signoff"][PR]
+
+
+def test_valid_for_reads_a_malformed_record_as_absent():
+    """The public helper follows the same contract as its callers."""
+    assert integration.valid_for(5, "a" * 40) is False
+    assert integration.valid_for(["not", "a", "mapping"], "a" * 40) is False
+    assert integration.valid_for(None, "a" * 40) is False
+
+
+def test_valid_for_rejects_a_non_string_revision():
+    """A truthy non-string revision is not a candidate (hand-edited state).
+
+    ``valid_for`` gates the router's ``SIGNOFF_MERGE`` coercion, so a record
+    whose ``base_sha``/``candidate_tree`` is a mapping must not read as a
+    conflict-free check: the driver would otherwise record an approval the
+    merge gate refuses for a missing binding, instead of coercing to
+    ``SIGNOFF_BLOCKED`` with the reason.
+    """
+    head, base, tree = "a" * 40, "b" * 40, "c" * 40
+    ok = {"status": integration.CLEAN, "head": head, "base_sha": base,
+          "candidate_tree": tree}
+    assert integration.valid_for(ok, head)
+    assert not integration.valid_for(dict(ok, base_sha={"sha": base}), head)
+    assert not integration.valid_for(dict(ok, candidate_tree=[tree]), head)
+    assert not integration.valid_for(dict(ok, base_sha=5), head)
+    # The router coerces on the same reading.
+    verdict, reason = signoff.effective_verdict(
+        signoff.SIGNOFF_MERGE, dict(ok, base_sha={"sha": base}), head)
+    assert verdict == signoff.SIGNOFF_BLOCKED and reason
+
+
+def test_a_malformed_dependency_list_does_not_fail_the_behaviour_summary(
+        monkeypatch):
+    """A hand-edited ``depends_on``/``prs`` is not a summary failure.
+
+    ``base_behavior_changes`` is what makes the agent weigh the new base; a
+    scalar where a list belongs must read as absent (so the other changes are
+    still reported), not raise into ``base_behavior_error`` and lose them.
+    """
+    old = {"project": {"skip_qa": False},
+           "prs": [{"id": PR, "status": "pending"}]}
+    new = {"project": {"skip_qa": True},
+           "prs": [{"id": PR, "status": "merged"}]}
+    monkeypatch.setattr(
+        integration, "_show_yaml",
+        lambda workdir, rev, path: old if rev == "a" * 40 else new)
+    out = integration._project_yaml_behavior_changes(
+        "/tmp", "a" * 40, "b" * 40, "pm/project.yaml",
+        pr={"id": PR, "depends_on": 5, "plan": None})
+    assert any("skip_qa" in c for c in out), out
+    assert any(f"{PR}.status" in c for c in out), out
+
+    # A scalar ``prs`` on either side is no list of records either.
+    for side in (old, new):
+        side["prs"] = 5
+    out = integration._project_yaml_behavior_changes(
+        "/tmp", "a" * 40, "b" * 40, "pm/project.yaml",
+        pr={"id": PR, "depends_on": ["pr-1"], "plan": None})
+    assert any("skip_qa" in c for c in out), out
+
+
+def test_a_non_string_workdir_reads_as_absent_on_every_signoff_surface(
+        tmp_path):
+    """A hand-edited ``workdir`` that is not a path string is not a checkout.
+
+    ``project.yaml`` is hand-editable state and every sign-off surface passes
+    ``pr["workdir"]`` straight in: ``head_sha`` (the driver tick, the TUI's
+    auto-merge, ``pm pr signoff``), the sign-off launch, the integration check
+    and the target-repo resolution (``pm pr merge``).  ``Path(5)`` raises
+    ``TypeError``, so one malformed value took the tick/launch down instead of
+    reading as "no workdir".  A string workdir still works.
+    """
+    assert signoff.head_sha(5) is None
+    assert signoff.head_sha({"a": 1}) is None
+    assert signoff.head_sha(["not", "a", "path"]) is None
+    assert signoff.head_sha(None) is None
+    assert signoff.head_sha(str(tmp_path)) is None  # real path, no git repo
+
+    data = {"project": {"name": "p", "repo": "https://example.invalid/r"}}
+    for bad in (5, {"a": 1}, ["x"]):
+        pr = {"id": PR, "workdir": bad}
+        rec = integration.run_check(data, pr, tmp_path)
+        assert rec["status"] == integration.ERROR, rec
+        assert rec["error"] == "no PR workdir", rec
+        # ``target_for`` is on the approval path (``pm pr merge``); a
+        # malformed workdir must not raise there either.
+        target, branch = integration.target_for(data, pr, tmp_path)
+        assert target == "https://example.invalid/r"
+        assert branch == "master"
+
+
+def test_a_malformed_recheck_base_reads_as_absent(w):
+    """``run_check``'s ``base_sha`` comes from stored (hand-editable) state.
+
+    ``prepare`` re-checks against ``previous.get("base_sha")`` after a lost
+    apply race, and it can be handed the *stored* record — so the value is
+    project.yaml state.  A value that is not a git object name was passed
+    straight to ``git merge-base`` and sliced into the log line, raising
+    ``TypeError`` out of a check that promises a ``status: error`` record,
+    never a traceback.  It now reads as absent and the ordinary fetch runs
+    (here it succeeds, so the check describes the real base).
+    """
+    data = store.load(w.pm_dir)
+    pr = pr_entry(w)
+    expected = git(w.repo, "rev-parse", "master")
+    for bad in (5, {"a": 1}, ["x"], True, 1.5, "", "HEAD", "master"):
+        rec = integration.run_check(data, pr, w.pm_dir, base_sha=bad)
+        # Never a traceback: the check names the base it actually fetched.
+        assert rec["base_sha"] == expected, (bad, rec)
+        assert rec["status"] in (integration.CLEAN, integration.UP_TO_DATE), (
+            bad, rec)
+
+
+def test_a_non_mapping_project_reads_as_absent_in_the_integration_check(
+        tmp_path):
+    """A hand-edited non-mapping ``project`` is no configuration.
+
+    ``project.yaml`` is hand-editable state.  ``data.get("project", {})``
+    returns the scalar when one is present, so ``.get`` raised
+    ``AttributeError`` out of ``run_check`` — which promises a ``status:
+    error`` record, never a traceback — and out of ``target_for`` (the
+    approval and recovery paths).  A ``base_branch``/``repo`` that is not a
+    string cannot be a git ref/remote (both are passed to git as arguments),
+    so it falls back too.
+    """
+    for bad in (5, ["x"], "scalar", True):
+        data = {"project": bad, "prs": []}
+        pr = {"id": PR, "workdir": str(tmp_path)}
+        target, branch = integration.target_for(data, pr, tmp_path)
+        assert (target, branch) == ("", "master"), (bad, target, branch)
+        rec = integration.run_check(data, pr, tmp_path)
+        # No git repo here, so the check reports an error rather than raising.
+        assert rec["status"] == integration.ERROR, (bad, rec)
+
+    # A mapping with non-string members reads each one as absent.
+    data = {"project": {"repo": 7, "base_branch": 9}, "prs": []}
+    pr = {"id": PR, "workdir": str(tmp_path)}
+    assert integration.target_for(data, pr, tmp_path) == ("", "master")
+    # A real string is still used verbatim.
+    data = {"project": {"repo": "/nope", "base_branch": "main"}, "prs": []}
+    assert integration.target_for(data, pr, tmp_path) == ("/nope", "main")
+
+
+def test_a_carried_record_keeps_the_bounded_totals():
+    """A carried-forward bounded list must keep the real total.
+
+    ``compact`` stores only the first N entries and records the true length
+    separately.  The carry-forward paths copy the (already bounded) list, so
+    without the recorded total the prompt under-reports "(+N more)".
+    """
+    rec: dict = {}
+    integration._carry_base_files(
+        rec, {"base_files_count": 7, "overlap": ["a", "b"],
+              "overlap_total": 9})
+    assert rec == {"base_files_count": 7, "overlap": ["a", "b"],
+                   "overlap_total": 9}
+    integration._carry_behavior_total(
+        rec, {"base_behavior_count": 35}, ["x"] * 30)
+    assert rec["base_behavior_count"] == 35
+    # A total that does not exceed the carried list is not a truncation.
+    rec2: dict = {}
+    integration._carry_behavior_total(
+        rec2, {"base_behavior_count": 3}, ["x"] * 30)
+    assert "base_behavior_count" not in rec2
+    # Hand-edited values read as absent rather than being carried.
+    rec3: dict = {}
+    integration._carry_behavior_total(
+        rec3, {"base_behavior_count": "35"}, ["x"])
+    integration._carry_base_files(rec3, {"overlap": ["a"],
+                                         "overlap_total": "9"})
+    assert "base_behavior_count" not in rec3
+    assert "overlap_total" not in rec3
+
+
+def test_a_recheck_carries_the_bounded_totals_forward(w):
+    """A later benign re-check keeps the truncated lists' real totals.
+
+    ``compact`` stores 30 of a 35-change list and 40 of a longer overlap list,
+    recording the real length separately.  The post-apply re-check sees no
+    base diff, so it carries those lists forward — and must carry their
+    totals too, or the sign-off prompt under-reports how much it is asking
+    the agent to weigh.
+    """
+    _metadata_conflict(w)
+
+    def _bound(d):
+        rec = store.get_pr(d, PR)["integration"]
+        rec["base_behavior_changes"] = [f"change {i}" for i in range(30)]
+        rec["base_behavior_count"] = 35
+        rec["overlap"] = ["pm/project.yaml"]
+        rec["overlap_total"] = 3
+
+    store.locked_update(w.pm_dir, _bound)
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    kept = pr_entry(w)["integration"]
+    assert kept["base_behavior_count"] == 35, kept
+    assert len(kept["base_behavior_changes"]) == 30, kept
+    assert kept["overlap_total"] == 3, kept
+    assert kept["overlap"] == ["pm/project.yaml"], kept
+
+
+def test_review_prompt_diffs_against_the_base_a_clean_bounce_merged(w):
+    """A clean bounce leaves the CLEAN check, but the branch has the base.
+
+    The applied merge is recorded only in the return record, so the review
+    prompt must take its diff base from there instead of the stale branch ref.
+    """
+    commit(w.repo, "base.txt", "base\n", "base moves ahead")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, rec["head"], rec["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+    ret = pr_entry(w)["signoff_return"]
+    assert ret["applied"]["base_sha"] == rec["base_sha"]
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        review = prompt_gen.generate_review_prompt(data, PR)
+    assert f"git diff {rec['base_sha'][:12]}...HEAD" in review
+    assert "git diff master...HEAD" not in review
+
+
+def test_review_prompt_diffs_against_the_newest_base_a_bounce_merged(w):
+    """The branch can contain two bases; diff against the newest one.
+
+    A metadata resolution applies base B1 at sign-off; later the base moves to
+    B2 and a bounce merges B2 into the branch.  The carried resolution still
+    names B1, so taking the applied resolution's base first would make the
+    review prompt diff ``B1...HEAD`` and list B2's commits as the PR's own
+    changes — contradicting the return block, which already names B2.
+    """
+    rec = _metadata_conflict(w)                      # applies base B1
+    b1 = rec["base_sha"]
+    assert rec["resolution"]["applied_merge_sha"]
+
+    commit(w.repo, "base_only.txt", "base\n", "base moves ahead")
+    b2 = git(w.repo, "rev-parse", "HEAD")
+    assert b2 != b1
+    clean = integration.check_integration(w.pm_dir, PR)
+    assert clean["status"] == integration.CLEAN, clean
+
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, clean["head"], clean["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+    ret = pr_entry(w)["signoff_return"]
+    assert ret["applied"]["base_sha"] == b2
+    assert git(w.wd, "rev-parse", "HEAD") == ret["applied"]["merge_sha"]
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        review = prompt_gen.generate_review_prompt(data, PR)
+    assert f"git diff {b2[:12]}...HEAD" in review
+    assert f"git diff {b1[:12]}...HEAD" not in review
+    assert "git diff master...HEAD" not in review
+
+
+def test_signoff_prompt_names_the_newest_base_after_a_bounce_merged_it(w):
+    """The resolution block's "PR's own changes" diff names the newest base.
+
+    Same two-base situation as the review case: the applied resolution block
+    must not point the agent at a diff that lists the newer base's commits as
+    the PR's changes.
+    """
+    rec = _metadata_conflict(w)
+    b1 = rec["base_sha"]
+    commit(w.repo, "base_only.txt", "base\n", "base moves ahead")
+    b2 = git(w.repo, "rev-parse", "HEAD")
+    clean = integration.check_integration(w.pm_dir, PR)
+    assert clean["status"] == integration.CLEAN, clean
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, clean["head"], clean["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+
+    again = integration.prepare(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    assert again["base_sha"] == b2
+    assert again["resolution"]["applied_merge_sha"]
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert f"git diff {b2[:12]}...HEAD" in text
+    assert f"git diff {b1[:12]}...HEAD" not in text
+
+
+def test_signoff_prompt_names_a_merged_base_after_the_return_record_is_replaced(
+        w):
+    """A merged base stays the diff base after a later bounce replaced the
+    return record that named it.
+
+    A clean bounce merges base B1, recording it only in
+    ``signoff_return.applied``.  A later QA bounce replaces that record (an
+    up-to-date check applies nothing, so the new record carries no ``applied``
+    block).  Once the base moves to B2, the last check's merge base (B1) is the
+    newest base the branch contains; the sign-off prompt must diff against it
+    rather than the workdir's stale ``master`` ref, which lists B1's commits as
+    the PR's own changes.
+    """
+    commit(w.repo, "base_only.txt", "base\n", "base moves ahead")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN, rec
+    b1 = rec["base_sha"]
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, rec["head"], rec["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+    assert pr_entry(w)["signoff_return"]["applied"]["base_sha"] == b1
+
+    # Review finishes: the next sign-off check is up to date and routes QA,
+    # replacing the return record with one that carries no ``applied`` block.
+    head = git(w.wd, "rev-parse", "HEAD")
+    up = integration.prepare(w.pm_dir, PR)
+    assert up["status"] == integration.UP_TO_DATE, up
+
+    def _to_qa(d):
+        p = store.get_pr(d, PR)
+        p["status"] = "sign_off"
+        p["signoff_return"] = signoff.build_return_record(
+            dict(p), SIGNOFF_REQA, "qa", reviewed_head=head)
+    store.locked_update(w.pm_dir, _to_qa)
+    assert not (pr_entry(w)["signoff_return"].get("applied"))
+
+    # The base moves on; the next check is clean and names b1 as its merge
+    # base — the newest base the branch already contains.
+    commit(w.repo, "base_only2.txt", "base\n", "base moves again")
+    again = integration.prepare(w.pm_dir, PR)
+    assert again["status"] == integration.CLEAN, again
+    assert again["merge_base"] == b1
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+        review = prompt_gen.generate_review_prompt(data, PR)
+    assert f"git diff {b1[:12]}...HEAD" in text
+    assert "git diff master...HEAD" not in text
+    # The review and QA prompts share the same diff base.
+    assert f"git diff {b1[:12]}...HEAD" in review
+    assert "git diff master...HEAD" not in review
+
+
+def test_signoff_prompt_counts_behavior_changes_stored_without_a_total(w):
+    """21-30 base behaviour changes are stored in full with no count key.
+
+    ``compact`` records ``base_behavior_count`` only when it truncates the
+    list (> ``_BEHAVIOR_LIMIT``), so the prompt must fall back to the stored
+    list's length instead of indexing the absent key — that raised KeyError
+    and blocked sign-off from launching on such a base.
+    """
+    integration.check_integration(w.pm_dir, PR)
+    changes = [f"`pm/project.yaml`: change {i}" for i in range(25)]
+    assert integration._BEHAVIOR_LIMIT > len(changes)   # not truncated
+
+    def _store(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ["base_behavior_changes"] = changes
+        integ.pop("base_behavior_count", None)
+    store.locked_update(w.pm_dir, _store)
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "… 5 more" in text
+    assert "change 19" in text          # the last one rendered in full
+    assert "change 20" not in text      # beyond the 20-line cap
+
+
+def test_signoff_prompt_never_hides_behaviour_changes_behind_a_small_total(w):
+    """A recorded total smaller than the stored list must not hide entries.
+
+    ``compact`` records the real length beside a bounded list, but
+    project.yaml is hand-editable: a count that is smaller than the list (or
+    a future compaction that keeps a count while shortening the list) must
+    not make the prompt's 20-line cap silently drop the rest.  The total is
+    the larger of the recorded count and the list — the same rule the return
+    text follows.
+    """
+    integration.check_integration(w.pm_dir, PR)
+    changes = [f"`pm/project.yaml`: change {i}" for i in range(25)]
+
+    def _store(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ["base_behavior_changes"] = changes
+        integ["base_behavior_count"] = 5      # smaller than the list
+    store.locked_update(w.pm_dir, _store)
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "… 5 more" in text
+    assert "change 19" in text
+    assert "change 20" not in text
+
+
+def test_merge_gate_refuses_a_clean_approval_whose_recheck_lost_the_candidate(
+        w, monkeypatch):
+    """A re-check that cannot name a candidate cannot justify the approval.
+
+    This holds even without a resolution or behavioural base change: the
+    gate must not pass an approval it cannot tie to the approved tree.
+    """
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.UP_TO_DATE
+    record_merge(w, rec)
+
+    monkeypatch.setattr(integration, "fetch_base",
+                        lambda *a, **k: (None, "network down"))
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.ERROR
+    assert not again.get("candidate_tree")
+    refusal = signoff.merge_gate_refusal(
+        pr_entry(w), signoff.head_sha(str(w.wd)), "master")
+    assert refusal and "does not record a candidate tree" in refusal
+
+
+def test_merge_gate_allows_recovery_when_the_head_is_already_in_the_base(w):
+    """``in_base`` carries no candidate tree but is not a lost approval.
+
+    The approved head is already published, so the merge step's recovery
+    path finalizes that merge rather than returning to sign-off.
+    """
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.UP_TO_DATE
+    record_merge(w, rec)
+
+    def _in_base(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ["status"] = integration.IN_BASE
+        integ.pop("candidate_tree", None)
+    store.locked_update(w.pm_dir, _in_base)
+    assert signoff.merge_gate_refusal(
+        pr_entry(w), signoff.head_sha(str(w.wd)), "master") is None
+
+
+def test_merge_gate_allows_recovery_for_a_resolved_approval_already_in_base(w):
+    """The same ``in_base`` recovery holds for a resolved (applied) approval.
+
+    A resolved candidate is applied to the branch, so its head can be in the
+    base after a partially completed publication just like a clean one.  The
+    approval then has a resolution digest but the ``in_base`` record carries
+    no candidate tree; requiring the candidate tag there would refuse a merge
+    that already happened and send the PR to a sign-off that can only block an
+    ``in_base`` head.
+    """
+    rec = _metadata_conflict(w)
+    assert rec["status"] == integration.UP_TO_DATE
+    assert rec["resolution"]["applied_merge_sha"]
+    record_merge(w, rec)
+    assert signoff.merge_gate_refusal(pr_entry(w), rec["head"], "master") is None
+
+    def _in_base(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ["status"] = integration.IN_BASE
+        integ.pop("candidate_tree", None)
+    store.locked_update(w.pm_dir, _in_base)
+    assert signoff.merge_gate_refusal(
+        pr_entry(w), signoff.head_sha(str(w.wd)), "master") is None
+
+
+def test_an_unsummarisable_base_change_still_requires_the_evidence_statement(
+        w, monkeypatch):
+    """A failed behaviour summary must not become an implicit exemption.
+
+    ``compute_candidate`` swallows a summary failure so the check still runs;
+    that must not read as "the base changes nothing".  A MERGE then requires
+    the same explicit reuse/checks statement as a listed behavioural change,
+    and the prompt says the summary failed instead of showing no changes.
+    """
+    data = store.load(w.base_pm)
+    data["project"]["model_config"] = {"session_models": {"impl": "model-new"}}
+    store.save(data, w.base_pm)
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base changes model")
+
+    def boom(*a, **k):
+        raise RuntimeError("summary exploded")
+
+    monkeypatch.setattr(integration, "base_behavior_changes", boom)
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN
+    assert not rec["base_behavior_changes"]
+    assert "summary exploded" in rec["base_behavior_error"]
+
+    # Recording a MERGE without the statement is refused.
+    write_report(w, rec, candidate=False, evidence=False, reason=False)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(pr_mod.pr, ["signoff", "record", PR])
+    assert r.exit_code != 0 and "pm-signoff-evidence" in r.output
+
+    # The prompt tells the agent the summary failed rather than listing none.
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(store.load(w.pm_dir), PR)
+    assert "could not summarise the base's behaviour-relevant changes" in text
+
+    # A bounce's return snapshot carries the failure too: the routed step
+    # must be told to assess the base itself, not read "no listed changes".
+    ret = signoff.build_return_record(
+        pr_entry(w), SIGNOFF_REQA, "qa", reviewed_head=rec["head"])
+    assert "summary exploded" in ret["integration"]["base_behavior_error"]
+    assert "could not summarise the base's behaviour-relevant changes" in \
+        signoff.format_signoff_return({"id": PR, "signoff_return": ret})
+
+    write_report(w, rec, candidate=False)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(pr_mod.pr, ["signoff", "record", PR])
+    assert r.exit_code == 0, r.output
+    assert signoff.merge_gate_refusal(pr_entry(w), rec["head"], "master") is None
+
+
+def test_a_failed_resolution_is_not_reported_as_resolved(w):
+    """The retained attempt is visible, but never claimed as a resolution.
+
+    A same-field conflict keeps a partial resolution record on the check; the
+    sign-off return and the prompt must say pm could *not* reconcile it, or
+    the next step would assume the metadata was already handled.
+    """
+    rec = _status_conflict(w)
+    assert rec["status"] == integration.CONFLICT
+    assert rec["resolution"]["unresolved"]
+    # A failed attempt has no delta to point at: naming a file that was never
+    # written would send the next step to an empty path.
+    assert not (rec.get("resolution") or {}).get("diff_path")
+    assert not (w.croot / PR / "integration-resolution.diff").exists()
+    head = rec["head"]
+    pr = dict(pr_entry(w))
+    ret = signoff.build_return_record(pr, SIGNOFF_IMPL, "impl",
+                                      reviewed_head=head)
+    pr["signoff_return"] = ret
+    text = signoff.format_signoff_return(pr)
+    assert "pm could not resolve the metadata conflict" in text
+    assert "pm resolved the metadata conflict" not in text
+    assert "changed differently on both sides" in text
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        prompt = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "NOT resolved" in prompt
+    assert "changed differently on both sides" in prompt
+    assert "Metadata conflict resolution (pm, by record id)" not in prompt
+    assert "Resolution delta" not in prompt
+
+
+def test_prompt_diff_refs_are_git_object_names_only(w):
+    """A hand-edited revision must not become part of a suggested command.
+
+    The integration record lives in the hand-editable project.yaml and its
+    revisions are interpolated into ``git diff <rev> HEAD`` / ``git merge
+    <rev>`` commands the agent is told to run — the same rule
+    ``contained_base`` follows (it refuses a value that is not an object
+    name).  The base-range, applied-merge and reconcile lines all fall back
+    instead of interpolating a shell fragment.
+    """
+    _metadata_conflict(w)
+    fragment = "abc; touch /tmp/pwned"
+
+    def _malformed(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ["base_sha"] = fragment
+        integ["merge_base"] = fragment
+        integ["base_range_from"] = fragment
+        resolution = dict(integ["resolution"])
+        resolution["resolved_from"] = {"head": fragment, "base_sha": fragment,
+                                       "merge_base": fragment}
+        integ["resolution"] = resolution
+        integ["resolved_from"] = resolution["resolved_from"]
+    store.locked_update(w.pm_dir, _malformed)
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    pr = store.get_pr(data, PR)
+    pr["signoff_return"] = signoff.build_return_record(
+        pr, SIGNOFF_REVIEW, "review", reviewed_head=pr["integration"]["head"])
+    ret = signoff.format_signoff_return(pr)
+    for rendered in (text, ret):
+        assert "touch /tmp/pwned" not in rendered
+        assert "git diff abc;" not in rendered
+        assert "git merge abc;" not in rendered
+    # The prompt names the fallbacks instead of the fragment.
+    assert "Base revision: `?`" in text
+    assert "git diff <base>...HEAD" in text
+    assert "<old head>" in text
+
+
+def test_signoff_prompt_survives_a_null_resolved_from_head(w):
+    """A record without the resolved-from revision must not crash the prompt."""
+    rec = _metadata_conflict(w)
+
+    def _blank(d):
+        integ = store.get_pr(d, PR)["integration"]
+        resolution = dict(integ["resolution"])
+        resolution["resolved_from"] = {
+            "head": None, "base_sha": rec["base_sha"],
+            "merge_base": rec.get("merge_base")}
+        integ["resolution"] = resolution
+        integ["resolved_from"] = resolution["resolved_from"]
+        integ["resolution_digest"] = integration._resolution_digest(resolution)
+    store.locked_update(w.pm_dir, _blank)
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "Applied to the PR branch" in text
+    assert "<old head>" in text
+
+
+def test_integrate_cli_prints_the_resolution(w):
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    head_before = git(w.wd, "rev-parse", "HEAD")
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(pr_mod.pr, ["signoff", "integrate", PR])
+    assert r.exit_code == 0, r.output
+    assert "resolved by record" in r.output
+    assert "added from PR: pr-300" in r.output
+    assert "added from base: pr-250" in r.output
+    # R1/R8: the read-only check names the delta file and leaves it on disk,
+    # without recording the check on the PR or touching the workdir.
+    diff_path = w.croot / PR / "integration-resolution.diff"
+    assert diff_path.is_file()
+    assert f"resolution delta: {diff_path}" in r.output
+    assert "resolved" in diff_path.read_text()
+    assert "integration" not in store.get_pr(store.load(w.pm_dir), PR)
+    assert git(w.wd, "rev-parse", "HEAD") == head_before
+    assert git(w.wd, "status", "--porcelain") == ""
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(
+            pr_mod.pr, ["signoff", "integrate", PR, "--no-resolve"])
+    assert r.exit_code != 0
+    assert "CONFLICTS" in r.output
+
+
+def test_integrate_cli_never_calls_a_failed_resolution_resolved(w):
+    """A retained attempt is reported as attempted, never as resolved.
+
+    The summary and the unresolved line already say the conflict stands; the
+    per-path line must agree, or a person reading the output would believe the
+    metadata was reconciled when the merge is still blocked.
+    """
+    rec = _status_conflict(w)
+    assert rec["status"] == integration.CONFLICT
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(pr_mod.pr, ["signoff", "integrate", PR])
+    assert r.exit_code != 0
+    assert "attempted: pm/project.yaml (by record id — NOT resolved)" in r.output
+    assert "\n  resolved: pm/project.yaml" not in r.output
+    assert "unresolved: pm/project.yaml" in r.output
+
+
+def test_a_carried_applied_resolution_is_not_labelled_a_failed_attempt(w):
+    """A resolution carried from an earlier applied merge is not an attempt.
+
+    ``integration._carry_forward`` keeps an applied resolution on a later
+    ``conflict``/``error`` record so its provenance (and the explicit-reuse
+    requirement) survives.  The current conflict is then somewhere else (here
+    a code file), so the per-path line must not claim pm failed to reconcile
+    ``project.yaml`` — that would contradict the summary and send the agent to
+    hand-merge a file that is not conflicted.
+    """
+    rec = _metadata_conflict(w)
+    applied = rec["resolution"]["applied_merge_sha"]
+    # The branch and a new base commit now conflict on code, not metadata.
+    commit(w.wd, "shared.txt", "pr\n", "branch edits shared")
+    commit(w.repo, "shared.txt", "base\nmore\n", "base edits shared")
+
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.CONFLICT
+    assert again["conflicts"] == ["shared.txt"]
+    # The applied resolution is carried forward ...
+    assert again["resolution"]["applied_merge_sha"] == applied
+    # ... but it is not a failed attempt at the current conflict.
+    assert integration.unresolved_paths(again) == set()
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(
+            pr_mod.pr, ["signoff", "integrate", PR, "--record"])
+    assert r.exit_code != 0
+    assert "conflicts: shared.txt" in r.output
+    assert "NOT resolved" not in r.output
+    # The path line says the resolution was already applied, not that it is
+    # this check's resolution of the current conflict.
+    assert ("resolved earlier: pm/project.yaml (by record id — already "
+            "applied)") in r.output
+
+    # The sign-off prompt names the current conflict and qualifies the earlier
+    # resolution instead of presenting it as this check's outcome.
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "Conflicting paths: `shared.txt`" in text
+    assert "already applied" in text
+    assert "**Metadata conflict resolution (pm, by record id):**" not in text
+
+    # The return text the routed step reads must not claim pm resolved *this*
+    # conflict either (the same honesty the prompt and the CLI carry).
+    head = git(w.wd, "rev-parse", "HEAD")
+    ret = signoff.build_return_record(
+        pr_entry(w), signoff.SIGNOFF_IMPL, "impl", reviewed_head=head)
+    text = signoff.format_signoff_return(dict(pr_entry(w), signoff_return=ret))
+    assert "Conflicting paths: `shared.txt`" in text
+    assert "pm resolved an *earlier* metadata conflict" in text
+    assert "pm resolved the metadata conflict by record id" not in text
+    assert "Reconcile it in this branch" in text
+
+
+def test_a_carried_resolution_on_an_error_record_is_not_called_a_conflict(w):
+    """An ``error`` record reports a failed check, not a conflict.
+
+    ``_carry_forward`` keeps an applied resolution on a later ``error`` record
+    too (a transient fetch failure must not drop the applied provenance).  The
+    prompt and the return text then qualify it as an earlier resolution, but
+    must name the *current* problem correctly — there is no conflict above.
+    """
+    rec = _metadata_conflict(w)
+    assert rec["resolution"]["applied_merge_sha"]
+
+    def _error(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ["status"] = integration.ERROR
+        integ["error"] = "fetch master failed: boom"
+        integ["conflicts"] = []
+        integ.pop("candidate_tree", None)
+    store.locked_update(w.pm_dir, _error)
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "the failed check above is separate" in text
+    assert "the conflict above is separate" not in text
+
+    head = git(w.wd, "rev-parse", "HEAD")
+    ret = signoff.build_return_record(
+        pr_entry(w), signoff.SIGNOFF_IMPL, "impl", reviewed_head=head)
+    text = signoff.format_signoff_return(dict(pr_entry(w), signoff_return=ret))
+    assert "already applied; the failed check above is separate" in text
+    assert "the conflict above is separate" not in text
+
+
+def test_return_text_names_the_newest_base_the_branch_contains(w):
+    """The return text's diff hint names the newest base, not the resolution's.
+
+    A resolution applies base B1; a later bounce merges B2 into the branch.
+    When a subsequent conflict routes the PR back, the return text must not
+    point at ``git diff B1 HEAD`` — that lists B2's commits as the PR's own
+    changes.
+    """
+    rec = _metadata_conflict(w)                      # applies base B1
+    b1 = rec["base_sha"]
+    commit(w.repo, "base_only.txt", "base\n", "base moves ahead")
+    b2 = git(w.repo, "rev-parse", "HEAD")
+    assert b2 != b1
+    clean = integration.check_integration(w.pm_dir, PR)
+    assert clean["status"] == integration.CLEAN, clean
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, clean["head"], clean["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+    assert pr_entry(w)["signoff_return"]["applied"]["base_sha"] == b2
+
+    # The next base conflicts on code: the record carries the applied
+    # resolution but this bounce applies nothing.
+    commit(w.wd, "shared.txt", "pr\n", "branch edits shared")
+    commit(w.repo, "shared.txt", "base\n", "base edits shared")
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.CONFLICT
+    assert again["resolution"]["applied_merge_sha"]
+
+    head = git(w.wd, "rev-parse", "HEAD")
+    ret = signoff.build_return_record(
+        pr_entry(w), SIGNOFF_IMPL, "impl", reviewed_head=head)
+    text = signoff.format_signoff_return(dict(pr_entry(w), signoff_return=ret))
+    assert f"git diff {b2[:12]} HEAD" in text
+    assert f"git diff {b1[:12]} HEAD" not in text
+
+
+def test_integrate_cli_apply_applies_a_clean_recheck_of_a_resolved_check(w):
+    """`--apply` still applies when the base moved to a clean merge."""
+    head, base, tree = "b" * 40, "a" * 40, "c" * 40
+    resolved = {"status": integration.RESOLVED, "head": head, "base_sha": base,
+                "base_branch": "master", "target_repo": "repo",
+                "candidate_tree": tree, "conflicts": ["pm/project.yaml"],
+                "resolution": {"paths": [{"path": "pm/project.yaml"}]}}
+    clean = dict(resolved, status=integration.CLEAN, resolution=None)
+    applied = {}
+
+    def fake_apply(root, pr_id, rec=None, **kw):
+        applied["status"] = rec["status"]
+        return "d" * 40, None
+
+    with patch.object(integration, "check_integration",
+                      return_value=dict(resolved)), \
+         patch.object(integration, "prepare", return_value=dict(clean)), \
+         patch.object(integration, "apply_integration", side_effect=fake_apply), \
+         patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(
+            pr_mod.pr, ["signoff", "integrate", PR, "--apply"])
+    assert r.exit_code == 0, r.output
+    assert applied == {"status": integration.CLEAN}
+
+
+def test_integrate_cli_apply_reports_a_stale_record_with_a_bad_base(w):
+    """``prepare`` can return the stored record when a concurrent apply won.
+
+    That record is hand-editable state: a non-string base revision must not
+    crash the applied-merge line (it prints without a revision).
+    """
+    stale = {"status": integration.CLEAN, "head": "b" * 40, "base_sha": 123,
+             "base_branch": "master", "candidate_tree": "c" * 40}
+    with patch.object(integration, "check_integration",
+                      return_value=dict(stale)), \
+         patch.object(integration, "prepare", return_value=dict(stale)), \
+         patch.object(integration, "apply_integration",
+                      return_value=("d" * 40, None)), \
+         patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(
+            pr_mod.pr, ["signoff", "integrate", PR, "--apply"])
+    assert r.exit_code == 0, r.output
+    assert "Merged master@ into the PR branch as dddddddddddd." in r.output
+
+
+def test_integrate_cli_apply_applies_a_resolved_candidate(w):
+    """`--apply` on a metadata-only conflict applies and records the merge."""
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    head = git(w.wd, "rev-parse", "HEAD")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(
+            pr_mod.pr, ["signoff", "integrate", PR, "--apply"])
+    assert r.exit_code == 0, r.output
+    # The applied re-check reads "up to date", but the resolution that was
+    # applied is still printed (and recorded).
+    assert "resolved: pm/project.yaml (by record id)" in r.output
+    assert "added from PR: pr-300" in r.output
+    assert "added from base: pr-250" in r.output
+    rec = pr_entry(w)["integration"]
+    assert rec["status"] == integration.UP_TO_DATE
+    assert rec["resolution"]["applied_merge_sha"]
+    assert rec["resolution"]["applied_merge_sha"] != head
+    assert git(w.wd, "rev-parse", "HEAD") == rec["resolution"]["applied_merge_sha"]
+    assert git(w.wd, "rev-parse", "HEAD^{tree}") == rec["candidate_tree"]
+    assert sorted(pr_ids(w.wd / "pm")) == [
+        "pr-100", PR, "pr-250", "pr-300"]
+
+
+def test_integrate_cli_apply_exits_nonzero_when_it_cannot_apply(w):
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    # A dirty workdir is never touched, so the resolution stays unapplied;
+    # `--apply` asked for the merge and must not report success.
+    (w.wd / "keep.txt").write_text("uncommitted\n")
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(
+            pr_mod.pr, ["signoff", "integrate", PR, "--apply"])
+    assert r.exit_code != 0
+    assert "not applied" in r.output
+    assert not (pr_entry(w)["integration"].get("resolution") or {}).get(
+        "applied_merge_sha")
+
+
+# --- resolver safety rails the merge gate depends on ------------------------
+
+def test_conflicting_reorders_are_refused():
+    """Both sides reordering the same records differently is ambiguous."""
+    base = ("project:\n  name: p\nprs:\n"
+            "- id: pr-1\n  status: pending\n"
+            "- id: pr-2\n  status: pending\n"
+            "- id: pr-3\n  status: pending\n")
+    ours = ("project:\n  name: p\nprs:\n"
+            "- id: pr-2\n  status: pending\n"
+            "- id: pr-1\n  status: pending\n"
+            "- id: pr-3\n  status: pending\n")
+    theirs = ("project:\n  name: p\nprs:\n"
+              "- id: pr-3\n  status: pending\n"
+              "- id: pr-2\n  status: pending\n"
+              "- id: pr-1\n  status: pending\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("reordered" in c for c in details["conflicts"])
+
+
+def test_field_deletion_vs_edit_is_refused_and_one_sided_deletion_is_kept():
+    """A scalar key is a field: never silently pick a side, but honour a
+    deletion the other side left alone."""
+    base = ("project:\n  name: p\n  skip_qa: true\n"
+            "prs:\n- id: pr-1\n  status: pending\n")
+    ours = "project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+    theirs = ("project:\n  name: p\n  skip_qa: false\n"
+              "prs:\n- id: pr-1\n  status: pending\n")
+
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("skip_qa" in c and "deleted" in c
+               for c in details["conflicts"])
+    # The other direction is symmetric, and names the same conflict.
+    merged, details = integration.resolve_project_yaml(base, theirs, ours)
+    assert merged is None
+    assert any("skip_qa" in c and "deleted on the new base" in c
+               for c in details["conflicts"])
+    # Deleting a field the other side did not touch is the PR's change.
+    merged, details = integration.resolve_project_yaml(base, ours, base)
+    assert merged is not None, details
+    assert "skip_qa" not in merged
+    # ... and it is a field change, not a removed *record*: the provenance
+    # lists name records, so a scalar key must not appear as one.  The other
+    # side changes another key so the mapping is actually merged (an
+    # untouched side is taken wholesale and records no actions).
+    theirs = ("project:\n  name: q\n  skip_qa: true\n"
+              "prs:\n- id: pr-1\n  status: pending\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is not None, details
+    actions = details["actions"].get("project", {})
+    assert actions.get("removed", []) == []
+    assert actions.get("changed", []) == []
+
+
+def test_invalid_merged_shape_is_refused():
+    """A merge that produces an invalid project.yaml is not a resolution."""
+    base = "project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+    ours = base.rstrip() + "\n- id: pr-2\n  status: not-a-status\n"
+    theirs = base.rstrip() + "\n- id: pr-3\n  status: pending\n"
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("invalid status" in c for c in details["conflicts"])
+
+    # A plan cycle that both sides carry is likewise not mergeable.
+    base = ("project:\n  name: p\n"
+            "prs:\n- id: pr-1\n  status: pending\n"
+            "plans:\n"
+            "- id: plan-a\n  status: active\n  parent: plan-b\n"
+            "- id: plan-b\n  status: active\n  parent: plan-a\n")
+    ours = base.replace(
+        "- id: pr-1\n  status: pending\n",
+        "- id: pr-1\n  status: pending\n- id: pr-2\n  status: pending\n")
+    theirs = base.replace(
+        "- id: pr-1\n  status: pending\n",
+        "- id: pr-1\n  status: pending\n- id: pr-3\n  status: pending\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("cycle" in c for c in details["conflicts"])
+
+
+def test_nested_duplicate_ids_are_ambiguous():
+    """A duplicate id inside a nested list (notes) is a conflict too."""
+    base = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+            "  notes:\n  - id: note-1\n    text: a\n")
+    ours = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+            "  notes:\n  - id: note-1\n    text: a\n"
+            "  - id: note-1\n    text: dup\n")
+    theirs = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+              "  notes:\n  - id: note-1\n    text: a\n"
+              "  - id: note-2\n    text: b\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("duplicate record id" in c for c in details["conflicts"])
+
+
+def test_nested_duplicate_ids_are_refused_even_when_taken_wholesale():
+    """A nested duplicate is refused even when the list is not merged.
+
+    Both sides carrying the same duplicated note id, or one side adding such
+    a list unchanged, would otherwise carry the ambiguity into the merged
+    document unnoticed.  It must be refused like a top-level duplicate.
+    """
+    base = "project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+    dup = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+           "  notes:\n  - id: note-1\n    text: a\n"
+           "  - id: note-1\n    text: a\n")
+    # Identical on both sides; the file only conflicts on an unrelated PR.
+    merged, details = integration.resolve_project_yaml(
+        base, dup, dup + "- id: pr-9\n  status: pending\n")
+    assert merged is None
+    assert any("duplicate record id" in c for c in details["conflicts"])
+    # Added by one side only (the other side has no notes).
+    merged, details = integration.resolve_project_yaml(base, dup, base)
+    assert merged is None
+    assert any("duplicate record id" in c for c in details["conflicts"])
+
+
+def test_a_duplicate_id_behind_a_malformed_member_is_still_ambiguous():
+    """A malformed member must not hide a duplicate id from the check.
+
+    ``_is_id_list`` requires every member to be a well-formed record, so one
+    hand-edited member (here a bare string) makes the list "atomic" and it is
+    then taken wholesale whenever the other side did not touch it.  The
+    duplicate note id would ride into the merged document unnoticed, where
+    pm's note commands — which look a note up by id — could only edit one of
+    the two.  The ambiguity is refused like any other duplicate.
+    """
+    base = "project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+    dup = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+           "  notes:\n  - id: note-1\n    text: a\n"
+           "  - id: note-1\n    text: b\n"
+           "  - just-a-hand-edited-string\n")
+    # Added by one side only: the list is taken wholesale, not merged.
+    merged, details = integration.resolve_project_yaml(base, dup, base)
+    assert merged is None
+    assert any("duplicate record id 'note-1'" in c
+               for c in details["conflicts"]), details
+    # And on the side that does not carry the malformed member either way.
+    merged, details = integration.resolve_project_yaml(base, base, dup)
+    assert merged is None
+    assert any("duplicate record id 'note-1'" in c
+               for c in details["conflicts"]), details
+    # A unique id behind a malformed member is still a plain merge (the
+    # malformed member is preserved, as the other readers preserve it).
+    ok = dup.replace("  - id: note-1\n    text: b\n", "  - id: note-2\n    text: b\n")
+    merged, details = integration.resolve_project_yaml(base, ok, base)
+    assert merged is not None, details
+    assert "just-a-hand-edited-string" in merged
+    assert "note-2" in merged
+
+
+@pytest.mark.parametrize("base,ours,theirs,needle", [
+    # A status that is a list/dict cannot be a set member: it must read as an
+    # invalid status, not raise (the resolver's contract is a refusal).
+    ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n",
+     "project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+     "- id: pr-2\n  status: {a: b}\n",
+     "project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n",
+     "invalid status"),
+    ("project:\n  name: p\nplans:\n- id: plan-1\n  status: draft\n",
+     "project:\n  name: p\nplans:\n- id: plan-1\n  status: [a]\n",
+     "project:\n  name: p\nplans:\n- id: plan-1\n  status: draft\n",
+     "invalid status"),
+    # A plan parent that is not a string is refused, not walked as a key.
+    ("project:\n  name: p\nplans:\n- id: plan-1\n  status: draft\n",
+     "project:\n  name: p\nplans:\n- id: plan-1\n  status: draft\n"
+     "  parent: {x: 1}\n",
+     "project:\n  name: p\nplans:\n- id: plan-1\n  status: draft\n",
+     "invalid parent"),
+    # A one-sided change to a non-mapping ``project`` must be refused before
+    # the serializer reads ``project.libyaml``.
+    ("project:\n  name: p\nprs: []\n",
+     "project: oops\nprs: []\n",
+     "project:\n  name: p\nprs: []\n",
+     "project is not a mapping"),
+    ("project:\n  name: p\nprs: []\n",
+     "project:\n  name: p\nprs: []\n",
+     "project:\n- a\n- b\nprs: []\n",
+     "project is not a mapping"),
+])
+def test_malformed_documents_are_refused_not_raised(base, ours, theirs,
+                                                    needle):
+    """Malformed sides are a readable conflict, never an uncaught error."""
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None, details
+    assert any(needle in c for c in details.get("conflicts") or []), details
+
+
+def test_a_malformed_base_entry_does_not_drop_the_behaviour_summary(w):
+    """A malformed record on the base must not suppress the base summary.
+
+    ``compute_candidate`` swallows a summary failure into a log warning, so a
+    raise here would silently drop the behaviour changes the sign-off agent
+    has to assess (and, with them, the justification requirement).
+    """
+    path = w.base_pm / "project.yaml"
+    doc = yaml.safe_load(path.read_text())
+    doc["project"]["model_config"] = {"review": "opus"}
+    doc["prs"].append({"id": {"not": "a string"}, "status": "pending"})
+    path.chmod(0o644)
+    path.write_text(yaml.safe_dump(doc, sort_keys=False))
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base malformed entry")
+
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec.get("base_behavior_error") is None, rec
+    assert any("model_config" in c for c in rec["base_behavior_changes"]), rec
+
+
+def test_bookkeeping_timestamps_both_bumped_do_not_block_the_merge():
+    """Real ``pm pr note add`` bumps ``updated_at`` on both sides.
+
+    The timestamps are bookkeeping, not semantics: the record must still
+    merge by id (the earlier value is not a lost change).
+    """
+    base = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+            "  updated_at: '2026-01-01T00:00:00Z'\n")
+    ours = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+            "  updated_at: '2026-01-02T00:00:00Z'\n"
+            "  notes:\n  - id: note-1\n    text: from branch\n")
+    theirs = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: merged\n"
+              "  updated_at: '2026-01-03T00:00:00Z'\n"
+              "  notes:\n  - id: note-2\n    text: from base\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is not None, details
+    doc = yaml.safe_load(merged)
+    rec = doc["prs"][0]
+    assert rec["status"] == "merged"
+    # The later bookkeeping value wins; both notes survive.
+    assert rec["updated_at"] == "2026-01-03T00:00:00Z"
+    assert [n["id"] for n in rec["notes"]] == ["note-1", "note-2"]
+
+
+def test_the_pm_ui_cursor_is_bookkeeping_but_project_fields_are_not():
+    """``project.active_pr`` is pm's own state, not a field conflict.
+
+    ``pm_core.tui`` persists the TUI's selected PR through the coalescing
+    write queue on every cursor move, so every branch pm was used on carries
+    a different value from the base.  Treating it as a real field conflict
+    refused the resolution for exactly the conflicts this feature exists for
+    (checked against this repository's own merge with master, where it was
+    the *only* non-record conflict).  It merges to the new base's value,
+    deterministically, and is not counted as a lost change — while a real
+    ``project`` field stays a conflict.
+    """
+    base = ("project:\n  name: p\n  active_pr: pr-1\n  skip_qa: false\n"
+            "prs:\n- id: pr-1\n  status: pending\n")
+    ours = ("project:\n  name: p\n  active_pr: pr-9\n  skip_qa: false\n"
+            "prs:\n- id: pr-1\n  status: pending\n"
+            "- id: pr-9\n  status: pending\n")
+    theirs = ("project:\n  name: p\n  active_pr: pr-8\n  skip_qa: false\n"
+              "prs:\n- id: pr-1\n  status: pending\n"
+              "- id: pr-8\n  status: pending\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is not None, details
+    doc = yaml.safe_load(merged)
+    # The new base's cursor is the shared state; both records survive.
+    assert doc["project"]["active_pr"] == "pr-8"
+    assert [p["id"] for p in doc["prs"]] == ["pr-1", "pr-9", "pr-8"]
+
+    # A real project field both sides changed differently is still a
+    # conflict: the exemption covers the cursor only.
+    conflict_ours = ours.replace("name: p", "name: from-branch")
+    conflict_theirs = theirs.replace("name: p", "name: from-base")
+    merged, details = integration.resolve_project_yaml(
+        base, conflict_ours, conflict_theirs)
+    assert merged is None
+    assert any("name" in c and "changed differently" in c
+               for c in details["conflicts"]), details
+
+    # A deletion vs edit is not silently resolved either (the same rule the
+    # bookkeeping timestamps follow).
+    deleted = ours.replace("  active_pr: pr-9\n", "")
+    assert "active_pr" not in deleted
+    merged, details = integration.resolve_project_yaml(base, deleted, theirs)
+    assert merged is None
+    assert any("active_pr" in c for c in details["conflicts"]), details
+
+
+def test_a_malformed_ui_cursor_is_a_conflict_not_a_side_selection():
+    """A cursor that is not a string is malformed state, not a selection.
+
+    Taking it would write the malformed value into the merged document, and
+    the preservation check exempts this path — so a value that is not a
+    cursor keeps the normal conflict rule (like the bookkeeping timestamps),
+    on either side.
+    """
+    base = ("project:\n  name: p\n  active_pr: pr-1\n"
+            "prs:\n- id: pr-1\n  status: pending\n")
+    ours = ("project:\n  name: p\n  active_pr: {bad: 1}\n"
+            "prs:\n- id: pr-1\n  status: pending\n")
+    theirs = ("project:\n  name: p\n  active_pr: pr-2\n"
+              "prs:\n- id: pr-1\n  status: pending\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("active_pr" in c for c in details["conflicts"]), details
+    # The malformed value on the *new base* side is refused the same way.
+    merged, details = integration.resolve_project_yaml(base, theirs, ours)
+    assert merged is None
+    assert any("active_pr" in c for c in details["conflicts"]), details
+
+
+def test_the_ui_cursor_does_not_block_the_real_metadata_resolution(w):
+    """The real #250 trigger carries pm's cursor on both sides.
+
+    A branch and the base each append their own PR records *and* each carries
+    the TUI cursor pm rewrote while it was used.  The integration must still
+    resolve, apply, and keep every record — otherwise every real integration
+    routes implementation for a UI pointer.
+    """
+    def _branch(d):
+        d["project"]["active_pr"] = PR
+        d["prs"].append({"id": "pr-300", "title": "Record pr-300",
+                         "branch": "pm/pr-300", "status": "pending"})
+    store.locked_update(w.wd / "pm", _branch)
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records + cursor")
+
+    def _base(d):
+        d["project"]["active_pr"] = "pr-100"
+        d["prs"].append({"id": "pr-250", "title": "Record pr-250",
+                         "branch": "pm/pr-250", "status": "merged"})
+    store.locked_update(w.base_pm, _base)
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records + cursor")
+
+    rec = integration.prepare(w.pm_dir, PR)
+    assert rec["status"] == integration.UP_TO_DATE, rec
+    assert rec["resolution"]["applied_merge_sha"]
+    doc = yaml.safe_load((w.wd / "pm" / "project.yaml").read_text())
+    ids = [p["id"] for p in doc["prs"]]
+    assert "pr-300" in ids and "pr-250" in ids and PR in ids
+    # The base's cursor is the shared state; the branch's is not content.
+    assert doc["project"]["active_pr"] == "pr-100"
+
+
+def test_bookkeeping_timestamp_merge_does_not_mask_a_real_conflict():
+    """A field both sides changed differently is still a conflict."""
+    base = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+            "  updated_at: '2026-01-01T00:00:00Z'\n")
+    ours = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: qa\n"
+            "  updated_at: '2026-01-02T00:00:00Z'\n")
+    theirs = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: merged\n"
+              "  updated_at: '2026-01-03T00:00:00Z'\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("status" in c and "changed differently" in c
+               for c in details["conflicts"])
+
+
+def test_a_non_string_bookkeeping_value_keeps_the_conflict_rule():
+    """Only real timestamps are bookkeeping; a malformed value is a conflict."""
+    base = "project:\n  name: p\nprs:\n- id: pr-1\n  updated_at: '2026-01-01'\n"
+    ours = "project:\n  name: p\nprs:\n- id: pr-1\n  updated_at: {bad: 1}\n"
+    theirs = "project:\n  name: p\nprs:\n- id: pr-1\n  updated_at: '2026-01-03'\n"
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("updated_at" in c for c in details["conflicts"])
+
+
+def test_a_null_bookkeeping_timestamp_is_not_silently_replaced():
+    """A branch that unset a timestamp did not agree to the other side's edit.
+
+    ``None`` is pm's own "unset" value, not a timestamp: taking the other
+    side's value would drop the branch's change without saying so, and the
+    spec keeps the normal conflict rule for a non-string value.
+    """
+    base = "project:\n  name: p\nprs:\n- id: pr-1\n  updated_at: '2026-01-01'\n"
+    ours = "project:\n  name: p\nprs:\n- id: pr-1\n  updated_at:\n"
+    theirs = "project:\n  name: p\nprs:\n- id: pr-1\n  updated_at: '2026-01-03'\n"
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("updated_at" in c for c in details["conflicts"])
+
+
+def test_a_mapping_valued_bookkeeping_field_is_refused_not_deep_merged():
+    """A malformed mapping is refused before the structural merge runs.
+
+    ``_merge_value`` settles the bookkeeping/UI fields before the dict/list
+    merges, so two branches' malformed mappings are not merged field by field
+    into a value neither side wrote.
+    """
+    base = "project:\n  name: p\nprs:\n- id: pr-1\n  updated_at: {a: 0}\n"
+    ours = "project:\n  name: p\nprs:\n- id: pr-1\n  updated_at: {a: 1}\n"
+    theirs = ("project:\n  name: p\nprs:\n- id: pr-1\n"
+              "  updated_at: {a: 0, b: 2}\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("updated_at" in c for c in details["conflicts"])
+
+
+def test_distinct_yaml_scalars_are_not_the_same_value():
+    """``True == 1 == 1.0`` in Python, but they are three different scalars.
+
+    With plain ``==`` a branch that changed a field to ``1`` and a base that
+    changed it to ``0`` looked like "unchanged on the branch" (``1 == True``),
+    so the base's value was taken silently — a real field conflict resolved by
+    side selection, which the preservation check (comparing the same way) did
+    not catch.  pm's own booleans (``libyaml``, ``skip_qa``, …) make the
+    shape reachable from hand-edited state.
+    """
+    def doc(flag) -> str:
+        return yaml.dump({"project": {"name": "p"}, "prs": [
+            {"id": "pr-1", "title": "A", "status": "in_progress",
+             "flag": flag}]})
+
+    for base_f, ours_f, theirs_f in ((True, 1, 0), (1, True, 1.0), (1, 1.0, 2)):
+        merged, details = integration.resolve_project_yaml(
+            doc(base_f), doc(ours_f), doc(theirs_f))
+        assert merged is None, (base_f, ours_f, theirs_f)
+        assert details["conflicts"]
+    # The same scalar kind still merges: one side unchanged, the other changed.
+    merged, _ = integration.resolve_project_yaml(doc(1), doc(1), doc(2))
+    assert yaml.safe_load(merged)["prs"][0]["flag"] == 2
+    merged, _ = integration.resolve_project_yaml(
+        doc(True), doc(False), doc(True))
+    assert yaml.safe_load(merged)["prs"][0]["flag"] is False
+
+
+def test_a_merge_that_loses_a_side_change_is_refused(monkeypatch):
+    """The preservation check is the safety net under the merge rules.
+
+    Force the merge to silently drop the PR branch's edit: the resolution
+    must fail rather than publish a candidate that lost it.
+    """
+    base = "project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+    ours = base.replace("name: p", "name: ours")
+    theirs = base.rstrip() + "\n- id: pr-2\n  status: pending\n"
+    real = integration._merge_value
+
+    def lossy(b, o, t, path, actions):
+        value, conflicts = real(b, o, t, path, actions)
+        if path == "project":
+            return b, []        # pretend the PR branch's edit vanished
+        return value, conflicts
+
+    monkeypatch.setattr(integration, "_merge_value", lossy)
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("PR branch change not preserved" in c
+               for c in details["conflicts"])
+
+
+# --- apply / merge-gate guards ---------------------------------------------
+
+def test_apply_refuses_a_non_deterministic_resolution(w):
+    """The applied merge must reproduce the candidate exactly.
+
+    A re-resolution whose blob differs from the recorded one (e.g. a resolver
+    change, or a base that moved under the check) is refused and the workdir
+    is left untouched.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    head = git(w.wd, "rev-parse", "HEAD")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED
+    entry = dict(rec["resolution"]["paths"][0])
+    entry["blob"] = "0" * 40
+    tampered = dict(rec, resolution=dict(rec["resolution"], paths=[entry]))
+    merged, err = integration.apply_integration(w.pm_dir, PR, tampered)
+    assert merged is None and "not deterministic" in err
+    assert git(w.wd, "rev-parse", "HEAD") == head
+    assert git(w.wd, "status", "--porcelain") == ""
+    assert "pr-250" not in (w.wd / "pm" / "project.yaml").read_text()
+
+
+def test_apply_refuses_a_base_that_is_not_a_git_object_name(w):
+    """The recorded base is handed straight to ``git merge``.
+
+    A hand-edited ``base_sha`` that is a ref name rather than an object name
+    would merge something other than the base the record assessed — ``git
+    merge HEAD`` is a no-op that reports a successful "apply" without
+    integrating anything — so only an object name counts as a base revision
+    (the same rule every revision interpolated into a command follows).
+    """
+    head = git(w.wd, "rev-parse", "HEAD")
+    for bad in ("HEAD", "master", "origin/master", " --no-verify"):
+        record = {"status": integration.CLEAN, "head": head,
+                  "base_sha": bad, "candidate_tree": "0" * 40,
+                  "base_branch": "master"}
+        merged, err = integration.apply_integration(w.pm_dir, PR, record)
+        assert merged is None and "no base revision" in err, bad
+        assert git(w.wd, "rev-parse", "HEAD") == head
+        assert git(w.wd, "status", "--porcelain") == ""
+
+
+def test_apply_refuses_a_clean_merge_with_another_candidate_tree(w):
+    """Even a conflict-free merge must reproduce the recorded candidate."""
+    head = git(w.wd, "rev-parse", "HEAD")
+    base = git(w.repo, "rev-parse", "master")
+    record = {"status": integration.RESOLVED, "head": head, "base_sha": base,
+              "candidate_tree": "0" * 40,
+              "resolution": {"paths": [{"path": "pm/project.yaml"}]}}
+    # Already up to date: nothing to undo, but the tree is not the candidate.
+    merged, err = integration._apply_resolution(
+        record, str(w.wd), head, base, "Integrate master")
+    assert merged is None and "different tree" in err
+    assert git(w.wd, "rev-parse", "HEAD") == head
+
+    # A real (clean) merge is aborted when its tree is not the candidate.
+    commit(w.repo, "base.txt", "base\n", "base moves ahead")
+    git(w.wd, "fetch", "-q", "origin")
+    base = git(w.wd, "rev-parse", "origin/master")
+    merged, err = integration._apply_resolution(
+        dict(record, base_sha=base), str(w.wd), head, base, "Integrate master")
+    assert merged is None and "different tree" in err
+    assert git(w.wd, "rev-parse", "HEAD") == head
+    assert git(w.wd, "status", "--porcelain") == ""
+
+
+def test_a_resolved_candidate_that_merges_cleanly_uses_the_integration_message(
+        w):
+    """Both apply paths record the same merge the same way.
+
+    ``_apply_resolution`` committed its clean-merge path with ``--no-edit``
+    (git's ``Merge commit '<sha>'``) while the CLEAN path
+    (``_apply_locked``) recorded the caller's
+    ``Integrate <base>@<sha> into <branch>``.  The same integration must not
+    be recorded two ways depending on whether the base moved under the check.
+    """
+    commit(w.repo, "base.txt", "base\n", "base moves ahead")
+    git(w.wd, "fetch", "-q", "origin")
+    head = git(w.wd, "rev-parse", "HEAD")
+    base = git(w.wd, "rev-parse", "origin/master")
+    cand = integration.compute_candidate(w.wd, head, base, resolve=False)
+    assert cand["status"] == integration.CLEAN, cand
+    record = {"status": integration.RESOLVED, "head": head, "base_sha": base,
+              "candidate_tree": cand["candidate_tree"],
+              "resolution": {"paths": [{"path": "pm/project.yaml"}],
+                             "unresolved": []}}
+    msg = "Integrate master@deadbeef into pm/pr-200"
+    merged, err = integration._apply_resolution(
+        record, str(w.wd), head, base, msg)
+    assert err is None and merged, err
+    assert git(w.wd, "log", "-1", "--format=%s") == msg
+
+
+def test_apply_refuses_a_clean_apply_with_another_candidate_tree(w):
+    """A CLEAN record's apply must reproduce the candidate before committing.
+
+    The isolated candidate is what sign-off reviewed; a merge driver (or a
+    stale record) that produces another tree must not be committed into the
+    branch, or review/QA and publication would see a tree nobody approved.
+    """
+    commit(w.repo, "base.txt", "base\n", "base moves ahead")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN, rec
+    head = rec["head"]
+
+    merged, err = integration.apply_integration(
+        w.pm_dir, PR, dict(rec, candidate_tree="0" * 40))
+    assert merged is None and "different tree" in err
+    assert git(w.wd, "rev-parse", "HEAD") == head
+    assert git(w.wd, "status", "--porcelain") == ""
+    assert not (w.wd / "base.txt").exists()
+
+
+def test_apply_refuses_a_clean_record_without_a_candidate_tree(w):
+    """A record pm cannot tie to a tree cannot be applied to the branch."""
+    commit(w.repo, "base.txt", "base\n", "base moves ahead")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN, rec
+    head = rec["head"]
+    tampered = dict(rec)
+    tampered.pop("candidate_tree")
+
+    merged, err = integration.apply_integration(w.pm_dir, PR, tampered)
+    assert merged is None and "different tree" in err
+    assert git(w.wd, "rev-parse", "HEAD") == head
+    assert git(w.wd, "status", "--porcelain") == ""
+
+
+def test_apply_reads_a_non_string_recorded_blob_as_absent(w):
+    """A hand-edited blob is not a recorded blob (and must not raise).
+
+    ``apply_integration`` runs unattended (sign-off launch, ``--apply``, a
+    bounce); a non-string ``blob`` in project.yaml used to make its mismatch
+    message slice an int.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED, rec
+    entry = dict(rec["resolution"]["paths"][0], blob=123)
+    merged, err = integration.apply_integration(
+        w.pm_dir, PR,
+        dict(rec, resolution=dict(rec["resolution"], paths=[entry])))
+    assert err is None, err
+    assert merged == git(w.wd, "rev-parse", "HEAD")
+    assert git(w.wd, "rev-parse", "HEAD^{tree}") == rec["candidate_tree"]
+
+
+def test_apply_refuses_a_resolved_merge_with_another_candidate_tree(w):
+    """The re-applied resolution must reproduce the recorded candidate."""
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    head = git(w.wd, "rev-parse", "HEAD")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED
+
+    merged, err = integration.apply_integration(
+        w.pm_dir, PR, dict(rec, candidate_tree="0" * 40))
+    assert merged is None and "different tree" in err
+    assert git(w.wd, "rev-parse", "HEAD") == head
+    assert git(w.wd, "status", "--porcelain") == ""
+
+
+def test_apply_refuses_conflicts_outside_the_recorded_resolution(w):
+    """The apply step never makes a new substantive conflict resolution."""
+    commit(w.wd, "shared.txt", "pr\n", "pr edits shared")
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    commit(w.repo, "shared.txt", "base\nmore\n", "base edits shared")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    head = git(w.wd, "rev-parse", "HEAD")
+    # The workdir must know the base commit (a sign-off check fetches it).
+    git(w.wd, "fetch", "-q", "origin")
+    base = git(w.wd, "rev-parse", "origin/master")
+    record = {"status": integration.RESOLVED, "head": head, "base_sha": base,
+              "base_branch": "master", "candidate_tree": "0" * 40,
+              "resolution": {"paths": [{"path": "pm/project.yaml"}]}}
+    merged, err = integration.apply_integration(w.pm_dir, PR, record)
+    assert merged is None
+    assert "unexpected conflict in shared.txt" in err
+    assert git(w.wd, "rev-parse", "HEAD") == head
+    assert git(w.wd, "status", "--porcelain") == ""
+
+
+def test_apply_refuses_when_head_moved_under_the_resolution(w):
+    """HEAD is re-verified immediately before touching the worktree."""
+    head = git(w.wd, "rev-parse", "HEAD")
+    base = git(w.repo, "rev-parse", "master")
+    record = {"status": integration.RESOLVED, "head": "0" * 40,
+              "base_sha": base, "candidate_tree": "0" * 40,
+              "resolution": {"paths": []}}
+    merged, err = integration._apply_resolution(
+        record, str(w.wd), "0" * 40, base, "Integrate master")
+    assert merged is None and "HEAD moved" in err
+    assert git(w.wd, "rev-parse", "HEAD") == head
+
+
+def test_a_clean_apply_rechecks_head_immediately_before_merging(w, monkeypatch):
+    """The clean path re-verifies HEAD before the merge, like the resolved one.
+
+    A commit landing between ``_apply_locked``'s HEAD check and ``git merge``
+    would be integrated instead of the revision the candidate describes.  The
+    tree comparison would refuse it afterwards, but naming the race is honest
+    (and the resolved path already does it).
+    """
+    head = git(w.wd, "rev-parse", "HEAD")
+    base = git(w.repo, "rev-parse", "master")
+    real_git = integration._git
+    seen = {"head_reads": 0}
+
+    def spy(*args, cwd=None):
+        if args == ("rev-parse", "HEAD") and str(cwd) == str(w.wd):
+            seen["head_reads"] += 1
+            if seen["head_reads"] == 2:
+                # Another actor commits between the check and the merge.
+                commit(w.wd, "race.txt", "race\n", "concurrent commit")
+        return real_git(*args, cwd=cwd)
+
+    monkeypatch.setattr(integration, "_git", spy)
+    pr = {"id": PR, "branch": BRANCH, "workdir": str(w.wd)}
+    record = {"status": integration.CLEAN, "head": head, "base_sha": base,
+              "base_branch": "master", "candidate_tree": "0" * 40}
+    merged, err = integration._apply_locked(pr, record, str(w.wd))
+    assert merged is None and err == integration.HEAD_MOVED_APPLYING
+    assert seen["head_reads"] == 2
+
+
+def test_apply_refuses_a_record_without_a_base_revision(w):
+    """A partial record is refused, not crashed on.
+
+    ``apply_integration`` runs unattended at sign-off launch and from
+    ``--apply``; both promise a reason on failure, so a record that cannot
+    name the base to merge must come back as an error, not a traceback.
+    """
+    head = git(w.wd, "rev-parse", "HEAD")
+    merged, err = integration.apply_integration(
+        w.pm_dir, PR, {"status": integration.CLEAN, "head": head})
+    assert merged is None and "no base revision" in err
+    assert git(w.wd, "rev-parse", "HEAD") == head
+    assert git(w.wd, "status", "--porcelain") == ""
+
+
+def test_effective_verdict_coerces_an_unresolved_resolved_merge():
+    """A RESOLVED record that still carries unresolved entries is not safe."""
+    head = "a" * 40
+    rec = {"status": integration.RESOLVED, "head": head,
+           "base_sha": "b" * 40, "candidate_tree": "c" * 40,
+           "resolution": {"paths": [], "unresolved": [
+               {"path": "pm/project.yaml", "conflicts": ["pr-1.status"]}]}}
+    verdict, why = signoff.effective_verdict(SIGNOFF_MERGE, rec, head)
+    assert verdict == SIGNOFF_IMPL and "could not resolve" in why
+    assert signoff.effective_verdict(SIGNOFF_REVIEW, rec, head)[0] == \
+        SIGNOFF_IMPL
+    # BLOCKED/IMPL pass through: only the forward routes are coerced.
+    assert signoff.effective_verdict(SIGNOFF_IMPL, rec, head) == \
+        (SIGNOFF_IMPL, None)
+
+
+def test_compute_candidate_never_approves_a_bare_tree(w, monkeypatch):
+    """A tree without a conflict-free resolution record is not ``resolved``."""
+    commit(w.repo, "base.txt", "base\n", "base moves ahead")
+    head = git(w.wd, "rev-parse", "HEAD")
+    base = git(w.repo, "rev-parse", "master")
+    resolution = {"paths": [], "unresolved": [
+        {"path": "pm/project.yaml", "conflicts": ["ambiguous record"]}]}
+    monkeypatch.setattr(integration, "_git_version", lambda: (2, 30))
+    monkeypatch.setattr(
+        integration, "_worktree_merge",
+        lambda *a, **k: ("f" * 40, ["pm/project.yaml"], None, resolution))
+    rec = integration.compute_candidate(str(w.wd), head, base)
+    assert rec["status"] == integration.CONFLICT
+    assert rec["candidate_tree"] is None
+
+
+def test_valid_for_rejects_an_unresolved_resolved_record():
+    head, base, tree = "a" * 40, "b" * 40, "c" * 40
+    ok = {"status": integration.RESOLVED, "head": head, "base_sha": base,
+          "candidate_tree": tree, "resolution": {"paths": []}}
+    assert integration.valid_for(ok, head)
+    assert not integration.valid_for(
+        dict(ok, resolution={"paths": [], "unresolved": [{"path": "x"}]}),
+        head)
+    assert not integration.valid_for(dict(ok, resolution=None), head)
+
+
+def test_merge_gate_refuses_a_changed_resolution_digest(w):
+    """A re-check that resolved differently invalidates the approval."""
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+
+    def _tamper(d):
+        integ = store.get_pr(d, PR)["integration"]
+        resolution = dict(integ["resolution"], applied_merge_sha="f" * 40)
+        integ["resolution"] = resolution
+        integ["resolution_digest"] = integration._resolution_digest(resolution)
+    store.locked_update(w.pm_dir, _tamper)
+    refusal = signoff.merge_gate_refusal(
+        pr_entry(w), signoff.head_sha(str(w.wd)), "master")
+    assert refusal and "metadata resolution changed" in refusal
+
+
+def test_merge_gate_refuses_a_resolution_that_lost_its_digest(w):
+    """A resolution edited without its digest is not the approved one."""
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+
+    def _tamper(d):
+        store.get_pr(d, PR)["integration"]["resolution_digest"] = "0" * 64
+    store.locked_update(w.pm_dir, _tamper)
+    refusal = signoff.merge_gate_refusal(
+        pr_entry(w), signoff.head_sha(str(w.wd)), "master")
+    assert refusal and "does not match its digest" in refusal
+
+
+def test_a_failed_recheck_keeps_the_applied_resolution(w, monkeypatch):
+    """A transient check failure must not lose what was applied.
+
+    The failed check cannot verify the candidate, so the merge is (rightly)
+    blocked until a check succeeds again — but the recorded resolution stays
+    bound, and the next successful check restores the approval.
+    """
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+
+    real_fetch = integration.fetch_base
+    monkeypatch.setattr(integration, "fetch_base",
+                        lambda *a, **k: (None, "network down"))
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.ERROR
+    assert again["resolution"]["applied_merge_sha"] == \
+        rec["resolution"]["applied_merge_sha"]
+    assert again["resolution_digest"] == rec["resolution_digest"]
+
+    # Only the fetch is restored; the fixture's environment stays patched.
+    monkeypatch.setattr(integration, "fetch_base", real_fetch)
+    ok = integration.check_integration(w.pm_dir, PR)
+    assert ok["status"] == integration.UP_TO_DATE
+    assert ok["candidate_tree"] == rec["candidate_tree"]
+    refusal = signoff.merge_gate_refusal(pr_entry(w), ok["head"], "master")
+    assert refusal is None, refusal
+
+
+def test_behavior_changes_survive_a_benign_recheck(w):
+    """An applied resolution's base interactions keep requiring a statement.
+
+    After the apply the branch contains the base, so a re-check sees no base
+    diff; the recorded behavioural changes must not silently disappear (that
+    would let an unstated reuse pass the merge gate).
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    data = store.load(w.base_pm)
+    data["project"]["model_config"] = {"session_models": {"impl": "model-new"}}
+    store.save(data, w.base_pm)
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records and model")
+
+    rec = integration.prepare(w.pm_dir, PR)
+    assert rec["status"] == integration.UP_TO_DATE
+    assert rec["resolution"]["applied_merge_sha"]
+    assert any("model_config" in c for c in rec["base_behavior_changes"])
+
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE
+    assert any("model_config" in c for c in again["base_behavior_changes"])
+
+    record_merge(w, again)
+    assert signoff.merge_gate_refusal(
+        pr_entry(w), again["head"], "master") is None
+    # A report that no longer states the evidence re-blocks the merge.
+    write_report(w, again, evidence=False)
+    refusal = signoff.merge_gate_refusal(
+        pr_entry(w), again["head"], "master")
+    assert refusal and "evidence" in refusal
+
+
+def test_a_failed_recheck_keeps_the_behavioural_changes(w, monkeypatch):
+    """A clean base's behavioural changes survive a transient check failure.
+
+    Without them the merge gate would no longer require the explicit
+    evidence/checks statement the approval was asked for.
+    """
+    data = store.load(w.base_pm)
+    data["project"]["model_config"] = {"session_models": {"impl": "model-new"}}
+    store.save(data, w.base_pm)
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base changes model")
+
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN
+    assert rec["base_behavior_changes"]
+    record_merge(w, rec)
+
+    monkeypatch.setattr(integration, "fetch_base",
+                        lambda *a, **k: (None, "network down"))
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.ERROR
+    assert again["head"] == rec["head"]
+    assert again["base_behavior_changes"] == rec["base_behavior_changes"]
+
+    write_report(w, again, evidence=False)
+    refusal = signoff.merge_gate_refusal(pr_entry(w), again["head"], "master")
+    assert refusal and "behavioural changes" in refusal
+
+
+def test_a_failed_recheck_keeps_a_failed_summary(w, monkeypatch):
+    """A summary failure survives a transient re-check failure too.
+
+    The failure is what makes the approval state its evidence; dropping it on
+    a fetch error would let the next approval read as behaviour-neutral.
+    """
+    data = store.load(w.base_pm)
+    data["project"]["model_config"] = {"session_models": {"impl": "model-new"}}
+    store.save(data, w.base_pm)
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base changes model")
+
+    def boom(*a, **k):
+        raise RuntimeError("summary exploded")
+
+    monkeypatch.setattr(integration, "base_behavior_changes", boom)
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["base_behavior_error"]
+    record_merge(w, rec)
+
+    monkeypatch.setattr(integration, "fetch_base",
+                        lambda *a, **k: (None, "network down"))
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.ERROR
+    assert again["head"] == rec["head"]
+    assert again["base_behavior_error"] == rec["base_behavior_error"]
+
+    write_report(w, again, candidate=False, evidence=False, reason=False)
+    refusal = signoff.merge_gate_refusal(pr_entry(w), again["head"], "master")
+    assert refusal and "behavioural changes" in refusal
+
+
+def test_an_applied_resolution_keeps_a_failed_behavior_summary(w, monkeypatch):
+    """The post-apply re-check cannot re-summarise a base now inside HEAD.
+
+    ``base_behavior_error`` is not an exemption: the merge gate requires the
+    evidence statement for it.  Applying the resolution must carry it, or a
+    resolved approval would silently need no statement at all — the re-check
+    sees no base diff and produces neither changes nor an error.
+    """
+    def boom(*a, **k):
+        raise RuntimeError("summary exploded")
+
+    monkeypatch.setattr(integration, "base_behavior_changes", boom)
+    rec = _metadata_conflict(w)
+    assert rec["status"] == integration.UP_TO_DATE
+    assert rec["resolution"]["applied_merge_sha"]
+    assert "summary exploded" in (rec.get("base_behavior_error") or "")
+    assert not rec.get("base_behavior_changes")
+
+    # A benign re-check keeps it too (the record no longer has a base diff).
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE
+    assert "summary exploded" in (again.get("base_behavior_error") or "")
+
+    # Recording a MERGE without the statement is refused, exactly as for a
+    # listed behavioural change.
+    write_report(w, rec, evidence=False, reason=False)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(pr_mod.pr, ["signoff", "record", PR])
+    assert r.exit_code != 0 and "pm-signoff-evidence" in r.output
+
+
+def test_config_path_base_change_requires_justification(w):
+    """Dependency/config files are behavioural too, not just project.yaml."""
+    commit(w.repo, "pyproject.toml", "[project]\nname = 'p'\n",
+           "base adds pyproject")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN
+    assert any("pyproject.toml" in c for c in rec["base_behavior_changes"])
+    write_report(w, rec, evidence=False)
+    problem = signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], rec["head"])
+    assert problem and "evidence" in problem
+    write_report(w, rec)
+    assert signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], rec["head"]) is None
+
+
+# --- the git >= 2.38 (merge-tree) path resolves through the worktree -------
+
+def test_new_git_merge_tree_conflict_resolves_via_the_worktree(w, monkeypatch):
+    """git >= 2.38 reports the conflict in memory; the resolution still runs
+    in the isolated worktree and yields the same ``RESOLVED`` candidate."""
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    head = git(w.wd, "rev-parse", "HEAD")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    git(w.wd, "fetch", "-q", "origin")
+    base = git(w.wd, "rev-parse", "origin/master")
+
+    monkeypatch.setattr(integration, "_git_version", lambda: (2, 45))
+    monkeypatch.setattr(integration, "_merge_tree",
+                        lambda *a, **k: (None, ["pm/project.yaml"], None))
+    rec = integration.compute_candidate(str(w.wd), head, base)
+    assert rec["status"] == integration.RESOLVED, rec
+    assert rec["candidate_tree"]
+    assert rec["resolution"]["paths"][0]["path"] == "pm/project.yaml"
+    assert not rec["resolution"]["unresolved"]
+    # The check is read-only: the PR workdir's HEAD and records are untouched
+    # (the base's pr-250 exists only in the isolated candidate).
+    assert git(w.wd, "rev-parse", "HEAD") == head
+    assert sorted(pr_ids(w.wd / "pm")) == ["pr-100", PR, "pr-300"]
+
+
+def test_new_git_worktree_failure_is_a_conflict_with_provenance(w, monkeypatch):
+    """A failed worktree resolution stays CONFLICT — never a bare tree."""
+    commit(w.repo, "base.txt", "base\n", "base moves ahead")
+    git(w.wd, "fetch", "-q", "origin")
+    head = git(w.wd, "rev-parse", "HEAD")
+    base = git(w.wd, "rev-parse", "origin/master")
+
+    monkeypatch.setattr(integration, "_git_version", lambda: (2, 45))
+    monkeypatch.setattr(integration, "_merge_tree",
+                        lambda *a, **k: (None, ["pm/project.yaml"], None))
+    monkeypatch.setattr(
+        integration, "_worktree_merge",
+        lambda *a, **k: (None, ["pm/project.yaml"],
+                         "candidate worktree failed", None))
+    rec = integration.compute_candidate(str(w.wd), head, base)
+    assert rec["status"] == integration.CONFLICT
+    assert rec["candidate_tree"] is None
+    unresolved = rec["resolution"]["unresolved"]
+    assert unresolved[0]["path"] == "pm/project.yaml"
+    assert "candidate worktree failed" in unresolved[0]["conflicts"]
+
+
+def test_new_git_non_metadata_conflict_is_never_resolved(w, monkeypatch):
+    """Only a conflict confined to project.yaml triggers the worktree resolver."""
+    commit(w.wd, "shared.txt", "pr\n", "pr edits shared")
+    commit(w.repo, "shared.txt", "base\nmore\n", "base edits shared")
+    git(w.wd, "fetch", "-q", "origin")
+    head = git(w.wd, "rev-parse", "HEAD")
+    base = git(w.wd, "rev-parse", "origin/master")
+    called = []
+
+    monkeypatch.setattr(integration, "_git_version", lambda: (2, 45))
+    monkeypatch.setattr(integration, "_merge_tree",
+                        lambda *a, **k: (None, ["shared.txt"], None))
+    monkeypatch.setattr(
+        integration, "_worktree_merge",
+        lambda *a, **k: called.append(1) or (None, [], None, None))
+    rec = integration.compute_candidate(str(w.wd), head, base)
+    assert rec["status"] == integration.CONFLICT
+    assert rec["resolution"] is None
+    assert called == []
+
+
+def test_a_bounce_that_applies_the_resolution_records_the_provenance(w):
+    """A bounce can be the first successful apply (``prepare`` could not touch
+    a dirty workdir).  The applied resolution must survive the next check, or
+    the later approval would not need the explicit reuse statement."""
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    original_head = git(w.wd, "rev-parse", "HEAD")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED
+    assert not rec["resolution"].get("applied_merge_sha")
+
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(
+        transcript, git(w.wd, "rev-parse", "HEAD"), rec["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+    ret = pr_entry(w)["signoff_return"]
+    applied_sha = ret["integration"]["resolution"]["applied_merge_sha"]
+    assert applied_sha
+    # The applied candidate is recorded on the PR, not only in the return.
+    stored = pr_entry(w)["integration"]
+    assert stored["status"] == integration.UP_TO_DATE
+    assert stored["head"] == applied_sha
+    assert stored["resolution"]["applied_merge_sha"] == applied_sha
+    # The revisions the resolution combined stay visible at the top level,
+    # where the evidence block and the prompt read them.
+    assert stored["resolved_from"]["head"] == original_head
+    assert stored["resolved_from"]["base_sha"] == rec["base_sha"]
+
+    # The next sign-off check carries it forward instead of dropping it.
+    again = integration.prepare(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE
+    assert again["resolution"]["applied_merge_sha"] == applied_sha
+    assert again["resolution_digest"] == stored["resolution_digest"]
+    # The explicit-reuse requirement still applies to an approval.
+    assert signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], again["head"])
+
+
+def test_a_bounce_that_applies_clears_a_stale_apply_error(w):
+    """A successful bounce apply must not leave the old "not applied" claim.
+
+    ``prepare`` at sign-off launch could not touch a dirty workdir, so the
+    record carried ``apply_error``; the bounce then applied the resolution.
+    The record must describe the applied merge, not the failed attempt.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    (w.wd / "keep.txt").write_text("uncommitted\n")
+
+    rec = integration.prepare(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED
+    assert rec.get("apply_error")
+
+    # The workdir is clean again, so the bounce applies the resolution.
+    (w.wd / "keep.txt").write_text("keep\n")
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(
+        transcript, git(w.wd, "rev-parse", "HEAD"), rec["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+    stored = pr_entry(w)["integration"]
+    assert stored["status"] == integration.UP_TO_DATE
+    assert stored["resolution"]["applied_merge_sha"]
+    assert "apply_error" not in stored
+
+
+def test_a_bounce_keeps_the_provenance_when_a_check_recorded_the_merge(
+        w, monkeypatch):
+    """A concurrent check of the just-applied merge must not drop the
+    resolution provenance.
+
+    The window is between the apply and the bounce's record write: a check
+    that reads the merge commit records a bare up-to-date record, and it
+    cannot know about the apply (the record it carried from still said
+    ``resolved``).  That record describes the same revision, so the bounce's
+    record — same revision, with the provenance — must win; otherwise the
+    applied resolution silently disappears and a later approval no longer
+    needs the explicit-reuse statement.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED
+    assert not rec["resolution"].get("applied_merge_sha")
+
+    real_apply = integration.apply_integration
+
+    def racing_apply(root, pr_id, record=None, **kw):
+        merged, err = real_apply(root, pr_id, record, **kw)
+        if merged:
+            # Simulate a check that read the merge commit before this bounce
+            # recorded the resolution.
+            tree = git(w.wd, "rev-parse", "HEAD^{tree}")
+
+            def _bare(d):
+                p = store.get_pr(d, pr_id)
+                p["integration"] = {
+                    "head": merged, "status": integration.UP_TO_DATE,
+                    "base_sha": (record or {}).get("base_sha"),
+                    "candidate_tree": tree,
+                }
+            store.locked_update(root, _bare)
+        return merged, err
+
+    monkeypatch.setattr(integration, "apply_integration", racing_apply)
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(
+        transcript, git(w.wd, "rev-parse", "HEAD"), rec["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+
+    stored = pr_entry(w)["integration"]
+    applied = stored["resolution"]["applied_merge_sha"]
+    assert stored["status"] == integration.UP_TO_DATE
+    assert stored["head"] == applied
+    assert stored["resolution_digest"]
+    # The next sign-off check carries it forward and still demands reuse.
+    again = integration.prepare(w.pm_dir, PR)
+    assert again["resolution"]["applied_merge_sha"] == applied
+    assert signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], again["head"])
+
+
+def test_a_bounce_does_not_overwrite_a_check_of_another_revision(w):
+    """The same-revision exception is narrow: any other record wins."""
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED
+
+    other = "c" * 40
+
+    def _other(d):
+        p = store.get_pr(d, PR)
+        p["integration"] = {"head": other, "status": integration.UP_TO_DATE,
+                            "candidate_tree": "d" * 40}
+    store.locked_update(w.pm_dir, _other)
+    signoff._record_applied_integration(
+        w.pm_dir, PR, rec, rec["head"], "e" * 40)
+    assert pr_entry(w)["integration"]["head"] == other
+
+
+def test_the_prompt_says_a_resolution_was_not_applied(w):
+    """A resolved candidate that pm has not applied must say so.
+
+    ``pm pr signoff integrate --record`` resolves the conflict in the isolated
+    candidate but applies nothing, so the record carries a resolution with no
+    ``applied_merge_sha`` and no ``apply_error``.  The prompt must not read as
+    if the branch were already integrated: a MERGE is blocked until it is.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED
+    assert not rec["resolution"].get("applied_merge_sha")
+    assert not rec.get("apply_error")
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "**Not applied**" in text
+    assert "has not been applied yet" in text
+    assert "Applied to the PR branch as" not in text
+
+
+def test_a_clean_bounce_keeps_the_base_interaction_summary(w):
+    """A clean base merged by a bounce must not lose what the base brought.
+
+    ``_prepare_bounce`` merges a clean base into the branch without a
+    resolution, so the next check sees the base inside HEAD and its own base
+    diff is empty.  Losing the earlier summary would hide the
+    behaviour-relevant base changes from the sign-off prompt and stop the
+    merge gate requiring the explicit evidence statement — the same hole the
+    applied-resolution carry-forward closes.
+    """
+    commit(w.repo, "pyproject.toml", "[project]\nname = 'p'\n", "base config")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN, rec
+    assert any("pyproject.toml" in c for c in rec["base_behavior_changes"])
+    pre_merge_base = rec["merge_base"]
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, rec["head"], rec["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+
+    again = integration.prepare(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    assert any("pyproject.toml" in c
+               for c in again["base_behavior_changes"]), again
+    assert again["base_range_from"] == pre_merge_base
+    stored = pr_entry(w)["integration"]
+    assert stored["base_files_count"] == 1, stored
+    # The merge gate must still ask for the explicit reuse/checks statement.
+    assert signoff.approval_justification_problem(PR, stored, again["head"])
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "`pyproject.toml` changed on the base" in text
+    assert f"{pre_merge_base[:12]}..{again['base_sha'][:12]}" in text
+    assert "(1 file(s))" in text
+
+    # A later launch re-checks again: the compact record carries the summary.
+    later = integration.prepare(w.pm_dir, PR)
+    assert any("pyproject.toml" in c for c in later["base_behavior_changes"])
+    assert later["base_range_from"] == pre_merge_base
+
+
+def test_a_new_base_does_not_inherit_the_earlier_bases_summary(w):
+    """Once the base moves on, its own changes replace the carried summary."""
+    commit(w.repo, "pyproject.toml", "[project]\nname = 'p'\n", "base config")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN, rec
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, rec["head"], rec["base_sha"])
+    signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    integration.prepare(w.pm_dir, PR)
+
+    commit(w.repo, "requirements.txt", "pytest\n", "base moves on")
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.CLEAN, again
+    assert any("requirements.txt" in c
+               for c in again["base_behavior_changes"]), again
+    assert not any("pyproject.toml" in c
+                   for c in again["base_behavior_changes"]), again
+    assert again["base_files"] == ["requirements.txt"], again
+    assert "base_range_from" not in again
+
+
+def test_stamp_signoff_launch_ignores_a_non_string_revision(w):
+    """A hand-edited non-string base revision must not crash the launch."""
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    sha = "a" * 40
+    signoff.stamp_signoff_launch(transcript, sha, 5)
+    assert signoff.signoff_launched_sha(w.tdir, PR) == sha
+    assert signoff.signoff_launched_base(w.tdir, PR) is None
+
+
+def test_a_manual_merge_after_a_failed_attempt_keeps_the_base_summary(w):
+    """Implementation reconciles a conflict by hand; the summary must survive.
+
+    The sign-off return tells implementation to fetch the base and merge it,
+    and pm's own metadata attempt can fail on a real field conflict.  The next
+    check then sees the base inside HEAD (its own base diff is empty), while
+    the stored record is the *failed attempt* — never applied.  It still
+    assessed that same base, so the files it changed, the overlap and the
+    behaviour-relevant changes must be carried: losing them would hide the
+    base interaction from the sign-off prompt and stop the merge gate
+    requiring the explicit evidence statement.
+    """
+    rec = _status_conflict(w)
+    assert rec["status"] == integration.CONFLICT
+    assert rec["resolution"]["unresolved"]
+    assert rec["base_files"] == ["pm/project.yaml"], rec
+    assert any("status" in c for c in rec["base_behavior_changes"]), rec
+
+    # The implementation step reconciles the conflict by hand, as the return
+    # text instructs ("git fetch the base and git merge ...").
+    git(w.wd, "fetch", "-q", "origin")
+    merged = subprocess.run(["/usr/bin/git", "merge", "--no-commit",
+                             "origin/master"], cwd=w.wd, capture_output=True,
+                            text=True)
+    assert merged.returncode != 0
+    ours = subprocess.run(["/usr/bin/git", "show", ":2:pm/project.yaml"],
+                          cwd=w.wd, capture_output=True, text=True, check=True)
+    (w.wd / "pm" / "project.yaml").write_text(ours.stdout)
+    data = store.load(w.wd / "pm")
+    store.get_pr(data, PR)["status"] = "in_review"
+    store.save(data, w.wd / "pm")
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "merge base, reconcile status")
+
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    assert again["base_files_count"] == 1, again
+    assert any("status" in c for c in again["base_behavior_changes"]), again
+    stored = pr_entry(w)["integration"]
+    # The merge gate must still require the explicit reuse/checks statement.
+    assert signoff.approval_justification_problem(PR, stored, again["head"])
+
+
+def test_a_resolved_candidate_never_applied_keeps_the_base_summary(w):
+    """A recorded-only resolution leaves the branch unmerged; a hand merge
+    afterwards must still show the base interaction.
+
+    ``--record`` (or a sign-off launch that could not touch a dirty workdir)
+    leaves a ``resolved`` check the branch never took.  Implementation can
+    then merge the base itself, so the next check sees the base inside HEAD
+    with no applied resolution to carry the provenance from.  The files the
+    base changed and the overlap must survive all the same.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    rec = integration.check_integration(w.pm_dir, PR)   # record only, no apply
+    assert rec["status"] == integration.RESOLVED, rec
+    assert not rec["resolution"].get("applied_merge_sha")
+
+    # The implementation step merges the base by hand, keeping both sides.
+    git(w.wd, "fetch", "-q", "origin")
+    merged = subprocess.run(["/usr/bin/git", "merge", "--no-commit",
+                             "origin/master"], cwd=w.wd, capture_output=True,
+                            text=True)
+    assert merged.returncode != 0
+
+    def stage(n: int) -> str:
+        return subprocess.run(
+            ["/usr/bin/git", "show", f":{n}:pm/project.yaml"], cwd=w.wd,
+            capture_output=True, text=True, check=True).stdout
+    text, detail = integration.resolve_project_yaml(
+        stage(1), stage(2), stage(3))
+    assert text, detail
+    (w.wd / "pm" / "project.yaml").write_text(text)
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "merge base, keep both records")
+
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    assert again["base_files_count"] == 1, again
+    assert again["overlap"] == ["pm/project.yaml"], again
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        prompt = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "Files changed on both sides: `pm/project.yaml`" in prompt
+    assert "(1 file(s))" in prompt
+
+
+def test_a_transient_error_between_the_assessment_and_a_hand_merge_keeps_it(w):
+    """A failed check must not break the base-interaction carry chain.
+
+    The failed metadata attempt (never applied) records the base interaction;
+    a transient check (the base fetch fails) then records ``error`` at the
+    same head; implementation reconciles the conflict by hand.  The next check
+    sees the base inside HEAD and carries the summary from the stored record —
+    which is the error one.  Without the assessed base on it, the files the
+    base changed and its behaviour-relevant changes vanish from the prompt and
+    the merge gate stops requiring the explicit evidence statement.
+    """
+    rec = _status_conflict(w)
+    assert rec["status"] == integration.CONFLICT
+    assert rec["base_files"] == ["pm/project.yaml"], rec
+    assert any("status" in c for c in rec["base_behavior_changes"]), rec
+
+    with patch("pm_core.integration.fetch_base",
+               lambda *a, **k: (None, "network down")):
+        err = integration.check_integration(w.pm_dir, PR)
+    assert err["status"] == integration.ERROR
+    assert err["head"] == rec["head"]
+    # The error record keeps the base the earlier check assessed (it is never
+    # mergeable, so nothing can bind to it) and its summary.
+    assert err["base_sha"] == rec["base_sha"], err
+    assert err["base_files_count"] == 1, err
+    assert any("status" in c for c in err["base_behavior_changes"]), err
+
+    # Implementation reconciles the conflict by hand, as the return text
+    # instructs ("git fetch the base and git merge ...").
+    git(w.wd, "fetch", "-q", "origin")
+    merged = subprocess.run(["/usr/bin/git", "merge", "--no-commit",
+                             "origin/master"], cwd=w.wd, capture_output=True,
+                            text=True)
+    assert merged.returncode != 0
+    ours = subprocess.run(["/usr/bin/git", "show", ":2:pm/project.yaml"],
+                          cwd=w.wd, capture_output=True, text=True, check=True)
+    (w.wd / "pm" / "project.yaml").write_text(ours.stdout)
+    data = store.load(w.wd / "pm")
+    store.get_pr(data, PR)["status"] = "in_review"
+    store.save(data, w.wd / "pm")
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "merge base, reconcile status")
+
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    assert again["base_files_count"] == 1, again
+    assert any("status" in c for c in again["base_behavior_changes"]), again
+    # The sign-off prompt still shows the base interaction and the merge gate
+    # still requires the explicit reuse/checks statement.
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        prompt = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "Files changed on both sides: `pm/project.yaml`" in prompt
+    assert "(1 file(s))" in prompt
+    stored = pr_entry(w)["integration"]
+    assert signoff.approval_justification_problem(PR, stored, again["head"])
+
+
+# --- the recovery path reads a hand-edited approval as absent --------------
+
+def test_github_merge_verification_renders_a_malformed_candidate_safely(
+        w, monkeypatch):
+    """The recovery path skips the merge gate, so it must not slice bad state.
+
+    ``--no-signoff-check`` / ``--propagation-only`` verify an already-published
+    GitHub merge against the recorded approval without running the merge gate.
+    A hand-edited ``candidate_tree`` used to raise ``TypeError`` there instead
+    of recording the mismatch.
+    """
+    head, base = "a" * 40, "b" * 40
+    log_line = f"{'d' * 40} {base} {head} {'e' * 40}"
+    monkeypatch.setattr(integration, "fetch_base",
+                        lambda *a, **k: ("c" * 40, None))
+    monkeypatch.setattr(
+        pr_mod.git_ops, "run_git",
+        lambda *a, **k: SimpleNamespace(returncode=0, stdout=log_line,
+                                        stderr=""))
+
+    pr_mod._verify_github_merge(
+        w.pm_dir, pr_entry(w), str(w.wd), "repo", "master", base, head,
+        {"status": "clean", "candidate_tree": 123})
+
+    stored = pr_entry(w)["merge_integrity"]
+    assert "approved ?" in stored["problem"]
+
+
+def test_recovery_skips_verification_for_a_malformed_approval(w, monkeypatch):
+    """A non-string approved sha/base is not a revision to verify against."""
+    calls = []
+    monkeypatch.setattr(pr_mod, "_verify_github_merge",
+                        lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(pr_mod, "_sync_main_repo_and_finalize",
+                        lambda *a, **k: None)
+    monkeypatch.setattr(integration, "fetch_base",
+                        lambda *a, **k: ("c" * 40, None))
+    monkeypatch.setattr(integration, "is_ancestor", lambda *a, **k: True)
+
+    entry = dict(pr_entry(w), signoff={
+        "verdict": SIGNOFF_MERGE, "sha": 123,
+        "integration": {"base_sha": 456}})
+    pr_mod._recover_completed_merge(
+        store.load(w.pm_dir), w.pm_dir, entry, "github", "master",
+        resolve_window=False, background=False, transcript=None,
+        companion=False)
+    assert calls == []
+
+
+def test_approved_candidate_reads_malformed_approvals_as_absent():
+    """``signoff``/``integration`` are hand-edited state, not typed records.
+
+    The recovery path (``--no-signoff-check`` / ``--propagation-only``) skips
+    the merge gate, so a scalar ``signoff`` (``.get`` on it raised
+    ``AttributeError``) or a non-string revision (sliced in
+    ``verify_github_merge``) must read as no bound approval instead of
+    raising out of ``pm pr merge``.
+    """
+    from pm_core import merge_integrity
+
+    good = {"verdict": SIGNOFF_MERGE, "sha": "a" * 40,
+            "integration": {"base_sha": "b" * 40}}
+    assert merge_integrity.approved_candidate({"signoff": good}) == (
+        "a" * 40, good["integration"])
+    # Not a mapping: no record at all.
+    assert merge_integrity.approved_candidate({"signoff": "merged"}) is None
+    assert merge_integrity.approved_candidate(
+        {"signoff": {"verdict": SIGNOFF_MERGE, "sha": "a" * 40,
+                     "integration": "bound"}}) is None
+    # A revision that is not a string cannot name the signed-off candidate.
+    assert merge_integrity.approved_candidate(
+        {"signoff": {"verdict": SIGNOFF_MERGE, "sha": 123,
+                     "integration": {"base_sha": "b" * 40}}}) is None
+    assert merge_integrity.approved_candidate(
+        {"signoff": {"verdict": SIGNOFF_MERGE, "sha": "a" * 40,
+                     "integration": {"base_sha": 456}}}) is None
+
+
+def test_apply_to_pr_tolerates_malformed_notes():
+    """Recording a mismatch must not raise on hand-edited note members.
+
+    The id set handed to ``generate_note_id`` is a ``set``, so a list/mapping
+    note id (unhashable) raised ``TypeError`` out of every sync path that
+    recorded a mismatch; a scalar ``notes`` value was iterated as characters.
+    The malformed members are kept as they are, and the note is still added
+    once.
+    """
+    from pm_core import merge_integrity
+
+    pr = {"id": "pr-200", "notes": [
+        {"id": ["not", "hashable"], "text": "hand-written"},
+        "scalar-member",
+        {"text": "no id"},
+    ]}
+    result = merge_integrity.MergeVerification(problem="merged elsewhere")
+    merge_integrity.apply_to_pr(pr, result)
+    assert pr["merge_integrity"]["problem"] == "merged elsewhere"
+    texts = [n.get("text") for n in pr["notes"] if isinstance(n, dict)]
+    assert texts.count("Merge integrity: merged elsewhere.") == 1
+    # The hand-written members are preserved, not dropped.
+    assert "scalar-member" in pr["notes"]
+    assert {"id": ["not", "hashable"], "text": "hand-written"} in pr["notes"]
+    # Recording the same problem again does not add a second note.
+    merge_integrity.apply_to_pr(pr, result)
+    texts = [n.get("text") for n in pr["notes"] if isinstance(n, dict)]
+    assert texts.count("Merge integrity: merged elsewhere.") == 1
+    # A scalar ``notes`` value is no collection: it is replaced by a list.
+    scalar = {"id": "pr-200", "notes": "hand-written"}
+    merge_integrity.apply_to_pr(scalar, result)
+    assert [n["text"] for n in scalar["notes"]] == [
+        "Merge integrity: merged elsewhere."]
+
+
+def test_same_target_reads_a_non_string_as_a_different_repository():
+    """A hand-edited ``target_repo`` cannot name the same repository.
+
+    ``same_target`` is handed the approval's ``integration.target_repo`` when
+    ``pm pr merge`` revalidates what the verdict was bound to.  ``Path(5)``
+    raised ``TypeError`` out of the command instead of reporting the mismatch,
+    so a value that is not a string reads as a *different* target (a refusal).
+    """
+    assert integration.same_target("/tmp", "/tmp") is True
+    assert integration.same_target("/tmp", 5) is False
+    assert integration.same_target(5, "/tmp") is False
+    assert integration.same_target("/tmp", None) is False
+
+
+def test_publish_refuses_a_malformed_bound_target_repo(w):
+    """``pm pr merge`` returns to sign-off instead of raising ``TypeError``.
+
+    The merge gate validates the approval's revisions and candidate tree, not
+    its ``target_repo``: a hand-edited value reached ``same_target`` and
+    crashed the publish path with a traceback instead of the refusal every
+    other binding mismatch gets.
+    """
+    entry = dict(pr_entry(w), signoff={
+        "verdict": SIGNOFF_MERGE, "sha": w.head,
+        "integration": {"status": "clean", "base_sha": "b" * 40,
+                        "candidate_tree": "c" * 40, "target_repo": 5}})
+    with patch.object(pr_mod, "trigger_tui_refresh"):
+        with pytest.raises(SystemExit) as exc:
+            pr_mod._publish_approved(
+                store.load(w.pm_dir), w.pm_dir, entry, "local", "master",
+                str(w.wd), resolve_window=False, background=False,
+                transcript=None, companion=False)
+    assert exc.value.code == 1
+
+
+def test_concurrent_applies_serialize_on_the_repository_lock(w):
+    """Two applies at once: one merges, the other sees HEAD moved.
+
+    Without the repository lock both can pass the HEAD check and enter
+    ``git merge`` in the same workdir; the loser's ``merge --abort`` then
+    discards the winner's in-progress merge and both report "merge failed".
+    Serialized, the loser returns ``HEAD_MOVED`` (which ``prepare`` re-checks
+    and records) and the branch gets exactly one merge commit.
+    """
+    commit(w.repo, "base.txt", "base\n", "base moves ahead")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN, rec
+    head = rec["head"]
+    results: list[tuple[str | None, str | None]] = []
+    barrier = threading.Barrier(2)
+
+    def apply():
+        barrier.wait(timeout=30)
+        results.append(integration.apply_integration(w.pm_dir, PR, rec))
+
+    threads = [threading.Thread(target=apply) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+    assert len(results) == 2, results
+
+    merged = [sha for sha, err in results if sha and not err]
+    errors = [err for sha, err in results if not sha]
+    assert len(merged) == 1, results
+    assert errors == [integration.HEAD_MOVED], results
+    assert git(w.wd, "rev-parse", "HEAD") == merged[0]
+    assert git(w.wd, "rev-parse", "HEAD^{tree}") == rec["candidate_tree"]
+    assert git(w.wd, "status", "--porcelain") == ""
+    # Exactly one merge commit on top of the reviewed head.
+    assert git(w.wd, "rev-list", "--count", "--merges",
+               f"{head}..HEAD") == "1"
+
+
+def test_integrate_cli_apply_checks_the_base_once_before_applying(w, monkeypatch):
+    """`--apply` delegates to ``prepare`` instead of checking the base twice.
+
+    ``prepare`` is check -> apply -> re-check; a separate check first would
+    fetch the base and merge the candidate a third time for the same result.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    calls = []
+    real_run_check = integration.run_check
+
+    def counting_run_check(*args, **kwargs):
+        calls.append(1)
+        return real_run_check(*args, **kwargs)
+
+    monkeypatch.setattr(integration, "run_check", counting_run_check)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(
+            pr_mod.pr, ["signoff", "integrate", PR, "--apply"])
+    assert r.exit_code == 0, r.output
+    # prepare's check + the post-apply re-check.
+    assert len(calls) == 2, calls
+    rec = pr_entry(w)["integration"]
+    assert rec["resolution"]["applied_merge_sha"]
+    assert git(w.wd, "rev-parse", "HEAD") == rec["resolution"]["applied_merge_sha"]
+
+
+def test_pr_show_reads_malformed_path_lists_as_absent(w):
+    """``pm pr show`` is the reader the omission markers point at.
+
+    ``integration_pointer`` tells a session to run it, so a hand-edited
+    non-list ``overlap``/``conflicts`` must read as absent there instead of
+    raising out of the command (an int broke ``len()``, a string was joined
+    character by character) — the same contract every other reader follows.
+    """
+    rec = _metadata_conflict(w)
+
+    def _malformed(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ["overlap"] = 5
+        integ["conflicts"] = "not-a-list"
+        integ["overlap_total"] = "garbage"
+    store.locked_update(w.pm_dir, _malformed)
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert "## Integration" in r.output
+    # No invented paths: the malformed values are not rendered as lists.
+    assert "Overlap" not in r.output
+    assert "Conflicts" not in r.output
+    # The rest of the record is still rendered.
+    assert f"Base sha: {rec['base_sha']}" in r.output
+
+    # A list of non-strings renders through ``str`` instead of raising out of
+    # ``join``.
+    def _non_strings(d):
+        store.get_pr(d, PR)["integration"]["conflicts"] = [1, 2]
+    store.locked_update(w.pm_dir, _non_strings)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert "Conflicts (2): 1, 2" in r.output
+
+    # A non-mapping ``integration`` / ``signoff_return`` is no record to print.
+    def _scalars(d):
+        entry = store.get_pr(d, PR)
+        entry["integration"] = "garbage"
+        entry["signoff_return"] = 7
+    store.locked_update(w.pm_dir, _scalars)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert "## Integration" not in r.output
+    assert "## Sign-off return" not in r.output
+
+
+def test_the_signoff_evidence_block_tolerates_every_malformed_member():
+    """``pm pr show``'s ``## Sign-off`` reader against hand-edited state.
+
+    ``record_signoff_verdict`` writes the evidence block into the tracked
+    project.yaml, so every member is hand-editable.  ``pm pr show`` is the
+    reader the abbreviated surfaces point at, so a member that is not the
+    expected type must contribute no line rather than raising out of the
+    command (or printing a value the record does not hold).
+    """
+    from pm_core.cli.pr import _signoff_evidence_lines
+
+    bad = {"SIGNOFF_MERGE": True}
+    record = {
+        "verdict": SIGNOFF_MERGE, "sha": bad, "origin": 5, "ts": [],
+        "invalidated": bad,
+        "integration": {"base_sha": bad, "base_branch": 5},
+        "evidence": {
+            "reviewed_head": bad,
+            "candidate_tree": bad,
+            "resolved_from": {"head": bad, "base_sha": bad},
+            "review": {"sha": bad, "sha_source": [], "note": 7},
+            "qa": {"planner_head": bad, "overall": []},
+            "reused": "not-a-list",
+            "reused_total": "3",
+            "reason": 5,
+            "checks": [],
+            "required_return_stage": bad,
+            "prior_signoff": {"verdict": bad, "sha": bad},
+        },
+    }
+    lines = _signoff_evidence_lines(record)
+    assert lines and lines[0] == f"Verdict: {SIGNOFF_MERGE}"
+    joined = "\n".join(lines)
+    for member in ("Approved head", "Approved base", "Reviewed head",
+                   "Candidate tree", "Resolved from", "Review:", "QA:",
+                   "Reused evidence", "Reuse reason", "Targeted checks",
+                   "Required return stage", "Prior sign-off"):
+        assert member not in joined, (member, joined)
+
+    # A non-string verdict is no decision, and a non-mapping record is no
+    # record: no section at all.
+    assert _signoff_evidence_lines({"verdict": bad}) == []
+    assert _signoff_evidence_lines(5) == []
+    assert _signoff_evidence_lines(None) == []
+
+
+def test_a_non_utf8_launch_stamp_does_not_crash_the_driver(w):
+    """A stamp file that cannot be decoded reads as "no stamp".
+
+    ``_launch_stamp_lines`` is read on every sign-off driver tick; a
+    non-UTF-8 file raises ``UnicodeDecodeError`` (a ``ValueError``, not an
+    ``OSError``), which the old guard let escape — taking the tick down
+    instead of treating the run as unstamped.
+    """
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    stamp = signoff.signoff_launch_stamp(transcript)
+    stamp.parent.mkdir(parents=True, exist_ok=True)
+    stamp.write_bytes(b"\xff\xfe\x00 not utf-8")
+    assert signoff.signoff_launched_sha(w.tdir, PR) is None
+    assert signoff.signoff_launched_base(w.tdir, PR) is None
+    # A decodable stamp still works (the guard is not a blanket "unreadable").
+    signoff.stamp_signoff_launch(transcript, "a" * 40, "b" * 40)
+    assert signoff.signoff_launched_sha(w.tdir, PR) == "a" * 40
+    assert signoff.signoff_launched_base(w.tdir, PR) == "b" * 40
+
+
+def test_a_concurrent_apply_is_not_reported_as_pm_not_merging(w):
+    """A HEAD race during a bounce apply is not "pm did not merge the base".
+
+    ``apply_integration`` returns ``HEAD_MOVED`` when a concurrent apply won;
+    the winner's merge is in the branch, so the return text must not claim the
+    base was not integrated.
+    """
+    ret = {"verdict": SIGNOFF_REVIEW, "hop": "review", "reason": "r",
+           "reviewed_head": "a" * 40, "awaiting": "review",
+           "apply_error": integration.HEAD_MOVED}
+    text = signoff.format_signoff_return({"id": PR, "signoff_return": ret})
+    assert "pm did not merge the base into the branch" not in text
+    assert "moved while pm was merging the base" in text
+
+    # A genuine apply failure keeps the direct wording.
+    ret["apply_error"] = "workdir has uncommitted changes"
+    text = signoff.format_signoff_return({"id": PR, "signoff_return": ret})
+    assert "pm did not merge the base into the branch" in text
+
+
+def test_the_return_text_says_how_many_behaviour_changes_it_omitted():
+    """A trimmed behaviour list must name what it dropped.
+
+    The return block shows the first 10 changes; ``compact`` keeps at most
+    30 and records the real total in ``base_behavior_count``.  Without a
+    marker the routed step would under-read how much of the base's
+    behaviour-relevant change it was asked to weigh.
+    """
+    changes = [f"`pm/project.yaml`: project.model_config.k{i} changed (1 -> 2)"
+               for i in range(25)]
+    pr = {"id": PR, "status": "in_progress", "signoff_return": {
+        "verdict": SIGNOFF_REVIEW, "hop": "review", "reviewed_head": "a" * 40,
+        "reason": "the base changed model settings",
+        "integration": {"status": "clean", "base_branch": "master",
+                        "base_sha": "b" * 40, "target_repo": "repo",
+                        "base_behavior_changes": changes}}}
+    text = signoff.format_signoff_return(pr)
+    assert changes[9] in text and changes[10] not in text
+    assert "… 15 more" in text
+
+    # ``base_behavior_count`` records the record's real total when the stored
+    # list is itself bounded: report that remainder, not the stored list's.
+    pr["signoff_return"]["integration"]["base_behavior_changes"] = changes[:30]
+    pr["signoff_return"]["integration"]["base_behavior_count"] = 35
+    text = signoff.format_signoff_return(pr)
+    assert "… 25 more" in text
+
+
+def test_the_return_record_keeps_the_real_behaviour_total(w):
+    """The returned copy of the behaviour list keeps the record's total.
+
+    ``compact`` stores at most 30 changes and records the real length in
+    ``base_behavior_count``.  Without carrying it into ``signoff_return``, the
+    return text's "… N more" marker would count against the bounded list and
+    under-report how much of the base the routed step must weigh.
+    """
+    _metadata_conflict(w)
+    changes = [f"`pm/project.yaml`: project.model_config.k{i} changed (1 -> 2)"
+               for i in range(30)]
+
+    def _record(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ["base_behavior_changes"] = changes
+        integ["base_behavior_count"] = 35
+    store.locked_update(w.pm_dir, _record)
+
+    pr = pr_entry(w)
+    ret = signoff.build_return_record(
+        pr, SIGNOFF_REVIEW, "review",
+        reviewed_head=pr["integration"]["head"])
+    assert ret["integration"]["base_behavior_count"] == 35
+    text = signoff.format_signoff_return(dict(pr, signoff_return=ret))
+    assert "… 25 more" in text
+
+
+def test_a_coerced_conflict_reason_says_the_list_is_abbreviated():
+    """The coerced reason names at most 5 conflicts; say so when trimmed."""
+    rec = {"head": "a" * 40, "base_sha": "b" * 40, "base_branch": "master",
+           "status": integration.CONFLICT,
+           "conflicts": [f"f{i}.py" for i in range(8)]}
+    verdict, reason = signoff.effective_verdict(SIGNOFF_MERGE, rec, "a" * 40)
+    assert verdict == SIGNOFF_IMPL
+    assert "f0.py" in reason and "f5.py" not in reason
+    assert "… 3 more" in reason
+
+
+
+
+# --- why sign-off is running again (a refused merge) ------------------------
+
+# The block's distinctive opening: the prompt always tells the agent to
+# *produce* ``$CAP/report.html``, so only this phrase proves the pointer.
+POINTER = "Why sign-off is running again"
+
+
+def _approve_and_refuse(w, approved: str, reason: str) -> None:
+    """Record an approval at *approved*, then have the merge gate refuse it."""
+    rec = integration.check_integration(w.pm_dir, PR)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, approved, "manual",
+        integration=integration.binding(rec))
+    signoff.invalidate_signoff(w.pm_dir, PR, reason)
+
+
+def _signoff_prompt(w) -> str:
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        return prompt_gen.generate_signoff_prompt(data, PR)
+
+
+def test_a_refused_merge_points_the_rerun_at_the_previous_report(w):
+    """No PR work since the refusal: name the previous report and its verdict.
+
+    The relaunch applies the metadata resolution, so HEAD moves — but that is
+    pm's base merge, not PR work, and the previous report still describes the
+    PR's own changes.  The re-run must be told it may reuse those conclusions.
+    """
+    rec = _metadata_conflict(w)
+    approved = rec["_original_head"]
+    _approve_and_refuse(w, approved, "master moved since sign-off (aaaa -> bbbb)")
+    after = integration.prepare(w.pm_dir, PR)
+    # pm applied the base on top of exactly the approved head.
+    assert after["resolution"]["resolved_from"]["head"] == approved
+    assert after["resolution"]["applied_merge_sha"]
+
+    text = _signoff_prompt(w)
+    assert POINTER in text
+    assert "master moved since sign-off" in text
+    assert f"`{approved[:12]}`" in text
+    assert "Read it before you overwrite it" in text
+
+
+def test_a_refused_merge_without_an_apply_still_points_at_the_previous_report(w):
+    """A clean base move applies nothing, so HEAD is unchanged — reuse too."""
+    commit(w.wd, "feature2.txt", "feature 2\n", "feature work")
+    approved = git(w.wd, "rev-parse", "HEAD")
+    _approve_and_refuse(w, approved, "master moved since sign-off (aaaa -> bbbb)")
+    commit(w.repo, "late.txt", "late\n", "base moves after approval")
+    rec = integration.prepare(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN, rec
+    assert rec["head"] == approved
+    assert not rec.get("resolution")
+
+    text = _signoff_prompt(w)
+    assert POINTER in text
+    assert f"`{approved[:12]}`" in text
+
+
+def test_pr_work_since_the_refusal_does_not_point_at_the_previous_report(w):
+    """Real PR work makes the previous report's conclusions stale."""
+    commit(w.wd, "feature2.txt", "feature 2\n", "feature work")
+    approved = git(w.wd, "rev-parse", "HEAD")
+    _approve_and_refuse(w, approved, "master moved since sign-off (aaaa -> bbbb)")
+    commit(w.wd, "later.txt", "later\n", "PR work after the refusal")
+    integration.prepare(w.pm_dir, PR)
+
+    text = _signoff_prompt(w)
+    assert POINTER not in text
+    assert "Read it before you overwrite it" not in text
+
+
+def test_a_verdict_bounce_does_not_point_at_the_previous_report(w):
+    """A bounce is a different episode: it has its own return block."""
+    pr = pr_entry(w)
+    ret = signoff.build_return_record(
+        pr, SIGNOFF_REVIEW, "review", reviewed_head=w.head)
+
+    def _set(d):
+        store.get_pr(d, PR)["signoff_return"] = ret
+    store.locked_update(w.pm_dir, _set)
+
+    text = _signoff_prompt(w)
+    assert "## Previous sign-off return" in text
+    assert POINTER not in text
+
+
+def test_pr_work_after_an_applied_resolution_does_not_point_at_the_previous_report(w):
+    """A commit on top of the applied base merge is PR work after the refusal.
+
+    ``resolved_from.head`` stays the approved revision permanently, so the
+    pointer must also require that the applied merge is still the revision
+    the current check saw.
+    """
+    rec = _metadata_conflict(w)
+    approved = rec["_original_head"]
+    _approve_and_refuse(w, approved, "master moved since sign-off (aaaa -> bbbb)")
+    after = integration.prepare(w.pm_dir, PR)
+    assert after["resolution"]["resolved_from"]["head"] == approved
+    commit(w.wd, "later.txt", "later\n", "PR work after the relaunch")
+    moved = integration.check_integration(w.pm_dir, PR)
+    assert moved["head"] == git(w.wd, "rev-parse", "HEAD")
+    assert moved["head"] != after["resolution"]["applied_merge_sha"]
+
+    text = _signoff_prompt(w)
+    assert POINTER not in text
+
+
+def test_a_bounce_after_a_refused_merge_does_not_point_at_the_previous_report(w):
+    """The invalidation marker outlives the bounce, but the bounce is now the
+    current episode — and its run overwrote the report the marker names."""
+    rec = _metadata_conflict(w)
+    approved = rec["_original_head"]
+    _approve_and_refuse(w, approved, "master moved since sign-off (aaaa -> bbbb)")
+    after = integration.prepare(w.pm_dir, PR)
+    assert after["resolution"]["resolved_from"]["head"] == approved
+    # Sign-off bounced (say a targeted QA) without adding PR work, so HEAD is
+    # still the approved revision via the applied resolution — the head test
+    # alone cannot tell this episode from the invalidation relaunch.
+    ret = signoff.build_return_record(
+        pr_entry(w), SIGNOFF_REQA, "qa", reviewed_head=after["head"])
+
+    def _set(d):
+        store.get_pr(d, PR)["signoff_return"] = ret
+    store.locked_update(w.pm_dir, _set)
+
+    text = _signoff_prompt(w)
+    assert "## Previous sign-off return" in text
+    assert POINTER not in text
+
+
+def test_recording_a_new_verdict_clears_the_invalidation_reason(w):
+    commit(w.wd, "feature2.txt", "feature 2\n", "feature work")
+    approved = git(w.wd, "rev-parse", "HEAD")
+    _approve_and_refuse(w, approved, "master moved since sign-off")
+    assert pr_entry(w).get("signoff_invalidated")
+    signoff.record_signoff_verdict(w.pm_dir, PR, SIGNOFF_REVIEW, w.head,
+                                   "manual")
+    assert not pr_entry(w).get("signoff_invalidated")
+    assert POINTER not in _signoff_prompt(w)
+
+
+def test_a_malformed_invalidation_record_is_not_a_pointer(w):
+    """Hand-edited state: no revision means nothing to point at, never raise."""
+    def _set(d):
+        pr = store.get_pr(d, PR)
+        pr["signoff_invalidated"] = {"reason": "base moved", "sha": 5}
+    store.locked_update(w.pm_dir, _set)
+    assert POINTER not in _signoff_prompt(w)
+
+    def _set_reason(d):
+        pr = store.get_pr(d, PR)
+        pr["signoff_invalidated"] = {"reason": None, "sha": w.head}
+    store.locked_update(w.pm_dir, _set_reason)
+    assert POINTER not in _signoff_prompt(w)
+
+
+# --- honesty of the deletion / applied-merge / path surfaces ---------------
+
+def test_an_unresolved_entry_without_details_is_not_rendered_as_none(w):
+    """A hand-edited ``unresolved`` entry that names no conflicts is described.
+
+    ``project.yaml`` is hand-editable state: an entry with a missing or null
+    ``conflicts`` cannot name what pm failed to reconcile, and rendering the
+    raw value presented ``None`` as if it were the conflict (in the router's
+    coercion message, the sign-off prompt, the return text and the CLI).  All
+    of them now use the same phrase R9-14 specifies, so the surfaces agree.
+    """
+    record = {"status": integration.RESOLVED, "head": "a" * 40,
+              "base_sha": "b" * 40, "candidate_tree": "c" * 40,
+              "base_branch": "master",
+              "resolution": {"paths": [{"path": "pm/project.yaml"}],
+                             "unresolved": [{"path": "pm/project.yaml"}]}}
+    phrase = "unresolved conflicts recorded without details"
+    assert integration.resolution_conflicts_text(
+        {"path": "pm/project.yaml"}) == phrase
+    assert integration.resolution_conflicts_text({"conflicts": None}) == phrase
+    assert integration.resolution_conflicts_text({"conflicts": []}) == phrase
+    assert integration.resolution_conflicts_text(
+        {"conflicts": ["a: changed"]}) == "['a: changed']"
+
+    _, reason = signoff.effective_verdict(SIGNOFF_MERGE, record, "a" * 40)
+    assert phrase in reason and "None" not in reason, reason
+
+    pr = {"id": PR, "integration": record,
+          "signoff_return": {"verdict": SIGNOFF_IMPL, "hop": "impl",
+                             "reviewed_head": "a" * 40,
+                             "integration": record,
+                             "ts": "2026-01-01T00:00:00Z"}}
+    block = prompt_gen._signoff_integration_block(pr, PR)
+    assert phrase in block and "None" not in block, block
+    text = signoff.format_signoff_return(pr)
+    assert phrase in text and "None" not in text, text
+
+
+def test_modify_delete_of_project_yaml_is_a_deletion_edit_conflict():
+    """A deleted side has no document to merge by record id.
+
+    Git reports this as a modify/delete conflict and stages no blob for the
+    deleted side, so the resolver must say that.  Reporting a YAML problem
+    ("not a mapping on one side") would send the agent looking for a syntax
+    error in a file that is fine, instead of at the deletion.
+    """
+    ours = BASE_YAML + "- id: pr-300\n  title: Feat\n  status: pending\n"
+
+    merged, details = integration.resolve_project_yaml(BASE_YAML, ours, None)
+    assert merged is None
+    assert any("deleted on the new base" in c
+               for c in details["conflicts"]), details
+    assert not any("not a mapping" in c for c in details["conflicts"])
+
+    merged, details = integration.resolve_project_yaml(BASE_YAML, None,
+                                                       BASE_YAML)
+    assert merged is None
+    assert any("deleted on the PR branch" in c
+               for c in details["conflicts"]), details
+    assert not any("not a mapping" in c for c in details["conflicts"])
+
+    # A malformed document (not a deletion) keeps the readable YAML problem.
+    merged, details = integration.resolve_project_yaml(
+        BASE_YAML, "- a\n- b\n", BASE_YAML)
+    assert merged is None
+    assert "not a mapping" in (details.get("error") or ""), details
+
+
+def test_the_return_text_names_the_applied_merge_once(w):
+    """A bounce that applied the resolution must not report the merge twice.
+
+    The resolution block and the ``applied`` block describe the same merge;
+    saying it twice reads as two separate integrations.  The diff hint the
+    routed step needs must survive the de-duplication.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED
+
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, git(w.wd, "rev-parse", "HEAD"),
+                                 rec["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+    ret = pr_entry(w)["signoff_return"]
+    merge_sha = ret["applied"]["merge_sha"]
+    assert ret["integration"]["resolution"]["applied_merge_sha"] == merge_sha
+
+    text = signoff.format_signoff_return(pr_entry(w))
+    assert text.count(merge_sha[:12]) == 1, text
+    assert f"git diff {rec['base_sha'][:12]} HEAD" in text
+
+
+def test_a_hand_edited_applied_merge_is_not_rendered_as_a_revision(w):
+    """Only a git object name is shown as the merge the branch carries.
+
+    ``applied_merge_sha`` is hand-editable project.yaml state and the lines
+    that render it sit beside commands the agent is told to run, so a shell
+    fragment must fall back rather than be interpolated.
+    """
+    fragment = "abc; touch /tmp/pwned"
+    _metadata_conflict(w)
+
+    def _set(d):
+        integ = store.get_pr(d, PR)["integration"]
+        resolution = dict(integ["resolution"])
+        resolution["applied_merge_sha"] = fragment
+        integ["resolution"] = resolution
+
+    store.locked_update(w.pm_dir, _set)
+
+    prompt = _signoff_prompt(w)
+    assert "touch /tmp/pwned" not in prompt
+    assert "Applied to the PR branch as `<merge>`" in prompt
+
+    pr = pr_entry(w)
+    pr["signoff_return"] = signoff.build_return_record(
+        pr, SIGNOFF_REVIEW, "review",
+        reviewed_head=pr["integration"]["head"])
+    text = signoff.format_signoff_return(pr)
+    assert "touch /tmp/pwned" not in text
+    assert "as `?`" in text
+
+
+def test_a_hand_edited_reviewed_head_is_not_a_command_revision():
+    """Only a git object name becomes the provenance command's revision.
+
+    ``signoff_return`` is hand-editable project.yaml state, and the sign-off
+    prompt tells the agent to run ``git log <rev>..HEAD`` built from its
+    ``reviewed_head``.  A value that is not an object name must fall back to
+    the placeholder rather than be interpolated into the command (the same
+    rule the return text's ``git diff``/``git merge`` hints follow).
+    """
+    def _return(reviewed_head):
+        pr = {"id": "pr-1", "signoff_return": {
+            "verdict": SIGNOFF_IMPL, "hop": "impl",
+            "reviewed_head": reviewed_head, "reason": "x", "awaiting": "impl"}}
+        text = signoff.format_signoff_return(pr, for_signoff=True)
+        return next(l for l in text.splitlines() if "Provenance:" in l)
+
+    hostile = _return("$(touch /tmp/pwned)")
+    assert "git log <old head>..HEAD" in hostile
+    assert "$(" not in hostile and "touch" not in hostile
+
+    # A real revision is still named (the command is useful).
+    sha = "a" * 40
+    assert f"git log {sha[:12]}..HEAD" in _return(sha)
+
+
+def test_a_non_string_resolution_path_is_not_reported_as_resolved(w):
+    """Hand-edited state: a path that is not a string is no path at all.
+
+    The CLI and ``pm pr show`` must not label it "resolved" — pm cannot name
+    what it resolved — and must not raise on it.
+    """
+    _metadata_conflict(w)
+
+    def _set(d):
+        integ = store.get_pr(d, PR)["integration"]
+        resolution = dict(integ["resolution"])
+        resolution["paths"] = [{"path": ["pm/project.yaml"], "records": {}}]
+        integ["resolution"] = resolution
+
+    store.locked_update(w.pm_dir, _set)
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert "Resolved: [" not in r.output
+    assert "Resolved: pm/project.yaml" not in r.output
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(pr_mod.pr, ["signoff", "integrate", PR])
+    assert r.exit_code == 0, r.output
+    assert "resolved: [" not in r.output
+
+
+def test_a_non_string_resolution_path_is_not_rendered_by_prompt_or_return(w):
+    """Hand-edited state: no surface may print a malformed path as a path.
+
+    The CLI, ``pm pr show`` and the sign-off launch read a non-string
+    ``path`` as absent (it is not a path, and not a set member either).  The
+    sign-off prompt and the return text must follow the same contract: name
+    the file pm can only have resolved (the fallback ``summary`` uses) rather
+    than render the malformed value as if pm had resolved it.
+    """
+    _metadata_conflict(w)
+
+    def _set(d):
+        integ = store.get_pr(d, PR)["integration"]
+        resolution = dict(integ["resolution"])
+        resolution["paths"] = [dict(resolution["paths"][0],
+                                    path=["pm/project.yaml"])]
+        integ["resolution"] = resolution
+    store.locked_update(w.pm_dir, _set)
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "['pm/project.yaml']" not in text
+    assert "`pm/project.yaml`" in text
+
+    pr = pr_entry(w)
+    pr = dict(pr, status="in_progress", signoff_return={
+        "verdict": SIGNOFF_REVIEW, "hop": "review", "reason": "x",
+        "reviewed_head": pr["integration"]["head"],
+        "integration": pr["integration"]})
+    ret = signoff.format_signoff_return(pr)
+    assert "['pm/project.yaml']" not in ret
+    assert "`pm/project.yaml`" in ret
+
+
+def test_a_non_string_unresolved_path_is_not_rendered_as_a_path(w):
+    """An unresolved entry's path follows the same hand-edited-state contract.
+
+    An ``unresolved`` entry is labelled "attempted — NOT resolved", but its
+    ``path`` member is still a path: a non-string is not one.  The sign-off
+    prompt, the return text and ``pm pr show`` must name the file pm can only
+    have attempted (``project.yaml``) instead of printing the raw value as a
+    path, so a hand-edited record cannot make pm name a file it never touched.
+    """
+    _metadata_conflict(w)
+
+    def _set(d):
+        integ = store.get_pr(d, PR)["integration"]
+        resolution = dict(integ["resolution"])
+        resolution["unresolved"] = [{"path": ["pm/project.yaml"],
+                                     "conflicts": ["same field changed"]}]
+        integ["resolution"] = resolution
+    store.locked_update(w.pm_dir, _set)
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "['pm/project.yaml']" not in text
+    assert "**Unresolved** `project.yaml`" in text
+
+    pr = pr_entry(w)
+    pr = dict(pr, status="in_progress", signoff_return={
+        "verdict": SIGNOFF_REVIEW, "hop": "review", "reason": "x",
+        "reviewed_head": pr["integration"]["head"],
+        "integration": pr["integration"]})
+    ret = signoff.format_signoff_return(pr)
+    assert "['pm/project.yaml']" not in ret
+    assert "`project.yaml`: ['same field changed']" in ret
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert "Unresolved: ['pm/project.yaml']" not in r.output
+    assert "Unresolved: project.yaml: ['same field changed']" in r.output
+
+
+def test_a_malformed_unresolved_value_is_never_labelled_resolved(w):
+    """A truthy non-list ``unresolved`` is a refusal everywhere; the labels agree.
+
+    ``pm`` never records a RESOLVED candidate with unresolved conflicts, but
+    project.yaml is hand-editable.  ``valid_for`` and the merge gate read the
+    value's truthiness (a refusal), and the sign-off prompt labels the attempt
+    "NOT resolved" — so the one-line summary and the per-path lines the CLI
+    and ``pm pr show`` print must not claim the path was resolved either.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    # A check without ``prepare``: the resolved candidate is *not* applied, so
+    # the stored record stays RESOLVED and the path labels are its outcome.
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED, rec
+    assert not rec["resolution"].get("applied_merge_sha")
+
+    def _tamper(d):
+        store.get_pr(d, PR)["integration"]["resolution"]["unresolved"] = \
+            "garbage"
+    store.locked_update(w.pm_dir, _tamper)
+
+    pr = pr_entry(w)
+    integ = pr["integration"]
+    # The malformed value cannot name what failed; every recorded path is an
+    # attempt (never labelled resolved).
+    assert integration.unresolved_paths(integ) == {"pm/project.yaml"}
+    # The summary must agree with the per-path lines.
+    assert "unresolved conflicts remain" in integration.summary(integ)
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert "Resolution attempted (NOT resolved): pm/project.yaml" in r.output
+    assert "Resolved: pm/project.yaml" not in r.output
+
+    # The sign-off prompt already reads the value's truthiness: the same
+    # "NOT resolved" wording, so the two surfaces agree.
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "attempted (pm, by record id) — NOT resolved" in text
+    # The Result line renders the (honest) one-line summary.
+    assert "metadata resolution attempted but unresolved conflicts remain" \
+        in text
+
+
+def test_a_benign_recheck_does_not_launder_a_malformed_unresolved(w):
+    """A hand-edited ``unresolved`` refusal survives the compact rewrite.
+
+    A truthy non-list ``unresolved`` is a refusal everywhere (``valid_for``,
+    the merge gate, the router, the prompt): the value cannot name what pm
+    failed to reconcile, so the record must never read as a clean resolution.
+    Every integration check rewrites the record through ``compact``, so a
+    compaction that dropped the malformed value would turn the refusal into an
+    approvable record on the next routine re-check — the person's edit erased
+    rather than surfaced.  The recorded value is kept verbatim (and with it in
+    the digest, so an approval bound to the clean form stops matching).
+    """
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+    clean_digest = pr_entry(w)["integration"]["resolution_digest"]
+
+    def _tamper(d):
+        store.get_pr(d, PR)["integration"]["resolution"]["unresolved"] = \
+            "garbage"
+    store.locked_update(w.pm_dir, _tamper)
+    # The edit is refused (its digest no longer describes the record), and it
+    # stays refused after the rewrite below.
+    refusal = signoff.merge_gate_refusal(pr_entry(w), rec["head"], "master")
+    assert refusal, "a hand-edited unresolved value must never be approved"
+
+    # A routine re-check carries the resolution forward and rewrites the
+    # record: the malformed value must still be there, still refusing.
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE
+    stored = pr_entry(w)["integration"]
+    assert stored["resolution"].get("unresolved") == "garbage"
+    refusal = signoff.merge_gate_refusal(pr_entry(w), again["head"], "master")
+    assert refusal, "the re-check must not launder the refusal into a merge"
+
+    # Removing the edit and re-checking recomputes the clean digest, so the
+    # approval bound to it holds again: the edit was refused, not absorbed.
+    def _restore(d):
+        store.get_pr(d, PR)["integration"]["resolution"]["unresolved"] = []
+    store.locked_update(w.pm_dir, _restore)
+    restored = integration.check_integration(w.pm_dir, PR)
+    assert restored["resolution_digest"] == clean_digest
+    assert signoff.merge_gate_refusal(
+        pr_entry(w), restored["head"], "master") is None
+
+
+def test_a_benign_recheck_does_not_launder_a_malformed_unresolved_list(w):
+    """A truthy ``unresolved`` *list* of non-mappings is a refusal too.
+
+    ``pm`` writes a list of mappings, but project.yaml is hand-editable: a
+    list of strings (or of anything else that is not a mapping) cannot name
+    what pm failed to reconcile, and ``resolution_entries`` drops those
+    members.  Every reader tests the value's truthiness (``valid_for``, the
+    merge gate, the router, the prompt), so a compaction that wrote ``[]``
+    would launder the refusal into a clean, approvable resolution on the next
+    routine re-check — the same hole the non-list value has.
+    """
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+    clean_digest = pr_entry(w)["integration"]["resolution_digest"]
+    edited = ["pm/project.yaml: both sides changed status differently"]
+
+    def _tamper(d):
+        store.get_pr(d, PR)["integration"]["resolution"]["unresolved"] = \
+            list(edited)
+    store.locked_update(w.pm_dir, _tamper)
+    # The edit is refused (its digest no longer describes the record), and it
+    # stays refused after the rewrite below.
+    assert signoff.merge_gate_refusal(pr_entry(w), rec["head"], "master")
+
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE
+    stored = pr_entry(w)["integration"]
+    assert stored["resolution"].get("unresolved") == edited
+    refusal = signoff.merge_gate_refusal(pr_entry(w), again["head"], "master")
+    assert refusal, "the re-check must not launder the refusal into a merge"
+
+    # Removing the edit and re-checking recomputes the clean digest, so the
+    # approval bound to it holds again: the edit was refused, not absorbed.
+    def _restore(d):
+        store.get_pr(d, PR)["integration"]["resolution"]["unresolved"] = []
+    store.locked_update(w.pm_dir, _restore)
+    restored = integration.check_integration(w.pm_dir, PR)
+    assert restored["resolution_digest"] == clean_digest
+    assert signoff.merge_gate_refusal(
+        pr_entry(w), restored["head"], "master") is None
+
+
+def test_an_unresolved_list_that_names_no_path_is_never_labelled_resolved(w):
+    """A truthy ``unresolved`` list without a string ``path`` refuses every path.
+
+    ``unresolved_paths`` cannot enumerate what such a value failed to
+    reconcile (a list of strings, or of mappings whose ``path`` is not a
+    string), so every recorded path must read as an attempt: the CLI and
+    ``pm pr show`` must not label a path "resolved" while the one-line summary
+    and the prompt say the resolution is unresolved.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    # A check without ``prepare``: the resolved candidate is *not* applied, so
+    # the stored record stays RESOLVED and the path labels are its outcome.
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED, rec
+
+    for malformed in (["pm/project.yaml: same field changed"],
+                      [{"conflicts": ["same field changed"]}]):
+        def _tamper(d, value=list(malformed)):
+            store.get_pr(d, PR)["integration"]["resolution"]["unresolved"] = \
+                list(value)
+        store.locked_update(w.pm_dir, _tamper)
+
+        integ = pr_entry(w)["integration"]
+        # The value names no path pm can match, so every recorded path is an
+        # attempt (never labelled resolved).
+        assert integration.unresolved_paths(integ) == {"pm/project.yaml"}
+        assert "unresolved conflicts remain" in integration.summary(integ)
+
+        with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+            r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+        assert r.exit_code == 0, r.output
+        assert "Resolution attempted (NOT resolved): pm/project.yaml" in r.output
+        assert "Resolved: pm/project.yaml" not in r.output
+
+
+def test_a_hand_edited_boolean_count_is_not_a_count():
+    """``True`` is an ``int`` to ``isinstance`` but not a count pm recorded.
+
+    ``base_files_count``/``paths_total``/the per-record counts are
+    hand-editable project.yaml state: a boolean must read as "no count"
+    instead of inventing ``1`` (the prompt's own count reader excludes it
+    explicitly).
+    """
+    assert integration._as_int(True) == 0
+    assert integration._as_int(False) == 0
+    assert integration._as_int("3") == 3
+    record = {"status": "clean", "base_sha": "a" * 40, "head": "b" * 40,
+              "candidate_tree": "c" * 40, "base_files_count": True}
+    assert integration.compact(record)["base_files_count"] == 0
+
+    # The other count readers are the same class.  ``compact``'s own
+    # ``paths_total``/``records_total`` checks already excluded booleans, so
+    # these are contract locks rather than pre-fix failures: a hand-edited
+    # ``true`` must not be written back as a total (which the prompt would
+    # report as a real "… N more" remainder and ``_apply_resolution`` would
+    # read as a count).
+    compact = integration.compact(
+        {"status": "resolved",
+         "resolution": {"paths": [{"path": "pm/project.yaml"}],
+                        "paths_total": True}})
+    assert "paths_total" not in compact["resolution"], compact["resolution"]
+    entry = integration.compact(
+        {"status": "resolved",
+         "resolution": {"paths": [{
+             "path": "pm/project.yaml",
+             "records": {"pm/project.yaml": {"added_ours": True}}}]}}
+    )["resolution"]["paths"][0]
+    assert "records_total" not in entry
+    assert "added_ours_total" not in entry
+    # The *summary* count went through ``_as_int``, so this one did count a
+    # hand-edited ``true`` as "1 added from PR" before the fix.
+    assert integration._added_count(entry, "added_ours") == 0
+
+
+def test_a_hand_edited_resolved_from_is_not_rendered_as_a_revision(w):
+    """The prompt and the return text agree on what a revision is.
+
+    ``resolution.resolved_from`` is hand-editable project.yaml state.  The
+    sign-off prompt already omits its "Resolved from PR HEAD ..." line when
+    the head is not a git object name; the return text (which feeds the
+    impl/review/QA prompts) rendered the same fields raw, so a shell fragment
+    read as a revision pm had confirmed.
+    """
+    _metadata_conflict(w)
+    fragment = "$(touch /tmp/pwned)"
+
+    def _set(d):
+        integ = store.get_pr(d, PR)["integration"]
+        resolution = dict(integ["resolution"])
+        resolved_from = dict(resolution.get("resolved_from") or {})
+        resolved_from.update(head=fragment, base_sha=fragment)
+        resolution["resolved_from"] = resolved_from
+        integ["resolution"] = resolution
+    store.locked_update(w.pm_dir, _set)
+
+    pr = pr_entry(w)
+    pr["signoff_return"] = signoff.build_return_record(
+        pr, SIGNOFF_REVIEW, "review",
+        reviewed_head=pr["integration"]["head"])
+    text = signoff.format_signoff_return(pr)
+    assert "$(touch" not in text
+    assert "Resolved from PR HEAD" not in text
+
+    prompt = _signoff_prompt(w)
+    assert "$(touch" not in prompt
+    assert "Resolved from PR HEAD" not in prompt
+
+    # A real revision is still named on both surfaces.
+    head = pr["integration"]["resolution"]["applied_merge_sha"]
+
+    def _restore(d):
+        integ = store.get_pr(d, PR)["integration"]
+        resolution = dict(integ["resolution"])
+        resolution["resolved_from"] = {"head": head, "base_sha": head,
+                                       "merge_base": head}
+        integ["resolution"] = resolution
+    store.locked_update(w.pm_dir, _restore)
+    pr = pr_entry(w)
+    pr["signoff_return"] = signoff.build_return_record(
+        pr, SIGNOFF_REVIEW, "review",
+        reviewed_head=pr["integration"]["head"])
+    assert f"Resolved from PR HEAD `{head[:12]}`" in \
+        signoff.format_signoff_return(pr)
+    assert f"Resolved from PR HEAD `{head[:12]}`" in _signoff_prompt(w)
+
+
+def test_a_transient_error_after_the_hand_merge_keeps_the_assessment(w):
+    """A failed check *after* implementation merged the base keeps the summary.
+
+    The failed metadata attempt (never applied) records the base interaction at
+    the pre-merge head.  Implementation reconciles the conflict by hand (the
+    return text tells it to ``git merge`` the base), so the branch moves.  A
+    transient check then records ``error`` at the *new* head: it cannot name the
+    base itself, and the earlier assessment's head is now behind it.  The next
+    successful check sees the base inside HEAD and must still carry the files
+    the base changed and its behaviour-relevant changes (and the merge gate's
+    evidence requirement) from the stored record.
+    """
+    rec = _status_conflict(w)
+    assert rec["status"] == integration.CONFLICT
+    assert rec["base_files"] == ["pm/project.yaml"], rec
+
+    # Implementation reconciles the conflict by hand, as the return text
+    # instructs ("git fetch the base and git merge ...").
+    git(w.wd, "fetch", "-q", "origin")
+    merged = subprocess.run(["/usr/bin/git", "merge", "--no-commit",
+                             "origin/master"], cwd=w.wd, capture_output=True,
+                            text=True)
+    assert merged.returncode != 0
+    ours = subprocess.run(["/usr/bin/git", "show", ":2:pm/project.yaml"],
+                          cwd=w.wd, capture_output=True, text=True, check=True)
+    (w.wd / "pm" / "project.yaml").write_text(ours.stdout)
+    data = store.load(w.wd / "pm")
+    store.get_pr(data, PR)["status"] = "in_review"
+    store.save(data, w.wd / "pm")
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "merge base, reconcile status")
+
+    # A transient failure at the integrated head cannot fetch the base itself.
+    with patch("pm_core.integration.fetch_base",
+               lambda *a, **k: (None, "network down")):
+        err = integration.check_integration(w.pm_dir, PR)
+    assert err["status"] == integration.ERROR
+    assert err["head"] == git(w.wd, "rev-parse", "HEAD")
+    # The error record keeps the base the earlier check assessed (it is never
+    # mergeable) even though the branch moved past that assessment.
+    assert err["base_sha"] == rec["base_sha"], err
+    assert err["base_files_count"] == 1, err
+
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    assert again["base_files_count"] == 1, again
+    assert any("status" in c for c in again["base_behavior_changes"]), again
+    stored = pr_entry(w)["integration"]
+    assert signoff.approval_justification_problem(PR, stored, again["head"])
+
+
+def test_a_moved_branch_that_does_not_carry_the_base_keeps_no_assessment(w):
+    """A failure after unrelated PR work must not adopt another base's summary.
+
+    The earlier check assessed a base the branch does not contain.  The branch
+    then moves on its own work and a check fails: the error record must not
+    claim that base (nor its file count/behaviour changes) — the next
+    successful check computes its own summary for the base it actually sees.
+    """
+    rec = _status_conflict(w)
+    assert rec["status"] == integration.CONFLICT
+    commit(w.wd, "more.txt", "more\n", "unrelated PR work")
+
+    with patch("pm_core.integration.fetch_base",
+               lambda *a, **k: (None, "network down")):
+        err = integration.check_integration(w.pm_dir, PR)
+    assert err["status"] == integration.ERROR
+    assert err["head"] != rec["head"]
+    assert not err.get("base_sha"), err
+    assert not err.get("base_files_count"), err
+    assert not err.get("base_behavior_changes"), err
+
+
+def test_merge_refuses_a_non_string_approved_sha_without_a_workdir(w):
+    """A hand-edited approval must not crash the merge gate.
+
+    ``pm pr merge`` probes the approval against the approved revision when the
+    workdir (and so HEAD) is gone, so it can say "workdir not found" instead of
+    "stale".  Passing the raw ``signoff.sha`` made the gate treat the record's
+    own value as a fresh match and then slice it (``head.startswith``) — an
+    ``AttributeError`` out of the command instead of a refusal.
+    """
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+
+    def _malformed(d):
+        store.get_pr(d, PR)["signoff"]["sha"] = ["hand-edited"]
+    store.locked_update(w.pm_dir, _malformed)
+
+    # The workdir is gone, so there is no HEAD to compare against.
+    gone = w.wd.with_name(w.wd.name + "-gone")
+    w.wd.rename(gone)
+    try:
+        result, _, finalized = merge(w)
+    finally:
+        gone.rename(w.wd)
+    assert not finalized
+    assert result.exit_code != 0
+    assert not isinstance(result.exception, AttributeError), result.exception
+    # A refusal naming the PR, not an empty output with a traceback behind it.
+    assert f"PR {PR}" in result.output, result.output
+
+    # The same probe still gives the useful message for a *valid* approval.
+    def _restore(d):
+        store.get_pr(d, PR)["signoff"]["sha"] = rec["head"]
+    store.locked_update(w.pm_dir, _restore)
+    w.wd.rename(gone)
+    try:
+        result, _, finalized = merge(w)
+    finally:
+        gone.rename(w.wd)
+    assert not finalized
+    assert result.exit_code != 0
+    assert "workdir not found" in result.output, result.output
+
+
+def test_a_malformed_applied_member_still_gets_the_diff_hint():
+    """The return text must always name the base the branch contains.
+
+    The resolution block emitted its corrected ``git diff <base> HEAD`` hint
+    only when ``signoff_return.applied.merge_sha`` was falsy, while the
+    ``applied`` block emitted it only for a string ``merge_sha`` *and* a
+    sha-like ``base_sha``.  A hand-edited value satisfied neither, so the
+    routed step got no hint at all and fell back to the stale
+    ``<base>...HEAD`` diff — which lists the merged base commits as the PR's
+    own changes.
+    """
+    base, head, merge = "b" * 40, "a" * 40, "d" * 40
+
+    def _text(applied):
+        integ = {"base_branch": "master", "base_sha": base,
+                 "target_repo": "r", "status": "up_to_date", "head": merge,
+                 "resolution": {"paths": [{"path": "pm/project.yaml"}],
+                                "unresolved": [],
+                                "applied_merge_sha": merge,
+                                "resolved_from": {"head": head,
+                                                  "base_sha": base,
+                                                  "merge_base": "e" * 40}}}
+        return signoff.format_signoff_return({
+            "id": PR,
+            "integration": integ,
+            "signoff_return": {"verdict": SIGNOFF_REVIEW, "hop": "review",
+                               "reason": "r", "reviewed_head": merge,
+                               "integration": integ, "applied": applied}})
+
+    hint = "The PR's changes on top of that base: `git diff"
+    # Well-formed: the ``applied`` block names the base.
+    assert hint in _text({"merge_sha": merge, "base_sha": base})
+    # No ``applied`` block (the launch apply): the resolution block names it.
+    assert hint in _text(None)
+    # Hand-edited members: one of the two blocks must still name the base.
+    for applied in ({"merge_sha": {"x": 1}, "base_sha": base},
+                    {"merge_sha": ["x"], "base_sha": base},
+                    {"merge_sha": True, "base_sha": base},
+                    {"merge_sha": merge, "base_sha": {"x": 1}}):
+        assert hint in _text(applied), applied
+
+
+def test_the_reconcile_command_names_a_real_base_or_a_placeholder():
+    """The ``git merge`` hint never interpolates a malformed ``base_branch``.
+
+    The hint falls back to the branch name when the record cannot name a base
+    revision, and ``base_branch`` is hand-editable project.yaml state: a null
+    rendered the literal ``git merge None`` and a mapping its repr — a command
+    the routed step is told to run.  A value that is not a branch-name string
+    is no ref, so it becomes an obvious placeholder (the same rule
+    ``_text`` applies to the block's own header and ``spec_gen`` applies to its
+    ``git diff`` instruction).
+    """
+    def _merge_hint(base_branch):
+        integ = {"status": "conflict", "base_sha": None,
+                 "base_branch": base_branch, "target_repo": "r",
+                 "conflicts": ["pm/project.yaml"]}
+        text = signoff.format_signoff_return({
+            "id": PR,
+            "signoff_return": {"verdict": SIGNOFF_IMPL, "hop": "impl",
+                               "reason": "r", "reviewed_head": "a" * 40,
+                               "integration": integ}})
+        return [line for line in text.splitlines() if "git merge" in line][0]
+
+    for bad in (None, {"x": 1}, ["master"], "", 0, True):
+        line = _merge_hint(bad)
+        assert "`git merge <base>`" in line, (bad, line)
+        assert "None" not in line and "{'x'" not in line, (bad, line)
+    # A real branch name is still named.
+    assert "`git merge master`" in _merge_hint("master")
+    # The coercion reason the return text carries uses the same placeholder.
+    verdict, reason = signoff.effective_verdict(
+        SIGNOFF_MERGE,
+        {"status": integration.CONFLICT, "head": "a" * 40,
+         "base_sha": "b" * 40, "base_branch": {"x": 1},
+         "conflicts": ["pm/project.yaml"]},
+        "a" * 40)
+    assert verdict == SIGNOFF_IMPL
+    assert "merging ?@" in reason and "{" not in reason
+
+
+def test_a_malformed_applied_merge_does_not_contradict_the_not_applied_label():
+    """A non-string ``applied_merge_sha`` is no applied merge, everywhere.
+
+    The base-changes range took the applied-resolution branch on raw
+    truthiness while the label in the same block used ``isinstance(..., str)``,
+    so one hand-edited record printed both the pre-apply base range and
+    "**Not applied**" — two contradictory statements in one prompt.
+    """
+    base = "b" * 40
+
+    def _block(applied_merge):
+        integ = {"base_branch": "master", "base_sha": base,
+                 "target_repo": "r", "status": "up_to_date", "head": "a" * 40,
+                 "merge_base": base, "candidate_tree": "c" * 40,
+                 "resolution": {"paths": [{"path": "pm/project.yaml"}],
+                                "unresolved": [],
+                                "applied_merge_sha": applied_merge,
+                                "resolved_from": {"head": "a" * 40,
+                                                  "base_sha": base,
+                                                  "merge_base": "e" * 40}}}
+        return prompt_gen._signoff_integration_block({"integration": integ},
+                                                     PR)
+
+    # A real revision: the range is shown and the resolution is not "not
+    # applied".
+    real = _block("d" * 40)
+    assert "Base changes since this PR branched" in real
+    assert "Not applied" not in real
+    # A hand-edited value: "Not applied", and no applied-resolution range.
+    for value in ({"x": 1}, ["x"], 5, True):
+        block = _block(value)
+        assert "Not applied" in block, value
+        assert "Base changes since this PR branched" not in block, value
+
+
+def test_a_hand_edited_base_branch_reads_as_a_placeholder_everywhere():
+    """A reader must not print a value the record does not hold.
+
+    ``base_branch``/``target_repo``/``error`` are hand-editable project.yaml
+    state, and every surface below can be handed the *stored* record
+    (``prepare`` returns it when a concurrent apply won the race).  The
+    one-line summary and the CLI/``pm pr show`` readers used to print the
+    literal ``None`` (``None@89e3c501``) or a mapping's repr instead of the
+    ``?`` placeholder the rest of those surfaces use.
+    """
+    for value in (None, {"x": 1}, ["x"], 5, True, ""):
+        summary = integration.summary(
+            {"status": "up_to_date", "base_branch": value,
+             "base_sha": "a" * 40})
+        assert summary.startswith("up to date with ?@"), summary
+        assert "None@" not in summary and "{'x'" not in summary, summary
+    # A real branch name is still printed.
+    assert integration.summary(
+        {"status": "up_to_date", "base_branch": "master",
+         "base_sha": "a" * 40}) == "up to date with master@aaaaaaaa"
+    # The failure text follows the same rule: a non-string ``error`` is not a
+    # reason, so the generic placeholder stands in for it.
+    assert integration.summary(
+        {"status": "error", "error": {"x": 1}}
+    ) == "integration check failed: unknown error"
+    assert integration.summary(
+        {"status": "error", "error": "boom"}
+    ) == "integration check failed: boom"
+
+
+def test_integrate_cli_renders_a_malformed_stored_record_as_placeholders(w):
+    """``prepare`` can hand the CLI the stored (hand-editable) record.
+
+    A concurrent apply that won the race makes ``prepare`` return what is on
+    the PR, so the ``target``/``head``/``base``/``candidate tree`` lines read
+    project.yaml state: a non-string value must render the placeholder, not
+    the literal ``None`` or a mapping's repr.
+    """
+    stored = {"status": "resolved", "base_branch": {"x": 1},
+              "target_repo": None, "head": ["h"], "base_sha": {"s": 1},
+              "candidate_tree": 5}
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(integration, "prepare", return_value=dict(stored)):
+        r = CliRunner().invoke(pr_mod.pr,
+                               ["signoff", "integrate", PR, "--apply"])
+    assert r.exit_code == 0, r.output
+    assert "target: ? of ?" in r.output
+    assert "head:   ?" in r.output
+    assert "base:   ?" in r.output
+    assert "candidate tree:" not in r.output
+    assert "None" not in r.output
+    assert "{'x': 1}" not in r.output and "{'s': 1}" not in r.output
+
+
+def test_pr_show_renders_a_malformed_integration_as_placeholders(w):
+    """``pm pr show``'s ``## Integration`` reader against hand-edited state."""
+    def _malformed(d):
+        store.get_pr(d, PR)["integration"] = {
+            "status": {"x": 1}, "target_repo": ["r"], "base_branch": None,
+            "base_sha": {"s": 1}}
+    store.locked_update(w.pm_dir, _malformed)
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert "## Integration" in r.output
+    # No field is printed with a value the record does not hold.  (The PR
+    # header above the section prints its own ``Status:`` line, so only the
+    # integration fields are checked here.)
+    assert "Base branch:" not in r.output
+    assert "Base sha:" not in r.output
+    assert "Target:" not in r.output
+    assert "None" not in r.output

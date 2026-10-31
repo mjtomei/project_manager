@@ -122,10 +122,15 @@ def find_workdir(data: dict) -> Optional[str]:
     """
     prs = data.get("prs") or []
 
-    # First check PR workdirs
+    # First check PR workdirs.  ``project.yaml`` is hand-editable state: a
+    # ``workdir`` that is not a path string is not a checkout (``Path(5)``
+    # raised ``TypeError`` out of every merge check that used this helper, so a
+    # malformed value skipped the integrity verification entirely), so it reads
+    # as absent.
     for p in prs:
         wd = p.get("workdir")
-        if wd and Path(wd).exists() and git_ops.is_git_repo(wd):
+        wd = wd if isinstance(wd, str) and wd else None
+        if wd and Path(wd).is_dir() and git_ops.is_git_repo(wd):
             return wd
 
     # Fall back to workdirs base directory
@@ -197,8 +202,15 @@ def sync_prs(
         _log.debug("Skipping sync: %s", skip_reason)
         return SyncResult(synced=False, skipped_reason=skip_reason)
 
-    # Find a workdir to use for checking
+    # Find a workdir to use for checking.  When every workdir is gone the
+    # project repo is still a valid place to detect the merge and verify what
+    # it published — the same fallback :func:`sync_from_github` uses, so a
+    # removed workdir cannot turn a mismatch into a silent finalize.
     target_workdir = find_workdir(data)
+    if not target_workdir:
+        repo_dir = _resolve_repo_dir(root, data)
+        if repo_dir and git_ops.is_git_repo(str(repo_dir)):
+            target_workdir = str(repo_dir)
     if not target_workdir:
         _log.debug("No workdirs found for sync")
         return SyncResult(
@@ -226,9 +238,13 @@ def sync_prs(
             if not branch:
                 continue
 
-            # Prefer PR's own workdir if it exists
+            # Prefer PR's own workdir if it exists.  ``project.yaml`` is
+            # hand-editable state: a ``workdir`` that is not a path string is
+            # not a checkout (``Path(5)`` raised ``TypeError`` out of the sync,
+            # before the per-PR ``try``), so it reads as absent.
             wd = pr_entry.get("workdir")
-            check_dir = wd if (wd and Path(wd).exists()) else target_workdir
+            wd = wd if isinstance(wd, str) and wd else None
+            check_dir = wd if (wd and Path(wd).is_dir()) else target_workdir
 
             try:
                 if backend.is_merged(str(check_dir), branch, base_branch):
@@ -385,8 +401,16 @@ def sync_from_github(
                     # Verify what GitHub published against the bound
                     # SIGNOFF_MERGE (pr-2e06289) — the same check
                     # `pm pr merge` runs, applied to a discovered merge.
+                    # ``project.yaml`` is hand-editable state: a ``workdir``
+                    # that is not a path string is not a checkout.  ``Path(5)``
+                    # raised ``TypeError`` here, and because this block sits
+                    # inside the per-PR ``except Exception`` the merge was then
+                    # finalized WITHOUT the verification this PR exists to
+                    # enforce — a malformed value must read as absent, not
+                    # silently skip the check.
                     wd = pr_entry.get("workdir")
-                    check_dir = (wd if (wd and Path(wd).exists())
+                    wd = wd if isinstance(wd, str) and wd else None
+                    check_dir = (wd if (wd and Path(wd).is_dir())
                                  else find_workdir(data))
                     if not check_dir:
                         check_dir = str(_resolve_repo_dir(root, data))

@@ -76,6 +76,18 @@ _UNICODE_TO_ASCII = [
 ]
 
 
+def _to_editor_ascii(text: str) -> str:
+    """Replace unicode characters vim renders badly with ASCII equivalents.
+
+    The inverse of :func:`_restore_unicode`; applied to the whole template and,
+    per note text, to model what an unmodified template parses back to (see
+    ``_apply_pr_edit``).
+    """
+    for uc, ascii_rep in _UNICODE_TO_ASCII:
+        text = text.replace(uc, ascii_rep)
+    return text
+
+
 def _restore_unicode(text: str) -> str:
     """Restore unicode characters that were replaced for the editor.
 
@@ -87,6 +99,54 @@ def _restore_unicode(text: str) -> str:
     for uc, ascii_rep in _UNICODE_TO_ASCII:
         text = text.replace(ascii_rep, uc)
     return text
+
+
+def _rendered_text(text: str) -> str:
+    """What the edit template's parser reads back for the content *text*.
+
+    The template is ASCII-ized for the editor (``_to_editor_ascii``) and the
+    parser restores unicode per content field (``_restore_unicode``), so the
+    round-trip is lossy in both directions: a plain hyphen comes back as an en
+    dash, an apostrophe as a left single quote, ``--`` as an em dash.  A
+    stored value therefore never equals its own round-trip, so comparing a
+    parsed field against the *stored* value made every save look like an edit
+    and rewrote it with the laundered text.  Comparing against this form is
+    what makes "the user did not change it" and "the user changed it"
+    distinguishable (see ``_apply_pr_edit``).
+    """
+    return _restore_unicode(_to_editor_ascii(text))
+
+
+def _note_bullet_line(n) -> str:
+    """One stored note as the edit template's bullet line.
+
+    Shared by the template (``pr_edit``) and the reconciliation
+    (``_apply_pr_edit``) so the "did the notes change?" test can compare
+    against exactly what was rendered: a member the template cannot show (no
+    ``text``, a non-string ``text``, a non-mapping member) renders as an empty
+    bullet, and a note with a ``created_at`` carries it as a comment suffix.
+    """
+    ts = n.get("created_at", "") if isinstance(n, dict) else ""
+    ts_suffix = f"  # {ts}" if ts else ""
+    return f"- {_note_text(n) or ''}{ts_suffix}"
+
+
+_EDIT_NOTE_TS_RE = re.compile(r"\s+#\s+\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+
+def _note_bullet_text(line: str) -> str | None:
+    """The note text a template bullet line parses to (``None``: not a note).
+
+    The counterpart of :func:`_note_bullet_line`, shared with the template
+    parser so both agree by construction.  ``line.strip()`` drops a bare
+    ``- `` (an empty bullet renders as just ``-``), which is why a no-op save
+    of a member the template cannot show must be compared against the *parsed*
+    render rather than the rendered text.
+    """
+    stripped = line.strip()
+    if not stripped.startswith("- "):
+        return None
+    return _EDIT_NOTE_TS_RE.sub("", stripped[2:])
 
 
 def _parse_pr_edit_raw(raw: str) -> dict:
@@ -110,6 +170,16 @@ def _parse_pr_edit_raw(raw: str) -> dict:
     deps_str = None
 
     for line in raw.splitlines():
+        if in_desc:
+            # Everything after the description header is the description —
+            # including a line that starts with ``#``.  A PR description very
+            # often carries markdown headings (``## Goal``), and the
+            # template's own comment lines all precede this header.  Treating
+            # them as comments dropped every heading from the stored
+            # description on a save that did not touch it (the template's
+            # "everything below this line" contract).
+            desc_lines.append(line)
+            continue
         if line.startswith("#"):
             if "description" in line.lower() and "below" in line.lower():
                 in_desc = True
@@ -117,15 +187,9 @@ def _parse_pr_edit_raw(raw: str) -> dict:
             elif "notes" in line.lower():
                 in_notes = True
             continue
-        if in_desc:
-            desc_lines.append(line)
-        elif in_notes:
-            stripped = line.strip()
-            if stripped.startswith("- "):
-                text = stripped[2:]
-                text = re.sub(
-                    r'\s+#\s+\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$', '', text
-                )
+        if in_notes:
+            text = _note_bullet_text(line)
+            if text is not None:
                 note_lines.append(text)
         elif line.startswith("title:"):
             title = line[len("title:"):].strip()
@@ -159,14 +223,41 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
         if not pr_entry:
             return
 
-        # Title
+        # Title.  Compared against what the template *renders* for the stored
+        # title, not the stored title itself: the editor's ASCII step and the
+        # parser's unicode restoration are lossy ("Don't" comes back as
+        # "Don‘t", "--" as "—"), so a save that did not touch the title used
+        # to look like an edit and rewrite it with the laundered text.  When
+        # the parse matches the rendered form, the stored value is kept
+        # verbatim.
         if parsed["title"] is not None:
-            if parsed["title"] != pr_entry.get("title", ""):
+            current_title = pr_entry.get("title", "")
+            # The template renders the stored value through ``str`` (a
+            # hand-edited non-string is shown as its text form), so the
+            # comparison must use that same form: coercing the *stored* value
+            # to "" made a no-op save look like an edit and rewrite a
+            # hand-edited title (an int, a mapping) as a string — the exact
+            # mutation the note and description paths already avoid.  The
+            # template also holds the title on one line, so only its first
+            # line is shown; a parse equal to that line is an unchanged save
+            # of a multi-line (hand-written) title, not a truncation.
+            current_title_text = (current_title
+                                  if isinstance(current_title, str)
+                                  else str(current_title))
+            rendered_title = _rendered_text(current_title_text)
+            if "\n" in current_title_text:
+                rendered_title = _rendered_text(
+                    current_title_text.split("\n", 1)[0])
+            if parsed["title"] != rendered_title:
                 pr_entry["title"] = parsed["title"]
                 changes.append(f"title={parsed['title']}")
 
-        # Description
-        if parsed["description"] != pr_entry.get("description", "").strip():
+        # Description.  Hand-edited state: only text has whitespace to strip
+        # (a scalar would raise AttributeError out of the edit path).  Same
+        # rendered-form comparison as the title, so a no-op save is a no-op.
+        current_desc = pr_entry.get("description")
+        current_desc = current_desc if isinstance(current_desc, str) else ""
+        if parsed["description"] != _rendered_text(current_desc.strip()):
             pr_entry["description"] = parsed["description"]
             changes.append("description updated")
 
@@ -181,7 +272,10 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
 
         # Dependencies (skip unknown IDs silently)
         if parsed["depends_on_str"] is not None:
-            current_deps = ", ".join(pr_entry.get("depends_on") or [])
+            # ``graph.deps_of``: a hand-edited scalar ``depends_on`` is not a
+            # list of ids (``join`` would raise on an int, and a string would
+            # be joined character by character).
+            current_deps = ", ".join(graph.deps_of(pr_entry))
             if parsed["depends_on_str"] != current_deps:
                 if not parsed["depends_on_str"]:
                     pr_entry["depends_on"] = []
@@ -194,20 +288,121 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
                         pr_entry["depends_on"] = deps
                         changes.append(f"depends_on={', '.join(deps)}")
 
-        # Notes reconciliation
-        current_notes = pr_entry.get("notes") or []
-        old_texts = [n["text"] for n in current_notes]
-        if parsed["note_texts"] != old_texts:
+        # Notes reconciliation.  Hand-edited state: a member that is not a
+        # mapping, or a note whose ``text`` is not text (a hand-edited
+        # unquoted date, a number, a missing ``text``), is not a note the edit
+        # template could have shown — it renders as an empty bullet, so a
+        # round-trip would rebuild it away (or replace it with an empty note
+        # under a new id) even when the user changed nothing.  Keep those
+        # verbatim instead of raising ``AttributeError``/``KeyError`` out of
+        # the write path or dropping hand-written state silently.
+        stored_notes = _notes_of(pr_entry)
+
+        def _renders_back(n) -> bool:
+            """Whether the template's bullet for *n* reads back as its text.
+
+            A note is only matched to a parsed line by its ``text``, so a
+            member the template renders as a line that parses to no note (or
+            to different text) is never matched: a rebuild would drop it or
+            rewrite its content.  That is the case for an empty ``text`` with
+            no ``created_at`` (a bare ``- `` bullet — pm's own note commands
+            always stamp one, so the shape is hand-written), for a text whose
+            trailing ``# <timestamp>``-looking suffix the comment stripping
+            would eat, and for a text the bullet cannot hold on one line (a
+            newline).  Parsed exactly like the template: the editor's ASCII
+            substitution comes first, then the line parser, then the parser's
+            per-field unicode restoration.  The ASCII step matters
+            structurally — an en dash becomes a plain hyphen, so a
+            continuation line starting ``– `` becomes a real ``- `` bullet and
+            a ``2020–01–01…`` suffix becomes a strippable timestamp.  Modelling
+            the bullet before that step missed both: a no-op save then created
+            a duplicate note for the continuation line, or replaced the note
+            with its truncated form under a new id.
+            """
+            text = _note_text(n)
+            if text is None:
+                return False
+            lines = _to_editor_ascii(_note_bullet_line(n)).splitlines()
+            if len(lines) != 1:
+                return False
+            read_back = _note_bullet_text(lines[0])
+            return read_back is not None \
+                and _restore_unicode(read_back) == _rendered_text(text)
+
+        uneditable = [n for n in stored_notes if not _renders_back(n)]
+        current_notes = [n for n in stored_notes if _renders_back(n)]
+        # Compare the parse against what an *unmodified* template parses back
+        # to — the same bullet renderer, line parser, ASCII substitution and
+        # unicode restoration — rather than against the editable notes alone:
+        # the editor watcher calls this on every save, and a no-op save must
+        # neither invent an empty note for each member the template could not
+        # show nor launder its lossy unicode round-trip into the stored notes.
+        # The block is ASCII-ized exactly like the template (``pr_edit`` runs
+        # ``_to_editor_ascii`` over the whole thing): that step can turn a
+        # unicode continuation line into a real bullet or a unicode timestamp
+        # suffix into a strippable one, and the model must see the same text
+        # the parser does.
+        block = _to_editor_ascii(
+            "".join(_note_bullet_line(n) + "\n" for n in stored_notes))
+        rendered = [_rendered_text(text)
+                    for text in (_note_bullet_text(line)
+                                 for line in block.splitlines())
+                    if text is not None]
+        if parsed["note_texts"] != rendered:
+            # Keyed by the text the template *renders* for each note, not the
+            # stored text: the round-trip is lossy ("alpha - beta" comes back
+            # as "alpha – beta", "don't" as "don‘t"), so a stored text never
+            # matches its own parse.  Keying by the stored text made any real
+            # edit rebuild every untouched note — a new id, a fresh
+            # ``created_at``, and the laundered text replacing the original.
             old_by_text: dict[str, list] = {}
             for n in current_notes:
-                old_by_text.setdefault(n["text"], []).append(n)
+                old_by_text.setdefault(_rendered_text(_note_text(n)),
+                                       []).append(n)
+            # A member the template cannot fully represent still contributes
+            # *fragments* to the parsed template: a multi-line note renders
+            # its lines as bullets, and a text ending in a timestamp-looking
+            # suffix renders truncated.  Those fragments are already
+            # represented by the uneditable note kept verbatim below, so a
+            # parsed line that matches one must not become a second note —
+            # editing any other note used to duplicate the member's content
+            # (the fragments were never matched, so a new note was created for
+            # each on every rebuild).  One fragment per parsed line the member
+            # contributes, consumed in order; a bare ``- `` bullet parses to
+            # no note at all and contributes none.
+            fragments: list[str] = []
+            for n in uneditable:
+                # Every line of the member's bullet that parses back as a note
+                # is a fragment: the first line for a multi-line text, the
+                # truncated form of a suffix-bearing text, and any
+                # ``- ``-prefixed continuation line the text happens to carry
+                # — including one the ASCII substitution turns into a real
+                # bullet (``– beta`` becomes ``- beta`` in the template).
+                for line in _to_editor_ascii(
+                        _note_bullet_line(n)).splitlines():
+                    frag = _note_bullet_text(line)
+                    if frag is not None:
+                        fragments.append(_rendered_text(frag))
             new_notes = []
-            existing_note_ids: set[str] = set()
+            # Every id already stored is a key (``pm pr note edit/delete``
+            # look notes up by id, and the integration resolver refuses a
+            # repeated one), including the members the template could not
+            # show — a note added here must not reuse any of them.
+            existing_note_ids: set[str] = {
+                i for i in (_note_id(n) for n in stored_notes) if i}
             for text in parsed["note_texts"]:
+                # An editable note first, so a fragment text that collides
+                # with a real note's text reuses the real note (the fragment
+                # is represented by the verbatim member appended below).
                 if text in old_by_text and old_by_text[text]:
                     reused = old_by_text[text].pop(0)
                     new_notes.append(reused)
-                    existing_note_ids.add(reused["id"])
+                    reused_id = _note_id(reused)
+                    if reused_id:
+                        existing_note_ids.add(reused_id)
+                elif text in fragments:
+                    # The kept uneditable member already carries this line.
+                    fragments.remove(text)
                 else:
                     note_id = store.generate_note_id(pr_id, text, existing_note_ids)
                     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -216,10 +411,11 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
                         "created_at": now, "last_edited": now,
                     })
                     existing_note_ids.add(note_id)
-            new_notes.sort(
-                key=lambda n: n.get("last_edited") or n.get("created_at", "")
-            )
-            pr_entry["notes"] = new_notes
+            new_notes.sort(key=_note_sort_key)
+            # The edit template cannot show those members, so keep them
+            # rather than dropping them silently (the readers render them,
+            # ``_note_line`` shows ``?``).
+            pr_entry["notes"] = new_notes + uneditable
             changes.append("notes updated")
 
         if changes:
@@ -359,26 +555,32 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
         # No flags given — open in $EDITOR with live save
         from pm_core.editor import run_watched_editor
 
-        # Capture original state for post-edit comparison
+        # Capture original state for post-edit comparison.  Hand-edited state:
+        # only text has whitespace to strip, a scalar ``depends_on`` is no
+        # list of ids, and a malformed note is not a note (see ``_note_text``).
         orig_title = pr_entry.get("title", "")
-        orig_desc = pr_entry.get("description", "").strip()
+        orig_desc_value = pr_entry.get("description")
+        orig_desc = (orig_desc_value
+                     if isinstance(orig_desc_value, str) else "").strip()
         orig_status = pr_entry.get("status", "pending")
-        orig_deps = ", ".join(pr_entry.get("depends_on") or [])
-        orig_notes = [n["text"] for n in (pr_entry.get("notes") or [])]
+        orig_deps = ", ".join(graph.deps_of(pr_entry))
+        orig_notes = [_note_text(n) for n in _notes_of(pr_entry)]
 
-        current_notes = pr_entry.get("notes") or []
+        current_notes = _notes_of(pr_entry)
         notes_lines = ""
         if current_notes:
             for n in current_notes:
-                ts = n.get("created_at", "")
-                ts_suffix = f"  # {ts}" if ts else ""
-                notes_lines += f"- {n['text']}{ts_suffix}\n"
+                notes_lines += _note_bullet_line(n) + "\n"
         else:
             notes_lines = "# (no notes)\n"
 
         template = (
             f"# Editing {pr_id}\n"
-            f"# Lines starting with # are ignored.\n"
+            # The description body is kept verbatim (see
+            # ``_parse_pr_edit_raw``): a ``#`` line there is a markdown
+            # heading, not a comment.  Phrase this without "below" so it
+            # cannot be mistaken for the description header.
+            f"# Lines above the description starting with # are ignored.\n"
             f"# Changes are saved each time you write the file.\n"
             f"\n"
             f"title: {orig_title}\n"
@@ -392,9 +594,7 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
             f"{orig_desc}\n"
         )
 
-        editor_template = template
-        for uc, ascii_rep in _UNICODE_TO_ASCII:
-            editor_template = editor_template.replace(uc, ascii_rep)
+        editor_template = _to_editor_ascii(template)
 
         def on_save(raw: str) -> None:
             _apply_pr_edit(root, pr_id, _parse_pr_edit_raw(raw))
@@ -412,14 +612,17 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
         pr_final = store.get_pr(data_final, pr_id)
         if pr_final.get("title", "") != orig_title:
             changes.append(f"title={pr_final['title']}")
-        if pr_final.get("description", "").strip() != orig_desc:
+        final_desc_value = pr_final.get("description")
+        final_desc = (final_desc_value
+                      if isinstance(final_desc_value, str) else "").strip()
+        if final_desc != orig_desc:
             changes.append("description updated")
         if pr_final.get("status", "pending") != orig_status:
             changes.append(f"status: {orig_status} → {pr_final['status']}")
-        final_deps = ", ".join(pr_final.get("depends_on") or [])
+        final_deps = ", ".join(graph.deps_of(pr_final))
         if final_deps != orig_deps:
             changes.append(f"depends_on={final_deps}")
-        final_notes = [n["text"] for n in (pr_final.get("notes") or [])]
+        final_notes = [_note_text(n) for n in _notes_of(pr_final)]
         if final_notes != orig_notes:
             changes.append("notes updated")
 
@@ -523,7 +726,14 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
         prs = [p for p in prs if (p.get("plan") or "_standalone") == filter_plan]
 
     if timestamps:
-        prs = sorted(prs, key=lambda p: p.get("updated_at") or p.get("created_at") or "", reverse=True)
+        # ``str(...)``: a hand-edited timestamp that YAML parses as a
+        # non-string (an unquoted date is a ``datetime.date``) cannot be
+        # compared with another PR's string — that raised ``TypeError`` out of
+        # `pm pr list --timestamps`.  The home window's PR list and
+        # ``format_pr_line`` already apply the same guard; the ISO strings pm
+        # writes sort identically either way.
+        prs = sorted(prs, key=lambda p: str(
+            p.get("updated_at") or p.get("created_at") or ""), reverse=True)
     else:
         # Sort newest first (by gh_pr_number descending, then pr id descending)
         prs = sorted(prs, key=lambda p: (p.get("gh_pr_number") or _pr_id_sort_key(p["id"])[0], _pr_id_sort_key(p["id"])[1]), reverse=True)
@@ -534,7 +744,7 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
         out.append(format_pr_line(p, active_pr=active_pr, with_timestamp=timestamps))
         if workdirs:
             wd = p.get("workdir")
-            if wd and Path(wd).exists():
+            if wd and Path(wd).is_dir():
                 dirty = _workdir_is_dirty(Path(wd))
                 dirty_str = " (dirty)" if dirty else " (clean)"
                 out.append(f"      workdir: {wd}{dirty_str}")
@@ -543,6 +753,46 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
             else:
                 out.append(f"      workdir: none")
     emit_paged(out)
+
+
+def _notes_of(pr_entry: dict) -> list:
+    """A PR's ``notes`` as a list (hand-edited state may hold a scalar).
+
+    The readers below must not raise on a shape ``project.yaml`` can hold: a
+    ``notes`` value that is not a list is no collection to iterate.
+    """
+    notes = pr_entry.get("notes")
+    return notes if isinstance(notes, list) else []
+
+
+def _note_id(n) -> str | None:
+    """A note's ``id`` when it is a string (hand-edited members read absent).
+
+    The note commands index every member with ``n["id"]``/``n["text"]``, so a
+    scalar member, or a member without those keys, raised ``TypeError`` /
+    ``KeyError`` out of ``pm pr note add`` — the canonical handoff channel.
+    """
+    value = n.get("id") if isinstance(n, dict) else None
+    return value if isinstance(value, str) and value else None
+
+
+def _note_text(n) -> str | None:
+    """A note's ``text`` when it is a string (see :func:`_note_id`)."""
+    value = n.get("text") if isinstance(n, dict) else None
+    return value if isinstance(value, str) else None
+
+
+def _note_sort_key(n) -> str:
+    """A note's last-edited/created stamp as text, for stable ordering.
+
+    A hand-edited value YAML parses as a non-string (an unquoted date) cannot
+    be compared with another note's string (``TypeError`` out of ``sort``).
+    """
+    for key in ("last_edited", "created_at"):
+        value = n.get(key) if isinstance(n, dict) else None
+        if isinstance(value, str) and value:
+            return value
+    return ""
 
 
 def _note_line(n: dict) -> str:
@@ -555,6 +805,13 @@ def _note_line(n: dict) -> str:
     ``project.yaml``), so the reader falls back to a placeholder rather than
     raising ``KeyError`` and hiding every note behind a traceback.
     """
+    if not isinstance(n, dict):
+        # Hand-edited project.yaml: a note member that is not a mapping is not
+        # a note.  Both readers are the on-demand fallback for an abbreviated
+        # PR-notes block, so render the raw value rather than raise out of the
+        # command (the prompt builder skips the same shape, see
+        # ``prompt_gen._note_mappings``).
+        return f"  ?: {n}"
     ts = n.get("created_at", "")
     ts_str = f" ({ts})" if ts else ""
     # Tolerate a note with no ``text`` as well as no ``id`` (hand-edited or
@@ -565,11 +822,115 @@ def _note_line(n: dict) -> str:
     return f"  {n.get('id') or '?'}{ts_str}: {n.get('text') or ''}"
 
 
+def _signoff_evidence_lines(record) -> list[str]:
+    """The recorded sign-off decision and the provenance behind it.
+
+    ``signoff.record_signoff_verdict`` stores an ``evidence`` block on the PR
+    (reviewed head, candidate tree, the revisions review and QA ran on, the
+    agent's reuse statement and the required return stage) so the decision can
+    be assessed after the fact — the merge gate enforces the statement, and a
+    person auditing the approval needs to see it.  Without a reader the block
+    exists only in ``project.yaml``, so ``pm pr show`` — the reader every
+    other abbreviated surface in this feature points at — prints it.
+
+    Every value is hand-edited state: a non-mapping record, a non-string
+    revision and a non-list id list read as absent instead of raising out of
+    the command (the contract the rest of this module follows).
+    """
+    from pm_core import integration
+
+    rec = record if isinstance(record, dict) else {}
+    verdict = rec.get("verdict")
+    if not (isinstance(verdict, str) and verdict):
+        return []
+    lines: list[str] = []
+    details = [v for v in (rec.get("origin"), rec.get("ts"))
+               if isinstance(v, str) and v]
+    lines.append(f"Verdict: {verdict}"
+                 + (f" ({', '.join(details)})" if details else ""))
+    if rec.get("invalidated"):
+        lines.append(f"Invalidated: {rec['invalidated']}")
+    sha = integration.revision_of(rec.get("sha"))
+    if sha:
+        lines.append(f"Approved head: {sha[:12]}")
+    # The base the approval was bound to: the verdict binds to the exact
+    # candidate the check computed against that base (``BINDING_KEYS``), and a
+    # person assessing the decision needs it beside the head.  The current
+    # ``## Integration`` record may be a later check of another base, so it
+    # cannot stand in for the approved one.
+    bound = rec.get("integration")
+    bound = bound if isinstance(bound, dict) else {}
+    bound_base = integration.revision_of(bound.get("base_sha"))
+    if bound_base:
+        bound_branch = bound.get("base_branch")
+        bound_branch = bound_branch if isinstance(bound_branch, str) \
+            and bound_branch else "base"
+        lines.append(f"Approved base: {bound_branch}@{bound_base[:12]}")
+
+    evidence = rec.get("evidence")
+    evidence = evidence if isinstance(evidence, dict) else {}
+    reviewed = integration.revision_of(evidence.get("reviewed_head"))
+    if reviewed:
+        lines.append(f"Reviewed head: {reviewed[:12]}")
+    tree = integration.revision_of(evidence.get("candidate_tree"))
+    if tree:
+        lines.append(f"Candidate tree: {tree[:12]}")
+    resolved_from = evidence.get("resolved_from")
+    resolved_from = resolved_from if isinstance(resolved_from, dict) else {}
+    pre_head = integration.revision_of(resolved_from.get("head"))
+    if pre_head:
+        base_rev = integration.revision_of(resolved_from.get("base_sha"))
+        lines.append(f"Resolved from: {pre_head[:12]} against base "
+                     f"{base_rev[:12] if base_rev else '?'}")
+    review = evidence.get("review")
+    review = review if isinstance(review, dict) else {}
+    review_sha = integration.revision_of(review.get("sha"))
+    if review_sha:
+        source = review.get("sha_source")
+        lines.append(f"Review: {review_sha[:12]}"
+                     + (f" ({source})"
+                        if isinstance(source, str) and source else ""))
+    elif isinstance(review.get("note"), str) and review["note"]:
+        # "pm does not record the revision the review ran on" — say so rather
+        # than leave the reader guessing why there is no review revision.
+        lines.append(f"Review: {review['note']}")
+    qa = evidence.get("qa")
+    qa = qa if isinstance(qa, dict) else {}
+    qa_head = integration.revision_of(qa.get("planner_head"))
+    if qa_head or qa.get("overall"):
+        lines.append("QA: " + str(qa.get("overall") or "?")
+                     + (f" at {qa_head[:12]}" if qa_head else ""))
+    reused = evidence.get("reused")
+    reused = [str(v) for v in reused] if isinstance(reused, list) else []
+    if reused:
+        total = evidence.get("reused_total")
+        more = (f" (+{total - len(reused)} more)"
+                if isinstance(total, int) and not isinstance(total, bool)
+                and total > len(reused) else "")
+        lines.append("Reused evidence: " + ", ".join(reused) + more)
+    for label, key in (("Reuse reason", "reason"),
+                       ("Targeted checks", "checks")):
+        value = evidence.get(key)
+        if isinstance(value, str) and value:
+            lines.append(f"{label}: {value}")
+    stage = evidence.get("required_return_stage")
+    if isinstance(stage, str) and stage:
+        lines.append(f"Required return stage: {stage}")
+    prior = evidence.get("prior_signoff")
+    prior = prior if isinstance(prior, dict) else {}
+    prior_verdict = prior.get("verdict")
+    if isinstance(prior_verdict, str) and prior_verdict:
+        prior_sha = integration.revision_of(prior.get("sha"))
+        lines.append(f"Prior sign-off: {prior_verdict}"
+                     + (f" at {prior_sha[:12]}" if prior_sha else ""))
+    return lines
+
+
 @pr.command("show")
 @click.argument("pr_id")
 def pr_show(pr_id: str):
     """Show a PR's full detail: description, tests, files, deps, notes,
-    sign-off return, and integration.
+    sign-off decision and its evidence, sign-off return, and integration.
 
     The on-demand companion to the abbreviated listings prompt builders
     emit when a collection is too large to inline: sessions told to "run
@@ -578,6 +939,9 @@ def pr_show(pr_id: str):
     root = state_root()
     data = store.load(root)
     pr_entry = _require_pr(data, pr_id)
+    # Imported here (not at module scope) like the other readers below: the
+    # integration module is imported lazily across the CLI.
+    from pm_core import integration
 
     click.echo(format_pr_line(pr_entry))
     for label, key in (
@@ -591,7 +955,11 @@ def pr_show(pr_id: str):
         val = pr_entry.get(key)
         if val:
             click.echo(f"{label}: {val}")
-    deps = pr_entry.get("depends_on") or []
+    # ``graph.deps_of``: a hand-edited scalar ``depends_on`` is not a list of
+    # ids (an int raises out of ``join``; a string would be joined character by
+    # character), so the readers agree with `pm pr list` and the behaviour
+    # summary.
+    deps = graph.deps_of(pr_entry)
     if deps:
         click.echo(f"Depends on: {', '.join(deps)}")
     for label, key in (
@@ -599,10 +967,13 @@ def pr_show(pr_id: str):
         ("Tests", "tests"),
         ("Files", "files"),
     ):
-        val = (pr_entry.get(key) or "").strip()
+        # Hand-edited state: only text has whitespace to strip (a scalar would
+        # raise AttributeError out of the reader the prompts point at).
+        val = pr_entry.get(key)
+        val = val.strip() if isinstance(val, str) else ""
         if val:
             click.echo(f"\n## {label}\n{val}")
-    notes = pr_entry.get("notes") or []
+    notes = _notes_of(pr_entry)
     if notes:
         click.echo("\n## Notes")
         for n in notes:
@@ -620,7 +991,12 @@ def pr_show(pr_id: str):
         integration record and the sign-off return's copy of it.
         """
         for label, key in (("Overlap", "overlap"), ("Conflicts", "conflicts")):
-            vals = record.get(key) or []
+            # Hand-edited state: a non-list value is not a list of paths — an
+            # int would raise out of ``len()`` and a string would be joined
+            # character by character — so it reads as absent, the same
+            # contract every other reader of the record follows.
+            raw = record.get(key)
+            vals = [str(v) for v in raw] if isinstance(raw, list) else []
             total = record.get(f"{key}_total")
             if (not isinstance(total, int) or isinstance(total, bool)
                     or total < len(vals)):
@@ -632,10 +1008,23 @@ def pr_show(pr_id: str):
                         if total > len(vals) else "")
                 click.echo(f"{label} ({total}): {', '.join(vals)}{more}")
 
+    # The sign-off decision and the provenance the approval rests on: the
+    # merge gate enforces an explicit reuse/checks statement for a resolved or
+    # behaviourally-changed base, and a person assessing that decision needs
+    # the recorded revisions and statement, not only the verdict icon.
+    signoff_lines = _signoff_evidence_lines(pr_entry.get("signoff"))
+    if signoff_lines:
+        click.echo("\n## Sign-off")
+        for line in signoff_lines:
+            click.echo(line)
     # The sign-off return is a separate prompt block from the notes (it is a
     # different document), so its omission marker points here rather than at
     # `pm pr note list`, which does not contain it.  Print the whole record.
-    ret = pr_entry.get("signoff_return") or {}
+    # Hand-edited state: a non-mapping value is no record to print (``.get``
+    # on a scalar would raise out of the command), so it reads as absent — the
+    # same contract every reader of these records follows.
+    ret = pr_entry.get("signoff_return")
+    ret = ret if isinstance(ret, dict) else {}
     if ret:
         click.echo("\n## Sign-off return")
         for label, key in (
@@ -649,25 +1038,28 @@ def pr_show(pr_id: str):
             val = ret.get(key)
             if val:
                 click.echo(f"{label}: {val}")
-        applied = ret.get("applied") or {}
+        applied = ret.get("applied")
+        applied = applied if isinstance(applied, dict) else {}
         if applied.get("merge_sha"):
             click.echo(f"Applied merge: {applied['merge_sha']}")
         if ret.get("apply_error"):
             click.echo(f"Apply error: {ret['apply_error']}")
-        ret_integ = ret.get("integration") or {}
+        ret_integ = ret.get("integration")
+        ret_integ = ret_integ if isinstance(ret_integ, dict) else {}
         if ret_integ:
             # A return integration can legitimately lack a field: an ERROR
             # record (e.g. the base fetch failed) carries ``base_sha: null``.
             # Render the placeholder rather than the literal ``None`` — the
             # same rule the notes readers follow (a reader must not print a
             # value the record does not hold).
-            base = (f"`{ret_integ.get('base_branch') or '?'}` @ "
-                    f"`{ret_integ.get('base_sha') or '?'}` from "
-                    f"`{ret_integ.get('target_repo') or '?'}`")
-            click.echo(f"Integration: {ret_integ.get('status') or '?'} "
+            base = (f"`{integration._text(ret_integ.get('base_branch'))}` @ "
+                    f"`{integration._text(ret_integ.get('base_sha'))}` from "
+                    f"`{integration._text(ret_integ.get('target_repo'))}`")
+            click.echo(f"Integration: {integration._text(ret_integ.get('status'))} "
                        f"with {base}")
             _path_list_lines(ret_integ)
-    integ = pr_entry.get("integration") or {}
+    integ = pr_entry.get("integration")
+    integ = integ if isinstance(integ, dict) else {}
     if integ:
         click.echo("\n## Integration")
         for label, key in (
@@ -676,10 +1068,71 @@ def pr_show(pr_id: str):
             ("Base sha", "base_sha"),
             ("Status", "status"),
         ):
-            val = integ.get(key)
+            # Hand-edited state: only text is a value this reader can print
+            # (a mapping/list would render its repr), so it reads as absent —
+            # the same rule the prompt block and the return text follow.
+            val = integration._text(integ.get(key), "")
             if val:
                 click.echo(f"{label}: {val}")
         _path_list_lines(integ)
+        # The resolution is the provenance the sign-off decision rests on
+        # (which records pm combined, what it applied, what it could not
+        # reconcile).  Prompt builders point here when the integration lists
+        # are abbreviated, so a resolved candidate must not be a dead end.
+        resolution = integration.resolution_of(integ)
+        if resolution:
+            candidate = integration.revision_of(integ.get("candidate_tree"))
+            if candidate:
+                click.echo(f"Candidate tree: {candidate}")
+            unresolved = integration.unresolved_paths(integ)
+            carried = integration.carried_applied_resolution(integ)
+            for entry in integration.resolution_entries(resolution, "paths"):
+                path = entry.get("path")
+                # Only a string is a path (and a set member): a hand-edited
+                # non-string reads as absent rather than raising, and is not
+                # reported as a resolved path pm cannot name.
+                if not (isinstance(path, str) and path):
+                    continue
+                if path in unresolved:
+                    click.echo(f"Resolution attempted (NOT resolved): {path}")
+                elif carried:
+                    click.echo(f"Resolved earlier (already applied): {path}")
+                else:
+                    click.echo(f"Resolved: {path}")
+                for key, label in (("added_ours", "added from PR"),
+                                   ("added_theirs", "added from base"),
+                                   ("merged_fields", "merged records"),
+                                   ("removed", "removed")):
+                    values = entry.get(key)
+                    values = values if isinstance(values, list) else []
+                    if not values:
+                        continue
+                    shown = values[:10]
+                    # The yaml copy keeps a prefix; name the ids it omits.
+                    more = max(0, integration.resolution_id_total(entry, key)
+                               - len(shown))
+                    click.echo(f"  {label}: {', '.join(map(str, shown))}"
+                               + (f", … {more} more" if more else ""))
+            for entry in integration.resolution_entries(resolution,
+                                                        "unresolved"):
+                # Hand-edited state: a non-string path is not a path, so name
+                # the file pm can only have attempted instead of printing the
+                # malformed value as one.
+                upath = integration.resolution_entry_path(entry)
+                click.echo(f"Unresolved: {upath}: "
+                           f"{integration.resolution_conflicts_text(entry)}")
+            applied = integration.revision_of(
+                resolution.get("applied_merge_sha"))
+            click.echo("Applied merge: "
+                       + (applied or "not applied to the PR branch"))
+            digest = integ.get("resolution_digest")
+            if isinstance(digest, str) and digest:
+                click.echo(f"Resolution digest: {digest[:12]}")
+            diff_path = resolution.get("diff_path")
+            if isinstance(diff_path, str) and diff_path:
+                # The basename, not the host path: the record travels between
+                # hosts, and the full record pointer below resolves the dir.
+                click.echo(f"Resolution delta: {Path(diff_path).name}")
         # A runtime-resolved reference, not a host path: sessions following the
         # integration omission marker run inside a container, where the host
         # ~/.pm/sessions/<tag>/captures/ path does not exist (the same
@@ -929,7 +1382,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     if pr_entry.get("status") == "in_progress":
         # If already in_progress, reuse existing workdir if available
         existing_workdir = pr_entry.get("workdir")
-        if existing_workdir and Path(existing_workdir).exists():
+        if existing_workdir and Path(existing_workdir).is_dir():
             click.echo(f"PR {pr_id} is already in_progress, reusing existing workdir.")
             workdir = existing_workdir  # Set workdir so it gets used below
         else:
@@ -1021,7 +1474,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     else:
         # Check if we already have a workdir for this PR
         existing_workdir = pr_entry.get("workdir")
-        if existing_workdir and Path(existing_workdir).exists():
+        if existing_workdir and Path(existing_workdir).is_dir():
             work_path = Path(existing_workdir)
         else:
             # Need to clone first, then figure out the final path
@@ -1330,7 +1783,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         return
 
     workdir = pr_entry.get("workdir")
-    if not workdir or not Path(workdir).exists():
+    if not workdir or not Path(workdir).is_dir():
         root = state_root()
         workdir = _ensure_workdir(data, pr_entry, root)
         if not workdir:
@@ -1375,6 +1828,12 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
 
     title = pr_entry.get("title", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
+    # Hand-edited state: a ``base_branch`` that is not a branch name is not a
+    # ref to quote (``shell_quote(5)`` raised ``TypeError`` out of the launch
+    # on the local backend, before the window was created), so it falls back
+    # to the default the other readers assume.
+    if not (isinstance(base_branch, str) and base_branch):
+        base_branch = "master"
 
     # Resolve model/provider for review session
     from pm_core.model_config import resolve_model_and_provider
@@ -1470,10 +1929,21 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         #   local:   merge-base between base_branch and HEAD (no remote)
         #   vanilla/github: origin/{base_branch}...HEAD
         backend_name = data.get("project", {}).get("backend", "vanilla")
-        if backend_name == "local":
-            diff_ref = base_branch
+        # A bounce integrates the base into the branch (a resolved metadata
+        # conflict, or a clean base), while the workdir's own base ref may
+        # predate that merge: pm fetches the base into its own ref, never
+        # origin/<base>.  Diff against the exact base the branch contains, or
+        # the pane lists the merged base commits as the PR's changes.
+        from pm_core import integration as _integration
+        contained = _integration.contained_base(pr_entry)
+        if contained:
+            # project.yaml is user-controlled state: quote like the other
+            # interpolated values (a sha never needs it, but never trust it).
+            diff_ref = shell_quote(contained)
+        elif backend_name == "local":
+            diff_ref = shell_quote(base_branch)
         else:
-            diff_ref = f"origin/{base_branch}"
+            diff_ref = shell_quote(f"origin/{base_branch}")
         # User-controlled values (workdir, title via header) MUST be
         # shell_quote'd. An apostrophe in a PR title would otherwise
         # break the surrounding single-quote and turn the rest of the
@@ -1672,7 +2142,7 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
     backend_name = data["project"].get("backend", "vanilla")
     gh_pr_number = pr_entry.get("gh_pr_number")
     workdir = pr_entry.get("workdir")
-    if workdir and not Path(workdir).exists():
+    if workdir and not Path(workdir).is_dir():
         workdir = _ensure_workdir(data, pr_entry, root)
 
     if backend_name == "github" and gh_pr_number and workdir:
@@ -1843,7 +2313,8 @@ def pr_signoff_record(pr_id: str):
     # a legacy (HEAD-only) report.
     from pm_core import integration
     meta = signoff_mod.report_meta(pr_id)
-    irec = pr_entry.get("integration") or {}
+    irec = pr_entry.get("integration")
+    irec = irec if isinstance(irec, dict) else {}
     bound = integration.binding(irec) if irec.get("head") == sha else None
     if verdict == signoff_mod.SIGNOFF_MERGE:
         problem = None
@@ -1857,14 +2328,25 @@ def pr_signoff_record(pr_id: str):
             problem = ("there is no conflict-free integration check of the "
                        f"current HEAD ({integration.summary(irec) if irec else 'none'})")
         elif len(meta["base"]) < 7 \
-                or not (irec.get("base_sha") or "").startswith(meta["base"]):
+                or not (integration.revision_of(irec.get("base_sha")) or ""
+                        ).startswith(meta["base"]):
+            check_base = integration.revision_of(irec.get("base_sha")) or "?"
             problem = (f"report.html assessed base {meta['base'][:12]}, but "
                        f"the latest integration check is against "
-                       f"{(irec.get('base_sha') or '?')[:12]}")
+                       f"{check_base[:12]}")
         if problem:
             click.echo(f"PR {pr_id}: cannot record {verdict}: {problem}. "
                        f"Regenerate with `pm pr signoff --fresh {pr_id}`.",
                        err=True)
+            raise SystemExit(1)
+        justification = signoff_mod.approval_justification_problem(
+            pr_id, irec, sha)
+        if justification:
+            click.echo(
+                f"PR {pr_id}: cannot record {verdict}: {justification}. "
+                f"Add the pm-signoff-candidate / pm-signoff-evidence / "
+                f"pm-signoff-checks tags to report.html, then re-run "
+                f"`pm pr signoff record {pr_id}`.", err=True)
             raise SystemExit(1)
 
     # Same earliest-step routing as the driver: a conflicted integration
@@ -1881,8 +2363,11 @@ def pr_signoff_record(pr_id: str):
     verdict = recorded
     base_note = ""
     if bound:
-        base_note = (f", base {bound.get('base_branch')}@"
-                     f"{(bound.get('base_sha') or '?')[:12]}")
+        bound_base = integration.revision_of(bound.get("base_sha")) or "?"
+        # The binding is the stored (hand-editable) check: a non-string
+        # ``base_branch`` is no branch to print.
+        base_note = (f", base {integration._text(bound.get('base_branch'))}@"
+                     f"{bound_base[:12]}")
     click.echo(
         f"Recorded sign-off verdict {verdict} for {pr_id} "
         f"(origin=manual, report approved at sha {sha[:12]}{base_note}).")
@@ -1895,17 +2380,28 @@ def pr_signoff_record(pr_id: str):
               help="Record the result on the PR (what a sign-off verdict "
                    "binds to). Run from the base pm directory.")
 @click.option("--apply", "apply_", is_flag=True, default=False,
-              help="Merge a clean base into the PR branch (never the base).")
-def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool):
+              help="Apply a clean result, or apply and re-record a resolved "
+                   "candidate, to the PR branch (never the base).")
+@click.option("--resolve/--no-resolve", "resolve", default=True,
+              help="Resolve metadata-only project.yaml conflicts by record "
+                   "id in the isolated candidate (default: yes).")
+def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
+                         resolve: bool):
     """Check integration with the latest base (isolated candidate).
 
     Fetches the configured base branch from the target repository and
     merges the PR HEAD with it in an isolated candidate — the PR worktree
-    and the base branch are untouched — and prints the result.  Read-only
-    by default (the sign-off launch records the check its verdict binds
-    to); ``--record`` stores it on the PR and in ``$CAP/integration.json``.
-    ``--apply`` then merges a *clean* result into the PR branch.  Exits 1
-    when the integration conflicts or the check fails.
+    and the base branch are untouched — and prints the result.  A conflict
+    confined to project.yaml is reconciled by record id (independent
+    additions survive; real field/deletion/ambiguity conflicts do not).
+    Records nothing on the PR by default (the sign-off launch records the
+    check its verdict binds to); the resolution delta it names is still
+    written under ``$CAP`` so the path it prints is inspectable.  ``--record``
+    stores the check on the PR and in ``$CAP/integration.json``.  ``--apply``
+    merges a *clean* result into the PR branch, or applies a *resolved*
+    candidate (verifying the resulting tree equals the recorded candidate)
+    and re-records it.  Exits 1 when the integration conflicts or the check
+    fails.
     """
     from pm_core import integration
 
@@ -1913,26 +2409,119 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool):
     data = store.load(root)
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
-    if record or apply_:
-        rec = integration.check_integration(root, pr_id, data=data)
+    applied_clean = None
+    if apply_:
+        if resolve:
+            # ``prepare`` is check -> apply a resolved candidate -> re-check,
+            # recorded as one coherent record; calling the check again first
+            # would fetch and merge the candidate a third time.
+            rec = integration.prepare(root, pr_id, data=data)
+        else:
+            rec = integration.check_integration(root, pr_id, data=data,
+                                                resolve=False)
+        if rec.get("status") == integration.CLEAN:
+            # A clean candidate (including a resolved check whose base moved to
+            # a clean merge): `--apply` must still apply the merge.
+            applied_clean, err = integration.apply_integration(root, pr_id, rec)
+            if err:
+                click.echo(f"Not applied: {err}", err=True)
+                raise SystemExit(1)
+    elif record:
+        rec = integration.check_integration(root, pr_id, data=data,
+                                            resolve=resolve)
     else:
-        rec = integration.run_check(data, pr_entry, root)
+        rec = integration.run_check(data, pr_entry, root, resolve=resolve)
+        # The read-only check records nothing on the PR, but the delta its
+        # output names must exist for the resolution to be inspectable.
+        integration.write_resolution_delta(pr_id, rec)
     click.echo(f"PR {pr_id}: {integration.summary(rec)}")
-    click.echo(f"  target: {rec.get('base_branch')} of {rec.get('target_repo')}")
-    click.echo(f"  head:   {rec.get('head')}")
-    click.echo(f"  base:   {rec.get('base_sha')}")
-    if rec.get("candidate_tree"):
-        click.echo(f"  candidate tree: {rec['candidate_tree']}")
-    for label, key in (("conflicts", "conflicts"), ("changed on both sides", "overlap")):
-        if rec.get(key):
-            click.echo(f"  {label}: {', '.join(rec[key])}")
-    if apply_ and rec.get("status") == integration.CLEAN:
-        merged, err = integration.apply_integration(root, pr_id, rec)
-        if err:
-            click.echo(f"Not applied: {err}", err=True)
+    # ``prepare`` can return the *stored* record when a concurrent apply won the
+    # race, so these are hand-editable state: a value that is not text reads as
+    # the ``?`` placeholder the rest of the output uses instead of the literal
+    # ``None`` or a mapping's repr.
+    click.echo(f"  target: {integration._text(rec.get('base_branch'))} of "
+               f"{integration._text(rec.get('target_repo'))}")
+    click.echo(f"  head:   {integration._text(rec.get('head'))}")
+    click.echo(f"  base:   {integration._text(rec.get('base_sha'))}")
+    candidate_tree = integration.revision_of(rec.get("candidate_tree"))
+    if candidate_tree:
+        click.echo(f"  candidate tree: {candidate_tree}")
+    for label, key in (("conflicts", "conflicts"),
+                       ("changed on both sides", "overlap")):
+        # A stale stored record (``prepare`` can return it when a concurrent
+        # apply won) is hand-editable state: a non-list value reads as absent
+        # instead of raising out of the CLI.
+        values = rec.get(key)
+        if isinstance(values, list) and values:
+            click.echo(f"  {label}: {', '.join(map(str, values))}")
+    resolution = integration.resolution_of(rec)
+    # A failed attempt keeps its per-path details on the record; never label a
+    # path it could not reconcile as "resolved" (the unresolved line below is
+    # the authoritative one).
+    unresolved = integration.unresolved_paths(rec)
+    # A resolution an earlier merge applied is not this check's outcome: the
+    # conflict the record now reports is elsewhere (``_carry_forward``).
+    carried = integration.carried_applied_resolution(rec)
+    for entry in integration.resolution_entries(resolution, "paths"):
+        path = entry.get("path")
+        # Only a string is a path (and a set member): a hand-edited
+        # non-string reads as absent rather than raising out of the CLI.
+        if not (isinstance(path, str) and path):
+            continue
+        if path in unresolved:
+            click.echo(f"  attempted: {path} (by record id — NOT resolved)")
+        elif carried:
+            click.echo(f"  resolved earlier: {path} (by record id — "
+                       "already applied)")
+        else:
+            click.echo(f"  resolved: {path} (by record id)")
+        for key, label in (("added_ours", "added from PR"),
+                           ("added_theirs", "added from base"),
+                           ("merged_fields", "merged fields"),
+                           ("removed", "removed")):
+            values = entry.get(key)
+            values = values if isinstance(values, list) else []
+            if values:
+                shown = values[:10]
+                # Name the ids the record holds but this listing omits.
+                more = max(0, integration.resolution_id_total(entry, key)
+                           - len(shown))
+                click.echo(f"    {label}: {', '.join(map(str, shown))}"
+                           + (f", … {more} more" if more else ""))
+    for entry in integration.resolution_entries(resolution, "unresolved"):
+        # Hand-edited state: a non-string path is not a path, so name the file
+        # pm can only have attempted instead of printing the malformed value
+        # as one.
+        upath = integration.resolution_entry_path(entry)
+        click.echo(f"  unresolved: {upath}: "
+                   f"{integration.resolution_conflicts_text(entry)}", err=True)
+    if applied_clean:
+        # ``prepare`` can return the stored record when a concurrent apply won:
+        # hand-edited state, so a non-string revision reads as absent instead
+        # of raising out of the CLI (and a non-string ``base_branch`` reads as
+        # the placeholder rather than the literal ``None``).
+        applied_base = integration.revision_of(rec.get("base_sha")) or ""
+        click.echo(f"Merged {integration._text(rec.get('base_branch'))}@"
+                   f"{applied_base[:12]} into the PR branch as "
+                   f"{applied_clean[:12]}.")
+    applied_merge = integration.revision_of(resolution.get("applied_merge_sha"))
+    if applied_merge:
+        click.echo(f"  applied to the PR branch as {applied_merge[:12]}")
+    if rec.get("apply_error"):
+        click.echo(f"  not applied: {rec['apply_error']}", err=True)
+        if apply_:
+            # `--apply` asked for the merge; a resolved candidate that could
+            # not be applied has not done what was asked, even though the
+            # (unapplied) record is still a mergeable-looking RESOLVED one.
             raise SystemExit(1)
-        click.echo(f"Merged {rec.get('base_branch')}@{rec['base_sha'][:12]} "
-                   f"into the PR branch as {merged[:12]}.")
+    # Hand-edited state: only a string is a path (``pm pr show`` and the
+    # prompt read a malformed pointer as absent), so never print the value.
+    diff_path = resolution.get("diff_path")
+    if isinstance(diff_path, str) and diff_path:
+        click.echo(f"  resolution delta: {diff_path}")
+    behavior = rec.get("base_behavior_changes")
+    for change in (behavior if isinstance(behavior, list) else [])[:10]:
+        click.echo(f"  base behaviour: {change}")
     if record or apply_:
         trigger_tui_refresh()
     if rec.get("status") not in integration.MERGEABLE:
@@ -1971,7 +2560,11 @@ def _finalize_merge(root, pr_entry: dict, pr_id: str,
     # pending PR).
     prs = data.get("prs") or []
     ready = graph.ready_prs(prs)
-    unblocked = [p for p in ready if pr_id in (p.get("depends_on") or [])]
+    # ``graph.deps_of``: a hand-edited scalar ``depends_on`` is no list of ids
+    # (``pr_id in 5`` raises TypeError, and a string would be substring-matched)
+    # — and this runs *after* the merge published, so a crash here would leave
+    # the PR half-finalized.
+    unblocked = [p for p in ready if pr_id in graph.deps_of(p)]
     merged = f"PR {_pr_display_id(pr_entry)} marked as merged"
     if ready:
         click.echo("Newly ready PRs:")
@@ -2014,7 +2607,7 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     if not workdir:
         click.echo(f"Merge window: no workdir for {pr_entry['id']}.")
         return
-    if not Path(workdir).exists():
+    if not Path(workdir).is_dir():
         root = state_root()
         workdir = _ensure_workdir(data, pr_entry, root)
         if not workdir:
@@ -2229,9 +2822,11 @@ def _publish_approved(data: dict, root: Path, pr_entry: dict,
     from pm_core import integration
 
     pr_id = pr_entry["id"]
-    approved = pr_entry["signoff"]
-    bound = approved["integration"]
-    head = approved["sha"]
+    approved = pr_entry.get("signoff")
+    approved = approved if isinstance(approved, dict) else {}
+    bound = approved.get("integration")
+    bound = bound if isinstance(bound, dict) else {}
+    head = approved.get("sha")
     target_repo, _ = integration.target_for(data, pr_entry, root)
     if bound.get("target_repo") and not integration.same_target(
             target_repo, bound["target_repo"]):
@@ -2289,7 +2884,10 @@ def _publish_candidate(data: dict, root: Path, pr_entry: dict,
     from pm_core import integration
     pr_id = pr_entry["id"]
     branch = pr_entry.get("branch", "")
-    cand = integration.compute_candidate(workdir, head, base_sha)
+    # The merge step never resolves anything: the approved candidate was
+    # already resolved at sign-off (and applied to the branch).  Recompute
+    # without resolution and require the exact approved tree.
+    cand = integration.compute_candidate(workdir, head, base_sha, resolve=False)
     if cand.get("status") not in integration.MERGEABLE \
             or cand.get("candidate_tree") != bound["candidate_tree"]:
         _return_to_signoff(
@@ -2597,7 +3195,12 @@ def _recover_completed_merge(data: dict, root: Path, pr_entry: dict,
     branch = pr_entry.get("branch", "")
     repo_dir = str(_resolve_repo_dir(root, data))
     workdir = pr_entry.get("workdir")
-    if not workdir or not Path(workdir).exists():
+    # Hand-edited state: a ``workdir`` that is not a path string is not a
+    # checkout (``Path(5)`` raised ``TypeError`` out of the recovery path,
+    # which runs before the merge gate), so it reads as absent and the
+    # revision is resolved from the main repo instead.
+    workdir = workdir if isinstance(workdir, str) and workdir else None
+    if not workdir or not Path(workdir).is_dir():
         workdir = None
     # The PR's revision: the workdir HEAD, else the branch in the main repo.
     head = _ref(workdir, "HEAD") if workdir else (
@@ -2817,9 +3420,18 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     # is otherwise valid, say the workdir is missing rather than "stale".
     current_sha = head_sha(workdir) if workdir else None
     refusal = merge_gate_refusal(pr_entry, current_sha, base_branch)
+    approved = pr_entry.get("signoff")
+    approved = approved if isinstance(approved, dict) else {}
+    # The approved revision is hand-editable state: a non-string value is not a
+    # revision, so it cannot stand in for the (missing) workdir HEAD.  Passing
+    # it raw made the gate treat the record's own value as a fresh match and
+    # then slice it (``head.startswith``) — an ``AttributeError`` out of
+    # `pm pr merge` instead of the refusal below.
+    approved_sha = approved.get("sha")
+    approved_sha = approved_sha \
+        if isinstance(approved_sha, str) and approved_sha else None
     if current_sha is None and refusal and merge_gate_refusal(
-            pr_entry, (pr_entry.get("signoff") or {}).get("sha"),
-            base_branch) is None:
+            pr_entry, approved_sha, base_branch) is None:
         refusal = (f"PR {pr_id} workdir not found; the approved HEAD and "
                    f"candidate live there, so nothing can be published. "
                    f"Restore the workdir, then re-run sign-off.")
@@ -2838,7 +3450,8 @@ def pr_sync():
     """Check for merged PRs and unblock dependents (GitHub backend only).
 
     For local/vanilla backends, use 'pm pr merge' instead.
-    Needs at least one workdir to exist (created by 'pm pr start').
+    Works from any existing workdir, and from the project repo when every
+    workdir is gone.
     """
     root = state_root()
     data = store.load(root)
@@ -2856,20 +3469,16 @@ def pr_sync():
 
     backend = get_backend(data)
 
-    # Find any existing workdir to check merge status from
-    target_workdir = None
-    for p in prs:
-        wd = p.get("workdir")
-        if wd and Path(wd).exists() and git_ops.is_git_repo(wd):
-            target_workdir = wd
-            break
+    # Find any existing workdir to check merge status from.  When every
+    # workdir is gone the project repo is still a valid place to detect the
+    # merge and verify what it published — the same fallback
+    # `pm pr sync-github` uses; losing a workdir must not turn a mismatch
+    # into a silent finalize.
+    target_workdir = pr_sync_mod.find_workdir(data)
     if not target_workdir:
-        workdirs_base = _workdirs_dir(data)
-        if workdirs_base.exists():
-            for d in workdirs_base.iterdir():
-                if d.is_dir() and git_ops.is_git_repo(d):
-                    target_workdir = str(d)
-                    break
+        repo_dir = _resolve_repo_dir(root, data)
+        if repo_dir and git_ops.is_git_repo(str(repo_dir)):
+            target_workdir = str(repo_dir)
 
     if not target_workdir:
         click.echo("No workdirs found. Run 'pm pr start' on a PR first.", err=True)
@@ -2882,9 +3491,14 @@ def pr_sync():
         if pr_entry.get("status") not in ("in_review", "in_progress", "qa", "sign_off"):
             continue
         branch = pr_entry.get("branch", "")
-        # Prefer PR's own workdir if it exists
+        # Prefer PR's own workdir if it exists.  ``project.yaml`` is
+        # hand-editable state: a ``workdir`` that is not a path string is not a
+        # checkout (``Path(5)`` raised ``TypeError`` out of ``pm pr sync``), so
+        # it reads as absent and the shared workdir is used — the same contract
+        # the sign-off surfaces follow.
         wd = pr_entry.get("workdir")
-        check_dir = wd if (wd and Path(wd).exists()) else target_workdir
+        wd = wd if isinstance(wd, str) and wd else None
+        check_dir = wd if (wd and Path(wd).is_dir()) else target_workdir
 
         if backend.is_merged(str(check_dir), branch, base_branch):
             merged_ids.add(pr_entry["id"])
@@ -3245,7 +3859,7 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
             nonlocal pruned
             for p in data.get("prs") or []:
                 wd = p.get("workdir")
-                if wd and not Path(wd).exists():
+                if wd and not Path(wd).is_dir():
                     click.echo(f"  {p['id']}: cleared missing workdir {wd}")
                     p["workdir"] = None
                     pruned += 1
@@ -3467,21 +4081,32 @@ def pr_note_add(pr_id: str, text: str):
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
-    note_id = store.generate_note_id(pr_id, text)
+    # The id is derived from the text, so adding the same text twice would
+    # reuse the id.  Two notes with one id are ambiguous: `pm pr note
+    # edit/delete` look a note up by id and can only touch one of them, and
+    # the integration resolver refuses a project.yaml with duplicate ids (so
+    # the PR could never have a metadata conflict resolved).  Generate the id
+    # from the *fresh* note list inside the locked update, so a concurrent add
+    # of the same text cannot collide either.
     created_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    note = {"id": note_id, "text": text, "created_at": created_at, "last_edited": created_at}
+    note = {"id": store.generate_note_id(pr_id, text), "text": text,
+            "created_at": created_at, "last_edited": created_at}
 
     def apply(data):
         pr = store.get_pr(data, pr_id)
         if not pr:
             return
-        notes = pr.get("notes") or []
+        # ``_notes_of`` returns the stored list when it is one (so malformed
+        # members are preserved) and a fresh list when the value is a scalar.
+        notes = _notes_of(pr)
+        note["id"] = store.generate_note_id(
+            pr_id, text, {i for i in (_note_id(n) for n in notes) if i})
         notes.append(note)
         pr["notes"] = notes
         _record_status_timestamp(pr)
 
     store.locked_update(root, apply)
-    click.echo(f"Added note {note_id} to {_pr_display_id(pr_entry)}")
+    click.echo(f"Added note {note['id']} to {_pr_display_id(pr_entry)}")
     trigger_tui_refresh()
 
 
@@ -3500,37 +4125,48 @@ def pr_note_edit(pr_id: str, note_id: str, text: str):
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
-    # Validate note exists (on stale data, but good enough for error messages)
-    notes = pr_entry.get("notes") or []
-    target = None
-    for n in notes:
-        if n["id"] == note_id:
-            target = n
-            break
+    # Validate note exists (on stale data, but good enough for error messages).
+    # Hand-edited state: a malformed member is not a note (``n["id"]`` raised
+    # ``TypeError``/``KeyError`` out of the command).
+    notes = _notes_of(pr_entry)
+    target = next((n for n in notes if _note_id(n) == note_id), None)
     if target is None:
         click.echo(f"Note '{note_id}' not found on {_pr_display_id(pr_entry)}.", err=True)
         if notes:
             click.echo("Available notes:", err=True)
             for n in notes:
-                click.echo(f"  {n['id']}: {n['text']}", err=True)
+                click.echo(f"  {_note_id(n) or '?'}: {_note_text(n) or ''}",
+                           err=True)
         raise SystemExit(1)
 
-    new_id = store.generate_note_id(pr_id, text)
+    # The new id is derived from the new text: editing a note to text another
+    # note already has would otherwise give both the same id — the ambiguity
+    # `pm pr note edit/delete` cannot resolve and the integration resolver
+    # refuses.  Generate it inside the locked update from the fresh notes,
+    # excluding the edited note itself (so re-saving its own text keeps its
+    # id).
+    new_id = {"id": store.generate_note_id(pr_id, text)}
 
     def apply(data):
         pr = store.get_pr(data, pr_id)
         if not pr:
             return
-        for n in pr.get("notes") or []:
-            if n["id"] == note_id:
-                n["id"] = new_id
+        notes = _notes_of(pr)
+        others = {i for i in (_note_id(n) for n in notes)
+                  if i and i != note_id}
+        fresh_id = store.generate_note_id(pr_id, text, others)
+        for n in notes:
+            if _note_id(n) == note_id:
+                n["id"] = fresh_id
                 n["text"] = text
                 n["last_edited"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                new_id["id"] = fresh_id
                 break
         _record_status_timestamp(pr)
 
     store.locked_update(root, apply)
-    click.echo(f"Updated note {note_id} → {new_id} on {_pr_display_id(pr_entry)}")
+    click.echo(f"Updated note {note_id} → {new_id['id']} on "
+               f"{_pr_display_id(pr_entry)}")
     trigger_tui_refresh()
 
 
@@ -3542,7 +4178,7 @@ def pr_note_list(pr_id: str):
     data = store.load(root)
     pr_entry = _require_pr(data, pr_id)
 
-    notes = pr_entry.get("notes") or []
+    notes = _notes_of(pr_entry)
     if not notes:
         click.echo(f"No notes on {_pr_display_id(pr_entry)}.")
         return
@@ -3560,21 +4196,25 @@ def pr_note_delete(pr_id: str, note_id: str):
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
-    # Validate note exists
-    notes = pr_entry.get("notes") or []
-    if not any(n["id"] == note_id for n in notes):
+    # Validate note exists.  Hand-edited state: a malformed member is not a
+    # note (``n["id"]`` raised ``TypeError``/``KeyError`` out of the command).
+    notes = _notes_of(pr_entry)
+    if not any(_note_id(n) == note_id for n in notes):
         click.echo(f"Note '{note_id}' not found on {_pr_display_id(pr_entry)}.", err=True)
         if notes:
             click.echo("Available notes:", err=True)
             for n in notes:
-                click.echo(f"  {n['id']}: {n['text']}", err=True)
+                click.echo(f"  {_note_id(n) or '?'}: {_note_text(n) or ''}",
+                           err=True)
         raise SystemExit(1)
 
     def apply(data):
         pr = store.get_pr(data, pr_id)
         if not pr:
             return
-        pr["notes"] = [n for n in (pr.get("notes") or []) if n["id"] != note_id]
+        # Keep every other member as-is, including a malformed one that is not
+        # a note: deleting one note must not drop hand-written state.
+        pr["notes"] = [n for n in _notes_of(pr) if _note_id(n) != note_id]
         _record_status_timestamp(pr)
 
     store.locked_update(root, apply)
@@ -3629,7 +4269,7 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
 
     # Remove workdir if exists (filesystem op, safe outside lock)
     workdir = pr_entry.get("workdir")
-    if workdir and Path(workdir).exists():
+    if workdir and Path(workdir).is_dir():
         shutil.rmtree(workdir)
         click.echo(f"Removed workdir: {workdir}")
 

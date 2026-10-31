@@ -1710,20 +1710,32 @@ def _record_qa_note(app, state: QALoopState,
             if not pr:
                 _log.warning("Cannot record QA note: PR %s not found", state.pr_id)
                 return
-            notes = pr.get("notes") or []
+            # Hand-edited state: a malformed ``notes`` value is no list, and a
+            # member that is not a mapping has no ``id`` — neither is a note
+            # (``n["id"]`` raised ``TypeError``/``KeyError`` and the QA note,
+            # the next session's handoff, was silently lost).
+            notes = pr.get("notes")
+            notes = notes if isinstance(notes, list) else []
             run_tail = f" (workdir: {state.qa_workdir})"
-            if state.qa_workdir and any(
-                    (n.get("text") or "").startswith(
-                        f"QA {state.latest_verdict}: ")
-                    and (n.get("text") or "").endswith(run_tail)
-                    for n in notes):
+
+            def _this_run_note(n) -> bool:
+                # A non-mapping member, or one whose text is not a string, is
+                # hand-edited state with no run to match (``.startswith`` on
+                # an int raised out of the completion path).
+                text = n.get("text") if isinstance(n, dict) else None
+                return (isinstance(text, str)
+                        and text.startswith(f"QA {state.latest_verdict}: ")
+                        and text.endswith(run_tail))
+
+            if state.qa_workdir and any(_this_run_note(n) for n in notes):
                 # This run's note is already there (its workdir names the
                 # run): a TUI restart re-processed a completion whose
                 # snapshot was kept for a pending follow-up.  The summary
                 # is rebuilt from the snapshot, so match the run, not it.
                 _log.info("QA note for %s already recorded", state.pr_id)
                 return
-            existing_ids = {n["id"] for n in notes}
+            existing_ids = {n.get("id") for n in notes
+                            if isinstance(n, dict) and isinstance(n.get("id"), str)}
             note_id = store.generate_note_id(state.pr_id, note_text, existing_ids)
             now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             notes.append({"id": note_id, "text": note_text,

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
+from click.testing import CliRunner
 
 from pm_core.cli.helpers import (
     _infer_pr_id,
@@ -12,6 +13,7 @@ from pm_core.cli.helpers import (
     _pr_id_sort_key,
     _record_status_timestamp,
     _resolve_pr_id,
+    _resolve_repo_dir,
 )
 
 
@@ -364,6 +366,122 @@ class TestEnsureWorkdir:
         result = _ensure_workdir(data, pr_entry, tmp_path)
         assert result is None
 
+    def test_a_non_string_workdir_is_reprovisioned_not_crashed(self, tmp_path):
+        """A hand-edited ``workdir`` that is not a path string is not a checkout.
+
+        Every window launch (start / review / sign-off) reaches provisioning
+        through this helper, and ``Path(5)`` raised ``TypeError`` there — so a
+        malformed value crashed the launch instead of being re-cloned like a
+        missing workdir.  (No branch here, so the re-provisioning itself
+        declines without cloning.)
+        """
+        for bad in (5, {"a": 1}, ["x"]):
+            pr_entry = {"id": "pr-001", "workdir": bad}
+            data = {"project": {"name": "test"}}
+            assert _ensure_workdir(data, pr_entry, tmp_path) is None
+
+    def test_a_workdir_that_is_a_file_is_not_a_checkout(self, tmp_path):
+        """A *string* path that is a regular file is not a checkout either.
+
+        The non-string guard above does not help here, and ``Path.exists()``
+        passed: every git read then ran with a file as the cwd and raised
+        ``NotADirectoryError`` — out of ``signoff.head_sha`` (``pm pr merge``,
+        ``pm pr signoff record``, the driver tick) and out of provisioning.
+        The predicate every reader uses is "is a directory".
+        """
+        from pm_core import signoff
+
+        f = tmp_path / "workdir-is-now-a-file"
+        f.write_text("not a checkout\n")
+        assert f.exists() and not f.is_dir()
+
+        # ``head_sha`` is the shared reader behind the merge gate, the manual
+        # verdict record and the sign-off driver tick: absent, not a crash.
+        assert signoff.head_sha(str(f)) is None
+        # Provisioning re-clones instead of returning the file as a workdir
+        # (no branch here, so it declines).
+        assert _ensure_workdir({"project": {"name": "test"}},
+                               {"id": "pr-001", "workdir": str(f)},
+                               tmp_path) is None
+
+
+# ---------------------------------------------------------------------------
+# `pm pr list --timestamps` reads hand-edited timestamps safely
+# ---------------------------------------------------------------------------
+
+
+class TestPrListTimestamps:
+    """A hand-edited timestamp is not always a string.
+
+    ``project.yaml`` is hand-editable state: an unquoted date is a
+    ``datetime.date``, which cannot be compared with another PR's ISO string.
+    ``format_pr_line`` (the same PR list's renderer) and the home window's PR
+    list already read such a value through ``str``; the CLI's own sort key
+    raised ``TypeError`` out of the command.
+    """
+
+    def _root(self, tmp_path):
+        (tmp_path / "project.yaml").write_text(
+            "project:\n"
+            "  name: test\n"
+            "  repo: /tmp/fake\n"
+            "  base_branch: master\n"
+            "plans: []\n"
+            "prs:\n"
+            "  - id: pr-001\n"
+            "    title: Dated\n"
+            "    status: in_progress\n"
+            "    updated_at: 2026-01-02\n"
+            "  - id: pr-002\n"
+            "    title: Stamped\n"
+            "    status: in_progress\n"
+            "    updated_at: '2026-01-03T00:00:00Z'\n"
+        )
+        return tmp_path
+
+    def test_a_hand_edited_date_does_not_crash_the_sort(self, tmp_path):
+        from pm_core.cli import cli
+
+        root = self._root(tmp_path)
+        result = CliRunner().invoke(
+            cli, ["-C", str(root), "pr", "list", "--timestamps"])
+        assert result.exit_code == 0, result.output
+        assert "pr-001" in result.output
+        assert "pr-002" in result.output
+
+
+# ---------------------------------------------------------------------------
+# _resolve_repo_dir
+# ---------------------------------------------------------------------------
+
+
+class TestResolveRepoDir:
+    """``project``/``repo`` are hand-edited state: a bad value is no repo."""
+
+    def test_a_malformed_project_or_repo_falls_back_to_cwd(
+            self, tmp_path, monkeypatch):
+        """A scalar ``project``/``repo`` must not raise out of the caller.
+
+        ``Path(5)`` raised ``TypeError`` and a non-mapping ``project`` raised
+        ``AttributeError``.  On the merge-detection path the exception is
+        swallowed by the per-PR handler, so the merge was finalized WITHOUT the
+        merge-integrity check — the silent finalize pr-2e06289 prevents.
+        """
+        monkeypatch.chdir(tmp_path)
+        root = tmp_path / "pm"          # not an internal pm/ dir (no .git)
+        assert _resolve_repo_dir(root, {"project": 5}) == tmp_path
+        assert _resolve_repo_dir(root, {"project": ["x"]}) == tmp_path
+        assert _resolve_repo_dir(root, {"project": {"repo": 5}}) == tmp_path
+        assert _resolve_repo_dir(
+            root, {"project": {"repo": ["x"]}}) == tmp_path
+        assert _resolve_repo_dir(root, {}) == tmp_path
+
+    def test_a_local_repo_path_is_still_used(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.chdir(tmp_path)
+        assert _resolve_repo_dir(tmp_path / "pm",
+                                 {"project": {"repo": str(repo)}}) == repo
 
 class TestPmSessionOutsidePmTmux:
     """A process outside a pm tmux session (a QA driver spawned by

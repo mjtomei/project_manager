@@ -20,6 +20,7 @@ from rich.text import Text
 from rich.cells import cell_len
 from rich.console import RenderableType
 
+from pm_core import graph
 from pm_core.pr_utils import usable_prs
 from pm_core.tui import item_message, perf
 from pm_core.tui.tree_layout import compute_tree_layout, SORT_FIELDS, SORT_FIELD_KEYS
@@ -64,7 +65,7 @@ VERDICT_STYLES = {
 # truth shared with `pm pr list`); re-exported here for the node renderer.
 from pm_core.signoff import (  # noqa: E402
     SIGNOFF_VERDICT_ICONS, SIGNOFF_VERDICT_STYLES, latest_signoff_verdict,
-    display_signoff_verdict,
+    display_signoff_verdict, verdict_of,
 )
 
 SPINNER_FRAMES = "◐◓◑◒"
@@ -130,6 +131,19 @@ PRSelected, _PRActivated = item_message("PR", "pr_id")
 def _node_y(row: int) -> int:
     """Pixel y of a node's top border given its grid *row*."""
     return row * (NODE_H + V_GAP) + 1
+
+
+def _signoff_verdict(pr: dict) -> str | None:
+    """The PR's recorded sign-off verdict, or ``None`` when malformed.
+
+    ``project.yaml`` is hand-editable state: a non-mapping ``signoff`` value
+    must read as absent instead of raising ``AttributeError`` out of the
+    layout signature, which runs on every render (the same contract
+    ``pm_core.signoff``'s readers follow).
+    """
+    record = pr.get("signoff")
+    return (verdict_of(record.get("verdict"))
+            if isinstance(record, dict) else None)
 
 
 def compute_neighbors(
@@ -281,7 +295,9 @@ class EdgeCanvas(Widget):
         # Collect edges where both endpoints are positioned
         edges = []
         for pr in prs:
-            for dep_id in pr.get("depends_on") or []:
+            # ``graph.deps_of``: a hand-edited scalar ``depends_on`` is not a
+            # list of ids (iterating an int raises out of every render).
+            for dep_id in graph.deps_of(pr):
                 if dep_id in node_positions and pr["id"] in node_positions:
                     edges.append((dep_id, pr["id"]))
 
@@ -930,8 +946,16 @@ class TechTree(Widget):
                 bool(pr.get("spec_pending")),
                 pr.get("agent_machine"),
                 bool(pr.get("workdir")),
-                (pr.get("signoff") or {}).get("verdict"),
-                tuple(pr.get("depends_on") or []),
+                _signoff_verdict(pr),
+                # ``graph.deps_of``: a hand-edited scalar ``depends_on`` is
+                # not a list of ids (``tuple(5)`` raises, and iterating a
+                # string yields characters), and a non-string member is not a
+                # dependency the layout can draw.  This is the same reader
+                # ``compute_tree_layout`` and the edge canvas use, so the
+                # signature changes exactly when the layout can — and it stays
+                # hashable, as documented above (a raw list member may be a
+                # mapping).
+                tuple(graph.deps_of(pr)),
                 pr.get("updated_at"), pr.get("created_at"), pr.get("started_at"),
                 pr.get("reviewed_at"), pr.get("merged_at"),
                 has_pr_override(pr),  # the ⇄ badge

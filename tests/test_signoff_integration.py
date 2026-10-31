@@ -263,6 +263,39 @@ def test_legacy_and_invalidated_records_relaunch(w):
     assert res.stale and res.reason == "master moved since sign-off"
 
 
+def test_malformed_verdict_is_no_verdict_not_a_stale_one(w):
+    """A hand-edited non-string verdict is no verdict for the driver too.
+
+    ``fresh_recorded_verdict`` already reads it as absent, but the stale
+    branch tested the raw value's truthiness: a mapping looked like a
+    recorded verdict that had gone stale, so the driver retired the run,
+    deleted ``pr["signoff"]`` and reported ``HEAD moved`` — a false
+    provenance claim, since HEAD had not moved.  It must fall through to the
+    no-verdict path (relaunch), leaving the record alone.
+    """
+    signoff.record_signoff_verdict(w.pm_dir, PR, SIGNOFF_MERGE, w.head,
+                                   "manual")
+
+    def _bad(d):
+        store.get_pr(d, PR)["signoff"]["verdict"] = {"verdict": SIGNOFF_MERGE}
+    store.locked_update(w.pm_dir, _bad)
+
+    res, retired = step(w, None, window=None)
+    assert (res.action, res.stale) == ("launch", False)
+    assert res.reason is None
+    assert retired == []
+    assert pr(w).get("signoff")          # not cleared as a stale record
+
+    # The guard is narrow: a real but stale verdict still takes the stale
+    # path and still reports why.
+    def _string(d):
+        store.get_pr(d, PR)["signoff"]["verdict"] = SIGNOFF_MERGE
+    store.locked_update(w.pm_dir, _string)
+    res, retired = step(w, None)
+    assert res.stale and res.reason          # a real verdict keeps its reason
+    assert "signoff" not in pr(w)
+
+
 def test_next_signoff_decision_resolves_the_return(w):
     commit(w.wd, "shared.txt", "pr\n", "pr")
     commit(w.repo, "shared.txt", "other\n", "base")
@@ -1110,6 +1143,23 @@ def test_claim_return_launch_expires(tmp_path):
                             "base_branch": "master", "backend": "local"},
                 "prs": [p]}, tmp_path)
     assert signoff.claim_return_launch(tmp_path, PR, "review") is True
+
+
+def test_claim_return_launch_reads_a_malformed_claim_as_no_claim(tmp_path):
+    """project.yaml is hand-editable state: a non-mapping ``launch_claim``
+    must read as absent, not raise out of the locked update.
+
+    The exception would be swallowed by ``claim_return_launch``'s guard, which
+    returns False — read by the driver as "another launcher holds it" — so a
+    scalar value would silently strand the returned PR's relaunch forever.
+    """
+    p = _returned("in_review", "review", launch_claim="garbage")
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master", "backend": "local"},
+                "prs": [p]}, tmp_path)
+    assert signoff.claim_return_launch(tmp_path, PR, "review") is True
+    ret = store.get_pr(store.load(tmp_path), PR)["signoff_return"]
+    assert ret["launch_claim"]["hop"] == "review"
 
 
 def test_cli_leaves_a_claimed_review_return_launch_alone(tmp_path):

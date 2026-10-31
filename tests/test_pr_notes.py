@@ -132,6 +132,29 @@ class TestPrNoteAdd:
         result = runner.invoke(cli, ["-C", str(root), "pr", "note", "add", "pr-999", "text"])
         assert result.exit_code != 0
 
+    def test_adding_the_same_text_twice_gets_unique_ids(self, tmp_path):
+        """Note ids are keys, so adding one text twice must not reuse an id.
+
+        ``pm pr note edit/delete`` look a note up by id (only one of the two
+        would ever be touched), and the integration resolver refuses a
+        project.yaml that repeats an id — pm's own note command must not
+        create the ambiguity that makes a metadata conflict unresolvable.
+        """
+        from pm_core import integration
+
+        root = _make_state(tmp_path)
+        runner = CliRunner()
+        for _ in range(2):
+            result = runner.invoke(
+                cli, ["-C", str(root), "pr", "note", "add", "pr-001",
+                      "same text"])
+            assert result.exit_code == 0, result.output
+        data = store.load(root)
+        notes = store.get_pr(data, "pr-001")["notes"]
+        assert [n["text"] for n in notes] == ["same text", "same text"]
+        assert notes[0]["id"] != notes[1]["id"]
+        assert integration._duplicate_id_problems(data, "PR branch") == []
+
 
 class TestPrNoteList:
     def test_list_empty(self, tmp_path):
@@ -173,6 +196,42 @@ class TestPrNoteList:
         result = runner.invoke(cli, ["-C", str(root), "pr", "note", "list", "pr-001"])
         assert result.exit_code == 0
         assert "Legacy note" in result.output
+
+    def test_list_tolerates_a_non_mapping_note(self, tmp_path):
+        """A hand-edited note member that is not a mapping still lists.
+
+        ``pm pr note list`` (like ``pm pr show``) is the on-demand reader the
+        PR-notes prompt marker names, so one malformed member must not hide
+        every note behind a traceback.
+        """
+        notes = ["just a string", {"id": "note-abc1234", "text": "Real note"}]
+        root = _make_state(tmp_path, notes=notes)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "list", "pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "Real note" in result.output
+
+
+class TestPrShowReaders:
+    """``pm pr show`` is the reader prompt builders point sessions at."""
+
+    def test_show_tolerates_malformed_fields(self, tmp_path):
+        """Hand-edited ``depends_on`` / ``notes`` / ``description`` must not
+        crash the reader (``join`` on an int, ``.get`` on a scalar note and
+        ``.strip()`` on a scalar description all raised out of the command).
+        """
+        root = _make_state(tmp_path)
+        data = store.load(root)
+        pr = store.get_pr(data, "pr-001")
+        pr["depends_on"] = 5
+        pr["notes"] = ["just a string", {"id": "note-abc", "text": "Real note"}]
+        pr["description"] = 7
+        store.save(data, root)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-C", str(root), "pr", "show", "pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "Real note" in result.output
+        assert "Depends on:" not in result.output
 
 
 class TestPrNoteEdit:
@@ -251,6 +310,49 @@ class TestPrNoteEdit:
         assert pr["notes"][0]["id"] == "note-abc1234"
         assert pr["notes"][0]["text"] == "Keep this"
         assert pr["notes"][1]["text"] == "Edited text"
+
+    def test_editing_to_another_notes_text_gets_a_unique_id(self, tmp_path):
+        """Editing must not give the note an id another note already has.
+
+        The id is derived from the text, so editing a note to text a sibling
+        already carries would otherwise duplicate that id — the ambiguity the
+        integration resolver refuses (and that ``pm pr note edit/delete``
+        cannot address).
+        """
+        from pm_core import integration
+
+        root = _make_state(tmp_path)
+        runner = CliRunner()
+        for text in ("first text", "second text"):
+            assert runner.invoke(
+                cli, ["-C", str(root), "pr", "note", "add", "pr-001", text]
+            ).exit_code == 0
+        data = store.load(root)
+        notes = store.get_pr(data, "pr-001")["notes"]
+        second_id = notes[1]["id"]
+        result = runner.invoke(
+            cli, ["-C", str(root), "pr", "note", "edit", "pr-001",
+                  second_id, "first text"])
+        assert result.exit_code == 0, result.output
+        data = store.load(root)
+        notes = store.get_pr(data, "pr-001")["notes"]
+        assert [n["text"] for n in notes] == ["first text", "first text"]
+        assert notes[0]["id"] != notes[1]["id"]
+        assert integration._duplicate_id_problems(data, "PR branch") == []
+
+    def test_re_editing_its_own_text_keeps_its_id(self, tmp_path):
+        """A no-op text edit keeps the id (the note is not "another" note)."""
+        root = _make_state(tmp_path)
+        runner = CliRunner()
+        runner.invoke(cli, ["-C", str(root), "pr", "note", "add", "pr-001",
+                            "steady text"])
+        note_id = store.get_pr(store.load(root), "pr-001")["notes"][0]["id"]
+        result = runner.invoke(
+            cli, ["-C", str(root), "pr", "note", "edit", "pr-001", note_id,
+                  "steady text"])
+        assert result.exit_code == 0, result.output
+        notes = store.get_pr(store.load(root), "pr-001")["notes"]
+        assert [n["id"] for n in notes] == [note_id]
 
 
 class TestPrNoteDelete:
@@ -673,6 +775,540 @@ class TestPromptGenNotes:
         prompt = generate_qa_child_prompt(data, "pr-001", scenario, "/tmp/workdir")
         assert "\n## PR Notes\n" in prompt
         assert "QA PASS: All passed" in prompt
+
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_non_mapping_note_does_not_crash_the_prompt(self, mock_root,
+                                                        mock_notes):
+        """A hand-edited note member that is not a mapping reads as absent.
+
+        ``project.yaml`` is hand-editable state, and every prompt builder
+        renders the notes block.  ``n.get(...)`` on a scalar note raised
+        ``AttributeError`` out of prompt generation, so the impl / review /
+        QA / sign-off window could not launch at all — the same class of
+        crash the note readers already tolerate for a missing ``id``/``text``.
+        """
+        data = self._data(notes=[
+            "just a string", 5,
+            {"id": "note-abc", "text": "Real note"},
+        ])
+        prompt = generate_prompt(data, "pr-001")
+        assert "Real note" in prompt
+
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_non_list_notes_reads_as_absent(self, mock_root, mock_notes):
+        """A scalar ``notes`` value is no collection to iterate."""
+        data = self._data()
+        data["prs"][0]["notes"] = 5
+        prompt = generate_prompt(data, "pr-001")
+        assert "\n## PR Notes\n" not in prompt
+
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_malformed_depends_on_does_not_crash_the_prompt(self, mock_root,
+                                                            mock_notes):
+        """A hand-edited scalar ``depends_on`` reads as absent.
+
+        ``map(_dep_line, 5)`` raised ``TypeError`` out of every prompt builder
+        (impl / review / QA / sign-off), so the session window could not
+        launch; a string was walked character by character and silently
+        rendered no dependency section.
+        """
+        for value in (5, "pr-002", ["pr-002", 7, None]):
+            data = self._data()
+            data["prs"][0]["depends_on"] = value
+            data["prs"].append({
+                "id": "pr-002", "plan": None, "title": "Dep", "status": "merged",
+                "depends_on": [], "description": "", "agent_machine": None,
+                "gh_pr": None, "gh_pr_number": None,
+            })
+            prompt = generate_prompt(data, "pr-001")
+            if value == "pr-002" or value == 5:
+                assert "It depends on:" not in prompt
+            else:
+                assert "pr-002" in prompt
+
+
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_non_string_note_id_does_not_crash_the_prompt(self, mock_root,
+                                                          mock_notes):
+        """A hand-edited non-hashable ``id`` is no id to index by.
+
+        ``merged.get(nid)`` raised ``TypeError`` on a list/mapping id, which
+        took every prompt builder down (the same class as a non-mapping note).
+        """
+        data = self._data(notes=[
+            {"id": ["not", "hashable"], "text": "List id"},
+            {"id": {"a": 1}, "text": "Mapping id"},
+            {"id": "note-abc", "text": "Real note"},
+        ])
+        prompt = generate_prompt(data, "pr-001")
+        assert "List id" in prompt
+        assert "Mapping id" in prompt
+        assert "Real note" in prompt
+
+
+class TestPrNoteWritePaths:
+    """The note commands are the canonical handoff channel.
+
+    ``project.yaml`` is hand-editable state: a malformed member used to raise
+    ``TypeError``/``KeyError`` out of ``pm pr note add`` / ``edit`` /
+    ``delete`` and out of the ``pm pr edit`` reconciliation, which left the
+    file untouched and hid the problem.
+    """
+
+    def _notes(self, root):
+        return store.get_pr(store.load(root), "pr-001")["notes"]
+
+    def test_add_tolerates_malformed_notes(self, tmp_path):
+        """A scalar ``notes`` value or a non-mapping member must not raise.
+
+        ``notes = pr.get("notes") or []`` then ``notes.append(...)`` raised
+        ``AttributeError`` on a scalar value, and the member indexing raised
+        elsewhere; a hand-edited state file must not make the canonical
+        handoff command fail.
+        """
+        runner = CliRunner()
+
+        # A scalar ``notes`` value is repaired into a real list.
+        root = _make_state(tmp_path, notes=5)
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "add",
+                                     "pr-001", "hello"])
+        assert result.exit_code == 0, result.output
+        notes = self._notes(root)
+        assert [n.get("text") for n in notes if isinstance(n, dict)] == ["hello"]
+
+        # A malformed member in a real list is preserved.
+        root = _make_state(tmp_path, notes=["just a string"])
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "add",
+                                     "pr-001", "hello"])
+        assert result.exit_code == 0, result.output
+        notes = self._notes(root)
+        assert "just a string" in notes
+        assert any(isinstance(n, dict) and n.get("text") == "hello"
+                   for n in notes)
+
+    def test_edit_tolerates_a_non_mapping_note(self, tmp_path):
+        root = _make_state(tmp_path, notes=[
+            "just a string",
+            {"id": "note-abc1234", "text": "old"},
+        ])
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "edit",
+                                     "pr-001", "note-abc1234", "new"])
+        assert result.exit_code == 0, result.output
+        notes = self._notes(root)
+        assert "just a string" in notes
+        assert any(isinstance(n, dict) and n.get("text") == "new"
+                   for n in notes)
+
+    def test_edit_lists_available_notes_without_raising(self, tmp_path):
+        root = _make_state(tmp_path, notes=["just a string"])
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "edit",
+                                     "pr-001", "note-missing", "new"])
+        assert result.exit_code == 1
+        assert "not found" in result.output
+
+    def test_delete_tolerates_a_non_mapping_note(self, tmp_path):
+        root = _make_state(tmp_path, notes=[
+            "just a string",
+            {"id": "note-abc1234", "text": "old"},
+        ])
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "delete",
+                                     "pr-001", "note-abc1234"])
+        assert result.exit_code == 0, result.output
+        # The malformed member is hand-written state: deleting one note must
+        # not drop it.
+        assert self._notes(root) == ["just a string"]
+
+    def test_pr_edit_reconciliation_tolerates_malformed_state(self, tmp_path):
+        """``_apply_pr_edit`` reconciles notes without raising.
+
+        The editor watcher calls this on every save: a scalar ``description``
+        / ``depends_on`` or a malformed note member raised out of it, so the
+        save was lost.
+        """
+        from pm_core.cli.pr import _apply_pr_edit
+
+        root = _make_state(tmp_path, notes=[
+            "just a string",
+            {"id": "note-abc1234", "text": "old"},
+        ])
+        data = store.load(root)
+        pr = store.get_pr(data, "pr-001")
+        pr["description"] = 7
+        pr["depends_on"] = 5
+        store.save(data, root)
+
+        changes = _apply_pr_edit(root, "pr-001", {
+            "title": None, "status": None, "depends_on_str": None,
+            "note_texts": ["old", "new"], "description": "desc",
+        })
+        assert "notes updated" in changes
+        notes = self._notes(root)
+        assert any(isinstance(n, dict) and n.get("text") == "new"
+                   for n in notes)
+        # A member the template cannot show is hand-written state: the edit
+        # keeps it instead of dropping it silently.
+        assert "just a string" in notes
+        assert store.get_pr(store.load(root), "pr-001")["description"] == "desc"
+
+    def test_pr_edit_keeps_a_note_whose_text_is_not_text(self, tmp_path):
+        """A save must not rebuild an unrenderable note away.
+
+        The template renders a note whose ``text`` is not a string (a
+        hand-edited unquoted date, a number, a missing ``text``) as an empty
+        bullet, so the parsed round-trip never matched it: the note was
+        dropped and replaced by an empty note under a new id on *every* save.
+        It is hand-written state, so it is kept verbatim.
+        """
+        from pm_core.cli.pr import _apply_pr_edit
+
+        original = [
+            {"id": "note-keep", "text": 20261026},
+            {"id": "note-null", "created_at": "2026-01-15T10:30:00Z"},
+            {"id": "note-abc1234", "text": "old"},
+        ]
+        root = _make_state(tmp_path, notes=[dict(n) for n in original])
+
+        # What the template's notes block parses back to with nothing changed:
+        # the bare bullet (no text, no timestamp) is dropped by the parser, the
+        # textless note that carries a timestamp parses as an empty note, and
+        # the real note is unchanged.
+        changes = _apply_pr_edit(root, "pr-001", {
+            "title": None, "status": None, "depends_on_str": None,
+            "note_texts": ["", "old"], "description": "A test PR",
+        })
+        assert changes == []
+        assert self._notes(root) == original
+
+        # A real edit keeps them too (they are not dropped by the rebuild).
+        changes = _apply_pr_edit(root, "pr-001", {
+            "title": None, "status": None, "depends_on_str": None,
+            "note_texts": ["", "new"], "description": "A test PR",
+        })
+        assert "notes updated" in changes
+        notes = [n for n in self._notes(root) if isinstance(n, dict)]
+        assert any(n.get("id") == "note-keep" and n.get("text") == 20261026
+                   for n in notes)
+        assert any(n.get("id") == "note-null" for n in notes)
+        assert any(n.get("text") == "new" for n in notes)
+
+    def test_pr_edit_keeps_a_note_the_template_cannot_read_back(self, tmp_path):
+        """A note the template's own parser does not read back is kept.
+
+        The reconciliation matches a stored note to a parsed line by its
+        ``text``, so a note whose rendered bullet parses to no note (or to
+        other text) can never be matched — a save that rebuilt the notes
+        dropped it or rewrote its content:
+
+        * ``text: ""`` with no ``created_at`` renders as a bare ``- `` bullet,
+          which parses to no note at all.  pm's note commands always stamp
+          ``created_at`` (such a note reads back as an empty note), so this
+          shape is hand-written state.
+        * a text that ends in a timestamp-looking suffix (or carries trailing
+          whitespace) is truncated by the template's ``# <ts>`` comment
+          stripping, so it used to be replaced by its truncated form.
+
+        Both are hand-written state and must be kept verbatim, like a member
+        the template cannot show.  A stamped empty note must still round-trip
+        as itself, not become a duplicate.
+        """
+        from pm_core.cli.pr import _apply_pr_edit
+
+        suffixed = "note  # 2026-01-15T10:30:00Z"
+        original = [
+            {"id": "note-plain", "text": ""},
+            {"id": "note-stamped", "text": "",
+             "created_at": "2026-01-01T00:00:00Z"},
+            {"id": "note-suffixed", "text": suffixed},
+            {"id": "note-real", "text": "real",
+             "created_at": "2026-01-02T00:00:00Z"},
+        ]
+        root = _make_state(tmp_path, notes=[dict(n) for n in original])
+
+        changes = _apply_pr_edit(root, "pr-001", {
+            "title": None, "status": None, "depends_on_str": None,
+            "note_texts": ["", "note", "real", "a new note"],
+            "description": "A test PR",
+        })
+        assert "notes updated" in changes
+        notes = self._notes(root)
+        ids = [n.get("id") for n in notes if isinstance(n, dict)]
+        # The hand-written empty note survives; the stamped empty note is
+        # matched by its parsed empty bullet rather than duplicated.
+        assert "note-plain" in ids
+        assert ids.count("note-stamped") == 1
+        assert sum(1 for n in notes
+                   if isinstance(n, dict) and n.get("text") == "") == 2
+        # The suffixed text is kept whole, not replaced by its truncated form.
+        assert any(n.get("text") == suffixed
+                   for n in notes if isinstance(n, dict))
+        assert any(n.get("text") == "a new note"
+                   for n in notes if isinstance(n, dict))
+
+    def test_a_note_the_template_cannot_read_back_is_not_duplicated(
+            self, tmp_path):
+        """A save must not add a second note for the fragment it *can* show.
+
+        A member the template cannot fully represent still renders fragments
+        the parser reads back as notes: a multi-line note renders its lines as
+        bullets, and a text ending in a timestamp-looking suffix renders
+        truncated.  Those fragments are not editable notes (the whole member
+        is kept verbatim), but the reconciliation only matched editable notes,
+        so editing any *other* note created brand-new notes for them —
+        silently duplicating the member's content on every save that touched
+        the notes.
+        """
+        from pm_core.cli.pr import _apply_pr_edit
+
+        suffixed = "note  # 2026-01-15T10:30:00Z"
+        original = [
+            {"id": "note-multiline", "text": "alpha\nbeta",
+             "created_at": "2026-01-01T00:00:00Z"},
+            # A continuation line that itself looks like a bullet parses back
+            # as another note, so it is a fragment too.
+            {"id": "note-bulleted", "text": "foo\n- bar",
+             "created_at": "2026-01-01T00:00:00Z"},
+            {"id": "note-suffixed", "text": suffixed},
+            {"id": "note-real", "text": "real",
+             "created_at": "2026-01-02T00:00:00Z"},
+        ]
+        root = _make_state(tmp_path, notes=[dict(n) for n in original])
+
+        # What the template parses back to, with "real" edited to "changed".
+        changes = _apply_pr_edit(root, "pr-001", {
+            "title": None, "status": None, "depends_on_str": None,
+            "note_texts": ["alpha", "foo", "bar", "note", "changed"],
+            "description": "A test PR",
+        })
+        assert "notes updated" in changes
+        notes = self._notes(root)
+        texts = [n.get("text") for n in notes if isinstance(n, dict)]
+        # The members the template cannot hold survive verbatim ...
+        assert "alpha\nbeta" in texts
+        assert "foo\n- bar" in texts
+        assert suffixed in texts
+        assert "changed" in texts
+        # ... and their fragments are not also added as separate notes.
+        assert "alpha" not in texts
+        assert "foo" not in texts
+        assert "bar" not in texts
+        assert "note" not in texts
+
+    def test_a_noop_editor_save_survives_the_templates_ascii_step(
+            self, tmp_path):
+        """The ASCII substitution can change the bullet's *structure*.
+
+        ``pr_edit`` ASCII-izes the whole template before the parser sees it, so
+        an en dash in a note's text becomes a plain hyphen.  That turns a
+        continuation line starting ``– `` into a real ``- `` bullet, and a
+        ``2020–01–01T…Z`` suffix into a strippable timestamp.  The no-op
+        comparison modelled the *raw* bullet, so it saw neither change: an
+        unchanged save invented a duplicate note for the continuation line, and
+        replaced the suffix-bearing note with its truncated form under a new id
+        (both lose the hand-written note the save was supposed to leave alone).
+        """
+        original = [
+            {"id": "note-multi", "text": "alpha\n– beta"},
+            {"id": "note-suffix",
+             "text": "note  # 2020–01–01T00:00:00Z"},
+        ]
+        root = _make_state(tmp_path, notes=[dict(n) for n in original])
+        saved = {}
+
+        def fake_editor(template, on_save):
+            saved["template"] = template
+            on_save(template)      # the user saved without changing anything
+            return 0, True
+
+        with patch("pm_core.editor.run_watched_editor", fake_editor):
+            result = CliRunner().invoke(cli, ["-C", str(root), "pr", "edit",
+                                              "pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "No changes detected." in result.output
+        # Sanity: the editor really holds the ASCII form of both notes.
+        assert "- beta" in saved["template"]
+        assert "2020-01-01T00:00:00Z" in saved["template"]
+        assert self._notes(root) == original
+
+    def test_a_noop_editor_save_changes_nothing(self, tmp_path):
+        """The editor watcher saves on every write, unchanged or not.
+
+        Driving the real template through the real parser, an unchanged save
+        must not rewrite the notes: the members the template cannot show (no
+        ``text``, a non-string ``text``, a non-mapping member) used to be
+        replaced by empty notes, and a note's unicode was laundered through the
+        template's lossy ASCII round-trip (a right quote came back as a left
+        one).
+        """
+        original = [
+            {"id": "note-keep", "text": 20261026},
+            {"id": "note-null", "created_at": "2026-01-15T10:30:00Z"},
+            {"id": "note-abc1234", "text": "old -- dashes",
+             "created_at": "2026-01-15T10:30:00Z"},
+            {"id": "note-quoted", "text": "“quoted”"},
+            "a bare string member",
+        ]
+        root = _make_state(tmp_path, notes=[dict(n) if isinstance(n, dict) else n
+                                            for n in original])
+        saved = {}
+
+        def fake_editor(template, on_save):
+            saved["template"] = template
+            on_save(template)      # the user saved without changing anything
+            return 0, True
+
+        with patch("pm_core.editor.run_watched_editor", fake_editor):
+            result = CliRunner().invoke(cli, ["-C", str(root), "pr", "edit",
+                                              "pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "No changes detected." in result.output
+        # Sanity: this drove the real template (and the editor's ASCII step).
+        assert "- old -- dashes" in saved["template"]
+        assert self._notes(root) == original
+
+    def test_a_noop_editor_save_does_not_launder_the_title_or_description(
+            self, tmp_path):
+        """A no-op save must not rewrite the title/description either.
+
+        The template is ASCII-ized for the editor and the parser restores
+        unicode per content field, so the round-trip is lossy in both
+        directions (a plain hyphen comes back as an en dash, an apostrophe as
+        a left single quote, ``--`` as an em dash).  Comparing the parse
+        against the *stored* value made every save look like an edit and
+        rewrote the field with the laundered text — silently corrupting the
+        PR's title and description on a save that changed nothing.
+        """
+        root = _make_state(tmp_path)
+        data = store.load(root)
+        pr = store.get_pr(data, "pr-001")
+        pr["title"] = "Don't break the -- dash"
+        pr["description"] = 'Uses a - b and "quotes".'
+        store.save(data, root)
+
+        def fake_editor(template, on_save):
+            on_save(template)      # the user saved without changing anything
+            return 0, True
+
+        with patch("pm_core.editor.run_watched_editor", fake_editor):
+            result = CliRunner().invoke(cli, ["-C", str(root), "pr", "edit",
+                                              "pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "No changes detected." in result.output
+        after = store.get_pr(store.load(root), "pr-001")
+        assert after["title"] == "Don't break the -- dash"
+        assert after["description"] == 'Uses a - b and "quotes".'
+
+    def test_a_noop_editor_save_keeps_a_hand_edited_title(self, tmp_path):
+        """A non-string or multi-line title is not rewritten by a no-op save.
+
+        The template renders the stored title through ``str`` and holds it on
+        one line, while ``_apply_pr_edit`` coerced a non-string current title
+        to ``""`` before comparing.  An unchanged save therefore looked like
+        an edit and replaced the hand-edited value with its text form (an int
+        became a string, a mapping its laundered repr), and a multi-line
+        title was truncated to its first line — the same "a no-op save is a
+        true no-op" contract the notes and description already follow.
+        """
+        for index, title in enumerate((20261026, {"a": 1}, ["x", "y"], True,
+                                       1.5, "line one\nline two")):
+            case_dir = tmp_path / f"case-{index}"
+            case_dir.mkdir()
+            root = _make_state(case_dir)
+            data = store.load(root)
+            store.get_pr(data, "pr-001")["title"] = title
+            store.save(data, root)
+
+            def fake_editor(template, on_save):
+                on_save(template)   # the user saved without changing anything
+                return 0, True
+
+            with patch("pm_core.editor.run_watched_editor", fake_editor):
+                result = CliRunner().invoke(
+                    cli, ["-C", str(root), "pr", "edit", "pr-001"])
+            assert result.exit_code == 0, (title, result.output)
+            assert "No changes detected." in result.output, (title, result.output)
+            after = store.get_pr(store.load(root), "pr-001")
+            assert after["title"] == title, (title, after["title"])
+
+    def test_a_noop_editor_save_keeps_markdown_headings_in_the_description(
+            self, tmp_path):
+        """A ``#`` line in the description is content, not a template comment.
+
+        The template renders the description below a "everything below this
+        line" header, and PR descriptions routinely carry markdown headings
+        (``## Goal``).  The parser skipped every line starting with ``#``
+        *before* it looked at the description section, so a no-op save dropped
+        every heading and rewrote the description — silent data loss on the
+        editor the reconciliation runs from.
+        """
+        root = _make_state(tmp_path)
+        description = (
+            "## Goal\n"
+            "Ship the fix.\n"
+            "\n"
+            "## Notes\n"
+            "Nothing special.\n"
+        )
+        data = store.load(root)
+        store.get_pr(data, "pr-001")["description"] = description
+        store.save(data, root)
+
+        def fake_editor(template, on_save):
+            on_save(template)      # the user saved without changing anything
+            return 0, True
+
+        with patch("pm_core.editor.run_watched_editor", fake_editor):
+            result = CliRunner().invoke(cli, ["-C", str(root), "pr", "edit",
+                                              "pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "No changes detected." in result.output
+        after = store.get_pr(store.load(root), "pr-001")
+        assert after["description"] == description
+
+    def test_a_real_note_edit_keeps_the_untouched_notes(self, tmp_path):
+        """Adding one note must not rebuild every other note.
+
+        The reconciliation matched a parsed line to a stored note by its
+        ``text``, but the parsed text has been through the template's lossy
+        ASCII round-trip and never equals a stored text containing a plain
+        hyphen, apostrophe or quote.  Every real edit therefore dropped the
+        untouched notes and re-created them: a new id, a fresh
+        ``created_at``, and the laundered text replacing the original.
+        """
+        original = [
+            {"id": "note-a", "text": "don't forget the base",
+             "created_at": "2026-01-01T00:00:00Z",
+             "last_edited": "2026-01-01T00:00:00Z"},
+            {"id": "note-b", "text": "alpha - beta",
+             "created_at": "2026-01-02T00:00:00Z",
+             "last_edited": "2026-01-02T00:00:00Z"},
+        ]
+        root = _make_state(tmp_path, notes=[dict(n) for n in original])
+
+        def fake_editor(template, on_save):
+            # The user adds one bullet inside the notes section and saves.
+            on_save(template.replace("# Description",
+                                     "- a new handoff note\n# Description"))
+            return 0, True
+
+        with patch("pm_core.editor.run_watched_editor", fake_editor):
+            result = CliRunner().invoke(cli, ["-C", str(root), "pr", "edit",
+                                              "pr-001"])
+        assert result.exit_code == 0, result.output
+        notes = [n for n in self._notes(root) if isinstance(n, dict)]
+        by_id = {n.get("id"): n for n in notes}
+        # The untouched notes survive verbatim: same id, timestamps and text.
+        assert by_id["note-a"] == original[0]
+        assert by_id["note-b"] == original[1]
+        # The new note is added.
+        assert any(n.get("text") == "a new handoff note" for n in notes)
+        assert len(notes) == 3
 
 
 class TestPrNotesHandoffGuidance:

@@ -1509,6 +1509,101 @@ class TestNotesBounding:
 
 
 # ---------------------------------------------------------------------------
+# hand-edited PR text fields
+# ---------------------------------------------------------------------------
+
+class TestHandEditedPrText:
+    """``project.yaml`` is hand-editable state: a non-string PR text field
+    must not crash a prompt builder.
+
+    ``description`` is inlined by every builder (impl / review / sign-off / QA
+    planner) and by the spec prompt.  A value YAML parses as a non-string (an
+    unquoted date, an int) has no ``.strip()``; without the guard the session
+    window could not launch at all — the same crash class ``_note_mappings``
+    closes for a malformed note.  A note whose ``text`` is a non-string
+    likewise crashed the bounded notes renderer once the notes block exceeded
+    its budget.
+    """
+
+    def test_a_non_string_description_does_not_crash_any_prompt(self):
+        data = _data(_pr(description=20260101))
+        for build in (prompt_gen.generate_prompt,
+                      prompt_gen.generate_review_prompt,
+                      prompt_gen.generate_signoff_prompt,
+                      prompt_gen.generate_qa_planner_prompt):
+            assert build(data, "pr-x")
+
+    def test_the_spec_prompt_tolerates_a_non_string_description(self):
+        pr = _pr(description=20260101)
+        prompt = spec_gen._build_spec_prompt(_data(pr), pr, "impl")
+        assert prompt
+
+    def test_a_string_description_is_still_inlined(self):
+        prompt = prompt_gen.generate_prompt(
+            _data(_pr(description="  real description  ")), "pr-x")
+        assert "real description" in prompt
+
+    def test_the_spec_prompt_diff_names_a_real_base_branch(self):
+        """A hand-edited ``base_branch`` is no branch name.
+
+        The QA spec prompt interpolates it into ``git diff <base>...HEAD``
+        when the branch does not already contain a base, so a value YAML
+        parses as a non-string (an int) or an empty one would hand the agent
+        a command that cannot work — the same fallback the review window's
+        diff pane applies.
+        """
+        pr = _pr(workdir="/tmp/nowhere")
+        for bad in (5, ["master"], "", None):
+            data = _data(pr)
+            data["project"]["base_branch"] = bad
+            prompt = spec_gen._build_spec_prompt(data, pr, "qa")
+            assert "git diff master...HEAD" in prompt, bad
+            assert f"git diff {bad}...HEAD" not in prompt, bad
+        data = _data(pr)
+        data["project"]["base_branch"] = "develop"
+        assert "git diff develop...HEAD" in spec_gen._build_spec_prompt(
+            data, pr, "qa")
+
+    def test_a_non_string_note_text_does_not_crash_the_bounded_renderer(self):
+        notes = [{"id": "note-a", "text": "x" * 20000,
+                  "created_at": "2026-01-01T00:00:00Z"},
+                 {"id": "note-b", "text": 7,
+                  "created_at": "2026-01-02T00:00:00Z"}]
+        out = prompt_gen._render_pr_notes_bounded(notes, 3000, "pr-x")
+        # Rendered through ``str``, like the full renderer renders it.
+        assert "- 7 " in out
+
+    def test_a_non_string_workdir_does_not_crash_the_prompt_builders(
+            self, tmp_path):
+        """A ``workdir`` that is not a path string is not a checkout.
+
+        Every builder inlines the specs through
+        ``spec_gen.format_spec_for_prompt`` → ``get_spec``, which built
+        ``Path(workdir)`` from the field: one hand-edited value raised
+        ``TypeError`` out of the impl / review / sign-off / QA-planner
+        prompts, so the session window could not launch at all.  It now reads
+        as absent (the canonical spec is used instead).
+        """
+        pr = _pr(workdir=20260101)
+        data = _data(pr)
+        for build in (prompt_gen.generate_prompt,
+                      prompt_gen.generate_review_prompt,
+                      prompt_gen.generate_signoff_prompt,
+                      prompt_gen.generate_qa_planner_prompt):
+            assert build(data, "pr-x")
+        assert spec_gen.get_spec(pr, "impl") is None
+
+    def test_a_string_workdir_still_supplies_the_workdir_spec(self, tmp_path):
+        """The guard reads a malformed value as absent — not every value."""
+        workdir = tmp_path / "wd"
+        (workdir / "pm" / "specs" / "pr-x").mkdir(parents=True)
+        (workdir / "pm" / "specs" / "pr-x" / "impl.md").write_text(
+            "workdir spec\n")
+        pr = _pr(workdir=str(workdir))
+        assert spec_gen.get_spec(pr, "impl") == "workdir spec"
+
+
+# ---------------------------------------------------------------------------
 # launcher guard
 # ---------------------------------------------------------------------------
 
@@ -1997,6 +2092,25 @@ class TestPlanPromptBounding:
                 cli, ["-C", str(root), "plan", "breakdown", "pl-001"])
         assert result.exit_code == 0, result.output
         assert prompt_bytes(result.output) <= PROMPT_ARG_LIMIT + 300
+
+    def test_plan_deps_tolerates_malformed_pr_fields(self, tmp_path):
+        """A hand-edited ``description``/``depends_on`` is not prompt material.
+
+        ``project.yaml`` is hand-editable state: ``" ".join(5.split())`` and
+        ``", ".join(5)`` raised ``AttributeError``/``TypeError`` out of the
+        plan prompt builders.
+        """
+        root = _make_plan_state(tmp_path, plan_prs=3, other_prs=0)
+        data = store.load(root)
+        for pr in data["prs"]:
+            pr["description"] = 5
+            pr["depends_on"] = 7
+        store.save(data, root)
+        for argv in (["plan", "deps"], ["plan", "breakdown", "pl-001"],
+                     ["plan", "review", "pl-001"]):
+            with patch("pm_core.cli.plan.find_claude", return_value=None):
+                result = CliRunner().invoke(cli, ["-C", str(root)] + argv)
+            assert result.exit_code == 0, (argv, result.output)
 
     def test_plan_lists_bound_long_titles_too(self, tmp_path):
         """The plan *listings* are count-capped, but their lines carry

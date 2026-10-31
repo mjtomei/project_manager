@@ -813,3 +813,33 @@ async def test_null_and_nonstring_titles_render_without_crashing():
         assert len(ctrl_lines) == 5
         assert ctrl_lines[2].startswith("║ Ctrl Line Tab NUL E")
         assert "\x1b" not in "".join(ctrl_lines)
+
+
+@async_test
+async def test_layout_signature_is_hashable_and_reads_deps_like_the_layout():
+    """``_signature`` is documented as hashable and must key on what can draw.
+
+    ``project.yaml`` is hand-editable state: a ``depends_on`` list can hold a
+    member that is not an id (a mapping), which made the signature tuple
+    unhashable — and it cannot affect the layout either, since
+    ``compute_tree_layout`` and ``EdgeCanvas`` read deps through
+    ``graph.deps_of``.  So the signature reads the same way: a change of only
+    a non-id member is not a layout change, a real dep is.
+    """
+    app = _TreeApp([_pr("pr-a"), _pr("pr-c"),
+                    _pr("pr-b", depends_on=["pr-a", {"x": 1}])])
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        tree = app.query_one(TechTree)
+        sig = tree._signature()
+        hash(sig)          # documented hashable; raised TypeError before
+        # A non-id member cannot be drawn, so it is not a layout input.
+        app._prs = [_pr("pr-a"), _pr("pr-c"),
+                    _pr("pr-b", depends_on=["pr-a", {"x": 2}])]
+        tree.update_prs(app._prs)
+        assert tree._signature() == sig
+        # A real dependency is (same PR set, only the dep differs).
+        app._prs = [_pr("pr-a"), _pr("pr-c"),
+                    _pr("pr-b", depends_on=["pr-a", "pr-c", {"x": 2}])]
+        tree.update_prs(app._prs)
+        assert tree._signature() != sig

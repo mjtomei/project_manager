@@ -85,8 +85,13 @@ def get_spec(pr: dict, phase: str) -> str | None:
     pr_id = pr.get("id", "")
 
     # 1. Workdir — most up-to-date copy while the PR is in flight.
+    # Hand-edited state: only a path string is a checkout (``Path(5)`` raised
+    # ``TypeError`` out of ``format_spec_for_prompt``, which every prompt
+    # builder calls — the sign-off/review/QA window could not launch), so a
+    # malformed value reads as "no workdir copy" and the canonical spec is
+    # used.
     workdir = pr.get("workdir")
-    if workdir:
+    if isinstance(workdir, str) and workdir:
         p = Path(workdir) / "pm" / "specs" / pr_id / f"{phase}.md"
         if p.exists():
             content = p.read_text().strip()
@@ -133,8 +138,22 @@ def set_spec(pr: dict, phase: str, spec: str,
 def _build_spec_prompt(data: dict, pr: dict, phase: str) -> str:
     """Build the Claude prompt for generating a phase spec."""
     title = pr.get("title", "")
-    description = pr.get("description", "").strip()
-    base_branch = data.get("project", {}).get("base_branch", "master")
+    # Hand-edited state: a ``description`` that YAML parses as a non-string is
+    # not text (``.strip()`` on it raised ``AttributeError`` out of the spec
+    # prompt, the same crash class the PR readers guard).
+    raw_description = pr.get("description")
+    description = raw_description.strip() if isinstance(raw_description, str) \
+        else ""
+    project = data.get("project")
+    project = project if isinstance(project, dict) else {}
+    # Hand-edited state: a ``base_branch`` that is not a branch name is no
+    # configuration.  It is interpolated into the QA diff instruction below
+    # (``git diff <base>...HEAD``), so a malformed value would tell the agent
+    # to run a command that cannot work — the same fallback
+    # ``_launch_review_window`` applies to its diff pane.
+    base_branch = project.get("base_branch")
+    if not (isinstance(base_branch, str) and base_branch):
+        base_branch = "master"
     workdir = pr.get("workdir", "")
 
     # Gather prior specs for context.  Specs are instructions, so they are
@@ -210,8 +229,17 @@ include it in the QA spec.""",
 
     diff_instruction = ""
     if phase == "qa" and workdir:
+        # The branch may already contain the base (a metadata resolution
+        # applied at sign-off, or a clean base merged by a bounce), while the
+        # workdir's own base ref predates that merge — pm fetches the base
+        # into its own ref, never ``origin/<base>``.  A ``<base>...HEAD``
+        # diff would then list the merged base commits as the PR's own
+        # changes; name the exact base the branch contains instead.
+        from pm_core import integration
+        contained = integration.contained_base(pr)
+        diff_base = contained[:12] if contained else base_branch
         diff_instruction = f"""
-Run `git diff {base_branch}...HEAD` in the workdir to see what changed.
+Run `git diff {diff_base}...HEAD` in the workdir to see what changed.
 Read source files as needed to understand the implementation.
 """
 
@@ -298,7 +326,11 @@ def generate_spec(data: dict, pr_id: str, phase: str,
     _log.info("spec_gen: generating %s spec for %s (mode=%s)", phase, pr_id, mode)
 
     prompt = _build_spec_prompt(data, pr, phase)
+    # Hand-edited state: a non-string ``workdir`` is not a cwd (passing it to
+    # the subprocess raised ``TypeError`` out of the spec generation), so it
+    # reads as absent and the session runs in the current directory.
     workdir = pr.get("workdir")
+    workdir = workdir if isinstance(workdir, str) and workdir else None
 
     click.echo(f"Generating {phase} spec for {pr_id}...")
     spec_text = launch_claude_print(prompt, cwd=workdir,
@@ -437,11 +469,14 @@ def reject_spec(data: dict, pr_id: str, feedback: str | None = None,
 
     _log.info("spec_gen: rejecting %s spec for %s (feedback=%r)", phase, pr_id, feedback)
 
-    # Temporarily append feedback to description for regeneration context
+    # Temporarily append feedback to description for regeneration context.
+    # Hand-edited state: a non-string ``description`` has no ``rstrip`` (and
+    # the raw value is restored verbatim below, not replaced by its text form).
     original_desc = pr.get("description", "")
+    desc_text = original_desc if isinstance(original_desc, str) else ""
     if feedback:
         pr["description"] = (
-            original_desc.rstrip() + f"\n\n[Spec review feedback]: {feedback}"
+            desc_text.rstrip() + f"\n\n[Spec review feedback]: {feedback}"
         )
         if root:
             def apply_feedback(fresh_data):

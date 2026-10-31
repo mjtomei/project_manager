@@ -262,6 +262,11 @@ def prune_dead_windows(session: str) -> list[str]:
     _ensure_logging()
     from pm_core import tmux as tmux_mod
 
+    # Nothing to prune (and no registry/lock file to create) for a session
+    # pm never registered panes for.
+    if not registry_path(session).exists():
+        return []
+
     # Query tmux OUTSIDE the lock, and never prune a session we cannot see:
     # an empty window list from a dead/absent session must not wipe the
     # registry.  A live session always has at least one window, so an empty

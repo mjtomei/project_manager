@@ -1009,10 +1009,14 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
     sha, refusal, pr = _signoff_gate(app, pr_id)
     if refusal:
         status = pr.get("status")
+        # Hand-edited state: a non-mapping ``signoff`` value is no record
+        # (``.get`` on a scalar would raise out of the TUI loop).
+        signoff = pr.get("signoff")
+        signoff = signoff if isinstance(signoff, dict) else {}
         if status in ("qa", "in_review"):
             from pm_core.tui import signoff_ui
             signoff_ui.start_signoff(app, pr_id)
-        elif status == "sign_off" and (pr.get("signoff") or {}).get(
+        elif status == "sign_off" and signoff.get(
                 "verdict") == "SIGNOFF_MERGE":
             # Signed off, yet the gate refuses (e.g. a manual approval whose
             # report.html changed since, or one targeting another base

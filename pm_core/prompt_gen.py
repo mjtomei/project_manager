@@ -1,6 +1,8 @@
 """Claude prompt generation for PR work sessions."""
 
-from pm_core import store, notes
+from pathlib import Path
+
+from pm_core import store, notes, graph
 from pm_core.backend import get_backend
 from pm_core.paths import get_global_setting
 from pm_core.prompt_bounds import (
@@ -132,6 +134,37 @@ def _note_timestamp(n: dict, key: str) -> str:
     return str(n.get(key) or "")
 
 
+def _note_mappings(value) -> list[dict]:
+    """The mapping members of a PR's ``notes`` value.
+
+    ``project.yaml`` is hand-editable state.  A ``notes`` value that is not a
+    list (a hand-edited scalar) and a list member that is not a mapping both
+    read as absent — the same tolerance a note without an ``id``/``text``
+    already gets (:func:`_note_timestamp`, :func:`_pr_note_full_line`).  The
+    merge below indexes every member with ``n.get(...)``, so without this a
+    single malformed note raises ``AttributeError`` out of *every* prompt
+    builder (impl / review / QA / sign-off) and the session window cannot
+    launch at all.
+    """
+    if not isinstance(value, list):
+        return []
+    return [n for n in value if isinstance(n, dict)]
+
+
+def _pr_text(pr: dict, key: str) -> str:
+    """A PR text field as text (``project.yaml`` is hand-editable state).
+
+    A ``description`` that YAML parses as a non-string (an unquoted date, an
+    int) is not text: ``.strip()`` on it raised ``AttributeError`` out of
+    *every* prompt builder (impl / review / QA / sign-off) and the spec
+    prompt, so the session window could not launch — the same crash class
+    :func:`_note_mappings` closes for a malformed note.  A missing field is
+    the empty string, like ``pr.get(key, "")``.
+    """
+    value = pr.get(key)
+    return value if isinstance(value, str) else ""
+
+
 def _format_pr_notes(pr: dict, workdir: str | None = None) -> str:
     """Format PR notes as a markdown section, or empty string if none.
 
@@ -140,7 +173,7 @@ def _format_pr_notes(pr: dict, workdir: str | None = None) -> str:
     the later ``last_edited`` timestamp.  The merged list is sorted by
     ``created_at``.
     """
-    main_notes = list(pr.get("notes") or [])
+    main_notes = _note_mappings(pr.get("notes"))
 
     # Collect notes from the workdir project.yaml, if available.
     workdir_notes: list[dict] = []
@@ -150,16 +183,20 @@ def _format_pr_notes(pr: dict, workdir: str | None = None) -> str:
             wd_data = store.load(wd_root, validate=False)
             wd_pr = store.get_pr(wd_data, pr["id"])
             if wd_pr:
-                workdir_notes = list(wd_pr.get("notes") or [])
+                workdir_notes = _note_mappings(wd_pr.get("notes"))
         except Exception:
             pass  # graceful degradation — use main notes only
 
     # Merge: index by note ID, prefer later last_edited on collision.
-    merged: dict[str, dict] = {}
+    merged: dict = {}
     for n in main_notes + workdir_notes:
         nid = n.get("id")
-        if nid is None:
-            # Notes without an ID can't be deduped; give them a unique key.
+        if not isinstance(nid, str) or not nid:
+            # Notes without a usable (string) id can't be deduped; give them a
+            # unique key.  project.yaml is hand-editable state, and a
+            # non-hashable hand-edited id (a list or mapping) would raise
+            # ``TypeError`` out of ``merged.get`` and take every prompt builder
+            # down (the same crash class as a non-mapping note).
             merged[id(n)] = n
             continue
         existing = merged.get(nid)
@@ -231,7 +268,12 @@ def _render_pr_notes_bounded(notes: list[dict], budget: int,
     full_line = _pr_note_full_line
 
     def summary_line(n: dict) -> str:
-        text = " ".join((n.get("text") or "").split())
+        # Hand-edited state: a non-string ``text`` is not text (``.split()``
+        # on an int raised ``AttributeError`` out of the bounded renderer, so
+        # one bad note took every prompt builder down once the notes block
+        # exceeded its budget).  Render it through ``str`` like the other
+        # note renderer does.
+        text = " ".join(str(n.get("text") or "").split())
         if len(text) > _PR_NOTE_SUMMARY_CHARS:
             text = text[:_PR_NOTE_SUMMARY_CHARS].rstrip() + "…"
         ts = n.get("created_at", "")
@@ -338,7 +380,11 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
         status = dep_pr.get("status", "unknown").upper()
         return f"- {dep_id} ({dep_pr.get('title', '???')}) - {status}"
 
-    dep_lines = [line for line in map(_dep_line, pr.get("depends_on") or [])
+    # ``graph.deps_of``: project.yaml is hand-editable state, and a scalar
+    # ``depends_on`` is not a list of ids (``map`` over an int raised
+    # ``TypeError`` out of every prompt builder; a string was walked character
+    # by character, silently rendering no dependency section).
+    dep_lines = [line for line in map(_dep_line, graph.deps_of(pr))
                  if line]
     deps_section = ""
     if dep_lines:
@@ -351,7 +397,7 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
 
     branch = pr.get("branch", f"pm/{pr_id}")
     title = pr.get("title", "")
-    description = pr.get("description", "").strip()
+    description = _pr_text(pr, "description").strip()
     base_branch = data.get("project", {}).get("base_branch", "master")
 
     backend = get_backend(data)
@@ -463,7 +509,7 @@ def generate_review_prompt(data: dict, pr_id: str, session_name: str | None = No
         raise ValueError(f"PR {pr_id} not found")
 
     title = pr.get("title", "")
-    description = pr.get("description", "").strip()
+    description = _pr_text(pr, "description").strip()
     base_branch = data.get("project", {}).get("base_branch", "master")
 
     # Build plan and sibling PR context for architectural review
@@ -517,6 +563,13 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
             f"1. Pull the latest changes for `{branch}` from the remote. "
             f"Resolve any merge conflicts before continuing.\n"
         )
+    # A bounce integrates the base into the branch (a resolved metadata
+    # conflict, or a clean base), while the workdir's own base ref may predate
+    # that merge: diff against the exact base the branch contains, or the
+    # merged base commits would read as the PR's own changes.
+    branch_base = _diff_base(pr)
+    if branch_base:
+        diff_cmd = f"git diff {branch_base[:12]}...HEAD"
 
     # Renumber steps based on whether pull step is present
     n = 2 if pull_step else 1
@@ -666,6 +719,12 @@ def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
     except (OSError, ValueError):
         return ("\n_qa_status.json unreadable — read the captures dir directly._\n",
                 "")
+    if not isinstance(data, dict):
+        # Valid JSON that is not an object (e.g. a list) is malformed
+        # evidence, not a status snapshot: report it instead of raising
+        # AttributeError while building the sign-off prompt.
+        return ("\n_qa_status.json malformed — read the captures dir directly._\n",
+                "")
     head_lines = [f"Overall QA verdict: **{data.get('overall') or '?'}**"]
     if data.get("error"):
         # Normalise whitespace but keep every character.  The error is
@@ -680,6 +739,11 @@ def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
     scenarios = data.get("scenarios") or []
     if isinstance(scenarios, dict):
         scenarios = list(scenarios.values())
+    elif not isinstance(scenarios, list):
+        # Hand-edited evidence: a scalar `scenarios` is malformed, not a
+        # collection to iterate (``for s in 5`` raises TypeError out of the
+        # sign-off prompt, the same contract the non-mapping guard follows).
+        scenarios = []
     valid = [s for s in scenarios if isinstance(s, dict)]
     if not valid:
         return (head, "")
@@ -693,7 +757,10 @@ def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
             title = title[:120].rstrip() + "…"
             truncated = True
         verdict = s.get("verdict", "?")
-        reason = " ".join((s.get("verdict_reason") or "").split())
+        # Hand-edited evidence: a non-string reason is not text (``" ".join``
+        # would raise TypeError out of the sign-off prompt), so it renders
+        # through ``str`` like the title above.
+        reason = " ".join(str(s.get("verdict_reason") or "").split())
         if len(reason) > _QA_SCENARIO_REASON_CHARS:
             reason = reason[:_QA_SCENARIO_REASON_CHARS].rstrip() + "…"
             truncated = True
@@ -734,28 +801,114 @@ def _signoff_qa_scenarios_block(pr_id: str) -> str:
     return head + listing
 
 
+def _diff_base(pr: dict) -> str | None:
+    """The *newest* base revision the branch already contains, or ``None``.
+
+    Once the branch carries a base — a metadata resolution applied at
+    sign-off, or a clean base merged by a bounce — the workdir's own base ref
+    (``origin/<base>``, or the local branch) may still point before that
+    merge: pm fetches the base into its own ref, never ``origin/<base>``.  A
+    ``<base>...HEAD`` diff would then list the merged base commits as PR
+    changes.  See :func:`pm_core.integration.contained_base` for how the
+    newest base is chosen when the branch contains more than one.
+    """
+    from pm_core import integration as integ
+    return integ.contained_base(pr)
+
+
 def _signoff_integration_block(pr: dict, pr_id: str) -> str:
     """The integration check sign-off reviews (see pm_core.integration)."""
     from pm_core import integration as integ
     from pm_core.signoff import SIGNOFF_IMPL, SIGNOFF_MERGE
-    rec = pr.get("integration") or {}
+    # project.yaml is hand-editable state: a malformed record reads as absent
+    # instead of raising out of prompt generation (the sign-off window could
+    # not launch), the same contract `contained_base` follows.
+    rec = pr.get("integration")
+    rec = rec if isinstance(rec, dict) else {}
     if not rec:
         return ("\n_No integration check recorded — run `pm pr signoff "
                 f"integrate {pr_id}` before routing; {SIGNOFF_MERGE} is "
                 "impossible without one._\n")
-    base_sha = rec.get("base_sha") or ""
+
+    def _short(value, default="?"):
+        """The 12-character form of a revision/tree, or *default*."""
+        return value[:12] if isinstance(value, str) and value else default
+
+    def _text(value, default="?"):
+        """*value* when it is text, else *default* (hand-edited state).
+
+        A reader must not print a value the record does not hold: an absent
+        (or non-string) ``target_repo``/``base_branch`` rendered as the
+        literal ``None``, beside the ``?`` placeholders the rest of this block
+        and ``pm pr show`` use for an absent revision.
+        """
+        return value if isinstance(value, str) and value else default
+
+    # Revisions from the record are interpolated into commands the agent is
+    # told to run (``git diff <rev> HEAD``).  project.yaml is hand-editable
+    # state, so only a git object name may become part of that command — the
+    # same rule ``integration.contained_base`` follows.
+    raw_base = rec.get("base_sha")
+    base_sha = integ._sha_like(raw_base) or ""
+    resolution = integ.resolution_of(rec)
     lines = [
-        f"- Target: `{rec.get('base_branch')}` of `{rec.get('target_repo')}`",
-        f"- Fetched base revision: `{base_sha or '?'}`",
-        f"- PR HEAD checked: `{rec.get('head') or '?'}`",
+        f"- Target: `{_text(rec.get('base_branch'))}` of "
+        f"`{_text(rec.get('target_repo'))}`",
+        # Neutral label: an ``error`` record may carry the base the last
+        # successful check assessed (``integration._carry_assessed_base``),
+        # so "fetched" would claim a fetch this check did not make.
+        f"- Base revision: `{base_sha or '?'}`",
+        f"- PR HEAD checked: `{_text(rec.get('head'))}`",
+        f"- Candidate tree: `{_short(rec.get('candidate_tree'))}`",
         f"- Result: **{rec.get('status')}** — {integ.summary(rec)}",
     ]
-    if rec.get("merge_base") and base_sha:
-        lines.append(
-            f"- Base changes since this PR branched: `git log --oneline "
-            f"{rec['merge_base'][:12]}..{base_sha[:12]}` / `git diff "
-            f"{rec['merge_base'][:12]} {base_sha[:12]}` "
-            f"({rec.get('base_files_count', 0)} file(s))")
+    if integ._sha_like(rec.get("merge_base")) and base_sha:
+        # An applied resolution (and a clean base merged by a bounce) puts the
+        # base inside HEAD, so the recorded merge base equals the base and the
+        # range would be empty — say nothing rather than "0 file(s)".  For an
+        # applied resolution show the pre-apply range: that is what the base
+        # brought (the resolution block names the same revisions).
+        range_base = rec["merge_base"]
+        pre = resolution.get("resolved_from")
+        pre = pre if isinstance(pre, dict) else {}
+        # A revision, not a truthiness test: a hand-edited non-string
+        # ``applied_merge_sha`` is no applied merge (the block below labels the
+        # same record "Not applied"), so taking the applied-resolution range
+        # here printed both the pre-apply base range and that "Not applied"
+        # line in the same prompt.
+        if integ._sha_like(resolution.get("applied_merge_sha")) \
+                and integ._sha_like(pre.get("merge_base")) \
+                and range_base == base_sha:
+            # Only when the base inside HEAD is the one the resolution
+            # applied.  If a newer base was merged by a bounce since, the
+            # pre-apply merge base would list the commits the resolution
+            # already merged as if they were new base changes (and disagree
+            # with the recorded base_files_count, which describes the range
+            # from the applied base): start at the applied base instead.
+            applied_base = integ._sha_like(pre.get("base_sha"))
+            if applied_base == base_sha:
+                range_base = pre["merge_base"]
+            elif applied_base:
+                range_base = applied_base
+        elif range_base == base_sha \
+                and integ._sha_like(rec.get("base_range_from")):
+            # A clean base merged by a bounce has no resolution to name the
+            # pre-merge range; the check that saw the base outside the branch
+            # recorded it (``integration._carry_base_interaction``).
+            range_base = rec["base_range_from"]
+        if range_base != base_sha:
+            # Hand-edited state: only a non-negative integer is a file count —
+            # a string/mapping rendered as the count the agent is told to
+            # weigh, and ``True`` is an ``int`` to ``isinstance`` but not a
+            # count.  The range itself is still shown; the count is a hint.
+            raw_count = rec.get("base_files_count")
+            count = 0 if isinstance(raw_count, bool) \
+                else max(0, integ._as_int(raw_count))
+            lines.append(
+                f"- Base changes since this PR branched: `git log --oneline "
+                f"{range_base[:12]}..{base_sha[:12]}` / `git diff "
+                f"{range_base[:12]} {base_sha[:12]}`"
+                + (f" ({count} file(s))" if count else ""))
     # Count-capped *and* byte-bounded: the lines are filesystem paths, so 20
     # long ones measured 200 KB — over PROMPT_ARG_LIMIT, in static text
     # fit_prompt cannot shrink.  The pointer names the full record.
@@ -769,25 +922,269 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
             omitted = integ.omitted_path_count(vals, total, n)
             return f"(+{omitted} more; {integ.integration_pointer(pr_id)})"
         return note
-
-    if rec.get("overlap"):
-        vals = rec["overlap"]
+    # The ``isinstance`` guards are this PR's hand-edited-state contract: a
+    # malformed (non-list) value is no evidence of a clean record and must not
+    # be iterated as characters.
+    overlap = rec.get("overlap")
+    if isinstance(overlap, list) and overlap:
         lines.append("- Files changed on both sides: " + bounded_join(
-            vals, lambda f: f"`{f}`", max_items=_INTEGRATION_MAX_PATHS,
+            overlap, lambda f: f"`{f}`", max_items=_INTEGRATION_MAX_PATHS,
             max_bytes=_INTEGRATION_LIST_BUDGET,
             separator=", ",
-            omitted_note=_list_note(vals, rec.get("overlap_total"))))
-    if rec.get("conflicts"):
-        vals = rec["conflicts"]
+            omitted_note=_list_note(overlap, rec.get("overlap_total"))))
+    conflicts = rec.get("conflicts")
+    if isinstance(conflicts, list) and conflicts:
         lines.append("- Conflicting paths: " + bounded_join(
-            vals, lambda f: f"`{f}`", max_items=_INTEGRATION_MAX_PATHS,
+            conflicts, lambda f: f"`{f}`", max_items=_INTEGRATION_MAX_PATHS,
             max_bytes=_INTEGRATION_LIST_BUDGET,
             separator=", ",
-            omitted_note=_list_note(vals, rec.get("conflicts_total"))))
+            omitted_note=_list_note(conflicts, rec.get("conflicts_total"))))
+    if resolution:
+        lines.append("")
+        # Truthiness, not the entry list: a malformed value is not evidence of
+        # a clean resolution, so it stays labelled as an attempt.
+        if resolution.get("unresolved"):
+            lines.append("**Metadata conflict resolution attempted (pm, by "
+                         "record id) — NOT resolved:**")
+        elif integ.carried_applied_resolution(rec):
+            # The record carries a resolution an earlier merge applied (see
+            # integration._carry_forward); the conflict/error above is a
+            # different, current problem.  Do not present the applied
+            # resolution as this check's outcome.  Name that problem as it
+            # actually is: an ``error`` record reports a failed check, not a
+            # conflict.
+            current = ("the conflict above is separate"
+                       if rec.get("status") == integ.CONFLICT
+                       else "the failed check above is separate")
+            lines.append("**Earlier metadata conflict resolution (pm, by "
+                         f"record id), already applied — {current}:**")
+        else:
+            lines.append("**Metadata conflict resolution (pm, by record id):**")
+        for entry in integ.resolution_entries(resolution, "paths"):
+            # Hand-edited state: a path that is not a non-empty string is not
+            # a path (the CLI, ``pm pr show`` and the launch read it as
+            # absent).  Do not render it as one here either — name the file pm
+            # can only have resolved (the same fallback ``summary`` and the
+            # return text use) rather than print the malformed value.
+            path = entry.get("path")
+            if not (isinstance(path, str) and path):
+                path = "project.yaml"
+            bits = [f"`{path}`"]
+            for key, label in (("added_ours", "added from the PR"),
+                               ("added_theirs", "added from the base"),
+                               ("merged_fields", "merged records"),
+                               ("removed", "removed")):
+                values = entry.get(key)
+                values = values if isinstance(values, list) else []
+                if values:
+                    shown = values[:10]
+                    # Never silent loss: name the ids the record holds but
+                    # this listing does not show (``compact`` keeps 20 and
+                    # records the real total).
+                    more = max(0, integ.resolution_id_total(entry, key)
+                               - len(shown))
+                    bits.append(f"{label}: "
+                                + ", ".join(f"`{v}`" for v in shown)
+                                + (f", … {more} more" if more else ""))
+            lines.append("- " + "; ".join(bits))
+        resolved_from = resolution.get("resolved_from")
+        resolved_from = resolved_from if isinstance(resolved_from, dict) else {}
+        # Object name only: this revision becomes a `git diff <rev> HEAD`
+        # command below, and the return text names the same revisions.
+        pre_head = _short(integ._sha_like(resolved_from.get("head")), None)
+        if pre_head:
+            lines.append(
+                f"- Resolved from PR HEAD `{pre_head}` "
+                f"against base "
+                f"`{_short(integ._sha_like(resolved_from.get('base_sha')))}` "
+                f"(merge-base "
+                f"`{_short(integ._sha_like(resolved_from.get('merge_base')))}`).")
+        applied_sha = resolution.get("applied_merge_sha")
+        if isinstance(applied_sha, str) and applied_sha:
+            # The branch may also contain a *newer* base merged by a bounce
+            # after this resolution; the PR's own changes are relative to the
+            # newest base the branch carries (an older one would list that
+            # newer base's commits as PR changes).
+            applied_base = _diff_base(pr) or base_sha
+            shown_base = _short(applied_base, "<base>")
+            # Object name only: this revision is shown as the merge the
+            # branch carries and sits beside commands the agent runs.
+            lines.append(
+                f"- Applied to the PR branch as "
+                f"`{_short(integ._sha_like(applied_sha), '<merge>')}`: "
+                "the branch now "
+                "includes the base merge, so review/verify the integrated "
+                "result. The PR's own changes remain "
+                f"`git diff {shown_base}...HEAD`; "
+                f"`git diff "
+                f"{pre_head or '<old head>'} "
+                "HEAD` shows the whole base merge as applied to this branch "
+                "(the resolution is only its project.yaml part; the delta "
+                "file below lists just the resolution changes).")
+        elif not resolution.get("unresolved"):
+            # A mergeable resolved candidate pm has not applied.  Say it even
+            # when pm recorded no apply error (e.g. a `--record`-only check):
+            # the agent must not read it as already integrated.  A failed
+            # attempt (``unresolved``) is listed below instead — it was never
+            # applied and is not a candidate.
+            why = rec.get("apply_error") or "it has not been applied yet"
+            lines.append(f"- **Not applied**: {why}. A "
+                         f"{SIGNOFF_MERGE} is blocked until the resolution is "
+                         "applied to the branch (clean the workdir and re-run "
+                         "sign-off, which applies it).")
+        for entry in integ.resolution_entries(resolution, "unresolved"):
+            # Hand-edited state: a non-string path is not a path, so name the
+            # file pm can only have attempted (the same contract as the
+            # resolved-path list above) instead of printing the malformed
+            # value as one.
+            path = integ.resolution_entry_path(entry)
+            lines.append(f"- **Unresolved** `{path}`: "
+                         f"{integ.resolution_conflicts_text(entry)}")
+        diff_path = resolution.get("diff_path")
+        if isinstance(diff_path, str) and diff_path:
+            lines.append(f"- Resolution delta: `$CAP/{Path(diff_path).name}`")
+    behavior = rec.get("base_behavior_changes")
+    behavior = behavior if isinstance(behavior, list) else []
+    if behavior:
+        lines.append("")
+        lines.append("**Base changes that can change behaviour** (assess "
+                     "these even when Git reports a clean merge; metadata is "
+                     "not an automatic exemption):")
+        for change in behavior[:20]:
+            lines.append(f"- {change}")
+        # ``base_behavior_count`` is only recorded when ``compact`` truncated
+        # the list (> _BEHAVIOR_LIMIT); 21-30 changes are stored in full with
+        # no count, so the total must fall back to the stored list's length
+        # (indexing the absent key would crash the prompt).  A hand-edited
+        # non-integer count is not a total either, and a count *smaller* than
+        # the stored list must not hide entries this listing drops: take the
+        # larger of the two, like the return text (``format_signoff_return``)
+        # does — a trimmed enumeration names what it omitted.
+        stored_total = rec.get("base_behavior_count")
+        if isinstance(stored_total, int) and not isinstance(stored_total, bool):
+            behavior_total = max(stored_total, len(behavior))
+        else:
+            behavior_total = len(behavior)
+        if behavior_total > 20:
+            lines.append(f"- … {behavior_total - 20} more")
+    elif rec.get("base_behavior_error"):
+        # The summary failed, so the absence of listed changes is not evidence
+        # that the base is behaviour-neutral.  Say so: a MERGE still requires
+        # the reuse/checks statement (pm enforces it at record and merge time).
+        lines.append("")
+        lines.append("**pm could not summarise the base's behaviour-relevant "
+                     f"changes** ({rec['base_behavior_error']}). Assess the "
+                     "base diff yourself; a MERGE must still state the evidence "
+                     "you are reusing or the targeted checks you ran.")
+    evidence = _evidence_revision_lines(pr_id)
+    if evidence:
+        lines.append("")
+        lines.extend(evidence)
     if rec.get("status") == integ.CONFLICT:
-        lines.append(f"- A conflicted integration can only route "
-                     f"**{SIGNOFF_IMPL}** (pm enforces this).")
+        lines.append(f"- A conflicted integration that pm could not resolve "
+                     f"safely can only route **{SIGNOFF_IMPL}** (pm enforces "
+                     "this).")
     return "\n" + "\n".join(lines) + "\n"
+
+
+def _signoff_invalidated_block(pr: dict) -> str:
+    """Why sign-off is running again after a refused merge (else empty).
+
+    Only a merge-gate invalidation points at the previous report, and only
+    while the PR's own changes are unchanged.  The gate refuses when the base
+    moved under an approval, and the relaunch then applies the base merge to
+    the branch — which moves HEAD without being PR work.  Any commit the PR
+    added since that approval makes the previous report's conclusions stale,
+    so it is not referenced then.  A bounce is a different episode entirely
+    (it writes ``signoff_return``, and its run overwrites the report this
+    block would name): while a return is open it never emits this block.
+    """
+    from pm_core import integration as integ
+    inv = pr.get("signoff_invalidated")
+    inv = inv if isinstance(inv, dict) else {}
+    reason = inv.get("reason")
+    approved = inv.get("sha")
+    if not (isinstance(reason, str) and reason.strip()):
+        return ""
+    if not (isinstance(approved, str) and approved):
+        return ""
+    # An open sign-off return is the current episode: the bounce's own run
+    # overwrote `$CAP/report.html`, so pointing at it would present the
+    # bounce's report as the invalidated approval's, and the reason sign-off
+    # is running again is the return — not the refused merge.  The marker
+    # outlives the bounce (only a new verdict clears it), so suppress it here.
+    from pm_core.signoff import open_return
+    if open_return(pr):
+        return ""
+    rec = pr.get("integration")
+    rec = rec if isinstance(rec, dict) else {}
+    resolution = integ.resolution_of(rec)
+    resolved_from = resolution.get("resolved_from")
+    resolved_from = resolved_from if isinstance(resolved_from, dict) else {}
+    # ``rec['head']`` is the revision the current check saw; when pm applied
+    # the base merge it is the merge commit and ``resolved_from.head`` is the
+    # head it applied on top of.  Either matching the approved revision means
+    # no PR work was added since — but the applied-resolution path must also
+    # require that the merge is still the revision the check saw: a later
+    # commit (and a re-check of it) is PR work, not the base merge, and the
+    # previous report no longer describes these exact changes.
+    applied_from = resolved_from.get("head")
+    applied_merge = integ.revision_of(resolution.get("applied_merge_sha"))
+    unchanged = rec.get("head") == approved or (
+        isinstance(applied_from, str) and applied_from == approved
+        and applied_merge and rec.get("head") == applied_merge)
+    if not unchanged:
+        return ""
+    prior = inv.get("verdict")
+    prior = (f"The previous sign-off concluded **{prior}** at "
+             f"`{approved[:12]}`, and pm's merge gate refused that approval — "
+             if isinstance(prior, str) and prior
+             else "pm's merge gate refused the previous approval — ")
+    return (
+        f"\n**Why sign-off is running again:** {prior}{reason}. "
+        "The PR's own changes are "
+        "unchanged since that sign-off (pm may have merged the base into the "
+        "branch, but no PR work was added), so the previous report at "
+        "`$CAP/report.html` still records the verdict and evidence sign-off "
+        "reached for these exact changes. Read it before you overwrite it "
+        "and reuse its conclusions where they still hold — but you must "
+        "still write a fresh report bound to the head, base and candidate "
+        "above, and the evidence/checks statement below still applies.\n")
+
+
+def _evidence_revision_lines(pr_id: str) -> list[str]:
+    """The revisions the existing review/QA evidence was produced against.
+
+    The reuse statement in the report names stages and revisions; pm records
+    the QA revision from its resume snapshot and infers the review revision
+    only when QA committed no code (see ``signoff.qa_evidence``).
+    """
+    from pm_core.signoff import qa_evidence
+    qa = qa_evidence(pr_id) or {}
+    if not qa:
+        return []
+    lines = ["**Existing evidence revisions** (name these when reusing it):"]
+    head = qa.get("planner_head")
+    if not head:
+        why = ("qa_status.json unreadable" if qa.get("error")
+               else "qa_resume.json has no recorded revision")
+        lines.append(f"- QA: no recorded revision ({why})")
+        return lines
+    overall = qa.get("overall") or "?"
+    lines.append(f"- QA: `qa@{head[:12]}` (overall {overall})")
+    if qa.get("planner_code_changes_error"):
+        # A malformed change list is not proof that QA committed nothing: the
+        # inferred review revision would be a guess recorded as fact.
+        lines.append("- Review: pm cannot tell whether QA committed changes "
+                     "(qa_resume.json `planner_code_changes` is malformed), so "
+                     "it does not record the revision the review ran on.")
+    elif qa.get("planner_code_changes"):
+        lines.append("- Review: pm does not record the revision the review ran "
+                     "on (QA committed changes after it).")
+    else:
+        lines.append(f"- Review: `review@{head[:12]}` (inferred: QA recorded "
+                     "no code changes after the review).")
+    return lines
 
 
 def generate_signoff_prompt(data: dict, pr_id: str,
@@ -812,13 +1209,21 @@ def generate_signoff_prompt(data: dict, pr_id: str,
         raise ValueError(f"PR {pr_id} not found")
 
     title = pr.get("title", "")
-    description = pr.get("description", "").strip()
+    description = _pr_text(pr, "description").strip()
     base_branch = data.get("project", {}).get("base_branch", "master")
     backend_name = data.get("project", {}).get("backend", "vanilla")
     if backend_name == "local":
         diff_cmd = f"git diff {base_branch}...HEAD"
     else:
         diff_cmd = f"git diff origin/{base_branch}...HEAD"
+    # A resolved metadata conflict is applied at sign-off launch, and a clean
+    # base may have been merged by a bounce: the branch then carries the base
+    # merge.  The workdir's own base ref may predate that merge (pm fetches the
+    # base into its own ref), so `<base>...HEAD` would list the merged base
+    # commits as PR changes — diff against the exact base the branch contains.
+    branch_base = _diff_base(pr)
+    if branch_base:
+        diff_cmd = f"git diff {branch_base[:12]}...HEAD"
 
     # Plan / sibling context (scope awareness for the router).
     plan_ref = pr.get("plan")
@@ -844,6 +1249,7 @@ def generate_signoff_prompt(data: dict, pr_id: str,
     tui_block = tui_section(session_name) if session_name else ""
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
     signoff_return_block = _signoff_return_block(pr, for_signoff=True)
+    invalidated_block = _signoff_invalidated_block(pr)
     impl_spec_block = format_spec_for_prompt(pr, "impl") or ""
     # The QA block is split: the overall verdict and the QA error are
     # pm-generated evidence, inlined whole; only the per-scenario verdict
@@ -890,7 +1296,7 @@ PR-level *comprehensive* review and a routing decision.
 
 ## Description
 {description}
-{pr_notes_block}{signoff_return_block}{impl_spec_block}{plan_context}{tui_block}
+{pr_notes_block}{signoff_return_block}{invalidated_block}{impl_spec_block}{plan_context}{tui_block}
 ## QA scenarios (from the QA run)
 {qa_head}{qa_listing}
 ## Integration with the latest base
@@ -899,23 +1305,44 @@ isolated candidate (your worktree and the base branch were not touched):
 {integration_block}
 ## What to do
 
-0. **Check integration with the latest base.** Sign-off owns integration: a
+0. **Assess integration with the latest base.** Sign-off owns integration: a
    {SIGNOFF_MERGE} certifies this PR *combined with the base revision above*,
    and the merge step publishes exactly that candidate — it never resolves
    conflicts. You may refresh the check with
    `pm pr signoff integrate {pr_id}` (read-only: it fetches and computes
-   the candidate). Your verdict
-   is bound to the check shown above; if a refresh shows the base moved,
-   say so in the report — the merge step re-runs sign-off when the base it
-   approved is no longer current. Read what changed on the base since the
-   PR branched and judge
-   whether it interacts with this PR: conflicts, semantic overlap (the same
-   behaviour, APIs, data or tests changed on both sides) or changed
-   behaviour the PR relies on. Line/file counts alone are not the rule.
+   the candidate). Your verdict is bound to the check shown above; if a
+   refresh shows the base moved, say so in the report — the merge step
+   re-runs sign-off when the base it approved is no longer current.
+
+   Read what changed on the base since the PR branched (see the integration
+   section above) and judge whether it interacts with this PR: semantic
+   overlap (the same behaviour, APIs, data or tests changed on both sides)
+   or changed behaviour the PR relies on. Line/file counts alone are not the
+   rule.
+
+   If pm **resolved a metadata-only conflict** (shown above), inspect the
+   resolution delta and the integrated branch. Confirm that every record
+   from both sides survived, that no real field/deletion/ambiguity conflict
+   was papered over, and that the resolution is semantically right — not
+   merely that Git is happy. The base may also change behaviour-relevant
+   configuration (model settings, dependencies, statuses, skip_qa, …) even
+   when it merges cleanly; **metadata is not an automatic exemption**. Judge
+   the combined code, not the PR in isolation.
+
+   Then decide the earliest stage that genuinely needs to run:
+   - the resolution or a base interaction needs code work → **{SIGNOFF_IMPL}**;
+   - the combined change needs a code-quality/correctness review →
+     **{SIGNOFF_REVIEW}**;
+   - the base change could affect behaviour QA demonstrated → **{SIGNOFF_REQA}**;
+   - nothing would benefit from another review/QA pass → **{SIGNOFF_MERGE}**
+     and **explicitly state which existing evidence you are reusing and why**
+     (or which targeted checks you ran) — see the report contract below.
+     A resolved candidate is never approved on an unstated assumption.
+
    Never merge the base into the branch, push the base branch, or run any
    backend merge (`pm pr merge`, `gh pr merge`) yourself — on a return pm
-   merges a clean base into the PR branch for the next step, and
-   conflicts go to implementation.
+   integrates the base for the next step, and unresolved conflicts go to
+   implementation.
 
 1. **Read the diff**: run `{diff_cmd}`.
 
@@ -997,12 +1424,24 @@ isolated candidate (your worktree and the base branch were not touched):
    <meta name="pm-signoff-head" content="<PR HEAD sha you reviewed>">
    <meta name="pm-signoff-base" content="<base revision sha you integrated with>">
    <meta name="pm-signoff-reason" content="<one or two sentences: why this route>">
+   <meta name="pm-signoff-candidate" content="<candidate tree sha from the integration section>">
+   <meta name="pm-signoff-evidence" content="review@<sha>,qa@<sha>">
+   <meta name="pm-signoff-evidence-reason" content="<why that evidence still covers the candidate>">
+   <meta name="pm-signoff-checks" content="<targeted checks you ran, if any>">
    ```
 
    A human approval (`pm pr signoff record`) is refused unless these match
-   the current HEAD and the recorded integration check. Include an
-   **Integration** section in the report: target base revision, result,
-   overlapping files and your semantic assessment.
+   the current HEAD and the recorded integration check. **`pm-signoff-candidate`
+   is required whenever pm resolved a conflict** (it must equal the candidate
+   tree above), and a {SIGNOFF_MERGE} on a resolved or behaviourally-changed
+   base also requires an explicit reuse/checks statement: name the evidence
+   stages and revisions you are reusing with `pm-signoff-evidence` plus
+   `pm-signoff-evidence-reason`, or the targeted checks you ran with
+   `pm-signoff-checks`. Do not leave it implicit. Include an **Integration**
+   section in the report: target base revision, result, overlapping files,
+   any metadata resolution (which records were combined, what you verified),
+   behaviour-relevant base changes, the evidence you reused (with revisions)
+   and your semantic assessment.
 
    ### Suggested shape — adapt as needed to serve the goal above
 
@@ -1143,11 +1582,15 @@ isolated candidate (your worktree and the base branch were not touched):
    - **{SIGNOFF_MERGE}** — all three steps met their criteria: the evidence
      supports the diff and the QA was rigorous, **and** the PR integrates
      with the latest base conflict-free with no interaction that needs more
-     work or verification. This is a RECOMMENDATION to merge bound to the
-     reviewed HEAD and base revision — sign-off never merges itself; the PR
+     work or verification. A metadata-only conflict pm resolved by record id
+     does not by itself require another stage — but only if you verified the
+     resolution and explicitly recorded which existing evidence you are
+     reusing (or the targeted checks you ran) and why it still covers the
+     candidate. This is a RECOMMENDATION to merge bound to the reviewed HEAD,
+     base revision and candidate tree — sign-off never merges itself; the PR
      is reported ready_to_merge and the merge decision is made later. If the
-     PR or the base moves before the merge, the merge is refused and
-     sign-off re-runs.
+     PR, the base or the candidate moves before the merge, the merge is
+     refused and sign-off re-runs.
    - **{SIGNOFF_IMPL}** — covers the **Implementation** step. Purpose of impl:
      deliver the PR's required behavior and an implementation spec. Criteria:
      the diff implements every requirement in the spec/description; an impl
@@ -2170,10 +2613,16 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     pr_path_seg = pr["id"]
 
     title = pr.get("title", "")
-    description = pr.get("description", "").strip()
+    description = _pr_text(pr, "description").strip()
     branch = pr.get("branch", f"pm/{pr_id}")
     workdir = pr.get("workdir", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
+    # The branch may already contain the base (a resolved metadata conflict or
+    # a clean base merged by a bounce); diff against that exact revision so
+    # the merged base commits are not read as the PR's own changes.
+    branch_base = _diff_base(pr)
+    diff_cmd = (f"git diff {branch_base[:12]}...HEAD" if branch_base
+                else f"git diff {base_branch}...HEAD")
 
     # Get instruction library summary and notes
     library_summary = "No instruction library found."
@@ -2288,7 +2737,7 @@ concurrent-use scenario.
 - **Base branch**: {base_branch}
 - **Workdir**: {workdir}
 
-Inspect the diff yourself — run `git diff {base_branch}...HEAD` in the workdir
+Inspect the diff yourself — run `{diff_cmd}` in the workdir
 to see what changed.  Read source files as needed to understand the context.
 Make sure to not get bogged down too much in the details and method names. Try
 to abstract out user stories that exercise the changes.
@@ -2422,6 +2871,9 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
     branch = pr.get("branch", f"pm/{pr_id}")
     pr_workdir = pr.get("workdir", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
+    branch_base = _diff_base(pr)
+    diff_cmd = (f"git diff {branch_base[:12]}...HEAD" if branch_base
+                else f"git diff {base_branch}...HEAD")
 
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
     pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
@@ -2494,7 +2946,7 @@ This is an interactive session — you work with the user to manually test and
 explore the PR's changes.
 
 Help the user with whatever they need:
-- Inspect code changes (`git diff {base_branch}...HEAD`)
+- Inspect code changes (`{diff_cmd}`)
 - Run tests, build the project, try out features
 - Debug issues found by automated scenarios
 - Write and run ad-hoc test scripts in the scratch dir

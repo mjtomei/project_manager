@@ -235,8 +235,16 @@ class TestSyncPrs:
         assert result.was_skipped is True
         assert "synced" in result.skipped_reason
 
-    def test_sync_prs_error_when_no_workdir(self, tmp_pm_root_with_prs):
-        """sync_prs returns error when no workdir available."""
+    def test_sync_prs_error_when_no_workdir(self, tmp_pm_root_with_prs,
+                                            tmp_path, monkeypatch):
+        """sync_prs reports when there is no directory to check from.
+
+        A gone workdir is not fatal on its own: sync falls back to the
+        project repo (R3.5, pr-2e06289).  Here neither exists — the project's
+        ``repo`` path is absent and the cwd is not a git repo either — so
+        there is nothing to read the merge state from.
+        """
+        monkeypatch.chdir(tmp_path)
         result = pr_sync.sync_prs(tmp_pm_root_with_prs, force=True)
 
         assert result.synced is False

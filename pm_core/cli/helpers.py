@@ -18,6 +18,7 @@ import click
 
 from pm_core import tui_pidfile
 from pm_core import store, git_ops
+from pm_core.graph import deps_of
 from pm_core.paths import configure_logger
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
@@ -289,7 +290,12 @@ def format_pr_line(p: dict, active_pr: str | None = None,
     v_icon = signoff_verdict_icon(display_signoff_verdict(p))
     if v_icon:
         verdict_str = f" {v_icon}"
-    deps = p.get("depends_on") or []
+    # ``graph.deps_of``: a hand-edited scalar ``depends_on`` is not a list of
+    # ids (an int raises out of ``join``; a string would be joined character by
+    # character).  This formatter backs `pm pr list`, `pm pr show` and the home
+    # window's PR list, so one malformed field must not take a reader (or a
+    # TUI render) down.
+    deps = deps_of(p)
     dep_str = f" <- [{', '.join(deps)}]" if deps else ""
     machine = p.get("agent_machine")
     machine_str = f" ({machine})" if machine else ""
@@ -297,12 +303,17 @@ def format_pr_line(p: dict, active_pr: str | None = None,
     ts_str = ""
     if with_timestamp:
         ts = p.get("updated_at") or p.get("created_at") or ""
-        if ts:
+        if isinstance(ts, str) and ts:
             try:
                 dt = datetime.fromisoformat(ts).astimezone()
                 ts_str = f" [{dt.strftime('%Y-%m-%d %H:%M')}]"
             except ValueError:
                 ts_str = f" [{ts}]"
+        elif ts:
+            # A hand-edited value YAML parses as a non-string (an unquoted
+            # date is a ``datetime.date``): render it rather than raising
+            # ``TypeError`` out of ``fromisoformat``.
+            ts_str = f" [{ts}]"
     return (
         f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} "
         f"[{p.get('status', '?')}{verdict_str}]{dep_str}{machine_str}{active_str}{ts_str}"
@@ -994,11 +1005,21 @@ def _resolve_repo_dir(root: Path, data: dict) -> Path:
     Used when a command needs to run tools (like ``gh``) against the
     target repo.  Returns the parent of an internal pm/ dir, otherwise
     falls back to the repo URL (if it's a local path) or cwd.
+
+    ``project.yaml`` is hand-editable state: a ``project`` that is not a
+    mapping, or a ``repo`` that is not a path string, is no checkout
+    (``Path(5)`` raised ``TypeError`` and a scalar ``project`` raised
+    ``AttributeError``), so it falls back to cwd like an unset one.  This runs
+    on the merge-detection path (``pm_core.pr_sync``), where an exception is
+    swallowed by the per-PR handler and the merge is finalized without the
+    integrity check — the silent finalize pr-2e06289 exists to prevent.
     """
     if store.is_internal_pm_dir(root):
         return root.parent
-    repo_url = data.get("project", {}).get("repo", "")
-    if repo_url and Path(repo_url).is_dir():
+    project = data.get("project")
+    project = project if isinstance(project, dict) else {}
+    repo_url = project.get("repo")
+    if isinstance(repo_url, str) and repo_url and Path(repo_url).is_dir():
         return Path(repo_url)
     return Path.cwd()
 
@@ -1051,8 +1072,15 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
     """
     import fcntl
 
+    # Hand-edited state: a ``workdir`` that is not a path string is not a
+    # checkout (``Path(5)`` raised ``TypeError`` here, which every window
+    # launch — start / review / sign-off — calls on the way to provisioning),
+    # so it reads as absent and is re-provisioned like a missing one.  Nor is
+    # a *regular file* left where the workdir was: git with it as the cwd
+    # raises ``NotADirectoryError``, so it is re-provisioned too.
     workdir = pr_entry.get("workdir")
-    if workdir and Path(workdir).exists():
+    workdir = workdir if isinstance(workdir, str) and workdir else None
+    if workdir and Path(workdir).is_dir():
         return workdir
 
     pr_id = pr_entry.get("id")
@@ -1071,7 +1099,9 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
             fresh_wd = (fresh_pr or {}).get("workdir")
         except Exception:
             fresh_wd = None
-        if fresh_wd and Path(fresh_wd).exists():
+        # Same hand-edited-state rule as the recorded value above.
+        fresh_wd = fresh_wd if isinstance(fresh_wd, str) and fresh_wd else None
+        if fresh_wd and Path(fresh_wd).is_dir():
             pr_entry["workdir"] = fresh_wd
             return fresh_wd
         return _clone_workdir(data, pr_entry, root)

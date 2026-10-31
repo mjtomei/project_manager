@@ -963,7 +963,7 @@ def on_state_loaded(app, old_statuses: dict,
     regraphed = [] if old_deps is None else [
         p["id"] for p in prs
         if p.get("id") in old_deps
-        and list(p.get("depends_on") or []) != old_deps[p["id"]]]
+        and graph.deps_of(p) != old_deps[p["id"]]]
     if not newly and not regraphed:
         return
     managed = managed_ids(app, prs)
@@ -1039,7 +1039,7 @@ async def check_and_start(app) -> None:
     for pr in prs:
         if pr.get("status") != "in_progress":
             continue
-        deps = pr.get("depends_on") or []
+        deps = graph.deps_of(pr)
         if all(d in merged_ids for d in deps):
             ready.append(pr)
 
@@ -1669,12 +1669,23 @@ def collect_status_inputs(app) -> dict:
                      and (qa_loops.get(pr_id) or {}).get("verdict") == "PASS")
         if qa_passed or status == "sign_off" or pr_id in pending_merge:
             from pm_core import signoff as _signoff
-            rec = pr.get("signoff") or {}
+            # Hand-edited state: a non-mapping ``signoff`` value is no record
+            # (``(5 or {}).get`` raised ``AttributeError`` out of this status
+            # snapshot, which runs on the TUI event loop — the runs popup then
+            # showed "status failed").  Read as absent, like the tech-tree
+            # signature and the auto-merge path.
+            rec = pr.get("signoff")
+            rec = rec if isinstance(rec, dict) else {}
             sha = _signoff.head_sha(pr.get("workdir"))
             fresh = _signoff.fresh_recorded_verdict(pr, sha)
-            signoff_info[pr_id] = {"verdict": rec.get("verdict"),
+            # Hand-edited state: a non-string ``verdict`` is no verdict, so the
+            # snapshot says "no sign-off verdict" instead of routing a mapping
+            # as if it were a decision — the same ``verdict_of`` reader every
+            # icon lookup and the driver's freshness check use.
+            verdict = _signoff.verdict_of(rec.get("verdict"))
+            signoff_info[pr_id] = {"verdict": verdict,
                                    "fresh": fresh is not None}
-            if fresh is None and rec.get("verdict"):
+            if fresh is None and verdict:
                 signoff_info[pr_id]["stale_reason"] = \
                     _signoff.stale_reason(rec)
 

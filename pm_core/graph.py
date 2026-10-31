@@ -4,11 +4,24 @@ from collections import defaultdict, deque
 from typing import Optional
 
 
+def deps_of(pr: dict) -> list[str]:
+    """A PR's ``depends_on`` as a list of ids.
+
+    ``project.yaml`` is hand-editable state: a scalar where a list belongs is
+    not a list of ids (``for dep in 5`` raises ``TypeError``, and iterating a
+    string yields characters — deps pm could never resolve), so a scalar reads
+    as absent and a non-string list member is ignored.  The same contract
+    ``pm_core.integration`` and the TUI's tech-tree signature follow.
+    """
+    deps = pr.get("depends_on")
+    return [d for d in deps if isinstance(d, str)] if isinstance(deps, list) else []
+
+
 def build_adjacency(prs: list[dict]) -> dict[str, list[str]]:
     """Build adjacency list: pr_id -> list of PRs that depend on it."""
     adj = defaultdict(list)
     for pr in prs:
-        for dep in pr.get("depends_on") or []:
+        for dep in deps_of(pr):
             adj[dep].append(pr["id"])
     return dict(adj)
 
@@ -23,7 +36,7 @@ def topological_sort(prs: list[dict]) -> list[str]:
         in_degree[pr_id] = 0
 
     for pr in prs:
-        for dep in pr.get("depends_on") or []:
+        for dep in deps_of(pr):
             if dep in pr_ids:
                 adj[dep].append(pr["id"])
                 in_degree[pr["id"]] = in_degree.get(pr["id"], 0) + 1
@@ -47,7 +60,7 @@ def ready_prs(prs: list[dict]) -> list[dict]:
     for pr in prs:
         if pr.get("status") != "pending":
             continue
-        deps = pr.get("depends_on") or []
+        deps = deps_of(pr)
         if all(d in merged for d in deps):
             result.append(pr)
     return result
@@ -58,7 +71,7 @@ def blocked_prs(prs: list[dict]) -> list[dict]:
     merged = {pr["id"] for pr in prs if pr.get("status") == "merged"}
     result = []
     for pr in prs:
-        deps = pr.get("depends_on") or []
+        deps = deps_of(pr)
         if deps and not all(d in merged for d in deps):
             if pr.get("status") in ("pending", "blocked"):
                 result.append(pr)
@@ -79,7 +92,7 @@ def compute_layers(prs: list[dict]) -> list[list[str]]:
         pr = pr_map.get(pr_id)
         if not pr:
             return -1
-        deps = pr.get("depends_on") or []
+        deps = deps_of(pr)
         visible_dep_layers = [get_layer(d) for d in deps if d in pr_map]
         if not visible_dep_layers:
             layers_map[pr_id] = 0
@@ -111,7 +124,7 @@ def count_crossings(
     pr_ids = set(p["id"] for p in prs)
     edges = []
     for pr in prs:
-        for dep in pr.get("depends_on") or []:
+        for dep in deps_of(pr):
             if dep in pr_ids and dep in node_positions and pr["id"] in node_positions:
                 edges.append((dep, pr["id"]))
 
@@ -155,7 +168,7 @@ def render_static_graph(prs: list[dict]) -> str:
         for pr_id in sorted(layer):
             pr = pr_map[pr_id]
             icon = status_icons.get(pr.get("status", "pending"), "?")
-            deps = pr.get("depends_on") or []
+            deps = deps_of(pr)
             dep_str = f" <- [{', '.join(deps)}]" if deps else ""
             machine = pr.get("agent_machine")
             machine_str = f" ({machine})" if machine else ""

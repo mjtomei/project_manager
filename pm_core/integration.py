@@ -22,29 +22,43 @@ Statuses:
   candidate is the HEAD's own tree.
 * ``clean`` — the base moved and merges without conflicts; the candidate
   tree is the merge result.
+* ``resolved`` — the merge conflicted only in ``project.yaml`` file(s) and
+  pm's record-aware resolver combined both sides safely; the candidate tree
+  is the conflict-free merge with the resolved documents.  ``resolution``
+  records exactly what was combined (see :func:`resolve_project_yaml`).
 * ``conflict`` — merging the base conflicts (``conflicts`` lists paths);
-  reconciling is implementation work.
+  reconciling is implementation work.  ``resolution`` carries a failed
+  attempt's details when the conflict was metadata-only.
 * ``in_base`` — the PR HEAD is already contained in the base (merged).
 * ``error`` — the check could not run (no workdir, fetch failed, ...).
 
-:func:`apply_integration` merges a *clean* base into the PR branch; pm uses
-it when sign-off routes work back, so the revalidating step sees the
-integrated code.  It never leaves a half-merge behind.
+:func:`apply_integration` merges a *clean* base into the PR branch (or
+applies a *resolved* candidate's resolution and verifies the resulting tree
+matches the candidate); pm uses it when sign-off routes work back, so the
+revalidating step sees the integrated code.  It never leaves a half-merge
+behind.  :func:`prepare` is what a sign-off launch runs: check, apply a
+resolved candidate, re-check, and record the resolution provenance.
 """
 
 from __future__ import annotations
 
 import contextlib
+import difflib
 import functools
+import hashlib
+import io
 import json
 import os
 import re
 import secrets
 import shutil
+import stat
 import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+import yaml
 
 from pm_core import git_ops, store
 from pm_core.paths import configure_logger
@@ -53,12 +67,19 @@ _log = configure_logger("pm.integration")
 
 UP_TO_DATE = "up_to_date"
 CLEAN = "clean"
+RESOLVED = "resolved"
 CONFLICT = "conflict"
 IN_BASE = "in_base"
 ERROR = "error"
 
 # Statuses whose candidate may be published (conflict-free, not yet merged).
-MERGEABLE = (UP_TO_DATE, CLEAN)
+MERGEABLE = (UP_TO_DATE, CLEAN, RESOLVED)
+
+# A concurrent actor moved the PR HEAD between the check and the apply (two
+# operators running ``--apply`` at once).  Named so the caller can tell this
+# lost race from a workdir that genuinely cannot take the merge.
+HEAD_MOVED = "PR HEAD moved since the integration check"
+HEAD_MOVED_APPLYING = "PR HEAD moved while applying the resolution"
 
 # Where the fetched base revision is pinned in the PR workdir, so the
 # candidate's objects stay reachable and no shared ref (FETCH_HEAD,
@@ -70,7 +91,12 @@ _YAML_LIST_LIMIT = 40
 
 # Keys of an integration record a sign-off verdict binds to.
 BINDING_KEYS = ("target_repo", "base_branch", "base_sha", "candidate_tree",
-                "status", "head")
+                "status", "head", "resolution_digest")
+
+# Bounds for state / artifacts.  project.yaml keeps summaries; the full
+# resolution (and its diff) lives in $CAP/<pr>/integration.json.
+_BEHAVIOR_LIMIT = 30
+_DIFF_LINE_LIMIT = 1500
 
 
 def _git(*args: str, cwd) -> subprocess.CompletedProcess:
@@ -126,9 +152,20 @@ def target_for(data: dict, pr: dict, root: Path | None = None) -> tuple[str, str
     Local backend: the main repo directory (merges land there).  Remote
     backends: the workdir's ``origin`` fetch URL (pushes may fan out to the
     local source as well; publication targets the upstream).
+
+    ``project.yaml`` is hand-editable state: a ``project`` that is not a
+    mapping is no configuration (``.get`` on a scalar raised
+    ``AttributeError`` out of ``run_check`` — which promises a ``status:
+    error`` record — and out of the approval/recovery paths), and a
+    ``base_branch``/``repo`` that is not a string cannot be a ref or a remote
+    (both are passed to git as arguments, where a non-string raises
+    ``TypeError``).  They read as absent/default like an unset one.
     """
-    project = data.get("project") or {}
-    base_branch = project.get("base_branch", "master")
+    project = data.get("project")
+    project = project if isinstance(project, dict) else {}
+    base_branch = project.get("base_branch")
+    if not (isinstance(base_branch, str) and base_branch):
+        base_branch = "master"
     if project.get("backend") == "local":
         from pm_core.cli.helpers import _resolve_repo_dir, state_root
         from pm_core.paths import workdirs_base
@@ -147,9 +184,14 @@ def target_for(data: dict, pr: dict, root: Path | None = None) -> tuple[str, str
             return origin, base_branch
         return str(repo_dir), base_branch
     workdir = pr.get("workdir")
+    # Hand-edited state: only a path string is a checkout to read the origin
+    # from (``Path(5)`` raises; ``pm pr merge`` calls this on the approval
+    # path, where the target repo decides what gets published).
     url = (_out(_git("remote", "get-url", "origin", cwd=workdir))
-           if workdir and Path(workdir).is_dir() else "")
-    return (url or project.get("repo", "")), base_branch
+           if isinstance(workdir, str) and workdir
+           and Path(workdir).is_dir() else "")
+    repo = project.get("repo")
+    return (url or (repo if isinstance(repo, str) else "")), base_branch
 
 
 def same_target(a: str, b: str) -> bool:
@@ -157,9 +199,16 @@ def same_target(a: str, b: str) -> bool:
 
     Local paths compare resolved (a PR workdir's origin and the main repo
     dir can spell one directory differently); URLs compare verbatim.
+
+    ``b`` can come from hand-edited state (an approval's
+    ``integration.target_repo``): a value that is not a string cannot name the
+    same repository, so it reads as a *different* one — a refusal, never a
+    ``Path(5)`` ``TypeError`` out of ``pm pr merge``.
     """
     if a == b:
         return True
+    if not (isinstance(a, str) and isinstance(b, str)):
+        return False
     try:
         pa, pb = Path(a), Path(b)
         return pa.is_dir() and pb.is_dir() and pa.resolve() == pb.resolve()
@@ -210,6 +259,971 @@ def remote_ref(workdir: str, target_repo: str, ref: str) -> str | None:
     return None
 
 
+# --- structured project.yaml resolution ------------------------------------
+# Git reports a conflict for two branches that independently appended records
+# to project.yaml, but the documents are mergeable by record id.  This
+# resolver is deliberately *not* ``store.merge_3way``: that policy lets the
+# live state win true conflicts, which is right for pm's own stash-pop but
+# wrong for an integration candidate that a human will approve.  Here a real
+# field conflict, a deletion/edit conflict or an ambiguous record is a
+# conflict — never a silent side selection.
+
+_MISSING = object()
+_DELETED = object()
+
+# Bookkeeping timestamps are bumped independently whenever either side touches
+# a record: ``pm pr note add`` and every status change call
+# ``_record_status_timestamp``, which rewrites ``updated_at`` (and the
+# transition stamp).  Two branches that both edited the same record therefore
+# change ``updated_at`` to different values even when the records themselves
+# are independently mergeable — the real #250 note-add path does exactly this.
+# These are not semantic fields: take the later value ("last touched") instead
+# of failing the whole metadata resolution, and do not count the earlier value
+# as a lost change.  Anything that is not a string timestamp keeps the normal
+# conflict rule.
+_BOOKKEEPING_TS = frozenset({
+    "created_at", "updated_at", "last_edited", "started_at", "reviewed_at",
+    "signed_off_at", "merged_at",
+})
+
+
+# UI state pm rewrites on its own, without any user intent about the PR's
+# content.  ``project.active_pr`` is the TUI's selected PR: ``pm_core.tui``
+# persists it through the coalescing write queue on *every cursor move*
+# (``store.WriteQueue`` documents "the per-keypress ``active_pr`` persist"),
+# so any branch where someone used pm has a different value from the base —
+# it is the same class as the bookkeeping timestamps above, not a real field
+# conflict.  Without this, the real #250-shaped conflict (independent record
+# appends) is refused by the resolver for every branch pm was used on, and
+# sign-off can only route implementation.
+#
+# Both sides changed it independently: take the new base's value (the shared
+# state; the branch's cursor belongs to its author and pm rewrites it on the
+# next keystroke), deterministically, and do not count the branch's value as a
+# lost change.  A *deletion* vs edit stays a conflict, like the timestamps.
+_UI_STATE_PATHS = frozenset({"project.active_pr"})
+
+
+def _bookkeeping_ts(path: str) -> bool:
+    return path.rsplit(".", 1)[-1] in _BOOKKEEPING_TS
+
+
+def _merge_bookkeeping_ts(ours, theirs):
+    """The merged value of a bookkeeping timestamp, or ``_MISSING``.
+
+    Only two real timestamps merge (to the later one).  ``None`` is pm's own
+    "unset" value and anything else is malformed hand-edited state: the spec
+    keeps the normal conflict rule for a non-string value, so a null-vs-edit
+    (or a mapping/list) must not be silently resolved to one side.
+    """
+    if not (isinstance(ours, str) and isinstance(theirs, str)):
+        return _MISSING
+    return max(ours, theirs)      # ISO-8601 strings sort chronologically
+
+
+def resolve_project_yaml(base_text: str | None, ours_text: str | None,
+                         theirs_text: str | None):
+    """Merge three versions of a project.yaml document by record id.
+
+    *base_text* is the merge-base version (``None`` when the file did not
+    exist there), *ours_text* the PR branch's version and *theirs_text* the
+    new base's version.  Returns ``(merged_text, details)``; on any real
+    conflict, ambiguity or failed validation returns ``(None, details)``
+    with a human-readable ``conflicts`` list.  ``details["actions"]`` names
+    the record ids added/removed/changed per list path.
+    """
+    try:
+        base = _parse_yaml(base_text)
+        ours = _parse_yaml(ours_text)
+        theirs = _parse_yaml(theirs_text)
+    except (yaml.YAMLError, ValueError) as e:
+        return None, {"error": f"cannot parse project.yaml: {e}"}
+    if ours is _MISSING or theirs is _MISSING:
+        # A modify/delete conflict: git stages no blob for the deleted side,
+        # so there is nothing to merge by record id.  Say that — reporting a
+        # YAML problem the surviving file does not have would send the agent
+        # looking for a syntax error instead of the deletion.
+        if ours is _MISSING and theirs is _MISSING:
+            return None, {"conflicts": [
+                "project.yaml: deleted on both sides (nothing to merge)"]}
+        side = "PR branch" if ours is _MISSING else "new base"
+        return None, {"conflicts": [
+            f"project.yaml: deleted on the {side} and changed on the other "
+            "side (deletion vs edit)"]}
+    if not isinstance(ours, dict) or not isinstance(theirs, dict):
+        return None, {"error": "project.yaml is not a mapping on one side"}
+    if base is not _MISSING and not isinstance(base, dict):
+        return None, {"error": "project.yaml base is not a mapping"}
+    # Every walk below is recursive, and a YAML anchor can make a hand-edited
+    # document self-referential (``project: &p {self: *p}``), which
+    # ``yaml.load`` builds happily.  ``RecursionError`` is not a "conflict", so
+    # it used to escape this function's ``(None, details)`` contract; the two
+    # callers catch it, but a malformed document must read as a refusal here,
+    # the same way every other malformed value does.
+    try:
+        ambiguous = (_duplicate_id_problems(ours, "PR branch")
+                     + _duplicate_id_problems(theirs, "new base")
+                     + (_duplicate_id_problems(base, "merge base")
+                        if base is not _MISSING else []))
+        if ambiguous:
+            return None, {"conflicts": ambiguous}
+
+        actions: dict = {}
+        merged, conflicts = _merge_value(base, ours, theirs, "", actions)
+        if conflicts:
+            return None, {"conflicts": conflicts, "actions": actions}
+        problems = (_preservation_problems(base, ours, merged, "PR branch")
+                    + _preservation_problems(base, theirs, merged, "new base"))
+        problems += _shape_problems(merged)
+        if problems:
+            return None, {"conflicts": problems, "actions": actions}
+    except RecursionError:
+        return None, {"conflicts": [
+            "project.yaml: the document is recursive (a YAML alias refers "
+            "back to itself); it cannot be merged by record id"]}
+    try:
+        return _dump_project_yaml(merged), {"actions": actions}
+    except (yaml.YAMLError, ValueError) as e:
+        return None, {"error": f"cannot serialize project.yaml: {e}"}
+    except RecursionError:
+        return None, {"conflicts": [
+            "project.yaml: the merged document is recursive (a YAML alias "
+            "refers back to itself)"]}
+
+
+def _yaml_load(text: str):
+    """Parse YAML with the store's loader (C-accelerated when available).
+
+    project.yaml is large enough that the pure-Python loader dominates a
+    sign-off's resolution time; this is the same loader ``store`` uses.
+    """
+    return yaml.load(text, Loader=store._yaml_loader())
+
+
+def _parse_yaml(text: str | None):
+    if text is None:
+        return _MISSING
+    if not text.strip():
+        return {}
+    return _yaml_load(text)
+
+
+def _dump_project_yaml(data: dict) -> str:
+    """Serialize exactly like :func:`pm_core.store.save` (byte-stable)."""
+    buf = io.StringIO()
+    buf.write(store._YAML_HEADER)
+    yaml.dump(data, buf, Dumper=store._yaml_dumper(data),
+              default_flow_style=False, sort_keys=False, allow_unicode=True)
+    return buf.getvalue()
+
+
+def _is_id_list(value) -> bool:
+    # The id must be a string: ids are used as dict keys (a mapping/list id
+    # is unhashable) and pm's own records always use string ids.  A list
+    # with any other id type is treated as an atomic value, so a malformed
+    # record becomes a conflict instead of an exception.
+    return isinstance(value, list) and all(
+        isinstance(e, dict) and isinstance(e.get("id"), str) for e in value)
+
+
+def _duplicate_id_problems(data, label: str) -> list[str]:
+    """Every id-keyed list that repeats an id is ambiguous.
+
+    This walks nested lists too: a duplicate note id inside a PR record is
+    exactly as ambiguous as a duplicate top-level record id, and taking such
+    a list wholesale (identical on both sides, or added by one side) would
+    otherwise carry the ambiguity into the merged document unnoticed.
+
+    Every mapping member's id is checked, not only those of a wholly
+    well-formed list: one hand-edited member that is not a mapping (or whose
+    id is not a string) makes ``_is_id_list`` false, and the resolver then
+    treats the list as atomic — so a duplicate id hiding behind that member
+    would ride along whenever the list is taken wholesale.  Ids are keys
+    wherever pm stores records by them (``pm pr note add`` looks a note up by
+    id), so the ambiguity is the same.
+    """
+    problems: list[str] = []
+
+    def walk(value, path: str) -> None:
+        if isinstance(value, list):
+            seen: set = set()
+            for entry in value:
+                rec_id = entry.get("id") if isinstance(entry, dict) else None
+                if not isinstance(rec_id, str):
+                    continue
+                if rec_id in seen:
+                    problems.append(
+                        f"{path}: duplicate record id {rec_id!r} on the "
+                        f"{label} side (ambiguous)")
+                seen.add(rec_id)
+            id_list = _is_id_list(value)
+            for index, entry in enumerate(value):
+                walk(entry, f"{path}[{entry['id']}]" if id_list
+                     else f"{path}[{index}]")
+        elif isinstance(value, dict):
+            for key, child in value.items():
+                walk(child, f"{path}.{key}" if path else str(key))
+
+    walk(data, "")
+    return problems
+
+
+def _record_action(actions: dict, path: str, kind: str,
+                   side: str | None = None, rec_id: str | None = None) -> None:
+    entry = actions.setdefault(
+        path or "<root>",
+        {"added": {"PR branch": [], "new base": []}, "removed": [],
+         "changed": []})
+    if kind == "added":
+        entry["added"].setdefault(side, []).append(rec_id)
+    elif kind == "removed":
+        entry["removed"].append(rec_id)
+    elif kind == "changed":
+        entry["changed"].append(rec_id)
+
+
+def _same(a, b) -> bool:
+    """Whether two parsed YAML values are the *same* value.
+
+    ``==`` is not enough.  ``True == 1 == 1.0`` in Python, but they are three
+    different YAML scalars, and pm writes them differently.  With ``==`` a
+    branch that changed a field to ``1`` and a base that changed it to ``0``
+    looked like "unchanged on the branch" (``1 == True``), so the base's value
+    was taken silently — a real field conflict resolved by side selection, and
+    the preservation check (which compares the same way) did not notice.  The
+    resolver must treat a change of scalar *kind* as a change.
+
+    Containers compare structurally under the same rule, so a nested
+    ``true``/``1`` pair cannot hide inside a record either.  Mapping *keys*
+    need the same rule as values: ``{1: x}`` and ``{True: x}`` compare equal
+    in Python, so a side that changed a key's scalar kind looked "unchanged"
+    and the other side's change won silently.  Two ``nan`` values are the same
+    value (``nan != nan`` would otherwise make a hand-edited ``.nan`` —
+    identical on both sides — refuse the document).
+    """
+    if isinstance(a, dict) and isinstance(b, dict):
+        if len(a) != len(b):
+            return False
+        other = {(type(k).__name__, k): v for k, v in b.items()}
+        for key, value in a.items():
+            slot = (type(key).__name__, key)
+            if slot not in other or not _same(value, other[slot]):
+                return False
+        return True
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(
+            _same(x, y) for x, y in zip(a, b))
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, float) and a != a:
+        # ``nan != nan``, but an identical hand-edited ``.nan`` on both sides
+        # is the *same* value, not a change.  Reading it as one refused the
+        # whole metadata resolution for the document ("changed differently on
+        # both sides") even though neither side changed anything.
+        return b != b
+    return a == b
+
+
+def _key_kind_clashes(*docs: dict) -> list:
+    """Keys whose YAML scalar *kind* differs between the documents.
+
+    ``1``, ``true`` and ``1.0`` are three different YAML scalars that compare
+    equal in Python, and a mapping cannot hold more than one of them, so
+    ``key in other`` conflates them: a side that changed a key from ``1`` to
+    ``true`` looked "unchanged on the PR branch" (and the preservation check,
+    which compares the same way, agreed), and a real conflict between ``true``
+    and ``1.0`` was silently resolved to one side.  ``_same`` compares mapping
+    *values* strictly for exactly this reason; keys need the same rule, and
+    the merge cannot represent both kinds in one mapping, so the ambiguity is
+    a refusal — never a side selection.
+    """
+    kinds: dict = {}
+    for doc in docs:
+        for key in doc:
+            # ``==``-keyed on purpose: that is what conflates ``1``/``true``
+            # here, and it is how the collision is detected.
+            kinds.setdefault(key, set()).add(type(key).__name__)
+    return [key for key, names in kinds.items() if len(names) > 1]
+
+
+def _merge_value(base, ours, theirs, path: str, actions: dict):
+    """``(value, conflicts)`` for one position in the document tree."""
+    if _same(ours, theirs):
+        return ours, []
+    if base is not _MISSING and _same(ours, base):
+        return theirs, []
+    if base is not _MISSING and _same(theirs, base):
+        return ours, []
+    # Bookkeeping timestamps and pm's UI cursor are scalar by nature, so they
+    # are settled before the structural merges: a malformed mapping/list value
+    # must be refused (or replaced) like any other non-string value, not
+    # deep-merged field by field.
+    if _bookkeeping_ts(path):
+        value = _merge_bookkeeping_ts(ours, theirs)
+        if value is not _MISSING:
+            return value, []
+        return None, [f"{path or '<root>'}: changed differently on both sides"]
+    if path in _UI_STATE_PATHS:
+        # Both sides moved pm's own UI cursor (see ``_UI_STATE_PATHS``): the
+        # new base's value is the shared state.  A value that is not a string
+        # is not a cursor (hand-edited state), so it keeps the normal conflict
+        # rule like the bookkeeping timestamps above — taking it would write a
+        # malformed selection into the merged document and the preservation
+        # check exempts this path.
+        if isinstance(ours, str) and isinstance(theirs, str):
+            return theirs, []
+        return None, [f"{path or '<root>'}: changed differently on both sides"]
+    if isinstance(ours, dict) and isinstance(theirs, dict):
+        if base is _MISSING:
+            return None, [f"{path or '<root>'}: added on both sides with "
+                          "different content"]
+        if not isinstance(base, dict):
+            return None, [f"{path or '<root>'}: type conflict"]
+        return _merge_dict(base, ours, theirs, path, actions)
+    if _is_id_list(ours) and _is_id_list(theirs) \
+            and (base is _MISSING or _is_id_list(base)):
+        # A list absent in the merge base (e.g. a PR record that had no
+        # ``notes`` key) merges like an empty one: independent additions
+        # survive and a same-id/different-content entry is still ambiguous.
+        # The preservation check below proves neither side lost an entry.
+        return _merge_id_list([] if base is _MISSING else base, ours, theirs,
+                              path, actions)
+    return None, [f"{path or '<root>'}: changed differently on both sides"]
+
+
+def _merge_dict(base: dict, ours: dict, theirs: dict, path: str, actions: dict):
+    out: dict = {}
+    conflicts: list[str] = []
+    # ``key in other`` conflates ``1``/``true``/``1.0``, so a key whose scalar
+    # kind differs between the documents would be merged as if it were one key
+    # — silently keeping one side's kind.  Refuse instead (see
+    # ``_key_kind_clashes``); a well-formed document has string keys only, so
+    # this never fires for pm's own writes.
+    clashes = _key_kind_clashes(base, ours, theirs)
+    if clashes:
+        return None, [f"{path or '<root>'}: mapping key {clashes[0]!r} changed "
+                      "scalar kind between the sides (ambiguous)"]
+    keys: list = list(base)
+    keys += [k for k in ours if k not in keys]
+    keys += [k for k in theirs if k not in keys]
+    for key in keys:
+        in_b, in_o, in_t = key in base, key in ours, key in theirs
+        key_path = f"{path}.{key}" if path else str(key)
+        if in_o and in_t:
+            value, problems = _merge_value(
+                base[key] if in_b else _MISSING, ours[key], theirs[key],
+                key_path, actions)
+            if problems:
+                conflicts.extend(problems)
+            else:
+                out[key] = value
+        elif in_o:
+            if in_b:
+                if not _same(ours[key], base[key]):
+                    conflicts.append(
+                        f"{key_path}: deleted on the new base, changed on the "
+                        "PR branch")
+                # A one-sided field deletion is a merge, not a removed
+                # record: the ``removed`` action list names whole records
+                # (``_merge_id_list``), and the resolution delta shows the
+                # field change.
+            else:
+                out[key] = ours[key]           # added by the PR branch
+        elif in_t:
+            if in_b:
+                if not _same(theirs[key], base[key]):
+                    conflicts.append(
+                        f"{key_path}: deleted on the PR branch, changed on the "
+                        "new base")
+            else:
+                out[key] = theirs[key]         # added by the new base
+        # absent from both sides: deleted by both
+    return out, conflicts
+
+
+def _merge_id_list(base: list, ours: list, theirs: list, path: str,
+                   actions: dict):
+    b = {e["id"]: e for e in base}
+    o = {e["id"]: e for e in ours}
+    t = {e["id"]: e for e in theirs}
+    for label, seq in (("PR branch", [e["id"] for e in ours]),
+                       ("new base", [e["id"] for e in theirs]),
+                       ("merge base", [e["id"] for e in base])):
+        if len(seq) != len(set(seq)):
+            return None, [f"{path or '<root>'}: duplicate record id on the "
+                          f"{label} side"]
+
+    conflicts: list[str] = []
+    results: dict = {}
+    for rec_id in list(b) + [i for i in o if i not in b] \
+            + [i for i in t if i not in b and i not in o]:
+        rec_path = f"{path}[{rec_id}]"
+        in_b, in_o, in_t = rec_id in b, rec_id in o, rec_id in t
+        if in_o and in_t:
+            value, problems = _merge_value(
+                b[rec_id] if in_b else _MISSING, o[rec_id], t[rec_id],
+                rec_path, actions)
+            if problems:
+                conflicts.extend(problems)
+                continue
+            results[rec_id] = value
+            if in_b and not _same(o[rec_id], b[rec_id]) \
+                    and not _same(t[rec_id], b[rec_id]) \
+                    and not _same(o[rec_id], t[rec_id]):
+                _record_action(actions, path, "changed", rec_id=rec_id)
+            elif not in_b:
+                _record_action(actions, path, "added",
+                               side="PR branch", rec_id=rec_id)
+                _record_action(actions, path, "added",
+                               side="new base", rec_id=rec_id)
+        elif in_b and in_o:
+            if _same(o[rec_id], b[rec_id]):
+                results[rec_id] = _DELETED
+                _record_action(actions, path, "removed", rec_id=rec_id)
+            else:
+                conflicts.append(f"{rec_path}: deleted on the new base, "
+                                 "changed on the PR branch")
+        elif in_b and in_t:
+            if _same(t[rec_id], b[rec_id]):
+                results[rec_id] = _DELETED
+                _record_action(actions, path, "removed", rec_id=rec_id)
+            else:
+                conflicts.append(f"{rec_path}: deleted on the PR branch, "
+                                 "changed on the new base")
+        elif in_o:
+            results[rec_id] = o[rec_id]
+            _record_action(actions, path, "added",
+                           side="PR branch", rec_id=rec_id)
+        elif in_t:
+            results[rec_id] = t[rec_id]
+            _record_action(actions, path, "added",
+                           side="new base", rec_id=rec_id)
+        else:
+            results[rec_id] = _DELETED         # deleted by both
+
+    if conflicts:
+        return None, conflicts
+
+    base_seq = [e["id"] for e in base]
+    ours_seq = [e["id"] for e in ours]
+    theirs_seq = [e["id"] for e in theirs]
+    common = [i for i in base_seq if i in o and i in t]
+    o_order = [i for i in ours_seq if i in common]
+    t_order = [i for i in theirs_seq if i in common]
+    if o_order != common and t_order != common and o_order != t_order:
+        return None, [f"{path or '<root>'}: both sides reordered records "
+                      "differently"]
+    order = o_order if o_order != common else (
+        t_order if t_order != common else common)
+    order = [i for i in order
+             if results.get(i) is not _DELETED and i in results]
+    for seq in (ours_seq, theirs_seq):
+        for rec_id in seq:
+            if rec_id in results and results[rec_id] is not _DELETED \
+                    and rec_id not in order:
+                order.append(rec_id)
+    return [results[i] for i in order], []
+
+
+def _preservation_problems(base, side, merged, label: str) -> list[str]:
+    """Verify every change *side* made to *base* survived into *merged*."""
+    problems: list[str] = []
+
+    def walk(b, s, m, path: str) -> None:
+        if _same(s, b):
+            return
+        if isinstance(s, dict) and isinstance(m, dict):
+            bd = b if isinstance(b, dict) else {}
+            for key, value in s.items():
+                key_path = f"{path}.{key}" if path else str(key)
+                if key not in bd or not _same(bd[key], value):
+                    if key not in m:
+                        problems.append(f"{label} change lost: {key_path}")
+                    else:
+                        walk(bd.get(key, _MISSING), value, m[key], key_path)
+            for key in bd:
+                if key not in s and key in m:
+                    problems.append(
+                        f"{label} deletion lost: "
+                        f"{f'{path}.{key}' if path else key}")
+        elif _is_id_list(s) and isinstance(m, list) and _is_id_list(m):
+            bm = {e["id"]: e for e in b} if _is_id_list(b) else {}
+            mm = {e["id"]: e for e in m}
+            for entry in s:
+                rec_id = entry["id"]
+                rec_path = f"{path}[{rec_id}]"
+                if rec_id not in mm:
+                    if rec_id not in bm or not _same(bm[rec_id], entry):
+                        problems.append(f"{label} record lost: {rec_path}")
+                    continue
+                walk(bm.get(rec_id, _MISSING), entry, mm[rec_id], rec_path)
+            for rec_id in bm:
+                if rec_id not in {e["id"] for e in s} and rec_id in mm:
+                    problems.append(
+                        f"{label} record deletion lost: {path}[{rec_id}]")
+        elif not _same(s, m):
+            # A bookkeeping timestamp both sides bumped is merged as the
+            # later value, so the earlier one is intentionally not carried.
+            if _bookkeeping_ts(path) and _merge_bookkeeping_ts(s, m) == m:
+                return
+            # pm's own UI cursor is not content (see ``_UI_STATE_PATHS``): one
+            # of the two selections is kept, and the other is not a lost
+            # change.
+            if path in _UI_STATE_PATHS:
+                return
+            problems.append(
+                f"{label} change not preserved at {path or '<root>'}")
+
+    walk(base, side, merged, "")
+    return problems
+
+
+def _shape_problems(data) -> list[str]:
+    """Read-only shape/status validation of the merged document.
+
+    ``store``'s own validators cannot be reused here: they *normalize*
+    (an invalid PR status silently becomes ``pending``) and raise on the
+    first problem, while a resolution must refuse a document that is
+    malformed on either side and report every problem to the agent.
+    """
+    from pm_core.pr_utils import VALID_PR_STATES
+    from pm_core.store import VALID_PLAN_STATUSES
+
+    if not isinstance(data, dict):
+        return ["merged project.yaml is not a mapping"]
+    problems: list[str] = []
+    # ``store`` only ever sees a mapping here (it would raise on load), but a
+    # hand-edited or generated side can carry anything: refuse it as a
+    # problem instead of letting the serializer raise (``_yaml_dumper`` reads
+    # ``project.libyaml``) and losing the readable conflict.
+    project = data.get("project")
+    if project is not None and not isinstance(project, dict):
+        problems.append("merged project is not a mapping")
+    prs = data.get("prs")
+    pr_ids: set = set()
+    if prs is not None:
+        if not isinstance(prs, list):
+            problems.append("merged prs is not a list")
+        else:
+            for entry in prs:
+                if not isinstance(entry, dict) \
+                        or not isinstance(entry.get("id"), str) \
+                        or not entry["id"]:
+                    problems.append("merged prs entry without a string id")
+                    continue
+                if entry["id"] in pr_ids:
+                    problems.append(f"merged project.yaml has duplicate PR "
+                                    f"id {entry['id']}")
+                pr_ids.add(entry["id"])
+                # Membership in a set needs a hashable value: a list/dict
+                # status must read as an invalid one, not raise.
+                status = entry.get("status")
+                if not isinstance(status, str) \
+                        or status not in VALID_PR_STATES:
+                    problems.append(
+                        f"merged PR {entry['id']} has invalid status "
+                        f"{status!r}")
+    plans = data.get("plans")
+    plan_ids: set = set()
+    parents: dict = {}
+    if plans is not None:
+        if not isinstance(plans, list):
+            problems.append("merged plans is not a list")
+        else:
+            for entry in plans:
+                if not isinstance(entry, dict) \
+                        or not isinstance(entry.get("id"), str) \
+                        or not entry["id"]:
+                    problems.append("merged plans entry without a string id")
+                    continue
+                if entry["id"] in plan_ids:
+                    problems.append(f"merged project.yaml has duplicate plan "
+                                    f"id {entry['id']}")
+                plan_ids.add(entry["id"])
+                status = entry.get("status")
+                if not isinstance(status, str) \
+                        or status not in VALID_PLAN_STATUSES:
+                    problems.append(
+                        f"merged plan {entry['id']} has invalid status "
+                        f"{status!r}")
+                parent = entry.get("parent")
+                if parent is not None and not isinstance(parent, str):
+                    problems.append(
+                        f"merged plan {entry['id']} has an invalid parent "
+                        f"{parent!r}")
+                parents[entry["id"]] = parent
+            for plan_id, parent in parents.items():
+                if isinstance(parent, str) and parent not in plan_ids:
+                    problems.append(
+                        f"merged plan {plan_id} references missing parent "
+                        f"{parent!r}")
+            for plan_id in plan_ids:
+                seen: set = set()
+                current = plan_id
+                # A non-string parent was already refused above; do not walk
+                # through it (it may be unhashable).
+                while isinstance(current, str):
+                    if current in seen:
+                        problems.append(
+                            f"merged plans have a cycle involving {plan_id}")
+                        break
+                    seen.add(current)
+                    current = parents.get(current)
+    return problems
+
+
+def _mapping(value) -> dict:
+    """*value* when it is a mapping, else ``{}``.
+
+    ``project.yaml`` is hand-editable state: a malformed ``integration`` /
+    ``resolution`` / ``signoff_return`` value must read as absent, never raise
+    out of a prompt, a CLI surface or the merge gate (the same contract
+    :func:`contained_base` and :func:`pm_core.signoff.qa_evidence` follow).
+    """
+    return value if isinstance(value, dict) else {}
+
+
+def revision_of(value) -> str | None:
+    """*value* when it is a non-empty revision string, else ``None``."""
+    return value if isinstance(value, str) and value else None
+
+
+def _text(value, default: str = "?") -> str:
+    """*value* when it is text, else *default*.
+
+    ``project.yaml`` is hand-editable state: a reader must not print a value
+    the record does not hold, so an absent (or non-string) ``base_branch`` /
+    ``target_repo`` / ``error`` renders as the ``?`` placeholder every other
+    surface uses — not the literal ``None`` or a mapping's repr.  The same
+    rule :func:`pm_core.signoff._text` applies to the return text.
+    """
+    return value if isinstance(value, str) and value else default
+
+
+_OBJECT_NAME_RE = re.compile(r"[0-9a-fA-F]{7,64}\Z")
+
+
+def _sha_like(value) -> str | None:
+    """*value* when it looks like a git object name, else ``None``.
+
+    ``contained_base`` returns a revision that prompt builders interpolate
+    into a suggested ``git diff`` command (and the review pane into a shell
+    command).  project.yaml is hand-editable, so a value that is not a hex
+    object name — a shell fragment, a ref with metacharacters — must not
+    become part of that command.
+    """
+    return value if isinstance(value, str) and _OBJECT_NAME_RE.match(value) \
+        else None
+
+
+def _as_int(value, default: int = 0) -> int:
+    """*value* as an int, or *default* when it is not one (hand-edited state).
+
+    ``True`` is an ``int`` to ``isinstance`` but not a count: the rest of this
+    module (and the prompt's ``base_files_count`` reader) excludes booleans
+    explicitly, and counting a hand-edited ``true`` as 1 would invent a number
+    pm never recorded.
+
+    ``OverflowError`` is caught with the rest: YAML parses ``.inf`` (and
+    ``1e400``) to ``float('inf')``, and ``int(inf)`` raises it — not
+    ``ValueError``.  Without it a single hand-edited count raised out of
+    ``compact`` (and so out of every recorded check, inside the store lock),
+    ``summary`` / ``pm pr show`` and ``_apply_resolution``'s ``paths_total``
+    guard — all of which promise a readable result, never a traceback.
+    """
+    if isinstance(value, bool):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _as_list(value) -> list:
+    """*value* when it is a list, else ``[]`` (hand-edited state).
+
+    ``list("garbage")`` would silently turn a malformed scalar into a list of
+    characters, so the carry-forward paths must not use ``list(... or [])`` on
+    a record member.
+    """
+    return value if isinstance(value, list) else []
+
+
+def resolution_of(record) -> dict:
+    """The record's resolution mapping, or ``{}`` when absent/malformed."""
+    resolution = record.get("resolution") if isinstance(record, dict) else None
+    return resolution if isinstance(resolution, dict) else {}
+
+
+def resolution_entries(resolution, key: str) -> list[dict]:
+    """The mapping entries of a resolution's ``paths``/``unresolved`` list.
+
+    ``project.yaml`` is hand-editable state: a list member that is not a list
+    (a hand-edited scalar) must read as absent instead of raising out of a
+    prompt, the CLI or the merge gate, and a non-mapping entry is skipped for
+    the same reason.  Every reader of these two members goes through here, so
+    ``for entry in resolution.get(key) or []`` never iterates a scalar.
+    """
+    resolution = resolution if isinstance(resolution, dict) else {}
+    values = resolution.get(key)
+    if not isinstance(values, list):
+        return []
+    return [v for v in values if isinstance(v, dict)]
+
+
+def resolution_id_total(entry: dict, key: str) -> int:
+    """The real length of a compact resolution id list (*key*).
+
+    ``_compact_resolution`` keeps at most 20 ids and records the full length
+    in ``<key>_total``; a prompt/CLI that lists a prefix must report the
+    remainder from that total rather than dropping ids silently.
+    """
+    entry = _mapping(entry)
+    values = entry.get(key)
+    n = len(values) if isinstance(values, list) else 0
+    total = entry.get(f"{key}_total")
+    if isinstance(total, int) and not isinstance(total, bool) and total > n:
+        return total
+    return n
+
+
+def resolution_entry_path(entry) -> str:
+    """The file a resolution entry names, for a human-readable listing.
+
+    ``project.yaml`` is hand-editable state: a ``path`` that is not a
+    non-empty string is not a path, so every surface that renders an entry
+    names the file pm can only have attempted (``project.yaml``, the same
+    fallback :func:`summary` uses) instead of printing the malformed value as
+    one.  Shared by the sign-off prompt, the return text and the CLI so the
+    surfaces agree.
+    """
+    path = _mapping(entry).get("path")
+    return path if isinstance(path, str) and path else "project.yaml"
+
+
+_UNRESOLVED_WITHOUT_DETAILS = "unresolved conflicts recorded without details"
+
+
+def resolution_conflicts_text(entry) -> str:
+    """An ``unresolved`` entry's ``conflicts`` as text, never the literal None.
+
+    ``project.yaml`` is hand-editable state: an entry without a usable
+    ``conflicts`` value (a missing key, a ``null``, an empty list) cannot name
+    what pm failed to reconcile, and rendering the raw value would present a
+    missing one as ``None`` — a value the record does not hold.  Shared by the
+    sign-off prompt, the return text, the CLI and the router's coercion
+    message so every surface describes the same refusal the same way (the
+    phrase R9-14 specifies).
+    """
+    value = _mapping(entry).get("conflicts")
+    if not value:
+        return _UNRESOLVED_WITHOUT_DETAILS
+    return str(value)
+
+
+def _digest_payload(value, _on_path: set | None = None):
+    """*value* with every mapping key rendered as a string, recursively.
+
+    ``_compact_resolution`` filters the top-level keys of ``records`` (a
+    YAML ``1:`` beside pm's string action paths), but a hand-edited member
+    *inside* the compact projection — ``resolved_from``, an ``unresolved``
+    entry, a ``records`` value — can carry one too.  ``json.dumps(...,
+    sort_keys=True)`` raises ``TypeError`` on a mapping that mixes key types,
+    and every integration check, the merge gate and ``compact`` compute this
+    digest: a malformed record must read as a stable hash, never crash the
+    command that touches it.
+
+    YAML anchors can also make a hand-edited member *recursive*
+    (``resolved_from: &r {self: *r}``), which ``yaml.load`` builds happily and
+    ``yaml.dump`` round-trips as an anchor.  Walking it without a guard raised
+    ``RecursionError`` out of ``compact`` — i.e. out of every recorded check
+    (inside the store lock), ``pm pr show`` and the merge gate's digest
+    comparison.  A container already on the current path is therefore hashed
+    as a fixed marker: the digest stays deterministic and the record is
+    readable.  The guard is a *path* set (added on entry, discarded on exit),
+    not a seen-set, so an ordinary shared alias — the same object reachable
+    twice without a cycle — is still expanded at both places, which keeps the
+    digest of a well-formed resolution byte-identical to what it was.
+    """
+    if isinstance(value, (dict, list)):
+        if _on_path is None:
+            _on_path = set()
+        if id(value) in _on_path:
+            return "<cycle>"
+        _on_path.add(id(value))
+        try:
+            if isinstance(value, dict):
+                return {str(k): _digest_payload(v, _on_path)
+                        for k, v in value.items()}
+            return [_digest_payload(v, _on_path) for v in value]
+        finally:
+            _on_path.discard(id(value))
+    return value
+
+
+def _resolution_digest(resolution: dict | None) -> str | None:
+    """Canonical digest of a resolution's identity-bearing fields.
+
+    The digest is computed over the *compact* projection (the form stored in
+    ``project.yaml``), not the raw record: a re-check after pm applied the
+    resolution carries the compact form forward (``_record_check``), and the
+    two must hash identically or a benign re-check would look like a changed
+    resolution and invalidate the approval.  The artifact path is excluded
+    because it is host-specific, not part of the resolution's identity.
+    """
+    if not isinstance(resolution, dict) or not resolution:
+        return None
+    payload = _compact_resolution(resolution)
+    payload.pop("diff_path", None)
+    return hashlib.sha256(
+        json.dumps(_digest_payload(payload), sort_keys=True,
+                   default=str).encode()).hexdigest()
+
+
+# --- base interaction summary ---------------------------------------------
+# A clean git merge is not automatically behaviour-neutral: a new base can
+# change model settings, dependencies, statuses or other configuration that
+# changes what the PR's evidence actually exercised.  PM surfaces those
+# changes; the sign-off agent decides whether they need a follow-up stage.
+
+_CONFIG_NAMES = {"pyproject.toml", "setup.py", "setup.cfg", "package.json",
+                 "Dockerfile", "install.sh", "Makefile"}
+_PROJECT_BEHAVIOR_KEYS = ("model_config", "skip_qa", "base_branch", "backend",
+                          "nested_podman", "libyaml")
+_PR_BEHAVIOR_FIELDS = ("status", "depends_on", "model", "session_models",
+                       "plan")
+
+
+def base_behavior_changes(workdir: str, merge_base: str,
+                          base_sha: str, pr: dict | None = None) -> list[str]:
+    """Human-readable behavioural changes the new base brings, or [].
+
+    *pr* (the PR being integrated) focuses the project.yaml part on records
+    that can affect it — its own entry, its dependencies and its plan —
+    instead of listing every other PR's status churn.
+    """
+    r = _git("diff", "--name-only", merge_base, base_sha, cwd=workdir)
+    changed = [p for p in (r.stdout or "").splitlines() if p.strip()]
+    out: list[str] = []
+    for path in changed:
+        if Path(path).name == "project.yaml":
+            out.extend(_project_yaml_behavior_changes(
+                workdir, merge_base, base_sha, path, pr=pr))
+        elif _is_config_path(path):
+            out.append(f"`{path}` changed on the base")
+    return out[:500]
+
+
+def _is_config_path(path: str) -> bool:
+    name = Path(path).name
+    return (name in _CONFIG_NAMES
+            or (name.startswith("requirements")
+                and name.endswith((".txt", ".in")))
+            or path.startswith(".github/workflows/"))
+
+
+def _show_yaml(workdir: str, rev: str, path: str):
+    r = _git("show", f"{rev}:{path}", cwd=workdir)
+    if r.returncode != 0:
+        return None
+    try:
+        return _yaml_load(r.stdout or "") or {}
+    except yaml.YAMLError:
+        return None
+
+
+def _short(value) -> str:
+    text = json.dumps(value, default=str)
+    return text if len(text) <= 80 else text[:77] + "..."
+
+
+def _diff_leaves(old, new, path: str, out: list[str]) -> None:
+    if isinstance(old, dict) and isinstance(new, dict):
+        for key in list(old) + [k for k in new if k not in old]:
+            _diff_leaves(old.get(key), new.get(key), f"{path}.{key}", out)
+        return
+    if old != new:
+        out.append(f"{path} changed ({_short(old)} -> {_short(new)})")
+
+
+def _project_yaml_behavior_changes(workdir: str, merge_base: str,
+                                   base_sha: str, path: str,
+                                   pr: dict | None = None) -> list[str]:
+    old = _show_yaml(workdir, merge_base, path)
+    new = _show_yaml(workdir, base_sha, path)
+    if not isinstance(old, dict) or not isinstance(new, dict):
+        return [f"`{path}` changed on the base"]
+    out: list[str] = []
+    # A malformed side (``project`` not a mapping) must not raise here: this
+    # summary is what makes the agent weigh behaviour-relevant base changes,
+    # so losing it silently would drop the justification requirement.
+    old_project = old.get("project")
+    new_project = new.get("project")
+    old_project = old_project if isinstance(old_project, dict) else {}
+    new_project = new_project if isinstance(new_project, dict) else {}
+    for key in _PROJECT_BEHAVIOR_KEYS:
+        if old_project.get(key) != new_project.get(key):
+            if key == "model_config":
+                _diff_leaves(old_project.get(key) or {},
+                             new_project.get(key) or {},
+                             f"`{path}`: project.model_config", out)
+            else:
+                out.append(
+                    f"`{path}`: project.{key} changed "
+                    f"({_short(old_project.get(key))} -> "
+                    f"{_short(new_project.get(key))})")
+    focus = (pr or {}).get("id")
+    # Hand-edited state: a non-list ``depends_on`` is not a set of ids
+    # (``for d in 5`` raises, and iterating a string yields characters), so it
+    # reads as absent instead of failing the whole behaviour summary.
+    deps = {d for d in _as_list((pr or {}).get("depends_on"))
+            if isinstance(d, str)}
+    focus_plan = (pr or {}).get("plan")
+
+    def relevant(rec_id) -> bool:
+        # Without a PR context list everything; with one, only records that
+        # can gate or change this PR's run.
+        return focus is None or rec_id == focus or rec_id in deps
+
+    # Ids are used as dict keys: skip a malformed entry (a non-string id)
+    # instead of raising on an unhashable one.  ``_as_list`` likewise keeps a
+    # hand-edited scalar ``prs``/``plans`` from failing the summary.
+    old_prs = {p["id"]: p for p in _as_list(old.get("prs"))
+               if isinstance(p, dict) and isinstance(p.get("id"), str)}
+    new_prs = {p["id"]: p for p in _as_list(new.get("prs"))
+               if isinstance(p, dict) and isinstance(p.get("id"), str)}
+    for pr_id, entry in new_prs.items():
+        if not pr_id or not relevant(pr_id):
+            continue
+        if pr_id not in old_prs:
+            out.append(f"`{path}`: base added PR {pr_id} "
+                       f"({entry.get('status')})")
+            continue
+        for field in _PR_BEHAVIOR_FIELDS:
+            if old_prs[pr_id].get(field) != entry.get(field):
+                out.append(
+                    f"`{path}`: base changed {pr_id}.{field} "
+                    f"({_short(old_prs[pr_id].get(field))} -> "
+                    f"{_short(entry.get(field))})")
+    for pr_id in old_prs:
+        if pr_id not in new_prs and relevant(pr_id):
+            out.append(f"`{path}`: base removed PR {pr_id}")
+    old_plans = {p["id"]: p for p in _as_list(old.get("plans"))
+                 if isinstance(p, dict) and isinstance(p.get("id"), str)}
+    new_plans = {p["id"]: p for p in _as_list(new.get("plans"))
+                 if isinstance(p, dict) and isinstance(p.get("id"), str)}
+    for plan_id, entry in new_plans.items():
+        if focus is not None and plan_id != focus_plan:
+            continue
+        if plan_id in old_plans \
+                and old_plans[plan_id].get("status") != entry.get("status"):
+            out.append(
+                f"`{path}`: base changed plan {plan_id}.status "
+                f"({old_plans[plan_id].get('status')} -> "
+                f"{entry.get('status')})")
+    return out
+
+
 # --- candidate -------------------------------------------------------------
 
 def is_ancestor(cwd, a: str, b: str) -> bool:
@@ -236,13 +1250,20 @@ def _merge_tree(workdir: str, head: str, base_sha: str):
     return None, [], _detail(r) or "git merge-tree failed"
 
 
-def _worktree_merge(workdir: str, head: str, base_sha: str):
-    """Merge in a temporary detached worktree: ``(tree|None, conflicts, error)``."""
+def _worktree_merge(workdir: str, head: str, base_sha: str,
+                    resolve: bool = False):
+    """Merge in a temporary detached worktree.
+
+    Returns ``(tree|None, conflicts, error, resolution|None)``.  With
+    *resolve*, a conflict confined to ``project.yaml`` files is reconciled
+    with :func:`resolve_project_yaml` in the same throwaway worktree.
+    """
     with _repo_lock(workdir):
-        return _worktree_merge_locked(workdir, head, base_sha)
+        return _worktree_merge_locked(workdir, head, base_sha, resolve)
 
 
-def _worktree_merge_locked(workdir: str, head: str, base_sha: str):
+def _worktree_merge_locked(workdir: str, head: str, base_sha: str,
+                           resolve: bool = False):
     tmp = Path(tempfile.mkdtemp(prefix="pm-integrate-"))
     # A unique basename gives a unique admin dir (.git/worktrees/<name>).
     wt = tmp / f"candidate-{secrets.token_hex(4)}"
@@ -251,7 +1272,7 @@ def _worktree_merge_locked(workdir: str, head: str, base_sha: str):
         add = _git(*no_hooks, "worktree", "add", "--detach", "--quiet",
                    str(wt), head, cwd=workdir)
         if add.returncode != 0:
-            return None, [], f"candidate worktree failed: {_detail(add)}"
+            return None, [], f"candidate worktree failed: {_detail(add)}", None
         # rerere off: the rr-cache is shared with the PR worktree, and a
         # replayed resolution would make the candidate depend on local
         # history (with rerere.autoUpdate it stages the replayed paths, so a
@@ -261,11 +1282,16 @@ def _worktree_merge_locked(workdir: str, head: str, base_sha: str):
                  "merge", "--no-commit", "--no-ff", "--no-edit", base_sha, cwd=wt)
         if m.returncode == 0:
             tree = _out(_git("write-tree", cwd=wt))
-            return (tree or None), [], (None if tree else "write-tree failed")
+            return (tree or None), [], (None if tree else "write-tree failed"), None
         conflicts = _out(_git("diff", "--name-only", "--diff-filter=U", cwd=wt))
-        if conflicts:
-            return None, sorted(conflicts.splitlines()), None
-        return None, [], f"candidate merge failed: {_detail(m)}"
+        if not conflicts:
+            return None, [], f"candidate merge failed: {_detail(m)}", None
+        conflicts = sorted(conflicts.splitlines())
+        if resolve and _all_resolvable(conflicts):
+            tree, resolution = _resolve_worktree_conflicts(
+                wt, workdir, head, base_sha, conflicts)
+            return tree, conflicts, None, resolution
+        return None, conflicts, None, None
     finally:
         removed = _git("worktree", "remove", "--force", str(wt),
                        cwd=workdir).returncode == 0
@@ -274,14 +1300,176 @@ def _worktree_merge_locked(workdir: str, head: str, base_sha: str):
             _git("worktree", "prune", cwd=workdir)
 
 
-def compute_candidate(workdir: str, head: str, base_sha: str) -> dict:
+def _all_resolvable(conflicts: list[str]) -> bool:
+    """Only project.yaml conflicts can be resolved automatically."""
+    return bool(conflicts) and all(
+        Path(c).name == "project.yaml" for c in conflicts)
+
+
+def _write_resolved(target: Path, text: str) -> None:
+    """Write a resolved document, lifting then restoring pm's read-only mode.
+
+    ``store.save`` leaves project.yaml read-only (0444) so casual manual
+    edits are blocked; a resolved file must not silently end up writable.
+    The write is atomic (temp file + rename) like ``store.save``: the apply
+    path writes into the real PR workdir mid-merge, and an interrupted
+    write must not leave a truncated project.yaml behind.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(f".{target.name}.pm-tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, target)
+    finally:
+        # A failed write must not leave a stray temp file in the workdir.
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+    try:
+        target.chmod(stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+    except OSError:
+        pass
+
+
+def _stage_text(cwd, path: str, stage: int) -> str | None:
+    """Index stage *stage* of *path* as text (``None`` when absent)."""
+    r = _git("show", f":{stage}:{path}", cwd=cwd)
+    return r.stdout if r.returncode == 0 else None
+
+
+def _unified_diff(old: str, new: str, fromfile: str, tofile: str) -> str:
+    lines = list(difflib.unified_diff(
+        (old or "").splitlines(), (new or "").splitlines(),
+        fromfile=fromfile, tofile=tofile, lineterm="", n=3))
+    if len(lines) > _DIFF_LINE_LIMIT:
+        lines = lines[:_DIFF_LINE_LIMIT] + ["... (truncated)"]
+    return "\n".join(lines)
+
+
+def _resolve_worktree_conflicts(wt: Path, workdir: str, head: str,
+                                base_sha: str, conflicts: list[str]):
+    """Resolve every conflicted project.yaml in *wt*; ``(tree|None, record)``."""
+    paths: list[dict] = []
+    unresolved: list[dict] = []
+    diff_parts: list[str] = []
+    for path in conflicts:
+        ours_text = _stage_text(wt, path, 2)
+        theirs_text = _stage_text(wt, path, 3)
+        base_text = _stage_text(wt, path, 1)
+        try:
+            merged, detail = resolve_project_yaml(
+                base_text, ours_text, theirs_text)
+        except Exception as e:  # a resolver bug must read as "unresolved"
+            merged, detail = None, {"error": f"resolver raised: {e}"}
+        detail = dict(detail or {})
+        detail["path"] = path
+        if merged is None:
+            unresolved.append({
+                "path": path,
+                "conflicts": detail.get("conflicts")
+                or [detail.get("error") or "unresolved"],
+            })
+            paths.append(detail)
+            continue
+        target = Path(wt, path)
+        try:
+            _write_resolved(target, merged)
+        except OSError as e:
+            unresolved.append({"path": path,
+                               "conflicts": [f"cannot write resolved file: {e}"]})
+            paths.append(detail)
+            continue
+        add = _git("add", "--", path, cwd=wt)
+        if add.returncode != 0:
+            unresolved.append({"path": path,
+                               "conflicts": [f"git add failed: {_detail(add)}"]})
+            paths.append(detail)
+            continue
+        detail["resolver"] = "project-yaml-records/v1"
+        detail["blob"] = _out(_git("rev-parse", f":{path}", cwd=wt)) or None
+        actions = detail.get("actions") or {}
+        detail["records"] = _record_counts(actions)
+        detail["added_ours"] = _action_ids(actions, "added", "PR branch")
+        detail["added_theirs"] = _action_ids(actions, "added", "new base")
+        detail["merged_fields"] = _action_ids(actions, "changed")
+        detail["removed"] = _action_ids(actions, "removed")
+        diff_parts.append(f"### {path}")
+        diff_parts.append(_unified_diff(
+            ours_text or "", merged, f"{head[:12]}:{path} (PR branch)",
+            f"{path} (resolved)"))
+        diff_parts.append(_unified_diff(
+            theirs_text or "", merged, f"{base_sha[:12]}:{path} (new base)",
+            f"{path} (resolved)"))
+        paths.append(detail)
+
+    resolution: dict = {
+        "resolver": "project-yaml-records/v1",
+        "paths": paths,
+        "unresolved": unresolved,
+        "base_tree": _out(_git("rev-parse", f"{base_sha}^{{tree}}",
+                               cwd=workdir)) or None,
+        "head_tree": _out(_git("rev-parse", f"{head}^{{tree}}",
+                               cwd=workdir)) or None,
+        "diff": "\n".join(diff_parts).strip() + "\n" if diff_parts else "",
+    }
+    if unresolved:
+        _git("merge", "--abort", cwd=wt)
+        return None, resolution
+    tree = _out(_git("write-tree", cwd=wt))
+    if not tree:
+        _git("merge", "--abort", cwd=wt)
+        resolution["unresolved"].append(
+            {"path": "*", "conflicts": ["git write-tree failed"]})
+        return None, resolution
+    resolution["candidate_tree"] = tree
+    return tree, resolution
+
+
+def _action_ids(actions: dict, kind: str, side: str | None = None) -> list[str]:
+    """Flatten record actions into the ids they touched.
+
+    A nested list's ids are qualified with their path
+    (``prs[pr-200].notes:note-1``) so a resolution that only merged notes
+    inside an existing record is still visible in the summary instead of
+    looking like nothing happened.
+    """
+    out: list[str] = []
+    for path, entry in actions.items():
+        if kind == "added":
+            values = (entry.get("added") or {}).get(side) or []
+        else:
+            values = entry.get(kind) or []
+        if "[" in path or "." in path:
+            values = [f"{path}:{v}" for v in values]
+        out.extend(values)
+    return sorted({str(i) for i in out})
+
+
+def _record_counts(actions: dict) -> dict:
+    """Bounded record counts for the compact summary."""
+    out: dict = {}
+    for path, entry in actions.items():
+        added = entry.get("added") or {}
+        out[path] = {
+            "added_ours": len(added.get("PR branch") or []),
+            "added_theirs": len(added.get("new base") or []),
+            "changed": len(entry.get("changed") or []),
+            "removed": len(entry.get("removed") or []),
+        }
+    return out
+
+
+def compute_candidate(workdir: str, head: str, base_sha: str,
+                      *, resolve: bool = True, pr: dict | None = None) -> dict:
     """Integration of *head* with *base_sha*, without touching the worktree.
 
     Returns ``{status, candidate_tree, conflicts, merge_base, base_files,
-    pr_files, overlap, error?}``.
+    pr_files, overlap, resolution?, base_behavior_changes, error?}``.  With
+    *resolve*, a conflict confined to ``project.yaml`` is reconciled by
+    record id in an isolated worktree; real conflicts are left alone.
     """
     out: dict = {"conflicts": [], "base_files": [], "pr_files": [],
-                 "overlap": [], "candidate_tree": None}
+                 "overlap": [], "candidate_tree": None,
+                 "resolution": None, "base_behavior_changes": []}
     mb = _out(_git("merge-base", head, base_sha, cwd=workdir))
     out["merge_base"] = mb or None
     if mb:
@@ -290,6 +1478,13 @@ def compute_candidate(workdir: str, head: str, base_sha: str) -> dict:
         out["base_files"] = base_files.splitlines() if base_files else []
         out["pr_files"] = pr_files.splitlines() if pr_files else []
         out["overlap"] = sorted(set(out["base_files"]) & set(out["pr_files"]))
+        if out["base_files"] and pr is not None:
+            try:
+                out["base_behavior_changes"] = base_behavior_changes(
+                    workdir, mb, base_sha, pr=pr)
+            except Exception as e:  # never fail the check on the summary
+                _log.warning("base interaction summary failed: %s", e)
+                out["base_behavior_error"] = str(e)
 
     # In-base first: a HEAD equal to the base (a PR with no commits of its
     # own) is "contained", not "up to date" — there is nothing to publish.
@@ -302,14 +1497,36 @@ def compute_candidate(workdir: str, head: str, base_sha: str) -> dict:
                                           cwd=workdir)) or None
         return out
 
+    resolution = None
     if _git_version() >= (2, 38):
         tree, conflicts, err = _merge_tree(workdir, head, base_sha)
+        if not err and conflicts and resolve and _all_resolvable(conflicts):
+            wtree, _wconf, werr, resolution = _worktree_merge(
+                workdir, head, base_sha, resolve=True)
+            if werr:
+                resolution = dict(resolution or {})
+                resolution.setdefault("unresolved", []).extend(
+                    {"path": p, "conflicts": [werr]} for p in conflicts)
+                resolution["error"] = werr
+                tree = None
+            else:
+                tree = wtree
     else:
-        tree, conflicts, err = _worktree_merge(workdir, head, base_sha)
+        tree, conflicts, err, resolution = _worktree_merge(
+            workdir, head, base_sha, resolve=resolve)
     if err:
         out.update(status=ERROR, error=err)
     elif conflicts:
-        out.update(status=CONFLICT, conflicts=conflicts)
+        # ``resolved`` is only meaningful with a resolution record that has
+        # no unresolved entries: merge-tree and the worktree merge can
+        # disagree, and a bare tree would be reported as an approved
+        # resolution with no provenance.
+        if tree and resolution and not resolution.get("unresolved"):
+            out.update(status=RESOLVED, conflicts=conflicts,
+                       candidate_tree=tree, resolution=resolution)
+        else:
+            out.update(status=CONFLICT, conflicts=conflicts,
+                       resolution=resolution)
     else:
         out.update(status=CLEAN, candidate_tree=tree)
     return out
@@ -317,11 +1534,21 @@ def compute_candidate(workdir: str, head: str, base_sha: str) -> dict:
 
 # --- check + record --------------------------------------------------------
 
-def run_check(data: dict, pr: dict, root: Path | None = None) -> dict:
-    """Fetch the base and compute the candidate for *pr* (no state writes)."""
+def run_check(data: dict, pr: dict, root: Path | None = None,
+              *, resolve: bool = True, base_sha: str | None = None) -> dict:
+    """Fetch the base and compute the candidate for *pr* (no state writes).
+
+    *base_sha* re-checks against an already-fetched revision instead of
+    fetching again (used right after applying a resolution, so the record
+    and the applied merge name the same base).
+    """
     record: dict = {"checked_at": _now()}
     workdir = pr.get("workdir")
-    if not workdir or not Path(workdir).is_dir():
+    # Hand-edited state: a ``workdir`` that is not a path string is not a
+    # checkout (``Path(5)`` raised ``TypeError`` out of the check — this
+    # function promises a ``status: error`` record, never a traceback).
+    if not isinstance(workdir, str) or not workdir \
+            or not Path(workdir).is_dir():
         workdir = _cwd_checkout_of(pr)
     try:
         # The target comes from the checkout actually used (its origin), so
@@ -329,8 +1556,16 @@ def run_check(data: dict, pr: dict, root: Path | None = None) -> dict:
         target_repo, base_branch = target_for(
             data, dict(pr, workdir=workdir), root)
     except Exception as e:  # repo dir resolution is best-effort
-        target_repo, base_branch = "", (data.get("project") or {}).get(
-            "base_branch", "master")
+        # The same hand-edited-state contract as ``target_for``: a
+        # ``project`` that is not a mapping (or a non-string ``base_branch``)
+        # must not raise out of a check that promises a ``status: error``
+        # record — the fallback itself must not re-raise.
+        project = data.get("project")
+        project = project if isinstance(project, dict) else {}
+        base_branch = project.get("base_branch")
+        if not (isinstance(base_branch, str) and base_branch):
+            base_branch = "master"
+        target_repo = ""
         _log.warning("integration target for %s: %s", pr.get("id"), e)
     record.update(target_repo=target_repo, base_branch=base_branch)
     if not workdir:
@@ -344,12 +1579,26 @@ def run_check(data: dict, pr: dict, root: Path | None = None) -> dict:
     if not target_repo:
         record.update(status=ERROR, error="no target repository")
         return record
-    base_sha, err = fetch_base(workdir, target_repo, base_branch)
+    # ``base_sha`` re-checks against an already-fetched revision instead of
+    # fetching again (used right after applying a resolution).  It reaches here
+    # from ``prepare`` as ``previous.get("base_sha")``, and ``prepare`` can be
+    # handed the *stored* record (a concurrent apply won the race) — which is
+    # hand-editable state.  The value is passed to git and sliced into the log
+    # line below, so anything that is not a git object name would raise
+    # ``TypeError`` out of a function that promises a record, never a
+    # traceback.  A value that is not a revision is not one: fall back to the
+    # ordinary fetch (which also cannot fabricate a base).
+    if base_sha is not None:
+        base_sha = _sha_like(base_sha)
+    if base_sha is None:
+        base_sha, err = fetch_base(workdir, target_repo, base_branch)
+        if err:
+            record["base_sha"] = None
+            record.update(status=ERROR, error=err)
+            return record
     record["base_sha"] = base_sha
-    if err:
-        record.update(status=ERROR, error=err)
-        return record
-    record.update(compute_candidate(workdir, head, base_sha))
+    record.update(compute_candidate(workdir, head, base_sha, resolve=resolve,
+                                    pr=pr))
     return record
 
 
@@ -366,16 +1615,159 @@ def _cwd_checkout_of(pr: dict) -> str | None:
     return top if cur == pr["branch"] else None
 
 
+def _checkout_of(pr_entry: dict) -> str | None:
+    """The checkout to resolve ancestry in: the recorded workdir, else cwd.
+
+    ``run_check`` falls back the same way when the recorded host workdir is not
+    visible (the container case), so ancestry resolved here describes the same
+    repository the check ran in.
+    """
+    workdir = pr_entry.get("workdir")
+    if isinstance(workdir, str) and Path(workdir).is_dir():
+        return workdir
+    return _cwd_checkout_of(pr_entry)
+
+
 def compact(record: dict) -> dict:
     """The project.yaml form of an integration record (lists truncated)."""
     out = {k: v for k, v in record.items()
-           if k not in ("base_files", "pr_files")}
+           if k not in ("base_files", "pr_files", "resolution")}
     for k in ("conflicts", "overlap"):
-        vals = list(record.get(k) or [])
+        raw = record.get(k)
+        vals = list(raw) if isinstance(raw, list) else []
         out[k] = vals[:_YAML_LIST_LIMIT]
         if len(vals) > _YAML_LIST_LIMIT:
             out[f"{k}_total"] = len(vals)
-    out["base_files_count"] = len(record.get("base_files") or [])
+    # ``compact`` also runs on an already-compact record (a bounce re-records
+    # the applied candidate, see signoff._record_applied_integration): the
+    # full ``base_files`` list is gone there, so keep the recorded count
+    # instead of resetting it to 0.
+    base_files = record.get("base_files")
+    if isinstance(base_files, list):
+        out["base_files_count"] = len(base_files)
+    else:
+        out["base_files_count"] = _as_int(record.get("base_files_count"))
+    resolution = resolution_of(record)
+    if resolution:
+        out["resolution"] = _compact_resolution(resolution)
+    raw_behavior = record.get("base_behavior_changes")
+    behavior = list(raw_behavior) if isinstance(raw_behavior, list) else []
+    out["base_behavior_changes"] = behavior[:_BEHAVIOR_LIMIT]
+    if len(behavior) > _BEHAVIOR_LIMIT:
+        out["base_behavior_count"] = len(behavior)
+    out["resolution_digest"] = _resolution_digest(resolution)
+    return out
+
+
+def _compact_resolution(resolution: dict) -> dict:
+    out: dict = {}
+    for key in ("resolver", "base_tree", "head_tree", "candidate_tree",
+                "applied_merge_sha", "resolved_from", "diff_path", "error"):
+        value = resolution.get(key)
+        if value is None:
+            continue
+        if key == "resolved_from":
+            if isinstance(value, dict):
+                out[key] = value
+        elif isinstance(value, str):
+            # Hand-edited state: a non-string identity value (a revision, a
+            # path) reads as absent instead of being carried into the compact
+            # record and the digest as if it were one.
+            out[key] = value
+    paths = []
+    for entry in resolution_entries(resolution, "paths"):
+        records = entry.get("records")
+        records = dict(records) if isinstance(records, dict) else {}
+        # An action path is a string; a hand-edited non-string key cannot be
+        # one, and ``_resolution_digest``'s ``sort_keys`` raises on a mapping
+        # that mixes key types (int from YAML + the string paths pm writes).
+        records = {k: v for k, v in records.items() if isinstance(k, str)}
+        # Bound the per-record counts too (a large conflict can touch every
+        # record).  A recorded total is carried through re-compaction so the
+        # resolution digest stays stable.
+        records_total = entry.get("records_total")
+        if records_total is None and len(records) > _YAML_LIST_LIMIT:
+            records_total = len(records)
+        if records_total is not None:
+            records = dict(list(records.items())[:_YAML_LIST_LIMIT])
+        path = entry.get("path")
+        resolver = entry.get("resolver")
+        blob = entry.get("blob")
+        item = {
+            # Hand-edited state: a non-string identity value reads as absent
+            # instead of being carried into the compact record.
+            "path": path if isinstance(path, str) else None,
+            "resolver": resolver if isinstance(resolver, str) else None,
+            "blob": blob if isinstance(blob, str) else None,
+            "records": records,
+        }
+        # ``_as_list``: ``list(5)`` raises and ``list("x")`` splits the value
+        # into characters, so a malformed scalar must read as [].  A truncated
+        # id list records its real length (like ``records_total``), so the
+        # prompt can name what it omits instead of dropping ids silently.  A
+        # recorded total is carried through re-compaction so the digest stays
+        # stable.
+        for key in ("added_ours", "added_theirs", "merged_fields", "removed"):
+            values = _as_list(entry.get(key))
+            item[key] = values[:20]
+            total = entry.get(f"{key}_total")
+            if total is None and len(values) > 20:
+                total = len(values)
+            if isinstance(total, int) and not isinstance(total, bool) \
+                    and total > len(item[key]):
+                item[f"{key}_total"] = total
+        if records_total is not None:
+            item["records_total"] = records_total
+        paths.append(item)
+    raw_paths_total = resolution.get("paths_total")
+    paths_total = (raw_paths_total
+                   if isinstance(raw_paths_total, int)
+                   and not isinstance(raw_paths_total, bool)
+                   else 0)
+    out["paths"] = paths[:_YAML_LIST_LIMIT]
+    if max(paths_total, len(paths)) > len(out["paths"]):
+        # ``paths`` is the one list ``compact`` truncates without recording a
+        # remainder (a resolution covers one entry per conflicted file, so in
+        # practice a single ``pm/project.yaml``).  Say how many the record
+        # describes: an apply that reads the *stored* record (a bounce) then
+        # refuses a partial resolution instead of aborting mid-merge on the
+        # first path it cannot find.  Carried through re-compaction so the
+        # digest stays stable.
+        out["paths_total"] = max(paths_total, len(paths))
+    raw_unresolved = resolution.get("unresolved")
+    unresolved = resolution_entries(resolution, "unresolved")
+    unresolved_total = resolution.get("unresolved_total")
+    if unresolved_total is None and len(unresolved) > _YAML_LIST_LIMIT:
+        unresolved_total = len(unresolved)
+    if isinstance(raw_unresolved, list) or not raw_unresolved:
+        kept = unresolved[:_YAML_LIST_LIMIT]
+        if raw_unresolved and not kept:
+            # A truthy *list* whose members are not mappings cannot name what
+            # pm failed to reconcile either (``resolution_entries`` drops
+            # them), but it is the same refusal marker the branch below keeps:
+            # ``valid_for``, the merge gate, the router and the prompt read
+            # the value's truthiness.  Writing ``[]`` here would launder the
+            # refusal into a clean, approvable resolution on the next routine
+            # re-check — every check compacts the record — so keep the value
+            # (bounded, with its real length) instead.  A list that still has
+            # mapping entries keeps its truthiness anyway; its malformed
+            # members read as absent, like every other hand-edited member.
+            kept = raw_unresolved[:_YAML_LIST_LIMIT]
+            if unresolved_total is None \
+                    and len(raw_unresolved) > _YAML_LIST_LIMIT:
+                unresolved_total = len(raw_unresolved)
+        out["unresolved"] = kept
+        if unresolved_total is not None:
+            out["unresolved_total"] = unresolved_total
+    else:
+        # Hand-edited state: a truthy non-list value is a *refusal* everywhere
+        # (``valid_for``, the merge gate, the router, the prompt) because it
+        # cannot name what pm failed to reconcile.  Dropping it here would
+        # launder that refusal into a clean resolution on the next record
+        # write — every check compacts the record — so it is kept verbatim:
+        # the record keeps refusing, and the digest changes with it, so an
+        # approval bound to the clean form stops matching.
+        out["unresolved"] = raw_unresolved
     return out
 
 
@@ -400,6 +1792,12 @@ def integration_json_path(pr_id: str) -> Path | None:
     from pm_core.paths import captures_root
     croot = captures_root()
     return croot / pr_id / "integration.json" if croot else None
+
+
+def resolution_diff_path(pr_id: str) -> Path | None:
+    from pm_core.paths import captures_root
+    croot = captures_root()
+    return croot / pr_id / "integration-resolution.diff" if croot else None
 
 
 def integration_pointer(pr_id: str) -> str:
@@ -430,36 +1828,646 @@ def integration_pointer(pr_id: str) -> str:
             f"or run `pm pr show {pr_id}`")
 
 
-def check_integration(root: Path, pr_id: str, *, data: dict | None = None) -> dict:
+def write_resolution_delta(pr_id: str, record: dict) -> str | None:
+    """Write the human-readable resolution delta for *record*.
+
+    Returns the delta's path, or None when the record carries no resolution
+    (or only an empty delta).  Shared by the recorded artifact write and the
+    read-only ``pm pr signoff integrate`` surface: the check records nothing
+    on the PR, but the delta its output names must be inspectable on disk.
+
+    A record with nothing to write must not name a delta.  A carried
+    resolution whose delta could not be read back (the file lives on another
+    host, or is unreadable) has a ``diff_path`` but no ``diff``: re-pointing it
+    at the local delta path would send ``pm pr show`` and the sign-off prompt
+    to a file that does not exist, and would overwrite where the delta
+    actually lives.  So the pointer is set only for a delta this call wrote,
+    and only a string is returned.
+    """
+    resolution = resolution_of(record)
+    diff = resolution.get("diff")
+    # Hand-edited state: only a string is a diff (``write_text`` would raise on
+    # anything else, taking the artifact write down with it).
+    diff = diff if isinstance(diff, str) else ""
+    diff_path = resolution_diff_path(pr_id)
+    if diff and diff_path is not None:
+        try:
+            diff_path.parent.mkdir(parents=True, exist_ok=True)
+            diff_path.write_text(diff)
+            resolution["diff_path"] = str(diff_path)
+        except OSError as e:
+            _log.warning("integration resolution diff for %s: %s", pr_id, e)
+    # A failed write leaves no pointer (and an earlier one — where the delta
+    # really lives — is not replaced by a local path with no file behind it).
+    return revision_of(resolution.get("diff_path"))
+
+
+def _write_artifacts(pr_id: str, record: dict) -> None:
+    """Write the full record + the human-readable resolution delta."""
+    # The delta first: the full record written below must carry the pointer
+    # to it (the compact state in project.yaml carries the same pointer).
+    write_resolution_delta(pr_id, record)
+    path = integration_json_path(pr_id)
+    if path is not None:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # ``default=str``: project.yaml is hand-editable state, and a
+            # carried list (``base_behavior_changes``) can hold a value YAML
+            # parses as a non-JSON type (an unquoted date, a ``!!set``).  The
+            # record is written for a person to read, so render it instead of
+            # raising ``TypeError`` out of every integration check and the
+            # sign-off launch (the same tolerance ``_resolution_digest`` has).
+            path.write_text(json.dumps(record, indent=2, default=str) + "\n")
+        except (OSError, TypeError, ValueError) as e:
+            # Last resort: the artifact is provenance, but failing to write it
+            # must not take the check down (the state record was already
+            # written by the caller).
+            _log.warning("integration.json for %s: %s", pr_id, e)
+
+
+def _dedupe(values: list) -> list:
+    """Order-preserving de-duplication that tolerates malformed members.
+
+    ``base_behavior_changes`` is hand-editable project.yaml state: an
+    unhashable member (a nested mapping or list) must still be carried and
+    reported to the agent, not raise ``TypeError`` out of every integration
+    check (``dict.fromkeys`` requires hashable elements).
+    """
+    out: list = []
+    seen: set = set()
+    for value in values:
+        try:
+            if value in seen:
+                continue
+            seen.add(value)
+        except TypeError:
+            pass          # unhashable: keep it (it is still rendered), no dedupe
+        out.append(value)
+    return out
+
+
+def _carry_behavior_total(record: dict, old: dict, values: list) -> None:
+    """Keep the real ``base_behavior_count`` when *values* is a bounded list.
+
+    ``compact`` stores only the first ``_BEHAVIOR_LIMIT`` changes and records
+    the full length separately.  A carried-forward list is already bounded, so
+    without the recorded total the prompt would read "(+20 more)" for a
+    35-change base, under-reporting what the agent must weigh.
+    """
+    total = old.get("base_behavior_count")
+    if isinstance(total, int) and not isinstance(total, bool) \
+            and total > len(values):
+        record["base_behavior_count"] = total
+
+
+def _carry_base_files(record: dict, old: dict) -> None:
+    """Keep an earlier check's base-file list and overlap on *record*.
+
+    A re-check that runs after pm applied a resolved candidate sees the base
+    inside HEAD, so ``compute_candidate`` reports an empty base diff: the
+    overlap ("files changed on both sides") and the file count the sign-off
+    prompt shows for the base-changes range would silently vanish.  The base
+    the applied resolution merged is the newest one the branch contains, so
+    that check's values still describe it.
+
+    ``old`` may be the compact record (which carries only ``base_files_count``
+    and the bounded ``overlap``); in that case the count is carried as the
+    recorded count, which ``compact`` keeps while ``base_files`` is absent.
+    """
+    old_files = old.get("base_files")
+    if isinstance(old_files, list) and old_files:
+        record["base_files"] = list(old_files)
+    elif _as_int(old.get("base_files_count")):
+        record.pop("base_files", None)
+        record["base_files_count"] = _as_int(old["base_files_count"])
+    old_overlap = old.get("overlap")
+    if isinstance(old_overlap, list) and old_overlap:
+        record["overlap"] = list(old_overlap)
+        # ``compact`` stores only the first ``_YAML_LIST_LIMIT`` paths and
+        # records the real total separately; the carried list is already
+        # bounded, so a re-compaction would otherwise under-report it.
+        total = old.get("overlap_total")
+        if isinstance(total, int) and not isinstance(total, bool) \
+                and total > len(record["overlap"]):
+            record["overlap_total"] = total
+
+
+def _copy_base_interaction(record: dict, old: dict, base: str) -> bool:
+    """Copy the base-interaction summary of *base* from *old* onto *record*.
+
+    Shared by :func:`_carry_base_interaction` (the branch now contains the
+    base) and :func:`_carry_assessed_base` (a failed check that could not
+    re-assess it).  The caller has established that *old*'s summary really
+    describes *base*; this only copies what is there and returns whether it
+    copied anything.
+    """
+    if not (old.get("base_files") or old.get("base_files_count")
+            or old.get("overlap") or old.get("base_behavior_changes")
+            or old.get("base_behavior_error")):
+        return False
+    _carry_base_files(record, old)
+    old_range = revision_of(old.get("base_range_from"))
+    if not old_range and revision_of(old.get("merge_base")) != base:
+        # The check that saw the base outside the branch recorded the real
+        # pre-merge merge base; a later re-check only carries it forward.
+        old_range = revision_of(old.get("merge_base"))
+    if old_range and old_range != base:
+        record["base_range_from"] = old_range
+    old_behavior = _as_list(old.get("base_behavior_changes"))
+    if old_behavior:
+        own_behavior = _as_list(record.get("base_behavior_changes"))
+        record["base_behavior_changes"] = _dedupe(
+            old_behavior + own_behavior)
+        if not own_behavior:
+            _carry_behavior_total(record, old, old_behavior)
+    if old.get("base_behavior_error") \
+            and not record.get("base_behavior_changes") \
+            and not record.get("base_behavior_error"):
+        record["base_behavior_error"] = old["base_behavior_error"]
+    return True
+
+
+def _carry_base_interaction(record: dict, old: dict) -> None:
+    """Keep an earlier check's base-interaction summary on *record*.
+
+    A clean base merged by a bounce puts the base inside HEAD without a
+    resolution to carry (``_prepare_bounce`` applies it; only a resolved
+    candidate re-records the applied record).  The next check's own base diff
+    is then empty — ``merge-base(HEAD, base)`` is the base itself — so the
+    files the base changed, the overlap and the behaviour-relevant changes
+    would vanish from the sign-off prompt, and with them the merge gate's
+    evidence requirement, even though the check still describes the same base
+    revision.  Carry them while the old record assessed that same base and
+    the branch now contains it.
+
+    The pre-merge merge base is carried as ``base_range_from`` so the prompt
+    can still show the base-changes range: the recorded ``merge_base`` is the
+    base itself now and would print as an empty range.
+    """
+    old_base = revision_of(old.get("base_sha"))
+    new_base = revision_of(record.get("base_sha"))
+    if not (old_base and old_base == new_base):
+        return
+    # ``merge-base(HEAD, base) == base`` means the branch contains the base.
+    # A check that still sees a base diff of its own (the base moved on) has
+    # its own, newer summary and must not inherit this one.
+    if record.get("merge_base") != new_base or record.get("base_files"):
+        return
+    _copy_base_interaction(record, old, new_base)
+
+
+def _carry_assessed_base(record: dict, old: dict,
+                         pr_entry: dict | None = None) -> None:
+    """Keep the base an earlier check assessed on a *failed* check.
+
+    A transient failure (the base fetch, a broken workdir) records ``error``
+    without naming a base.  The branch has not moved, so the base the stored
+    record assessed is still the one the next successful check will see: the
+    record keeps that base (and its interaction) so the carry chain survives a
+    later hand merge — ``_carry_base_interaction`` needs the recorded base to
+    recognise that the branch now contains it.  Without it, a network hiccup
+    between "the base was assessed" and "implementation merged the base by
+    hand" silently drops the files/behaviour the base changed, and with them
+    the merge gate's evidence requirement.
+
+    The same holds when the failure comes *after* the hand merge: the branch
+    moved past the assessment (which still describes the same base revision),
+    so the assessment is kept while the branch descends from the revision it
+    assessed.  The next check re-verifies that the branch contains the base
+    before carrying anything forward.
+
+    The record keeps ``error`` (it is never mergeable, so nothing binds to
+    this carried base).
+    """
+    if record.get("status") != ERROR:
+        return
+    if record.get("base_sha"):
+        # This check resolved a base of its own (e.g. the candidate merge
+        # failed after a successful fetch): its own summary is the current one.
+        return
+    old_base = revision_of(old.get("base_sha"))
+    if not old_base:
+        return
+    old_head = revision_of(old.get("head"))
+    new_head = revision_of(record.get("head"))
+    if not new_head or not old_head:
+        # A check that could not resolve HEAD cannot show it descends from the
+        # assessed revision.
+        return
+    if new_head != old_head:
+        # The branch moved past the assessment (implementation merged the base
+        # by hand, as the sign-off return instructs).  Keep the assessment only
+        # when the branch descends from the revision that assessed it *and* now
+        # contains that base: then the summary still describes the base the
+        # next check will see inside HEAD.  Otherwise the branch does not carry
+        # this base and the next check computes its own summary.
+        checkout = _checkout_of(pr_entry or {})
+        if not (checkout
+                and is_ancestor(checkout, old_head, new_head)
+                and is_ancestor(checkout, old_base, new_head)):
+            return
+    if _copy_base_interaction(record, old, old_base):
+        record["base_sha"] = old_base
+
+
+def _carry_failed_check_behavior(record: dict, old: dict) -> None:
+    """Keep the behavioural summary a *failed* check could not re-assess.
+
+    A transient failure at the same head must not drop what the approval was
+    required to assess — the listed behavioural changes, or a summary pm could
+    not compute (which also requires the evidence statement): the merge gate
+    would then no longer ask for it.
+    """
+    if record.get("status") != ERROR:
+        return
+    if record.get("base_behavior_changes") or record.get("base_behavior_error"):
+        return
+    if not (old.get("base_behavior_changes") or old.get("base_behavior_error")):
+        return
+    if not record.get("head") or record.get("head") != old.get("head"):
+        return
+    carried_behavior = _as_list(old.get("base_behavior_changes"))
+    if carried_behavior:
+        record["base_behavior_changes"] = list(carried_behavior)
+        _carry_behavior_total(record, old, carried_behavior)
+    if old.get("base_behavior_error"):
+        record["base_behavior_error"] = old["base_behavior_error"]
+
+
+def _carry_forward(record: dict, pr_entry: dict) -> dict:
+    """Carry provenance from *pr_entry*'s stored record onto *record*.
+
+    A re-check after pm applied a resolved candidate sees a clean/up-to-date
+    merge; the resolution that produced the applied head must stay visible
+    (and bound), so it is carried when the applied merge is an ancestor of
+    the new HEAD.  A clean base merged by a bounce carries no resolution, and
+    an attempt that was never applied (a failed resolution, or one a dirty
+    workdir kept pm from applying) leaves the branch to be reconciled by
+    hand, so their base-interaction summary is carried separately (see
+    :func:`_carry_base_interaction`).
+    """
+    old = _mapping(pr_entry.get("integration"))
+    old_resolution = resolution_of(old)
+    if not record.get("resolution") and old_resolution:
+        applied = revision_of(old_resolution.get("applied_merge_sha"))
+        # ``run_check`` may have computed this check from the current checkout
+        # when the recorded workdir is not visible (e.g. inside a container);
+        # resolve the ancestry from that same checkout so the applied
+        # resolution is not silently dropped.
+        workdir = _checkout_of(pr_entry)
+        new_head = revision_of(record.get("head"))
+        verified = bool(
+            applied and workdir and new_head and Path(workdir).is_dir()
+            and (applied == new_head
+                 or is_ancestor(workdir, applied, new_head)))
+        # A check that could not resolve HEAD (a transient failure: a broken
+        # or replaced workdir) cannot prove the ancestry, but it must not
+        # lose what was applied.  The record is not mergeable (status error),
+        # and a later successful check re-verifies the ancestry before any
+        # approval can bind to it.
+        unverifiable = bool(applied and not new_head)
+        if verified or unverifiable:
+            carried = dict(old_resolution)
+            carried.pop("diff", None)      # compact state never holds it
+            # Hand-edited state: a non-string path is not a path (``Path(5)``
+            # would raise out of the integration check), so it reads as absent
+            # instead of being carried into the record and its digest.
+            diff_path = revision_of(carried.get("diff_path"))
+            if diff_path:
+                # Keep the full record's delta in integration.json: the
+                # artifact is rewritten below, and the compact state only
+                # carries the pointer.  A string is not enough to make it
+                # readable: a null byte raises ``ValueError`` out of ``open``
+                # and a non-UTF-8 file raises ``UnicodeDecodeError``, neither
+                # of which is an ``OSError`` — both must read as "no delta"
+                # (the pointer is kept; the file may exist on the host that
+                # wrote it) rather than take every later check down.
+                with contextlib.suppress(OSError, ValueError):
+                    carried["diff"] = Path(diff_path).read_text()
+            else:
+                carried.pop("diff_path", None)
+            record["resolution"] = carried
+            record["resolution_digest"] = _resolution_digest(carried)
+            record["resolved_from"] = carried.get("resolved_from")
+            old_behavior = _as_list(old.get("base_behavior_changes"))
+            own_behavior = _as_list(record.get("base_behavior_changes"))
+            if old_behavior:
+                record["base_behavior_changes"] = _dedupe(
+                    old_behavior + own_behavior)
+                if not own_behavior:
+                    # The stored list is already bounded; keep the real total
+                    # ``compact`` recorded so the prompt does not under-report
+                    # "… N more" after the carry-forward.
+                    _carry_behavior_total(record, old, old_behavior)
+            if old.get("base_behavior_error") \
+                    and not record.get("base_behavior_changes") \
+                    and not record.get("base_behavior_error"):
+                # A summary the earlier check could not compute is not an
+                # exemption (the merge gate requires the evidence statement
+                # for it).  The post-apply re-check sees no base diff, so
+                # without carrying it the requirement would silently vanish.
+                record["base_behavior_error"] = old["base_behavior_error"]
+            if not record.get("base_files"):
+                # The re-check sees the base inside HEAD, so its own base diff
+                # is empty.  The base the applied resolution merged is still
+                # the newest one the branch contains: keep what that check
+                # found — the overlap the agent must weigh and the file count
+                # the prompt reports for the base-changes range.  ``compact``
+                # derives the count from ``base_files`` when present, so a
+                # re-compaction carries the recorded count instead.
+                _carry_base_files(record, old)
+        else:
+            # The stored attempt was never applied (a failed resolution, or a
+            # resolved candidate a dirty workdir kept pm from applying), or
+            # the branch no longer contains the merge it made.  The
+            # implementation step is told to reconcile the conflict by hand
+            # ("git fetch the base and git merge ..."), so the branch can now
+            # contain the same base with no applied merge to carry the
+            # provenance from.  Keep the base interaction that check
+            # assessed: without it the prompt hides the files/behaviour the
+            # base changed and the merge gate stops requiring the evidence
+            # statement — the same hole the clean-bounce carry closes.
+            _carry_base_interaction(record, old)
+            # A transient failure here must not break that chain either: the
+            # error record keeps the assessed base (and its summary) so the
+            # next check can still carry it after a hand merge.
+            _carry_failed_check_behavior(record, old)
+    elif record.get("status") == ERROR:
+        # A transient failure (e.g. the base fetch) must not drop what the
+        # approval was required to assess, nor the base revision that makes
+        # the summary usable by a later check.
+        _carry_failed_check_behavior(record, old)
+    elif not record.get("resolution") and not old_resolution:
+        # No resolution on either side: this is the clean-bounce path (or a
+        # plain re-check).  The base-interaction summary must survive the
+        # base moving into HEAD the same way it does for a resolution.
+        _carry_base_interaction(record, old)
+    # A failed check keeps the base the stored record assessed, on every path
+    # (an unapplied resolution, no resolution at all, an earlier failure): the
+    # next check needs it to recognise that the branch now contains that base
+    # and carry its summary forward.  No-op unless *record* is ``error``.
+    _carry_assessed_base(record, old, pr_entry)
+    return record
+
+
+def _check_is_stale(record: dict, pr_entry: dict) -> bool:
+    """Whether *record* was computed before a concurrent actor moved HEAD.
+
+    A check that starts before a parallel apply reads the old HEAD but can
+    finish (and try to record) after it.  That record describes a revision
+    the branch no longer has, so it must not overwrite the record that
+    describes the revision the branch is on now.
+    """
+    old = _mapping(pr_entry.get("integration"))
+    # The recorded host workdir may not be visible (the container case): the
+    # check may have run from the current checkout (``run_check`` falls back
+    # the same way), so the stale check must be recognised there too —
+    # otherwise a loser's stale record overwrites the winner's applied one and
+    # drops the resolution provenance.
+    workdir = _checkout_of(pr_entry)
+    if not workdir:
+        return False
+    now = _out(_git("rev-parse", "HEAD", cwd=workdir))
+    head = record.get("head")
+    if not now or not head or now == head:
+        return False
+    return old.get("head") == now
+
+
+def _record_check(root: Path, pr_id: str, record: dict, *,
+                  keep_recorded_head: str | None = None) -> dict:
+    """Record *record* on the PR, carrying resolution provenance forward.
+
+    The carry-forward runs again inside the locked update.  Two operators can
+    run ``--apply``/``--record`` at once, and one can store an applied record
+    between this check's read and its write; overwriting that with a bare
+    up-to-date record would lose the applied revision and its provenance (a
+    later ``--record`` cannot restore them once the branch carries the base).
+    A check computed before the HEAD moved is dropped the same way: it must
+    not replace the record that describes the branch's current revision.
+
+    *keep_recorded_head* makes a *failed* check of that revision yield to a
+    mergeable record of the same revision, re-evaluated inside the lock.  The
+    lost-apply-race path (:func:`prepare`) decides outside the lock that the
+    branch's current revision has no record yet and must be re-recorded; the
+    winner of that race can record in between, and ``_check_is_stale`` cannot
+    drop this record (it describes the same revision).  Without the in-lock
+    re-check a transient failure of the loser would replace the winner's
+    applied record (and drop the approval until another check re-runs it).
+    """
+    # The freshly computed record, before the pre-lock carry below mutates it.
+    # The in-lock carry must start from this, not from the pre-lock-carried
+    # record: ``_carry_forward`` only carries onto a record that has no
+    # resolution of its own, so a resolution carried from the pre-lock read
+    # would suppress the one in the record the lock actually found — and a
+    # newer applied resolution (a concurrent apply that landed between the two
+    # reads) would be replaced by an older one, leaving ``base_sha`` and
+    # ``resolved_from`` describing different merges.
+    computed = dict(record)
+    try:
+        old_pr = store.get_pr(store.load(root), pr_id) or {}
+    except Exception:
+        old_pr = {}
+    _carry_forward(record, old_pr)
+
+    # Compute the digest before writing the artifact: integration.json is the
+    # full record a person assesses, and it must carry the digest of the
+    # resolution it describes (a later re-check/binding compares it).
+    # ``_write_artifacts`` also records the diff path the compact state
+    # carries (the full diff itself never goes into project.yaml); the digest
+    # ignores that host-specific path.
+    record["resolution_digest"] = _resolution_digest(record.get("resolution"))
+    resolution = resolution_of(record)
+    if resolution and not resolution.get("diff_path") \
+            and resolution.get("diff"):
+        # Set it before compaction so the compact record carries the pointer;
+        # the file itself is written with the artifact below.  Only a record
+        # with an actual delta gets a pointer: a failed attempt retains its
+        # unresolved conflicts but has nothing to write, and naming a file
+        # that does not exist would send the agent to an empty path.  (The
+        # write stays after the store update on purpose: a check that turns
+        # out to be stale is dropped there, and its delta must not overwrite
+        # the recorded resolution's delta with another merge's.)
+        path = resolution_diff_path(pr_id)
+        if path is not None:
+            resolution["diff_path"] = str(path)
+
+    final = {"record": record, "stale": False}
+
+    def _apply(d):
+        p = store.get_pr(d, pr_id)
+        if p is None:
+            return
+        if _check_is_stale(record, p):
+            # Keep the record that describes the branch's current revision
+            # (and its applied resolution).
+            final["record"] = p.get("integration") or record
+            final["stale"] = True
+            return
+        stored_rec = _mapping(p.get("integration"))
+        if (keep_recorded_head and record.get("status") not in MERGEABLE
+                and stored_rec.get("head") == keep_recorded_head
+                and stored_rec.get("status") in MERGEABLE):
+            # A concurrent actor already recorded a mergeable result for this
+            # revision (the winner of the HEAD race).  A failed check of the
+            # *same* revision is the loser's transient failure — not new
+            # information — so it must not replace the applied record.  This
+            # is re-evaluated here, under the lock: the caller's decision (a
+            # revision with no stored record must be re-recorded) can be
+            # overtaken by the winner's write between its read and this one.
+            final["record"] = p.get("integration") or record
+            final["stale"] = True
+            return
+        merged = _carry_forward(dict(computed), p)
+        if not merged.get("resolution") and record.get("resolution"):
+            # The record the lock found carries no resolution, but the
+            # pre-lock read did (a concurrent write replaced it): keep what
+            # was applied rather than dropping the provenance entirely.
+            merged["resolution"] = record["resolution"]
+            merged["resolved_from"] = record.get("resolved_from")
+        merged["resolution_digest"] = _resolution_digest(
+            merged.get("resolution"))
+        p["integration"] = compact(merged)
+        final["record"] = merged
+
+    store.locked_update(root, _apply)
+    final_record = final["record"]
+    if final["stale"]:
+        # The stored record (and the winner's artifact) is the one that
+        # describes the branch; do not overwrite either.
+        return final_record
+    _write_artifacts(pr_id, final_record)
+    return final_record
+
+
+def check_integration(root: Path, pr_id: str, *, data: dict | None = None,
+                      resolve: bool = True,
+                      base_sha: str | None = None) -> dict:
     """Run the integration check for *pr_id* and record it.
 
     Writes ``pr["integration"]`` (compact) and ``$CAP/integration.json``
-    (full).  Never raises for git/network problems: they come back as
-    ``status: error``.
+    (full), plus the resolution delta when there was one.  Never raises for
+    git/network problems: they come back as ``status: error``.
     """
     if data is None:
         data = store.load(root)
     pr = store.get_pr(data, pr_id)
     if pr is None:
         raise ValueError(f"PR {pr_id} not found")
-    record = run_check(data, pr, root)
+    record = run_check(data, pr, root, resolve=resolve, base_sha=base_sha)
     _log.info("integration %s: %s base=%s head=%s", pr_id, record.get("status"),
               (record.get("base_sha") or "")[:8], (record.get("head") or "")[:8])
+    return _record_check(root, pr_id, record)
 
-    def _apply(d):
-        p = store.get_pr(d, pr_id)
-        if p is not None:
-            p["integration"] = compact(record)
 
-    store.locked_update(root, _apply)
-    path = integration_json_path(pr_id)
-    if path is not None:
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(record, indent=2) + "\n")
-        except OSError as e:
-            _log.warning("integration.json for %s: %s", pr_id, e)
-    return record
+def prepare(root: Path, pr_id: str, *, data: dict | None = None) -> dict:
+    """Sign-off's integration step: check, apply a resolution, re-check.
+
+    A metadata-only conflict is resolved in the isolated candidate, then the
+    same deterministic resolution is applied to the PR branch (so every
+    backend can publish the candidate; GitHub refuses a conflicted branch).
+    The branch is re-checked afterwards and the resolution provenance is
+    carried onto the clean/up-to-date record the sign-off verdict binds to.
+    A workdir that cannot take the merge keeps the ``resolved`` record plus
+    ``apply_error``; sign-off cannot approve it.  When the apply lost a race
+    with a concurrent apply (the PR HEAD moved under it), the revision the
+    branch now has is re-checked and recorded instead, so the winner's
+    applied record is never overwritten by the loser's stale one.
+    """
+    record = check_integration(root, pr_id, data=data)
+    if record.get("status") != RESOLVED:
+        return record
+    try:
+        merged, err = apply_integration(root, pr_id, record)
+    except Exception as e:  # an apply bug must not crash the sign-off launch
+        merged, err = None, f"applying the resolution raised: {e}"
+    if not merged:
+        record["apply_error"] = err
+        _log.warning("sign-off %s: resolved integration not applied: %s",
+                     pr_id, err)
+        # Two operators can run ``--apply`` at the same time.  The loser's
+        # apply fails once the winner has moved the PR HEAD; recording the
+        # loser's *stale* resolved check would then overwrite the winner's
+        # applied record — a lost update that drops the applied revision and
+        # the resolution provenance (a later ``--record`` cannot restore
+        # them once the branch already carries the base).  When the branch
+        # now has a different revision, re-check that revision and record
+        # it; ``_record_check`` carries the winner's applied resolution
+        # forward onto the up-to-date record.
+        if err in (HEAD_MOVED, HEAD_MOVED_APPLYING):
+            fresh = store.load(root)
+            pr_now = store.get_pr(fresh, pr_id)
+            if pr_now is not None:
+                current = run_check(fresh, pr_now, root,
+                                    base_sha=record.get("base_sha"))
+                stored = _mapping(pr_now.get("integration"))
+                now_head = revision_of(current.get("head"))
+                # Record the revision the branch now has — including a
+                # non-mergeable result (a new conflict, a failed check): it is
+                # honest, and the loser's stale ``resolved`` check describes a
+                # revision that no longer exists (``_check_is_stale`` cannot
+                # drop it, because the stored record is that stale one).  A
+                # record that already describes this revision is the winner's:
+                # a transient failure of the loser must not overwrite it (the
+                # fall-through drops the stale record in ``_record_check``).
+                if now_head and now_head != record.get("head") and (
+                        current.get("status") in MERGEABLE
+                        or stored.get("head") != now_head):
+                    _log.info("sign-off %s: HEAD moved during apply; recorded "
+                              "%s at %s", pr_id, current.get("status"),
+                              now_head[:8])
+                    # A non-mergeable re-check must still yield to a record
+                    # the winner stores between this read and the write: the
+                    # decision above is taken outside the store lock, so
+                    # ``_record_check`` re-evaluates it under the lock.
+                    return _record_check(
+                        root, pr_id, current,
+                        keep_recorded_head=(now_head
+                                            if current.get("status")
+                                            not in MERGEABLE else None))
+        return _record_check(root, pr_id, record)
+    previous = record
+    # Re-check against the exact revision just applied, not a fresh fetch: a
+    # base that moved during the apply must not silently make the recorded
+    # candidate describe a different merge (the merge gate re-fetches and
+    # returns the PR to sign-off if the base is no longer current).  This
+    # uses ``run_check`` + a single ``_record_check`` instead of
+    # ``check_integration`` so the re-check is written once *with* the
+    # resolution: an intermediate record without it would lose the applied
+    # provenance (and the explicit-reuse requirement with it) if pm died
+    # between the two writes.
+    fresh = store.load(root)
+    pr_now = store.get_pr(fresh, pr_id)
+    if pr_now is None:
+        raise ValueError(f"PR {pr_id} not found")
+    record = run_check(fresh, pr_now, root, base_sha=previous.get("base_sha"))
+    resolution = dict(resolution_of(previous))
+    resolution["applied_merge_sha"] = merged
+    resolution["resolved_from"] = {
+        "head": previous.get("head"),
+        "base_sha": previous.get("base_sha"),
+        "merge_base": previous.get("merge_base"),
+        "status": previous.get("status"),
+    }
+    record["resolution"] = resolution
+    record["resolved_from"] = resolution["resolved_from"]
+    # The post-apply check sees no base diff (the base is in the branch now),
+    # but the base interactions the agent must assess are still relevant.
+    record["base_behavior_changes"] = _as_list(
+        previous.get("base_behavior_changes"))
+    _carry_behavior_total(record, previous,
+                          record["base_behavior_changes"])
+    _carry_base_files(record, previous)
+    if previous.get("base_behavior_error") \
+            and not record.get("base_behavior_changes"):
+        # A summary pm could not compute is not an exemption: the merge gate
+        # still requires the evidence statement for it, and the post-apply
+        # check cannot produce one (no base diff).
+        record["base_behavior_error"] = previous["base_behavior_error"]
+    _log.info("sign-off %s: resolved and applied %s@%s as %s", pr_id,
+              previous.get("base_branch"),
+              (previous.get("base_sha") or "")[:8], merged[:8])
+    return _record_check(root, pr_id, record)
 
 
 def binding(record: dict | None) -> dict | None:
@@ -470,56 +2478,301 @@ def binding(record: dict | None) -> dict | None:
 
 
 def valid_for(record: dict | None, head: str | None) -> bool:
-    """Whether *record* is a mergeable integration check of *head*."""
-    return bool(record and head and record.get("head") == head
-                and record.get("status") in MERGEABLE
-                and record.get("base_sha") and record.get("candidate_tree"))
+    """Whether *record* is a mergeable integration check of *head*.
+
+    ``project.yaml`` is hand-editable state: a ``base_sha``/``candidate_tree``
+    that is not a revision string cannot name what the check merged or
+    produced, so it reads as absent — the same rule the merge gate and every
+    reader apply.  A truthy non-string value (a mapping) used to pass here, so
+    the driver recorded a ``SIGNOFF_MERGE`` the gate then refused for a
+    missing binding instead of the router coercing it to ``SIGNOFF_BLOCKED``
+    with the reason.
+    """
+    record = _mapping(record)
+    if not (record and head and record.get("head") == head
+            and record.get("status") in MERGEABLE
+            and revision_of(record.get("base_sha"))
+            and revision_of(record.get("candidate_tree"))):
+        return False
+    if record.get("status") == RESOLVED:
+        resolution = resolution_of(record)
+        if not resolution or resolution.get("unresolved"):
+            return False
+    return True
+
+
+def unresolved_paths(record: dict | None) -> set[str]:
+    """Paths a retained resolution attempt could *not* reconcile.
+
+    A failed attempt keeps its per-path details on the record (so the agent can
+    see what was tried), but a path listed there must never be presented as
+    resolved — the CLI and the sign-off launch both label the paths.  A
+    ``conflict`` record's attempt was never applied, so every path it touched
+    is an attempt even when its ``unresolved`` list was truncated.
+
+    A resolution *carried forward* from an earlier applied merge is not an
+    attempt at the current conflict (see ``_carry_forward``): the merge is an
+    ancestor of HEAD, so those paths were reconciled and applied, and the
+    conflict the record now reports is somewhere else.  Marking them
+    "attempted — NOT resolved" would contradict the summary and send the agent
+    to hand-merge a file that is not conflicted.
+    """
+    record = _mapping(record)
+    resolution = resolution_of(record)
+    # Only a string is a path (and a set member): a hand-edited ``path`` that
+    # is a list/mapping is unhashable, and building the set would raise out of
+    # the CLI and the sign-off launch instead of reading as absent.
+    paths = {e["path"] for e in resolution_entries(resolution, "unresolved")
+             if isinstance(e.get("path"), str)}
+    # A malformed ``unresolved`` value cannot name the paths it could not
+    # reconcile, but it is still a refusal everywhere else (the merge gate and
+    # the router read its truthiness, and the sign-off prompt labels the
+    # attempt "NOT resolved").  That covers a truthy non-list value *and* a
+    # truthy list that names no path at all (its members are not mappings, or
+    # their ``path`` is not a string): ``resolution_entries`` drops those, so
+    # reading the list as "nothing unresolved" would let the CLI / launch /
+    # ``pm pr show`` label a path "resolved" while the prompt labels it "NOT
+    # resolved".  Conservatively treat every recorded path as an attempt then.
+    unenumerable = bool(resolution.get("unresolved")) and not paths
+    if unenumerable or (
+            record.get("status") == CONFLICT
+            and not revision_of(resolution.get("applied_merge_sha"))):
+        paths |= {p["path"]
+                  for p in resolution_entries(resolution, "paths")
+                  if isinstance(p.get("path"), str)}
+    return paths
+
+
+def carried_applied_resolution(record: dict | None) -> bool:
+    """Whether the record's resolution is an *earlier*, already-applied merge.
+
+    ``_carry_forward`` keeps an applied resolution on a later record so the
+    provenance (and the explicit-reuse requirement) survives a re-check.  When
+    that later record is a ``conflict``/``error``, the conflict it reports is a
+    different, current problem: the resolution's paths were already reconciled
+    and applied.  Every surface that labels the paths (the CLI, the sign-off
+    launch, the return text and the prompt) must say so instead of presenting
+    them as this check's outcome.
+    """
+    rec = _mapping(record)
+    resolution = resolution_of(rec)
+    return bool(revision_of(resolution.get("applied_merge_sha"))) \
+        and rec.get("status") in (CONFLICT, ERROR)
+
+
+def _on_first_parent_chain(workdir: str, sha: str) -> bool:
+    """Whether *sha* is on HEAD's first-parent chain.
+
+    A base the branch merged sits on a merge commit's non-first parent side,
+    so it never appears on HEAD's first-parent chain; the branch point (where
+    the PR forked) does.  That tells "the branch already carries this base"
+    from "this is just where the PR branched" without relying on an apply that
+    a later bounce may have overwritten.
+    """
+    chain = _out(_git("rev-list", "--first-parent", "HEAD", cwd=workdir))
+    return bool(chain) and sha in set(chain.splitlines())
+
+
+def contained_base(pr: dict) -> str | None:
+    """The newest base revision the PR branch already contains, or ``None``.
+
+    Once the branch carries a base — a metadata resolution applied at
+    sign-off, or a clean base merged by a bounce — the workdir's own base ref
+    (``origin/<base>``, or the local branch) may still point before that
+    merge: pm fetches the base into its own ref, never ``origin/<base>``.  A
+    prompt that then says ``<base>...HEAD`` lists the merged base commits as
+    the PR's own changes.
+
+    The branch can contain more than one base revision: a resolution applied
+    at sign-off, then a newer base merged by a later bounce.  Diffing against
+    the older one would list the newer base's commits as the PR's changes, so
+    the candidates are ordered by ancestry and the newest wins.  Candidates,
+    in the order trusted when git cannot order them (e.g. the workdir is not
+    visible): an ``up_to_date`` check's base, the merge a bounce recorded in
+    ``signoff_return.applied``, the last check's recorded merge base (the
+    newest base revision the branch shares with the checked base — it
+    survives a later check replacing an ``up_to_date`` record), and the base
+    an applied resolution merged.
+    """
+    # project.yaml is hand-editable state: a malformed record must read as
+    # absent instead of crashing a prompt or a review-window launch (the same
+    # contract the resolver and ``signoff.qa_evidence`` follow).  A non-string
+    # revision is not a revision — passing it to git would raise.
+    record = _mapping(pr.get("integration"))
+    applied = _mapping(_mapping(pr.get("signoff_return")).get("applied"))
+    resolution = _mapping(record.get("resolution"))
+    candidates: list[str] = []
+    # Only a hex object name may become the diff ref: the value is
+    # interpolated into a command the agent is told to run.
+    base_sha = _sha_like(record.get("base_sha"))
+    if record.get("status") == UP_TO_DATE and base_sha:
+        candidates.append(base_sha)
+    applied_base = _sha_like(applied.get("base_sha"))
+    if applied.get("merge_sha") and applied_base:
+        candidates.append(applied_base)
+    workdir = pr.get("workdir")
+    workdir = workdir if isinstance(workdir, str) else None
+    have_workdir = bool(workdir) and Path(workdir).is_dir()
+    # The last check's merge base is the newest base revision the branch
+    # shares with the checked base, and it survives a later check replacing
+    # the ``up_to_date`` record that named the applied base.  Without one, the
+    # merge base is just the branch point and the usual base-branch diff stays
+    # (the workdir ref is not stale in that case).  A later bounce can replace
+    # ``signoff_return`` — dropping the ``applied`` block that recorded the
+    # merge — so when the workdir is visible, ask git instead: a base the
+    # branch merged sits on a merge commit's non-first parent side and is
+    # absent from HEAD's first-parent chain, while the branch point is on it.
+    carries_base = bool(revision_of(resolution.get("applied_merge_sha"))) \
+        or bool(applied.get("merge_sha"))
+    merge_base = _sha_like(record.get("merge_base"))
+    if merge_base and (
+            carries_base
+            or (have_workdir and is_ancestor(workdir, merge_base, "HEAD")
+                and not _on_first_parent_chain(workdir, merge_base))):
+        candidates.append(merge_base)
+    if revision_of(resolution.get("applied_merge_sha")):
+        resolved_from = _mapping(resolution.get("resolved_from"))
+        base = _sha_like(resolved_from.get("base_sha")) or base_sha
+        if base:
+            candidates.append(base)
+    candidates = list(dict.fromkeys(candidates))
+    if not candidates:
+        return None
+    if len(candidates) > 1 and have_workdir:
+        # A revision HEAD does not contain (the branch was rewritten, or a
+        # recorded merge base from another repository) cannot be what the
+        # branch carries.
+        usable = [c for c in candidates if is_ancestor(workdir, c, "HEAD")]
+        if usable:
+            candidates = usable
+    newest = candidates[0]
+    if len(candidates) > 1 and have_workdir:
+        for other in candidates[1:]:
+            # ``is_ancestor`` is true for equal revisions too; an unrelated
+            # revision (a force-pushed base) cannot be shown newer, so the
+            # first candidate — the latest check's — stays.
+            if is_ancestor(workdir, newest, other):
+                newest = other
+    return newest
+
+
+def _added_count(entry: dict, key: str) -> int:
+    """Added-record count for one resolved path, nested lists included.
+
+    ``records`` holds the per-path counts (notes, plan sub-lists, ...); the
+    flat id lists only name top-level records, so a notes-only resolution
+    would otherwise read "0 added".
+    """
+    records = entry.get("records")
+    records = records if isinstance(records, dict) else {}
+    if records:
+        return sum(_as_int(c.get(key)) for c in records.values()
+                   if isinstance(c, dict))
+    values = entry.get(key)
+    return len(values) if isinstance(values, list) else 0
 
 
 def summary(record: dict) -> str:
     """One-line human summary of an integration record."""
+    record = _mapping(record)
     status = record.get("status")
-    base = f"{record.get('base_branch')}@{(record.get('base_sha') or '?')[:8]}"
+    base_rev = revision_of(record.get("base_sha"))
+    # ``base_branch`` is hand-editable state and this line is printed by the
+    # sign-off prompt, the router's coercion reason, `pm pr show` and
+    # `pm pr signoff integrate`: an absent (or non-string) value must read as
+    # the ``?`` placeholder, not the literal ``None`` or a mapping's repr.
+    base = f"{_text(record.get('base_branch'))}@{(base_rev or '?')[:8]}"
     if status == UP_TO_DATE:
         return f"up to date with {base}"
     if status == CLEAN:
-        n = len(record.get("overlap") or [])
+        overlap = record.get("overlap")
+        n = len(overlap) if isinstance(overlap, list) else 0
         return (f"merges cleanly with {base}"
                 + (f" ({n} file(s) changed on both sides)" if n else ""))
+    if status == RESOLVED:
+        resolution = resolution_of(record)
+        if resolution.get("unresolved"):
+            # ``pm`` never records a RESOLVED candidate with unresolved
+            # conflicts, but project.yaml is hand-editable: a truthy value is
+            # a refusal everywhere else (``valid_for``, the merge gate, the
+            # router).  The one-line summary must not claim a resolution the
+            # record itself says is incomplete — it is printed beside the
+            # per-path "attempted — NOT resolved" lines.
+            return (f"conflicts with {base}: metadata resolution attempted "
+                    "but unresolved conflicts remain")
+        entries = resolution_entries(resolution, "paths")
+        paths = [p.get("path") for p in entries
+                 if isinstance(p.get("path"), str) and p.get("path")]
+        ours = sum(_added_count(p, "added_ours") for p in entries)
+        theirs = sum(_added_count(p, "added_theirs") for p in entries)
+        return (f"conflicts with {base} resolved by record "
+                f"({', '.join(paths) or 'project.yaml'}; "
+                f"{ours} added from PR, {theirs} from base)")
     if status == CONFLICT:
-        files = record.get("conflicts") or []
-        return (f"CONFLICTS with {base}: {', '.join(files[:5])}"
+        files = record.get("conflicts")
+        files = files if isinstance(files, list) else []
+        text = (f"CONFLICTS with {base}: "
+                + ", ".join(str(f) for f in files[:5])
                 + (" ..." if len(files) > 5 else ""))
+        unresolved = resolution_of(record).get("unresolved")
+        if unresolved:
+            text += " (metadata resolution not possible)"
+        return text
     if status == IN_BASE:
         return f"already contained in {base}"
-    return f"integration check failed: {record.get('error') or 'unknown error'}"
+    # Same rule for the failure text: a hand-edited non-string ``error`` must
+    # not print its repr as the reason.
+    return f"integration check failed: {_text(record.get('error'), 'unknown error')}"
 
 
 # --- apply (PR branch only) -----------------------------------------------
 
 def apply_integration(root: Path, pr_id: str, record: dict | None = None,
                       *, data: dict | None = None) -> tuple[str | None, str | None]:
-    """Merge the recorded clean base revision into the PR branch.
+    """Merge the recorded base revision into the PR branch.
 
-    Only for a ``clean`` record of the workdir's current HEAD, on the PR
-    branch, with a clean tree and no merge in progress.  Returns
-    ``(merge_sha, None)`` or ``(None, reason)``; a failed merge is aborted
-    so no half-merge is left.  Never touches the base branch and never
-    pushes (the merge step pushes the approved PR head where needed).
+    For a ``clean`` record this is a plain merge, and for a ``resolved``
+    record the same deterministic record-aware resolution is re-applied to the
+    conflicted ``project.yaml`` files.  Either way the resulting tree must
+    equal the recorded candidate tree before the merge is committed (a clean
+    merge can differ from the isolated candidate, e.g. a merge driver); on a
+    mismatch the merge is aborted and nothing is committed.
+
+    Only for a record of the workdir's current HEAD, on the PR branch, with a
+    clean tree and no merge in progress.  Returns ``(merge_sha, None)`` or
+    ``(None, reason)``; a failed merge is aborted so no half-merge is left.
+    Never touches the base branch and never pushes (the merge step pushes the
+    approved PR head where needed).
+
+    Runs under the repository lock (:func:`_repo_lock`), like the check's
+    candidate worktrees and fetches: two applies (the sign-off launch, a
+    ``--apply``, a bounce) can otherwise both pass the HEAD check and enter
+    ``git merge`` in the same workdir, where the loser's ``merge --abort``
+    would discard the winner's in-progress merge and both would report a
+    confusing "merge failed".  Serialized, the loser sees the winner's commit
+    and returns :data:`HEAD_MOVED`, which ``prepare`` re-checks and records.
     """
     if data is None:
         data = store.load(root)
     pr = store.get_pr(data, pr_id) or {}
     if record is None:
-        record = pr.get("integration") or {}
-    if record.get("status") != CLEAN:
-        return None, f"integration is {record.get('status')}, not clean"
+        record = _mapping(pr.get("integration"))
+    status = record.get("status")
+    if status not in (CLEAN, RESOLVED):
+        return None, f"integration is {status}, not clean/resolved"
     workdir = pr.get("workdir")
-    if not workdir or not Path(workdir).is_dir():
+    if not isinstance(workdir, str) or not Path(workdir).is_dir():
         return None, "no PR workdir"
+    with _repo_lock(workdir):
+        return _apply_locked(pr, record, workdir)
+
+
+def _apply_locked(pr: dict, record: dict, workdir: str):
+    """The merge itself; the caller holds :func:`_repo_lock`."""
+    status = record.get("status")
     head = _out(_git("rev-parse", "HEAD", cwd=workdir))
     if head != record.get("head"):
-        return None, "PR HEAD moved since the integration check"
+        return None, HEAD_MOVED
     branch = pr.get("branch") or ""
     cur = _out(_git("rev-parse", "--abbrev-ref", "HEAD", cwd=workdir))
     if branch and cur != branch:
@@ -529,19 +2782,185 @@ def apply_integration(root: Path, pr_id: str, record: dict | None = None,
         return None, "a merge is already in progress in the workdir"
     if _out(_git("status", "--porcelain", "--untracked-files=no", cwd=workdir)):
         return None, "workdir has uncommitted changes"
-    base_sha = record.get("base_sha")
-    msg = (f"Integrate {record.get('base_branch')}@{base_sha[:8]} into "
+    # Only a git object name may be merged: the value is handed to
+    # ``git merge``, and a hand-edited ref name (``HEAD``, ``master``) would
+    # merge something other than the base revision the record assessed — a
+    # ``git merge HEAD`` is a no-op that would report a successful "apply"
+    # without integrating anything.  A record that cannot name its base is a
+    # refusal, not a crash (this runs unattended at sign-off launch and from
+    # `--apply`, both of which promise a reason, not a traceback).
+    base_sha = _sha_like(record.get("base_sha"))
+    if not base_sha:
+        return None, "the integration record has no base revision"
+    msg = (f"Integrate {_text(record.get('base_branch'))}@{base_sha[:8]} into "
            f"{branch or 'PR branch'}")
-    m = _git("merge", "--no-ff", "-m", msg, base_sha, cwd=workdir)
+    if status == RESOLVED:
+        return _apply_resolution(record, workdir, head, base_sha, msg)
+
+    # The clean merge must reproduce the approved candidate exactly, like the
+    # resolved one (``_apply_resolution``): publication and the review/QA a
+    # bounce sends to the integrated branch rely on the branch tree being the
+    # candidate sign-off checked.  A different tree (a merge driver or hook
+    # altering the result, or a record whose candidate is stale) is refused
+    # before it is committed, so the workdir is left exactly as it was.
+    # ``--no-commit`` is what makes that possible: after a plain ``git merge``
+    # the commit already exists and only a destructive reset could undo it.
+    # HEAD is re-verified immediately before the merge, like the resolved path
+    # (``_apply_resolution``): the caller checked it, but another process may
+    # have moved it since, and a merge would then integrate the new HEAD
+    # instead of the revision the candidate describes.
+    if _out(_git("rev-parse", "HEAD", cwd=workdir)) != head:
+        return None, HEAD_MOVED_APPLYING
+    no_hooks = ("-c", "core.hooksPath=/dev/null")
+    m = _git(*no_hooks, "-c", "rerere.enabled=false", "merge", "--no-commit",
+             "--no-ff", base_sha, cwd=workdir)
     if m.returncode != 0:
         _git("merge", "--abort", cwd=workdir)
         return None, f"merge failed: {_detail(m)}"
-    merged = _out(_git("rev-parse", "HEAD", cwd=workdir))
-    tree = _out(_git("rev-parse", "HEAD^{tree}", cwd=workdir))
-    if record.get("candidate_tree") and tree != record["candidate_tree"]:
-        _log.warning("integration apply %s: tree %s != candidate %s",
-                     pr_id, tree[:8], record["candidate_tree"][:8])
-    return merged or None, None
+    merging = _git("rev-parse", "-q", "--verify", "MERGE_HEAD",
+                   cwd=workdir).returncode == 0
+    tree = _out(_git("write-tree", cwd=workdir))
+    # A hand-edited non-string tree is not a tree (slicing it would raise).
+    expected = revision_of(record.get("candidate_tree"))
+    if not expected or tree != expected:
+        # Undo only this merge: ``merge --abort`` restores the state before
+        # it, while ``reset --hard head`` could discard a commit another
+        # process made between the HEAD check and this merge.
+        if merging:
+            _git("merge", "--abort", cwd=workdir)
+        return None, ("the clean merge produced a different tree "
+                      f"({(tree or '?')[:12]} != {(expected or '?')[:12]})")
+    if not merging:
+        # The branch already carries the base (a concurrent apply won the
+        # race): there is nothing to commit, and resetting would discard that
+        # merge.  Report the current head; the caller re-checks it.
+        return _out(_git("rev-parse", "HEAD", cwd=workdir)) or None, None
+    commit = _git(*no_hooks, "-c", "user.name=pm",
+                  "-c", "user.email=pm@localhost",
+                  "commit", "-m", msg, cwd=workdir)
+    if commit.returncode != 0:
+        _git("merge", "--abort", cwd=workdir)
+        return None, f"merge commit failed: {_detail(commit)}"
+    return _out(_git("rev-parse", "HEAD", cwd=workdir)) or None, None
+
+
+def _apply_resolution(record: dict, workdir: str, head: str, base_sha: str,
+                      msg: str):
+    """Merge *base_sha* and re-apply the recorded project.yaml resolution."""
+    no_hooks = ("-c", "core.hooksPath=/dev/null")
+    # A hand-edited non-string tree cannot name the approved candidate (and
+    # slicing it in the mismatch message would raise).
+    expected = revision_of(record.get("candidate_tree"))
+    resolution = resolution_of(record)
+    recorded = {p.get("path"): p
+                for p in resolution_entries(resolution, "paths")
+                if isinstance(p.get("path"), str) and p.get("path")}
+    # ``compact`` bounds the stored path list and records the real length when
+    # it truncated (``paths_total``).  An apply that reads the *stored* record
+    # — a sign-off bounce — would otherwise reconcile only the paths it can
+    # see and abort mid-merge ("unexpected conflict in …") on the first one it
+    # cannot.  Refuse up front with the real reason; the launch path applies
+    # the uncompacted record and is unaffected.
+    recorded_total = _as_int(resolution.get("paths_total"))
+    if recorded_total > len(recorded):
+        return None, ("the recorded resolution covers only "
+                      f"{len(recorded)} of {recorded_total} conflicted files; "
+                      "re-run sign-off so it applies the full resolution")
+    if _out(_git("rev-parse", "HEAD", cwd=workdir)) != head:
+        # Re-check right before touching the worktree: the caller verified
+        # HEAD, but another process may have moved it since.
+        return None, HEAD_MOVED_APPLYING
+    m = _git(*no_hooks, "-c", "rerere.enabled=false", "merge", "--no-commit",
+             "--no-ff", base_sha, cwd=workdir)
+    if m.returncode == 0:
+        # The workdir merged without conflict (the base moved under the
+        # recorded check, or the branch already carries the change): the
+        # candidate must still match exactly.
+        tree = _out(_git("write-tree", cwd=workdir))
+        merging = _git("rev-parse", "-q", "--verify", "MERGE_HEAD",
+                       cwd=workdir).returncode == 0
+        if not expected or tree != expected:
+            # Undo only this merge.  ``merge --abort`` restores the state
+            # before it, while ``reset --hard head`` could discard a commit
+            # another process made between the HEAD check and this merge.
+            if merging:
+                _git("merge", "--abort", cwd=workdir)
+            return None, ("the resolved merge produced a different tree "
+                          f"({(tree or '?')[:12]} != {(expected or '?')[:12]})")
+        if not merging:
+            # The branch already carries the base (a concurrent apply won
+            # the race): there is nothing to commit, and resetting would
+            # discard that merge.  Report the current head; the caller
+            # re-checks and binds that revision.
+            return _out(_git("rev-parse", "HEAD", cwd=workdir)) or None, None
+        # ``-m msg`` (like the clean apply in ``_apply_locked``), not
+        # ``--no-edit``: the caller's message names the integration, and the
+        # two apply paths must not record the same merge differently.
+        commit = _git(*no_hooks, "-c", "user.name=pm",
+                      "-c", "user.email=pm@localhost",
+                      "commit", "-m", msg, cwd=workdir)
+        if commit.returncode != 0:
+            _git("merge", "--abort", cwd=workdir)
+            return None, f"merge commit failed: {_detail(commit)}"
+        return _out(_git("rev-parse", "HEAD", cwd=workdir)) or None, None
+
+    conflicts = _out(_git("diff", "--name-only", "--diff-filter=U", cwd=workdir))
+    conflicts = sorted(conflicts.splitlines()) if conflicts else []
+    if not conflicts:
+        _git("merge", "--abort", cwd=workdir)
+        return None, f"merge failed: {_detail(m)}"
+    for path in conflicts:
+        entry = recorded.get(path)
+        if entry is None or Path(path).name != "project.yaml":
+            _git("merge", "--abort", cwd=workdir)
+            return None, (f"unexpected conflict in {path} (not part of the "
+                          "recorded resolution)")
+        try:
+            merged, detail = resolve_project_yaml(
+                _stage_text(workdir, path, 1),
+                _stage_text(workdir, path, 2),
+                _stage_text(workdir, path, 3))
+        except Exception as e:  # never leave the workdir mid-merge
+            _git("merge", "--abort", cwd=workdir)
+            return None, f"resolution of {path} raised: {e}"
+        if merged is None:
+            _git("merge", "--abort", cwd=workdir)
+            why = (detail or {}).get("conflicts") or [(detail or {}).get("error")]
+            return None, f"resolution of {path} failed: {why}"
+        target = Path(workdir, path)
+        try:
+            _write_resolved(target, merged)
+        except OSError as e:  # never leave the workdir mid-merge
+            _git("merge", "--abort", cwd=workdir)
+            return None, f"cannot write the resolution of {path}: {e}"
+        add = _git("add", "--", path, cwd=workdir)
+        if add.returncode != 0:
+            _git("merge", "--abort", cwd=workdir)
+            return None, f"git add {path} failed: {_detail(add)}"
+        blob = _out(_git("rev-parse", f":{path}", cwd=workdir))
+        # Hand-edited state: a non-string blob is not the recorded one
+        # (slicing it in the message would raise out of an unattended apply).
+        recorded_blob = revision_of(entry.get("blob"))
+        if recorded_blob and blob != recorded_blob:
+            _git("merge", "--abort", cwd=workdir)
+            return None, (f"the resolution of {path} is not deterministic "
+                          f"(blob {blob[:12]} != recorded "
+                          f"{recorded_blob[:12]})")
+    left = _out(_git("diff", "--name-only", "--diff-filter=U", cwd=workdir))
+    if left:
+        _git("merge", "--abort", cwd=workdir)
+        return None, f"unresolved conflicts remain: {left.split()}"
+    tree = _out(_git("write-tree", cwd=workdir))
+    if not expected or tree != expected:
+        _git("merge", "--abort", cwd=workdir)
+        return None, ("the resolved merge produced a different tree "
+                      f"({(tree or '?')[:12]} != {(expected or '?')[:12]})")
+    commit = _git(*no_hooks, "-c", "user.name=pm", "-c", "user.email=pm@localhost",
+                  "commit", "-m", msg, cwd=workdir)
+    if commit.returncode != 0:
+        _git("merge", "--abort", cwd=workdir)
+        return None, f"merge commit failed: {_detail(commit)}"
+    return _out(_git("rev-parse", "HEAD", cwd=workdir)) or None, None
 
 
 # --- publication helpers (used by `pm pr merge`) --------------------------

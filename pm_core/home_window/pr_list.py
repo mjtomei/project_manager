@@ -154,9 +154,14 @@ def _render_content(width: int, height: int) -> str:
 
     prs = data.get("prs") or []
     prs = [p for p in prs if p.get("status") not in ("closed", "merged")]
+    # ``str(...)``: a hand-edited ``updated_at``/``created_at`` that YAML
+    # parses as a non-string (an unquoted date is a ``datetime.date``) cannot
+    # be compared with another PR's string — that raised TypeError out of the
+    # home window's render.  The ISO strings pm writes sort identically either
+    # way.
     prs = sorted(
         prs,
-        key=lambda p: p.get("updated_at") or p.get("created_at") or "",
+        key=lambda p: str(p.get("updated_at") or p.get("created_at") or ""),
         reverse=True,
     )
 

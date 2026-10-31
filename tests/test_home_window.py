@@ -381,3 +381,32 @@ class TestFormatPrLine:
                                  with_timestamp=True)
         assert "[2026-01-01" in with_ts
         assert "[2026-01-01" not in no_ts
+
+    def test_tolerates_a_malformed_dependency_list(self):
+        """A hand-edited scalar ``depends_on`` is no list of ids.
+
+        ``format_pr_line`` backs `pm pr list`, `pm pr show` and this window's
+        PR list, so ``', '.join(5)`` (TypeError) or joining a string
+        character by character must not reach any of them.
+        """
+        for bad in (5, "pr-2", {"a": 1}):
+            line = format_pr_line({"id": "pr-1", "title": "t",
+                                   "status": "pending", "depends_on": bad})
+            assert "<- [" not in line, line
+        # A non-string member is not an id: it is ignored (the same rule
+        # ``pm_core.graph.deps_of`` applies to the dependency graph).
+        line = format_pr_line({"id": "pr-1", "title": "t", "status": "pending",
+                               "depends_on": ["pr-2", 7]})
+        assert "<- [pr-2]" in line
+
+    def test_tolerates_a_non_string_timestamp(self):
+        """A value YAML parses as a non-string (an unquoted date) renders.
+
+        ``datetime.fromisoformat`` raises TypeError — not ValueError — for a
+        non-string, which took the home window's render down.
+        """
+        import datetime
+        line = format_pr_line({"id": "pr-1", "title": "t", "status": "pending",
+                               "updated_at": datetime.date(2026, 1, 2)},
+                              with_timestamp=True)
+        assert "[2026-01-02]" in line
