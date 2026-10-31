@@ -2479,7 +2479,11 @@ def test_web_ui_failed_transcode_leaves_no_partial_mp4(tmp_path):
     a playable video), so the finalize step's file check alone reports a
     successful transcode for a video the report cannot play — the
     header-only-cast bug again, one artifact over. ffmpeg's own exit status is
-    the handle, and its partial output goes with it.
+    the handle, and its partial output goes with it. The encode writes
+    ``recording.mp4.partial.mp4`` and renames it only on success (R66), so the
+    file this case has to see removed is the *partial* — checking
+    ``recording.mp4`` alone is vacuous, because no failure path of the block
+    ever writes that name.
     """
     block = _web_ui_finalize_block()
 
@@ -2499,7 +2503,11 @@ def test_web_ui_failed_transcode_leaves_no_partial_mp4(tmp_path):
         "a failed transcode that left a partial mp4 was reported as success")
     assert "transcode produced no mp4" in r.stderr, r.stderr
     assert not (capdir / "recording.mp4").exists(), (
-        "a failed transcode left its partial mp4 as this run's recording")
+        "a failed transcode published its partial mp4 as this run's "
+        "recording")
+    assert not (capdir / "recording.mp4.partial.mp4").exists(), (
+        "a failed transcode left its partial output behind, so an "
+        "interrupted encode's video survives as this run's evidence")
 
 
 def test_web_ui_finalize_publishes_through_a_partial_name(tmp_path):
@@ -2560,6 +2568,47 @@ def test_web_ui_finalize_publishes_through_a_partial_name(tmp_path):
         "recording")
 
 
+def test_web_ui_finalize_names_a_publish_that_failed(tmp_path):
+    """A rename that fails is not a bad transcode.
+
+    The encode writes ``recording.mp4.partial.mp4`` and publishes it by
+    renaming onto ``recording.mp4`` (R66). The rename is what makes the
+    partial this run's video: if it fails (the directory went away, a
+    filesystem error), the partial must not be left looking like a finished
+    recording, and the worker has to be told the publish failed rather than
+    that ffmpeg wrote nothing. The recording recipes' ``render_cast`` has the
+    same guard and a case (``test_render_names_a_publish_that_failed``); the
+    finalize step's guard had none — with it removed the block still exits 1,
+    but at the final ``test -s`` ("the published mp4 is not there") with the
+    partial left behind.
+    """
+    block = _web_ui_finalize_block()
+
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    (capdir / "recording.webm").write_bytes(b"webm")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    _stub_tool(bindir, "ffmpeg",
+               'for a in "$@"; do last=$a; done\nprintf mp4 > "$last"\n')
+    _stub_tool(bindir, "mv", 'exit 1\n')
+    (bindir / "rm").symlink_to("/bin/rm")
+    env = {"CAPDIR": str(capdir), "PATH": str(bindir)}
+    r = subprocess.run(["/bin/bash"], input=block, env=env,
+                       capture_output=True, text=True)
+
+    assert r.returncode != 0, "a failed publish was reported as success"
+    assert "could not publish" in r.stderr, r.stderr
+    assert "transcode produced no mp4" not in r.stderr, (
+        "a failed rename is reported as an encoder failure: " + r.stderr)
+    assert not (capdir / "recording.mp4").exists()
+    assert not (capdir / "recording.mp4.partial.mp4").exists(), (
+        "a failed publish left the partial beside no mp4, so the produced-"
+        "files list explains it as an interrupted encode's output")
+    assert (capdir / "recording.webm").exists(), (
+        "the webm was dropped although nothing was published")
+
+
 def test_web_ui_transcode_that_writes_nothing_leaves_no_mp4(tmp_path):
     """A renderer that reports success and writes nothing leaves no output.
 
@@ -2569,7 +2618,11 @@ def test_web_ui_transcode_that_writes_nothing_leaves_no_mp4(tmp_path):
     which the manifest's ``## Files`` section could then list as this run's
     video — the recording recipes' ``render_fail`` removes the output for
     exactly this reason, so the two finalize paths disagreed. The webm stays,
-    because a failed transcode is retried from it.
+    because a failed transcode is retried from it. Since the encode publishes
+    through ``recording.mp4.partial.mp4`` (R66), the empty file the branch
+    has to remove is the *partial*: ``recording.mp4`` is not a name any
+    failure path writes, so asserting only that one cannot see the empty
+    output the branch exists to drop.
     """
     block = _web_ui_finalize_block()
 
@@ -2591,6 +2644,10 @@ def test_web_ui_transcode_that_writes_nothing_leaves_no_mp4(tmp_path):
     assert not (capdir / "recording.mp4").exists(), (
         "the transcode failure left an empty mp4, which the manifest could "
         "present as this run's video")
+    assert not (capdir / "recording.mp4.partial.mp4").exists(), (
+        "the transcode failure left an empty partial mp4, which the "
+        "produced-files list explains only as an interrupted encode's "
+        "output")
     assert (capdir / "recording.webm").exists(), (
         "the finalize step dropped the webm, so a failed transcode cannot be "
         "retried without re-driving the UI")
