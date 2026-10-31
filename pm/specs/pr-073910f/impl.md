@@ -59,9 +59,12 @@ extra branching is required beyond keeping the existing shared setup
 `create_grouped_session()` (`tmux new-session -d -t base -s base~N`) and the
 group helpers (`list_grouped_sessions`, `find_unattached_grouped_session`,
 `next_grouped_session_name`, `list_clients_in_group`, `detach_client`,
-`current_or_base_session`) must all run against the same socket. They already
-accept `socket_path` and otherwise fall back to `PM_TMUX_SOCKET`; R1 makes
-that variable always present. `_session_start()` must pass the computed
+`session_group`) must all run against the same socket. They take
+`socket_path` and otherwise fall back to `PM_TMUX_SOCKET`; R1 makes that
+variable always present. (`current_or_base_session()` takes no
+`socket_path` — it resolves the current pane through the ambient server, so
+it is only correct from a process whose `PM_TMUX_SOCKET` is already
+selected; every caller is.) `_session_start()` must pass the computed
 `socket_path` explicitly on the create/attach path (as it does for shared
 sessions today).
 
@@ -1528,3 +1531,51 @@ Validation on the integrated head: full suite re-run after the edit (see
 the PR note for this iteration); no live session, server or shared host
 configuration was touched, and the new test is unit-level (it binds no
 tmux server).
+
+## Review iteration (2026-10-31, review-loop 703c i3)
+
+Verification pass over the integrated head; no requirement changes.  One
+gap in the precise-detach resolution (R5.2), plus a spec correction:
+
+1. **`detach_current_client()` derived the base session by splitting the
+   name at `~`, which a user's own grouped view defeats.**  tmux reports
+   the most recently active view's name for a pane in a shared window
+   (verified on this machine: with `pm-x`, `pm-x~1` and `myview` all
+   grouped, `display-message -t <base pane> '#{session_name}'` returned
+   `myview` while `'#{session_group}'` returned `pm-x`), and S118/S121/S124
+   let that view be named anything.  `session.split("~", 1)[0]` therefore
+   took `myview` for the base, so `list_grouped_sessions()` returned
+   nothing and `sessions_on_window()` covered only the view itself: the
+   candidate set collapsed to the view's client, and Ctrl-Q could detach
+   a *different* client of the same pm session than the one that pressed
+   it (the client attached to `pm-x~1` and viewing the TUI window stayed
+   attached while the view's client was dropped).  This is the same
+   resolution 703c i1 fixed in `_find_tui_pane()` and the one
+   `pane_registry.pm_session_name()`/`current_or_base_session()` already
+   use.  `tmux.session_group()` now takes an optional `socket_path` (the
+   rest of the group helpers already did) and `_detach_current_client()`
+   derives the base through it, falling back to the `~` split when the
+   session is ungrouped (or the query fails).  The candidate set is then
+   the base + `base~N` that R5.2 defines.  Test:
+   `test_resolves_the_pm_base_through_the_session_group` (verified to fail
+   without the fix: it detached the view's client `/dev/pts/9` instead of
+   `/dev/pts/1`).  A user view's client is still not a *candidate* unless
+   the view is named `base~N`; that matches R5.2 and the ambiguity #5
+   resolution (a pane cannot identify which client pressed the key).
+2. **The spec claimed `current_or_base_session()` accepts `socket_path`.**
+   It does not (it resolves the current pane through the ambient server),
+   so R2 now says so and records why that is still correct: every caller
+   runs with `PM_TMUX_SOCKET` already selected.  `session_group()` was
+   added to R2's list of group helpers that do take it.
+
+Nothing else surfaced.  The socket derivation and default-server
+addressing (R4.3), discovery scoping (7af7 i1–i3, 3cc7 i1, 703c i1), the
+rollout path (R6) and the socket-directory/ownership checks (d1c0
+i10/i12, 703c i2) all match the spec, and every new helper has direct
+coverage.
+
+Validation on the integrated head: full suite re-run after the edit (see
+the PR note for this iteration); `pm/specs/pr-073910f/session_start_smoke.py`
+re-run end to end on a disposable socket; no live session, server or
+shared host configuration was touched, and the new test is unit-level (it
+binds no tmux server).

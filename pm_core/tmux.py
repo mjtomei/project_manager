@@ -277,12 +277,19 @@ def _find_session_server(session_name: str, *, exact: bool) -> tuple[str | None,
         return None, False
     return None, False
 
-def session_group(name: str) -> str:
+
+def session_group(name: str, socket_path: str | None = None) -> str:
     """The group of session *name* (named after the session it was
-    grouped with), or '' when it is not grouped or does not exist."""
+    grouped with), or '' when it is not grouped or does not exist.
+
+    Resolves a user's own view of a pm session (``tmux new-session -t
+    pm-x -s myview``) to the pm base it was grouped with, whatever the
+    view is called — the same resolution ``pane_registry.pm_session_name``
+    builds on (S118/S121/S124).
+    """
     result = _run(
         _tmux_cmd("display-message", "-p", "-t", f"={name}:",
-                  "#{session_group}"),
+                  "#{session_group}", socket_path=socket_path),
         text=True,
     )
     return result.stdout.strip() if result.returncode == 0 else ""
@@ -1218,7 +1225,15 @@ def _detach_current_client(socket_path: str | None) -> bool:
     session = session_r.stdout.strip() if session_r.returncode == 0 else ""
     if not session:
         return False
-    base = session.split("~", 1)[0]
+    # Resolve the pm base through the session *group*: tmux reports the
+    # most recently active view's name for a pane in a shared window, and
+    # a user's own view need not be named ``pm-<base>~N`` (S118/S121/S124).
+    # Splitting at ``~`` would then take the view's name for the base and
+    # narrow the candidate set to that view's client, so Ctrl-Q could
+    # detach a different client of the same session than the one that
+    # pressed it (R5.2 defines the candidates as base + ``base~N``).
+    base = (session_group(session, socket_path=socket_path)
+            or session.split("~", 1)[0])
     grouped = list_grouped_sessions(base, socket_path=socket_path)
     group = {base} | set(grouped)
     # Clients viewing the TUI's window: the group's sessions whose active

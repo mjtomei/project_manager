@@ -527,6 +527,56 @@ class TestDetachCurrentClient:
         assert detaches[0][-1] == "/dev/pts/1"
 
     @patch("pm_core.tmux.subprocess.run")
+    def test_resolves_the_pm_base_through_the_session_group(
+            self, mock_run, monkeypatch):
+        """A user's own grouped view must not become the detach base.
+
+        tmux reports the most recently active view's name for a pane in a
+        shared window, and S118/S121/S124 let that view be named anything
+        (here ``myview``).  Splitting the name at ``~`` would take
+        ``myview`` for the base, so only that view's client would be a
+        candidate: the client that pressed Ctrl-Q (attached to ``pm-x~1``
+        and viewing the TUI window) would stay attached while the view's
+        client was dropped.  ``#{session_group}`` names the pm base in
+        both cases, which is the candidate set R5.2 defines (base +
+        ``base~N``).
+        """
+        monkeypatch.setenv("TMUX_PANE", "%7")
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+
+        def fake_run(cmd, **kwargs):
+            if "#{session_group}" in cmd:
+                target = cmd[cmd.index("-t") + 1]
+                return MagicMock(
+                    returncode=0,
+                    stdout="pm-x\n" if target in ("=myview:", "=pm-x~1:")
+                    else "")
+            if "list-sessions" in cmd:
+                return MagicMock(returncode=0, stdout="pm-x\npm-x~1\n")
+            if "list-clients" in cmd:
+                # The view's client is the most recently active one; the
+                # client that pressed Ctrl-Q is the ~1 one.
+                return MagicMock(
+                    returncode=0,
+                    stdout="/dev/pts/9|900|90|myview\n"
+                           "/dev/pts/1|100|10|pm-x~1\n")
+            if "detach-client" in cmd:
+                return MagicMock(returncode=0, stdout="")
+            if "#{window_id}" in cmd:
+                return MagicMock(returncode=0, stdout="@1\n")
+            if "#{session_name}" in cmd:
+                return MagicMock(returncode=0, stdout="myview\n")
+            return MagicMock(returncode=0, stdout="0\n")
+
+        mock_run.side_effect = fake_run
+        assert tmux.detach_current_client() is True
+
+        detaches = [c[0][0] for c in mock_run.call_args_list
+                    if "detach-client" in c[0][0]]
+        assert len(detaches) == 1
+        assert detaches[0][-1] == "/dev/pts/1"
+
+    @patch("pm_core.tmux.subprocess.run")
     def test_falls_back_to_session_detach(self, mock_run, monkeypatch):
         """No client views the TUI window: detach by session, not server-wide.
 
@@ -654,6 +704,8 @@ class TestDetachCurrentClient:
                                  stdout="/dev/pts/1|100|10|pm-x\n")
             if "detach-client" in cmd:
                 return MagicMock(returncode=0, stdout="")
+            if "#{session_group}" in cmd:
+                return MagicMock(returncode=0, stdout="pm-x\n")
             if "#{session_name}" in cmd:
                 return MagicMock(returncode=0, stdout="pm-x\n")
             return MagicMock(returncode=0, stdout="@1\n")
