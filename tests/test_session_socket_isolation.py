@@ -2083,6 +2083,81 @@ class TestStartSessionName:
         assert session_mod._resolve_start_session_name(shared=True) == "pm-live"
 
 
+class TestSessionIsShared:
+    """Shared-ness comes from the session, not only from this call's flags.
+
+    ``_session_start`` clears ``PM_SHARE_MODE`` when no ``--global``/
+    ``--group`` was passed, yet a plain ``pm session`` may still adopt an
+    already-shared ambient session.  The session environment records the
+    mode at creation, so the window-size/bindings gate has to consult it —
+    otherwise the grouped session such a reattach creates keeps tmux's
+    default ``window-size`` and the smallest client sees a clipped layout.
+    """
+
+    def test_process_flag_is_enough(self, monkeypatch):
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setenv("PM_SHARE_MODE", "global")
+        monkeypatch.setattr(
+            tmux, "get_session_environment",
+            lambda *a, **k: pytest.fail("must not query for an explicit flag"))
+        assert session_mod._session_is_shared("pm-x") is True
+
+    def test_reads_the_session_environment(self, monkeypatch):
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        calls = []
+
+        def _env(session, key, socket_path=None):
+            calls.append((session, key))
+            return "group:staff"
+
+        monkeypatch.setattr(tmux, "get_session_environment", _env)
+        assert session_mod._session_is_shared("pm-x") is True
+        assert calls == [("pm-x", "PM_SHARE_MODE")]
+
+    def test_private_session_is_not_shared(self, monkeypatch):
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        monkeypatch.setattr(tmux, "get_session_environment",
+                            lambda *a, **k: None)
+        assert session_mod._session_is_shared("pm-x") is False
+
+    def test_bindings_apply_smallest_from_the_session_env(self, monkeypatch):
+        """The wiring: a reattached shared session still gets the option."""
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        monkeypatch.setattr(tmux, "get_session_environment",
+                            lambda *a, **k: "global")
+        monkeypatch.setattr(tmux, "list_grouped_sessions",
+                            lambda *a, **k: ["pm-x~1"])
+        opts = []
+        monkeypatch.setattr(
+            tmux, "set_session_option",
+            lambda s, opt, val, socket_path=None: opts.append((s, opt, val)))
+        with patch("pm_core.cli.session.subprocess.run"):
+            session_mod._register_tmux_bindings("pm-x")
+        assert ("pm-x", "window-size", "smallest") in opts
+        assert ("pm-x~1", "window-size", "smallest") in opts
+
+    def test_bindings_leave_a_private_session_alone(self, monkeypatch):
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        monkeypatch.setattr(tmux, "get_session_environment",
+                            lambda *a, **k: None)
+        opts = []
+        monkeypatch.setattr(
+            tmux, "set_session_option",
+            lambda s, opt, val, socket_path=None: opts.append((s, opt, val)))
+        with patch("pm_core.cli.session.subprocess.run"):
+            session_mod._register_tmux_bindings("pm-x")
+        assert opts == []
+
+
 # ---------------------------------------------------------------------------
 # TUI quit/restart use no server-wide tmux operations
 # ---------------------------------------------------------------------------

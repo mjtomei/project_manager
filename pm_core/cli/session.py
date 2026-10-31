@@ -111,6 +111,27 @@ def _bind_popups() -> None:
                 check=False)
 
 
+def _session_is_shared(session_name: str) -> bool:
+    """True when *session_name* belongs to a shared (--global/--group) session.
+
+    The process environment carries ``PM_SHARE_MODE`` only when *this*
+    invocation passed the flag.  A plain ``pm session`` that adopts an
+    already-shared ambient session (``_resolve_start_session_name``) clears
+    it via ``_set_share_mode_env(False, None)``, yet the session it is
+    attaching to is still shared: the session environment records the mode
+    at creation, so consult that too.  Otherwise the grouped session such a
+    reattach creates would keep tmux's default ``window-size`` and the
+    smallest connected client would see a clipped layout.
+
+    The session environment is authoritative for an existing session; the
+    process variable is the only signal for one that does not exist yet
+    (the create path sets it before this is ever consulted).
+    """
+    if os.environ.get("PM_SHARE_MODE"):
+        return True
+    return bool(tmux_mod.get_session_environment(session_name, "PM_SHARE_MODE"))
+
+
 def _register_tmux_bindings(session_name: str) -> None:
     """Register tmux keybindings and session options for pm.
 
@@ -127,7 +148,7 @@ def _register_tmux_bindings(session_name: str) -> None:
     # users may connect simultaneously.  For normal (non-shared) sessions
     # the default tmux window-size is fine and avoids issues with the
     # unattached base session contributing a zero size.
-    if os.environ.get("PM_SHARE_MODE"):
+    if _session_is_shared(session_name):
         base = session_name.split("~")[0]
         for s in [base] + tmux_mod.list_grouped_sessions(base):
             tmux_mod.set_session_option(s, "window-size", "smallest")
@@ -576,7 +597,9 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
                 _log.info("creating new grouped session: %s", grouped)
                 tmux_mod.create_grouped_session(session_name, grouped,
                                                 socket_path=socket_path)
-                if os.environ.get("PM_SHARE_MODE"):
+                # A plain `pm session` that adopted a shared ambient session
+                # has no PM_SHARE_MODE in the process env; ask the session.
+                if _session_is_shared(session_name):
                     tmux_mod.set_session_option(grouped, "window-size", "smallest",
                                                 socket_path=socket_path)
                 click.echo(f"Attaching to session '{grouped}'...")
@@ -711,7 +734,7 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # Create a grouped session so we never attach directly to the base
     grouped = f"{session_name}~1"
     tmux_mod.create_grouped_session(session_name, grouped, socket_path=socket_path)
-    if os.environ.get("PM_SHARE_MODE"):
+    if _session_is_shared(session_name):
         tmux_mod.set_session_option(grouped, "window-size", "smallest",
                                     socket_path=socket_path)
     tmux_mod.attach(grouped, socket_path=socket_path)

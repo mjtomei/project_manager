@@ -1764,3 +1764,51 @@ direct coverage.
 Validation on the integrated head: full suite re-run after the edit (see the
 PR note for this iteration); no live session, server or shared host
 configuration was touched, and the new test binds only disposable sockets.
+
+## Review iteration (2026-10-31, review-loop 703c i8)
+
+Verification pass over the integrated head; no requirement changes.  One
+shared-session consistency fix in the session-start path:
+
+1. **A plain `pm session` that adopted a shared ambient session lost
+   `window-size=smallest`.**  `_session_start()` calls
+   `_set_share_mode_env(share_global, share_group)`, which *pops*
+   `PM_SHARE_MODE` when no `--global`/`--group` was passed.  Since the
+   d1c0 i7 change, a plain `pm session` run from inside an already-shared
+   session adopts that ambient session instead of creating a private twin
+   — but `_register_tmux_bindings()` and the two grouped-session
+   `set_session_option(..., "window-size", "smallest")` gates keyed off the
+   *process* `PM_SHARE_MODE`, so none of them fired.  The new grouped
+   session (and any grouped session the bindings pass would have healed)
+   kept tmux's default `window-size=latest`, so with clients of different
+   sizes the smallest one sees a clipped layout — the exact condition
+   `window-size=smallest` exists for.  The mode the session was *created*
+   with is recorded in its session environment, so a new
+   `session._session_is_shared(session_name)` returns true when either the
+   process variable is set or the session environment records
+   `PM_SHARE_MODE`; all three gates now use it.  The process variable is
+   still the only signal on the create path (it is set before any of these
+   run), and a private session records nothing, so its behaviour is
+   unchanged.  Tests: `TestSessionIsShared` (explicit flag short-circuits
+   the query; the session environment is read by name; a private session
+   is not shared) plus the wiring (`_register_tmux_bindings` applies
+   `window-size=smallest` to base + grouped from the session environment,
+   and leaves a private session alone).
+
+Also checked and left alone: the d1c0 i8 residual — `is_shared` is still
+flag-derived for the private-socket ownership check, so an adopted shared
+session is checked as private, which is harmless for the owner, who owns
+the socket.  This fix deliberately does not touch that: the ownership
+check keeps using the flag, and only the window-size/bindings gate
+consults the session environment.
+
+Nothing else surfaced.  The socket derivation and default-server addressing
+(R4.3), discovery scoping (7af7 i1–i3, 3cc7 i1, 703c i1/i4/i6), the precise
+detach (R5, 703c i3), the kill/unlink rules (R3.2, R8), the socket-directory
+and ownership checks (d1c0 i10/i12, 703c i2) and the shared-session
+share-mode handling (d1c0 i7, 703c i8) all match the spec, and every new
+helper has direct coverage.
+
+Validation on the integrated head: full suite re-run after the edit (see the
+PR note for this iteration); no live session, server or shared host
+configuration was touched.
