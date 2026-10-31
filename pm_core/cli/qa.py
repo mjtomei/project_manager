@@ -649,10 +649,37 @@ End with a summary of which steps work and which don't, then one of:
         os.chdir(run_cwd)
         os.execvpe("bash", ["bash", "-c", shell_cmd], {**os.environ, **env})
     else:
-        tmux_mod.new_window_get_pane(
-            session, window_name, shell_cmd,
-            cwd=run_cwd, switch=False, env=env,
-        )
+        window_problem = ""
+        try:
+            pane = tmux_mod.new_window_get_pane(
+                session, window_name, shell_cmd,
+                cwd=run_cwd, switch=False, env=env,
+            )
+        except Exception as exc:
+            pane = None
+            window_problem = str(exc) or exc.__class__.__name__
+        if not pane:
+            # Nothing runs in the workdir/clone (or in the container created
+            # for it above): reporting "Launched" here would claim a session
+            # that does not exist and leak the container.  Release only this
+            # attempt's own container, never anything else.
+            detail = f": {window_problem}" if window_problem else ""
+            if use_containers:
+                try:
+                    container_mod.remove_container(cname)
+                except Exception:
+                    pass
+            click.echo(
+                "Could not create the QA debug window in tmux session "
+                f"'{session}'{detail}. No debug session was launched"
+                + (", and the container created for it was released."
+                   if use_containers else "."),
+                err=True,
+            )
+            click.echo(
+                "Remedy: make sure the pm session is running "
+                "('pm tui view'), then retry.", err=True)
+            raise SystemExit(1)
         click.echo(f"Launched debug session")
         click.echo(f"  Instruction: {item['title']}")
         click.echo(f"  Workdir: {qa_workdir}")

@@ -175,6 +175,15 @@ shared-launcher (review) fail-closed behaviour.
   failure and the retry remedy, no traceback-only output, no host agent, and
   the failed container name is not left behind.
 
+### R6b — `pm qa debug` reports a window-creation failure instead of a false success
+- **Given** container mode enabled and the runtime answering `info`, but the
+  QA debug tmux window cannot be created (the pm session vanished after the
+  preflight, or tmux refuses the window),
+- **When** the user runs `pm qa debug <instruction>` (windowed),
+- **Then** it exits nonzero with a message naming the failure and how to
+  retry, it does **not** print "Launched debug session", no host agent runs,
+  and only the container it created for this attempt is released.
+
 ### R7 — TUI QA run fails closed at the planning handoff and reports ERROR
 - **Given** a project with a PR in `qa`, container mode enabled, runtime down,
 - **When** the user starts QA for the PR from the TUI,

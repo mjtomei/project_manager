@@ -785,6 +785,117 @@ def test_qa_debug_fails_closed_when_create_raises_non_container_error(
     assert remove.call_count == 1
 
 
+def test_qa_debug_fails_closed_when_the_window_cannot_be_created(
+        tmp_path, home):
+    """A container that was created but whose tmux window cannot be created
+    has nothing running in it: the command must report the failure, release
+    only that container, and never print "Launched" (the pre-fix code
+    ignored the return value, claimed success and leaked the container)."""
+    from pm_core.cli.qa import qa as qa_group
+
+    root = tmp_path / "pm"
+    root.mkdir()
+    instr = tmp_path / "repro.md"
+    instr.write_text("# repro\n")
+    item = {"path": str(instr), "title": "Repro", "description": "d"}
+    data = {"project": {"name": "t"}, "prs": [], "plans": []}
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+
+    remove = MagicMock()
+    with ExitStack() as stack:
+        stack.enter_context(patch("pm_core.cli.qa.state_root",
+                                  return_value=root))
+        stack.enter_context(patch("pm_core.qa_instructions.get_instruction",
+                                  return_value=item))
+        stack.enter_context(patch("pm_core.store.load", return_value=data))
+        stack.enter_context(patch("pm_core.loop_shared.get_pm_session",
+                                  return_value="pm-s"))
+        stack.enter_context(patch.object(container_mod,
+                                         "is_container_mode_enabled",
+                                         return_value=True))
+        _patch_runtime(stack, True)
+        stack.enter_context(patch(
+            "pm_core.qa_loop.create_scenario_workdir",
+            return_value=(clone, scratch)))
+        stack.enter_context(patch.object(
+            container_mod, "create_qa_container"))
+        stack.enter_context(patch.object(container_mod, "remove_container",
+                                         remove))
+        stack.enter_context(patch.object(
+            container_mod, "build_exec_cmd", return_value="EXEC-CMD"))
+        stack.enter_context(patch(
+            "pm_core.claude_launcher.build_claude_shell_cmd",
+            return_value="CLAUDE-CMD"))
+        stack.enter_context(patch(
+            "pm_core.tmux.new_window_get_pane", return_value=None))
+        result = CliRunner().invoke(qa_group,
+                                    ["debug", "repro", "--branch", "b"])
+
+    assert result.exit_code == 1
+    assert "Launched debug session" not in result.output
+    assert "could not create the qa debug window" in result.output.lower()
+    assert "released" in result.output.lower()
+    # Only this attempt's own container is released.
+    assert remove.call_count == 1
+
+
+def test_qa_debug_reports_a_raising_window_creation(tmp_path, home):
+    """The window helper raises (e.g. the pm session vanished between the
+    preflight and the launch) — same treatment as a None return: a clear
+    error, this attempt's container released, no "Launched" claim."""
+    from pm_core.cli.qa import qa as qa_group
+
+    root = tmp_path / "pm"
+    root.mkdir()
+    instr = tmp_path / "repro.md"
+    instr.write_text("# repro\n")
+    item = {"path": str(instr), "title": "Repro", "description": "d"}
+    data = {"project": {"name": "t"}, "prs": [], "plans": []}
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+
+    remove = MagicMock()
+    with ExitStack() as stack:
+        stack.enter_context(patch("pm_core.cli.qa.state_root",
+                                  return_value=root))
+        stack.enter_context(patch("pm_core.qa_instructions.get_instruction",
+                                  return_value=item))
+        stack.enter_context(patch("pm_core.store.load", return_value=data))
+        stack.enter_context(patch("pm_core.loop_shared.get_pm_session",
+                                  return_value="pm-s"))
+        stack.enter_context(patch.object(container_mod,
+                                         "is_container_mode_enabled",
+                                         return_value=True))
+        _patch_runtime(stack, True)
+        stack.enter_context(patch(
+            "pm_core.qa_loop.create_scenario_workdir",
+            return_value=(clone, scratch)))
+        stack.enter_context(patch.object(
+            container_mod, "create_qa_container"))
+        stack.enter_context(patch.object(container_mod, "remove_container",
+                                         remove))
+        stack.enter_context(patch.object(
+            container_mod, "build_exec_cmd", return_value="EXEC-CMD"))
+        stack.enter_context(patch(
+            "pm_core.claude_launcher.build_claude_shell_cmd",
+            return_value="CLAUDE-CMD"))
+        stack.enter_context(patch(
+            "pm_core.tmux.new_window_get_pane",
+            side_effect=RuntimeError("no server running on /tmp/tmux")))
+        result = CliRunner().invoke(qa_group,
+                                    ["debug", "repro", "--branch", "b"])
+
+    assert result.exit_code == 1
+    assert "Launched debug session" not in result.output
+    assert "no server running" in result.output
+    assert remove.call_count == 1
+
+
 def test_resume_keeps_host_mode_when_snapshot_says_host(tmp_path, home):
     """The persisted per-run mode wins: a host run resumes on the host even
     when container mode is enabled and the runtime is down now."""

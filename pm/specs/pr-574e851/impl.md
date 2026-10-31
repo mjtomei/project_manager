@@ -696,3 +696,36 @@ mode still runs on the host. Changes made:
   runs two scenarios, fails the second's create, and asserts the first's
   container and window are kept while only the failed attempt's exact
   container is released (no broad cleanup).
+
+## Review iteration (421e i3)
+
+Re-audited the integrated head against R1-R7 and the acceptance list (fresh
+run, initial launch, queued launch, relaunch, resume, `pm qa debug`,
+`pm qa run`). The fail-closed boundary is unchanged and no new downgrade
+path was found. Two robustness gaps on the error/reporting paths are closed:
+
+- **A corrupt `qa_status.json` no longer aborts the resume scan.** The
+  421e i1/i2 read of the display file in `_resume_incomplete_qa` called
+  `.get()` on whatever `json.loads` returned; a valid-but-non-object file
+  (`[]`, `"x"`) raised `AttributeError`, which aborted the whole scan for
+  every PR's snapshot (both callers catch the exception and give up on the
+  remaining runs). The completed-run read now guards `isinstance(sdata,
+  dict)`, and the adjacent pre-existing `_overall()` helper (run ordering,
+  same file) gets the same guard — the ended-run scan above already had it.
+- **`pm qa debug` no longer claims a launch it did not make (closes the
+  421e i2 observation).** The windowed branch ignored the return of
+  `tmux_mod.new_window_get_pane`: a `None` (or a raising call, e.g. the pm
+  session vanished after the preflight) printed "Launched debug session",
+  exited 0 and leaked the container it had just created. It now reports the
+  failure, releases only that attempt's own container, and exits 1; the
+  host branch reports the same failure without a container to release.
+  This is allocation hygiene on a container-eligible launcher, not a new
+  downgrade path (nothing ran on the host either way).
+
+Tests added: `test_resume_tolerates_a_non_dict_status_file` (the run is
+treated as incomplete instead of aborting the scan),
+`test_qa_debug_fails_closed_when_the_window_cannot_be_created` (None
+return), and `test_qa_debug_reports_a_raising_window_creation` (exception),
+both asserting the exact container is released and "Launched" is not
+printed. Focused suites: `tests/test_container_fail_closed.py` 27 passed,
+`tests/test_qa_resume.py` 92 passed.

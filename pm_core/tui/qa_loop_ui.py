@@ -1158,9 +1158,11 @@ def _resume_incomplete_qa(app) -> None:
     def _overall(qa_dir):
         try:
             sdata = json.loads((qa_dir / "qa_status.json").read_text())
-            return sdata.get("overall", "")
         except (json.JSONDecodeError, OSError):
             return ""
+        # A corrupt/hand-edited file can hold any valid JSON; a non-dict
+        # would raise AttributeError on .get() and abort the whole scan.
+        return sdata.get("overall", "") if isinstance(sdata, dict) else ""
 
     def _run_order(rdata):
         idx = [s["index"] for s in rdata.get("scenarios") or []
@@ -1336,10 +1338,15 @@ def _resume_incomplete_qa(app) -> None:
         status_error = ""
         try:
             sdata = json.loads((resume_file.parent / "qa_status.json").read_text())
+        except (json.JSONDecodeError, OSError):
+            sdata = None
+        # The file is written as a dict by _write_status_file, but a
+        # hand-edited/corrupt one can hold any valid JSON: a non-dict would
+        # raise AttributeError on .get() and abort the whole scan for every
+        # other PR's snapshot.  Same guard as the ended-run scan above.
+        if isinstance(sdata, dict):
             overall = sdata.get("overall", "")
             status_error = sdata.get("error", "") or ""
-        except (json.JSONDecodeError, OSError):
-            overall = ""
 
         # The ownership check above read the snapshot earlier; another TUI
         # may have adopted the run since.  Claim it atomically (S41).

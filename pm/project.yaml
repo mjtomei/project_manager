@@ -48690,7 +48690,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-10-31T20:04:58.643573+00:00'
+  updated_at: '2026-10-31T20:26:27.294868+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -49018,6 +49018,36 @@ prs:
       The host branch has the same message behaviour.'
     created_at: '2026-10-31T20:04:58Z'
     last_edited: '2026-10-31T20:04:58Z'
+  - id: note-3908dc2
+    text: 'Review 421e i3: re-audited the fail-closed boundary at 7573a343 (fresh
+      run, initial launch, queued launch, relaunch, resume, pm qa debug, pm qa run)
+      — no new downgrade path found. Two robustness gaps on the error/reporting paths
+      are closed.
+
+
+      (1) `_resume_incomplete_qa` read `qa_status.json` and called `.get()` on whatever
+      `json.loads` returned; a valid-but-non-object file (`[]`, `"x"`) raised AttributeError
+      and aborted the whole resume scan for every PR''s snapshot. The completed-run
+      read now guards `isinstance(dict)`, and the adjacent pre-existing `_overall()`
+      run-ordering helper gets the same guard (the ended-run scan above already had
+      it). Test: test_resume_tolerates_a_non_dict_status_file.
+
+
+      (2) `pm qa debug`''s windowed branch ignored `new_window_get_pane`''s return:
+      a None (or a raising call, e.g. the pm session vanished after the preflight)
+      printed "Launched debug session", exited 0, and leaked the container it had
+      just created. It now reports the failure, releases only that attempt''s own
+      container, and exits 1; the host branch reports the same failure without a container.
+      This closes the 421e i2 observation. Tests: test_qa_debug_fails_closed_when_the_window_cannot_be_created
+      (None), test_qa_debug_reports_a_raising_window_creation (exception).
+
+
+      Full pytest: 5232 passed, 1 skipped, 0 failed (407s). tests/test_container_fail_closed.py
+      27 passed; tests/test_qa_resume.py 92 passed. Specs updated: impl.md "Review
+      iteration (421e i3)", qa.md R6b. Captures unchanged (the fail-closed behaviour
+      and the pre/post-fix evidence are unaffected).'
+    created_at: '2026-10-31T20:26:27Z'
+    last_edited: '2026-10-31T20:26:27Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

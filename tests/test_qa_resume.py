@@ -370,6 +370,25 @@ def test_resume_completed_error_keeps_its_cause(tmp_path):
     assert not _resume_file_path(qa_dir).exists()
 
 
+def test_resume_tolerates_a_non_dict_status_file(tmp_path):
+    """A corrupt/hand-edited qa_status.json holding valid non-object JSON
+    must not abort the whole resume scan (an AttributeError on ``.get`` would
+    stop every other PR's snapshot from being adopted).  The run is treated
+    as incomplete, exactly as for an unreadable file."""
+    app = _make_app(tmp_path)
+    qa_dir = _seed_run(tmp_path, overall="")
+    (qa_dir / "qa_status.json").write_text("[]")
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_called_once()
+    on_complete.assert_not_called()
+    assert "pr-001" in app._qa_loops
+
+
 def test_resume_skips_non_qa_pr(tmp_path):
     app = _make_app(tmp_path, pr_status="merged")
     qa_dir = _seed_run(tmp_path, overall="")
