@@ -397,7 +397,7 @@ with permissions and tmux `server-access` grants for the invited users.
 Another user connects by pointing at your project directory:
 
 ```bash
-pm session --dir /home/alice/myrepo/pm
+pm session --global --dir /home/alice/myrepo/pm   # repeat the owner's flag
 ```
 
 Or, if you just need the raw tmux attach command (useful for scripting or

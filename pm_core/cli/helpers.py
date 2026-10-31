@@ -1328,9 +1328,9 @@ def _select_session_socket(session_name: str) -> str | None:
     """Point ``PM_TMUX_SOCKET`` at the server hosting *session_name*.
 
     Prefers the session's dedicated private socket, falls back to the
-    legacy default server.  Returns the selected socket path, or None when
-    the session is on the default server or was not found (the ambient
-    setting is left untouched in the latter case).
+    legacy default server (selected by its explicit path).  Returns the
+    socket now in effect, or None when the session is not a pm session or
+    was not found — in which case the ambient setting is left untouched.
     """
     base = pane_registry.base_session_name(session_name)
     if not base.startswith("pm-"):
@@ -1342,7 +1342,7 @@ def _select_session_socket(session_name: str) -> str | None:
     # the override is not enough, because tmux would then follow $TMUX and
     # reach the private server this process happens to run on.
     _use_tmux_socket(sock if on_private else None)
-    return sock if on_private else None
+    return sock
 
 
 def _server_owned_by_us(socket_path: str | None) -> bool:

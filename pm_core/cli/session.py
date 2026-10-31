@@ -114,8 +114,11 @@ def _bind_popups() -> None:
 def _register_tmux_bindings(session_name: str) -> None:
     """Register tmux keybindings and session options for pm.
 
-    Called on both new session creation and reattach so bindings
-    survive across sessions (tmux bindings are global).
+    Called on both new session creation and reattach.  Bindings and hooks
+    are per tmux *server*, and every pm session now has its own, so they
+    are not inherited from another pm session: a fresh server starts with
+    none and needs them registered here.  Re-registering on reattach also
+    heals a server whose bindings were lost.
     For shared sessions (--global/--group), sets window-size=smallest on
     all sessions in the group so the window fits the smallest connected
     client (everyone sees the full layout).

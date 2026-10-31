@@ -75,8 +75,11 @@ sessions today).
    for private sessions too (not only shared ones).
 2. `pm session kill` targets the server that hosts the session (private
    socket preferred, legacy default server as fallback), kills grouped
-   sessions then the base, and unlinks the socket file (tmux leaves it behind
-   after `kill-server` / last-session exit — verified).  Session selection
+   sessions then the base, and unlinks the socket file **only when no server
+   answers on it** (`server_alive()`; tmux leaves the file behind after
+   `kill-server` / last-session exit — verified — but a live server can
+   outlive its base session, and unlinking its socket would strand the
+   clients still attached to it).  Session selection
    tries the cwd-derived name first and the ambient session second, choosing
    the first that is actually running — so a workdir clone kills the session
    hosting it, while a different project's ambient session is never preferred
@@ -231,6 +234,32 @@ must be left untouched:
    socket directory is world-writable, private sessions refuse to use an
    existing socket file owned by another UID (shared sessions skip this
    check — the sharing user owns the socket by design).
+
+### R8 — Destructive and concurrent session operations are exact and convergent
+
+Formalises the exact-match and concurrent-start rules introduced by the
+QA scenario 6 fixes (those were not new *user-facing* requirements, which is
+why that section says "no requirement changes"); the code comments in
+`find_exact_session_server` and `session_kill` refer to them as R8, which is
+also the number of the matching user story in `qa.md` ("Killing a session
+tears down only that session").
+
+1. `pm session kill` resolves the session with an **exact** name match
+   (`find_exact_session_server`, tmux target `=name`).  A bare tmux target is
+   a *prefix* match, so `has-session -t pm-x` also succeeds for a surviving
+   grouped session `pm-x~1`; treating that as "running" killed the grouped
+   session (detaching its client) and unlinked a live server's socket.  When
+   nothing matches exactly, the command reports `No session '<name>' found.`
+   and leaves the server alone (it unlinks the socket file only when
+   `server_alive()` says nothing answers on it).  Discovery (`pm tui …`)
+   keeps prefix matching on purpose, so `pm tui view -s pm-x` still reaches
+   the group's TUI after the base was killed elsewhere.
+2. Paired simultaneous `pm session` starts converge.  Both invocations pass
+   the caller's `session_exists` check and then race into `new-session`; the
+   loser gets "duplicate session".  `create_session` /
+   `create_grouped_session` treat that as a lost race only when the exact
+   name exists afterwards (`has-session -t =name`) and converge on the
+   winner's session; any other failure is still re-raised.
 
 ## Implicit requirements
 

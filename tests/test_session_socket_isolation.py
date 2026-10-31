@@ -915,6 +915,55 @@ class TestGetPmSessionSelectsServer:
         assert helpers._get_pm_session() == "pm-current"
 
 
+class TestSelectSessionSocketReturnValue:
+    """The return value names the server actually put in effect.
+
+    No caller reads it today, but returning None for a *legacy* session —
+    which does select the default server — invited a future caller to read
+    it as "session not found".
+    """
+
+    def test_private_session_returns_its_socket(self, monkeypatch, tmp_path):
+        from pm_core.cli import helpers
+
+        # Register the variable so monkeypatch restores it: the code under
+        # test writes os.environ directly, which would otherwise leak.
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        monkeypatch.setattr(
+            helpers.tmux_mod, "session_exists",
+            lambda name, socket_path=None, use_env=True:
+            socket_path == str(tmp_path / "pm-target"))
+
+        sock = str(tmp_path / "pm-target")
+        assert helpers._select_session_socket("pm-target") == sock
+        assert os.environ["PM_TMUX_SOCKET"] == sock
+
+    def test_legacy_session_returns_the_default_server_path(self, monkeypatch):
+        from pm_core.cli import helpers
+
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+        monkeypatch.setattr(
+            helpers.tmux_mod, "session_exists",
+            lambda name, socket_path=None, use_env=True:
+            socket_path is None and not use_env)
+
+        expected = str(paths.default_socket_path())
+        assert helpers._select_session_socket("pm-legacy") == expected
+        assert os.environ["PM_TMUX_SOCKET"] == expected
+
+    def test_missing_session_returns_none_and_keeps_the_ambient_socket(
+            self, monkeypatch):
+        from pm_core.cli import helpers
+
+        monkeypatch.setenv("PM_TMUX_SOCKET", "/tmp/pm-sessions/ambient")
+        monkeypatch.setattr(helpers.tmux_mod, "session_exists",
+                            lambda *a, **kw: False)
+
+        assert helpers._select_session_socket("pm-gone") is None
+        assert os.environ["PM_TMUX_SOCKET"] == "/tmp/pm-sessions/ambient"
+
+
 # ---------------------------------------------------------------------------
 # CLI: TUI pane discovery across servers
 # ---------------------------------------------------------------------------
