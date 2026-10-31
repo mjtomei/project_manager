@@ -668,3 +668,45 @@ No **[UNRESOLVED]** ambiguities.
   untouched, as are `pm pr merge`'s merge flow and the TUI cleanup keys.
 - Branch deletion features (e.g. `gh pr close --delete-branch`) — removed from
   the close path entirely; no replacement command is added.
+
+## 7. Integration with origin/master eaf3372e (2026-10-31)
+
+User-authorized implementation return: `origin/master` (`eaf3372e`, the merge
+of PR #249 / pr-592e4bd) was merged into this PR branch as `7f3fe839`. No
+requirement above changed; the integration preserves the close contract and
+every earlier review/QA correction while taking master's newer code.
+
+- **`pm/project.yaml`** — resolved with `store.merge_3way(base,
+  ours=master, theirs=branch)` over the index stages. 573 records (571
+  master + 2 branch-only), no duplicate or missing ids, all 38 notes on
+  `pr-62ad13d` kept, the cross-PR notes on `pr-3d1fa55` / `pr-77c4f91` kept,
+  every other record byte-identical to master, plans and `project` settings
+  intact.
+- **`pm_core/qa_loop.py`** — master replaced the inline
+  `store.get_pr(store.load(...))` guards with `_live_pr_status()`, which
+  tolerates an unparseable `project.yaml` (it skips the round instead of
+  aborting the run). The three late guards (pre-window, post-window,
+  mid-planning) now call that helper and compare against
+  `TERMINAL_PR_STATES`, so R11 item 27's single-definition claim still holds
+  and master's parse-error resilience is kept. The fourth guard (the
+  `run_qa` entry check) was unchanged and still uses the constant.
+- **`pm_core/autostart_state.py`, `pm_core/cli/pr.py`** — import unions:
+  the branch's `TERMINAL_PR_STATES` / `usable_prs` names plus master's
+  `usable_prs` / `model_config` imports.
+- Everything else auto-merged: master's auto-sequence driver work, QA-run
+  ownership logic, and `pm pr model` commands coexist with the branch's
+  `closed` guards (`pr_start`/`pr_review` in-lock re-checks, the five
+  `_closed_reopen_hint` refusals, the auto-sequence `closed` report) and the
+  sync/cleanup changes.
+
+Validation on `7f3fe839`: full suite **5276 passed, 1 skipped, 0 failed**
+(438 s); a real-CLI smoke run on a disposable HOME against the git-backed
+fake GitHub confirmed close retains the entry (status `closed`, `closed_at`,
+notes, dependencies, branch, workdir), never passes `--delete-branch` (the
+remote branch survives a fake that emulates the flag), leaves a workdir with
+tracked modifications, untracked/ignored files and captures byte-identical,
+warns the dependent without unblocking it, keeps `closed_at` across a repeat
+close, honours `--keep-github`, makes `--remove` registry-only, and refuses
+every lifecycle command with the reopen command (auto-sequence reports
+`closed`, exit 0). Evidence:
+`/pm-captures/integration-20261031/`.
