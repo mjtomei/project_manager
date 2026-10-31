@@ -128,6 +128,29 @@ Reproduction traps (from the prior QA runs — avoid rediscovering them):
   `pm_core/pr_sync.sync_prs`) now falls back to the project repo when every
   workdir is gone, so a deleted workdir can no longer turn a bad merge into a
   silent finalize.
+- The head also contains the base's owed-REQA / return-launch work
+  (master@4a74d880, pr-db3bf10): `signoff_return.launch_claim` +
+  `claim_return_launch` now gate every relaunch of a routed hop, and the
+  merge ported this PR's hand-edited-state guard into `_launch_claimable` (a
+  scalar `launch_claim` reads as absent). A REQA return is deliberately *not*
+  claimed by the hop that performs the transition — that hop may defer behind
+  a live `pm qa run` — so exercise the deferral and the single-winner start
+  with two actors: the TUI (or `pm pr auto-sequence`) plus a QA run already
+  live for the same PR. `pm fake-claude config set` makes both deterministic.
+  `RETURN_LAUNCH_CLAIM_SECONDS` is 180, so a dead-claim-expiry test should
+  not sleep for it — back-date the claim's `at` by hand (bootstrap-style
+  `project.yaml` edit) or observe the deferral message instead.
+- Since scenarios 44/47, review-loop 4f1e i1-i7 landed (all hand-edited-state
+  / honesty fixes): a truthy non-list `resolution.unresolved` survives a
+  re-check rewrite as a refusal; a report written for another base is not
+  recorded as this decision's evidence; `_apply_locked` refuses a `base_sha`
+  that is not a git object name (a `git merge HEAD` no-op "apply"); the QA
+  spec prompt's diff hint falls back to `master`; an identical `.nan` is not
+  a conflict; a recursive document, a recursive resolution digest and mixed
+  scalar-key kinds are handled readably; a `workdir` that is a regular file
+  reads as absent; and every hand-edited `base_branch`/`head`/`target_repo`/
+  `error` renders as `?`, including the merge commit message. These are the
+  freshest surfaces at this head.
 - Fake-github harness facts (from scenarios 40/43): the stand-in's session tag
   derives from the git-root basename, so re-running a fixture in the same
   directory reuses the stand-in (and may already contain the PR head); use a
@@ -615,6 +638,43 @@ THEN the evidence block carries the `planner_code_changes_error` marker and no
 review revision is inferred — while an *absent* key still allows the
 documented inference.
 
+### R17. The merged base's owed QA re-run and its launch ownership
+GIVEN a PR in `sign_off` whose sign-off agent returns REQA, while a QA run for
+that PR is already live in another process (a `pm qa run` in a terminal, or a
+second TUI driving it).
+WHEN the verdict is recorded and the TUI reconciles the obligation.
+THEN the owed QA re-run is not started over the live run: the TUI says the
+sign-off REQA waits for the run another process drives, the obligation stays
+on disk, and when that run ends the owed run starts exactly once — one QA
+window set, one verifier/finalizer pair, no retired windows.
+
+GIVEN an owed QA re-run and two drivers acting at once (two TUIs, or a TUI and
+`pm pr auto-sequence`).
+WHEN both try to launch it.
+THEN exactly one takes the launch and starts the run; the other leaves it
+alone (no second loop over the first, no duplicate or retired panes), and the
+PR shows one live QA run.
+
+GIVEN an owed QA re-run and no TUI running (the user closed it, or the process
+died mid-claim).
+WHEN the user reopens the session with auto-start off — or, for a dead claim,
+waits past the claim window.
+THEN the first frame appears without waiting on the start, the obligation is
+still there, and the QA run starts (a stale claim expires and a later driver
+takes it) instead of being silently dropped.
+
+GIVEN a `signoff_return.launch_claim` hand-edited to a non-mapping value
+(a scalar), and an owed QA re-run.
+WHEN a driver reconciles.
+THEN the malformed claim reads as absent (the launch is claimable) and the run
+starts — never a traceback.
+
+GIVEN an owed QA re-run whose PR left `qa` status out of band (a bounce moved
+it on).
+WHEN a driver ticks.
+THEN it does not start a QA run off the stale read, and the obligation is not
+consumed.
+
 ## Edge cases (Given / When / Then)
 
 - GIVEN a hand-edited non-string verdict and a clean integration check. WHEN the
@@ -670,6 +730,17 @@ documented inference.
   the recovery path again. THEN the mismatch is re-derived against the
   recorded approval (or reported as unverifiable), and no second note is
   added.
+
+- GIVEN a resolved candidate whose recorded `base_sha` was hand-edited to a
+  ref name (`HEAD`, `master`) or a non-string. WHEN the user applies it
+  (`--apply` or the sign-off launch). THEN the apply is refused readably as
+  having no base revision, no merge commit is created, and the workdir is
+  unchanged — never a no-op `git merge HEAD` that reports a successful
+  "apply" without integrating anything.
+- GIVEN two applies racing on one PR workdir where the check found a *clean*
+  merge (not a resolved one). WHEN both run. THEN the branch gains one merge
+  commit, the loser reports the branch's current integrated state rather than
+  a merge failure, and no stale re-check overwrites the applied record.
 
 ## Pass / Fail criteria
 
