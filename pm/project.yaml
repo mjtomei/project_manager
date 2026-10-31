@@ -45908,7 +45908,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/267
   gh_pr_number: 267
   created_at: '2026-10-27T19:03:40.643246+00:00'
-  updated_at: '2026-10-31T18:07:25.345765+00:00'
+  updated_at: '2026-10-31T18:30:31.993052+00:00'
   started_at: '2026-10-27T19:04:56.616056+00:00'
   reviewed_at: null
   merged_at: null
@@ -46151,6 +46151,36 @@ prs:
       by this request.'
     created_at: '2026-10-31T18:07:25.345765+00:00'
     last_edited: '2026-10-31T18:07:25.345765+00:00'
+  - id: note-f6bc353
+    text: 'MASTER INTEGRATION 2026-10-31 (implementation restart): merged origin/master
+      eaf3372e60d1717bd97cc50b5e0b04c6df881fa1 (#249, 544 commits) INTO this PR branch.
+      Merge commit 1c9841f8. No force-push, no reset, PR not merged.
+
+
+      Conflict resolutions: (1) pm_core/tui/auto_start.py keeps the fail-soft, type-validated
+      _loop_record_fields restore; master''s new last_attempt_failed retry field is
+      folded in (validated bool) and written by save_breadcrumb; master''s enable_all
+      was dropped so all-PR mode stays removed. (2) tests/test_qa_loop.py keeps "no
+      target means no scope" — master''s replacement test relied on the removed _auto_start_all
+      wildcard. (3) tests/test_autostart_multi_target.py drops the enable_all branch
+      from the explicit re-arm test. (4) pm/project.yaml takes master''s registry
+      (571 records) and re-adds this PR''s record with its notes (incl. signoff provider:claude-work-xhigh-249)
+      plus the S15 evidence note on pr-3951487; active_pr follows master.
+
+
+      Master''s pr-592e4bd work (usable_prs, live-transcript finalize, retry field,
+      claim/on-disk return handling) is preserved; scope primitives remain is_enabled
+      + in_scope, so no wildcard authority returns.
+
+
+      Validation on integrated head 1c9841f8: full suite 5291 passed, 1 skipped, 0
+      failed (447 s). Focused autostart parser/multi-target/single-policy, breadcrumb/review-loop,
+      QA-loop, log-message, owed-REQA, launch-retry and signoff-handoff suites all
+      pass. Spec pm/specs/pr-049649a/impl.md has a new Integration section. Prior
+      QA results remain historical evidence, not a verdict for this head; native review/QA
+      must re-run. Do not merge: manual merge gate applies.'
+    created_at: '2026-10-31T18:30:31Z'
+    last_edited: '2026-10-31T18:30:31Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

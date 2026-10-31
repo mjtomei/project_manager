@@ -436,3 +436,49 @@ passes in isolation and is master's push-proxy code, not touched here).
 Focused autostart suites (parser, multi-target, single-policy,
 merge-wait, breadcrumb/loop, log-message, signoff handoff, owed REQA,
 launch retry) all pass.
+## Integration — origin/master merged 2026-10-31
+
+Integrated master SHA: `eaf3372e60d1717bd97cc50b5e0b04c6df881fa1`
+("Merge pull request #249 …", 544 commits since the 2026-10-29 integration),
+merged into `pm/pr-049649a-remove-all-pr-autostart-and-fail-closed-on-malform`.
+
+Master's autostart-adjacent changes reconciled here:
+
+- **pr-592e4bd (#249) — QA execution routing / live-transcript readers.**
+  `managed_ids`/`merge_holds`/`on_state_loaded`/`check_and_start`/
+  `_auto_start_review_loops`/`_auto_start_qa_loops` now call master's
+  `usable_prs()` (id-less entries are skipped instead of killing a poll);
+  `_finalize_all_transcripts` skips transcripts a live reader still polls;
+  review-loop retry state gained `last_attempt_failed` (validated as a bool
+  by `_loop_record_fields` before adoption, so a corrupt record still cannot
+  raise on restore); an explicit re-add clears the shown-start-failure memo;
+  and the scheduler/return-handoff paths keep master's newer claim and
+  on-disk-return logic.  None of it reintroduces wildcard scope: the scope
+  primitives remain `is_enabled` + `in_scope`, both fail-closed.
+- **pr-25f4038 — single manual policy (`wait_for_merge`).**  Unchanged by
+  this merge; `add_targets` still defaults new targets to wait-for-merge,
+  `--stop-before-merge` remains only a deprecated alias, and saved stop
+  marks still fold into wait targets on a valid restore.
+
+Conflict resolutions (both sides' behaviour preserved):
+
+- `pm_core/tui/auto_start.py` — kept this PR's fail-soft, type-validated
+  `_loop_record_fields` restore (master had reverted that hunk to a direct
+  constructor); folded master's `last_attempt_failed` into the validated
+  field set and into `save_breadcrumb`; dropped master's `enable_all`
+  (all-PR mode stays removed, with its `_start_failures_shown` clear
+  preserved on `add_targets`).
+- `tests/test_qa_loop.py` — kept this PR's contract: an enabled-but-
+  targetless app drives nothing ("no target means no scope").  Master's
+  replacement test (`test_no_target_allows_all_prs`) depended on the
+  removed `_auto_start_all` wildcard and was dropped with the feature.
+- `tests/test_autostart_multi_target.py` — the explicit re-arm test no
+  longer parametrizes on `enable_all` (removed); the `add_targets` case and
+  its assertions are unchanged.
+- `pm/project.yaml` — took master's registry (571 PR records) and re-added
+  this PR's own record with its nine notes (including the provider
+  `signoff: provider:claude-work-xhigh-249` override) plus the S15 evidence
+  note on `pr-3951487`; `active_pr` follows master.  No other record was
+  altered or dropped.
+
+Validation on the integrated head: full suite **5291 passed, 1 skipped, 0 failed** (447 s) on the merge commit `1c9841f8` (an earlier focused run of the autostart, breadcrumb/review-loop, QA-loop, log-message, owed-REQA, launch-retry and signoff-handoff suites: 720 passed).
