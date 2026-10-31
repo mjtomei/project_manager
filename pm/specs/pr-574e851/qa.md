@@ -279,8 +279,8 @@ shared-launcher (review) fail-closed behaviour.
 
 ### R16 — A mid-run infrastructure ERROR keeps its cause in the note and across a restart
 - **Given** a container-mode run where a container fails **after** another
-  scenario already has a verdict (a lost container, or a queued scenario's
-  create failure),
+  scenario already has a verdict (a lost container that cannot be recreated,
+  or a queued scenario's create failure),
 - **When** the run fails,
 - **Then** the `QA ERROR` note on the PR carries the cause and the retry
   remedy (not a bare per-scenario summary with no reason), `qa_status.json`
