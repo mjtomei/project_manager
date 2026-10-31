@@ -14331,7 +14331,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-31T20:11:02.479381+00:00'
+  updated_at: '2026-10-31T20:27:59.066519+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -15080,6 +15080,28 @@ prs:
       (cast + mp4 + manifests + sha256 snapshots).'
     created_at: '2026-10-31T20:11:02Z'
     last_edited: '2026-10-31T20:11:02Z'
+  - id: note-6e4df42
+    text: 'QA S19 (R15 + loop guards after the worker-routing integration): PASS.
+      Story 1 — closing A during a live review loop: close exited 0 with the retention
+      contract; the loop reported `Review loop done for <A>: · CLOSED (2 iterations)`
+      plus `review_loop: PR <A> merged/closed during review launch`, launched no second
+      review (same review window id, no "Killed existing review window", fake review
+      pane alive), the tree dropped A from the default view and showed `✗ closed ⟳2·`
+      under the `✗ closed` filter, `pm pr list`/pm-home moved the active `*` to B,
+      and A workdir sha256s + the review window survived. Story 2 — closing B mid-planning:
+      `QA aborted mid-planning: <B> is closed; tearing down qa window` within 1 s,
+      qa-<B>/qa-<B>-s0 torn down, no -s1 ever, pr-<B> alive, B stayed closed with
+      note/branch/workdir and unchanged sha256, no QA note. Story 3 — `pm pr cleanup
+      <closed> --resources` cleaned `2 window(s)` (pr-<id>, review-<id>), left the
+      workdir on disk and the entry closed. No code change. Two non-issues recorded:
+      (a) default status bar reads `filter: hide closed` (not the scenario text `hide
+      merged+closed`; hide_merged defaults false, behaviour matches); (b) harness
+      caveat — a tmux session named `pm-*` (the recording recipe suggests `pm-recorder`)
+      is treated as the pm session by `_get_current_pm_session`, so `pm pr cleanup
+      --resources` run from it targets the wrong session and prints "nothing to clean";
+      record from a non-`pm-` session name. Captures: /pm-captures/scenarios/19/{story1-close-during-review,story2-close-during-qa-planning,story3-cleanup-resources}/.'
+    created_at: '2026-10-31T20:27:58Z'
+    last_edited: '2026-10-31T20:27:58Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
