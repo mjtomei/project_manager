@@ -499,6 +499,36 @@ workdirs are touched.
     exit 0).  Observed end to end in QA S22: close-wins rounds print the new
     message, open no `signoff-#1` window, and leave the record `closed`.
 
+51. Launch commands treat a *removed* record at the lock like a terminal one
+    (QA S25).  The at-lock guards in `pm pr start`, `pm pr review` and
+    `pm pr signoff` opened with `pr = store.get_pr(...)` / `if not pr:
+    return`, which reads a `pm pr close --remove` that deleted the entry
+    during the launch's pre-lock work as "nothing to update".  The command
+    then fell through to its success path: `review` printed `PR <id> marked
+    as in_review.` and opened `review-<id>`, exit 0; `signoff` printed
+    `Opened sign-off window 'signoff-<id>'` (after `Integration check failed:
+    PR <id> not found`) and exited 0; `start` printed `PR <id> is now
+    in_progress on <host>` + `Work directory: …` and then crashed in
+    `prompt_gen.generate_prompt` with `ValueError: PR <id> not found` (exit 1
+    but a traceback, and a phantom success line).  All three now decide from
+    one shared `helpers._launch_blocked_at_lock(pr)`, which returns
+    `"removed"` for a missing entry and the terminal status otherwise (it
+    delegates to `_terminal_status_at_lock`), and exits 1 before printing
+    anything or launching a window:
+    `PR <id> was removed while opening the review — not marked in_review and
+    no review window was opened.` / `… opening the sign-off — not marked
+    sign_off and no sign-off window was opened.` / `… while starting — not
+    recording the start. Any prepared workdir is left in place.`  Covered by
+    `test_review_does_not_launch_against_a_removed_pr`,
+    `test_signoff_does_not_launch_against_a_removed_pr` and
+    `test_start_does_not_claim_a_start_on_a_removed_pr` (all three fail on
+    the previous head — the probe reproduces the phantom messages and the
+    start traceback).  Verified end to end on this head against a throwaway
+    project: with the lock held, each launch frozen with `SIGSTOP`, the
+    removal queued, and the lock released, the removal exits 0 with the
+    `Kept:`/`Note:` lines while the launch exits 1 with the message above,
+    opens no window, and leaves the workdir/branch untouched.
+
 The pre-existing `tests/test_pr_enhancements.py:746`
 (`TestGitHubCloseResilience`) asserted the *old* destructive outcome (workdir
 removed, entry removed); it was rewritten to assert retention
@@ -508,7 +538,11 @@ removed, entry removed); it was rewritten to assert retention
 
 - **Lock discipline.** Status mutation happens inside `store.locked_update`
   using the freshly loaded entry; a concurrent `--remove` (entry gone) must not
-  raise — re-check `store.get_pr` inside `apply` and no-op. The merged guard is
+  raise — re-check `store.get_pr` inside `apply` and no-op.  That no-op is for
+  commands that mutate a record in place (close, edit, `--remove`); a *launch*
+  must not treat a missing entry as "nothing to update" and then print its
+  success line and open its window — it reports the removal and exits 1
+  (item 51). The merged guard is
   re-checked inside `apply` too: a merge landing between the pre-lock load and
   the lock must not be rewritten to `closed` (the pre-lock refusal message is
   reused and the command exits 1).  The same rule applies in the other

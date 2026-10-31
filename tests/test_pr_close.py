@@ -1152,6 +1152,104 @@ def test_signoff_does_not_launch_against_a_concurrently_closed_pr(tmp_path):
     assert entry["closed_at"] == "2026-09-01T00:00:00+00:00"
 
 
+def _racing_remove(pm_dir: Path, pr_id: str = "pr-001"):
+    """A ``store.locked_update`` stand-in that deletes *pr_id* on the way in.
+
+    ``pm pr close --remove`` deletes the registry entry outright (the branch
+    and workdir stay on disk).  A launch that loaded its pre-lock snapshot
+    before that removal finds ``store.get_pr`` answering ``None`` inside the
+    lock — the removed-entry half of the at-lock guard.
+    """
+    real_locked_update = store.locked_update
+
+    def racing_update(root, fn, **kwargs):
+        data = store.load(root)
+        data["prs"] = [p for p in data.get("prs") or []
+                       if p.get("id") != pr_id]
+        store.save(data, root)
+        return real_locked_update(root, fn, **kwargs)
+
+    return racing_update
+
+
+def test_review_does_not_launch_against_a_removed_pr(tmp_path):
+    """`pm pr close --remove` deleting the record between review's snapshot
+    and its apply must not leave the review claiming in_review and opening a
+    window against a PR the registry no longer has (pr-62ad13d)."""
+    project = _make_project(tmp_path, status="in_progress",
+                            with_dependent=False)
+    racing = _racing_remove(project["pm_dir"])
+    runner = CliRunner()
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=project["pm_dir"]), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"), \
+         mock.patch.object(pr_mod.store, "locked_update", racing), \
+         mock.patch.object(pr_mod, "_launch_review_window") as launch:
+        result = runner.invoke(pr_mod.pr, ["review", "pr-001"])
+
+    assert result.exit_code != 0, result.output
+    assert "removed while opening the review" in result.output
+    assert "marked as in_review" not in result.output
+    assert not launch.called
+    assert _load_entry(project["pm_dir"]) is None
+
+
+def test_signoff_does_not_launch_against_a_removed_pr(tmp_path):
+    """The sign-off at-lock guard covers the removed record too: it must not
+    claim the transition and must not open a window against a deleted entry
+    (pr-62ad13d)."""
+    project = _make_project(tmp_path, status="qa", with_dependent=False)
+    racing = _racing_remove(project["pm_dir"])
+    runner = CliRunner()
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=project["pm_dir"]), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"), \
+         mock.patch.object(pr_mod.store, "locked_update", racing), \
+         mock.patch.object(signoff_mod, "launch_signoff_window") as launch:
+        result = runner.invoke(pr_mod.pr, ["signoff", "pr-001"])
+
+    assert result.exit_code != 0, result.output
+    assert "removed while opening the sign-off" in result.output
+    assert "marked as sign_off" not in result.output
+    assert not launch.called
+    assert _load_entry(project["pm_dir"]) is None
+
+
+def test_start_does_not_claim_a_start_on_a_removed_pr(tmp_path):
+    """`pm pr start` clones/pushes before writing the start under the lock.
+    A `pm pr close --remove` deleting the entry in that window must fail the
+    command cleanly — no "is now in_progress", no traceback from the prompt
+    generator, and no active_pr claiming a record that is gone
+    (pr-62ad13d)."""
+    project = _make_project(tmp_path, status="in_progress")
+    repo = project["pm_dir"]
+    _git(repo, "init", "-q", "-b", "master")
+    _git(repo, "config", "user.email", "close@example.com")
+    _git(repo, "config", "user.name", "Close Test")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "project state")
+    data = store.load(repo)
+    data["project"]["active_pr"] = "pr-002"
+    store.save(data, repo)
+
+    racing = _racing_remove(repo)
+    runner = CliRunner()
+    with _fake_gh(), \
+         mock.patch.object(pr_mod, "state_root", return_value=repo), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"), \
+         mock.patch.object(pr_mod.store, "locked_update", racing), \
+         mock.patch.object(pr_mod, "_get_pm_session", return_value=None):
+        result = runner.invoke(pr_mod.pr, ["start", "pr-001"])
+
+    assert result.exit_code != 0, result.output
+    assert "removed while starting" in result.output
+    assert "is now in_progress" not in result.output
+    assert "Traceback" not in result.output
+    after = store.load(repo)
+    assert store.get_pr(after, "pr-001") is None
+    assert after["project"]["active_pr"] == "pr-002"
+
+
 def test_auto_sequence_reports_a_closed_pr_without_advancing_it(tmp_path):
     """`closed` is terminal exactly like `merged` for the auto-sequence
     driver: it reports the status (exit 0) instead of "unknown status"

@@ -32,11 +32,13 @@ from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_s
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
+    LAUNCH_REMOVED_AT_LOCK,
     _closed_reopen_hint,
     _ensure_workdir,
     _get_pm_session,
     _gh_state_to_status,
     _infer_pr_id,
+    _launch_blocked_at_lock,
     _log,
     _make_pr_entry,
     _pr_display_id,
@@ -47,7 +49,6 @@ from pm_core.cli.helpers import (
     _resolve_pr_id,
     _resolve_repo_dir,
     _resolve_repo_id,
-    _terminal_status_at_lock,
     _workdirs_dir,
     echo_record,
     emit_paged,
@@ -1126,19 +1127,19 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     # Update state under lock — only advance from pending; don't regress in_review/merged
     machine = platform.node()
     work_path_str = str(work_path)
-    terminal_at_lock: str | None = None
+    blocked_at_lock: str | None = None
 
     def apply(data):
-        nonlocal terminal_at_lock
+        nonlocal blocked_at_lock
         pr = store.get_pr(data, pr_id)
-        if not pr:
-            return
         # A `pm pr close`/merge that landed while this start was cloning and
         # pushing wins: attaching a workdir, the active pointer and an
         # `in_progress` timestamp to a terminal record would erase its
-        # closed_at and re-activate a retired PR (pr-62ad13d).
-        terminal_at_lock = _terminal_status_at_lock(pr)
-        if terminal_at_lock:
+        # closed_at and re-activate a retired PR.  A `--remove` that deleted
+        # the record is reported the same way, not as "nothing to update"
+        # (pr-62ad13d).
+        blocked_at_lock = _launch_blocked_at_lock(pr)
+        if blocked_at_lock:
             return
         if pr.get("status") == "pending":
             pr["status"] = "in_progress"
@@ -1151,9 +1152,14 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         data["project"]["active_pr"] = pr_id
 
     data = store.locked_update(root, apply)
-    if terminal_at_lock:
+    if blocked_at_lock == LAUNCH_REMOVED_AT_LOCK:
         click.echo(
-            f"PR {pr_id} became {terminal_at_lock} while starting — not "
+            f"PR {pr_id} was removed while starting — not recording the "
+            f"start. Any prepared workdir is left in place.", err=True)
+        raise SystemExit(1)
+    if blocked_at_lock:
+        click.echo(
+            f"PR {pr_id} became {blocked_at_lock} while starting — not "
             f"recording the start. Any prepared workdir is left in place.",
             err=True)
         raise SystemExit(1)
@@ -1728,27 +1734,31 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         else:
             click.echo("Warning: Failed to upgrade draft PR. It may already be ready or was closed.", err=True)
 
-    terminal_at_lock: str | None = None
+    blocked_at_lock: str | None = None
 
     def apply(data):
-        nonlocal terminal_at_lock
+        nonlocal blocked_at_lock
         pr = store.get_pr(data, pr_id)
-        if not pr:
-            return
         # Upgrading the draft PR and resolving the workdir happen outside the
         # lock; a `pm pr close`/merge landing meanwhile must win — moving a
         # terminal record back to `in_review` would resurrect it and erase
-        # its closed_at (pr-62ad13d).
-        terminal_at_lock = _terminal_status_at_lock(pr)
-        if terminal_at_lock:
+        # its closed_at (pr-62ad13d).  A `--remove` that deleted the record
+        # must not leave the review window opening against it either.
+        blocked_at_lock = _launch_blocked_at_lock(pr)
+        if blocked_at_lock:
             return
         pr["status"] = "in_review"
         _record_status_timestamp(pr, "in_review")
 
     store.locked_update(root, apply)
-    if terminal_at_lock:
+    if blocked_at_lock == LAUNCH_REMOVED_AT_LOCK:
         click.echo(
-            f"PR {pr_id} became {terminal_at_lock} while opening the review — "
+            f"PR {pr_id} was removed while opening the review — not marked "
+            f"in_review and no review window was opened.", err=True)
+        raise SystemExit(1)
+    if blocked_at_lock:
+        click.echo(
+            f"PR {pr_id} became {blocked_at_lock} while opening the review — "
             f"not marked in_review and no review window was opened.", err=True)
         raise SystemExit(1)
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
@@ -1842,16 +1852,14 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
     # sign-off window against a record that has become terminal would
     # resurrect a retired PR's phase and contradict the record
     # (pr-62ad13d), exactly like the start/review at-lock guards.
-    terminal_at_lock: str | None = None
+    blocked_at_lock: str | None = None
     transitioned = False
 
     def apply(d):
-        nonlocal terminal_at_lock, transitioned
+        nonlocal blocked_at_lock, transitioned
         pr = store.get_pr(d, pr_id)
-        if not pr:
-            return
-        terminal_at_lock = _terminal_status_at_lock(pr)
-        if terminal_at_lock:
+        blocked_at_lock = _launch_blocked_at_lock(pr)
+        if blocked_at_lock:
             return
         # Decide from the freshly loaded status, not the pre-lock snapshot:
         # a concurrent edit may already have moved the PR to sign_off.
@@ -1861,9 +1869,14 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
             transitioned = True
 
     store.locked_update(root, apply)
-    if terminal_at_lock:
+    if blocked_at_lock == LAUNCH_REMOVED_AT_LOCK:
         click.echo(
-            f"PR {pr_id} became {terminal_at_lock} while opening the "
+            f"PR {pr_id} was removed while opening the sign-off — not "
+            f"marked sign_off and no sign-off window was opened.", err=True)
+        raise SystemExit(1)
+    if blocked_at_lock:
+        click.echo(
+            f"PR {pr_id} became {blocked_at_lock} while opening the "
             f"sign-off — not marked sign_off and no sign-off window was "
             f"opened.", err=True)
         raise SystemExit(1)

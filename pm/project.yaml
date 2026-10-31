@@ -14331,7 +14331,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-31T22:33:03.593534+00:00'
+  updated_at: '2026-10-31T22:46:56.113421+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -15222,6 +15222,22 @@ prs:
       (cast+mp4+transcript+driver+manifest).'
     created_at: '2026-10-31T22:33:03Z'
     last_edited: '2026-10-31T22:33:03Z'
+  - id: note-d4c3137
+    text: 'QA S25 (close --remove vs launch, removed-entry at-lock path): NEEDS_WORK
+      fixed in the next commit. A `pm pr close --remove` that deletes the entry between
+      a launch pre-lock snapshot and its apply was read as "nothing to update": review
+      printed "marked as in_review." + opened review-<id> (rc 0), signoff opened signoff-<id>
+      (rc 0, after "Integration check failed"), start printed "is now in_progress"
+      then crashed in prompt_gen with ValueError. The three at-lock guards now share
+      helpers._launch_blocked_at_lock (returns "removed" for a missing entry, else
+      the terminal status) and exit 1 with a removal-specific message before printing
+      a success line or opening a window. Tests: _racing_remove + one per command
+      (all three fail on the previous head). Spec impl.md item 51 + lock-discipline
+      note. Runtime evidence: /pm-captures/scenarios/25/{pre-fix,post-fix}/ (frozen
+      race with the store lock held); removal side unchanged (Kept/Note lines, workdir
+      + branch survive).'
+    created_at: '2026-10-31T22:46:56Z'
+    last_edited: '2026-10-31T22:46:56Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249

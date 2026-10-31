@@ -502,6 +502,33 @@ def _terminal_status_at_lock(pr: dict | None) -> str | None:
     return status if status in TERMINAL_PR_STATES else None
 
 
+#: Sentinel returned by :func:`_launch_blocked_at_lock` when the record was
+#: deleted (``pm pr close --remove``) between a launch's pre-lock snapshot and
+#: its apply — distinct from a terminal status because the launch's wording
+#: has to say the record is gone, not that it is retired.
+LAUNCH_REMOVED_AT_LOCK = "removed"
+
+
+def _launch_blocked_at_lock(pr: dict | None) -> str | None:
+    """Return why a launch command must not record its work, or ``None``.
+
+    A launch (start/review/sign-off) checks its pre-lock snapshot, then does
+    real work — clone/push/draft-PR create, workdir resolution, window setup —
+    before writing its transition under the store lock.  Anything that lands
+    in that window must win:
+
+    * a ``pm pr close``/merge turns the record terminal — reported as its
+      status (see :func:`_terminal_status_at_lock`);
+    * ``pm pr close --remove`` deletes the record outright — reported as
+      ``"removed"``.  ``store.get_pr`` answers ``None`` then, and a launch that
+      treated that as "nothing to update" still printed its success line and
+      opened its window against a PR the registry no longer has (pr-62ad13d).
+    """
+    if pr is None:
+        return LAUNCH_REMOVED_AT_LOCK
+    return _terminal_status_at_lock(pr)
+
+
 def _closed_reopen_hint(pr_id: str, purpose: str | None = None) -> str:
     """The refusal sentence for a command run against a retained closed PR.
 
