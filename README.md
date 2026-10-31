@@ -177,6 +177,11 @@ merge, watcher) runs Claude Code with a model and effort chosen per role:
 Effort follows the same order, with the selected provider's own `effort`
 between the PR's setting and the project's.
 
+The choice is explicit and independent per role: any session type may be
+routed to a provider, and a role with no model or provider configured
+runs plain `claude` on the CLI default. Routing one role does not move
+the others.
+
 A model value is a model name (`opus`, `claude-opus-5-5`, ...) or
 `provider:<name>` for a provider defined on this host in
 `~/.pm/providers.yaml`. A provider of type `router` points Claude at an
@@ -190,6 +195,11 @@ endpoint, and pm handles that session like one on the default provider
 (`pm provider test` checks a router on demand). pm never stores, checks or
 refreshes credentials: signing in happens outside pm, as it does for plain
 `claude`.
+
+Scenario 0 (the interactive QA session you drive) is its own role,
+`qa_interactive`. Configs from before that role existed that set only
+`qa_scenario` to a plain model still apply that model to Scenario 0, but
+a `qa_scenario` provider (the QA workers' route) never follows it.
 
 ```yaml
 # ~/.pm/providers.yaml
@@ -209,7 +219,10 @@ providers:
 pm provider add my-router --type router --api-base http://127.0.0.1:<port> --model <model>
 pm provider show my-router          # settings, launch environment, status
 pm provider edit my-router --effort high
-pm model set qa_scenario provider:my-router --project   # project-wide, one role
+pm model set qa_scenario provider:my-router --project   # one QA role, project-wide
+pm model set impl provider:my-router --project          # one role, any type
+pm model set signoff provider:my-router --project       # another role, independently
+pm model set impl opus --project                        # or just a plain model name
 pm pr model set pr-001 provider:my-router               # one PR, every role
 pm pr model set pr-001 opus --role signoff --effort high
 pm pr model show pr-001             # per role: model, effort, command, why

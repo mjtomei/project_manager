@@ -88,18 +88,20 @@ def model_show():
         for line in pr_lines:
             click.echo(line)
 
-    # Router providers (worker routes): where those sessions actually go.
-    from pm_core import worker_route
+    # Router providers: where each explicitly routed role actually goes.
+    # Any session type may be routed; the setting is explicit per role.
+    from pm_core import router_route
     from pm_core.container import is_container_mode_enabled
     from pm_core.model_config import PR_SESSION_TYPES, get_pr_model_override
     # In container mode only some types run in a container (and reach the
-    # route through its bridge); the rest stay on the host (S58).
+    # route through its bridge); the rest stay on the host (S58).  This is
+    # placement, not routing eligibility.
     in_containers = is_container_mode_enabled()
 
     def describe(st, res):
-        return worker_route.describe(
+        return router_route.describe(
             res, container=(in_containers
-                            and st in worker_route.CONTAINER_SESSION_TYPES))
+                            and st in router_route.CONTAINER_SESSION_TYPES))
 
     route_lines = []
     for st in SESSION_TYPES if resolvable else ():
@@ -152,7 +154,7 @@ def model_show():
                 f"  {pr.get('id')} ({label}) {describe(items[0][0], res)}")
     if route_lines:
         click.echo()
-        click.echo("Routes:")
+        click.echo("Routes (roles set to a provider):")
         for line in route_lines:
             click.echo(line)
 

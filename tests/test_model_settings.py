@@ -26,7 +26,7 @@ ROUTE = "rt"
 def pm_home_dir(tmp_path, monkeypatch):
     home = tmp_path / "pmhome"
     home.mkdir()
-    for mod in ("pm_core.providers", "pm_core.worker_route"):
+    for mod in ("pm_core.providers", "pm_core.router_route"):
         monkeypatch.setattr(f"{mod}.pm_home", lambda: home)
     for var in ("PM_PROVIDER", "PM_MODEL", "PM_EFFORT"):
         monkeypatch.delenv(var, raising=False)
@@ -518,10 +518,10 @@ async def test_tui_project_view_shows_ok_route_status(project_root,
                                                       pm_home_dir,
                                                       monkeypatch):
     # "[OK]" reads as a markup tag to textual; the popup must still show it.
-    from pm_core import worker_route
+    from pm_core import router_route
     _providers(pm_home_dir, **{ROUTE: _router()})
-    monkeypatch.setattr(worker_route, "check_route",
-                        lambda res: worker_route.RouteStatus(
+    monkeypatch.setattr(router_route, "check_route",
+                        lambda res: router_route.RouteStatus(
                             ok=True, route=res.provider))
     app = _screen_app(project_root, "pr-001")
     async with app.run_test(size=(160, 60)) as pilot:

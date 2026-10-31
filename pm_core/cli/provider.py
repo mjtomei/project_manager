@@ -372,9 +372,9 @@ def provider_detail_lines(p, *, status: bool = False) -> list[str]:
         lines.append(f"  launch unsets: {', '.join(unset)}")
     lines.extend(f"  warning: {line}" for line in _retired_key_lines(p.name))
     if status and p.type == "router":
-        from pm_core import worker_route
+        from pm_core import router_route
         from pm_core.model_config import ModelResolution
-        st = worker_route.check_route(ModelResolution(provider=p.name))
+        st = router_route.check_route(ModelResolution(provider=p.name))
         lines.append("  status: OK" if st.ok else f"  status: {st.message()}")
     return lines
 
@@ -443,7 +443,7 @@ def provider_test(name: str | None, quick: bool, in_container: bool,
     function calling (required for Claude Code's agentic workflows).
     If NAME is omitted, tests the default provider.
 
-    For a router provider, runs the same preflight QA runs before every
+    For a router provider, runs the same preflight pm runs before every
     routed launch (router port, launcher, and with --container the bridge
     into a container); --live sends one prompt.
     """
@@ -482,21 +482,21 @@ def provider_test(name: str | None, quick: bool, in_container: bool,
 
 
 def _test_router(provider, *, in_container: bool, live: bool) -> None:
-    from pm_core import worker_route
+    from pm_core import router_route
     from pm_core.model_config import ModelResolution
 
     click.echo(f"  Router: {provider.api_base}  model: {provider.model}")
     for line in _router_detail_lines(provider):
         click.echo(f"  {line}")
     res = ModelResolution(provider=provider.name)
-    st = worker_route.check_route(res, container=in_container)
+    st = router_route.check_route(res, container=in_container)
     if not st.ok:
         click.echo(f"  Preflight: FAILED — {st.message()}", err=True)
         raise SystemExit(1)
     click.echo("  Preflight (host): OK")
     if not in_container:
         if live:
-            _report_probe(worker_route.live_probe(provider), provider)
+            _report_probe(router_route.live_probe(provider), provider)
         return
 
     import secrets
@@ -511,17 +511,17 @@ def _test_router(provider, *, in_container: bool, live: bool) -> None:
         container_mod.create_container(
             name=name, config=container_mod.load_container_config(),
             workdir=workdir,
-            extra_rw_mounts=worker_route.container_mounts(res))
-        st = worker_route.check_route(res, container=True,
+            extra_rw_mounts=router_route.container_mounts(res))
+        st = router_route.check_route(res, container=True,
                                       container_name=name)
         if not st.ok:
             click.echo(f"  Container route: FAILED — {st.message()}", err=True)
             raise SystemExit(1)
         click.echo(f"  Container route: OK (127.0.0.1 in {name} -> "
-                   f"{worker_route.bridge_socket(provider.name)} -> "
+                   f"{router_route.bridge_socket(provider.name)} -> "
                    f"{provider.api_base})")
         if live:
-            _report_probe(worker_route.live_probe(provider,
+            _report_probe(router_route.live_probe(provider,
                                                   container_name=name),
                           provider)
     finally:
@@ -531,7 +531,7 @@ def _test_router(provider, *, in_container: bool, live: bool) -> None:
 
 def _probe_mismatch(out: dict, provider) -> str:
     """Why a probe that reported no error failed, naming the models."""
-    from pm_core.worker_route import model_on_route
+    from pm_core.router_route import model_on_route
     requested = out.get("models") or []
     if not requested:
         return f"no model requested; expected only {provider.model}"
