@@ -38420,7 +38420,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/247
   gh_pr_number: 247
   created_at: '2026-10-22T15:34:40.862915+00:00'
-  updated_at: '2026-10-31T18:07:25.345765+00:00'
+  updated_at: '2026-10-31T18:59:18.490971+00:00'
   started_at: '2026-10-22T17:21:04.879323+00:00'
   reviewed_at: '2026-10-22T18:43:52.122594+00:00'
   merged_at: null
@@ -39001,6 +39001,59 @@ prs:
       by this request.'
     created_at: '2026-10-31T18:07:25.345765+00:00'
     last_edited: '2026-10-31T18:07:25.345765+00:00'
+  - id: note-d132ae5
+    text: 'MASTER INTEGRATION DONE 2026-10-31 (second integration, after #249): merged
+      origin/master eaf3372e into this branch as merge commit 59449dcb and pushed
+      (no force). This is the user-directed implementation return, not a review/signoff
+      verdict; prior review/QA results are historical evidence for their revisions
+      only and must be re-run against this HEAD.
+
+
+      Conflicts resolved (pm/project.yaml, pm_core/qa_loop.py, tests/test_qa_loop.py):
+
+      - qa_loop.py keeps this PR launch_retries / per-scenario grace / background
+      launch+diagnose ops / dropped_wait_verdicts guards; took master _write_dashboard
+      (S106), verifier setup-error stop, _ensure_scenario_container (S78), duplicate-window
+      collapse, and the _status_scenarios dashboard write.
+
+      - RELAUNCH BEHAVIOR CHANGED vs the earlier R9 text: a relaunch now REUSES the
+      scenario window its refiner/verifier keeps alive (a re-evaluation follow-up
+      is typed into the verifier pane; killing the window broke that) and only collapses
+      duplicate same-named windows. A create retry still tears down the leftover window/container.
+      impl.md R9 updated.
+
+      - Background launch steps now hand a ProviderNotFoundError to the poll thread
+      via setup_errors, which writes the dashboard and re-raises, instead of treating
+      it as a retryable launch failure (otherwise a broken provider burned the retry
+      ladder and the S106 dashboard guarantee was lost). impl.md R2 updated.
+
+      - Master immediate INPUT_REQUIRED for windowless scenarios stays dropped (create
+      retries replace it, R5/E5).
+
+      - project.yaml: 3-way merge (merge_3way over index stages, master order); 573
+      PRs, every PR id and every note id from both sides verified present; this PR
+      entry keeps all 24 branch notes.
+
+      - tests: adapted master queued-launch/setup-error poll tests to the async dequeue
+      model (a dequeued launch is in flight, not "queued"; a relaunch spends a retry
+      backoff before the setup error surfaces); kept the S78/S130 container tests;
+      dropped the old sleep-based TestScenarioRetryLogic tests replaced by tests/test_qa_launch_retry.py.
+
+
+      Tests (scratch venv, PATH=/usr/bin:$PATH): 5039 passed, 1 skipped, 0 failed.
+      tests/test_push_proxy.py is excluded: it hangs identically on origin/master
+      in this container (pre-existing environment issue, reproduced in a detached
+      master worktree).
+
+
+      QA caveats from earlier runs still apply (dedicated tmux socket/isolated HOME,
+      fake-claude hold timers, zoom the status pane). Still open for fresh QA: the
+      earlier NEEDS_WORK on TUI-restart-mid-backoff and the scenario-9 INPUT_REQUIRED
+      Then (instruction file is inlined by the concretizer, not referenced in the
+      worker prompt) need re-evaluation against this HEAD; process-limit (PID) create-kind
+      exhaustion has not been covered live. Handoff to fresh native review/QA/signoff.'
+    created_at: '2026-10-31T18:59:18Z'
+    last_edited: '2026-10-31T18:59:18Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-1ab9075-bug-one-failed-qa-worker-blocks-verd-c740d896
   model: provider:deepseek-flash
   effort: high
