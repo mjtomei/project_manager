@@ -863,7 +863,6 @@ class TestMaybeStartQAScoping:
         app._data = data
         app._auto_start = auto_start
         app._auto_start_targets = {target: {}} if target else {}
-        app._auto_start_all = not target
         app._qa_loops = {}
         app._self_driving_qa = {}
         return app
@@ -936,8 +935,9 @@ class TestMaybeStartQAScoping:
         assert pr["status"] == "in_review"  # unchanged
         mock_start.assert_not_called()
 
-    def test_no_target_allows_all_prs(self, tmp_path):
-        """Without a target, any in_review PR transitions to qa."""
+    def test_no_target_does_not_transition_any_pr(self, tmp_path):
+        """No explicit target means no scope: auto-start must not fall back
+        to the whole backlog."""
         from pm_core.tui.review_loop_ui import _maybe_start_qa
         from pm_core import store
 
@@ -952,9 +952,8 @@ class TestMaybeStartQAScoping:
 
         data = store.load(app._root)
         pr = store.get_pr(data, "pr-x")
-        assert pr["status"] == "qa"
-        mock_start.assert_called_once_with(
-            app, "pr-x", lock_timeout=0.0)  # store.NO_WAIT: retried per tick (RQ38)
+        assert pr["status"] == "in_review"  # unchanged
+        mock_start.assert_not_called()
 
     def test_skips_pr_not_in_review_status(self, tmp_path):
         """PR that is not in_review status is not transitioned even if in tree."""
@@ -997,7 +996,6 @@ class TestPollTriggersQA:
         app._data = data
         app._auto_start = auto_start
         app._auto_start_targets = {target: {}} if target else {}
-        app._auto_start_all = not target
         app._review_loops = {}
         app._qa_loops = {}
         app._self_driving_qa = {}
@@ -1093,7 +1091,6 @@ class TestSelfDrivingQALoop:
         app._data = data
         app._auto_start = False  # Self-driving works independently of auto-start
         app._auto_start_targets = {}
-        app._auto_start_all = True
         app._qa_loops = {}
         app._review_loops = {}
         app._self_driving_qa = {
@@ -1190,6 +1187,9 @@ class TestSelfDrivingQALoop:
         from pm_core.tui.qa_loop_ui import _on_qa_complete
 
         app = self._make_app(tmp_path)
+        # Explicit target: the hand-off is scoped to a target closure.
+        app._auto_start = True
+        app._auto_start_targets = {"pr-001": {}}
         app._self_driving_qa["pr-001"]["required_passes"] = 2
         app._self_driving_qa["pr-001"]["pass_count"] = 1
 

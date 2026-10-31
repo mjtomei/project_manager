@@ -141,7 +141,6 @@ class TestAutoStartHelpers:
         from pm_core.tui.auto_start import get_targets, in_scope
         app = MagicMock()
         app._auto_start = True
-        app._auto_start_all = False
         app._data = {"prs": [{"id": "pr-001"}]}
         assert get_targets(app) == []
         assert in_scope(app, "pr-001") is False
@@ -158,8 +157,10 @@ class TestAutoStartQALoops:
         """Create a mock app with auto-start enabled."""
         app = MagicMock()
         app._auto_start = True
-        app._auto_start_targets = {target: {}} if target else {}
-        app._auto_start_all = not target
+        # Explicit targets only (no all-PR mode).  With no target argument,
+        # every listed PR is an explicit target for these fixture tests.
+        app._auto_start_targets = ({target: {}} if target
+                                   else {p["id"]: {} for p in prs})
         app._data = {"prs": prs}
         app._qa_loops = {}
         return app
@@ -271,8 +272,8 @@ class TestAutoStartQALoops:
             _auto_start_qa_loops(app, prs=prs)
         mock_start.assert_not_called()
 
-    def test_no_target_starts_all_qa_prs(self):
-        """Without a target, all qa-status PRs get QA started."""
+    def test_all_prs_as_explicit_targets_start(self):
+        """Every explicitly targeted qa-status PR gets QA started."""
         from pm_core.tui.auto_start import _auto_start_qa_loops
         prs = [
             {"id": "pr-a", "status": "qa", "workdir": "/tmp/a", "depends_on": []},

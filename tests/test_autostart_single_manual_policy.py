@@ -168,27 +168,28 @@ def test_breadcrumb_legacy_stop_marks_become_wait_targets():
     data = {"auto_start": True, "run_id": "r",
             "targets": [{"pr_id": "f", "added_at": "t", "source": "key:A"}],
             "stop_before_merge": ["f", "x"]}
-    targets, all_mode, migrated = st.targets_from_breadcrumb(data, prs)
-    assert not all_mode and migrated
-    assert list(targets) == ["f", "x"]
-    assert targets["f"][st.WAIT_KEY] is True      # legacy stop target
-    assert targets["x"][st.WAIT_KEY] is True      # standalone hold preserved
-    assert targets["x"]["source"] == "legacy-stop"
+    res = st.targets_from_breadcrumb(data, prs)
+    assert res.error is None and res.migrated
+    assert list(res.targets) == ["f", "x"]
+    assert res.targets["f"][st.WAIT_KEY] is True      # legacy stop target
+    assert res.targets["x"][st.WAIT_KEY] is True      # standalone hold preserved
+    assert res.targets["x"]["source"] == "legacy-stop"
 
 
 def test_breadcrumb_legacy_stop_drops_terminal_ids():
     prs = [_pr("m", status="merged"), _pr("f")]
     data = {"auto_start": True, "targets": [{"pr_id": "f"}],
             "stop_before_merge": ["m", "f"]}
-    targets, _all, _mig = st.targets_from_breadcrumb(data, prs)
-    assert list(targets) == ["f"] and targets["f"][st.WAIT_KEY] is True
+    res = st.targets_from_breadcrumb(data, prs)
+    assert res.error is None
+    assert list(res.targets) == ["f"] and res.targets["f"][st.WAIT_KEY] is True
 
 
 def test_breadcrumb_legacy_single_target_is_wait():
-    targets, all_mode, migrated = st.targets_from_breadcrumb(
+    res = st.targets_from_breadcrumb(
         {"auto_start": True, "target": "f", "run_id": "r"})
-    assert list(targets) == ["f"] and not all_mode and migrated
-    assert targets["f"][st.WAIT_KEY] is True
+    assert list(res.targets) == ["f"] and res.error is None and res.migrated
+    assert res.targets["f"][st.WAIT_KEY] is True
 
 
 @pytest.mark.parametrize("record,wait", [
@@ -205,94 +206,98 @@ def test_breadcrumb_legacy_single_target_is_wait():
     ({"pr_id": "f"}, False),
 ])
 def test_breadcrumb_record_fields_normalized(record, wait):
-    targets, _all, _mig = st.targets_from_breadcrumb(
+    res = st.targets_from_breadcrumb(
         {"auto_start": True, "targets": [record]})
-    assert bool(targets["f"].get(st.WAIT_KEY)) is wait
+    assert res.error is None
+    assert bool(res.targets["f"].get(st.WAIT_KEY)) is wait
 
 
 def test_breadcrumb_record_migration_is_reported():
     """A legacy record field marks the breadcrumb migrated; a plain
     current-format record (auto target) does not."""
-    _t, _a, migrated = st.targets_from_breadcrumb(
+    res = st.targets_from_breadcrumb(
         {"auto_start": True,
          "targets": [{"pr_id": "f", "policy": "stop_before_merge"}]})
-    assert migrated
-    _t, _a, migrated = st.targets_from_breadcrumb(
+    assert res.migrated
+    res = st.targets_from_breadcrumb(
         {"auto_start": True,
          "targets": [{"pr_id": "f", "added_at": "t", "source": "key:A"}]})
-    assert not migrated
-    _t, _a, migrated = st.targets_from_breadcrumb(
+    assert not res.migrated
+    res = st.targets_from_breadcrumb(
         {"auto_start": True,
          "targets": [{"pr_id": "f", "wait_for_merge": True}]})
-    assert not migrated
+    assert not res.migrated
 
 
 def test_breadcrumb_stop_marks_dropped_when_auto_start_was_off():
     """A leftover mark cannot re-enable auto-start (and launch work) on its
     own; with auto-start off there is no scheduler/merge path to gate."""
-    targets, all_mode, migrated = st.targets_from_breadcrumb(
+    res = st.targets_from_breadcrumb(
         {"targets": [], "stop_before_merge": ["x"]})
-    assert targets == {} and all_mode is False and migrated
+    assert res.targets == {} and res.error is None and res.migrated
 
 
 def test_breadcrumb_string_target_is_a_legacy_shape():
     """No pm version wrote bare-string targets, so the policy is unknown:
     fail closed to wait-for-merge (as for ``target: X``) and report it."""
-    targets, _all, migrated = st.targets_from_breadcrumb(
+    res = st.targets_from_breadcrumb(
         {"auto_start": True, "targets": ["f"]})
-    assert list(targets) == ["f"] and migrated
-    assert targets["f"].get(st.WAIT_KEY) is True
-    assert targets["f"]["source"] == "legacy-breadcrumb"
+    assert list(res.targets) == ["f"] and res.migrated
+    assert res.targets["f"].get(st.WAIT_KEY) is True
+    assert res.targets["f"]["source"] == "legacy-breadcrumb"
 
 
-def test_breadcrumb_empty_string_target_is_dropped_and_reported():
-    """An empty string names no PR: like any other entry without a
-    recoverable id it is dropped (nothing to hold) but still reported."""
-    targets, _all, migrated = st.targets_from_breadcrumb(
+def test_breadcrumb_empty_string_target_rejects_whole_set():
+    """An empty string names no PR, so the set cannot be restored exactly:
+    fail closed (all-or-nothing) rather than silently dropping an entry."""
+    res = st.targets_from_breadcrumb(
         {"auto_start": True, "targets": ["", {"pr_id": "f"}]})
-    assert list(targets) == ["f"] and migrated
+    assert res.targets == {} and res.error
 
 
 def test_breadcrumb_parse_is_idempotent():
     data = {"auto_start": True, "targets": [{"pr_id": "f"}],
             "stop_before_merge": ["x"]}
-    first, _a, _m = st.targets_from_breadcrumb(data)
-    second, _a2, _m2 = st.targets_from_breadcrumb(
+    first = st.targets_from_breadcrumb(data)
+    second = st.targets_from_breadcrumb(
         {"auto_start": True,
-         "targets": st.targets_to_breadcrumb(first)})
-    assert first == second
+         "targets": st.targets_to_breadcrumb(first.targets)})
+    assert first.targets == second.targets
 
 
 @pytest.mark.parametrize("bad_targets", [{"f": {}}, "f", 42])
-def test_breadcrumb_malformed_targets_matches_null_handling(bad_targets):
-    """A non-list ``targets`` value is corrupt: the unusable list is dropped
-    and the explicit ``all_mode`` flag is read exactly as for
-    ``targets: null`` (never the legacy "all ready PRs" inference)."""
-    targets, all_mode, migrated = st.targets_from_breadcrumb(
-        {"targets": bad_targets, "all_mode": True})
-    assert targets == {} and all_mode is True and migrated
-    targets, all_mode, migrated = st.targets_from_breadcrumb(
+def test_breadcrumb_malformed_targets_is_rejected(bad_targets):
+    """A non-list ``targets`` value is corrupt saved state (the incident
+    shape): reject it and never fall back to legacy "all ready PRs"."""
+    res = st.targets_from_breadcrumb(
         {"targets": bad_targets, "all_mode": False})
-    assert targets == {} and all_mode is False and migrated
+    assert res.targets == {} and res.error
+    res = st.targets_from_breadcrumb({"targets": bad_targets})
+    assert res.targets == {} and res.error
 
 
-def test_breadcrumb_unusable_list_entry_is_reported():
-    """An entry with no recoverable id is dropped (nothing to hold) but the
-    corrupt shape must still be reported, not silently ignored."""
-    targets, _all, migrated = st.targets_from_breadcrumb(
+def test_breadcrumb_unusable_list_entry_rejects_whole_set():
+    """An entry with no recoverable id makes the saved set ambiguous:
+    reject all of it rather than restoring a partial authority."""
+    res = st.targets_from_breadcrumb(
         {"targets": [{"pr_id": "f"}, 42, {"added_at": "t", "source": "x"}]})
-    assert list(targets) == ["f"] and migrated
+    assert res.targets == {} and res.error
 
 
-def test_breadcrumb_all_mode_must_be_literal_true():
-    targets, all_mode, _mig = st.targets_from_breadcrumb(
+def test_breadcrumb_all_mode_flag_is_never_honored():
+    """All-PR mode has been removed: even a literal ``True`` (or a
+    non-boolean) is rejected, never narrowed into a restore."""
+    res = st.targets_from_breadcrumb(
         {"targets": [], "all_mode": "false", "stop_before_merge": ["a"]})
-    assert targets == {} and all_mode is False
+    assert res.targets == {} and res.error
+    assert "all_mode" in res.error
+    res = st.targets_from_breadcrumb(
+        {"auto_start": True, "all_mode": True, "run_id": "r"})
+    assert res.targets == {} and res.error and "all-mode" in res.error
 
 
 @pytest.mark.parametrize("data", [
     {"auto_start": True, "all_mode": False},
-    {"auto_start": True, "all_mode": "false"},
     {"auto_start": True, "targets": None, "all_mode": False},
     {"auto_start": True, "targets": None},
 ])
@@ -300,33 +305,27 @@ def test_breadcrumb_current_keys_without_targets_fail_closed(data):
     """A mixed-version/corrupt breadcrumb carrying current-format keys but no
     usable target list must not fall back to the legacy "all ready PRs"
     inference (which would auto-merge the whole backlog)."""
-    targets, all_mode, migrated = st.targets_from_breadcrumb(data)
-    assert targets == {} and all_mode is False and migrated
+    res = st.targets_from_breadcrumb(data)
+    assert res.targets == {} and res.error
 
 
-def test_breadcrumb_explicit_all_mode_without_targets_is_honored():
-    targets, all_mode, migrated = st.targets_from_breadcrumb(
-        {"auto_start": True, "all_mode": True, "run_id": "r"})
-    assert targets == {} and all_mode is True and migrated
-
-
-def test_breadcrumb_stop_field_as_string_keeps_one_id():
-    targets, _all, _mig = st.targets_from_breadcrumb(
+def test_breadcrumb_stop_field_as_string_is_rejected():
+    """Saved state is held to the shape this module writes (a list).  A
+    string is ambiguous: fail closed rather than guessing a gate."""
+    res = st.targets_from_breadcrumb(
         {"auto_start": True, "targets": [{"pr_id": "f"}],
          "stop_before_merge": "x"})
-    assert list(targets) == ["f", "x"]
-    assert targets["x"][st.WAIT_KEY] is True
+    assert res.targets == {} and res.error
+    assert "stop_before_merge" in res.error
 
 
-def test_breadcrumb_stop_ids_from_unordered_input_are_sorted():
+def test_migrate_legacy_stop_order_is_deterministic():
     """The old in-memory status input carried a set: the migrated target
     order must be deterministic (sorted), not hash order.  A list keeps the
     recorded order."""
     def migrated_order(stop):
-        targets, _all, _mig = st.targets_from_breadcrumb(
-            {"auto_start": True, "targets": [{"pr_id": "f"}],
-             "stop_before_merge": stop})
-        return list(targets)
+        return list(st.migrate_legacy_stop(
+            [], {"f": {"wait_for_merge": False}}, stop))
 
     assert migrated_order({"y", "b", "x"}) == ["f", "b", "x", "y"]
     assert migrated_order({"y": 1, "b": 1}) == ["f", "b", "y"]
@@ -363,6 +362,8 @@ def test_consume_legacy_breadcrumb_preserves_standalone_hold(tmp_path):
     assert auto_start.target_policy(fresh, "x") == POLICY_WAIT
     assert auto_start.merge_hold(fresh, "a") is None
     assert auto_start.merge_hold(fresh, "x") == {"targets": ["x"]}
+
+
 
 
 # ---------------------------------------------------------------------------

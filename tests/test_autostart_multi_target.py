@@ -41,7 +41,6 @@ class FakeApp:
         self._root = root
         self._auto_start = False
         self._auto_start_targets = {}
-        self._auto_start_all = False
         self._auto_start_run_id = None
         self._auto_start_launching = set()
         self._review_loops = {}
@@ -107,25 +106,26 @@ class TestBreadcrumbFormat:
         targets = {"a": st.make_target_record("cli"),
                    "b": st.make_target_record("key:O")}
         data = {"auto_start": True,
-                "targets": st.targets_to_breadcrumb(targets),
-                "all_mode": False}
-        got, all_mode, migrated = st.targets_from_breadcrumb(data)
-        assert list(got) == ["a", "b"]
-        assert got["b"]["source"] == "key:O"
-        assert (all_mode, migrated) == (False, False)
+                "targets": st.targets_to_breadcrumb(targets)}
+        got = st.targets_from_breadcrumb(data)
+        assert list(got.targets) == ["a", "b"]
+        assert got.targets["b"]["source"] == "key:O"
+        assert (got.migrated, got.error) == (False, None)
 
     def test_legacy_single_target_migrates(self):
-        got, all_mode, migrated = st.targets_from_breadcrumb(
+        got = st.targets_from_breadcrumb(
             {"auto_start": True, "target": "pr-1", "run_id": "r"})
-        assert list(got) == ["pr-1"] and not all_mode and migrated
+        assert list(got.targets) == ["pr-1"]
+        assert got.migrated and got.error is None
 
-    def test_legacy_targetless_is_explicit_all_mode(self):
-        got, all_mode, migrated = st.targets_from_breadcrumb(
+    def test_legacy_targetless_is_rejected_not_all_mode(self):
+        got = st.targets_from_breadcrumb(
             {"auto_start": True, "target": None, "run_id": "r"})
-        assert got == {} and all_mode and migrated
+        assert got.targets == {} and got.error
 
     def test_no_auto_start(self):
-        assert st.targets_from_breadcrumb({"review_loops": {}}) == ({}, False, False)
+        got = st.targets_from_breadcrumb({"review_loops": {}})
+        assert got.targets == {} and got.error is None and not got.migrated
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +141,6 @@ class TestAddRemove:
         assert r["changes"][0]["action"] == "unchanged"
         assert auto_start.get_targets(app) == ["a", "b"]
         assert app._auto_start is True
-        assert not auto_start.is_all_mode(app)
 
     def test_default_policy_new_target_is_wait(self):
         app = FakeApp([_pr("a")])
@@ -338,7 +337,7 @@ class TestKeys:
         app = FakeApp([_pr("a")])
         asyncio.run(auto_start.toggle(app, None))
         assert app._auto_start is False
-        assert not auto_start.is_all_mode(app)
+        assert auto_start.managed_ids(app) == set()
 
 
 # ---------------------------------------------------------------------------
@@ -431,7 +430,7 @@ class TestCheckAndStart:
             asyncio.run(auto_start.check_and_start(app))
         sp.assert_not_called()
         assert app._auto_start is False
-        assert not auto_start.is_all_mode(app)
+        assert auto_start.managed_ids(app) == set()
 
     def test_empty_pr_data_does_not_prune_targets(self, tmp_path):
         """Unloaded/empty PR data must not read as "every target vanished"."""
@@ -562,8 +561,10 @@ class TestBreadcrumb:
              patch.object(auto_start, "check_and_start"):
             asyncio.run(auto_start.consume_breadcrumb(fresh))
         assert auto_start.get_targets(fresh) == ["a"]
+        assert auto_start.managed_ids(fresh) == {"a"}
+        # The legacy single-target shape cannot distinguish O from A, so it
+        # migrates fail-closed to the manual (wait-for-merge) policy.
         assert fresh._auto_start_targets["a"][st.WAIT_KEY] is True
-        assert not auto_start.is_all_mode(fresh)
         assert any("migrated legacy" in m for m in fresh.logs)
 
 
@@ -617,10 +618,12 @@ class TestHandleCommand:
         auto_start.handle_command(app, ["target", "b"])
         assert auto_start.get_targets(app) == ["a", "b"]
 
-    def test_all_mode_is_explicit(self):
+    def test_all_mode_is_rejected(self):
         app = FakeApp([_pr("a")])
-        auto_start.handle_command(app, ["all"])
-        assert auto_start.is_all_mode(app) and auto_start.managed_ids(app) is None
+        result = auto_start.handle_command(app, ["all"])
+        assert result["ok"] is False and result["error"] == "all_mode_removed"
+        assert app._auto_start is False
+        assert auto_start.managed_ids(app) == set()
 
     def test_bad_reply_id_rejected(self, tmp_path):
         with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path):
@@ -996,7 +999,29 @@ class TestCLI:
             res = _cli(["status", "--json", "-s", "pm-x"])
         assert res.exit_code == 1
         out = json.loads(res.output)
+        assert out["ok"] is False
         assert (out["error"], out["message"]) == ("internal", "boom")
+
+    def test_status_json_ok_true_on_success(self, project, tmp_path):
+        """A successful status carries ``ok: true`` like the other verbs, and
+        the rest of the object is still the pm.autostart.status/1 document."""
+        import os
+        pidfile = tmp_path / "tui.pid"
+        pidfile.write_text(str(os.getpid()))
+        ok = {"ok": True, "changes": [],
+              "status": {"schema": "pm.autostart.status/1",
+                         "mode": "targets", "targets": [], "runs": []}}
+        with patch("pm_core.cli.autostart._tui_pidfile_for_session",
+                   return_value=pidfile), \
+             patch("pm_core.cli.autostart._request", return_value=ok):
+            res = _cli(["status", "--json", "-s", "pm-x"])
+        assert res.exit_code == 0, res.output
+        out = json.loads(res.output)
+        assert out["ok"] is True
+        assert "error" not in out
+        assert (out["schema"], out["mode"]) == ("pm.autostart.status/1",
+                                                "targets")
+        assert out["targets"] == [] and out["runs"] == []
 
     def test_round_trip_through_tui_handler(self, project, tmp_path):
         """CLI → queue → TUI handle_command → reply file → CLI JSON."""
@@ -1024,6 +1049,7 @@ class TestCLI:
         assert r1.exit_code == 0, r1.output
         assert sent[1].startswith("autostart add pr-b --auto-merge --reply ")
         status = json.loads(r3.output)
+        assert status["ok"] is True
         assert [(t["pr_id"], t["policy"]) for t in status["targets"]] == [
             ("pr-a", POLICY_WAIT), ("pr-b", POLICY_AUTO)]
         assert "removed: pr-a" in r4.output
@@ -1453,11 +1479,11 @@ class TestCursorFollowsActivePr:
         start()  # ... so the same failure later is said again
         assert len(shown) == 3 and shown[2][0] == shown[1][0]
 
-    @pytest.mark.parametrize("rearm", ["add_targets", "enable_all"])
-    def test_explicit_rearm_says_a_shown_start_failure_again(self, rearm):
-        """Re-adding a target (or ``autostart all``) asks for a start now.
-        If that retry fails for the reason already shown (route still
-        down), the reason is said again, not just the targets line."""
+    def test_explicit_rearm_says_a_shown_start_failure_again(self):
+        """Re-adding a target asks for a start now.  If that retry fails
+        for the reason already shown (route still down), the reason is said
+        again, not just the targets line.  (There is no ``autostart all``
+        re-arm: all-mode was removed.)"""
         app = FakeApp([_pr("u", status="in_progress")])
         app._quiet_activations = {}
         failures = []
@@ -1482,10 +1508,7 @@ class TestCursorFollowsActivePr:
         start()
         start()
         assert len(failures) == 1
-        if rearm == "add_targets":
-            auto_start.add_targets(app, ["u"])  # already a target: re-armed
-        else:
-            auto_start.enable_all(app)
+        auto_start.add_targets(app, ["u"])  # already a target: re-armed
         start()
         assert len(failures) == 2 and failures[1] == failures[0]
 

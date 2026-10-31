@@ -723,7 +723,7 @@ class AutoRunsScreen(ModalScreen):
             return None
         owner = None
         for r in rows[:idx + 1]:
-            if r["kind"] in ("target", "run"):
+            if r["kind"] == "target":
                 owner = r["pr_id"]
         return (owner, rows[idx]["pr_id"])
 
@@ -757,8 +757,6 @@ class AutoRunsScreen(ModalScreen):
         title = "Auto-start runs"
         if mode == "targets":
             title += f" — {len(st.get('targets') or [])} target(s)"
-        elif mode == "all":
-            title += " — all ready PRs (backlog mode)"
         if st.get("run_id"):
             title += f"  [dim]{st['run_id']}[/]"
         self.query_one("#runs-title", Label).update(title)

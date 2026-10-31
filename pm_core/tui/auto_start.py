@@ -8,8 +8,9 @@ dependencies once), starts review/QA loops for in-scope PRs, and removes
 targets that have merged/closed — without touching the other targets.
 
 Adding a target is additive and idempotent; an empty collection means
-auto-start is OFF (never "all pending PRs").  The whole-backlog mode is a
-separate explicit switch (``autostart all``, ``app._auto_start_all``).
+auto-start is OFF.  There is no whole-backlog/all-PR mode: authority is
+always the explicit, validated, non-empty target collection, and a saved
+state that is malformed, empty, targetless or all-mode restores nothing.
 
 Merge holds: there is one manual policy.  A ``wait_for_merge`` target
 (record flag) holds itself and its whole unmerged dependency closure for an
@@ -46,7 +47,7 @@ _log = configure_logger("pm.tui.auto_start")
 
 _BREADCRUMB_FILE = "autostart-resume.json"
 _REPLY_MAX_AGE = 600  # seconds
-# How long a "targets +=" / "ON (all …)" confirmation holds the log line
+# How long a "targets +=" / target-removed confirmation holds the log line
 # against the scheduler messages it triggers, so it stays readable.
 CONFIRM_HOLD_SECONDS = 3.0
 
@@ -67,21 +68,15 @@ def get_targets(app) -> list[str]:
     return list(_targets(app))
 
 
-def is_all_mode(app) -> bool:
-    """True only in the explicit whole-backlog mode (``autostart all``)."""
-    return getattr(app, "_auto_start_all", False) is True
-
-
-def managed_ids(app, prs: list[dict] | None = None) -> set[str] | None:
+def managed_ids(app, prs: list[dict] | None = None) -> set[str]:
     """PR ids auto-start may act on: the union of target closures.
 
-    Returns None only in explicit all-mode (everything), and an empty set
-    when auto-start is off or has no targets.
+    Always a concrete set.  Empty when auto-start is off or has no targets;
+    there is no wildcard sentinel, so no caller can mistake "off" for
+    "everything".
     """
     if not is_enabled(app):
         return set()
-    if is_all_mode(app):
-        return None
     if prs is None:
         prs = usable_prs((app._data or {}).get("prs"))
     return autostart_state.managed_ids(prs, get_targets(app))
@@ -89,8 +84,7 @@ def managed_ids(app, prs: list[dict] | None = None) -> set[str] | None:
 
 def in_scope(app, pr_id: str, prs: list[dict] | None = None) -> bool:
     """Whether auto-start should drive *pr_id* right now."""
-    m = managed_ids(app, prs)
-    return m is None or pr_id in m
+    return pr_id in managed_ids(app, prs)
 
 
 def merge_holds(app, prs: list[dict] | None = None) -> dict[str, dict]:
@@ -227,13 +221,18 @@ def save_breadcrumb(app) -> None:
     data: dict = {}
 
     # Persist auto-start state if active: the full target collection
-    # (records, in order), explicit all-mode, and the shared run id.
-    # A target's wait-for-merge flag rides on its record.
-    if is_enabled(app):
+    # (records, in order) and the shared run id.  A target's
+    # wait-for-merge flag rides on its record.  Never persist an empty or
+    # all-PR state: there is no mode flag that could broaden authority on
+    # restore.
+    targets = _targets(app)
+    if is_enabled(app) and targets:
         data["auto_start"] = True
-        data["targets"] = autostart_state.targets_to_breadcrumb(_targets(app))
-        data["all_mode"] = is_all_mode(app)
+        data["targets"] = autostart_state.targets_to_breadcrumb(targets)
         data["run_id"] = app._auto_start_run_id
+    elif is_enabled(app):
+        _log.warning("save_breadcrumb: auto-start enabled with no targets; "
+                     "not persisting autostart state")
 
     # Persist review loop state for running loops
     review_loops = {}
@@ -309,12 +308,192 @@ def save_breadcrumb(app) -> None:
     _log.info("save_breadcrumb: wrote %s", data)
 
 
+def _reset_autostart_state(app) -> None:
+    """Clear the in-memory auto-start scope (fail-closed reset).
+
+    Used when a saved restore is rejected: a rejected restore must never
+    leave a previous or wildcard scope live.
+    """
+    app._auto_start = False
+    app._auto_start_targets = {}
+    app._auto_start_run_id = None
+
+
+def _quarantine_breadcrumb(path: Path) -> Path | None:
+    """Preserve a rejected/corrupt saved-state file instead of deleting it.
+
+    Malformed evidence may explain an incident or carry merge-gate intent;
+    it is renamed aside (never parsed again) so the next startup is not
+    blocked by it and the bytes remain available for diagnosis.  If the
+    rename fails the file is deliberately left in place: deleting it would
+    destroy the evidence, and re-rejecting it on the next startup is safe
+    (auto-start stays off either way).
+    """
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    dest = path.with_name(f"{path.stem}.rejected-{stamp}{path.suffix}")
+    n = 0
+    while dest.exists():
+        n += 1
+        dest = path.with_name(
+            f"{path.stem}.rejected-{stamp}-{n}{path.suffix}")
+    try:
+        os.replace(path, dest)
+        _log.warning("consume_breadcrumb: preserved rejected saved state "
+                     "at %s", dest)
+        return dest
+    except OSError:
+        _log.warning("consume_breadcrumb: could not move rejected saved "
+                     "state aside; leaving it in place", exc_info=True)
+        return None
+
+
+def _is_int(value) -> bool:
+    """An ``int`` that is not a ``bool`` (bool is an int subclass)."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_number(value) -> bool:
+    return (isinstance(value, (int, float))
+            and not isinstance(value, bool))
+
+
+def _loop_record_fields(loop_data: dict) -> dict | None:
+    """Validate a saved review-loop record's scalar fields.
+
+    Returns the kwargs for ``ReviewLoopState``, or ``None`` when a field has
+    the wrong type.  Restoring is fail-soft but not blind: a record with,
+    say, a string ``iteration`` would be adopted at startup and only raise
+    later inside a review-loop worker, so a wrong-typed record counts as
+    malformed saved state and is skipped like a non-object one.  The
+    failed-launch retry fields are validated the same way so a corrupt
+    record cannot raise on restore.
+    """
+    iteration = loop_data.get("iteration", 0)
+    if not _is_int(iteration):
+        return None
+    latest_verdict = loop_data.get("latest_verdict", "")
+    if not isinstance(latest_verdict, str):
+        return None
+    loop_id = loop_data.get("loop_id")
+    if loop_id is not None and not isinstance(loop_id, str):
+        return None
+    input_required = loop_data.get("input_required", False)
+    if not isinstance(input_required, bool):
+        return None
+    transcript_dir = loop_data.get("_transcript_dir")
+    if transcript_dir is not None and not isinstance(transcript_dir, str):
+        return None
+
+    retry_iteration = loop_data.get("retry_iteration", 0)
+    launch_attempts = loop_data.get("launch_attempts", 0)
+    retry_episodes = loop_data.get("retry_episodes", 0)
+    ui_notified_retry = loop_data.get("_ui_notified_retry", 0)
+    if not all(_is_int(v) for v in (retry_iteration, launch_attempts,
+                                    retry_episodes, ui_notified_retry)):
+        return None
+    next_retry_at = loop_data.get("next_retry_at", 0.0)
+    retry_ready_at = loop_data.get("retry_ready_at", 0.0)
+    if not all(_is_number(v) for v in (next_retry_at, retry_ready_at)):
+        return None
+    last_launch_error = loop_data.get("last_launch_error", "")
+    last_session_id = loop_data.get("last_session_id", "")
+    stale_session_id = loop_data.get("stale_session_id", "")
+    stale_pane_session_id = loop_data.get("stale_pane_session_id", "")
+    if not all(isinstance(v, str) for v in (last_launch_error,
+                                            last_session_id,
+                                            stale_session_id,
+                                            stale_pane_session_id)):
+        return None
+    last_launch_artifact = loop_data.get("last_launch_artifact")
+    if (last_launch_artifact is not None
+            and not isinstance(last_launch_artifact, str)):
+        return None
+    launch_retryable = loop_data.get("launch_retryable", False)
+    iteration_attempted = loop_data.get("iteration_attempted", False)
+    last_attempt_failed = loop_data.get("last_attempt_failed", False)
+    if not isinstance(launch_retryable, bool):
+        return None
+    if not isinstance(iteration_attempted, bool):
+        return None
+    if not isinstance(last_attempt_failed, bool):
+        return None
+
+    return {"iteration": iteration,
+            "latest_verdict": latest_verdict,
+            "loop_id": loop_id or secrets.token_hex(2),
+            "input_required": input_required,
+            "_transcript_dir": transcript_dir,
+            "retry_iteration": retry_iteration,
+            "launch_attempts": launch_attempts,
+            "next_retry_at": next_retry_at,
+            "last_launch_error": last_launch_error,
+            "last_launch_artifact": last_launch_artifact,
+            "launch_retryable": launch_retryable,
+            "retry_episodes": retry_episodes,
+            "retry_ready_at": retry_ready_at,
+            "last_session_id": last_session_id,
+            "iteration_attempted": iteration_attempted,
+            "last_attempt_failed": last_attempt_failed,
+            "stale_session_id": stale_session_id,
+            "stale_pane_session_id": stale_pane_session_id,
+            "_ui_notified_retry": ui_notified_retry}
+
+
+def _valid_history_entry(entry) -> bool:
+    """Whether a saved review-loop history entry has well-typed fields.
+
+    ``iteration``/``verdict`` are required; ``timestamp`` is optional but
+    must be a string when present.
+    """
+    if not isinstance(entry, dict):
+        return False
+    if "iteration" not in entry or "verdict" not in entry:
+        return False
+    iteration = entry["iteration"]
+    if not isinstance(iteration, int) or isinstance(iteration, bool):
+        return False
+    if not isinstance(entry["verdict"], str):
+        return False
+    return isinstance(entry.get("timestamp", ""), str)
+
+
+def _validate_restored_targets(app, targets: dict[str, dict],
+                               migrated: bool) -> str | None:
+    """Reject saved targets that do not resolve in the loaded project.
+
+    Unknown ids can never grant authority (they would be no-ops), but a
+    restore containing them is malformed saved state: fail the whole
+    restore with a diagnostic instead of acting on a partial set.  Terminal
+    (merged/closed) targets are kept; the normal scheduler prune removes
+    them.
+    """
+    if not targets:
+        return None
+    prs = (app._data or {}).get("prs") or []
+    pr_map = {p.get("id") for p in prs
+              if isinstance(p, dict) and p.get("id")}
+    if not pr_map:
+        return ("saved auto-start state names targets but no project PRs "
+                "are loaded")
+    missing = [t for t in targets if t not in pr_map]
+    if missing:
+        label = "legacy target" if migrated else "target"
+        return (f"saved auto-start {label}(s) not found in project: "
+                f"{', '.join(missing)}")
+    return None
+
+
 async def consume_breadcrumb(app) -> None:
     """Restore auto-start state from a breadcrumb file on startup.
 
     If the breadcrumb exists and belongs to this session (or carries no
-    session, as legacy breadcrumbs do), reads it, deletes it (always, even
-    on error), restores auto-start fields, and calls check_and_start.  A
+    session, as legacy breadcrumbs do), reads it, restores any safe state,
+    and consumes or quarantines the file.  Parsing is fail-closed: only a
+    validated, non-empty explicit target collection is restored.  Malformed,
+    empty, targetless, all-mode or unreadable state leaves auto-start OFF,
+    emits an actionable diagnostic and preserves the evidence (quarantined
+    file); a valid ``stop_before_merge`` set migrates to wait targets when
+    auto-start resumes, so a merge hold is never silently dropped.  A
     breadcrumb owned by another session is left untouched for its own mount.
     """
     breadcrumb = pm_home() / _BREADCRUMB_FILE
@@ -325,15 +504,31 @@ async def consume_breadcrumb(app) -> None:
         data = json.loads(breadcrumb.read_text())
     except Exception as e:
         _log.warning("consume_breadcrumb: failed to read breadcrumb: %s", e)
-        breadcrumb.unlink(missing_ok=True)
+        # Fail closed exactly like a rejected parse: a corrupt file must not
+        # leave any pre-existing in-memory scope active.
+        _reset_autostart_state(app)
+        _quarantine_breadcrumb(breadcrumb)
+        app.log_message(
+            "Auto-start: saved state is unreadable "
+            f"({type(e).__name__}); auto-start remains off. Re-add targets "
+            "with `pm autostart add PR_ID...`.", force=True, sticky=10)
+        app._update_display()
         return
+
     if not isinstance(data, dict):
         # Valid JSON but not a breadcrumb object (``[]``, ``null``, a bare
-        # string).  Every field below is read with ``.get``, so a corrupt
-        # file must be dropped here rather than raising out of the mount.
+        # string): malformed saved state.  Reject it like any other corrupt
+        # file — fail closed, diagnose, preserve the evidence — rather than
+        # raising out of the mount.
         _log.warning("consume_breadcrumb: ignoring non-object breadcrumb "
                      "(%s)", type(data).__name__)
-        breadcrumb.unlink(missing_ok=True)
+        _reset_autostart_state(app)
+        _quarantine_breadcrumb(breadcrumb)
+        app.log_message(
+            "Auto-start: saved state is not a JSON object; auto-start "
+            "remains off. Re-add targets with `pm autostart add PR_ID...`.",
+            force=True, sticky=10)
+        app._update_display()
         return
 
     # The breadcrumb file is shared by every pm session under this PM home.
@@ -360,29 +555,40 @@ async def consume_breadcrumb(app) -> None:
                   "(this session is %s)", owner, mine)
         return
 
-    breadcrumb.unlink(missing_ok=True)
-
-    # Restore auto-start state only if it was active before the restart.
-    # Current breadcrumbs carry ``targets`` + ``all_mode``; a legacy
-    # single-target breadcrumb (``target: X``) migrates to a wait target and
-    # a legacy targetless one to the explicit all-mode it represented.
-    # Removed ``stop_before_merge`` marks migrate to wait targets (fail
-    # closed) so a restart can never silently permit a merge.
-    targets, all_mode, migrated = autostart_state.targets_from_breadcrumb(
+    parsed = autostart_state.targets_from_breadcrumb(
         data, (app._data or {}).get("prs") or [])
-    had_auto_start = bool(targets) or all_mode
-    run_id = data.get("run_id")
-    if not isinstance(run_id, str) or not run_id:
-        # The run id names a directory under ``transcripts/``; a wrong-typed
-        # value would raise ``TypeError`` out of the mount (``Path / 5``).
-        run_id = None
-    _log.info("consume_breadcrumb: restoring targets=%s all_mode=%s run_id=%s "
-              "migrated_legacy=%s", list(targets), all_mode, run_id, migrated)
+    targets = dict(parsed.targets)
+    migrated = parsed.migrated
+    diagnostic = parsed.error
+
+    if not diagnostic:
+        diagnostic = _validate_restored_targets(app, targets, migrated)
+        if diagnostic:
+            targets = {}
+
+    if diagnostic:
+        _log.warning("consume_breadcrumb: rejected saved state: %s",
+                     diagnostic)
+        # Fail closed even if this app somehow had autostart state already:
+        # a rejected restore never leaves a previous/wildcard scope active.
+        _reset_autostart_state(app)
+        _quarantine_breadcrumb(breadcrumb)
+        app.log_message(f"Auto-start: {diagnostic}; auto-start remains off. "
+                        "Re-add targets with `pm autostart add PR_ID...`.",
+                        force=True, sticky=10)
+        targets = {}
+    else:
+        breadcrumb.unlink(missing_ok=True)
+
+    had_auto_start = bool(targets)
+    run_id = data.get("run_id") if isinstance(data.get("run_id"), str) else None
+    _log.info("consume_breadcrumb: restoring targets=%s run_id=%s "
+              "migrated_legacy=%s rejected=%s", list(targets), run_id,
+              migrated, bool(diagnostic))
 
     if had_auto_start:
         app._auto_start = True
         app._auto_start_targets = dict(targets)
-        app._auto_start_all = all_mode
         app._auto_start_run_id = run_id
 
         # Recreate transcript directory if needed
@@ -392,55 +598,35 @@ async def consume_breadcrumb(app) -> None:
         elif not run_id:
             _ensure_run(app)
 
-    # Restore review loop state before check_and_start so it sees existing loops
-    review_loops_data = data.get("review_loops", {})
+    # Restore review loop state before check_and_start so it sees existing
+    # loops.  Parsing is fail-soft here: a malformed record/history entry is
+    # skipped with a warning and must never raise out of the mount.
+    review_loops_data = data.get("review_loops") or {}
     if not isinstance(review_loops_data, dict):
-        # Valid JSON, wrong shape (a list, a string, ...).  Every entry below
-        # is read structurally, and this whole function runs before the
-        # command queue is armed, so corruption must be dropped here rather
-        # than raising out of the mount (see the non-object check above).
-        _log.warning("consume_breadcrumb: ignoring non-object review_loops "
-                     "(%s)", type(review_loops_data).__name__)
+        _log.warning("consume_breadcrumb: ignoring malformed review_loops")
         review_loops_data = {}
+    restored_loops = 0
     if review_loops_data:
         from pm_core.review_loop import ReviewLoopState, ReviewIteration
         for pr_id, loop_data in review_loops_data.items():
-            if not isinstance(loop_data, dict):
-                _log.warning("consume_breadcrumb: ignoring corrupt review "
-                             "loop entry %s (%s)", pr_id,
-                             type(loop_data).__name__)
+            fields = (_loop_record_fields(loop_data)
+                      if isinstance(loop_data, dict) else None)
+            if fields is None:
+                _log.warning("consume_breadcrumb: ignoring malformed review "
+                             "loop record for %s", pr_id)
                 continue
-            history = loop_data.get("history")
+            rstate = ReviewLoopState(pr_id=pr_id, **fields)
+            history = loop_data.get("history") or []
             if not isinstance(history, list):
+                _log.warning("consume_breadcrumb: ignoring malformed review "
+                             "loop history for %s", pr_id)
                 history = []
-            rstate = ReviewLoopState(
-                pr_id=pr_id,
-                iteration=loop_data.get("iteration", 0),
-                latest_verdict=loop_data.get("latest_verdict", ""),
-                loop_id=loop_data.get("loop_id", secrets.token_hex(2)),
-                input_required=loop_data.get("input_required", False),
-                _transcript_dir=loop_data.get("_transcript_dir"),
-                retry_iteration=loop_data.get("retry_iteration", 0) or 0,
-                launch_attempts=loop_data.get("launch_attempts", 0) or 0,
-                next_retry_at=loop_data.get("next_retry_at", 0.0) or 0.0,
-                last_launch_error=loop_data.get("last_launch_error", "") or "",
-                last_launch_artifact=loop_data.get("last_launch_artifact"),
-                launch_retryable=bool(loop_data.get("launch_retryable", False)),
-                retry_episodes=loop_data.get("retry_episodes", 0) or 0,
-                retry_ready_at=loop_data.get("retry_ready_at", 0.0) or 0.0,
-                last_session_id=loop_data.get("last_session_id", "") or "",
-                iteration_attempted=bool(
-                    loop_data.get("iteration_attempted", False)),
-                last_attempt_failed=bool(
-                    loop_data.get("last_attempt_failed", False)),
-                stale_session_id=loop_data.get("stale_session_id", "") or "",
-                stale_pane_session_id=(
-                    loop_data.get("stale_pane_session_id", "") or ""),
-                _ui_notified_retry=int(
-                    loop_data.get("_ui_notified_retry", 0) or 0),
-            )
             for h in history:
-                if not isinstance(h, dict):
+                # Saved-state parsing is fail-soft here: a malformed history
+                # entry must not abort the whole startup restore.
+                if not _valid_history_entry(h):
+                    _log.warning("consume_breadcrumb: ignoring malformed "
+                                 "review-loop history entry for %s", pr_id)
                     continue
                 rstate.history.append(ReviewIteration(
                     iteration=h.get("iteration", 0),
@@ -449,7 +635,11 @@ async def consume_breadcrumb(app) -> None:
                     timestamp=h.get("timestamp", ""),
                 ))
             app._review_loops[pr_id] = rstate
-        _log.info("consume_breadcrumb: restored %d review loop state(s)", len(review_loops_data))
+            restored_loops += 1
+        # Count what was actually restored: every record in the file may be
+        # malformed, in which case no loop state was adopted.
+        _log.info("consume_breadcrumb: restored %d review loop state(s)",
+                  restored_loops)
 
     app._update_display()
 
@@ -530,8 +720,8 @@ async def consume_breadcrumb(app) -> None:
         resumed = 0
         for wd in watchers_data:
             if not isinstance(wd, dict):
-                _log.warning("consume_breadcrumb: ignoring corrupt watcher "
-                             "entry (%s)", type(wd).__name__)
+                _log.warning("consume_breadcrumb: ignoring malformed watcher "
+                             "record")
                 continue
             watcher_ui.start_watcher(
                 app,
@@ -540,18 +730,35 @@ async def consume_breadcrumb(app) -> None:
                 watcher_type=wd.get("type", "auto-start"),
             )
             resumed += 1
+        # Count what was actually handed to the watcher manager: a malformed
+        # record is skipped above, so a bare len() would overstate the resume.
         _log.info("consume_breadcrumb: resumed %d watcher(s)", resumed)
 
     # Summarise last: the per-loop resume messages above (one of them
     # sticky) would otherwise overwrite this before it is ever painted.
     if had_auto_start:
-        desc = "all" if all_mode else ", ".join(targets)
-        note = " (migrated legacy breadcrumb)" if migrated else ""
-        msg = f"Auto-start: resumed after merge restart → {desc}{note}"
-        _log.info("consume_breadcrumb: %s", msg)
-        app.log_message(msg, sticky=5)
-    elif review_loops_data:
-        app.log_message("Resumed review loop state after restart", sticky=5)
+        # Report what is actually still active.  A restored target that
+        # completed during downtime was pruned by the scheduler pass above
+        # (which already logged the "auto-start OFF" line); painting a stale
+        # "resumed → <target>" over that would claim a scope that is gone.
+        remaining = get_targets(app)
+        if remaining:
+            desc = ", ".join(remaining)
+            note = " (migrated legacy breadcrumb)" if migrated else ""
+            msg = f"Auto-start: resumed after merge restart → {desc}{note}"
+            _log.info("consume_breadcrumb: %s", msg)
+            app.log_message(msg, sticky=5)
+        else:
+            _log.info("consume_breadcrumb: restored targets all completed "
+                      "during downtime; auto-start remains off")
+    elif restored_loops:
+        # Only claim a resume when loop state was actually adopted; every
+        # record in the file may have been malformed.  A rejected restore's
+        # diagnostic is the message the user must see, so do not paint this
+        # informational summary over it.  (It is still recorded in the ``L``
+        # command log.)
+        app.log_message("Resumed review loop state after restart",
+                        sticky=0 if diagnostic else 5)
 
 
 def _adopt_live_qa(app) -> None:
@@ -635,7 +842,6 @@ def _disable(app) -> None:
         watcher_ui.stop_watcher(app)
     app._auto_start = False
     app._auto_start_targets = {}
-    app._auto_start_all = False
     app._auto_start_run_id = None
     app._update_display()
 
@@ -645,7 +851,7 @@ def _ensure_run(app) -> None:
     if app._auto_start_run_id:
         return
     targets = get_targets(app)
-    tag = "all" if is_all_mode(app) else (targets[0] if targets else "all")
+    tag = targets[0] if targets else "none"
     run_id = f"autostart-{tag}-{secrets.token_hex(4)}"
     app._auto_start_run_id = run_id
     if app._root:
@@ -657,11 +863,11 @@ def _ensure_run(app) -> None:
 def _sync_enabled(app) -> None:
     """Recompute the derived ``_auto_start`` flag after a target mutation.
 
-    Enabled iff there is at least one target or explicit all-mode.  Going
-    from enabled → empty disables auto-start; it never falls back to
-    all-mode.  Also keeps a running auto-start watcher's scope current.
+    Enabled iff there is at least one explicit target.  Going from
+    enabled → empty disables auto-start; there is no targetless/all-PR
+    fallback.  Also keeps a running auto-start watcher's scope current.
     """
-    enabled = bool(_targets(app)) or is_all_mode(app)
+    enabled = bool(_targets(app))
     if enabled:
         app._auto_start = True
         _ensure_run(app)
@@ -869,31 +1075,18 @@ def remove_targets(app, ids: list[str]) -> dict:
 
 
 def clear_targets(app) -> dict:
-    """Remove every target and leave all-mode → auto-start OFF."""
+    """Remove every target → auto-start OFF."""
     removed = get_targets(app)
     was = is_enabled(app)
     if was:
         _disable(app)
     else:
         app._auto_start_targets = {}
-        app._auto_start_all = False
     app.log_message("Auto-start: OFF" if was else "Auto-start: already off",
                     force=True, hold=CONFIRM_HOLD_SECONDS)
     _log.info("auto_start: cleared targets=%s", removed)
     return {"ok": True,
             "changes": [{"pr_id": r, "action": "removed"} for r in removed]}
-
-
-def enable_all(app) -> dict:
-    """Explicit whole-backlog mode (the legacy targetless auto-start)."""
-    app._auto_start_all = True
-    _sync_enabled(app)
-    _start_failures_shown(app).clear()
-    app.log_message("Auto-start: ON (all ready PRs — explicit backlog mode)",
-                    force=True, hold=CONFIRM_HOLD_SECONDS)
-    _log.info("auto_start: all-mode enabled")
-    app.run_worker(check_and_start(app))
-    return {"ok": True, "changes": [{"pr_id": None, "action": "all_mode"}]}
 
 
 async def toggle(app, selected_pr_id: str | None = None) -> None:
@@ -903,14 +1096,14 @@ async def toggle(app, selected_pr_id: str | None = None) -> None:
       New targets get the plain auto-merge policy (explicit ``A``).
     - Selected PR already a target → remove it (others keep running).
     - No PR selected → turn auto-start off if on, else "No PR selected"
-      (no implicit whole-backlog mode — use ``autostart all``).
+      (there is no implicit whole-backlog mode).
     """
     if not selected_pr_id:
         if is_enabled(app):
             clear_targets(app)
         else:
-            app.log_message("No PR selected (use 'autostart all' for the "
-                            "whole backlog)", force=True)
+            app.log_message("No PR selected (add explicit targets with "
+                            "`pm autostart add PR_ID...`)", force=True)
         return
     if selected_pr_id in _targets(app):
         remove_targets(app, [selected_pr_id])
@@ -967,8 +1160,7 @@ def on_state_loaded(app, old_statuses: dict,
     if not newly and not regraphed:
         return
     managed = managed_ids(app, prs)
-    if managed is not None and not any(i in managed
-                                       for i in newly + regraphed):
+    if not any(i in managed for i in newly + regraphed):
         return
     _log.info("auto_start: reload saw %s merged/closed, %s deps changed, "
               "scheduling pass", newly, regraphed)
@@ -994,7 +1186,7 @@ def _prune_completed_targets(app, prs: list[dict]) -> None:
     for t, status in done:
         _log.info("auto_start: target %s %s, removed (%d remaining)",
                   t, status, len(targets))
-    turn_off = not targets and not is_all_mode(app)
+    turn_off = not targets
     rest = ("all targets complete — auto-start OFF" if turn_off
             else f"{len(targets)} remaining")
     # One line, held: a TUI ``g`` merge prunes here from the reload its own
@@ -1013,13 +1205,14 @@ def _prune_completed_targets(app, prs: list[dict]) -> None:
 async def check_and_start(app) -> None:
     """Advance every in-scope PR one scheduler step.
 
-    Scope is the union of the target closures (or everything in explicit
-    all-mode).  Launches ready PRs (pending with deps merged, plus
-    restartable in_progress PRs — ``pm pr start --background`` no-ops when
-    the window exists), each at most once even across concurrent passes
-    (``_auto_start_launching``), then starts review/QA loops.  Scope is
-    re-checked after every ``await`` so a removal that lands mid-pass takes
-    effect.  Completed targets are removed individually.
+    Scope is the union of the target closures; an empty target set is OFF
+    (there is no all-PR mode).  Launches ready PRs (pending with deps
+    merged, plus restartable in_progress PRs — ``pm pr start --background``
+    no-ops when the window exists), each at most once even across
+    concurrent passes (``_auto_start_launching``), then starts review/QA
+    loops.  Scope is re-checked after every ``await`` so a removal that
+    lands mid-pass takes effect.  Completed targets are removed
+    individually.
     """
     if not is_enabled(app):
         return
@@ -1620,7 +1813,7 @@ def collect_status_inputs(app) -> dict:
     managed = managed_ids(app, prs)
 
     def scoped(pr_id: str) -> bool:
-        return managed is None or pr_id in managed
+        return pr_id in managed
 
     windows: dict[str, str] = {}
     session = getattr(app, "_session_name", None)
@@ -1682,7 +1875,6 @@ def collect_status_inputs(app) -> dict:
     return {
         "prs": prs,
         "targets": dict(_targets(app)) if enabled else {},
-        "all_mode": is_all_mode(app),
         "enabled": enabled,
         "run_id": app._auto_start_run_id,
         "owner": {"session": session, "pid": os.getpid()},
@@ -1708,7 +1900,7 @@ def build_status(app) -> dict:
 # ---------------------------------------------------------------------------
 
 USAGE = ("autostart add PR_ID... [--wait-for-merge|--auto-merge] | "
-         "remove PR_ID... | list | status | clear | all")
+         "remove PR_ID... | list | status | clear")
 
 # Flag → policy (the inverse of ``autostart_state.POLICY_FLAGS`` plus the
 # deprecated ``--stop-before-merge`` alias, which maps to wait-for-merge).
@@ -1745,12 +1937,13 @@ def handle_command(app, args: list[str]) -> dict:
     """Dispatch ``autostart <verb> …`` (tokens after ``autostart``).
 
     Verbs: ``add``/``target`` IDS, ``remove``/``rm`` IDS, ``clear``/``off``,
-    ``all``, ``list``, ``status``; bare ``autostart`` turns auto-start off
-    when on and prints usage when off (it no longer enables the whole
-    backlog).  Flags: ``--wait-for-merge`` / ``--auto-merge`` (``add`` only;
-    at most one distinct policy — a contradiction rejects the whole command
-    before any change).  The removed ``--stop-before-merge`` is accepted as
-    a deprecated alias for ``--wait-for-merge``.  ``--reply ID`` (CLI: write
+    ``list``, ``status``; bare ``autostart`` turns auto-start off when on
+    and prints usage when off.  The removed ``all`` verb is rejected with
+    an actionable error (it never enables a whole-backlog scope).  Flags:
+    ``--wait-for-merge`` / ``--auto-merge`` (``add`` only; at most one
+    distinct policy — a contradiction rejects the whole command before any
+    change).  The removed ``--stop-before-merge`` is accepted as a
+    deprecated alias for ``--wait-for-merge``.  ``--reply ID`` (CLI: write
     the JSON reply file).  Returns the result.
     """
     reply_id = None
@@ -1834,7 +2027,10 @@ def _dispatch(app, verb: str, ids: list[str], policy: str | None,
     elif verb in ("clear", "off"):
         result = clear_targets(app)
     elif verb == "all":
-        result = enable_all(app)
+        result = {"ok": False, "error": "all_mode_removed",
+                  "message": "all-PR autostart has been removed; add explicit "
+                             "targets with `autostart add PR_ID...`",
+                  "changes": []}
     elif verb in ("list", "status"):
         result = {"ok": True, "changes": []}
         if not has_reply:
@@ -1853,8 +2049,6 @@ def _list_summary(app) -> str:
     """One log line for command-bar ``autostart list``."""
     if not is_enabled(app):
         return "Auto-start: off (no targets)"
-    if is_all_mode(app):
-        return "Auto-start: all ready PRs (backlog mode)"
     marks = {POLICY_WAIT: " (wait-for-merge)"}
     parts = [f"{t}{marks.get(target_policy(app, t), '')}"
              for t in get_targets(app)]

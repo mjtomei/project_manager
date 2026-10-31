@@ -460,12 +460,11 @@ class ProjectManagerApp(App):
         self._impl_poll_counter: int = 0
         # Auto-start state (in-memory; preserved only via the merge-restart
         # breadcrumb).  ``_auto_start`` is derived: True iff there is at
-        # least one target or the explicit whole-backlog mode is on.
+        # least one explicit target.  There is no all-PR mode.
         self._auto_start: bool = False
         # Ordered {pr_id: {"added_at", "source"[, "wait_for_merge"]}} — see
         # auto_start.add_targets (the flag holds the target's closure).
         self._auto_start_targets: dict[str, dict] = {}
-        self._auto_start_all: bool = False
         self._auto_start_run_id: str | None = None
         # PR ids whose ``pm pr start`` is in flight (shared-dep launch guard
         # across concurrent check_and_start workers).
@@ -1307,12 +1306,10 @@ class ProjectManagerApp(App):
         self.run_worker(toggle(self, selected_pr_id=tree.selected_pr_id))
 
     def _auto_start_label(self) -> str:
-        """Status-bar suffix: ``×N`` for several targets, ``all`` for backlog."""
+        """Status-bar suffix: ``×N`` for several explicit targets."""
         from pm_core.tui import auto_start as _auto_start
         if not self._auto_start:
             return ""
-        if _auto_start.is_all_mode(self):
-            return "all"
         n = len(_auto_start.get_targets(self))
         return f"×{n}" if n > 1 else ""
 

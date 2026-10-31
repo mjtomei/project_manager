@@ -6,9 +6,12 @@ This module holds the pure pieces that the scheduler, the CLI
 
 - dependency closures over an explicit *collection* of targets
   (:func:`closure`, :func:`managed_ids`, :func:`needed_by`);
-- target records and breadcrumb (de)serialisation, including migration of
-  the legacy single-``target`` breadcrumb and the removed per-PR
-  ``stop_before_merge`` marks (:func:`targets_from_breadcrumb`);
+- target records and breadcrumb (de)serialisation, including the one
+  permitted migration of a legacy single-``target`` breadcrumb and the
+  removed per-PR ``stop_before_merge`` marks
+  (:func:`targets_from_breadcrumb`).  Parsing is fail-closed: malformed,
+  empty, targetless or all-mode state restores nothing and yields an
+  actionable diagnostic.  There is no whole-backlog/all-PR mode;
 - the single structured status builder (:func:`build_status`, schema
   ``pm.autostart.status/1``) and a row flattener (:func:`status_rows`) used by
   both the CLI text output and the TUI popup.
@@ -28,6 +31,7 @@ registry status alone.
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from pm_core.pr_utils import usable_prs
@@ -187,6 +191,51 @@ def targets_to_breadcrumb(targets: dict[str, dict]) -> list[dict]:
     return [{"pr_id": pr_id, **(rec or {})} for pr_id, rec in targets.items()]
 
 
+@dataclass(frozen=True)
+class BreadcrumbTargets:
+    """Result of parsing saved auto-start state (fail-closed).
+
+    *targets* is the only authority.  It is empty whenever nothing may be
+    restored — malformed data, an empty/targetless request, an all-mode
+    request, or an explicit ``auto_start: false``.  *error*, when set, is
+    the actionable diagnostic to show/log; callers must leave auto-start
+    OFF and must never substitute a wildcard scope.
+    """
+
+    targets: dict[str, dict] = field(default_factory=dict)
+    migrated: bool = False
+    error: str | None = None
+
+
+# Fields a saved target record may carry, and their required types.  A
+# wrong type is rejected (all-or-nothing) rather than coerced: silently
+# turning a malformed ``wait_for_merge`` into "not held" would drop a merge
+# gate, and coercing it could widen a hold.
+_RECORD_TYPES = {"wait_for_merge": bool, "added_at": str, "source": str}
+
+# Diagnostics name the problem only; the consumer (``consume_breadcrumb``)
+# appends the actionable remedy so it is not repeated twice in one message.
+_ALL_MODE_ERROR = (
+    "saved auto-start state requested all-mode (whole backlog); all-mode "
+    "autostart has been removed"
+)
+_TARGETLESS_ERROR = "saved auto-start state has no target PRs"
+_STOP_ERROR = ("saved auto-start state has a malformed stop_before_merge "
+               "merge-gate set")
+
+
+def valid_pr_id(value) -> bool:
+    """A saved PR id must be a non-empty, whitespace-free string.
+
+    Shared by the target parser and the saved merge-gate set: an id that
+    cannot equal a real PR id (padded with whitespace, say) would be
+    silently dropped from the hold lookup, so it is malformed saved state,
+    not something to coerce.
+    """
+    return (isinstance(value, str) and bool(value)
+            and not any(c.isspace() for c in value))
+
+
 def _legacy_ids(value) -> list[str]:
     """String ids from a legacy field, defensively typed.
 
@@ -276,83 +325,175 @@ def migrate_legacy_stop(prs: list[dict], targets: dict,
     return out
 
 
-def targets_from_breadcrumb(data: dict, prs: list[dict] | None = None
-                            ) -> tuple[dict[str, dict], bool, bool]:
-    """Read ``(targets, all_mode, migrated)`` from a breadcrumb dict.
+def _parse_stop_ids(raw) -> tuple[list[str] | None, str | None]:
+    """Validate the saved ``stop_before_merge`` merge-gate set.
 
-    Current format: ``targets`` (list of records) + ``all_mode``.
-    Legacy format (single-target TUI): ``target: X`` → ``[X]``; legacy
-    ``auto_start`` with no target was the explicit "all ready PRs" mode and
-    maps to ``all_mode``.
+    Returns ``(ids, error)``.  The writer always emitted a list of PR ids;
+    anything else is malformed saved state and must not be silently dropped
+    while auto-start resumes (that would auto-merge without the user's
+    holds).  ``None`` means the key was absent (or JSON ``null``); an empty
+    list yields no ids.  Each entry must be a valid PR id: a padded id would
+    never match a PR in the hold lookup, so accepting it would silently lose
+    the gate.
 
-    The removed ``stop_before_merge`` list is migrated to
-    ``wait_for_merge`` targets (see :func:`migrate_legacy_stop`), and a
-    legacy single target (which cannot be distinguished from an ``A``
-    target) also fails closed to ``wait_for_merge``.  *migrated* is True
-    when any legacy shape/field was interpreted.
+    Unordered/stale *in-memory* inputs (a set or mapping) are handled by
+    :func:`migrate_legacy_stop` from :func:`build_status`; saved state is
+    held to the exact shape this module's writer emits.
+    """
+    if raw is None:
+        return None, None
+    if not isinstance(raw, list):
+        return None, _STOP_ERROR
+    for entry in raw:
+        if not valid_pr_id(entry):
+            return None, _STOP_ERROR
+    return list(raw), None
+
+
+def _parse_target_entries(raw: list) -> tuple[dict[str, dict], bool, str | None]:
+    """Parse a current-format ``targets`` list; reject the whole set on
+    any malformed entry (never restore a partial authority).
+
+    Duplicate ids are rejected too: keeping only the first record could
+    silently drop the other's ``wait_for_merge`` merge gate, and our own
+    writer (a dict keyed by id) never emits duplicates.  A bare-string
+    target is a legacy shape (no pm version wrote one): its policy is
+    unknown, so it fails closed to the single manual policy, as does a
+    legacy single ``target: X`` breadcrumb.
     """
     targets: dict[str, dict] = {}
-    all_mode = False
     migrated = False
-    raw = data.get("targets")
-    if isinstance(raw, list):
-        for entry in raw:
-            if isinstance(entry, str) and entry:
-                # No pm version wrote bare-string targets, so the record's
-                # policy is unknown: fail closed to the single manual policy
-                # (as for the legacy ``target: X`` shape) instead of letting
-                # a corrupted/mixed-version record silently auto-merge.
-                migrated = True
-                rec = make_target_record("legacy-breadcrumb")
-                rec[WAIT_KEY] = True
-                targets.setdefault(entry, rec)
-            elif isinstance(entry, dict) and entry.get("pr_id"):
-                rec, legacy_seen = _normalize_record(entry)
-                migrated = migrated or legacy_seen
-                rec.setdefault("added_at", now_iso())
-                rec.setdefault("source", "breadcrumb")
-                targets.setdefault(entry["pr_id"], rec)
-            else:
-                # An entry with no recoverable id (wrong type, an empty
-                # string, or a record missing ``pr_id``): nothing to hold,
-                # but surface the corrupt shape in the restart log rather
-                # than hiding it.
-                migrated = True
-        all_mode = data.get("all_mode") is True
-    elif "targets" in data or "all_mode" in data:
-        # Current-format keys without a usable target list — a non-list
-        # ``targets`` value, ``targets: null``, or ``all_mode`` with no
-        # ``targets`` key: a corrupt/mixed-version breadcrumb.  Drop the
-        # unusable list, honour only the explicit ``all_mode`` flag (literal
-        # ``True``), and never fall back to the legacy "all ready PRs"
-        # inference, which would silently auto-merge the whole backlog.
-        migrated = True
-        all_mode = data.get("all_mode") is True
-    else:
-        # Legacy single-target breadcrumb.  Older breadcrumbs always implied
-        # auto-start; treat presence of target/run_id as enabled.
-        had_auto = data.get("auto_start",
-                            bool(data.get("target") or data.get("run_id")))
-        if had_auto:
+    for i, entry in enumerate(raw):
+        if isinstance(entry, str):
+            if not valid_pr_id(entry):
+                return {}, False, f"targets[{i}] is not a valid PR id"
+            if entry in targets:
+                return {}, False, f"targets[{i}] duplicates target {entry!r}"
+            rec = make_target_record("legacy-breadcrumb")
+            rec[WAIT_KEY] = True
+            targets[entry] = rec
             migrated = True
-            legacy = data.get("target")
-            if legacy:
-                rec = make_target_record("legacy-breadcrumb")
-                # Cannot tell O from A here: hold for a manual merge.
-                rec[WAIT_KEY] = True
-                targets[legacy] = rec
-            else:
-                all_mode = True
+            continue
+        if not isinstance(entry, dict):
+            return {}, False, (f"targets[{i}] must be a PR id string or a "
+                               "record object")
+        pr_id = entry.get("pr_id")
+        if not valid_pr_id(pr_id):
+            return {}, False, f"targets[{i}] has a missing or invalid pr_id"
+        if pr_id in targets:
+            return {}, False, f"targets[{i}] duplicates target {pr_id!r}"
+        for key, typ in _RECORD_TYPES.items():
+            if key in entry and not isinstance(entry[key], typ):
+                return {}, False, (f"targets[{i}].{key} has the wrong type "
+                                   f"({type(entry[key]).__name__})")
+        rec, legacy_seen = _normalize_record(entry)
+        migrated = migrated or legacy_seen
+        rec.setdefault("added_at", now_iso())
+        rec.setdefault("source", "breadcrumb")
+        targets[pr_id] = rec
+    return targets, migrated, None
 
-    # Removed per-PR stop marks.  Only meaningful when auto-start was active:
-    # with it off there is no scheduler/merge path, and turning these into
-    # targets would enable one (and could launch work).
-    stop_ids = _legacy_ids(data.get("stop_before_merge"))
-    if stop_ids:
-        migrated = True
-        if targets or all_mode:
-            targets = migrate_legacy_stop(prs, targets, stop_ids)
-    return targets, all_mode, migrated
+
+def targets_from_breadcrumb(data, prs: list[dict] | None = None
+                            ) -> BreadcrumbTargets:
+    """Parse saved auto-start state without ever granting wildcard scope.
+
+    Current format: ``targets`` (a list of ids/records) + optional
+    ``auto_start``/``run_id``.  The only legacy shape accepted is a single
+    ``target: X``, which migrates to exactly ``[X]`` (as a wait target: the
+    old shape cannot distinguish O from A, so it fails closed).
+
+    Fail-closed rules:
+
+    - ``all_mode`` truthy (or a non-boolean) rejects everything.  All-PR
+      mode has been removed; it is never narrowed into a partial restore.
+    - ``targets`` present but not a list rejects everything.  In particular
+      a mapping (the 2026-10-27 incident) must **not** fall through to the
+      legacy targetless branch.
+    - Any malformed entry/record rejects the whole set.
+    - An empty list is OFF; if it is accompanied by an autostart request
+      (``auto_start`` truthy or ``run_id``) it is rejected with a
+      diagnostic.
+    - Legacy ``auto_start``/``run_id`` with no ``target`` is rejected; it
+      must never become all-mode.
+    - ``auto_start: false`` restores nothing (explicit off).
+    - A malformed ``stop_before_merge`` set rejects everything (its holds
+      are evidence; auto-start must not resume without them).  Valid marks
+      on a restored target set migrate to wait targets.
+    """
+    if not isinstance(data, dict):
+        return BreadcrumbTargets(
+            error="saved auto-start state is not a JSON object")
+
+    if "all_mode" in data:
+        all_mode = data.get("all_mode")
+        if not isinstance(all_mode, bool):
+            return BreadcrumbTargets(
+                error="saved auto-start state has a non-boolean all_mode "
+                      "flag")
+        if all_mode:
+            return BreadcrumbTargets(error=_ALL_MODE_ERROR)
+
+    auto_start = data.get("auto_start")
+    if "auto_start" in data and not isinstance(auto_start, bool):
+        return BreadcrumbTargets(
+            error="saved auto-start state has a non-boolean auto_start "
+                  "flag")
+
+    run_id = data.get("run_id")
+    if "run_id" in data and not (run_id is None or isinstance(run_id, str)):
+        return BreadcrumbTargets(
+            error="saved auto-start state has a non-string run_id")
+
+    stop_ids, stop_error = _parse_stop_ids(data.get("stop_before_merge"))
+    if stop_error:
+        return BreadcrumbTargets(error=stop_error)
+
+    if "targets" in data:
+        raw = data.get("targets")
+        if not isinstance(raw, list):
+            return BreadcrumbTargets(
+                error="saved auto-start state targets must be a list of PR "
+                      f"ids/records, got {type(raw).__name__}")
+        targets, entry_migrated, error = _parse_target_entries(raw)
+        if error:
+            return BreadcrumbTargets(error=error)
+        if not targets:
+            if auto_start or run_id is not None:
+                return BreadcrumbTargets(error=_TARGETLESS_ERROR)
+            # No autostart request.  Leftover stop marks cannot re-enable
+            # auto-start on their own (with it off there is no scheduler or
+            # merge path to gate), but record that they were seen.
+            return BreadcrumbTargets(migrated=bool(stop_ids))
+        if auto_start is False:
+            return BreadcrumbTargets(migrated=entry_migrated)
+        migrated = entry_migrated
+        if stop_ids:
+            targets = migrate_legacy_stop(prs or [], targets, stop_ids)
+            migrated = True
+        return BreadcrumbTargets(targets=targets, migrated=migrated)
+
+    # No ``targets`` key: the only permitted legacy migration is one exact
+    # single target.  A targetless legacy request must never become
+    # all-mode.
+    if "target" in data and data.get("target") is not None:
+        legacy = data.get("target")
+        if not valid_pr_id(legacy):
+            return BreadcrumbTargets(
+                error="saved auto-start state has an invalid legacy target")
+        if auto_start is False:
+            return BreadcrumbTargets()
+        rec = make_target_record("legacy-breadcrumb")
+        # Cannot tell O from A here: hold for a manual merge.
+        rec[WAIT_KEY] = True
+        targets = {legacy: rec}
+        if stop_ids:
+            targets = migrate_legacy_stop(prs or [], targets, stop_ids)
+        return BreadcrumbTargets(targets=targets, migrated=True)
+
+    if auto_start or run_id is not None:
+        return BreadcrumbTargets(error=_TARGETLESS_ERROR)
+    return BreadcrumbTargets(migrated=bool(stop_ids))
 
 
 # ---------------------------------------------------------------------------
@@ -590,34 +731,35 @@ def build_status(inp: dict) -> dict:
     """Build the ``pm.autostart.status/1`` dict from gathered inputs.
 
     *inp* keys (all optional except ``prs``): ``prs``, ``targets`` (ordered
-    ``{pr_id: record}``), ``all_mode``, ``enabled``, ``run_id``, ``owner``,
+    ``{pr_id: record}``), ``enabled``, ``run_id``, ``owner``,
+    ``stop_before_merge`` (stale/removed input, folded below),
     ``review_loops``, ``qa_loops``, ``pending_merge``,
     ``merge_input_required``, ``launching``,
     ``impl_idle``, ``windows`` (``{name: id}``), ``signoff``
     (``{pr_id: {verdict, fresh, stale_reason?}}``), ``skip_qa``, ``generated_at``.
 
-    A stale ``stop_before_merge`` input (the removed policy) is folded into
-    ``wait_for_merge`` targets rather than ignored, so an old caller cannot
-    silently permit a merge.
+    There is no all-PR mode: an ``enabled`` hint without at least one target
+    is reported as OFF (a future caller cannot accidentally describe or
+    derive wildcard authority).  A stale ``stop_before_merge`` input (the
+    removed policy) is folded into ``wait_for_merge`` targets rather than
+    ignored, so an old caller cannot silently permit a merge.
     """
     prs = usable_prs(inp.get("prs"))
     pr_map = {p["id"]: p for p in prs}
     targets: dict[str, dict] = inp.get("targets") or {}
+    if not isinstance(targets, dict):
+        targets = {}
     legacy_stop = inp.get("stop_before_merge")
     if _legacy_ids(legacy_stop):
         targets = migrate_legacy_stop(prs, targets, legacy_stop)
-    all_mode = bool(inp.get("all_mode"))
-    enabled = bool(inp.get("enabled", bool(targets) or all_mode))
+    # No all-PR mode: enabling requires at least one explicit target, and a
+    # stale ``all_mode`` hint can never broaden the scope.
+    enabled = bool(targets) and bool(inp.get("enabled", True))
     windows = inp.get("windows") or {}
     # Only active wait targets hold their closures.
     holds = merge_holds(prs, targets if enabled else {})
 
-    if not enabled:
-        mode = "off"
-    elif all_mode:
-        mode = "all"
-    else:
-        mode = "targets"
+    mode = "targets" if enabled else "off"
 
     target_ids = list(targets) if enabled else []
     nb = needed_by(prs, target_ids)
@@ -681,15 +823,6 @@ def build_status(inp: dict) -> dict:
         run_ids = [i for i in ids
                    if i in pr_map and (i in targets or
                                        pr_map[i].get("status") not in TERMINAL_STATUSES)]
-    elif mode == "all":
-        merged = {p["id"] for p in prs if p.get("status") == "merged"}
-        run_ids = []
-        for p in prs:
-            st = p.get("status") or "pending"
-            if st in ("in_progress", "in_review", "qa", "sign_off"):
-                run_ids.append(p["id"])
-            elif st == "pending" and all(d in merged for d in (p.get("depends_on") or [])):
-                run_ids.append(p["id"])
     else:
         run_ids = []
 
@@ -771,17 +904,12 @@ def status_rows(status: dict) -> list[dict]:
     Each row: ``{pr_id, depth, kind, run}`` where *kind* is ``target`` (a
     target header, depth 0) or ``dep`` (an unmerged closure PR, depth 1),
     plus ``also`` (other targets that share this dep) and ``progress``.
-    In ``all`` mode every run is a depth-0 row.  A shared dependency
-    appears under each target that needs it (with ``also`` naming the
-    others) but is one entry in ``runs`` — i.e. one worker.
+    A shared dependency appears under each target that needs it (with
+    ``also`` naming the others) but is one entry in ``runs`` — i.e. one
+    worker.
     """
     runs = {r["pr_id"]: r for r in status.get("runs") or []}
     rows: list[dict] = []
-    if status.get("mode") == "all":
-        for r in status.get("runs") or []:
-            rows.append({"pr_id": r["pr_id"], "depth": 0, "kind": "run",
-                         "run": r, "also": [], "progress": _progress(r)})
-        return rows
     for t in status.get("targets") or []:
         tid = t["pr_id"]
         run = runs.get(tid) or {
@@ -851,8 +979,6 @@ def format_text(status: dict) -> str:
         r = row["run"]
         indent = "  " * row["depth"]
         mark = "◎ " if row["kind"] == "target" else "└ "
-        if row["kind"] == "run":
-            mark = ""
         # The default policy goes unlabelled in text (only holds show).
         labels = [lbl for lbl, _ in policy_labels(row) if lbl != "auto-merge"]
         pol = f" [{'; '.join(labels)}]" if labels else ""

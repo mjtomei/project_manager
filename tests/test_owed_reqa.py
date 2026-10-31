@@ -66,7 +66,6 @@ class App:
         self._data = store.load(root)
         self._auto_start = autostart
         self._auto_start_targets = {t: {} for t in targets}
-        self._auto_start_all = False
         self._auto_start_launching = set()
         self._qa_loops = {}
         self._review_loops = {}
