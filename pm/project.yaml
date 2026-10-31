@@ -14331,7 +14331,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-31T22:46:56.113421+00:00'
+  updated_at: '2026-10-31T23:32:29.552477+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -15238,6 +15238,35 @@ prs:
       + branch survive).'
     created_at: '2026-10-31T22:46:56Z'
     last_edited: '2026-10-31T22:46:56Z'
+  - id: note-b28e21f
+    text: 'QA S28 (original bug re-proven, head d7dbed6f3): PASS, no code change.
+      CLI-only sandbox: disposable HOME, dedicated PM_TMUX_SOCKET, PYTHONPATH=/workspace
+      over /opt/pm-src, PATH without claude/gh, git-backed fake-github installed before
+      pm init (session repo-024732a1). Story 1 — `pm pr close pr-f6a2b28` on an in_progress
+      PR A exits 0 with exactly `Closing GitHub PR #1...` / `GitHub PR #1 closed.`
+      / `Closed #1: Alpha feature (status: closed)` / `Kept: registry entry, branch
+      ..., workdir ...` / `Reopen` / `Cleanup` on stdout and the dependent warning
+      + Hint on stderr naming B by its pm id (pr-ccfe513), not #2. `show` retains
+      title/status closed/branch/workdir/GitHub .../pull/1/description/note; `list`
+      shows 🚫 #1 [closed] and B ⏳ [pending] <- [pr-f6a2b28]; `list --open` only B;
+      `ready` says No PRs are ready to start. Stand-in #1 CLOSED, next_number 2, refs/heads/branch-1
+      still resolves (close passed no --delete-branch). Workdir 49-file recursive
+      sha256 listing and `git status --porcelain --ignored` byte-identical. Story
+      2 — repeat close: one entry, one note, closed_at byte-identical (23:30:21.159573),
+      updated_at strictly later, workdir/branch intact. Story 3 — `pm pr edit --status
+      pending` prints `status: closed → pending` and drops closed_at; the second close
+      stamps a strictly later one (23:30:54.439231) with title/description/note/branch/workdir/depends_on
+      identical and the sha256 listing unchanged. Story 4 — `pm pr close "#2"` closes
+      C (stand-in #2 CLOSED, branch-2 survives, next_number stays 3); local-backend
+      D closes by pm id with Kept + no Closing GitHub PR line, workdir byte-identical,
+      branch present, and bare `pm pr close 2` correctly reports `PR ''2'' not found.`
+      Reproduction tests: 4 passed on this head; the same file in a detached origin/master
+      (eaf3372e6) worktree gives 4 real failures (close must keep the registry entry;
+      `[["''pr'',''close'',''1'',''--delete-branch'']] != [["''pr'',''close'',''1'']]`
+      twice; `assert wd.is_dir() is False`). Evidence: /pm-captures/scenarios/28/{story1-close-default,story2-repeat-close,story3-reopen-reclose,story4a-close-by-github-number,story4b-close-local-pr,reproduction-tests}/
+      plus manifest.md and final-state.txt.'
+    created_at: '2026-10-31T23:32:29Z'
+    last_edited: '2026-10-31T23:32:29Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
