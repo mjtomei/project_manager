@@ -365,6 +365,55 @@ class TestEnsureWorkdir:
         assert result is None
 
 
+class TestPmSessionOutsidePmTmux:
+    """A process outside a pm tmux session (a QA driver spawned by
+    ``pm pr auto-sequence`` from a plain terminal, a non-pm tmux session or
+    a PR workdir with ``-C``) resolves the session of its project (RQ47 a)."""
+
+    @pytest.fixture
+    def no_pm_tmux(self, monkeypatch):
+        from pm_core.cli import helpers
+        monkeypatch.setattr(helpers, "_get_current_pm_session", lambda: None)
+        monkeypatch.setattr(helpers.tmux_mod, "has_tmux", lambda: True)
+        monkeypatch.setattr(helpers, "_project_override", None)
+        return helpers
+
+    def test_project_override_names_the_session(self, no_pm_tmux, tmp_path,
+                                                monkeypatch):
+        from pm_core import paths
+        tags = {str(tmp_path / "clone" / "pm"): "clone-1111",
+                str(tmp_path / "workdir"): "workdir-2222"}
+        monkeypatch.setattr(
+            paths, "get_session_tag",
+            lambda start_path=None, use_github_name=True:
+                tags[str(start_path or tmp_path / "workdir")])
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "workdir").mkdir()
+        monkeypatch.chdir(tmp_path / "workdir")
+        assert no_pm_tmux._get_pm_session() == "pm-workdir-2222"
+        monkeypatch.setattr(no_pm_tmux, "_project_override",
+                            tmp_path / "clone" / "pm")
+        assert no_pm_tmux._get_pm_session() == "pm-clone-1111"
+
+    def test_loop_session_is_the_live_project_session(self, no_pm_tmux,
+                                                      monkeypatch):
+        from pm_core import loop_shared, tmux as tmux_mod
+        monkeypatch.setattr(no_pm_tmux, "_get_session_name_for_cwd",
+                            lambda: "pm-proj-1234")
+        live = set()
+        monkeypatch.setattr(tmux_mod, "session_exists",
+                            lambda name, socket_path=None: name.lstrip("=") in live)
+        assert loop_shared.get_pm_session() is None
+        live.add("pm-proj-1234")
+        assert loop_shared.get_pm_session() == "pm-proj-1234"
+
+    def test_pm_pane_session_wins(self, no_pm_tmux, monkeypatch):
+        from pm_core import loop_shared
+        monkeypatch.setattr(no_pm_tmux, "_get_current_pm_session",
+                            lambda: "pm-pane-0001")
+        assert loop_shared.get_pm_session() == "pm-pane-0001"
+
+
 # ---------------------------------------------------------------------------
 # _find_live_tui_pane
 # ---------------------------------------------------------------------------

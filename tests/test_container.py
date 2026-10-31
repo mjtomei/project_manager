@@ -571,9 +571,51 @@ class TestCreateContainer:
                 workdir=Path("/w"),
             )
 
-        args_str = " ".join(mock_docker.call_args_list[0][0])
-        assert "ANTHROPIC_API_KEY=sk-test" in args_str
-        assert "CUSTOM_VAR=custom_val" in args_str
+        args = mock_docker.call_args_list[0][0]
+        args_str = " ".join(args)
+        # Passed by name; values go through the runtime's environment so
+        # they never reach the logged / raised command line.
+        assert "-e ANTHROPIC_API_KEY " in args_str
+        assert "-e CUSTOM_VAR " in args_str
+        assert "sk-test" not in args_str
+        assert "custom_val" not in args_str
+        env = mock_docker.call_args_list[0][1]["env"]
+        assert env["ANTHROPIC_API_KEY"] == "sk-test"
+        assert env["CUSTOM_VAR"] == "custom_val"
+
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container.remove_container")
+    def test_failed_create_does_not_expose_env_values(
+            self, mock_rm, mock_exists, _mock_running, _mock_runtime):
+        """Regression: a failed ``run`` logged and raised the full argv,
+        including ``-e ANTHROPIC_API_KEY=<key>``."""
+        import io
+        import logging
+        import subprocess
+        # pm.container does not propagate (file logger), so listen on it
+        # directly, at DEBUG to include the per-command debug line.
+        logger = logging.getLogger("pm.container")
+        buf = io.StringIO()
+        handler = logging.StreamHandler(buf)
+        old_level = logger.level
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+        failed = MagicMock(returncode=125, stdout="", stderr="boom")
+        try:
+            with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-SECRET"}), \
+                 patch("pm_core.container.subprocess.run",
+                       return_value=failed) as run:
+                with pytest.raises(subprocess.CalledProcessError) as exc:
+                    create_container(name="test", config=ContainerConfig(),
+                                     workdir=Path("/w"))
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(old_level)
+        assert "container runtime failed" in buf.getvalue()
+        assert "SECRET" not in buf.getvalue()
+        assert "SECRET" not in str(exc.value)
+        assert "SECRET" not in " ".join(exc.value.cmd)
+        assert run.call_args[1]["env"]["ANTHROPIC_API_KEY"] == "sk-ant-SECRET"
 
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary", return_value=None)

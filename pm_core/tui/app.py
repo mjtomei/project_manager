@@ -26,6 +26,7 @@ from textual.containers import Container, Vertical
 from textual.timer import Timer
 
 from pm_core import store, guide, tui_pidfile
+from rich.markup import escape
 
 from pm_core import tmux as tmux_mod
 from pm_core.tui.tech_tree import TechTree, PRSelected
@@ -51,6 +52,24 @@ from pm_core.tui import review_loop_ui
 # Held confirmations queued behind the current hold (see log_message); more
 # than this and the oldest is dropped from the line (it is still in ``L``).
 _LOG_HELD_QUEUE_MAX = 3
+
+
+def log_line_held(app, now: float | None = None) -> bool:
+    """True while a ``log_message`` hold keeps the log line.
+
+    A hold lasts until its time is up and, while held confirmations are
+    queued, until a pending flush has run: a message arriving after the
+    hold expired but before its timer fired must not jump (and so drop)
+    the confirmations it queued (S50: a fast sign-off's "✓ … signed off"
+    dropped the queued "→ sign-off").  With no flush pending nothing
+    would ever release the queue, so it then holds nothing.
+    """
+    if now is None:
+        import time as _time
+        now = _time.monotonic()
+    return now < getattr(app, "_log_hold_until", 0.0) or (
+        bool(getattr(app, "_log_held_queue", None))
+        and getattr(app, "_log_flush_timers", 0) > 0)
 
 
 def _record_log_message(app, msg: str, suppressed: bool) -> None:
@@ -80,6 +99,12 @@ def current_session_name() -> str | None:
     Callers look the pidfile up by our real session name, so the file
     would never be found and IPC would be silently dead — the same
     pitfall the popup bodies pin ``$S`` for.
+
+    Even the pane's own ``#{session_name}`` is the most recently active
+    session of a window shared by grouped sessions, so a view grouped
+    under another name (not ``<base>~N``) is resolved through its group:
+    otherwise a restarted TUI moved its pidfile and command queue to the
+    view and every CLI command to the TUI timed out (S118).
     """
     if not tmux_mod.in_tmux():
         return None
@@ -87,7 +112,8 @@ def current_session_name() -> str | None:
         name = tmux_mod.get_session_name()
     except Exception:
         return None
-    return name.split("~")[0] or None
+    from pm_core import pane_registry
+    return pane_registry.pm_session_name(name) or None
 
 
 def _session_for_claim(claim: tui_pidfile.TuiPidfileClaim | None) -> str | None:
@@ -227,6 +253,7 @@ class ProjectManagerApp(App):
         Binding("w", "focus_watcher", "Watcher", show=False),
         Binding("V", "review_spec", "Review Spec", show=False),
         Binding("Y", "cleanup_pr", "Cleanup", show=True),
+        Binding("o", "model_settings", "Models", show=True),
     ]
 
     def on_key(self, event) -> None:
@@ -351,7 +378,8 @@ class ProjectManagerApp(App):
                        "view_log", "refresh", "rebalance", "show_help",
                        "toggle_plans", "toggle_qa", "start_qa_on_pr", "hide_plan", "move_to_plan", "toggle_merged",
                        "cycle_filter", "cycle_sort", "toggle_auto_start", "auto_sequence_pr", "focus_watcher",
-                       "review_spec", "cleanup_pr", "show_auto_runs"):
+                       "review_spec", "cleanup_pr", "show_auto_runs",
+                       "model_settings"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus or self._command_pending:
                 _log.debug("check_action: blocked %s (command bar focused/pending)", action)
@@ -407,6 +435,7 @@ class ProjectManagerApp(App):
         self._log_hold_until: float = 0.0  # see log_message(hold=)
         self._log_held: tuple | None = None  # latest message deferred by a hold
         self._log_held_queue: list = []  # held messages waiting for the line
+        self._log_flush_timers: int = 0  # hold flush timers not yet run
         self._log_seq: int = 0  # arrival number of the latest log message
         self._log_shown_seq: int = 0  # arrival number of the one on the line
         # z modifier key state (vim-style prefix, supports z/zz)
@@ -465,6 +494,9 @@ class ProjectManagerApp(App):
         self._prefix_hint_seq: int | None = None
         # QA loop state (purely in-memory)
         self._qa_loops: dict = {}
+        # PRs whose QA run the restart cut off, reported after the breadcrumb
+        # (qa_loop_ui.recover_restart_killed_runs / report_restart_lost_runs)
+        self._restart_lost_qa: list[str] = []
         # Self-driving QA state (zz t — tracks pass counts per PR)
         self._self_driving_qa: dict = {}
         # Command-input race condition fix: buffer keystrokes between / and focus
@@ -565,16 +597,6 @@ class ProjectManagerApp(App):
         if self._startup_error:
             # Another TUI owns this session; exit() was already requested.
             return
-        # Sweep stale runtime_state entries from the previous TUI
-        # process — a freshly-started TUI doesn't own any pane or loop
-        # recorded by an old one, so anything still flagged as
-        # running/idle/queued is no longer live.  Action mirrors will
-        # rewrite real entries as panes register and loops resume.
-        try:
-            from pm_core import runtime_state as _rs
-            _rs.sweep_stale_states("tui-mount")
-        except Exception:
-            _log.debug("runtime_state sweep on mount failed", exc_info=True)
         # Load any existing capture config
         frame_capture.load_capture_config(self)
         # Set up watchers on child widgets for frame capture
@@ -584,7 +606,36 @@ class ProjectManagerApp(App):
         # Defer heavier operations (heal_registry, tmux bindings, GitHub
         # sync) to after the first frame.
         self._load_state()
+        # Sweep stale runtime_state entries from the previous TUI
+        # process — a freshly-started TUI doesn't own any pane or loop
+        # recorded by an old one, so anything still flagged as
+        # running/idle/queued is no longer live.  Action mirrors will
+        # rewrite real entries as panes register and loops resume.
+        # Only this project's PRs: ~/.pm/runtime is shared by every
+        # project, and another project's live TUI owns its entries (S36).
+        # A QA run a ``pm pr auto-sequence`` driver runs is not the old
+        # TUI's either: nothing would rewrite its entry before its verdict,
+        # so the picker would lose its [working] badge (S121).
+        try:
+            from pm_core import runtime_state as _rs
+            from pm_core.qa_loop import run_driven_elsewhere
+            _rs.sweep_stale_states(
+                "tui-mount",
+                pr_ids={p.get("id") for p in (self._data or {}).get("prs") or []},
+                keep=lambda pr_id, action: (action == "qa"
+                                            and run_driven_elsewhere(pr_id)))
+        except Exception:
+            _log.debug("runtime_state sweep on mount failed", exc_info=True)
         self._update_orientation()
+        # A QA run the previous image started and lost before its first
+        # resume snapshot reads as driven by this very pid: end it, and
+        # reopen the REQA it consumed, before the obligation is armed.
+        try:
+            from pm_core.tui import qa_loop_ui
+            qa_loop_ui.recover_restart_killed_runs(self)
+        except Exception:
+            _log.warning("QA runs lost to the restart: recovery failed",
+                         exc_info=True)
         # A sign-off REQA whose QA start was deferred behind a live run — or
         # whose TUI died before starting it — is owed only on disk.  Re-arm
         # it here: the obligation must not depend on the auto-start switch
@@ -614,6 +665,10 @@ class ProjectManagerApp(App):
             self.run_worker(self._write_queue.run(), exclusive=False)
         # Background sync interval: 5 minutes for automatic PR sync
         self._sync_timer = self.set_interval(300, self._background_sync)
+        # The QA resume scan runs on the shared poll timer, which an idle
+        # TUI stops.  Another clone's orphaned run whose PR arrives by a
+        # pull would then wait for the 5 minute sync (S43); keep scanning.
+        self._qa_resume_timer = self.set_interval(5, self._idle_qa_resume_scan)
         # Run heavier startup tasks (heal_registry, tmux bindings) in a
         # background thread so they don't block input processing.
         self.run_worker(self._deferred_startup(), exclusive=False)
@@ -648,6 +703,14 @@ class ProjectManagerApp(App):
         # breadcrumb restore above (which would have overwritten them).
         self._cmd_queue_ready = True
         self._drain_command_queue(startup=True)
+        # A QA run the restart cut off is reported only now: the breadcrumb
+        # pass (or a queued command) may have started it again already.
+        try:
+            from pm_core.tui import qa_loop_ui
+            qa_loop_ui.report_restart_lost_runs(self)
+        except Exception:
+            _log.warning("QA runs lost to the restart: report failed",
+                         exc_info=True)
         # These must run on the main thread (touch Textual state)
         self.run_worker(sync_mod.startup_github_sync(self))
         self._capture_frame("mount")
@@ -726,6 +789,7 @@ class ProjectManagerApp(App):
                         for p in (self._data or {}).get("prs") or []}
         old_deps = {p.get("id"): list(p.get("depends_on") or [])
                     for p in (self._data or {}).get("prs") or []}
+        load_error = None
         try:
             # Only search for root on first load; reuse existing root for refreshes
             if self._root is None:
@@ -741,12 +805,32 @@ class ProjectManagerApp(App):
             # newly-unblocked or newly-in-scope PRs.
             from pm_core.tui import auto_start as _auto_start
             _auto_start.on_state_loaded(self, old_statuses, old_deps)
-        except FileNotFoundError:
-            _log.warning("no project.yaml found")
-            self._root = None
-            self._data = {}
-        except store.ProjectYamlParseError as e:
+        except FileNotFoundError as e:
+            if self._root is not None and Path(self._root).is_dir():
+                # The project's pm dir is still there and only project.yaml
+                # is briefly missing (checkout/rebase): keep the previous
+                # state, as for a conflicted file.
+                _log.warning("project.yaml missing, keeping previous state: %s", e)
+                load_error = e
+            else:
+                _log.warning("no project.yaml found")
+                self._root = None
+                self._data = {}
+        except store.ProjectYamlParseError as e:  # incl. PlanValidationError
             _log.warning("corrupt project.yaml, keeping previous state: %s", e)
+            load_error = e
+        shown_seq = getattr(self, "_load_error_seq", None)
+        if load_error is None and shown_seq:
+            # The "cannot be loaded" line is sticky: drop it now, or it
+            # hides what the reload brings (resumed or recorded QA).  Only
+            # that line: a newer message keeps the log line.
+            self._load_error_seq = None
+            self._clear_log_message(shown_seq)
+            _log.info("project.yaml loads again")
+        self._load_error = load_error
+        if load_error is not None:
+            from pm_core.tui.qa_loop_ui import _project_file_stamp
+            self._load_error_stamp = _project_file_stamp(self._root)
 
         # Decide which view to show based on whether PRs exist
         prs = self._data.get("prs") or []
@@ -754,6 +838,19 @@ class ProjectManagerApp(App):
             self._show_plans_view()
         elif self._qa_visible:
             self._show_qa_view()
+        elif not prs and load_error is not None:
+            # No previous state to keep: a TUI started or restarted while
+            # project.yaml cannot be loaded.  The guide would load the file
+            # again and raise, which killed the TUI at mount, and every QA
+            # run it would resume with it.  Show the (empty) tree, say why,
+            # and reload once the file changes (_retry_failed_load).
+            reason = (str(load_error).splitlines() or [""])[0]
+            msg = (f"project.yaml cannot be loaded: {reason} — waiting "
+                   "for it to load")
+            self.query_one("#tech-tree", TechTree).update_prs(
+                [], unavailable=msg)
+            self._show_normal_view()
+            self._load_error_seq = self.log_message(escape(msg), sticky=30)
         elif not prs:
             state, _ = guide.detect_state(self._root)
             self._show_guide_view(state)
@@ -958,7 +1055,13 @@ class ProjectManagerApp(App):
         replay = _seq is not None
         if not replay:
             _seq = self._log_seq = getattr(self, "_log_seq", 0) + 1
-        held = hold <= 0 and now < self._log_hold_until and not force
+        # Replays come from the flush that releases the queue, so for them
+        # only the hold's own time counts.  (By log_line_held, a queue with
+        # another flush still pending, e.g. a late older timer, would hold:
+        # each replay would be queued again behind the next, forever.)
+        holding = (now < self._log_hold_until if replay
+                   else log_line_held(self, now))
+        held = hold <= 0 and holding and not force
         suppressed = held or (
             sticky <= 0 and now < self._log_sticky_until and not force)
         # The log line holds one message and is overwritten (often within
@@ -966,7 +1069,7 @@ class ProjectManagerApp(App):
         # that ``L`` tails — otherwise status updates are lost unseen.
         if not replay:
             _record_log_message(self, msg, suppressed)
-        if hold > 0 and now < self._log_hold_until:
+        if hold > 0 and holding:
             queue = getattr(self, "_log_held_queue", None)
             if queue is None:
                 queue = self._log_held_queue = []
@@ -997,6 +1100,7 @@ class ProjectManagerApp(App):
                 self._log_sticky_until = 0.0
             # Only a message that is actually shown holds the line.
             self._log_hold_until = now + hold
+            self._log_flush_timers = getattr(self, "_log_flush_timers", 0) + 1
             self.set_timer(hold, self._flush_held_log_message)
         try:
             log = self.query_one("#log-line", LogLine)
@@ -1013,7 +1117,16 @@ class ProjectManagerApp(App):
         confirmations first (oldest first), then the latest deferred
         message."""
         import time as _time
-        if _time.monotonic() < self._log_hold_until:
+        pending = self._log_flush_timers = max(
+            0, getattr(self, "_log_flush_timers", 0) - 1)
+        remaining = self._log_hold_until - _time.monotonic()
+        if remaining > 0:
+            if not pending:
+                # This hold's own timer fired early (Textual sleeps 0.5 ms
+                # short of the delay); without another flush the queued
+                # confirmations would hold the line for good.
+                self._log_flush_timers = 1
+                self.set_timer(remaining, self._flush_held_log_message)
             return  # a newer hold is active; its own timer flushes
         queue = getattr(self, "_log_held_queue", None)
         while queue:
@@ -1067,6 +1180,31 @@ class ProjectManagerApp(App):
             pass
 
     # --- Sync delegates (see tui/sync.py) ---
+
+    def _retry_failed_load(self) -> None:
+        """Reload once project.yaml changes after a load with no previous
+        state failed, so a TUI started on an unloadable file shows the
+        project when it loads, not at the next 5 minute sync."""
+        if (getattr(self, "_load_error", None) is None
+                or (self._data or {}).get("prs")):
+            return
+        from pm_core.tui.qa_loop_ui import _project_file_stamp
+        if _project_file_stamp(self._root) != self._load_error_stamp:
+            self._load_state()
+
+    def _idle_qa_resume_scan(self) -> None:
+        """QA resume scan while the shared poll timer (which scans) is off."""
+        try:
+            self._retry_failed_load()
+        except Exception:
+            _log.warning("reload after a failed load failed", exc_info=True)
+        if self._review_loop_timer:
+            return
+        try:
+            from pm_core.tui import qa_loop_ui
+            qa_loop_ui._resume_incomplete_qa(self)
+        except Exception:
+            _log.warning("idle QA resume scan failed", exc_info=True)
 
     async def _background_sync(self) -> None:
         try:
@@ -1217,6 +1355,18 @@ class ProjectManagerApp(App):
 
     def action_cleanup_pr(self) -> None:
         pr_view.cleanup_pr(self)
+
+    def action_model_settings(self) -> None:
+        """Model / provider / effort of the selected PR's roles (the
+        project's when no PR is selected); see tui/model_screen.py."""
+        from pm_core.tui.model_screen import ModelSettingsScreen
+        if not self._root:
+            self.log_message("No project root")
+            return
+        pr_id = None
+        if not (self._plans_visible or self._qa_visible):
+            pr_id = self.query_one("#tech-tree", TechTree).selected_pr_id
+        self.push_screen(ModelSettingsScreen(self._root, pr_id))
 
     def _action_focus_watcher(self) -> None:
         """Focus the watcher window (wf key chord)."""

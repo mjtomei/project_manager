@@ -42,7 +42,8 @@ class PaneIdleState:
     Three orthogonal flags:
 
     * ``idle`` — the agent emitted ``idle_prompt`` (turn ended, waiting
-      for the next user message).
+      for the next user message); cleared by ``user_prompt`` (a new
+      turn was submitted).
     * ``waiting_for_input`` — the agent emitted ``permission_prompt``
       (Claude Code is showing its own tool-approval dialog and is
       blocked until the user responds).  This is a distinct "the user
@@ -184,11 +185,25 @@ class PaneIdleTracker:
                     state.waiting_for_input = True
                     state.idle = False
                     state.idle_notified = False
+                elif etype == "user_prompt":
+                    # A new turn started (typed or sent by pm), so a pane
+                    # that went idle reads as working again and its next
+                    # idle_prompt counts as newly idle.
+                    state.idle = False
+                    state.waiting_for_input = False
+                    state.idle_notified = False
                 elif etype == "Stop":
                     # Stop fires per-turn (not only at session end), so
-                    # we don't flip state on it.  pane_exists is the
-                    # authoritative session-gone signal.
-                    pass
+                    # it never marks a pane gone; pane_exists is the
+                    # authoritative session-gone signal.  The hook file
+                    # holds only the latest event, so a turn answered
+                    # between two polls shows up as a Stop that replaced
+                    # its user_prompt: a Stop newer than an observed
+                    # idle_prompt is a new turn, working until Claude's
+                    # next idle_prompt (S35).
+                    if state.idle:
+                        state.idle = False
+                        state.idle_notified = False
             return state.idle
 
     # -- Pure reads --
@@ -202,10 +217,10 @@ class PaneIdleTracker:
         """Timestamp of the last hook event when the pane is idle, else None.
 
         Callers that must not treat an immediate idle turn as finished work
-        (e.g. a base-rework handoff) use this to require a settle window; a
-        later hook event refreshes it.  The value is the most recent event's
-        timestamp (an event after ``idle_prompt``, such as ``Stop``, only
-        makes the settle window more conservative).
+        (e.g. a base-rework handoff) use this to require a settle window.  The
+        value is the most recent event's timestamp.  ``None`` while the pane
+        is not idle: a ``Stop`` after an observed ``idle_prompt`` starts a new
+        turn (S35), so the earlier idle timestamp is no longer evidence.
         """
         with self._lock:
             state = self._states.get(key)

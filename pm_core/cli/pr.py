@@ -7,6 +7,7 @@ import contextlib
 import os
 import platform
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,7 @@ import yaml
 
 from pm_core import store, graph, git_ops, prompt_gen, merge_integrity
 from pm_core.pr_utils import VALID_PR_STATES
+from pm_core.model_config import EFFORT_LEVELS, PR_SESSION_TYPES
 from pm_core.shell import shell_quote
 from pm_core import pr_sync as pr_sync_mod
 from pm_core import tmux as tmux_mod
@@ -1152,10 +1154,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     prompt = prompt_gen.generate_prompt(data, pr_id, session_name=pm_session)
 
     # Resolve model/provider for this implementation session
-    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
+    from pm_core.model_config import resolve_model_and_provider
     _resolution = resolve_model_and_provider(
         "impl",
-        pr_model=get_pr_model_override(pr_entry),
+        pr_entry=pr_entry,
         project_data=data,
     )
     resolved_model = _resolution.model
@@ -1200,6 +1202,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                                          effort=_resolution.effort,
                                          session_tag=_stag,
                                          session_type="impl",
+                                         container=_is_container_enabled(),
                                          env_out=env)
             # Optionally wrap in a container for isolation
             from pm_core.container import wrap_claude_cmd, ContainerError
@@ -1207,6 +1210,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
                                               allowed_push_branch=branch,
                                               session_tag=_stag, pr_id=pr_id,
+                                              provider=resolved_provider,
                                               env=env)
             except ContainerError as e:
                 click.echo(str(e), err=True)
@@ -1227,10 +1231,12 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                     win = tmux_mod.find_window_by_name(pm_session, window_name)
                     if win:
                         tmux_mod.set_shared_window_size(pm_session, win["id"])
-                click.echo(f"Launched Claude in tmux window '{window_name}' (session: {pm_session})")
-                # A sign-off IMPL / base-conflict return is now being worked on.
+                # A sign-off IMPL / base-conflict return is now being worked
+                # on.  Cleared before the echo, which fails (EPIPE) when the
+                # TUI that launched this restarted meanwhile (see
+                # _launch_review_window).
                 from pm_core.signoff import clear_return_awaiting
-                clear_return_awaiting(root, pr_id, "impl")
+                clear_return_awaiting(root, pr_id, "impl", session_opened=True)
                 from pm_core import base_check
                 base_check.clear_return_awaiting(root, pr_id)
                 # Every driver watching this PR's impl pane (TUI run dir,
@@ -1239,6 +1245,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 # symlink makes the others read the killed session's last
                 # idle event (a base-return handoff would never advance).
                 base_check.share_impl_transcript(root, pr_id, transcript)
+                click.echo(f"Launched Claude in tmux window '{window_name}' (session: {pm_session})")
                 return
             except Exception as e:
                 click.echo(f"Failed to create tmux window: {e}", err=True)
@@ -1250,7 +1257,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         clear_session(root, session_key)
     click.echo("Launching Claude...")
     from pm_core.signoff import clear_return_awaiting
-    clear_return_awaiting(root, pr_id, "impl")
+    clear_return_awaiting(root, pr_id, "impl", session_opened=True)
     from pm_core import base_check
     base_check.clear_return_awaiting(root, pr_id)
     launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh,
@@ -1347,7 +1354,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                           review_loop_id: str = "",
                           transcript: str | None = None) -> None:
     """Launch a tmux review window with Claude review + git diff shell."""
-    if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
+    # A background launch (``pm pr auto-sequence``) switches no client, so
+    # it may come from a shell outside tmux: the window opens in the pm
+    # session of the project.
+    if not tmux_mod.has_tmux() or not (background or tmux_mod.in_tmux()):
         click.echo("Review window requires tmux.")
         return
 
@@ -1404,10 +1414,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     base_branch = data.get("project", {}).get("base_branch", "master")
 
     # Resolve model/provider for review session
-    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
+    from pm_core.model_config import resolve_model_and_provider
     _resolution = resolve_model_and_provider(
         "review",
-        pr_model=get_pr_model_override(pr_entry),
+        pr_entry=pr_entry,
         project_data=data,
     )
 
@@ -1441,6 +1451,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                                          effort=_resolution.effort,
                                          session_tag=_review_stag,
                                          session_type="review",
+                                         container=_is_container_enabled(),
                                          env_out=env)
     # Optionally wrap in a container for isolation.
     # Always remove any existing container for this review before creating a
@@ -1453,7 +1464,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     branch = pr_entry.get("branch", "")
     from pm_core.container import wrap_claude_cmd, ContainerError, remove_container, is_container_mode_enabled, _make_container_name
     if is_container_mode_enabled():
-        remove_container(_make_container_name(f"review-{pr_id}"))
+        remove_container(_make_container_name(f"review-{pr_id}",
+                                              session_tag=_review_stag))
     # session_tag drives the captures bind-mount so the review
     # container's /pm-captures points at the same per-PR captures dir
     # the impl and QA containers use (lets a reviewer read pre/post-fix
@@ -1463,6 +1475,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                                               allowed_push_branch=branch,
                                               session_tag=_review_stag,
                                               pr_id=pr_id,
+                                              provider=_resolution.provider,
                                               env=env)
     except ContainerError as e:
         click.echo(str(e), err=True)
@@ -1586,10 +1599,15 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         if review_win_id:
             pane_layout.rebalance(pm_session, review_win_id)
 
-        click.echo(f"Opened review window '{window_name}'")
-        # A sign-off REVIEW return is now being reviewed.
+        # A sign-off REVIEW return is now being reviewed.  Cleared before
+        # the echo: a TUI that launched this and restarted meanwhile left
+        # stdout a broken pipe, and the echo's EPIPE would skip the clear
+        # while the window runs (S75), so a tick after the claim expired
+        # would launch a second --fresh review over it.
         from pm_core.signoff import clear_return_awaiting
-        clear_return_awaiting(state_root(), pr_entry["id"], "review")
+        clear_return_awaiting(state_root(), pr_entry["id"], "review",
+                              session_opened=True)
+        click.echo(f"Opened review window '{window_name}'")
     except Exception as e:
         _log.warning("Failed to launch review window: %s", e)
         click.echo(f"Review window error: {e}")
@@ -1971,9 +1989,17 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
         click.echo(f"PR {_pr_display_id(pr_entry)} marked as sign_off.")
         trigger_tui_refresh()
 
-    signoff_mod.launch_signoff_window(
-        data, pr_entry, fresh=fresh, background=background,
-        transcript=transcript)
+    from pm_core.container import ContainerError
+    try:
+        signoff_mod.launch_signoff_window(
+            data, pr_entry, fresh=fresh, background=background,
+            transcript=transcript)
+    except ContainerError as e:
+        # Like impl/review: the TUI's sign-off driver discards stdout and
+        # shows a failed launch's last stderr line, so a setup remedy
+        # printed to stdout with rc 0 was never seen (it logged "launched").
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
 
 
 @pr_signoff_group.command("record")
@@ -2210,10 +2236,10 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     display_id = _pr_display_id(pr_entry)
 
     # Resolve model/provider for merge session
-    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
+    from pm_core.model_config import resolve_model_and_provider
     _resolution = resolve_model_and_provider(
         "merge",
-        pr_model=get_pr_model_override(pr_entry),
+        pr_entry=pr_entry,
         project_data=data,
     )
 
@@ -3502,6 +3528,134 @@ def _clear_workdir(data: dict, pr_id: str) -> None:
         pr["workdir"] = None
 
 
+@pr.group("model")
+def pr_model():
+    """View and set which model, provider and effort a PR's sessions use.
+
+    A PR's settings win over the project's and global ones (only PM_MODEL /
+    PM_EFFORT beat them).  Without --role a setting applies to every role of
+    the PR; with --role it applies to that role (and the roles that fall
+    back to it, e.g. qa -> qa_scenario).  Providers are configured with
+    'pm provider'.
+    """
+    pass
+
+
+_PR_ROLE_CHOICE = click.Choice(list(PR_SESSION_TYPES))
+
+
+@pr_model.command("show")
+@click.argument("pr_id")
+def pr_model_show(pr_id: str):
+    """Show the effective model, effort and command of each role of a PR."""
+    from pm_core import model_settings
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    click.echo(f"{_pr_display_id(pr_entry)} model settings "
+               f"(model: {pr_entry.get('model') or '-'}, "
+               f"effort: {pr_entry.get('effort') or '-'}):")
+    for key in ("session_models", "session_effort"):
+        entries = pr_entry.get(key)
+        if isinstance(entries, dict) and entries:
+            click.echo(f"  {key}: " + ", ".join(
+                f"{k}={v}" for k, v in entries.items()))
+    click.echo()
+    for line in model_settings.format_rows(
+            model_settings.role_rows(data, pr_entry)):
+        click.echo(f"  {line}")
+
+
+@pr_model.command("set")
+@click.argument("pr_id")
+@click.argument("value", required=False)
+@click.option("--effort", type=click.Choice(list(EFFORT_LEVELS)),
+              default=None, help="Also set the effort")
+@click.option("--role", "roles", multiple=True, type=_PR_ROLE_CHOICE,
+              help="Only this role (repeatable); default: every role")
+def pr_model_set(pr_id: str, value: str | None, effort: str | None,
+                 roles: tuple):
+    """Set a PR's model (VALUE) and/or effort.
+
+    VALUE is a model name (opus, claude-opus-5-5, ...) or provider:NAME
+    for a provider configured with 'pm provider'.
+
+    \b
+    Examples:
+      pm pr model set pr-001 provider:my-router --effort high
+      pm pr model set pr-001 provider:other --role signoff
+      pm pr model set pr-001 --effort medium --role qa_scenario
+    """
+    from pm_core import model_settings
+    if value is None and effort is None:
+        click.echo("Error: give a VALUE and/or --effort.", err=True)
+        raise SystemExit(1)
+    if value is not None:
+        problem = model_settings.check_model_value(value)
+        if problem:
+            click.echo(f"Error: {problem}", err=True)
+            raise SystemExit(1)
+    root = state_root()
+    pr_id = _require_pr(store.load(root), pr_id)["id"]
+
+    def apply(data):
+        pr_entry = store.get_pr(data, pr_id)
+        if pr_entry is None:
+            raise click.ClickException(f"PR {pr_id} disappeared")
+        if value is not None:
+            model_settings.set_pr_value(pr_entry, "model", value, list(roles))
+        if effort is not None:
+            model_settings.set_pr_value(pr_entry, "effort", effort,
+                                        list(roles))
+
+    store.locked_update(root, apply)
+    scope = ", ".join(roles) if roles else "every role"
+    what = " and ".join(x for x in (value and f"model {value}",
+                                    effort and f"effort {effort}") if x)
+    click.echo(f"{pr_id}: set {what} for {scope}")
+    click.echo("Running sessions keep their settings; new launches use "
+               "these.")
+
+
+@pr_model.command("unset")
+@click.argument("pr_id")
+@click.option("--role", "roles", multiple=True, type=_PR_ROLE_CHOICE,
+              help="Only this role's entry (repeatable)")
+@click.option("--model", "only_model", is_flag=True,
+              help="Only the model setting")
+@click.option("--effort", "only_effort", is_flag=True,
+              help="Only the effort setting")
+@click.option("--all", "everything", is_flag=True,
+              help="Every PR-wide and per-role setting")
+def pr_model_unset(pr_id: str, roles: tuple, only_model: bool,
+                   only_effort: bool, everything: bool):
+    """Remove a PR's model and/or effort setting.
+
+    Without --role removes the PR-wide setting (role entries stay); with
+    --role those roles' entries; with --all everything.
+    """
+    from pm_core import model_settings
+    kinds = [k for k, on in (("model", only_model), ("effort", only_effort))
+             if on] or ["model", "effort"]
+    root = state_root()
+    pr_id = _require_pr(store.load(root), pr_id)["id"]
+
+    def apply(data):
+        pr_entry = store.get_pr(data, pr_id)
+        if pr_entry is None:
+            raise click.ClickException(f"PR {pr_id} disappeared")
+        for kind in kinds:
+            if everything:
+                model_settings.clear_pr(pr_entry, kind)
+            else:
+                model_settings.set_pr_value(pr_entry, kind, None, list(roles))
+
+    store.locked_update(root, apply)
+    scope = ("all settings" if everything else
+             ", ".join(roles) if roles else "PR-wide setting")
+    click.echo(f"{pr_id}: removed {' and '.join(kinds)} ({scope})")
+
+
 @pr.group("note")
 def pr_note():
     """Manage notes on a PR."""
@@ -3792,6 +3946,11 @@ def _impl_idle_tracker(pr_entry: dict, tdir: Path, pane_id: str):
     transcript = tdir / f"impl-{pr_id}.jsonl"
     if not transcript.exists():
         return None
+    from pm_core.claude_launcher import pane_runs_transcript
+    if not pane_runs_transcript(pane_id, pr_entry.get("workdir"), transcript):
+        # Another driver (the TUI) launched this pane; the symlink is an
+        # earlier session's, whose idle event says nothing about it (S79).
+        return None
     tracker = PaneIdleTracker()
     try:
         tracker.register(pr_id, pane_id, str(transcript))
@@ -3844,6 +4003,68 @@ def _older_than(path: Path | None, iso_ts: str | None) -> bool:
         return path.stat().st_mtime < parse_ts(iso_ts).timestamp()
     except (OSError, ValueError):
         return False
+
+
+def _qa_run_started_since(pr_id: str, iso_ts: str | None) -> bool:
+    """Whether this pm session started a QA run of *pr_id* at or after the
+    ISO timestamp *iso_ts*, by the start record each run writes in its QA
+    workdir."""
+    from pm_core.qa_loop import own_run_started_since
+    from pm_core.signoff import parse_ts
+    try:
+        since = parse_ts(iso_ts).timestamp()
+    except (TypeError, ValueError):
+        return False
+    return own_run_started_since(pr_id, since)
+
+
+def _qa_run_starting(pr_id: str, iso_ts: str | None) -> bool:
+    """Whether this pm session started a QA run of *pr_id* less than a
+    launch claim's expiry ago (and at or after the ISO timestamp *iso_ts*
+    when given): a driver still killing the judged run's windows and
+    planning, before its own qa window and status exist.  The TUI's REQA
+    hop holds no launch claim, so its start record is the only sign of it
+    (S91).  A run that died before opening a window stops counting once
+    that expiry passes, like a claim whose launcher died."""
+    import time
+    from pm_core.qa_loop import own_run_started_since
+    from pm_core.signoff import RETURN_LAUNCH_CLAIM_SECONDS, parse_ts
+    since = time.time() - RETURN_LAUNCH_CLAIM_SECONDS
+    if iso_ts:
+        try:
+            since = max(since, parse_ts(iso_ts).timestamp())
+        except (TypeError, ValueError):
+            pass
+    return own_run_started_since(pr_id, since)
+
+
+def _qa_run_driven(pr_id: str) -> bool:
+    """Whether a QA run of *pr_id* this pm session started is still driven
+    by a live process, with or without its qa window.  It need not be the
+    re-run: a run from before a sign-off return still holds the PR until it
+    ends (S120)."""
+    from pm_core.qa_loop import own_run_driven
+    return own_run_driven(pr_id)
+
+
+def _qa_run_stopped(pr_id: str, status_path: Path | None) -> bool:
+    """Whether the latest QA run of *pr_id* (*status_path* is its status
+    file) ended on a provider setup error and nothing drives or replaced
+    it: no run of it this pm session started after that stop, and no live
+    driver of one (see :func:`pm_core.qa_loop.record_setup_stop`)."""
+    import json
+    from pm_core.qa_loop import own_run_started_since
+    if status_path is None:
+        return False
+    try:
+        data = json.loads(status_path.read_text())
+        stopped_at = status_path.stat().st_mtime
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict) or not data.get("stopped"):
+        return False
+    return (not own_run_started_since(pr_id, stopped_at)
+            and not _qa_run_driven(pr_id))
 
 
 def _qa_status_for(pr_id: str) -> tuple[str | None, Path | None]:
@@ -4046,12 +4267,14 @@ def pr_auto_sequence(pr_id: str):
         # the highest one — so continue numbering after them.  An open
         # review window then reviewed the older code: replace it (fresh)
         # rather than switching to it, or no rework review ever runs and
-        # the in_review tick waits on that window forever.
+        # the in_review tick waits on that window forever.  That holds for
+        # any rework of a sign-off return, also when this dir has no
+        # iteration because the TUI ran the earlier reviews (S77).
         _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
         next_iter = latest_iter + 1
         blocked = _launch_review_iteration(
-            pr_id, tdir, next_iter, fresh=latest_iter > 0,
-            review_loop=False, root=root)
+            pr_id, tdir, next_iter, review_loop=False, root=root,
+            fresh=latest_iter > 0 or open_return(pr_entry) is not None)
         if blocked:
             click.echo(blocked)
             return
@@ -4109,15 +4332,30 @@ def pr_auto_sequence(pr_id: str):
             if project.get("skip_qa"):
                 click.echo("ready_to_merge (skip_qa)")
                 return
-            # Transition to qa and launch QA in a detached subprocess.
+            # Transition to qa and launch QA in a detached subprocess.  A
+            # provider setup error is reported before the move: a PR left in
+            # qa with no run would have its next tick act on an earlier
+            # run's qa_status.json (a stale NEEDS_WORK bounces it back to
+            # review) or qa window ("running: qa", the launch never retried).
+            _check_qa_launch(root, pr_id)
             def _to_qa(d):
                 p = store.get_pr(d, pr_id)
                 if p and p.get("status") == "in_review":
                     p["status"] = "qa"
                     _record_status_timestamp(p, "qa")
-            store.locked_update(root, _to_qa)
+            # A run record names this tick (then the driver) before the PR
+            # shows qa: a TUI auto-start pass in between saw no driver and
+            # started a second loop (S111).
+            from pm_core.qa_loop import drop_launch_record, write_launch_record
+            loop_id = secrets.token_hex(8)
+            write_launch_record(pr_id, loop_id, os.getpid())
+            try:
+                store.locked_update(root, _to_qa)
+            except BaseException:
+                drop_launch_record(pr_id, loop_id)
+                raise
             trigger_tui_refresh()
-            _launch_qa_detached(root, pr_id)
+            _launch_qa_detached(root, pr_id, loop_id=loop_id)
             click.echo("advanced: qa")
             return
 
@@ -4241,37 +4479,82 @@ def pr_auto_sequence(pr_id: str):
             # launched run, or a held run reopening after INPUT_REQUIRED.
             # Check for the qa tmux window before
             # re-launching to avoid stacking duplicate QA subprocesses
-            # during the launch→first-write race window.  While the REQA
-            # obligation is still unclaimed that window belongs to a run that
-            # already finished (QA windows are kept for inspection), so it
-            # does not mean a run is starting: the catch-up's claim is the
-            # one-owner gate there, and any run actually starting has either
-            # cleared ``awaiting`` or written its run record by now.
-            qa_win = None
-            if pm_session and not owed_reqa:
-                display_id = _pr_display_id(pr_entry)
-                qa_win = tmux_mod.find_window_by_name(
-                    pm_session, f"qa-{display_id}")
-            if qa_win:
+            # during the launch→first-write race window.
+            display_id = _pr_display_id(pr_entry)
+            qa_win = tmux_mod.find_window_by_name(
+                pm_session, f"qa-{display_id}",
+            ) if pm_session else None
+            return_ts = (open_return(pr_entry) or {}).get("ts")
+            if owed_reqa:
+                if (qa_win and _qa_run_started_since(pr_id, return_ts)) \
+                        or _qa_run_starting(pr_id, return_ts) \
+                        or _qa_run_driven(pr_id):
+                    # The TUI started the re-run while project.yaml was
+                    # busy: its clear of ``awaiting`` is still pending (the
+                    # poll tick retries it), and a tick queued on the lock
+                    # got it first at the release (S87).  That run's window
+                    # is the re-run's, not the judged run's (or it has
+                    # none yet: it is still replacing the judged run's).  A
+                    # live driver of that run counts even after the user
+                    # closed its qa window (S89).  So does a run another
+                    # process still drives from before the return (the
+                    # user's ``pm qa run``): a launch now retires its
+                    # windows as stale and runs a second loop beside it;
+                    # the re-run starts once it ends (S117, S120).
+                    click.echo("running: qa")
+                    return
+                if run_driven_elsewhere(pr_id):
+                    click.echo("running: qa (driven elsewhere)")
+                    return
+                # Sign-off sent this back to QA and no driver has started
+                # the re-run yet (each clears ``awaiting`` as it starts), so
+                # a qa window is the judged run's (QA windows are kept for
+                # inspection): launch — unless another driver already is,
+                # the claim being the one-owner gate.  The hop tick refuses
+                # a provider setup error after the hop, so check before
+                # claiming: a claim held through the fix would hide the
+                # launch for minutes.
+                from pm_core.signoff import claim_return_launch
+                _check_qa_launch(root, pr_id)
+                if not claim_return_launch(root, pr_id, "qa",
+                                           require_status="qa"):
+                    click.echo("running: qa (launch claimed)")
+                    return
+            elif _qa_run_stopped(pr_id, _path):
+                # The run ended on a provider setup error and nothing will
+                # finish it (its window stays open): relaunch.  While the
+                # setting is still broken the launch check prints the one
+                # Error: line and spawns nothing.
+                _launch_qa_detached(root, pr_id)
+                click.echo("running: qa (relaunched)")
+                return
+            elif qa_win:
                 click.echo("running: qa")
                 return
-            # Same race, before the window exists: a run another live
-            # process drives (a user's ``pm qa run``, another TUI) is not
-            # ours to duplicate (S117).
-            if run_driven_elsewhere(pr_id):
-                click.echo("running: qa (driven elsewhere)")
-                return
-            if _qa_run_owned_elsewhere(_path):
-                # A reopened held run can still have an owner even without
-                # its window. Keep that driver's workers and evidence intact.
-                click.echo("running: qa")
-                return
-            # A sign-off REQA's re-run is owed: only one driver may take it.
-            from pm_core.signoff import claim_return_launch, return_awaiting
-            if return_awaiting(pr_entry) == "qa" and not claim_return_launch(
-                    root, pr_id, "qa", require_status="qa"):
-                click.echo("running: qa (launch claimed)")
-                return
+            else:
+                # The re-run's driver cleared ``awaiting`` and is replacing
+                # the judged run's window: its claim still stands.
+                # A TUI driver holds no claim: its start record stands in
+                # until its window exists (S91: two ticks 2 s apart each
+                # launched qa-run-bg over a TUI REQA re-run in that gap).
+                # A run whose qa window the user closed is still driven
+                # while its driver lives (S89), and a run another live
+                # process drives is not ours to duplicate (S117).
+                from pm_core.signoff import return_launch_claimed
+                if return_launch_claimed(pr_entry, "qa") \
+                        or _qa_run_starting(pr_id, return_ts) \
+                        or _qa_run_driven(pr_id):
+                    click.echo("running: qa")
+                    return
+                if run_driven_elsewhere(pr_id):
+                    click.echo("running: qa (driven elsewhere)")
+                    return
+                if _qa_run_owned_elsewhere(_path):
+                    # A reopened held run can still have an owner even
+                    # without its window. Keep that driver's workers and
+                    # evidence intact.
+                    click.echo("running: qa")
+                    return
             _launch_qa_detached(root, pr_id)
             click.echo("running: qa (launched)")
             return
@@ -4321,19 +4604,22 @@ def pr_auto_sequence(pr_id: str):
             click.echo("paused: sign_off_blocked")
             return
         if hop == "qa":
-            # A ``pm qa run`` of this PR may be live (the user's own
-            # re-verification): a detached run now would retire its windows
-            # as stale and run QA twice (S117).  The return record keeps
-            # ``awaiting: qa``, so the next tick — or the TUI's reconciler —
-            # starts the owed run once that one ends.
+            # A QA run another process still drives (the user's ``pm qa
+            # run``) is left to finish: a detached run now would retire its
+            # windows as stale and run QA twice (S117).  The return record
+            # keeps ``awaiting: qa``, so the next tick — or the TUI's
+            # reconciler — starts the owed run once that one ends (S120).
             from pm_core.qa_loop import run_driven_elsewhere
-            if run_driven_elsewhere(pr_id):
+            if run_driven_elsewhere(pr_id) or _qa_run_driven(pr_id):
                 click.echo("sign_off: re-qa deferred: a QA run is in flight")
                 return
-            # One owner across ticks and TUIs: the hop's driver claims the
-            # launch before spawning it (the detached driver clears the
-            # claim with ``awaiting`` as its run starts).
+            # One owner across ticks and TUIs: claimed (after the provider
+            # check: a claim held through the fix would hide the launch for
+            # minutes) before the spawn, so a concurrent qa tick leaves this
+            # driver alone until it starts; one that claimed first launches
+            # instead.
             from pm_core.signoff import claim_return_launch
+            _check_qa_launch(root, pr_id)
             if not claim_return_launch(root, pr_id, "qa", require_status="qa"):
                 click.echo("running: qa (launch claimed)")
                 return
@@ -4377,33 +4663,66 @@ def pr_auto_sequence(pr_id: str):
     raise SystemExit(2)
 
 
-def _launch_qa_detached(root: Path, pr_id: str) -> None:
+def _check_qa_launch(root: Path, pr_id: str) -> None:
+    """Raise the provider setup error a detached QA driver would die on."""
+    from pm_core.qa_loop import check_qa_providers
+    data = store.load(root)
+    check_qa_providers(store.get_pr(data, pr_id) or {}, data)
+
+
+def _launch_qa_detached(root: Path, pr_id: str,
+                        loop_id: str | None = None) -> None:
     """Spawn a detached subprocess to drive the QA loop for *pr_id*.
 
     Uses the hidden ``pm pr qa-run-bg`` subcommand so the QA scenarios
     run in tmux windows under their own long-lived process.  Subsequent
     auto-sequence ticks read the resulting ``qa_status.json``.
+
+    The driver's output goes nowhere, so a provider setup error of a QA
+    session is raised here (one ``Error:`` line from
+    this tick, no driver spawned) instead of ending the driver unseen and
+    being relaunched on every tick.
+
+    The run's start record names this process and then the driver from
+    before the spawn (qa_loop.write_launch_record): the driver writes its
+    own only after setting up, and a TUI auto-start pass in that gap would
+    start a second loop.
     """
+    from pm_core.qa_loop import drop_launch_record, write_launch_record
+    loop_id = loop_id or secrets.token_hex(8)
     cmd = [sys.executable, "-m", "pm_core.wrapper",
-           "pr", "qa-run-bg", pr_id]
-    # start_new_session detaches from the parent process group so the
-    # caller can exit while QA continues.
-    subprocess.Popen(
-        cmd, cwd=str(root), start_new_session=True,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        stdin=subprocess.DEVNULL,
-    )
+           "pr", "qa-run-bg", pr_id, "--loop-id", loop_id]
+    try:
+        _check_qa_launch(root, pr_id)
+        write_launch_record(pr_id, loop_id, os.getpid())
+        # start_new_session detaches from the parent process group so the
+        # caller can exit while QA continues.
+        proc = subprocess.Popen(
+            cmd, cwd=str(root), start_new_session=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+        )
+    except BaseException:
+        # No driver: a record naming this exiting tick would read as a
+        # run starting (_qa_run_starting) until the claim expiry.
+        drop_launch_record(pr_id, loop_id)
+        raise
+    write_launch_record(pr_id, loop_id, proc.pid)
 
 
 @pr.command("qa-run-bg", hidden=True)
 @click.argument("pr_id")
-def pr_qa_run_bg(pr_id: str):
+@click.option("--loop-id", default=None, hidden=True,
+              help="Run id whose start record the launcher wrote.")
+def pr_qa_run_bg(pr_id: str, loop_id: str | None):
     """Hidden: run the QA loop synchronously to completion.
 
     Used by ``pm pr auto-sequence`` to spawn a detached QA driver.  Not
     intended for direct human use — prefer the TUI ``t`` key.
     """
-    from pm_core.qa_loop import QALoopState, clear_resume_file, run_qa_sync
+    from pm_core.qa_loop import (QALoopState, _is_setup_error,
+                                 _log_thread_end, clear_resume_file,
+                                 record_setup_stop, run_qa_sync)
 
     root = state_root()
     data = store.load(root)
@@ -4422,15 +4741,26 @@ def pr_qa_run_bg(pr_id: str):
                   pr_id)
         return
 
-    # Transition to qa if necessary
+    # Transition to qa if necessary.  The launching tick has normally done
+    # it already; only lock when there is something to write, and wait out
+    # a busy project.yaml (another pm command) rather than die before the
+    # run starts: nothing would report it (output goes nowhere) (S111).
     def _to_qa(d):
         p = store.get_pr(d, pr_id)
         if p and p.get("status") == "in_review":
             p["status"] = "qa"
             _record_status_timestamp(p, "qa")
-    store.locked_update(root, _to_qa)
-    data = store.load(root)
-    pr_entry = store.get_pr(data, pr_id) or pr_entry
+    if pr_entry.get("status") == "in_review":
+        try:
+            store.locked_update(root, _to_qa)
+        except store.StoreLockTimeout as e:
+            from pm_core.signoff import RETURN_CLEAR_WAIT_SECONDS
+            _log.warning("pr_qa_run_bg: %s; waiting up to %ss more", e,
+                         RETURN_CLEAR_WAIT_SECONDS)
+            store.locked_update(root, _to_qa,
+                                timeout=RETURN_CLEAR_WAIT_SECONDS)
+        data = store.load(root)
+        pr_entry = store.get_pr(data, pr_id) or pr_entry
 
     # Guard against an out-of-band status change that landed between the
     # auto-sequence sign_off->qa bounce (apply_signoff_hop) that spawned this
@@ -4455,7 +4785,7 @@ def pr_qa_run_bg(pr_id: str):
         return
 
     from pm_core.signoff import clear_return_awaiting
-    clear_return_awaiting(root, pr_id, "qa")
+    clear_return_awaiting(root, pr_id, "qa", session_opened=True)
     # Mirror this CLI-driven run into the shared per-PR runtime state.  Only
     # TUI-owned loops mirror themselves, so without this a run launched by
     # auto-sequence has no ~/.pm/runtime/<id>.json at all: the popup picker
@@ -4466,12 +4796,15 @@ def pr_qa_run_bg(pr_id: str):
     from pm_core import runtime_state as _rs
     _suppress = (_rs.get_action_state(pr_id, "qa") or {}).get("suppress_switch")
     _rs.set_action_state(pr_id, "qa", "running", suppress_switch=_suppress)
-    state = QALoopState(pr_id=pr_id)
+    state = (QALoopState(pr_id=pr_id, loop_id=loop_id) if loop_id
+             else QALoopState(pr_id=pr_id))
     try:
         run_qa_sync(state, root, pr_entry, on_update=None, max_scenarios=None)
     except Exception as e:
         _rs.set_action_state(pr_id, "qa", "failed")
-        _log.exception("pr_qa_run_bg: QA crashed for %s: %s", pr_id, e)
+        _log_thread_end(e, "pr_qa_run_bg: QA", pr_id)
+        if _is_setup_error(e):
+            record_setup_stop(state, e)
         raise SystemExit(1)
     if state.base_returned:
         _log.info("pr_qa_run_bg: %s returned to implementation for a base "

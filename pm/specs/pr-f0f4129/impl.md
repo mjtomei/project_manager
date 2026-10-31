@@ -370,6 +370,40 @@ already drops it because the status is no longer `qa`.
   transcript in `share_impl_transcript`, a merge landing during the gate's
   fetch at the review and QA choke points, and a missing project root in the
   TUI completion tick.
+- **R16 — Master integration (2026-10-31).** `origin/master` @ `eaf3372e`
+  (which carries #249/pr-592e4bd) was merged into this branch. The two
+  feature sets are kept side by side, not traded off:
+  - the CLI's pane-identity guard (S79: a symlink naming another driver's
+    session) moved into the shared `_impl_idle_tracker`, so both
+    `_check_impl_idle` and the base-return `_impl_idle_since` reject it;
+  - `_launch_review_iteration` keeps this branch's exit-3 → `base_conflict:`
+    status-line conversion *and* master's `fresh=... or open_return(...)`
+    (replace a review window an older sign-off-return review left open);
+  - `_announce_loop_done` (master's extraction of the completion message)
+    renders `_done_iteration_count(state)`, so a fresh loop seeded from a
+    long-lived PR's transcripts still reports the iterations *it* performed;
+  - `_LAUNCH_TIMEOUT` stays 360 s (above the gate's 300 s relaunch) and keeps
+    master's `_IN_FLIGHT_SYMLINK_GRACE`;
+  - `pr_start` clears both returns with master's `session_opened=True` (the
+    echo can fail with EPIPE after a TUI restart) and still clears
+    `base_return` + re-points the transcript links;
+  - `start_qa`/`start_or_stop_qa_loop` keep the base-return refusal on top of
+    master's `_enter_qa_status(app, pr_id, pr, caller, lock_timeout=...)`
+    contract; the refusal returns `False` like master's other refusals and
+    repairs a raced `qa` status;
+  - the TUI's restart fallback to a shared `impl-<pr>.jsonl` link runs
+    *before* master's `pane_runs_transcript` check, so a restarted TUI tracks
+    the live session and still rejects a pane another driver launched;
+  - the QA gate's post-fetch re-read goes through `_load_project_waiting`
+    (RQ37) like every other load in `_run_qa_sync`: a `project.yaml` that
+    became unloadable under the fetch must end the run quietly on a stop
+    request, not raise out of the QA thread.  That re-read is one more
+    `store.load` in a planning run, so the load-index constants in
+    `tests/test_qa_load_failures.py` name it (`GATE_POST`);
+  - `PaneIdleTracker.idle_since` reports `None` for a pane that is no longer
+    idle: master's `Stop` handling makes a `Stop` after an observed
+    `idle_prompt` a *new turn* (S35), so the earlier idle timestamp is no
+    longer settle-window evidence.
 
 ## 2. Implicit requirements
 

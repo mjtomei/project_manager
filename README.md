@@ -166,6 +166,60 @@ machine-readable status, automated dependency resolution, interfaces that
 can handle dozens of concurrent contributors without friction. `pm` prepares
 for this by abstracting git hosting behind a minimal pluggable interface.
 
+## Models, providers and effort
+
+Every session pm launches (implementation, review, each QA role, sign-off,
+merge, watcher) runs Claude Code with a model and effort chosen per role:
+
+    PM_MODEL  >  the PR's role setting  >  the PR's setting
+              >  project.yaml model_config  >  global ~/.pm/settings  >  CLI default
+
+Effort follows the same order, with the selected provider's own `effort`
+between the PR's setting and the project's.
+
+A model value is a model name (`opus`, `claude-opus-5-5`, ...) or
+`provider:<name>` for a provider defined on this host in
+`~/.pm/providers.yaml`. A provider of type `router` points Claude at an
+Anthropic-compatible endpoint that holds its own credentials (an account
+router or proxy). pm sets `ANTHROPIC_BASE_URL` from its `api_base` and, in
+container mode, bridges it into the container. A provider that is missing
+or misconfigured stops the launch with an error; pm never falls back to
+another provider or account. A router that is down is not special: the
+session sees the API errors Claude Code reports for any unreachable
+endpoint, and pm handles that session like one on the default provider
+(`pm provider test` checks a router on demand). pm never stores, checks or
+refreshes credentials: signing in happens outside pm, as it does for plain
+`claude`.
+
+```yaml
+# ~/.pm/providers.yaml
+providers:
+  my-router:
+    type: router
+    api_base: http://127.0.0.1:<port>
+    model: <model name as the router expects it>
+    effort: high                    # optional default effort
+    classifier_model: <model>       # optional: auto-mode permission classifier
+    launcher: <executable>          # optional: run instead of claude (host)
+    remedy: <text>                  # optional: shown when a check finds it down
+    env: {VAR: value}               # optional; VAR: null drops a default
+```
+
+```bash
+pm provider add my-router --type router --api-base http://127.0.0.1:<port> --model <model>
+pm provider show my-router          # settings, launch environment, status
+pm provider edit my-router --effort high
+pm model set qa_scenario provider:my-router --project   # project-wide, one role
+pm pr model set pr-001 provider:my-router               # one PR, every role
+pm pr model set pr-001 opus --role signoff --effort high
+pm pr model show pr-001             # per role: model, effort, command, why
+```
+
+In the TUI, `o` opens the same view for the selected PR. Enter picks a
+model or provider, `e` cycles the effort, and `p` switches to the
+project's settings and the provider list. A `⇄` on a PR node means that PR
+has settings of its own.
+
 ## Architecture
 
 **pm/ directory inside your repo:**
@@ -226,8 +280,24 @@ When a PR is ready for review, the review loop automates the review-fix cycle:
 4. The loop stops when the PR receives PASS
 
 From the TUI:
-- `zz d` — start a review loop (iterates until PASS)
-- `z d` — stop a running loop, or do a single fresh review
+
+- `zz d` — start a fresh review loop (iterates until PASS), replacing any
+  running loop and its current review window.
+- `z d` — stop any running loop and immediately open a fresh single review.
+
+Neither shortcut is a stop-only toggle. The command bar's
+`review-loop [start] [PR_ID]` also starts fresh; `review-loop stop` is not
+supported.
+
+For a session-wide stop of review-loop scheduling, use a normal TUI restart
+(`Ctrl-r`, or `pm tui restart -s <session>`). This clears review-loop and
+auto-start state while leaving existing agent windows running. In-progress
+QA orchestration is recovered from its saved snapshots. A restart with
+`--breadcrumb`, including a merge-triggered restart, instead preserves
+auto-start and review-loop state.
+
+`pm autostart off` stops scheduling targets but does not stop review loops
+that are already running.
 
 The loop runs in the background without stealing focus from your active window,
 so you can continue working while reviews iterate.

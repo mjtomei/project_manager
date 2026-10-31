@@ -12,6 +12,7 @@ import pytest
 from click.testing import CliRunner
 
 from pm_core.cli.pr import pr_auto_sequence, pr_qa_run_bg
+from pm_core.qa_loop import write_launch_record as _REAL_WRITE_LAUNCH_RECORD
 
 
 def _pr(status: str, **extra) -> dict:
@@ -525,6 +526,59 @@ class TestQA:
 
 
 
+    def _stopped_run(self, tmp_path):
+        """A qa_status.json that record_setup_stop marked (S94)."""
+        import json
+        status = tmp_path / "pr-001-x" / "qa_status.json"
+        status.parent.mkdir()
+        status.write_text(json.dumps({"pr_id": "pr-001", "scenarios": [],
+                                      "overall": "", "stopped": "boom"}))
+        return status
+
+    def test_stopped_run_with_window_relaunches(self, runner, tmp_path):
+        """S94: a run a provider setup error ended keeps its qa window but
+        has no driver: the tick relaunches it instead of `running: qa`."""
+        pr = _pr("qa")
+        status = self._stopped_run(tmp_path)
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._qa_status_for",
+                   return_value=(None, status)), \
+             patch("pm_core.cli.pr.tmux_mod.find_window_by_name",
+                   return_value={"id": "@7", "index": "3"}), \
+             patch("pm_core.qa_loop.own_run_started_since",
+                   return_value=False), \
+             patch("pm_core.cli.pr._qa_run_driven", return_value=False), \
+             patch("pm_core.cli.pr._launch_qa_detached") as mock_qa:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert result.output.strip() == "running: qa (relaunched)"
+        mock_qa.assert_called_once()
+
+    @pytest.mark.parametrize("newer,driven", [(True, False), (False, True)])
+    def test_stopped_run_replaced_or_driven_is_left_alone(
+            self, runner, tmp_path, newer, driven):
+        """A run started after the stop (a TUI t), or a live driver, owns
+        the PR's QA: no second driver."""
+        pr = _pr("qa")
+        status = self._stopped_run(tmp_path)
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._qa_status_for",
+                   return_value=(None, status)), \
+             patch("pm_core.cli.pr.tmux_mod.find_window_by_name",
+                   return_value={"id": "@7", "index": "3"}), \
+             patch("pm_core.qa_loop.own_run_started_since",
+                   return_value=newer), \
+             patch("pm_core.cli.pr._qa_run_driven", return_value=driven), \
+             patch("pm_core.cli.pr._launch_qa_detached") as mock_qa:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.output.strip() == "running: qa"
+        mock_qa.assert_not_called()
+
+
 class TestSignOff:
     def test_no_verdict_window_present_running(self, runner, tmp_path):
         pr = _pr("sign_off")
@@ -695,6 +749,34 @@ class TestSignOff:
         # The stale sign-off window + transcript are retired so the next
         # sign_off entry runs a fresh router (no stale-verdict replay loop).
         mock_retire.assert_called_once()
+
+    def test_reqa_leaves_a_run_driven_elsewhere_to_finish(self, runner,
+                                                         tmp_path):
+        """S120: the user's ``pm qa run`` still runs when sign-off says
+        REQA.  The hop tick must not launch qa-run-bg over it (that kills
+        its windows as stale and runs a second loop beside it): the return
+        stays awaiting qa, and a later qa tick launches once it ends."""
+        pr = _pr("sign_off")
+        data = _data_with(pr)
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._check_signoff_verdict",
+                   return_value="SIGNOFF_REQA"), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.cli.pr._retire_signoff_window"), \
+             patch("pm_core.cli.pr._qa_run_driven", return_value=True), \
+             patch("pm_core.qa_loop.run_driven_elsewhere",
+                   return_value=False), \
+             patch("pm_core.cli.pr._launch_qa_detached") as mock_qa:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "sign_off: re-qa deferred" in result.output
+        mock_qa.assert_not_called()
+        assert pr["status"] == "qa"
+        assert pr["signoff_return"]["awaiting"] == "qa"
+        assert "launch_claim" not in pr["signoff_return"]
 
     def test_reqa_defers_behind_a_run_driven_elsewhere(self, runner, tmp_path):
         """A live ``pm qa run`` of the PR must not be duplicated (S117): the
@@ -1024,6 +1106,36 @@ class TestQaRunBgRuntimeState:
             rec = runtime_state.get_action_state("pr-001", "qa")
             assert rec.get("state") == "failed"
 
+    def test_setup_error_marks_run_stopped(self, runner, tmp_path):
+        """S94: a provider setup error marks the run's status file stopped
+        and drops its snapshot, so a later tick relaunches QA."""
+        import json
+        from pm_core.providers import ProviderNotFoundError
+        pr = _pr("qa")
+        data = _data_with(pr)
+        rt = tmp_path / "runtime"
+        rt.mkdir()
+        wd = tmp_path / "qa-wd"
+        wd.mkdir()
+        (wd / "qa_resume.json").write_text("{}")
+
+        def _run(state, *a, **kw):
+            state.qa_workdir = str(wd)
+            raise ProviderNotFoundError("provider 'x' is not configured")
+        with patch("pm_core.runtime_state._runtime_dir", return_value=rt), \
+             patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.signoff.clear_return_awaiting"), \
+             patch("pm_core.qa_loop.run_qa_sync", side_effect=_run):
+            result = runner.invoke(pr_qa_run_bg, ["pr-001"])
+        assert result.exit_code == 1
+        status = json.loads((wd / "qa_status.json").read_text())
+        assert status["overall"] == ""
+        assert "not configured" in status["stopped"]
+        assert not (wd / "qa_resume.json").exists()
+
 
 # ---------------------------------------------------------------------------
 # Base integration gate (pre-review / pre-QA, return to implementation)
@@ -1244,3 +1356,212 @@ def test_launch_review_iteration_reraises_other_refusals(tmp_path):
         with pytest.raises(SystemExit):
             _launch_review_iteration("pr-001", tmp_path, 2, fresh=True,
                                      root=tmp_path)
+
+
+class TestQaLaunchRecord:
+    """S111: a TUI auto-start pass between the review-PASS tick moving a PR
+    to qa and its ``pm pr qa-run-bg`` driver writing ``qa_run.json`` (later
+    still while another pm command held project.yaml) saw no driver and
+    started a second QA loop, whose windows the driver killed as stale."""
+
+    @pytest.fixture
+    def records(self, tmp_path, monkeypatch):
+        from pm_core import qa_loop
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr(qa_loop, "get_pm_session", lambda: "pm-own")
+        monkeypatch.setattr(qa_loop, "write_launch_record",
+                            _REAL_WRITE_LAUNCH_RECORD)
+        return tmp_path / ".pm" / "workdirs" / "qa"
+
+    def test_review_pass_tick_names_the_driver_before_moving_to_qa(
+            self, runner, records):
+        import json, os
+        pr = _pr("in_review")
+        data = _data_with(pr)
+        seen = []
+
+        def _locked(root, fn, **kw):
+            # The PR is not in qa yet, and a record already names this tick.
+            recs = [json.loads(p.read_text())
+                    for p in records.glob("pr-001-*/qa_run.json")]
+            seen.append((pr["status"], recs))
+            fn(data)
+        with patch("pm_core.cli.pr.state_root", return_value=Path("/tmp/x")), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-own"), \
+             patch("pm_core.cli.pr._check_review_verdict",
+                   return_value=("PASS", 1)), \
+             patch("pm_core.cli.pr._check_qa_launch"), \
+             patch("pm_core.cli.pr.trigger_tui_refresh"), \
+             patch("pm_core.cli.pr.store.locked_update", side_effect=_locked), \
+             patch("pm_core.cli.pr._launch_qa_detached") as launch:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "advanced: qa" in result.output
+        (status, recs), = seen
+        assert status == "in_review"
+        assert [(r["owner_pid"], r["launch"], r["session_tag"])
+                for r in recs] == [(os.getpid(), True, "own")]
+        assert launch.call_args.kwargs["loop_id"] == recs[0]["loop_id"]
+        assert pr["status"] == "qa"
+
+    def test_review_pass_tick_drops_its_record_when_the_move_fails(
+            self, runner, records):
+        from pm_core import store
+        pr = _pr("in_review")
+        with patch("pm_core.cli.pr.state_root", return_value=Path("/tmp/x")), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-own"), \
+             patch("pm_core.cli.pr._check_review_verdict",
+                   return_value=("PASS", 1)), \
+             patch("pm_core.cli.pr._check_qa_launch"), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=store.StoreLockTimeout("busy")), \
+             patch("pm_core.cli.pr._launch_qa_detached") as launch:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert isinstance(result.exception, store.StoreLockTimeout)
+        launch.assert_not_called()
+        assert not list(records.glob("pr-001-*"))
+
+    def test_launch_names_the_spawned_driver(self, records):
+        import json, subprocess
+        from pm_core.cli import pr as pr_cli
+        from pm_core.qa_loop import _proc_start_time, run_driven_elsewhere
+        child = subprocess.Popen(["sleep", "30"])
+        try:
+            with patch.object(pr_cli, "_check_qa_launch"), \
+                 patch.object(pr_cli.subprocess, "Popen",
+                              return_value=child) as popen:
+                pr_cli._launch_qa_detached(Path("/tmp/x"), "pr-001",
+                                           loop_id="abc")
+            argv = popen.call_args.args[0]
+            assert argv[-4:] == ["qa-run-bg", "pr-001", "--loop-id", "abc"]
+            rec = json.loads((records / "pr-001-abc" / "qa_run.json")
+                             .read_text())
+            assert (rec["owner_pid"], rec["owner_start"], rec["launch"]) == (
+                child.pid, _proc_start_time(child.pid), True)
+            # What a TUI auto-start pass checks before starting its own loop.
+            assert run_driven_elsewhere("pr-001")
+        finally:
+            child.kill()
+            child.wait()
+        assert not run_driven_elsewhere("pr-001")
+
+    @pytest.mark.parametrize("failing", ["check", "spawn"])
+    def test_launch_drops_its_record_when_no_driver_spawns(self, records,
+                                                           failing):
+        """A record naming the exiting tick would read as a run starting
+        (``_qa_run_starting``) until the launch claim expired."""
+        import click
+        from pm_core.cli import pr as pr_cli
+        from pm_core.qa_loop import write_launch_record
+        # The review-PASS tick wrote one before moving the PR to qa.
+        write_launch_record("pr-001", "abc", 1)
+        err = (click.ClickException("bad provider") if failing == "check"
+               else OSError("no exec"))
+        with patch.object(pr_cli, "_check_qa_launch",
+                          side_effect=err if failing == "check" else None), \
+             patch.object(pr_cli.subprocess, "Popen",
+                          side_effect=err if failing == "spawn" else None):
+            with pytest.raises(type(err)):
+                pr_cli._launch_qa_detached(Path("/tmp/x"), "pr-001",
+                                           loop_id="abc")
+        assert not (records / "pr-001-abc").exists()
+
+    def test_pm_qa_run_is_driven_before_its_snapshot(self, records):
+        """S123: a ``pm qa run`` still refining has a start record but no
+        resume snapshot yet; a REQA tick launched over it.  A live owner of
+        any other run with no snapshot (a TUI that finished it) holds
+        nothing."""
+        import json, subprocess
+        from pm_core.qa_loop import _proc_start_time, own_run_driven
+        child = subprocess.Popen(["sleep", "30"])
+        try:
+            for loop_id in ("cli-pr-001", "abc"):
+                (records / f"pr-001-{loop_id}").mkdir(parents=True)
+                (records / f"pr-001-{loop_id}" / "qa_run.json").write_text(
+                    json.dumps({"pr_id": "pr-001", "loop_id": loop_id,
+                                "session_tag": "own", "started_at": 1.0,
+                                "owner_pid": child.pid,
+                                "owner_start": _proc_start_time(child.pid)}))
+            assert own_run_driven("pr-001")
+            (records / "pr-001-cli-pr-001" / "qa_run.json").unlink()
+            assert not own_run_driven("pr-001")
+        finally:
+            child.kill()
+            child.wait()
+
+    def test_instruction_run_live_reads_only_its_own_record(
+            self, records, monkeypatch):
+        """The picker asks on every render: finished full runs' kept
+        records must cost no session lookup, nor a dead ``pm qa run``."""
+        import json, os
+        from pm_core import qa_loop
+        calls = []
+        real = qa_loop.launched_elsewhere
+        monkeypatch.setattr(qa_loop, "launched_elsewhere",
+                            lambda tag: calls.append(tag) or real(tag))
+        for loop_id in ("a", "b", "cli-pr-001"):
+            (records / f"pr-001-{loop_id}").mkdir(parents=True)
+            (records / f"pr-001-{loop_id}" / "qa_run.json").write_text(
+                json.dumps({"pr_id": "pr-001", "loop_id": loop_id,
+                            "session_tag": "own", "started_at": 1.0,
+                            "owner_pid": os.getppid() if loop_id != "cli-pr-001"
+                            else 2 ** 22 + 1}))
+        assert not qa_loop.instruction_run_live("pr-001")
+        assert calls == []
+
+    def test_driver_record_replaces_the_launch_record_only(self, records):
+        import json, os
+        from pm_core import qa_loop
+        qa_loop.write_launch_record("pr-001", "abc", 1)
+        state = qa_loop.QALoopState(pr_id="pr-001", loop_id="abc",
+                                    qa_workdir=str(records / "pr-001-abc"),
+                                    session_tag="own")
+        qa_loop.write_run_record(state)
+        path = records / "pr-001-abc" / "qa_run.json"
+        rec = json.loads(path.read_text())
+        assert rec["owner_pid"] == os.getpid() and "launch" not in rec
+        # Kept from then on: a late launch write never replaces it.
+        qa_loop.write_launch_record("pr-001", "abc", 1)
+        assert json.loads(path.read_text()) == rec
+
+
+class TestQaRunBgLock:
+    """S111: the driver's first project.yaml write waited the plain 2 s lock
+    timeout and was not caught, so a `pm edit` held a little longer killed
+    it silently before its run started."""
+
+    def test_driver_skips_the_lock_when_the_pr_is_in_qa(self, runner,
+                                                       tmp_path):
+        pr = _pr("qa")
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr.store.locked_update") as locked, \
+             patch("pm_core.qa_loop.run_qa_sync") as run:
+            result = runner.invoke(pr_qa_run_bg, ["pr-001", "--loop-id", "abc"])
+        assert result.exit_code == 0, result.output
+        locked.assert_not_called()
+        assert run.call_args.args[0].loop_id == "abc"
+
+    def test_driver_waits_out_a_busy_lock(self, runner, tmp_path):
+        from pm_core import store
+        from pm_core.signoff import RETURN_CLEAR_WAIT_SECONDS
+        pr = _pr("in_review")
+        data = _data_with(pr)
+        calls = []
+
+        def _locked(root, fn, timeout=store.LOCK_TIMEOUT_SECONDS):
+            calls.append(timeout)
+            if len(calls) == 1:
+                raise store.StoreLockTimeout("busy")
+            fn(data)
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr.store.locked_update", side_effect=_locked), \
+             patch("pm_core.qa_loop.run_qa_sync") as run:
+            result = runner.invoke(pr_qa_run_bg, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert calls == [store.LOCK_TIMEOUT_SECONDS, RETURN_CLEAR_WAIT_SECONDS]
+        assert pr["status"] == "qa"
+        run.assert_called_once()
