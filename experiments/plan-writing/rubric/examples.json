@@ -1,0 +1,976 @@
+{
+  "note": "Published stronger/weaker passages attached to family-rubric criteria. Each comes from the same source as the criterion it illustrates and is printed there under that criterion; text is verbatim, with the source's own context where the example needs it. Some sources print only one side. scores holds a number only where the source publishes one.",
+  "examples": [
+    {
+      "id": "pep661-pr4050-1",
+      "context": null,
+      "stronger": {
+        "text": "Ordering comparisons are undefined for sentinel objects.\n\n\nBackwards Compatibility\n=======================\n\nWhile not breaking existing code, adding a new \"sentinels\" stdlib module could\ncause some confusion with regard to existing modules named \"sentinels\", and\nspecifically with the \"sentinels\" package on PyPI.\n\nThe existing \"sentinels\" package on PyPI [10]_ appears to be abandoned, with\nthe latest release being made on Aug. 2016.  Therefore, using this name for a\nnew stdlib module seems reasonable.\n\nIf and when this PEP is accepted, it may be worth verifying if this has indeed\nbeen abandoned, and if so asking to transfer ownership to the CPython\nmaintainers to reduce the potential for confusion with the new stdlib module.\n\n\nHow to Teach This\n=================\n\nThe normal types of documentation of new stdlib modules and features, namely\ndoc-strings, module docs and a section in \"What's New\", should suffice.\n\n\nSecurity Implications\n=====================\n\nThis proposal should have no security implications.\n\n\nReference Implementation\n========================",
+        "ref": "pep661-pr4050",
+        "locator": "peps/pep-0661.rst; before = base e43cb850, after = head e45f7cb6; the excerpt is the seam between Specification and Reference Implementation"
+      },
+      "weaker": {
+        "text": "Ordering comparisons are undefined for sentinel objects.\n\n\nReference Implementation\n========================",
+        "ref": "pep661-pr4050",
+        "locator": "peps/pep-0661.rst; before = base e43cb850, after = head e45f7cb6; the excerpt is the seam between Specification and Reference Implementation"
+      },
+      "scores": null
+    },
+    {
+      "id": "rust-rfc-3013-1",
+      "context": {
+        "text": "This proposes a minor new feature for rustc and cargo, which will allow rustc to detect invalid usage of #[cfg] conditions, such as misspelling a \"feature\" name.\n\nThe feature is purely opt-in. If the user doesn't enable this feature, then there is no impact on anything. If the user does enable this feature, then the only possible impact is that rustc fires new diagnostics. Language semantics, codegen, etc. are all unchanged.",
+        "ref": "rust-rfc-3013",
+        "locator": "section \"Drawbacks\", parent of commit 1788dd4d vs commit 1788dd4d"
+      },
+      "stronger": {
+        "text": "## Drawbacks\n\n* Adds complexity, in the form of additional command-line options.\n* As with all lints, correct code may be trigger lints. Developers will need to take time to\n  examine them and see whether they are legitimate or not.\n* To take full advantage of this, build systems (including but not limited to Cargo) must be\n  updated. However, for those systems that are not updated, there is no penalty or drawback,\n  since `--check-cfg` is opt-in.",
+        "ref": "rust-rfc-3013",
+        "locator": "section \"Drawbacks\", parent of commit 1788dd4d vs commit 1788dd4d"
+      },
+      "weaker": {
+        "text": "## Drawbacks\n\nThere are no known drawbacks to this proposal.",
+        "ref": "rust-rfc-3013",
+        "locator": "section \"Drawbacks\", parent of commit 1788dd4d vs commit 1788dd4d"
+      },
+      "scores": null
+    },
+    {
+      "id": "rust-rfc-3013-2",
+      "context": null,
+      "stronger": {
+        "text": "## Drawbacks\n\n* Adds complexity, in the form of additional command-line options. Fortunately, this is\n  complexity that will be mainly be exposed to build systems, such as Cargo.\n* As with all lints, correct code may be trigger lints. Developers will need to take time to\n  examine them and see whether they are legitimate or not.\n* To take full advantage of this, build systems (including but not limited to Cargo) must be\n  updated. However, for those systems that are not updated, there is no penalty or drawback,\n  since `--check-cfg` is opt-in.\n\n* This lint will not be able to detect invalid `#[cfg]` tests that are within modules that\n  are not compiled, presumably because an ancestor `mod` is disabled due to a.  For example:\n\nFile `lib.rs` (root module):\n  ```rust\n  #[cfg(feature = \"this_is_disabled_but_valid\")]\n  mod foo\n  ```\n\nFile `foo.rs` (nested module):\n  ```rust\n  #[cfg(feature = \"oooooops_this_feature_is_misspelled_and_invalid\")]\n  mod uh_uh;\n  ```\n\nThe invalid `#[cfg]` attribute in `foo.rs` will not be detected, because `foo.rs` was not\n  read and parsed. This is a minor drawback, and should not prevent users from benefitting\n  from checking in most common situations.",
+        "ref": "rust-rfc-3013",
+        "locator": "section \"Drawbacks\", parent of commit 133cd51e vs commit 133cd51e"
+      },
+      "weaker": {
+        "text": "## Drawbacks\n\n* Adds complexity, in the form of additional command-line options. Fortunately, this is\n  complexity that will be mainly be exposed to build systems, such as Cargo.\n* As with all lints, correct code may be trigger lints. Developers will need to take time to\n  examine them and see whether they are legitimate or not.\n* To take full advantage of this, build systems (including but not limited to Cargo) must be\n  updated. However, for those systems that are not updated, there is no penalty or drawback,\n  since `--check-cfg` is opt-in.",
+        "ref": "rust-rfc-3013",
+        "locator": "section \"Drawbacks\", parent of commit 133cd51e vs commit 133cd51e"
+      },
+      "scores": null
+    },
+    {
+      "id": "rust-rfc-2909-1",
+      "context": null,
+      "stronger": {
+        "text": "# Drawbacks\n[drawbacks]: #drawbacks\n\n- It could be argued that this feature increases the surface area of the language and thus complexity. However, we feel that by decreasing surprise, it actually makes the language less complex for users.\n- It is possible that these changes could result in some confusing diagnostics. However, we have not found any during testing, and these could in any case be ironed out before stabilisation.",
+        "ref": "rust-rfc-2909",
+        "locator": "section \"Drawbacks\", parent of commit eab6125d vs commit eab6125d"
+      },
+      "weaker": {
+        "text": "# Drawbacks [drawbacks]: #drawbacks\n\nWe find no convincing reason not to allow this. Though technically this increases the complexity of the compiler, it does so minimally: the desugaring is noninvasive and simple. On the other hand, for users, this change makes the language feel more consistent and decreases surprise, as evidenced by the discussion in [the open issue](https://github.com/rust-lang/rfcs/issues/372) for this feature.",
+        "ref": "rust-rfc-2909",
+        "locator": "section \"Drawbacks\", parent of commit eab6125d vs commit eab6125d"
+      },
+      "scores": null
+    },
+    {
+      "id": "rust-rfc-2539-1",
+      "context": {
+        "text": "`#[cfg_attr(predicate, attr1, attr2, ...)]` expands to each attribute instead of only taking one attribute.",
+        "ref": "rust-rfc-2539",
+        "locator": "section \"Rationale and alternatives\", parent of commit ad8ba5ef vs commit ad8ba5ef"
+      },
+      "stronger": {
+        "text": "# Rationale and alternatives [rationale-and-alternatives]: #rationale-and-alternatives\n\nWe could require that multiple attributes must be within in a delimiter to make it so that it's always two arguments at the top level. E.g., `#[cfg_attr(predicate, [attr, attr])]`. While this could increase clarity, it mostly seems like it would just add noise. In the multiline case, it already reads pretty clear with the predicate on the first line and each attribute indented.\n\nThe default alternative of not doing this is a possibility. It would just mean that conditionally including attributes is slightly less ergonomic than it could be.",
+        "ref": "rust-rfc-2539",
+        "locator": "section \"Rationale and alternatives\", parent of commit ad8ba5ef vs commit ad8ba5ef"
+      },
+      "weaker": {
+        "text": "# Rationale and alternatives [rationale-and-alternatives]: #rationale-and-alternatives\n\nThere are no other alternatives.\n\nBy not doing this, conditionally including attributes is slightly less ergonomic than it can be.",
+        "ref": "rust-rfc-2539",
+        "locator": "section \"Rationale and alternatives\", parent of commit ad8ba5ef vs commit ad8ba5ef"
+      },
+      "scores": null
+    },
+    {
+      "id": "rust-rfc-1861-1",
+      "context": {
+        "text": "Add `extern type` declarations for declaring types from external libraries which have an unknown size/layout.",
+        "ref": "rust-rfc-1861",
+        "locator": "section \"Alternatives\", parent of commit d76b6080 vs commit d76b6080"
+      },
+      "stronger": {
+        "text": "# Alternatives [alternatives]: #alternatives\n\nNot do this.\n\nAlternatively, rather than provide a way to create opaque types, we could just offer one distinguished type (`std::mem::OpaqueData` or something like that). Then, to create new opaque types, users just declare a struct with a member of type `OpaqueData`. This has the advantage of introducing no new syntax, and issues like FFI-compatibility would fall out of existing rules.",
+        "ref": "rust-rfc-1861",
+        "locator": "section \"Alternatives\", parent of commit d76b6080 vs commit d76b6080"
+      },
+      "weaker": {
+        "text": "# Alternatives [alternatives]: #alternatives\n\nNot do this.",
+        "ref": "rust-rfc-1861",
+        "locator": "section \"Alternatives\", parent of commit d76b6080 vs commit d76b6080"
+      },
+      "scores": null
+    },
+    {
+      "id": "rust-rfc-3641-1",
+      "context": null,
+      "stronger": {
+        "text": "Some unresolved questions are:\n1. Can ordinals be skipped? If you specify ordinals `1, 3, 4`, should this throw an error as `2` is skipped?\n2. If ordinals `1, 3` are specified, and you have another exported function, should it use `2` (the next unused ordinal) or `4` (the next in the sequence)?",
+        "ref": "rust-rfc-3641",
+        "locator": "weak: Reference-level explanation, last paragraph before \"# Drawbacks\" (parent of 60b62ff2; the same draft also lists question 2 as unresolved); strong: \"# Unresolved questions\", items 1-2, after 60b62ff2"
+      },
+      "weaker": {
+        "text": "If `#[export_ordinal(n)]` is not provided above an exported function, the current behaviour should apply, where an unused ordinal is provided sequentially. For example, if ordinals `1` and `3` are specified with the `export_ordinal` attribute, and there are two other exported functions without specified ordinals, they should use ordinals `2` and `4`.",
+        "ref": "rust-rfc-3641",
+        "locator": "weak: Reference-level explanation, last paragraph before \"# Drawbacks\" (parent of 60b62ff2; the same draft also lists question 2 as unresolved); strong: \"# Unresolved questions\", items 1-2, after 60b62ff2"
+      },
+      "scores": null
+    },
+    {
+      "id": "kep2033-pr3859-1",
+      "context": {
+        "text": "For Beta and GA, document that tests have been written,\nhave been executed regularly, and have been stable.\nThis can be done with:\n- permalinks to the GitHub source code\n- links to the periodic job (typically https://testgrid.k8s.io/sig-release-master-blocking#integration-master), filtered by the test name\n- a search in the Kubernetes bug triage tool (https://storage.googleapis.com/k8s-triage/index.html)",
+        "ref": "kep2033-pr3859",
+        "locator": "KEP template, Test Plan guidance (Integration tests comment), which the PR updated the section to meet"
+      },
+      "stronger": {
+        "text": "Tests are present in several subproject repos and third party repos:\n- https://github.com/kubernetes-sigs/kind/blob/v0.17.0/.github/workflows/cgroup2.yaml#L24\n- https://github.com/kubernetes/minikube/blob/v1.29.0/.github/workflows/pr.yml#L293-L410\n- https://github.com/k3s-io/k3s/blob/v1.26.1+k3s1/.github/workflows/cgroup.yaml#L92-L99\n- https://github.com/rootless-containers/usernetes/blob/v20221007.0/.cirrus.yml\n\nTests will be added to `kubernetes/test-infra` as well when the [`k8s-infra-prow-build`](https://github.com/kubernetes/k8s.io/blob/a071c4ed0823f193ee29e2f14e191be42dc1a1f0/infra/gcp/terraform/k8s-infra-prow-build/main.tf#L78) cluster\nis upgraded to use cgroup v2.\nThis will probably automatically happen when [GKE bumps up their \"regular\" channel to Kubernetes v1.26 or later](https://cloud.google.com/kubernetes-engine/docs/how-to/node-system-config).",
+        "ref": "kep2033-pr3859",
+        "locator": "keps/sig-node/2033-kubelet-in-userns-aka-rootless/README.md, Test Plan; before = base 43a9cd21, after = head e74e2685"
+      },
+      "weaker": {
+        "text": "Testing needs cgroup v2 CI infra.\n\nThe most easiest way to test Rootless Kubernetes would be to run `kind` with Rootless Docker provider.\n\nAlternatively we could use [Usernetes smoke tests](https://github.com/rootless-containers/usernetes/blob/v20201118.0/.github/workflows/main.yaml#L49-L50) as well.",
+        "ref": "kep2033-pr3859",
+        "locator": "keps/sig-node/2033-kubelet-in-userns-aka-rootless/README.md, Test Plan; before = base 43a9cd21, after = head e74e2685"
+      },
+      "scores": null
+    },
+    {
+      "id": "kep127-pr4439-1",
+      "context": {
+        "text": "### Upgrade / Downgrade Strategy\n\n<!--\nIf applicable, how will the component be upgraded and downgraded? Make sure\nthis is in the test plan.\n\nConsider the following in developing an upgrade/downgrade strategy for this\nenhancement:\n- What changes (in invocations, configurations, API use, etc.) is an existing\n  cluster required to make on upgrade, in order to maintain previous behavior?\n- What changes (in invocations, configurations, API use, etc.) is an existing\n  cluster required to make on upgrade, in order to make use of the enhancement?\n-->",
+        "ref": "kep127-pr4439",
+        "locator": "KEP template section with its guidance comment"
+      },
+      "stronger": {
+        "text": "### Upgrade / Downgrade Strategy\n\nExisting pods will still work as intended, as the new field is missing there.\n\nUpgrade will not change any current behaviors.\n\nWhen the new functionality wasn't yet used, downgrade will not be affected.\n\nOn downgrade, when the functionality was used, the pods created with\nuser namespaces that are running will continue to run with user\nnamespaces. Pods will need to be re-created to stop using the user\nnamespace.\n\nVersions of Kubernetes that doesn't have this feature implemented will\nignore the new field `pod.spec.hostUsers`.\n\n### Version Skew Strategy",
+        "ref": "kep127-pr4439",
+        "locator": "keps/sig-node/127-user-namespaces/README.md, 'Upgrade / Downgrade Strategy'; before = d7e437cf (reviewed), after = PR head b64d85b2"
+      },
+      "weaker": {
+        "text": "### Upgrade / Downgrade Strategy\n\n### Version Skew Strategy",
+        "ref": "kep127-pr4439",
+        "locator": "keps/sig-node/127-user-namespaces/README.md, 'Upgrade / Downgrade Strategy'; before = d7e437cf (reviewed), after = PR head b64d85b2"
+      },
+      "scores": null
+    },
+    {
+      "id": "kep127-pr4439-2",
+      "context": {
+        "text": "###### What specific metrics should inform a rollback?\n\n<!--\nWhat signals should users be paying attention to when the feature is young\nthat might indicate a serious problem?\n-->",
+        "ref": "kep127-pr4439",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md) prompt for this PRR question"
+      },
+      "stronger": {
+        "text": "###### What specific metrics should inform a rollback?\n\nOn Kubernetes side, the kubelet should start correctly.\n\nOn the node runtime side, a pod created with pod.spec.hostUsers=false should be on RUNNING state if\nall node requirements are met. If the CRI runtime or the handler do not support the feature, the\nkubelet returns an error.\n\nWhen a pod hits this error returned by the kubelet, the status in `kubectl` is shown as\n`ContainerCreating` and the pod events shows:\n\n```\n  Warning  FailedCreatePodSandBox  12s (x23 over 5m6s)  kubelet            Failed to create pod sandbox: user namespaces is not supported by the runtime\n```\n\nThe following kubelet metrics are useful to check:\n - `kubelet_running_pods`: Shows the actual number of pods running\n - `kubelet_desired_pods`: The number of pods the kubelet is _trying_ to run\n\nIf these metrics are very different, it means there are desired pods that can't be set to running.\nIf that is the case, checking the pod events to see if they are failing for user namespaces reasons\n(like the errors shown in this KEP) is advised, in which case it is recommended to rollback or\ndisable the feature gate.",
+        "ref": "kep127-pr4439",
+        "locator": "keps/sig-node/127-user-namespaces/README.md, 'What specific metrics should inform a rollback?'; before = commit fc5ea6ee, after = PR head b64d85b2"
+      },
+      "weaker": {
+        "text": "###### What specific metrics should inform a rollback?\n\nOn Kubernetes side, the kubelet should start correctly.\n\nOn the node runtime side, a pod created with pod.spec.hostUsers=false should be on RUNNING state if\nall node requirements are met. If the CRI runtime or the handler do not support the feature, the kubelet\nreturns an error.",
+        "ref": "kep127-pr4439",
+        "locator": "keps/sig-node/127-user-namespaces/README.md, 'What specific metrics should inform a rollback?'; before = commit fc5ea6ee, after = PR head b64d85b2"
+      },
+      "scores": null
+    },
+    {
+      "id": "fplg-1",
+      "context": null,
+      "stronger": {
+        "text": "You must apply at least 30 days before you need the certification. a. If you are an individual, apply at the State office in the State where you reside. b. If you are an organization, apply at the State office in the State where your headquarters is located.",
+        "ref": "fplg",
+        "locator": "II. Organize > b. Address one person, not a group, printed p. 10 (PDF p. 16), table 'Confusing plural / Clearer singular'"
+      },
+      "weaker": {
+        "text": "Individuals and organizations wishing to apply must file applications with the appropriate offices in a timely manner.",
+        "ref": "fplg",
+        "locator": "II. Organize > b. Address one person, not a group, printed p. 10 (PDF p. 16), table 'Confusing plural / Clearer singular'"
+      },
+      "scores": null
+    },
+    {
+      "id": "fplg-2",
+      "context": null,
+      "stronger": {
+        "text": "More night jobs would keep youths off the streets.",
+        "ref": "fplg",
+        "locator": "III. Write clearly > 3. Other word issues > i. Use short, simple words, printed p. 36 (PDF p. 42)"
+      },
+      "weaker": {
+        "text": "There is no escaping the fact that it is considered very important to note that a number of various available applicable studies ipso facto have generally identified the fact that additional appropriate nocturnal employment could usually keep juvenile adolescents off thoroughfares during the night hours, including but not limited to the time prior to midnight on weeknights and/or 2 a.m. on weekends.",
+        "ref": "fplg",
+        "locator": "III. Write clearly > 3. Other word issues > i. Use short, simple words, printed p. 36 (PDF p. 42)"
+      },
+      "scores": null
+    },
+    {
+      "id": "sec-plain-english-1",
+      "context": null,
+      "stronger": {
+        "text": "You may revoke your proxy and reclaim your right to vote up to and including the day of the meeting by following the directions on page 10.",
+        "ref": "sec-plain-english",
+        "locator": "Chapter 6 Writing in Plain English > Use the active voice, printed p. 20; commentary: 'It's not enough merely to translate existing texts—the key is to add useful information.'"
+      },
+      "weaker": {
+        "text": "The proxies solicited hereby for the Heartland Meeting may be revoked, subject to the procedures described herein, at any time up to and including the date of the Heartland Meeting.",
+        "ref": "sec-plain-english",
+        "locator": "Chapter 6 Writing in Plain English > Use the active voice, printed p. 20; commentary: 'It's not enough merely to translate existing texts—the key is to add useful information.'"
+      },
+      "scores": null
+    },
+    {
+      "id": "sec-plain-english-2",
+      "context": null,
+      "stronger": {
+        "text": "Because this is a summary, it does not contain all the information that may be important to you. You should read the entire proxy statement and its appendices carefully before you decide how to vote.",
+        "ref": "sec-plain-english",
+        "locator": "Chapter 6 Writing in Plain English > Try personal pronouns, printed p. 22"
+      },
+      "weaker": {
+        "text": "This Summary does not purport to be complete and is qualified in its entirety by the more detailed information contained in the Proxy Statement and the Appendices hereto, all of which should be carefully reviewed.",
+        "ref": "sec-plain-english",
+        "locator": "Chapter 6 Writing in Plain English > Try personal pronouns, printed p. 22"
+      },
+      "scores": null
+    },
+    {
+      "id": "sec-plain-english-3",
+      "context": null,
+      "stronger": {
+        "text": "You will not have to turn in your shares of Beco stock or pay any money to receive your shares of Unis common stock from the spin-off.",
+        "ref": "sec-plain-english",
+        "locator": "Chapter 6 Writing in Plain English > Bring abstractions down to earth, printed p. 24"
+      },
+      "weaker": {
+        "text": "No consideration or surrender of Beco Stock will be required of shareholders of Beco in return for the shares of Unis Common Stock issued pursuant to the Distribution.",
+        "ref": "sec-plain-english",
+        "locator": "Chapter 6 Writing in Plain English > Bring abstractions down to earth, printed p. 24"
+      },
+      "scores": null
+    },
+    {
+      "id": "sec-plain-english-4",
+      "context": null,
+      "stronger": {
+        "text": "This summary highlights some information from this Prospectus.",
+        "ref": "sec-plain-english",
+        "locator": "Chapter 6 Writing in Plain English > Omit superfluous words, printed p. 25"
+      },
+      "weaker": {
+        "text": "The following summary is intended only to highlight certain information contained elsewhere in this Prospectus.",
+        "ref": "sec-plain-english",
+        "locator": "Chapter 6 Writing in Plain English > Omit superfluous words, printed p. 25"
+      },
+      "scores": null
+    },
+    {
+      "id": "sec-plain-english-5",
+      "context": null,
+      "stronger": {
+        "text": "We provide information to you about our notes in three separate documents that progressively provide more detail: 1) the prospectus, 2) the prospectus supplement, and 3) the pricing supplement. Since the terms of speciﬁc notes may differ from the general information we have provided, in all cases rely on information in the pricing supplement over different information in the prospectus and the prospectus supplement; and rely on this prospectus supplement over different information in the prospectus.",
+        "ref": "sec-plain-english",
+        "locator": "Chapter 6 Writing in Plain English > Use short sentences, printed pp. 28-29"
+      },
+      "weaker": {
+        "text": "The following description encompasses all the material terms and provisions of the Notes offered hereby and supplements, and to the extent inconsistent therewith replaces, the description of the general terms and provisions of the Debt Securities (as defined in the accompanying Prospectus) set forth under the heading “Description of Debt Securities” in the Prospectus, to which description reference is hereby made. The following description will apply to each Note unless otherwise specified in the applicable Pricing Supplement.",
+        "ref": "sec-plain-english",
+        "locator": "Chapter 6 Writing in Plain English > Use short sentences, printed pp. 28-29"
+      },
+      "scores": null
+    },
+    {
+      "id": "sec-plain-english-6",
+      "context": null,
+      "stronger": {
+        "text": "We provide information to you about our notes in three separate documents that progressively provide more detail: 1 The Prospectus General information that may or may not apply to each note. 2 The Prospectus Supplement More speciﬁc than the prospectus, and to the extent information differs from the prospectus, rely on the different information in this document. 3 The Pricing Supplement Provides ﬁnal details about a speciﬁc note including its price. To the extent information differs from the prospectus or the prospectus supplement, rely on the different information in this document.",
+        "ref": "sec-plain-english",
+        "locator": "Chapter 6 > Use short sentences, printed p. 29 (the tabulated alternative 'after'; the prose 'after' and the 'before' are in the organization 'context before detail' entry)"
+      },
+      "weaker": null,
+      "scores": null
+    },
+    {
+      "id": "sec-plain-english-7",
+      "context": {
+        "text": "the first sentence on the cover page of an exchange offer",
+        "ref": "sec-plain-english",
+        "locator": "Chapter 6 > Replace jargon and legalese with short, common words, printed pp. 30-31; commentary: 'laden with defined terms and other data that mask the fundamental information: the two companies are offering to exchange their stock for the investors’ limited partnership holdings.'"
+      },
+      "stronger": null,
+      "weaker": {
+        "text": "NLR Insured Mortgage Association, Inc., a Delaware corporation (“NLR MAE”), which is an actively managed, inﬁnite life, New York Stock Exchange-listed real estate investment trust (“REIT”), and PAL Liquidating REIT, Inc., a newly formed, finite life, self-liquidating Delaware corporation which intends to qualify as a REIT (“PAL Liquidating REIT”), hereby jointly offer, upon the terms and subject to the conditions set forth herein and in the related Letters of Transmittal (collectively, the “Offer”), to exchange (i) shares of NLR MAE’s Common Stock, par value $.01 per share (“NLR MAE Shares”), or, at the option of Unitholders, shares of PAL Liquidating REIT’s Common Stock, par value $.01 per share (“PAL Liquidating REIT Shares”), and (ii) the right to receive cash payable 60 days after closing on the first of any Acquisitions (as defined below) [...]",
+        "ref": "sec-plain-english",
+        "locator": "Chapter 6 > Replace jargon and legalese with short, common words, printed pp. 30-31; commentary: 'laden with defined terms and other data that mask the fundamental information: the two companies are offering to exchange their stock for the investors’ limited partnership holdings.'"
+      },
+      "scores": null
+    },
+    {
+      "id": "sec-plain-english-8",
+      "context": null,
+      "stronger": {
+        "text": "The Securities and Exchange Commission has not approved or disapproved these securities or determined if this prospectus is truthful or complete. Any representation to the contrary is a criminal offense.",
+        "ref": "sec-plain-english",
+        "locator": "Chapter 7 Designing the Document > Emphasizing text, printed p. 43 (margin quote from Tufte: 'when everything ... is emphasized, nothing is emphasized')"
+      },
+      "weaker": {
+        "text": "THE SECURITIES AND EXCHANGE COMMISSION HAS NOT APPROVED OR DISAPPROVED THESE SECURITIES OR DETERMINED IF THIS PROSPECTUS IS TRUTHFUL OR COMPLETE. ANY REPRESENTATION TO THE CONTRARY IS A CRIMINAL OFFENSE.",
+        "ref": "sec-plain-english",
+        "locator": "Chapter 7 Designing the Document > Emphasizing text, printed p. 43 (margin quote from Tufte: 'when everything ... is emphasized, nothing is emphasized')"
+      },
+      "scores": null
+    },
+    {
+      "id": "google-tw1-1",
+      "context": null,
+      "stronger": null,
+      "weaker": {
+        "text": "Frambus Weather app v2 introduces ten features not available in Frambus Weather app v1. Most importantly, v2 offers two-week forecasts, v1 offered only one-week forecasts. Tidal information won't change.",
+        "ref": "google-tw1",
+        "locator": "Documents > Compare and contrast > Exercise ('What problem do you see in the following introduction?')"
+      },
+      "scores": null
+    },
+    {
+      "id": "google-tw1-2",
+      "context": {
+        "text": "Assume that the following paragraph is the start of a paper aimed at physicians who have never programmed before.",
+        "ref": "google-tw1",
+        "locator": "Audience > Curse of knowledge > Exercise"
+      },
+      "stronger": null,
+      "weaker": {
+        "text": "C is a mid-level language, higher than assembly language but lower than Python and Java. The C language provides programmers fine-grained control over all aspects of a program. For example, using the C Standard Library, it is easy to allocate and free blocks of memory. In C, manipulating pointers directly is mundane.",
+        "ref": "google-tw1",
+        "locator": "Audience > Curse of knowledge > Exercise"
+      },
+      "scores": null
+    },
+    {
+      "id": "google-tw1-3",
+      "context": null,
+      "stronger": {
+        "text": "This user ID lets users authenticate.",
+        "ref": "google-tw1",
+        "locator": "Words > Recognize ambiguous pronouns > This and that"
+      },
+      "weaker": {
+        "text": "Running the process configures permissions and generates a user ID. This lets users authenticate to the app.",
+        "ref": "google-tw1",
+        "locator": "Words > Recognize ambiguous pronouns > This and that"
+      },
+      "scores": null
+    },
+    {
+      "id": "google-tw1-4",
+      "context": null,
+      "stronger": {
+        "text": "Setting this flag makes the application run 225-250% faster.",
+        "ref": "google-tw1",
+        "locator": "Clear sentences > Minimize certain adjectives and adverbs (optional); page last updated 2025-07-07"
+      },
+      "weaker": {
+        "text": "Setting this flag makes the application run screamingly fast.",
+        "ref": "google-tw1",
+        "locator": "Clear sentences > Minimize certain adjectives and adverbs (optional); page last updated 2025-07-07"
+      },
+      "scores": null
+    },
+    {
+      "id": "google-tw1-5",
+      "context": null,
+      "stronger": {
+        "text": "This design document describes Project Frambus.",
+        "ref": "google-tw1",
+        "locator": "Short sentences > Eliminate or reduce extraneous words"
+      },
+      "weaker": {
+        "text": "This design document provides a detailed description of Project Frambus.",
+        "ref": "google-tw1",
+        "locator": "Short sentences > Eliminate or reduce extraneous words"
+      },
+      "scores": null
+    },
+    {
+      "id": "google-tw1-6",
+      "context": null,
+      "stronger": {
+        "text": "A loop runs the same block of code multiple times. For example, suppose you wrote a block of code that detected whether an input line ended with a period. To evaluate a million input lines, create a loop that runs a million times.",
+        "ref": "google-tw1",
+        "locator": "Paragraphs > Write a great opening sentence"
+      },
+      "weaker": {
+        "text": "A block of code is any set of contiguous code within the same function. For example, suppose you wrote a block of code that detected whether an input line ended with a period. To evaluate a million input lines, create a loop that runs a million times.",
+        "ref": "google-tw1",
+        "locator": "Paragraphs > Write a great opening sentence"
+      },
+      "scores": null
+    },
+    {
+      "id": "google-tw1-7",
+      "context": null,
+      "stronger": null,
+      "weaker": {
+        "text": "The Pythagorean Theorem states that the sum of the squares of both legs of a right triangle is equal to the square of the hypotenuse. The perimeter of a triangle is equal to the sum of the three sides. You can use the Pythagorean Theorem to measure diagonal distances. For example, if you know the length and width of a ping-pong table, you can use the Pythagorean Theorem to determine the diagonal distance. To calculate the perimeter of the ping-pong table, sum the length and the width, and then multiply that sum by 2.",
+        "ref": "google-tw1",
+        "locator": "Paragraphs > Focus each paragraph on a single topic"
+      },
+      "scores": null
+    },
+    {
+      "id": "google-tw1-8",
+      "context": null,
+      "stronger": {
+        "text": "The garp() function returns the delta between a dataset's mean and median. Many people believe unquestioningly that a mean always holds the truth. However, a mean is easily influenced by a few very large or very small data points. Call garp() to help determine whether a few very large or very small data points are influencing the mean too much. A relatively small garp() value suggests that the mean is more meaningful than when the garp() value is relatively high.",
+        "ref": "google-tw1",
+        "locator": "Paragraphs > Answer what, why, and how"
+      },
+      "weaker": null,
+      "scores": null
+    },
+    {
+      "id": "google-tw2-1",
+      "context": {
+        "text": "Review and update the following high-level outline of an introduction to a long tutorial.",
+        "ref": "google-tw2",
+        "locator": "Organize a document > Outline exercise and 'one possible solution'"
+      },
+      "stronger": {
+        "text": "## Audience\nDescribes who the tutorial is aimed at.\n## Prerequisites\nLists concepts the reader should be familiar with prior to starting, as well as any software or hardware requirements.\n## Setting up the tutorial\nExplains how to configure your environment to follow the tutorial.\n## Useful terminology\nLists definitions of terms that the reader needs to know to follow the tutorial.",
+        "ref": "google-tw2",
+        "locator": "Organize a document > Outline exercise and 'one possible solution'"
+      },
+      "weaker": {
+        "text": "## The history of the project\nDescribes the history of the development of the project.\n## Prerequisites\nLists concepts the reader should be familiar with prior to starting, as well as any software or hardware requirements.\n## The design of the system\nDescribes how the system works.\n## Audience\nDescribes who the tutorial is aimed at.\n## Setting up the tutorial\nExplains how to configure your environment to follow the tutorial.\n## Troubleshooting\nExplains how to diagnose and solve potential problems that might occur when working through the tutorial.\n## Useful terminology\nLists definitions of terms that the reader needs to know to follow the tutorial.",
+        "ref": "google-tw2",
+        "locator": "Organize a document > Outline exercise and 'one possible solution'"
+      },
+      "scores": null
+    },
+    {
+      "id": "google-tw2-2",
+      "context": {
+        "text": "review and revise the following introduction for a best practices guide for a hypothetical programming language called F@. Remove any information you feel is irrelevant in this context and add any information you feel is missing.",
+        "ref": "google-tw2",
+        "locator": "Introduce a document > Introduction exercise and 'one possible solution'"
+      },
+      "stronger": {
+        "text": "This guide lists best practices for working with the F@ programming language. Before you review this guide, complete the introductory tutorial for new F@ developers. This guide supplements the F@ style guide. In addition to the best practices in this guide, make sure you also install the F@ command-line linter and run it on your code. If you have suggestions for additions to the list of best practices, file an issue in the F@ documentation repository.",
+        "ref": "google-tw2",
+        "locator": "Introduce a document > Introduction exercise and 'one possible solution'"
+      },
+      "weaker": {
+        "text": "This guide lists best practices for working with the F@ programming language. F@ was developed in 2011 as an open source community project. This guide supplements the F@ style guide. In addition to the best practices in this guide, make sure you also install the F@ command-line linter and run it on your code. The programming language is widely adopted in the health industry. If you have suggestions for additions to the list of best practices, file an issue in the F@ documentation repository.",
+        "ref": "google-tw2",
+        "locator": "Introduce a document > Introduction exercise and 'one possible solution'"
+      },
+      "scores": null
+    },
+    {
+      "id": "google-tw2-3",
+      "context": null,
+      "stronger": {
+        "text": "This document explains how to publish Markdown files using the Froobus system. Froobus is a publishing system that runs on a Linux server and converts Markdown files into HTML pages. This document is intended for people who are familiar with Markdown syntax. To learn about the syntax, see the Markdown reference. You also need to be comfortable running simple commands in a Linux terminal. This document doesn't include information about installing or configuring a Froobus publishing system. For information on installing Froobus, see Getting started.",
+        "ref": "google-tw2",
+        "locator": "Introduce a document"
+      },
+      "weaker": null,
+      "scores": null
+    },
+    {
+      "id": "google-tw2-4",
+      "context": {
+        "text": "suppose you are documenting the process for creating a new website. To create the site, the reader must initialize the Froobus framework. To initialize the Froobus framework, the reader must run the carambola command-line tool.",
+        "ref": "google-tw2",
+        "locator": "Add navigation > Provide text under each heading"
+      },
+      "stronger": {
+        "text": "## Creating the site\nTo create the site, you run the `carambola` command-line tool. The command displays a series of prompts to help you configure the site.\n### Running the carambola command",
+        "ref": "google-tw2",
+        "locator": "Add navigation > Provide text under each heading"
+      },
+      "weaker": {
+        "text": "## Creating the site\n### Running the carambola command",
+        "ref": "google-tw2",
+        "locator": "Add navigation > Provide text under each heading"
+      },
+      "scores": null
+    },
+    {
+      "id": "gopen-swan-1",
+      "context": null,
+      "stronger": {
+        "text": "We have directly measured the enthalpy of hydrogen bond formation between the nucleoside bases 2'deoxyguanosine (dG) and 2'deoxycytidine (dC). dG and dC were derivatized at the 5' and 3' hydroxyls with triisopropylsiyl groups; these groups serve both to solubilize the nucleosides in non-aqueous solvents and to prevent the ribose hydroxyls from forming hydrogen bonds. Consequently, when the derivatized nucleosides are dissolved in non-aqueous solvents, hydrogen bonds form almost exclusively between the bases. Since the interbase hydrogen bonds are the only bonds to form upon mixing, their enthalpy of formation can be determined directly by measuring the enthalpy of mixing. From our isoperibolic titration measurements, the enthalpy of dG:dC base pair formation is -6.65±0.32 kcal/mol.",
+        "ref": "gopen-swan",
+        "locator": "Section 'Perceiving Logical Gaps' (original and the final revision 'with two additional sentences supplied')"
+      },
+      "weaker": {
+        "text": "The enthalpy of hydrogen bond formation between the nucleoside bases 2'deoxyguanosine (dG) and 2'deoxycytidine (dC) has been determined by direct measurement. dG and dC were derivatized at the 5' and 3' hydroxyls with triisopropylsilyl groups to obtain solubility of the nucleosides in non-aqueous solvents and to prevent the ribose hydroxyls from forming hydrogen bonds. From isoperibolic titration measurements, the enthalpy of dC:dG base pair formation is -6.65±0.32 kcal/mol.",
+        "ref": "gopen-swan",
+        "locator": "Section 'Perceiving Logical Gaps' (original and the final revision 'with two additional sentences supplied')"
+      },
+      "scores": null
+    },
+    {
+      "id": "gopen-swan-2",
+      "context": {
+        "text": "Given that this is the first paragraph of the article, which type of earthquake will the article most likely proceed to discuss?",
+        "ref": "gopen-swan",
+        "locator": "Section on topic position / old and new information ('Here is a second example of scientific prose...' and 'here is our proposed revision')"
+      },
+      "stronger": {
+        "text": "Large earthquakes along a given fault segment do not occur at random intervals because it takes time to accumulate the strain energy for the rupture. The rates at which tectonic plates move and accumulate strain at their boundaries are roughly uniform. Therefore, nearly constant time intervals (at first approximation) would be expected between large ruptures of the same fault segment. [However?], the recurrence time may vary; the basic idea of periodic mainshocks may need to be modified if subsequent mainshocks have different amounts of slip across the fault. [Indeed?], the length and slip of great plate boundary ruptures often vary by a factor of 2. [For example?], the recurrence intervals along the southern segment of the San Andreas fault is 145 years with variations of several decades. The smaller the standard deviation of the average recurrence interval, the more specific could be the long term prediction of a future mainshock.",
+        "ref": "gopen-swan",
+        "locator": "Section on topic position / old and new information ('Here is a second example of scientific prose...' and 'here is our proposed revision')"
+      },
+      "weaker": {
+        "text": "Large earthquakes along a given fault segment do not occur at random intervals because it takes time to accumulate the strain energy for the rupture. The rates at which tectonic plates move and accumulate strain at their boundaries are approximately uniform. Therefore, in first approximation, one may expect that large ruptures of the same fault segment will occur at approximately constant time intervals. If subsequent main shocks have different amounts of slip across the fault, then the recurrence time may vary, and the basic idea of periodic mainshocks must be modified. For great plate boundary ruptures the length and slip often vary by a factor of 2. Along the southern segment of the San Andreas fault the recurrence interval is 145 years with variations of several decades. The smaller the standard deviation of the average recurrence interval, the more specific could be the long term prediction of a future mainshock.",
+        "ref": "gopen-swan",
+        "locator": "Section on topic position / old and new information ('Here is a second example of scientific prose...' and 'here is our proposed revision')"
+      },
+      "scores": null
+    },
+    {
+      "id": "da-pam-600-67-1",
+      "context": {
+        "text": "DA Form 4697 (Report of Survey), block 26:",
+        "ref": "da-pam-600-67",
+        "locator": "Figures 5-5 (poor) and 5-6 (good), printed p. 9 (PDF p. 15); commentary para 5-2d"
+      },
+      "stronger": {
+        "text": "I have investigated the evidence and find PVT John T. Thomas as negligent. PVT Thomas damaged his M16 by carelessly leaving it on an M113 ramp. Private Thomas admits that he laid his M16 on the tailgate of the M113 to put on his protective mask. By doing so, he violated two specific directives. Private Thomas neither followed proper masking procedure (Exhibit F, “Soldier’s Manual of Common Tasks,” p.37) nor obeyed his field SOP that “at not time will equipment be placed on the ramp of personnel carriers” (Exhibit G). His squad leader, SSG Young, attests (Exhibit C) that Private Thomas knew the SOP. Direct support maintenance confirms that the M16 (total cost–$433.40) is damaged beyond repair (Exhibit D).",
+        "ref": "da-pam-600-67",
+        "locator": "Figures 5-5 (poor) and 5-6 (good), printed p. 9 (PDF p. 15); commentary para 5-2d"
+      },
+      "weaker": {
+        "text": "I have examined all available evidence as shown in exhibits A to G and as indicated below have personally investigated the same and it is my belief that the article (s) listed hereon and/or on attached sheets, total cost $433.50 was not damaged in an accidental manner. Something like this does not just happen; therefore, the soldier is responsible if negligent. [...] Well, one thing led to another and the next thing you know Thomas’ M16 is only good for shooting around corners. Such actions show negligence and make SP4 Farmer liable for restitution. (Exhibit D—statement from DS maintenance saying the M16 is irreparably damaged beyond repair).",
+        "ref": "da-pam-600-67",
+        "locator": "Figures 5-5 (poor) and 5-6 (good), printed p. 9 (PDF p. 15); commentary para 5-2d"
+      },
+      "scores": null
+    },
+    {
+      "id": "da-pam-600-67-2",
+      "context": {
+        "text": "MEMORANDUM THRU DEPUTY CHIEF OF STAFF FOR OPERATIONS AND PLANS FOR VICE CHIEF OF STAFF, UNITED STATES ARMY\nSUBJECT: Reserve Component Mobilization Exercises",
+        "ref": "da-pam-600-67",
+        "locator": "Figures 5-1 (poor) and 5-2 (good), printed pp. 5-6 (PDF pp. 11-12); commentary para 5-2b: 'Packaging in figure 5-2 brings the recommendation to the top and eliminates unnecessary verbiage.'"
+      },
+      "stronger": {
+        "text": "1. Purpose. To answer this question: Can we conduct mobilization exercise for NG and USAR units this year?\n2. Recommendation. Yes, we can, but with these constraints:\na. That FORSCOM sees the results of the last such exercise before planning begins.\nb. That FORSCOM, together with NGB and OCAR, choose participating units.\nc. That we use this year’s training and testing money.\nd. that the exercise is well–timed.",
+        "ref": "da-pam-600-67",
+        "locator": "Figures 5-1 (poor) and 5-2 (good), printed pp. 5-6 (PDF pp. 11-12); commentary para 5-2b: 'Packaging in figure 5-2 brings the recommendation to the top and eliminates unnecessary verbiage.'"
+      },
+      "weaker": {
+        "text": "1. The purpose of this memorandum is to reply to your not to the Director of the Army Staff which requested an evaluation be made to determine the feasibility of conducting mobilization exercises for NG and USAR units.\n2. A feasibility study of such exercises has been initiated. Representatives from the NGB and OCAR have participated in a preliminary planning session, and FORSCOM has provided informal comments and suggestions.\n3. It appears feasible to conduct an exercise of this nature within the current year; however, funding restraints, available planning time, and personnel and training disruptions will tend to limit the scope and participation. [...]\n4. Subject to further analysis, it appears feasible to conduct a mobilization exercise in conjunction with next year’s AT. FORSCOM is receptive to the concept as outlined, but desires to examine the result of its Mobilization Evaluation Exercise which terminated 30 January, prior to the recommending or developing specific exercise objectives. Therefore, this is an interim reply.",
+        "ref": "da-pam-600-67",
+        "locator": "Figures 5-1 (poor) and 5-2 (good), printed pp. 5-6 (PDF pp. 11-12); commentary para 5-2b: 'Packaging in figure 5-2 brings the recommendation to the top and eliminates unnecessary verbiage.'"
+      },
+      "scores": {
+        "text": "Published clarity index: weaker 42, stronger 23.",
+        "ref": "da-pam-600-67",
+        "locator": "para 5-2b: 'The memorandum at figure 5–1 has a clarity index of 42.' ... 'The example in figure 5–2 has a clarity index of 23.'"
+      }
+    },
+    {
+      "id": "da-pam-600-67-3",
+      "context": {
+        "text": "SUBJECT: Request for JTX “Frostbite” Assignment\nCommander\n3d Battalion\n13th Field Artillery",
+        "ref": "da-pam-600-67",
+        "locator": "Figures 5-3 (poor) and 5-4 (good), printed pp. 7-8 (PDF pp. 13-14)"
+      },
+      "stronger": {
+        "text": "1. I request to represent the Battalion on JTX “Frostbite” in Alaska this summer.\n2. I feel qualified for this assignment since I have some expertise in cold–weather operations. I was an evaluator during JTX “Team Spirit” in Korea last winter, and am a distinguished graduate of the Northern Warfare School.\n3. I have attached a copy of my latest physical examination.",
+        "ref": "da-pam-600-67",
+        "locator": "Figures 5-3 (poor) and 5-4 (good), printed pp. 7-8 (PDF pp. 13-14)"
+      },
+      "weaker": {
+        "text": "1. It has recently come to my attention that this Battalion stands in dire need of a volunteer to participate on a voluntary basis in an evaluative capacity on Joint Training Exercise “Frostbite” to be held in the State of Alaska on or about this summer time–frame.\n2. I graduated fourth in a class of seventy–three from the U.S. Army Northern Warfare School on 17 August 1985 and was awarded the distinction of a distinguished graduate. I learned the latest in cold weather tactics while on patrol in the DMZ last winter which make me current in that area. In looking at the training forecast, it doesn’t seem that I will be mission–essential during that training cycle. Much can be learned by seeing how other units operate in the boonies.\n3. The S–3 indicated to me that anyone interested should submit a copy of their last physical. As you can see, I have no previous cold–weather injuries and, therefore, would perhaps be less suspectible to such injury.\n4. It is my opinion that I am fully qualified to participate in this Joint Training Exercise at this point in time.",
+        "ref": "da-pam-600-67",
+        "locator": "Figures 5-3 (poor) and 5-4 (good), printed pp. 7-8 (PDF pp. 13-14)"
+      },
+      "scores": null
+    },
+    {
+      "id": "da-pam-600-67-4",
+      "context": null,
+      "stronger": {
+        "text": "1. I request a microcomputer for this office.\n2. We need a microcomputer to:\na. Monitor training.\nb. Increase the amount of work we can do.\nc. Handle our administrative jobs.",
+        "ref": "da-pam-600-67",
+        "locator": "Figures 3-1 and 3-2, printed pp. 2-3 (PDF pp. 8-9); principle in para 3-2a 'Structure—main idea first'"
+      },
+      "weaker": {
+        "text": "A microcomputer can help this office speed up actions which is very important to getting all missions accomplished. By using the data base software, we can keep track of all training and not allow repetitive training. WE can use the work processor to do our administrative actions and speed up our ability to do work. We need such and instrument at this time.",
+        "ref": "da-pam-600-67",
+        "locator": "Figures 3-1 and 3-2, printed pp. 2-3 (PDF pp. 8-9); principle in para 3-2a 'Structure—main idea first'"
+      },
+      "scores": null
+    },
+    {
+      "id": "kent-wep-1",
+      "context": null,
+      "stronger": {
+        "text": "\"And at this location there is a new airfield. [He could have located it to the second on a larger map.] Its longest runway is 10,000 feet.\" \"It is almost certainly a military airfield.\" \"The terrain is such that the Blanks could easily lengthen the runways, otherwise improve the facilities, and incorporate this field into their system of strategic staging bases. It is possible that they will.\" Or, more daringly, \"It would be logical for them to do this and sooner or later they probably will.\" The above are typical of three kinds of statements which populate the literature of all substantive intelligence. The first is as close as one can come to a statement of indisputable fact.",
+        "ref": "kent-wep",
+        "locator": "opening example (the briefing officer's three statements) and the paragraph after it"
+      },
+      "weaker": null,
+      "scores": null
+    },
+    {
+      "id": "kent-wep-2",
+      "context": null,
+      "stronger": null,
+      "weaker": {
+        "text": "Although it is impossible to determine which course the Kremlin is likely to adopt, we believe that the extent of Satellite military and propaganda preparations indicates that an attack on Yugoslavia in 1951 should be considered a serious possibility.",
+        "ref": "kent-wep",
+        "locator": "section 'Early Brush with Ambiguity', paragraphs 1 and 4"
+      },
+      "scores": null
+    },
+    {
+      "id": "kent-wep-3",
+      "context": null,
+      "stronger": {
+        "text": "Important note to consumers: You should be quite clear that when we say \"such and such is unlikely\" we mean that the chances of its NOT happening are in our judgment about three to one. Another, and to you critically important, way of saying the same thing is that the chances of its HAPPENING are about one in four. Thus if we were to write, \"It is unlikely that Castro will attempt to shoot down a U-2 between now and November 1965,\" we mean there is in our view around a 25-percent chance that he will do just that.",
+        "ref": "kent-wep",
+        "locator": "section after the five-gradation chart ('Important note to consumers')"
+      },
+      "weaker": null,
+      "scores": null
+    },
+    {
+      "id": "strunk-1918-1",
+      "context": null,
+      "stronger": {
+        "text": "It rained every day for a week.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 12 'Use definite, specific, concrete language'"
+      },
+      "weaker": {
+        "text": "A period of unfavorable weather set in.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 12 'Use definite, specific, concrete language'"
+      },
+      "scores": null
+    },
+    {
+      "id": "strunk-1918-2",
+      "context": null,
+      "stronger": {
+        "text": "Encouraged by his wife, Macbeth achieved his ambition and realized the prediction of the witches by murdering Duncan and becoming king of Scotland in his place. (26 words.)",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 13 'Omit needless words' (final example set)"
+      },
+      "weaker": {
+        "text": "Macbeth was very ambitious. This led him to wish to become king of Scotland. The witches told him that this wish of his would come true. The king of Scotland at this time was Duncan. Encouraged by his wife, Macbeth murdered Duncan. He was thus enabled to succeed Duncan as king. (51 words.)",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 13 'Omit needless words' (final example set)"
+      },
+      "scores": null
+    },
+    {
+      "id": "f4-strunk-r10-boston",
+      "context": {
+        "text": "The latter sentence is less direct, less bold, and less concise.",
+        "ref": "strunk-1918",
+        "locator": "Rule 10"
+      },
+      "stronger": {
+        "text": "I shall always remember my first visit to Boston.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 10 'Use the active voice.'"
+      },
+      "weaker": {
+        "text": "My first visit to Boston will always be remembered by me.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 10 'Use the active voice.'"
+      },
+      "scores": null
+    },
+    {
+      "id": "f4-strunk-r10-survey",
+      "context": {
+        "text": "A common fault is to use as the subject of a passive construction a noun which expresses the entire action, leaving to the verb no function beyond that of completing the sentence.",
+        "ref": "strunk-1918",
+        "locator": "Rule 10"
+      },
+      "stronger": {
+        "text": "This region was surveyed in 1900.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 10 'Use the active voice.'"
+      },
+      "weaker": {
+        "text": "A survey of this region was made in 1900.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 10 'Use the active voice.'"
+      },
+      "scores": null
+    },
+    {
+      "id": "f4-strunk-r10-leaves",
+      "context": null,
+      "stronger": {
+        "text": "Dead leaves covered the ground.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 10 'Use the active voice.'"
+      },
+      "weaker": {
+        "text": "There were a great number of dead leaves lying on the ground.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 10 'Use the active voice.'"
+      },
+      "scores": null
+    },
+    {
+      "id": "f4-strunk-r11-late",
+      "context": null,
+      "stronger": {
+        "text": "He usually came late.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 11 'Put statements in positive form.'"
+      },
+      "weaker": {
+        "text": "He was not very often on time.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 11 'Put statements in positive form.'"
+      },
+      "scores": null
+    },
+    {
+      "id": "f4-strunk-r12-surf",
+      "context": null,
+      "stronger": {
+        "text": "All who have tried surf-riding agree that it is most exhilarating.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 12 'Use definite, specific, concrete language.'"
+      },
+      "weaker": {
+        "text": "There is a general agreement among those who have enjoyed the experience that surf-riding is productive of great exhilaration.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 12 'Use definite, specific, concrete language.'"
+      },
+      "scores": null
+    },
+    {
+      "id": "f4-strunk-r13-courses",
+      "context": null,
+      "stronger": {
+        "text": "These, the most important courses of all, came, if not daily, at least often enough to keep one under constant strain. (21 words.)",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 13 'Omit needless words.' (second word-count pair)"
+      },
+      "weaker": {
+        "text": "There were several less important courses, but these were the most important, and although they did not come every day, they came often enough to keep you in such a state of mind that you never knew what your next move would be. (43 words.)",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 13 'Omit needless words.' (second word-count pair)"
+      },
+      "scores": null
+    },
+    {
+      "id": "f4-strunk-r15-science",
+      "context": {
+        "text": "The left-hand version gives the impression that the writer is undecided or timid; he seems unable or afraid to choose one form of expression and hold to it.",
+        "ref": "strunk-1918",
+        "locator": "Rule 15"
+      },
+      "stronger": {
+        "text": "Formerly, science was taught by the textbook method; now it is taught by the laboratory method.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 15 'Express co-ordinate ideas in similar form.'"
+      },
+      "weaker": {
+        "text": "Formerly, science was taught by the textbook method, while now the laboratory method is employed.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 15 'Express co-ordinate ideas in similar form.'"
+      },
+      "scores": null
+    },
+    {
+      "id": "f4-strunk-r15-objections",
+      "context": null,
+      "stronger": {
+        "text": "My objections are, first, that the measure is unjust; second, that it is unconstitutional.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 15 'Express co-ordinate ideas in similar form.'"
+      },
+      "weaker": {
+        "text": "My objections are, first, the injustice of the measure; second, that it is unconstitutional.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 15 'Express co-ordinate ideas in similar form.'"
+      },
+      "scores": null
+    },
+    {
+      "id": "f4-strunk-r16-only",
+      "context": null,
+      "stronger": {
+        "text": "He found only two mistakes.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 16 'Keep related words together.'"
+      },
+      "weaker": {
+        "text": "He only found two mistakes.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 16 'Keep related words together.'"
+      },
+      "scores": null
+    },
+    {
+      "id": "f4-strunk-r16-lecture",
+      "context": null,
+      "stronger": {
+        "text": "On Tuesday evening at eight P. M., Major R. E. Joyce will give in Bailey Hall a lecture on \"My Experiences in Mesopotamia.\" The public is invited.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 16 'Keep related words together.'"
+      },
+      "weaker": {
+        "text": "Major R. E. Joyce will give a lecture on Tuesday evening in Bailey Hall, to which the public is invited, on \"My Experiences in Mesopotamia\" at eight P. M.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 16 'Keep related words together.'"
+      },
+      "scores": null
+    },
+    {
+      "id": "f4-strunk-r18-fortitude",
+      "context": null,
+      "stronger": {
+        "text": "Humanity, since that time, has advanced in many other ways, but it has hardly advanced in fortitude.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 18 'Place the emphatic words of a sentence at the end.'"
+      },
+      "weaker": {
+        "text": "Humanity has hardly advanced in fortitude since that time, though it has advanced in many other ways.",
+        "ref": "strunk-1918",
+        "locator": "Chapter III, Rule 18 'Place the emphatic words of a sentence at the end.'"
+      },
+      "scores": null
+    },
+    {
+      "id": "f4-qc-jargon-degree",
+      "context": {
+        "text": "That is Jargon. In prose it runs simply 'The earlier editions of this romance are rare'",
+        "ref": "quiller-couch-1916",
+        "locator": "Lecture V"
+      },
+      "stronger": {
+        "text": "The earlier editions of this romance are rare",
+        "ref": "quiller-couch-1916",
+        "locator": "Lecture V, Interlude: On Jargon (first rule: case, instance, character, nature, condition, persuasion, degree)"
+      },
+      "weaker": {
+        "text": "A singular degree of rarity prevails in the earlier editions of this romance.",
+        "ref": "quiller-couch-1916",
+        "locator": "Lecture V, Interlude: On Jargon (first rule: case, instance, character, nature, condition, persuasion, degree)"
+      },
+      "scores": null
+    },
+    {
+      "id": "f4-qc-jargon-condition",
+      "context": null,
+      "stronger": {
+        "text": "He was carried home drunk.",
+        "ref": "quiller-couch-1916",
+        "locator": "Lecture V, Interlude: On Jargon (first rule; specimen under Condition)"
+      },
+      "weaker": {
+        "text": "He was conveyed to his place of residence in an intoxicated condition.",
+        "ref": "quiller-couch-1916",
+        "locator": "Lecture V, Interlude: On Jargon (first rule; specimen under Condition)"
+      },
+      "scores": null
+    },
+    {
+      "id": "f4-qc-jargon-aintree",
+      "context": {
+        "text": "in each the writer was using Jargon to shirk prose, palming off periphrases upon us when with a little trouble he could have gone straight to the point.",
+        "ref": "quiller-couch-1916",
+        "locator": "Lecture V"
+      },
+      "stronger": {
+        "text": "Aintree is a trying course",
+        "ref": "quiller-couch-1916",
+        "locator": "Lecture V, Interlude: On Jargon (first rule)"
+      },
+      "weaker": {
+        "text": "the Aintree course is of a trying nature",
+        "ref": "quiller-couch-1916",
+        "locator": "Lecture V, Interlude: On Jargon (first rule)"
+      },
+      "scores": null
+    },
+    {
+      "id": "f4-qc-abstract-times",
+      "context": null,
+      "stronger": {
+        "text": "One of the most important reforms is that of the Courts, which need a uniform system and to be made independent. In this way only can men be assured that all are equal before the law.",
+        "ref": "quiller-couch-1916",
+        "locator": "Lecture V, Interlude: On Jargon (abstract terms; specimen from The Times via H. W. and F. G. Fowler)"
+      },
+      "weaker": {
+        "text": "One of the most important reforms mentioned in the rescript is the unification of the organisation of judicial institutions and the guarantee for all the tribunals of the independence necessary for securing to all classes of the community equality before the law.",
+        "ref": "quiller-couch-1916",
+        "locator": "Lecture V, Interlude: On Jargon (abstract terms; specimen from The Times via H. W. and F. G. Fowler)"
+      },
+      "scores": null
+    },
+    {
+      "id": "f4-qc-asto-game",
+      "context": {
+        "text": "Still the sentence remains absurd: for the second clause but repeats the first without adding one jot.",
+        "ref": "quiller-couch-1916",
+        "locator": "Lecture V"
+      },
+      "stronger": {
+        "text": "I was careless if I won or lost,",
+        "ref": "quiller-couch-1916",
+        "locator": "Lecture V, Interlude: On Jargon (second rule: 'as regards,' 'with regard to' ...)"
+      },
+      "weaker": {
+        "text": "I was entirely indifferent as to the results of the game, caring nothing at all as to whether I had losses or gains--",
+        "ref": "quiller-couch-1916",
+        "locator": "Lecture V, Interlude: On Jargon (second rule: 'as regards,' 'with regard to' ...)"
+      },
+      "scores": null
+    },
+    {
+      "id": "f4-qc-active-teapot",
+      "context": {
+        "text": "When you write in the active voice, 'They gave him a silver teapot,' you write as a man. When you write 'He was made the recipient of a silver teapot,' you write jargon.",
+        "ref": "quiller-couch-1916",
+        "locator": "Lecture V"
+      },
+      "stronger": {
+        "text": "They gave him a silver teapot",
+        "ref": "quiller-couch-1916",
+        "locator": "Lecture V, Interlude: On Jargon (the active verb and the concrete noun)"
+      },
+      "weaker": {
+        "text": "He was made the recipient of a silver teapot",
+        "ref": "quiller-couch-1916",
+        "locator": "Lecture V, Interlude: On Jargon (the active verb and the concrete noun)"
+      },
+      "scores": null
+    },
+    {
+      "id": "f4-qc-burke-brougham",
+      "context": {
+        "text": "You perceive that Brougham has transferred Burke's thought to his own page: but will you not also perceive how pitiably, by dissolving Burke's vivid particulars into smooth generalities, he has enervated its hold on the mind?",
+        "ref": "quiller-couch-1916",
+        "locator": "Lecture V"
+      },
+      "stronger": {
+        "text": "In large bodies the circulation of power must be less vigorous at the extremities. Nature has said it. The Turk cannot govern Ægypt and Arabia and Curdistan as he governs Thrace; nor has he the same dominion in Crimea and Algiers which he has at Brusa and Smyrna. Despotism itself is obliged to truck and huckster. The Sultan gets such obedience as he can. He governs with a loose rein, that he may govern at all; and the whole of the force and vigour of his authority in his centre is derived from a prudent relaxation in all his borders.",
+        "ref": "quiller-couch-1916",
+        "locator": "Lecture V (Burke, On Conciliation with America, as quoted)"
+      },
+      "weaker": {
+        "text": "In all the despotisms of the East, it has been observed that the further any part of the empire is removed from the capital, the more do its inhabitants enjoy some sort of rights and privileges: the more inefficacious is the power of the monarch; and the more feeble and easily decayed is the organisation of the government.",
+        "ref": "quiller-couch-1916",
+        "locator": "Lecture V (Brougham, Inquiry into the Policy of the European Powers, as quoted)"
+      },
+      "scores": null
+    }
+  ]
+}

@@ -1,0 +1,365 @@
+{
+  "id": "text_organization",
+  "title": "Text organization: reader expectations, conversational maxims and the pyramid rules",
+  "criteria": [
+    {
+      "id": "gs_1",
+      "name": "Follow a grammatical subject as soon as possible with its verb.",
+      "definition": {
+        "text": "1. Follow a grammatical subject as soon as possible with its verb.",
+        "ref": "gopen-swan",
+        "locator": "American Scientist 78(6), 1990, final section 'Writing and the Scientific Process', numbered list of structural principles, item 1 (Wayback 2021-01-15 copy of the americanscientist.org page)"
+      },
+      "condition": "None of these reader-expectation principles should be considered \"rules.\" [...] any reader expectation can be violated to good effect.",
+      "levels": null,
+      "examples": [
+        "gopen-swan-1"
+      ],
+      "example_notes": "a19 (hydrogen-bond paragraph, original vs. the authors' final revision): the authors' first revision tactic for this paragraph is to invert the first sentence so the subject-verb-complement connection is unbroken. The final revision also adds two sentences of content."
+    },
+    {
+      "id": "gs_2",
+      "name": "Place in the stress position the \"new information\" you want the reader to emphasize.",
+      "definition": {
+        "text": "2. Place in the stress position the \"new information\" you want the reader to emphasize.",
+        "ref": "gopen-swan",
+        "locator": "American Scientist 78(6), 1990, final section 'Writing and the Scientific Process', numbered list of structural principles, item 2 (Wayback 2021-01-15 copy of the americanscientist.org page)"
+      },
+      "condition": "None of these reader-expectation principles should be considered \"rules.\" [...] any reader expectation can be violated to good effect.",
+      "levels": null,
+      "examples": [
+        "gopen-swan-2",
+        "gopen-swan-1"
+      ],
+      "example_notes": "a18 (earthquake paragraph): the authors revise it by ensuring, for each sentence, that the new, emphasis-worthy information appears in the stress position. a19: their revision tactics create a stress position for 'triisopropylsilyl groups' and use 'both' to flag two effects in one stress position."
+    },
+    {
+      "id": "gs_3",
+      "name": "Place the person or thing whose \"story\" a sentence is telling at the beginning of the sentence, in the topic position.",
+      "definition": {
+        "text": "3. Place the person or thing whose \"story\" a sentence is telling at the beginning of the sentence, in the topic position.",
+        "ref": "gopen-swan",
+        "locator": "American Scientist 78(6), 1990, final section 'Writing and the Scientific Process', numbered list of structural principles, item 3 (Wayback 2021-01-15 copy of the americanscientist.org page)"
+      },
+      "condition": "None of these reader-expectation principles should be considered \"rules.\" [...] any reader expectation can be violated to good effect.",
+      "levels": null,
+      "examples": [
+        "gopen-swan-2",
+        "gopen-swan-1"
+      ],
+      "example_notes": "a18: the authors' second revision condition is that the person, thing or concept whose story it is appears in the topic position. a19: the authors note that in the original 'we are not sure at all times whose story is being told'."
+    },
+    {
+      "id": "gs_4",
+      "name": "Place appropriate \"old information\" (material already stated in the discourse) in the topic position for linkage backward and contextualization forward.",
+      "definition": {
+        "text": "4. Place appropriate \"old information\" (material already stated in the discourse) in the topic position for linkage backward and contextualization forward.",
+        "ref": "gopen-swan",
+        "locator": "American Scientist 78(6), 1990, final section 'Writing and the Scientific Process', numbered list of structural principles, item 4 (Wayback 2021-01-15 copy of the americanscientist.org page)"
+      },
+      "condition": "None of these reader-expectation principles should be considered \"rules.\" [...] any reader expectation can be violated to good effect.",
+      "levels": null,
+      "examples": [
+        "gopen-swan-2",
+        "gopen-swan-1"
+      ],
+      "example_notes": "a18: the authors' first revision condition is that the backward-linking old information appears in the topic position. a19: introduced as the example showing that when old information does not appear at all, readers are left to construct the logical linkage; the final revision supplies the missing linking sentences."
+    },
+    {
+      "id": "gs_5",
+      "name": "Articulate the action of every clause or sentence in its verb.",
+      "definition": {
+        "text": "5. Articulate the action of every clause or sentence in its verb.",
+        "ref": "gopen-swan",
+        "locator": "American Scientist 78(6), 1990, final section 'Writing and the Scientific Process', numbered list of structural principles, item 5 (Wayback 2021-01-15 copy of the americanscientist.org page)"
+      },
+      "condition": "None of these reader-expectation principles should be considered \"rules.\" [...] any reader expectation can be violated to good effect.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gs_6",
+      "name": "In general, provide context for your reader before asking that reader to consider anything new.",
+      "definition": {
+        "text": "6. In general, provide context for your reader before asking that reader to consider anything new.",
+        "ref": "gopen-swan",
+        "locator": "American Scientist 78(6), 1990, final section 'Writing and the Scientific Process', numbered list of structural principles, item 6 (Wayback 2021-01-15 copy of the americanscientist.org page)"
+      },
+      "condition": "None of these reader-expectation principles should be considered \"rules.\" [...] any reader expectation can be violated to good effect.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gs_7",
+      "name": "In general, try to ensure that the relative emphases of the substance coincide with the relative expectations for emphasis raised by the structure.",
+      "definition": {
+        "text": "7. In general, try to ensure that the relative emphases of the substance coincide with the relative expectations for emphasis raised by the structure.",
+        "ref": "gopen-swan",
+        "locator": "American Scientist 78(6), 1990, final section 'Writing and the Scientific Process', numbered list of structural principles, item 7 (Wayback 2021-01-15 copy of the americanscientist.org page)"
+      },
+      "condition": "None of these reader-expectation principles should be considered \"rules.\" [...] any reader expectation can be violated to good effect.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gs_8",
+      "name": "every unit of discourse, no matter the size, should serve a single function or make a single point",
+      "definition": {
+        "text": "We now have three rhetorical principles based on reader expectations: [...] second, every unit of discourse, no matter the size, should serve a single function or make a single point;",
+        "ref": "gopen-swan",
+        "locator": "Section 'The Stress Position', summary of the three rhetorical principles (the second is not repeated in the final numbered list)"
+      },
+      "condition": "None of these reader-expectation principles should be considered \"rules.\" [...] any reader expectation can be violated to good effect.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "grice_cp",
+      "name": "The Cooperative Principle",
+      "definition": {
+        "text": "Make your conversational contribution such as is required, at the stage at which it occurs, by the accepted purpose or direction of the talk exchange in which you are engaged.",
+        "ref": "grice",
+        "locator": "Grice 1975 'Logic and Conversation' (Grice 1989, pp. 26-27 as cited by SEP); original not seen. Wording verified against: SEP 'Paul Grice' §3 'Conversational implicature' and the MIT OCW 24.903 handout 'Grice's System'",
+        "via": [
+          "mit-ocw-grice-handout",
+          "sep-grice"
+        ]
+      },
+      "condition": "at the stage at which it occurs, by the accepted purpose or direction of the talk exchange in which you are engaged",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "grice_quantity_1",
+      "name": "Quantity 1",
+      "definition": {
+        "text": "Make your contribution as informative as is required [...] (for the current purposes of the exchange).",
+        "ref": "grice",
+        "locator": "Grice 1975 'Logic and Conversation' (Grice 1989, pp. 26-27 as cited by SEP); original not seen. Wording verified against: MIT OCW handout (maxim text); the parenthetical is absent from that handout and is verified against Tanswell (Aporia, St Andrews) and Garnock-Jones (2017 thesis, arXiv 2409.04055), both quoting Grice 1975",
+        "via": [
+          "garnock-jones-thesis",
+          "mit-ocw-grice-handout",
+          "tanswell-aporia-grice"
+        ]
+      },
+      "condition": "(for the current purposes of the exchange)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "grice_quantity_2",
+      "name": "Quantity 2",
+      "definition": {
+        "text": "Do not make your contribution more informative than is required.",
+        "ref": "grice",
+        "locator": "Grice 1975 'Logic and Conversation' (Grice 1989, pp. 26-27 as cited by SEP); original not seen. Wording verified against: MIT OCW handout",
+        "via": [
+          "mit-ocw-grice-handout"
+        ]
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "grice_quality",
+      "name": "Quality (supermaxim)",
+      "definition": {
+        "text": "Try to make your contribution one that is true",
+        "ref": "grice",
+        "locator": "Grice 1975 'Logic and Conversation' (Grice 1989, pp. 26-27 as cited by SEP); original not seen. Wording verified against: SEP 'Paul Grice' §3",
+        "via": [
+          "sep-grice"
+        ]
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "grice_quality_1",
+      "name": "Quality 1",
+      "definition": {
+        "text": "Do not say what you believe to be false.",
+        "ref": "grice",
+        "locator": "Grice 1975 'Logic and Conversation' (Grice 1989, pp. 26-27 as cited by SEP); original not seen. Wording verified against: MIT OCW handout",
+        "via": [
+          "mit-ocw-grice-handout"
+        ]
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "grice_quality_2",
+      "name": "Quality 2",
+      "definition": {
+        "text": "Do not say that for which you lack adequate evidence.",
+        "ref": "grice",
+        "locator": "Grice 1975 'Logic and Conversation' (Grice 1989, pp. 26-27 as cited by SEP); original not seen. Wording verified against: MIT OCW handout",
+        "via": [
+          "mit-ocw-grice-handout"
+        ]
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "grice_relation",
+      "name": "Relation",
+      "definition": {
+        "text": "Be relevant.",
+        "ref": "grice",
+        "locator": "Grice 1975 'Logic and Conversation' (Grice 1989, pp. 26-27 as cited by SEP); original not seen. Wording verified against: SEP 'Paul Grice' §3 and MIT OCW handout",
+        "via": [
+          "mit-ocw-grice-handout",
+          "sep-grice"
+        ]
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "grice_manner",
+      "name": "Manner (supermaxim)",
+      "definition": {
+        "text": "Be perspicuous",
+        "ref": "grice",
+        "locator": "Grice 1975 'Logic and Conversation' (Grice 1989, pp. 26-27 as cited by SEP); original not seen. Wording verified against: SEP 'Paul Grice' §3",
+        "via": [
+          "sep-grice"
+        ]
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "grice_manner_1",
+      "name": "Manner 1",
+      "definition": {
+        "text": "Avoid obscurity of expression.",
+        "ref": "grice",
+        "locator": "Grice 1975 'Logic and Conversation' (Grice 1989, pp. 26-27 as cited by SEP); original not seen. Wording verified against: MIT OCW handout",
+        "via": [
+          "mit-ocw-grice-handout"
+        ]
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "grice_manner_2",
+      "name": "Manner 2",
+      "definition": {
+        "text": "Avoid ambiguity.",
+        "ref": "grice",
+        "locator": "Grice 1975 'Logic and Conversation' (Grice 1989, pp. 26-27 as cited by SEP); original not seen. Wording verified against: MIT OCW handout",
+        "via": [
+          "mit-ocw-grice-handout"
+        ]
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "grice_manner_3",
+      "name": "Manner 3",
+      "definition": {
+        "text": "Be brief (avoid unnecessary prolixity).",
+        "ref": "grice",
+        "locator": "Grice 1975 'Logic and Conversation' (Grice 1989, pp. 26-27 as cited by SEP); original not seen. Wording verified against: MIT OCW handout ('Be brief.'); the parenthetical is verified against Tanswell (Aporia) and Garnock-Jones (arXiv 2409.04055)",
+        "via": [
+          "garnock-jones-thesis",
+          "tanswell-aporia-grice"
+        ]
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "grice_manner_4",
+      "name": "Manner 4",
+      "definition": {
+        "text": "Be orderly.",
+        "ref": "grice",
+        "locator": "Grice 1975 'Logic and Conversation' (Grice 1989, pp. 26-27 as cited by SEP); original not seen. Wording verified against: MIT OCW handout",
+        "via": [
+          "mit-ocw-grice-handout"
+        ]
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "minto_top_down",
+      "name": "present their information from the top down",
+      "definition": {
+        "text": "the clearest written documents will be those that consistently present their information from the top down, in a pyramidal structure, even though the original thinking will have been done from the bottom up.",
+        "ref": "minto",
+        "locator": "Minto, The Minto Pyramid Principle ([1996] 2018), ch. 1, p. 7, as quoted with page reference by manager138.com notes; book not seen",
+        "via": [
+          "minto-manager138-notes"
+        ]
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "minto_rule_1",
+      "name": "Ideas at any level in the pyramid must always be summaries of the ideas grouped below them",
+      "definition": {
+        "text": "Ideas at any level in the pyramid must always be summaries of the ideas grouped below them.",
+        "ref": "minto",
+        "locator": "Minto, The Minto Pyramid Principle ([1996] 2018), ch. 1 'Pyramid rules', p. 9, as quoted with page reference by manager138.com notes; book not seen; same wording quoted by strategyu.co and ConsultingMethodology.com",
+        "via": [
+          "minto-manager138-notes",
+          "minto-strategyu-review"
+        ]
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "minto_rule_2",
+      "name": "Ideas in each grouping must always be the same kind of idea",
+      "definition": {
+        "text": "Ideas in each grouping must always be the same kind of idea. [...] Be sure you can label the ideas with a plural noun.",
+        "ref": "minto",
+        "locator": "Minto, The Minto Pyramid Principle ([1996] 2018), ch. 1 'Pyramid rules', pp. 9-10, as quoted with page reference by manager138.com notes; book not seen; rule wording also quoted by strategyu.co",
+        "via": [
+          "minto-manager138-notes",
+          "minto-strategyu-review"
+        ]
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "minto_rule_3",
+      "name": "Ideas in each grouping must always be logically ordered",
+      "definition": {
+        "text": "Ideas in each grouping must always be logically ordered. [...] Deductively (major premise, minor premise, conclusion) Chronologically (first, second, third) Structurally (Boston, New York, Washington) Comparatively (first most important, second most important, etc)",
+        "ref": "minto",
+        "locator": "Minto, The Minto Pyramid Principle ([1996] 2018), ch. 1 'Pyramid rules', pp. 9-11, as quoted with page reference by manager138.com notes; book not seen; rule wording also quoted by strategyu.co and ConsultingMethodology.com",
+        "via": [
+          "minto-manager138-notes",
+          "minto-strategyu-review"
+        ]
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    }
+  ]
+}

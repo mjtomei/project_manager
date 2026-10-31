@@ -1,0 +1,518 @@
+{
+  "id": "general_style_guidance",
+  "title": "Rules of general prose style from Strunk (1918), Quiller-Couch (1916), Orwell (1946) and Zinsser (2010)",
+  "criteria": [
+    {
+      "id": "strunk_08_paragraph_unit",
+      "name": "Make the paragraph the unit of composition: one paragraph to each topic.",
+      "definition": {
+        "text": "Ordinarily, however, a subject requires subdivision into topics, each of which should be made the subject of a paragraph. The object of treating each topic in a paragraph by itself is, of course, to aid the reader. The beginning of each paragraph is a signal to him that a new step in the development of the subject has been reached.",
+        "ref": "strunk-1918",
+        "locator": "The Elements of Style (1918), Chapter III Elementary Principles of Composition, Rule 8"
+      },
+      "condition": "If the subject on which you are writing is of slight extent, or if you intend to treat it very briefly, there may be no need of subdividing it into topics. ... As a rule, single sentences should not be written or printed as paragraphs. An exception may be made of sentences of transition, indicating the relation between the parts of an exposition or argument. Frequent exceptions are also necessary in textbooks, guidebooks, and other works in which many topics are treated briefly.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "strunk_09_topic_sentence",
+      "name": "As a rule, begin each paragraph with a topic sentence, end it in conformity with the beginning.",
+      "definition": {
+        "text": "the most generally useful kind of paragraph, particularly in exposition and argument, is that in which (a) the topic sentence comes at or near the beginning; (b) the succeeding sentences explain or establish or develop the statement made in the topic sentence; and (c) the final sentence either emphasizes the thought of the topic sentence or states some important consequence. Ending with a digression, or with an unimportant detail, is particularly to be avoided.",
+        "ref": "strunk-1918",
+        "locator": "The Elements of Style (1918), Chapter III Elementary Principles of Composition, Rule 9"
+      },
+      "condition": "If the paragraph forms part of a larger composition, its relation to what precedes, or its function as a part of the whole, may need to be expressed. ... The brief paragraphs of animated narrative, however, are often without even this semblance of a topic sentence.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "strunk_10_active_voice",
+      "name": "Use the active voice.",
+      "definition": {
+        "text": "The active voice is usually more direct and vigorous than the passive ... The habitual use of the active voice makes for forcible writing. This is true not only in narrative principally concerned with action, but in writing of any kind.",
+        "ref": "strunk-1918",
+        "locator": "The Elements of Style (1918), Chapter III Elementary Principles of Composition, Rule 10"
+      },
+      "condition": "This rule does not, of course, mean that the writer should entirely discard the passive voice, which is frequently convenient and sometimes necessary. ... The need of making a particular word the subject of the sentence will often, as in these examples, determine which voice is to be used.",
+      "levels": null,
+      "examples": [
+        "f4-strunk-r10-boston",
+        "f4-strunk-r10-survey",
+        "f4-strunk-r10-leaves"
+      ]
+    },
+    {
+      "id": "strunk_11_positive_form",
+      "name": "Put statements in positive form.",
+      "definition": {
+        "text": "Make definite assertions. Avoid tame, colorless, hesitating, non-committal language. Use the word not as a means of denial or in antithesis, never as a means of evasion. ... Consciously or unconsciously, the reader is dissatisfied with being told only what is not; he wishes to be told what is.",
+        "ref": "strunk-1918",
+        "locator": "The Elements of Style (1918), Chapter III Elementary Principles of Composition, Rule 11"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "f4-strunk-r11-late"
+      ]
+    },
+    {
+      "id": "strunk_12_definite_specific_concrete",
+      "name": "Use definite, specific, concrete language.",
+      "definition": {
+        "text": "Prefer the specific to the general, the definite to the vague, the concrete to the abstract. ... In exposition and in argument, the writer must likewise never lose his hold upon the concrete, and even when he is dealing with general principles, he must give particular instances of their application.",
+        "ref": "strunk-1918",
+        "locator": "The Elements of Style (1918), Chapter III Elementary Principles of Composition, Rule 12"
+      },
+      "condition": "It is not that every detail is given; that would be impossible, as well as to no purpose; but that all the significant details are given",
+      "levels": null,
+      "examples": [
+        "strunk-1918-1",
+        "f4-strunk-r12-surf"
+      ]
+    },
+    {
+      "id": "strunk_13_omit_needless_words",
+      "name": "Omit needless words.",
+      "definition": {
+        "text": "Vigorous writing is concise. A sentence should contain no unnecessary words, a paragraph no unnecessary sentences, for the same reason that a drawing should have no unnecessary lines and a machine no unnecessary parts. ... A common violation of conciseness is the presentation of a single complex idea, step by step, in a series of sentences or independent clauses which might to advantage be combined into one.",
+        "ref": "strunk-1918",
+        "locator": "The Elements of Style (1918), Chapter III Elementary Principles of Composition, Rule 13"
+      },
+      "condition": "This requires not that the writer make all his sentences short, or that he avoid all detail and treat his subjects only in outline, but that he make every word tell.",
+      "levels": null,
+      "examples": [
+        "strunk-1918-2",
+        "f4-strunk-r13-courses"
+      ]
+    },
+    {
+      "id": "strunk_14_loose_sentences",
+      "name": "Avoid a succession of loose sentences",
+      "definition": {
+        "text": "This rule refers especially to loose sentences of a particular type, those consisting of two co-ordinate clauses, the second introduced by a conjunction or relative. ... he should recast enough of them to remove the monotony, replacing them by simple sentences, by sentences of two clauses joined by a semicolon, by periodic sentences of two clauses, by sentences, loose or periodic, of three clauses--whichever best represent the real relations of the thought.",
+        "ref": "strunk-1918",
+        "locator": "The Elements of Style (1918), Chapter III Elementary Principles of Composition, Rule 14"
+      },
+      "condition": "Although single sentences of this type may be unexceptionable (see under Rule 4), a series soon becomes monotonous and tedious.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "strunk_15_parallel_form",
+      "name": "Express co-ordinate ideas in similar form.",
+      "definition": {
+        "text": "This principle, that of parallel construction, requires that expressions of similar content and function should be outwardly similar. The likeness of form enables the reader to recognize more readily the likeness of content and function.",
+        "ref": "strunk-1918",
+        "locator": "The Elements of Style (1918), Chapter III Elementary Principles of Composition, Rule 15"
+      },
+      "condition": "It is true that in repeating a statement in order to emphasize it he may have need to vary its form.",
+      "levels": null,
+      "examples": [
+        "f4-strunk-r15-science",
+        "f4-strunk-r15-objections"
+      ]
+    },
+    {
+      "id": "strunk_16_related_words_together",
+      "name": "Keep related words together.",
+      "definition": {
+        "text": "The position of the words in a sentence is the principal means of showing their relationship. The writer must therefore, so far as possible, bring together the words, and groups of words, that are related in thought, and keep apart those which are not so related.",
+        "ref": "strunk-1918",
+        "locator": "The Elements of Style (1918), Chapter III Elementary Principles of Composition, Rule 16"
+      },
+      "condition": "Usually, however, this objection does not hold when the order is interrupted only by a relative clause or by an expression in apposition. Nor does it hold in periodic sentences in which the interruption is a deliberately used means of creating suspense (see examples under Rule 18).",
+      "levels": null,
+      "examples": [
+        "f4-strunk-r16-only",
+        "f4-strunk-r16-lecture"
+      ]
+    },
+    {
+      "id": "strunk_17_summaries_one_tense",
+      "name": "In summaries, keep to one tense.",
+      "definition": {
+        "text": "Apart from the exceptions noted, whichever tense the writer chooses, he should use throughout. Shifting from one tense to the other gives the appearance of uncertainty and irresolution (compare Rule 15). ... He should indicate clearly at the outset, once for all, that what follows is summary, and then waste no words in repeating the notification.",
+        "ref": "strunk-1918",
+        "locator": "The Elements of Style (1918), Chapter III Elementary Principles of Composition, Rule 17"
+      },
+      "condition": "But whichever tense be used in the summary, a past tense in indirect discourse or in indirect question remains unchanged.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "strunk_18_emphatic_words_end",
+      "name": "Place the emphatic words of a sentence at the end.",
+      "definition": {
+        "text": "The proper place in the sentence for the word, or group of words, which the writer desires to make most prominent is usually the end. ... The principle that the proper place for what is to be made most prominent is the end applies equally to the words of a sentence, to the sentences of a paragraph, and to the paragraphs of a composition.",
+        "ref": "strunk-1918",
+        "locator": "The Elements of Style (1918), Chapter III Elementary Principles of Composition, Rule 18"
+      },
+      "condition": "The other prominent position in the sentence is the beginning. Any element in the sentence, other than the subject, may become emphatic when placed first.",
+      "levels": null,
+      "examples": [
+        "f4-strunk-r18-fortitude"
+      ]
+    },
+    {
+      "id": "strunk_v_ready_made_formula",
+      "name": "Words and Expressions Commonly Misused",
+      "definition": {
+        "text": "If the writer will make it his purpose from the beginning to express accurately his own individual thought, and will refuse to be satisfied with a ready-made formula that saves him the trouble of doing so, this last set of expressions will cause him little trouble.",
+        "ref": "strunk-1918",
+        "locator": "The Elements of Style (1918), Chapter V, prefatory note"
+      },
+      "condition": "still others, as case, factor, feature, interesting, one of the most, are good in their place, but are constantly obtruding themselves into places where they have no right to be.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "qc_appropriate",
+      "name": "appropriate",
+      "definition": {
+        "text": "when you talk or write, you would wish to observe the occasion; to say what you have to say without impertinence or ill-timed excess. ... this desire of yours to be appropriate is really the root of the matter.",
+        "ref": "quiller-couch-1916",
+        "locator": "On the Art of Writing (1916), Lecture II The Practice of Writing"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "qc_perspicuity",
+      "name": "Perspicuity.",
+      "definition": {
+        "text": "Perspicuity.--I shall waste no words on the need of this: since the first aim of speech is to be understood. The more clearly you write the more easily and surely you will be understood.",
+        "ref": "quiller-couch-1916",
+        "locator": "On the Art of Writing (1916), Lecture II The Practice of Writing"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "qc_accuracy",
+      "name": "Accuracy.",
+      "definition": {
+        "text": "Accuracy.--Did I not remind myself in my first lecture, that Cambridge is the home of accurate scholarship? Surely no Cambridge man would willingly be a sloven in speech, oral or written? ... Does it not follow, then, that the more accurately we use words the closer definition we shall give to our thoughts?",
+        "ref": "quiller-couch-1916",
+        "locator": "On the Art of Writing (1916), Lecture II The Practice of Writing"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "qc_persuasiveness",
+      "name": "Persuasiveness",
+      "definition": {
+        "text": "Persuasiveness; of which you may say, indeed, that it embraces the whole--not only the qualities of propriety, perspicuity, accuracy, we have been considering, but many another, such as harmony, order, sublimity, beauty of diction; all in short that--writing being an art, not a science, and therefore so personal a thing--may be summed up under the word Charm.",
+        "ref": "quiller-couch-1916",
+        "locator": "On the Art of Writing (1916), Lecture II The Practice of Writing"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "qc_jargon_circumlocution",
+      "name": "the two main vices of Jargon (the first)",
+      "definition": {
+        "text": "Have you begun to detect the two main vices of Jargon? The first is that it uses circumlocution rather than short straight speech.",
+        "ref": "quiller-couch-1916",
+        "locator": "On the Art of Writing (1916), Lecture V Interlude: On Jargon"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "qc_jargon_abstract_nouns",
+      "name": "the two main vices of Jargon (the second)",
+      "definition": {
+        "text": "The second vice is that it habitually chooses vague woolly abstract nouns rather than concrete ones.",
+        "ref": "quiller-couch-1916",
+        "locator": "On the Art of Writing (1916), Lecture V Interlude: On Jargon"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "f4-qc-abstract-times"
+      ]
+    },
+    {
+      "id": "qc_rule_case_words",
+      "name": "The first is:--Whenever in your reading you come across one of these words, case, instance, character, nature, condition, persuasion, degree",
+      "definition": {
+        "text": "The first is:--Whenever in your reading you come across one of these words, case, instance, character, nature, condition, persuasion, degree--whenever in writing your pen betrays you to one or another of them--pull yourself up and take thought.",
+        "ref": "quiller-couch-1916",
+        "locator": "On the Art of Writing (1916), Lecture V Interlude: On Jargon (first of \"one or two extremely rough rules\")"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "f4-qc-jargon-degree",
+        "f4-qc-jargon-condition",
+        "f4-qc-jargon-aintree"
+      ]
+    },
+    {
+      "id": "qc_rule_as_regards",
+      "name": "Train your suspicions to bristle up whenever you come upon 'as regards,' 'with regard to,' 'in respect of,' 'in connection with,' 'according as to whether,' and the like.",
+      "definition": {
+        "text": "Train your suspicions to bristle up whenever you come upon 'as regards,' 'with regard to,' 'in respect of,' 'in connection with,' 'according as to whether,' and the like. They are all dodges of Jargon, circumlocutions for evading this or that simple statement",
+        "ref": "quiller-couch-1916",
+        "locator": "On the Art of Writing (1916), Lecture V Interlude: On Jargon (\"another rule--just as rough and ready\")"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "f4-qc-asto-game"
+      ]
+    },
+    {
+      "id": "qc_elegant_variation",
+      "name": "the trick of Elegant Variation",
+      "definition": {
+        "text": "Let us turn to another trick of Jargon: the trick of Elegant Variation ... In an essay on Byron, Byron is (or ought to be) mentioned many times. I expect, nay exact, that Bryon shall be mentioned again and again. ... The Gospel does not, like my young essayist, fear to repeat a word, if the word be good.",
+        "ref": "quiller-couch-1916",
+        "locator": "On the Art of Writing (1916), Lecture V Interlude: On Jargon"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "qc_active_verb_concrete_noun",
+      "name": "The first virtue, the touchstone of a masculine style",
+      "definition": {
+        "text": "The first virtue, the touchstone of a masculine style, is its use of the active verb and the concrete noun.",
+        "ref": "quiller-couch-1916",
+        "locator": "On the Art of Writing (1916), Lecture V Interlude: On Jargon"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "f4-qc-active-teapot"
+      ]
+    },
+    {
+      "id": "qc_concrete_term_maxim",
+      "name": "our maxim--to prefer the concrete term to the abstract, the particular to the general, the definite to the vague",
+      "definition": {
+        "text": "men who have written learnedly on the art agree in treating our maxim--to prefer the concrete term to the abstract, the particular to the general, the definite to the vague--as a canon of rhetoric.",
+        "ref": "quiller-couch-1916",
+        "locator": "On the Art of Writing (1916), Lecture V Interlude: On Jargon"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "f4-qc-burke-brougham"
+      ]
+    },
+    {
+      "id": "qc_murder_your_darlings",
+      "name": "Murder your darlings.",
+      "definition": {
+        "text": "Style, for example, is not--can never be--extraneous Ornament. ... 'Whenever you feel an impulse to perpetrate a piece of exceptionally fine writing, obey it--whole-heartedly--and delete it before sending your manuscript to press. Murder your darlings.'",
+        "ref": "quiller-couch-1916",
+        "locator": "On the Art of Writing (1916), Lecture XII On Style"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "orwell_i_stale_figures",
+      "name": "i. Never use a metaphor, simile or other figure of speech which you are used to seeing in print.",
+      "definition": {
+        "text": "one needs rules that one can rely on when instinct fails. I think the following rules will cover most cases: i. Never use a metaphor, simile or other figure of speech which you are used to seeing in print.",
+        "ref": "orwell-1946",
+        "locator": "'Politics and the English Language' (1946), Orwell Foundation text, rule i"
+      },
+      "condition": "Break any of these rules sooner than say anything outright barbarous. ... I have not here been considering the literary use of language, but merely language as an instrument for expressing and not for concealing or preventing thought.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "orwell_ii_short_word",
+      "name": "ii. Never use a long word where a short one will do.",
+      "definition": {
+        "text": "ii. Never use a long word where a short one will do.",
+        "ref": "orwell-1946",
+        "locator": "'Politics and the English Language' (1946), Orwell Foundation text, rule ii"
+      },
+      "condition": "Break any of these rules sooner than say anything outright barbarous. ... I have not here been considering the literary use of language, but merely language as an instrument for expressing and not for concealing or preventing thought.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "orwell_iii_cut_word",
+      "name": "iii. If it is possible to cut a word out, always cut it out.",
+      "definition": {
+        "text": "iii. If it is possible to cut a word out, always cut it out.",
+        "ref": "orwell-1946",
+        "locator": "'Politics and the English Language' (1946), Orwell Foundation text, rule iii"
+      },
+      "condition": "Break any of these rules sooner than say anything outright barbarous. ... I have not here been considering the literary use of language, but merely language as an instrument for expressing and not for concealing or preventing thought.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "orwell_iv_active",
+      "name": "iv. Never use the passive where you can use the active.",
+      "definition": {
+        "text": "iv. Never use the passive where you can use the active.",
+        "ref": "orwell-1946",
+        "locator": "'Politics and the English Language' (1946), Orwell Foundation text, rule iv"
+      },
+      "condition": "Break any of these rules sooner than say anything outright barbarous. ... I have not here been considering the literary use of language, but merely language as an instrument for expressing and not for concealing or preventing thought.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "orwell_v_everyday_equivalent",
+      "name": "v. Never use a foreign phrase, a scientific word or a jargon word if you can think of an everyday English equivalent.",
+      "definition": {
+        "text": "v. Never use a foreign phrase, a scientific word or a jargon word if you can think of an everyday English equivalent.",
+        "ref": "orwell-1946",
+        "locator": "'Politics and the English Language' (1946), Orwell Foundation text, rule v"
+      },
+      "condition": "Break any of these rules sooner than say anything outright barbarous. ... I have not here been considering the literary use of language, but merely language as an instrument for expressing and not for concealing or preventing thought.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "orwell_vi_break_rules",
+      "name": "vi. Break any of these rules sooner than say anything outright barbarous.",
+      "definition": {
+        "text": "vi. Break any of these rules sooner than say anything outright barbarous. These rules sound elementary, and so they are, but they demand a deep change of attitude in anyone who has grown used to writing in the style now fashionable. One could keep all of them and still write bad English",
+        "ref": "orwell-1946",
+        "locator": "'Politics and the English Language' (1946), Orwell Foundation text, rule vi and the paragraph after the rules"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "orwell_scrupulous_writer_questions",
+      "name": "A scrupulous writer, in every sentence that he writes, will ask himself at least four questions",
+      "definition": {
+        "text": "A scrupulous writer, in every sentence that he writes, will ask himself at least four questions, thus: What am I trying to say? What words will express it? What image or idiom will make it clearer? Is this image fresh enough to have an effect? And he will probably ask himself two more: Could I put it more shortly? Have I said anything that is avoidably ugly?",
+        "ref": "orwell-1946",
+        "locator": "'Politics and the English Language' (1946), Orwell Foundation text, paragraph beginning 'As I have tried to show'"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "orwell_meaning_chooses_word",
+      "name": "let the meaning choose the word, and not the other way about",
+      "definition": {
+        "text": "it does imply using the fewest and shortest words that will cover one’s meaning. What is above all needed is to let the meaning choose the word, and not the other way about.",
+        "ref": "orwell-1946",
+        "locator": "'Politics and the English Language' (1946), Orwell Foundation text, paragraph beginning 'To begin with it has nothing to do with archaism'"
+      },
+      "condition": "It has nothing to do with correct grammar and syntax, which are of no importance so long as one makes one’s meaning clear or with the avoidance of Americanisms, or with having what is called a ‘good prose style’. On the other hand it is not concerned with fake simplicity and the attempt to make written English colloquial.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "orwell_dying_metaphors",
+      "name": "Dying metaphors.",
+      "definition": {
+        "text": "But in between these two classes there is a huge dump of worn-out metaphors which have lost all evocative power and are merely used because they save people the trouble of inventing phrases for themselves. ... incompatible metaphors are frequently mixed, a sure sign that the writer is not interested in what he is saying.",
+        "ref": "orwell-1946",
+        "locator": "'Politics and the English Language' (1946), Orwell Foundation text, catalogue of 'tricks', first item"
+      },
+      "condition": "A newly invented metaphor assists thought by evoking a visual image, while on the other hand a metaphor which is technically ‘dead’ (e. g. iron resolution) has in effect reverted to being an ordinary word and can generally be used without loss of vividness.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "orwell_operators_false_limbs",
+      "name": "Operators, or verbal false limbs.",
+      "definition": {
+        "text": "These save the trouble of picking out appropriate verbs and nouns, and at the same time pad each sentence with extra syllables which give it an appearance of symmetry. ... The keynote is the elimination of simple verbs. ... Simple conjunctions and prepositions are replaced by such phrases as with respect to, having regard to, the fact that, by dint of, in view of, in the interests of, on the hypothesis that",
+        "ref": "orwell-1946",
+        "locator": "'Politics and the English Language' (1946), Orwell Foundation text, catalogue of 'tricks', second item"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "orwell_pretentious_diction",
+      "name": "Pretentious diction.",
+      "definition": {
+        "text": "Words like phenomenon, element, individual (as noun), objective, categorical, effective, virtual, basic, primary, promote, constitute, exhibit, exploit, utilize, eliminate, liquidate, are used to dress up simple statements and give an air of scientific impartiality to biassed judgements. ... The result, in general, is an increase in slovenliness and vagueness.",
+        "ref": "orwell-1946",
+        "locator": "'Politics and the English Language' (1946), Orwell Foundation text, catalogue of 'tricks', third item"
+      },
+      "condition": "Except for the useful abbreviations i.e., e.g., and etc., there is no real need for any of the hundreds of foreign phrases now current in English.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "orwell_meaningless_words",
+      "name": "Meaningless words.",
+      "definition": {
+        "text": "Words like romantic, plastic, values, human, dead, sentimental, natural, vitality, as used in art criticism, are strictly meaningless, in the sense that they not only do not point to any discoverable object, but are hardly even expected to do so by the reader. ... Words of this kind are often used in a consciously dishonest way.",
+        "ref": "orwell-1946",
+        "locator": "'Politics and the English Language' (1946), Orwell Foundation text, catalogue of 'tricks', fourth item"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "zinsser_clarity",
+      "name": "Clarity",
+      "definition": {
+        "text": "I have four principles of writing good English. They are Clarity, Simplicity, Brevity, and Humanity. First, Clarity. If it’s not clear you might as well not write it.",
+        "ref": "zinsser-2010",
+        "locator": "'Writing English as a Second Language' (The American Scholar, 2010; Wayback snapshot 2023-12-09)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "zinsser_simplicity",
+      "name": "Simplicity",
+      "definition": {
+        "text": "Two: Simplicity. Simple is good.",
+        "ref": "zinsser-2010",
+        "locator": "'Writing English as a Second Language' (The American Scholar, 2010; Wayback snapshot 2023-12-09)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "zinsser_brevity",
+      "name": "Brevity",
+      "definition": {
+        "text": "Principle number 3. Brevity. Short is always better than long. Short sentences are better than long sentences. Short words are better than long words. ... Don’t say anything in writing that you wouldn’t comfortably say in conversation.",
+        "ref": "zinsser-2010",
+        "locator": "'Writing English as a Second Language' (The American Scholar, 2010; Wayback snapshot 2023-12-09)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "zinsser_humanity",
+      "name": "Humanity",
+      "definition": {
+        "text": "Which brings me to my fourth principle: Humanity. Be yourself. Never try in your writing to be someone you’re not.",
+        "ref": "zinsser-2010",
+        "locator": "'Writing English as a Second Language' (The American Scholar, 2010; Wayback snapshot 2023-12-09)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    }
+  ]
+}

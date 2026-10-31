@@ -1,0 +1,753 @@
+{
+  "id": "analytic_tradecraft",
+  "title": "Analytic tradecraft: ICD 203 standards, the Army writing standard and calibrated uncertainty language",
+  "criteria": [
+    {
+      "id": "icd203_objective",
+      "name": "Objective",
+      "definition": {
+        "text": "Objective: Analysts must perform their functions with objectivity and with awareness of their own assumptions and reasoning. They must employ reasoning techniques and practical mechanisms that reveal and mitigate bias. Analysts should be alert to influence by existing analytic positions or judgments and must consider alternative perspectives and contrary information. Analysis should not be unduly constrained by previous judgments when new developments indicate a modification is necessary.",
+        "ref": "icd203",
+        "locator": "ICD 203 Analytic Standards (signed 2 Jan 2015, as amended), Section D.6.a, printed p. 4"
+      },
+      "condition": "IC Analytic Standards shall be applied in each analytic product in a manner appropriate to its purpose, the type and scope of its underlying source information, its production timeline, and its customers.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "icd203_independent",
+      "name": "Independent of political consideration",
+      "definition": {
+        "text": "Independent of political consideration: Analytic assessments must not be distorted by, nor shaped for, advocacy of a particular audience, agenda, or policy viewpoint. Analytic judgments must not be influenced by the force of preference for a particular policy.",
+        "ref": "icd203",
+        "locator": "ICD 203 Analytic Standards (signed 2 Jan 2015, as amended), Section D.6.b, printed p. 4"
+      },
+      "condition": "IC Analytic Standards shall be applied in each analytic product in a manner appropriate to its purpose, the type and scope of its underlying source information, its production timeline, and its customers.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "icd203_timely",
+      "name": "Timely",
+      "definition": {
+        "text": "Timely: Analysis must be disseminated in time for it to be actionable by customers.",
+        "ref": "icd203",
+        "locator": "ICD 203 Analytic Standards (signed 2 Jan 2015, as amended), Section D.6.c, printed p. 4"
+      },
+      "condition": "IC Analytic Standards shall be applied in each analytic product in a manner appropriate to its purpose, the type and scope of its underlying source information, its production timeline, and its customers.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "icd203_all_sources",
+      "name": "Based on all available sources of intelligence information",
+      "definition": {
+        "text": "Based on all available sources of intelligence information: Analysis should be informed by all relevant information available. Analytic elements should identify and address critical information gaps and work with collection activities and data providers to develop access and collection strategies.",
+        "ref": "icd203",
+        "locator": "ICD 203 Analytic Standards (signed 2 Jan 2015, as amended), Section D.6.d, printed p. 4"
+      },
+      "condition": "IC Analytic Standards shall be applied in each analytic product in a manner appropriate to its purpose, the type and scope of its underlying source information, its production timeline, and its customers.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "icd203_t1",
+      "name": "Properly describes quality and credibility of underlying sources, data, and methodologies",
+      "definition": {
+        "text": "Analytic products should identify underlying sources and methodologies upon which judgments are based, and use source descriptors in accordance with ICD 206, Sourcing Requirements for Disseminated Analytic Products, to describe factors affecting source quality and credibility. [...] Source summary statements, described in ICD 206, are strongly encouraged and should be used to provide a holistic assessment of the strengths or weaknesses in the source base and explain which sources are most important to key analytic judgments.",
+        "ref": "icd203",
+        "locator": "ICD 203 Analytic Standards (signed 2 Jan 2015, as amended), Section D.6.e.(1), printed p. 4-5"
+      },
+      "condition": "IC Analytic Standards shall be applied in each analytic product in a manner appropriate to its purpose, the type and scope of its underlying source information, its production timeline, and its customers.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "icd203_t2",
+      "name": "Properly expresses and explains uncertainties associated with major analytic judgments",
+      "definition": {
+        "text": "Analytic products should indicate and explain the basis for the uncertainties associated with major analytic judgments, specifically the likelihood of occurrence of an event or development, and the analyst's confidence in the basis for this judgment. [...] Analytic products should note causes of uncertainty (e.g., type, currency, and amount of information, knowledge gaps, and the nature of the issue) and explain how uncertainties affect analysis (e.g., to what degree and how a judgment depends on assumptions). [...] Consistency in the terms used and the supporting information and logic advanced is critical to success in expressing uncertainty",
+        "ref": "icd203",
+        "locator": "ICD 203 Analytic Standards (signed 2 Jan 2015, as amended), Section D.6.e.(2), printed p. 5"
+      },
+      "condition": "IC Analytic Standards shall be applied in each analytic product in a manner appropriate to its purpose, the type and scope of its underlying source information, its production timeline, and its customers. [...] As appropriate, products should identify indicators that would alter the levels of uncertainty for major analytic judgments.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "icd203_t2a",
+      "name": "(a) For expressions of likelihood or probability",
+      "definition": {
+        "text": "(a) For expressions of likelihood or probability, an analytic product must use one of the following sets of terms: [...] Analysts are strongly encouraged not to mix terms from different rows. Products that do mix terms must include a disclaimer clearly noting the terms indicate the same assessment of probability.",
+        "ref": "icd203",
+        "locator": "ICD 203 Analytic Standards (signed 2 Jan 2015, as amended), Section D.6.e.(2)(a), printed p. 5"
+      },
+      "condition": "IC Analytic Standards shall be applied in each analytic product in a manner appropriate to its purpose, the type and scope of its underlying source information, its production timeline, and its customers.",
+      "levels": null,
+      "term_table": {
+        "row_1": [
+          "almost no chance",
+          "very unlikely",
+          "unlikely",
+          "roughly even chance",
+          "likely",
+          "very likely",
+          "almost certain(ly)"
+        ],
+        "row_2": [
+          "remote",
+          "highly improbable",
+          "improbable (improbably)",
+          "roughly even odds",
+          "probable (probably)",
+          "highly probable",
+          "nearly certain"
+        ],
+        "bands": [
+          "01-05%",
+          "05-20%",
+          "20-45%",
+          "45-55%",
+          "55-80%",
+          "80-95%",
+          "95-99%"
+        ]
+      },
+      "examples": []
+    },
+    {
+      "id": "icd203_t2b",
+      "name": "(b) confidence level and degree of likelihood not combined",
+      "definition": {
+        "text": "(b) To avoid confusion, products that express an analyst's confidence in an assessment or judgment using a \"confidence level\" (e.g., \"high confidence\") must not combine a confidence level and a degree of likelihood, which refers to an event or development, in the same sentence.",
+        "ref": "icd203",
+        "locator": "ICD 203 Analytic Standards (signed 2 Jan 2015, as amended), Section D.6.e.(2)(b), printed p. 5"
+      },
+      "condition": "IC Analytic Standards shall be applied in each analytic product in a manner appropriate to its purpose, the type and scope of its underlying source information, its production timeline, and its customers.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "icd203_t3",
+      "name": "Properly distinguishes between underlying intelligence information and analysts' assumptions and judgments",
+      "definition": {
+        "text": "Analytic products should clearly distinguish statements that convey underlying intelligence information used in analysis from statements that convey assumptions or judgments. [...] Products should state assumptions explicitly when they serve as the linchpin of an argument or when they bridge key information gaps. Products should explain the implications for judgments if assumptions prove to be incorrect.",
+        "ref": "icd203",
+        "locator": "ICD 203 Analytic Standards (signed 2 Jan 2015, as amended), Section D.6.e.(3), printed p. 5"
+      },
+      "condition": "IC Analytic Standards shall be applied in each analytic product in a manner appropriate to its purpose, the type and scope of its underlying source information, its production timeline, and its customers. [...] when they serve as the linchpin of an argument or when they bridge key information gaps. [...] Products also should, as appropriate, identify indicators that, if detected, would alter judgments.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "icd203_t4",
+      "name": "Incorporates analysis of alternatives",
+      "definition": {
+        "text": "Analytic products should identify and assess plausible alternative hypotheses. This is particularly important when major judgments must contend with significant uncertainties, or complexity (e.g., forecasting future trends), or when low probability events could produce high-impact results. In discussing alternatives, products should address factors such as associated assumptions, likelihood, or implications related to U.S. interests.",
+        "ref": "icd203",
+        "locator": "ICD 203 Analytic Standards (signed 2 Jan 2015, as amended), Section D.6.e.(4), printed p. 6"
+      },
+      "condition": "IC Analytic Standards shall be applied in each analytic product in a manner appropriate to its purpose, the type and scope of its underlying source information, its production timeline, and its customers. [...] This is particularly important when major judgments must contend with significant uncertainties, or complexity (e.g., forecasting future trends), or when low probability events could produce high-impact results.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "icd203_t5",
+      "name": "Demonstrates customer relevance and addresses implications",
+      "definition": {
+        "text": "Analytic products should provide information and insight on issues relevant to the customers of U.S. intelligence and address the implications of the information and analysis they provide. Products should add value by addressing prospects, context, threats, or factors affecting opportunities for action.",
+        "ref": "icd203",
+        "locator": "ICD 203 Analytic Standards (signed 2 Jan 2015, as amended), Section D.6.e.(5), printed p. 6"
+      },
+      "condition": "IC Analytic Standards shall be applied in each analytic product in a manner appropriate to its purpose, the type and scope of its underlying source information, its production timeline, and its customers.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "icd203_t6",
+      "name": "Uses clear and logical argumentation",
+      "definition": {
+        "text": "Analytic products should present a clear main analytic message up front. Products containing multiple judgments should have a main analytic message that is drawn collectively from those judgments. All analytic judgments should be effectively supported by relevant intelligence information and coherent reasoning. Language and syntax should convey meaning unambiguously. Products should be internally consistent and acknowledge significant supporting and contrary information affecting judgments.",
+        "ref": "icd203",
+        "locator": "ICD 203 Analytic Standards (signed 2 Jan 2015, as amended), Section D.6.e.(6), printed p. 6"
+      },
+      "condition": "IC Analytic Standards shall be applied in each analytic product in a manner appropriate to its purpose, the type and scope of its underlying source information, its production timeline, and its customers.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "icd203_t7",
+      "name": "Explains change to or consistency of analytic judgments",
+      "definition": {
+        "text": "Analytic products should state how their major judgments on a topic are consistent with or represent a change from those in previously published analysis, or represent initial coverage of a topic. Products need not be lengthy or detailed in explaining change or consistency. They should avoid using boilerplate language, however, and should make clear how new information or different reasoning led to the judgments expressed in them.",
+        "ref": "icd203",
+        "locator": "ICD 203 Analytic Standards (signed 2 Jan 2015, as amended), Section D.6.e.(7), printed p. 6"
+      },
+      "condition": "IC Analytic Standards shall be applied in each analytic product in a manner appropriate to its purpose, the type and scope of its underlying source information, its production timeline, and its customers. [...] Recurrent products such as daily crisis reports should note any changes in judgments; absent changes, recurrent products need not confirm consistency with previous editions.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "icd203_t8",
+      "name": "Makes accurate judgments and assessments",
+      "definition": {
+        "text": "Analytic products should apply expertise and logic to make the most accurate judgments and assessments possible, based on the information available and known information gaps. In doing so, analytic products should present all judgments that would be useful to customers, and should not avoid difficult judgments in order to minimize the risk of being wrong. [...] analytic products should express judgments as clearly and precisely as possible, reducing ambiguity by addressing the likelihood, timing, and nature of the outcome or development.",
+        "ref": "icd203",
+        "locator": "ICD 203 Analytic Standards (signed 2 Jan 2015, as amended), Section D.6.e.(8), printed p. 6"
+      },
+      "condition": "IC Analytic Standards shall be applied in each analytic product in a manner appropriate to its purpose, the type and scope of its underlying source information, its production timeline, and its customers.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "icd203_t9",
+      "name": "Incorporates effective visual information where appropriate",
+      "definition": {
+        "text": "Analytic products should incorporate visual information to clarify an analytic message and to complement or enhance the presentation of data and analysis. In particular, visual presentations should be used when information or concepts (e.g., spatial or temporal relationships) can be conveyed better in graphic form (e.g., tables, flow charts, images) than in written text. [...] Visual information should always be clear and pertinent to the product's subject.",
+        "ref": "icd203",
+        "locator": "ICD 203 Analytic Standards (signed 2 Jan 2015, as amended), Section D.6.e.(9), printed p. 6-7"
+      },
+      "condition": "IC Analytic Standards shall be applied in each analytic product in a manner appropriate to its purpose, the type and scope of its underlying source information, its production timeline, and its customers. [...] Incorporates effective visual information where appropriate",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "dapam_1_4a",
+      "name": "the standard for Army writing",
+      "definition": {
+        "text": "According to AR 600–70, the standard for Army writing is writing you can understand in a single rapid reading, and is generally free of errors in grammar, mechanics, and usage.",
+        "ref": "da-pam-600-67",
+        "locator": "DA PAM 600-67 (2 June 1986), para 1-4a 'Defining the standard', printed p. 1"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "dapam_1_4b",
+      "name": "Good Army writing",
+      "definition": {
+        "text": "Good Army writing is clear, concise, organized, and right to the point.",
+        "ref": "da-pam-600-67",
+        "locator": "DA PAM 600-67 (2 June 1986), para 1-4b 'Defining the standard', printed p. 1"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "dapam_3_1a",
+      "name": "bottom line",
+      "definition": {
+        "text": "Put the recommendation, conclusion, or reason for writing— the “ bottom line ”—in the first or second paragraph, not at the end.",
+        "ref": "da-pam-600-67",
+        "locator": "DA PAM 600-67 (2 June 1986), para 3-1a 'Style Rules', printed p. 1"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "da-pam-600-67-1"
+      ],
+      "example_notes": "a26 (Report of Survey, figures 5-5 poor / 5-6 good): para 5-2d says figure 5-6 is much improved because the bottom line is up front and the paragraphs are short."
+    },
+    {
+      "id": "dapam_3_1b",
+      "name": "Use the active voice",
+      "definition": {
+        "text": "Use the active voice.",
+        "ref": "da-pam-600-67",
+        "locator": "DA PAM 600-67 (2 June 1986), para 3-1b 'Style Rules', printed p. 1"
+      },
+      "condition": "Although sometimes the passive is appropriate, most of the time it is not.",
+      "levels": null,
+      "examples": [
+        "da-pam-600-67-2"
+      ],
+      "example_notes": "a31 (memorandum, figures 5-1 poor / 5-2 good): para 5-2b says the figure 5-1 memorandum is filled with jargon and the passive voice."
+    },
+    {
+      "id": "dapam_3_1c",
+      "name": "Use short sentences",
+      "definition": {
+        "text": "Use short sentences (an average of 15 or fewer words).",
+        "ref": "da-pam-600-67",
+        "locator": "DA PAM 600-67 (2 June 1986), para 3-1c 'Style Rules', printed p. 1"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "dapam_3_1d",
+      "name": "Use short words",
+      "definition": {
+        "text": "Use short words (three syllables or fewer). (See the clarity index in paragraph 4–3.)",
+        "ref": "da-pam-600-67",
+        "locator": "DA PAM 600-67 (2 June 1986), para 3-1d 'Style Rules', printed p. 1"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "dapam_3_1e",
+      "name": "paragraphs no more than 1 inch deep",
+      "definition": {
+        "text": "Write paragraphs that, with few exceptions, are no more than 1 inch deep.",
+        "ref": "da-pam-600-67",
+        "locator": "DA PAM 600-67 (2 June 1986), para 3-1e 'Style Rules', printed p. 1"
+      },
+      "condition": "with few exceptions",
+      "levels": null,
+      "examples": [
+        "da-pam-600-67-1"
+      ],
+      "example_notes": "a26: para 5-2d credits figure 5-6 with short paragraphs as well as the bottom line up front."
+    },
+    {
+      "id": "dapam_3_1f",
+      "name": "Use correct spelling, grammar, and punctuation",
+      "definition": {
+        "text": "Use correct spelling, grammar, and punctuation.",
+        "ref": "da-pam-600-67",
+        "locator": "DA PAM 600-67 (2 June 1986), para 3-1f 'Style Rules', printed p. 1"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "da-pam-600-67-3"
+      ],
+      "example_notes": "a32 (military letter, figures 5-3 poor / 5-4 good): para 5-2c says much of figure 5-3 is error-riddled or Army jargon and points to figure 5-4 for the difference. The tie is to errors and jargon generally; the pamphlet does not name this rule."
+    },
+    {
+      "id": "dapam_3_1g",
+      "name": "Use “I,” “you” and “we” as subjects",
+      "definition": {
+        "text": "Use “I,”“you” and “we” as subjects of sentences instead of “this office,”“this headquarters,”“all individuals,” and so forth, for most kinds of writing.",
+        "ref": "da-pam-600-67",
+        "locator": "DA PAM 600-67 (2 June 1986), para 3-1g 'Style Rules', printed p. 1"
+      },
+      "condition": "for most kinds of writing",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "dapam_3_2a1",
+      "name": "Structure—main idea first",
+      "definition": {
+        "text": "Structure—main idea first. (1) Require all staff writing to begin with the main idea. [...] Have subordinates start with the information they would keep if they had to get rid of all the rest.",
+        "ref": "da-pam-600-67",
+        "locator": "DA PAM 600-67 (2 June 1986), para 3-2a(1) 'Two essential changes', printed p. 1"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "dapam_3_2a2",
+      "name": "packaging",
+      "definition": {
+        "text": "(2) Require specific packaging of all writing. [...] To package– (a) Open with a short, clear purpose sentence. (b) Put the recommendation, conclusion, or most important information (the main point) next. (Some writing combines the purpose and the main point.) (c) Clearly separate each major section. Use paragraphs, headings, or section titles. (d) Use a specific format if one is appropriate.",
+        "ref": "da-pam-600-67",
+        "locator": "DA PAM 600-67 (2 June 1986), para 3-2a(2) 'Two essential changes', printed p. 1"
+      },
+      "condition": "(Some writing combines the purpose and the main point.) [...] (d) Use a specific format if one is appropriate.",
+      "levels": null,
+      "examples": [
+        "da-pam-600-67-4",
+        "da-pam-600-67-2",
+        "da-pam-600-67-1"
+      ],
+      "example_notes": "a27: figures 3-1 and 3-2 are titled 'Example of writing without packaging' and 'Example of writing with packaging'. a31: para 5-2b says packaging in figure 5-2 brings the recommendation to the top and eliminates unnecessary verbiage. a26: para 5-2d says figure 5-5's more basic problem is packaging."
+    },
+    {
+      "id": "dapam_3_2b",
+      "name": "Style – the active voice",
+      "definition": {
+        "text": "Style – the active voice. (1) The major style change that makes Army writing clear, direct communication is using the active voice rather than passive voice. [...] (6) When you see writing in the passive voice, have the writers change it to active voice.",
+        "ref": "da-pam-600-67",
+        "locator": "DA PAM 600-67 (2 June 1986), para 3-2b 'Two essential changes', printed p. 1"
+      },
+      "condition": "Although sometimes the passive is appropriate, most of the time it is not.",
+      "levels": null,
+      "examples": [
+        "da-pam-600-67-2"
+      ],
+      "example_notes": "a31: para 5-2b names the passive voice among the faults of figure 5-1."
+    },
+    {
+      "id": "dapam_4_2",
+      "name": "The quick–screen edit",
+      "definition": {
+        "text": "This editing tool identifies major violations of the Army standard for writing. [...] In a single, rapid reading highlight, circle, or underline– (1) The “bottom line,” the purpose of the piece of writing. (2) Any forms of the verb to be used with a past participle ( a verb ending in “–en” or “–ed”). This identifies the passive voice. (3) Any unnecessary long words or jargon. (4) Spelling, punctuation, or grammar mistakes.",
+        "ref": "da-pam-600-67",
+        "locator": "DA PAM 600-67 (2 June 1986), para 4-2 'The quick-screen edit', printed p. 2"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [],
+      "example_notes": "Figures 4-1/4-2 illustrate this edit but are not among the verified example pairs (a, b, c examples.json), so nothing is attached."
+    },
+    {
+      "id": "dapam_4_3",
+      "name": "The clarity index",
+      "definition": {
+        "text": "The clarity index is based on word and sentence length. [...] (3) Divide the number of words by the number of sentences to get the average sentence length. (The target average is 15 words per sentence. (4) Count the number of words that have three syllables or more. (5) Divide the number of long words by the total of words to determine the percentage of long words. (The target is 15 percent.) (6) Add the average sentence length to the percentage of long words. (7) The sum is the clarity index. (The target is 30.)",
+        "ref": "da-pam-600-67",
+        "locator": "DA PAM 600-67 (2 June 1986), para 4-3 'The clarity index', printed p. 2"
+      },
+      "condition": null,
+      "levels": null,
+      "source_notes": [
+        "Below 20, writing is too abrupt.",
+        "Over 40, writing is difficult to understand.",
+        "Aim for an index of 30."
+      ],
+      "examples": [
+        "da-pam-600-67-2"
+      ],
+      "example_notes": "a31: the pamphlet publishes clarity indices for both versions (figure 5-1 = 42, 'too high'; figure 5-2 = 23). Figures 4-4/4-5 (45 vs 24) also carry published indices but are not among the verified example pairs."
+    },
+    {
+      "id": "kent_1",
+      "name": "make clear to the reader what is certain knowledge and what is reasoned judgment",
+      "definition": {
+        "text": "It should set forth the community's findings in such a way as to make clear to the reader what is certain knowledge and what is reasoned judgment, and within this large realm of judgment what varying degrees of certitude lie behind each key statement.",
+        "ref": "kent-wep",
+        "locator": "Kent, 'Words of Estimative Probability', Studies in Intelligence 8(4), 1964; CIA CSI web edition (archived 2015 copy), section 'Estimative Uncertainty', paragraph on the NIE"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "kent-wep-1"
+      ],
+      "example_notes": "c11: Kent's own opening example (the briefing officer's three statements), which he immediately classifies as an indisputable fact, a judgment on strong evidence ('almost certainly') and an estimate made almost without evidence ('possible'/'probably')."
+    },
+    {
+      "id": "kent_2",
+      "name": "The first cardinal rule",
+      "definition": {
+        "text": "The first cardinal rule to emerge was thus, \"The word `possible' (and its cognates (6) ) must not be modified.\" The urge to drop into ordinary usage and write \"just possible,\" \"barely possible,\" \"a distinct [or good] possibility,\" and so on must be suppressed.",
+        "ref": "kent-wep",
+        "locator": "Kent, 'Words of Estimative Probability', Studies in Intelligence 8(4), 1964; CIA CSI web edition (archived 2015 copy), section 'Early Brush with Ambiguity', end"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "kent-wep-2"
+      ],
+      "example_notes": "c8: the NIE 29-51 key judgment ('should be considered a serious possibility'); Kent says the particular error lay in using the word 'possibility' with the modifier 'serious', and the cardinal rule follows from it."
+    },
+    {
+      "id": "kent_3",
+      "name": "meet these key estimates head on",
+      "definition": {
+        "text": "Let us meet these key estimates head on. Let us isolate and seize upon exactly the thing that needs estimating. Let us endeavor to make clear to the reader that the passage in question is of critical importance--the gut estimate, as we call it among ourselves.",
+        "ref": "kent-wep",
+        "locator": "Kent, 'Words of Estimative Probability', Studies in Intelligence 8(4), 1964; CIA CSI web edition (archived 2015 copy), closing section, paragraph addressed to 'the brotherhood of the NIE'"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kent_4",
+      "name": "assign it a word or phrase chosen from one of the five rough categories of likelihood",
+      "definition": {
+        "text": "Let us talk of it in terms of odds or chances, and when we have made our best judgment let us assign it a word or phrase that is chosen from one of the five rough categories of likelihood on the chart. Let the judgment be unmistakable and let it be unmistakably ours.",
+        "ref": "kent-wep",
+        "locator": "Kent, 'Words of Estimative Probability', Studies in Intelligence 8(4), 1964; CIA CSI web edition (archived 2015 copy), closing section (rule) and section 'An Odds Table' (chart)"
+      },
+      "condition": null,
+      "levels": null,
+      "term_table": {
+        "rows": [
+          "93% give or take about 6% — Almost certain",
+          "75% give or take about 12% — Probable",
+          "50% give or take about 10% — Chances about even",
+          "30% give or take about 10% — Probably not",
+          "7% give or take about 5% — Almost certainly not"
+        ]
+      },
+      "examples": [
+        "kent-wep-3"
+      ],
+      "example_notes": "c12: Kent's proposed 'Important note to consumers' that follows the chart and glosses the odds behind the terms. It glosses 'unlikely' (about one in four) and 'almost certain ... not', not the chart's own 'Probably not' / 'Almost certainly not' wording."
+    },
+    {
+      "id": "kent_5",
+      "name": "use the word \"possible\" ... with no modifier",
+      "definition": {
+        "text": "If the matter is important and cannot be assigned an order of likelihood, but is plainly something which is neither certain to come about nor impossible, let us use the word \"possible\" or one of its stand-ins--and with no modifier.",
+        "ref": "kent-wep",
+        "locator": "Kent, 'Words of Estimative Probability', Studies in Intelligence 8(4), 1964; CIA CSI web edition (archived 2015 copy), closing section"
+      },
+      "condition": "If the matter is important and cannot be assigned an order of likelihood, but is plainly something which is neither certain to come about nor impossible",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kent_6",
+      "name": "use them sparingly",
+      "definition": {
+        "text": "If use them we must in NIEs, let us try to use them sparingly and in places where they are least likely to obscure the thrust of our key estimative passages.",
+        "ref": "kent-wep",
+        "locator": "Kent, 'Words of Estimative Probability', Studies in Intelligence 8(4), 1964; CIA CSI web edition (archived 2015 copy), section on 'apparently', 'seemingly', 'fear', 'hope' and similar expressions"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ipcc_general",
+      "name": "findings that are general enough",
+      "definition": {
+        "text": "It is important for author teams to develop findings that are general enough to reflect the underlying evidence but not so general that they lose substantive meaning.",
+        "ref": "ipcc-uncertainty",
+        "locator": "IPCC AR5 Guidance Note on Consistent Treatment of Uncertainties (Mastrandrea et al. 2010), introduction, p. 1"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ipcc_conditional",
+      "name": "findings (effects) that are conditional on other findings (causes)",
+      "definition": {
+        "text": "For findings (effects) that are conditional on other findings (causes), consider independently evaluating the degrees of certainty in both causes and effects, with the understanding that the degree of certainty in the causes may be low.",
+        "ref": "ipcc-uncertainty",
+        "locator": "IPCC AR5 Guidance Note on Consistent Treatment of Uncertainties (Mastrandrea et al. 2010), introduction, p. 1"
+      },
+      "condition": "For findings (effects) that are conditional on other findings (causes)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ipcc_tails",
+      "name": "information on the tails of distributions",
+      "definition": {
+        "text": "Author teams are therefore encouraged to provide information on the tails of distributions of key variables, reporting quantitative estimates when possible and supplying qualitative assessments and evaluations when appropriate.",
+        "ref": "ipcc-uncertainty",
+        "locator": "IPCC AR5 Guidance Note on Consistent Treatment of Uncertainties (Mastrandrea et al. 2010), introduction, p. 1"
+      },
+      "condition": "reporting quantitative estimates when possible and supplying qualitative assessments and evaluations when appropriate",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ipcc_2",
+      "name": "traceable account",
+      "definition": {
+        "text": "2) Be prepared to make expert judgments in developing key findings, and to explain those judgments by providing a traceable account: a description in the chapter text of your evaluation of the type, amount, quality, and consistency of evidence and the degree of agreement, which together form the basis for a given key finding.",
+        "ref": "ipcc-uncertainty",
+        "locator": "IPCC AR5 Guidance Note on Consistent Treatment of Uncertainties (Mastrandrea et al. 2010), paragraph 2 ('Review the information available'), p. 2"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ipcc_4",
+      "name": "the way in which a statement is framed",
+      "definition": {
+        "text": "4) Be aware that the way in which a statement is framed will have an effect on how it is interpreted (e.g., a 10% chance of dying is interpreted more negatively than a 90% chance of surviving). [...] Consider reciprocal statements to avoid value-laden interpretations (e.g., report chances both of dying and of surviving).",
+        "ref": "ipcc-uncertainty",
+        "locator": "IPCC AR5 Guidance Note on Consistent Treatment of Uncertainties (Mastrandrea et al. 2010), paragraph 4, p. 2"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ipcc_5",
+      "name": "statements of fact without using uncertainty qualifiers",
+      "definition": {
+        "text": "5) Consider that, in some cases, it may be appropriate to describe findings for which evidence and understanding are overwhelming as statements of fact without using uncertainty qualifiers.",
+        "ref": "ipcc-uncertainty",
+        "locator": "IPCC AR5 Guidance Note on Consistent Treatment of Uncertainties (Mastrandrea et al. 2010), paragraph 5, p. 2"
+      },
+      "condition": "in some cases, it may be appropriate to describe findings for which evidence and understanding are overwhelming",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ipcc_8",
+      "name": "evidence and agreement",
+      "definition": {
+        "text": "8) Use the following dimensions to evaluate the validity of a finding: the type, amount, quality, and consistency of evidence (summary terms: “limited,” “medium,” or “robust”), and the degree of agreement (summary terms: “low,” “medium,” or “high”). [...] Provide a traceable account describing your evaluation of evidence and agreement in the text of your chapter.",
+        "ref": "ipcc-uncertainty",
+        "locator": "IPCC AR5 Guidance Note on Consistent Treatment of Uncertainties (Mastrandrea et al. 2010), paragraph 8 ('Evaluate and communicate at the appropriate level of precision'), p. 2"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ipcc_8a",
+      "name": "high agreement and robust evidence",
+      "definition": {
+        "text": "For findings with high agreement and robust evidence, present a level of confidence or a quantified measure of uncertainty.",
+        "ref": "ipcc-uncertainty",
+        "locator": "IPCC AR5 Guidance Note on Consistent Treatment of Uncertainties (Mastrandrea et al. 2010), paragraph 8, first bullet, p. 2"
+      },
+      "condition": "For findings with high agreement and robust evidence",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ipcc_8b",
+      "name": "high agreement or robust evidence, but not both",
+      "definition": {
+        "text": "For findings with high agreement or robust evidence, but not both, assign confidence or quantify uncertainty when possible. Otherwise, assign the appropriate combination of summary terms for your evaluation of evidence and agreement (e.g., robust evidence, medium agreement).",
+        "ref": "ipcc-uncertainty",
+        "locator": "IPCC AR5 Guidance Note on Consistent Treatment of Uncertainties (Mastrandrea et al. 2010), paragraph 8, second bullet, p. 2"
+      },
+      "condition": "For findings with high agreement or robust evidence, but not both",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ipcc_8c",
+      "name": "low agreement and limited evidence",
+      "definition": {
+        "text": "For findings with low agreement and limited evidence, assign summary terms for your evaluation of evidence and agreement.",
+        "ref": "ipcc-uncertainty",
+        "locator": "IPCC AR5 Guidance Note on Consistent Treatment of Uncertainties (Mastrandrea et al. 2010), paragraph 8, third bullet, p. 3"
+      },
+      "condition": "For findings with low agreement and limited evidence",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ipcc_8d",
+      "name": "findings that are conditional on other findings",
+      "definition": {
+        "text": "In any of these cases, the degree of certainty in findings that are conditional on other findings should be evaluated and reported separately.",
+        "ref": "ipcc-uncertainty",
+        "locator": "IPCC AR5 Guidance Note on Consistent Treatment of Uncertainties (Mastrandrea et al. 2010), paragraph 8, fourth bullet, p. 3"
+      },
+      "condition": "findings that are conditional on other findings",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ipcc_9",
+      "name": "level of confidence",
+      "definition": {
+        "text": "9) A level of confidence is expressed using five qualifiers: “very low,” “low,” “medium,” “high,” and “very high.” [...] Presentation of findings with “low” and “very low” confidence should be reserved for areas of major concern, and the reasons for their presentation should be carefully explained. Confidence should not be interpreted probabilistically, and it is distinct from “statistical confidence.”",
+        "ref": "ipcc-uncertainty",
+        "locator": "IPCC AR5 Guidance Note on Consistent Treatment of Uncertainties (Mastrandrea et al. 2010), paragraph 9, p. 3"
+      },
+      "condition": "a finding that includes a probabilistic measure of uncertainty does not require explicit mention of the level of confidence associated with that finding if the level of confidence is “high” or “very high.”",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ipcc_10",
+      "name": "Likelihood",
+      "definition": {
+        "text": "10) Likelihood, as defined in Table 1, provides calibrated language for describing quantified uncertainty. [...] When there is sufficient information, it is preferable to specify the full probability distribution or a probability range (e.g., 90–95%) without using the terms in Table 1. “About as likely as not” should not be used to express a lack of knowledge (see Paragraph 8 for that situation).",
+        "ref": "ipcc-uncertainty",
+        "locator": "IPCC AR5 Guidance Note on Consistent Treatment of Uncertainties (Mastrandrea et al. 2010), paragraph 10 and Table 1, p. 3"
+      },
+      "condition": "When there is sufficient information",
+      "levels": null,
+      "term_table": {
+        "rows": [
+          "Virtually certain 99-100% probability",
+          "Very likely 90-100% probability",
+          "Likely 66-100% probability",
+          "About as likely as not 33 to 66% probability",
+          "Unlikely 0-33% probability",
+          "Very unlikely 0-10% probability",
+          "Exceptionally unlikely 0-1% probability"
+        ]
+      },
+      "examples": []
+    },
+    {
+      "id": "ipcc_11",
+      "name": "Characterize key findings regarding a variable",
+      "definition": {
+        "text": "11) Characterize key findings regarding a variable (e.g., a measured, simulated, or derived quantity or its change) using calibrated uncertainty language that conveys the most information to the reader, based on the criteria (A-F) below. [...] recognizing that in all cases it is important to include a traceable account of relevant evidence and agreement in your chapter text.",
+        "ref": "ipcc-uncertainty",
+        "locator": "IPCC AR5 Guidance Note on Consistent Treatment of Uncertainties (Mastrandrea et al. 2010), paragraph 11, p. 3"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ipcc_11a",
+      "name": "A) variable ambiguous or processes poorly known",
+      "definition": {
+        "text": "Confidence should not be assigned; assign summary terms for evidence and agreement (see Paragraph 8). Explain the governing factors, key indicators, and [...] relationships. If a variable could be either positive or negative, describe the pre-conditions or evidence for each.",
+        "ref": "ipcc-uncertainty",
+        "locator": "IPCC AR5 Guidance Note on Consistent Treatment of Uncertainties (Mastrandrea et al. 2010), paragraph 11 A, p. 3-4"
+      },
+      "condition": "A) A variable is ambiguous, or the processes determining it are poorly known or not amenable to measurement:",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ipcc_11b",
+      "name": "B) sign known, magnitude poorly known",
+      "definition": {
+        "text": "Assign confidence when possible; otherwise assign summary terms for evidence and agreement (see Paragraphs 8 and 9). Explain the basis for this confidence evaluation and the extent to which opposite changes would not be expected.",
+        "ref": "ipcc-uncertainty",
+        "locator": "IPCC AR5 Guidance Note on Consistent Treatment of Uncertainties (Mastrandrea et al. 2010), paragraph 11 B, p. 4"
+      },
+      "condition": "B) The sign of a variable can be identified but the magnitude is poorly known:",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ipcc_11c",
+      "name": "C) order of magnitude",
+      "definition": {
+        "text": "Assign confidence when possible; otherwise assign summary terms for evidence and agreement (see Paragraphs 8 and 9). Explain the basis for estimates and confidence evaluations made, and indicate any assumptions. If the evaluation is particularly sensitive to specific assumptions, then also evaluate confidence in those assumptions.",
+        "ref": "ipcc-uncertainty",
+        "locator": "IPCC AR5 Guidance Note on Consistent Treatment of Uncertainties (Mastrandrea et al. 2010), paragraph 11 C, p. 4"
+      },
+      "condition": "C) An order of magnitude can be given for a variable:",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ipcc_11d",
+      "name": "D) a range can be given",
+      "definition": {
+        "text": "Assign likelihood or probability for that range when possible; otherwise only assign confidence (see Paragraphs 8-10). Explain the basis for the range given, noting factors that determine the outer bounds. State any assumptions made and estimate the role of structural uncertainties. Report likelihood or probability for values or changes outside the range, if appropriate.",
+        "ref": "ipcc-uncertainty",
+        "locator": "IPCC AR5 Guidance Note on Consistent Treatment of Uncertainties (Mastrandrea et al. 2010), paragraph 11 D, p. 4"
+      },
+      "condition": "D) A range can be given for a variable, based on quantitative analysis or expert judgment:",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ipcc_11e",
+      "name": "E) a likelihood or probability can be determined",
+      "definition": {
+        "text": "Assign a likelihood for the event or outcomes, for which confidence should be “high” or “very high” (see Paragraphs 8-10). In this case, the level of confidence need not be explicitly stated. State any assumptions made and estimate the role of structural uncertainties. Consider characterizing the likelihood or probability of other events or outcomes within the full set of alternatives, including those at the tails.",
+        "ref": "ipcc-uncertainty",
+        "locator": "IPCC AR5 Guidance Note on Consistent Treatment of Uncertainties (Mastrandrea et al. 2010), paragraph 11 E, p. 4"
+      },
+      "condition": "E) A likelihood or probability can be determined for a variable, for the occurrence of an event, or for a range of outcomes (e.g., based on multiple observations, model ensemble runs, or expert judgment):",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ipcc_11f",
+      "name": "F) a probability distribution can be determined",
+      "definition": {
+        "text": "Present the probability distribution(s) graphically and/or provide a range of percentiles of the distribution(s), for which confidence should be “high” or “very high” (see Paragraphs 8-10). In this case, the level of confidence need not be explicitly stated. Explain the method used to produce the probability distribution(s) and any assumptions made, and estimate the role of structural uncertainties. Provide quantification of the tails of the distribution(s) to the extent possible.",
+        "ref": "ipcc-uncertainty",
+        "locator": "IPCC AR5 Guidance Note on Consistent Treatment of Uncertainties (Mastrandrea et al. 2010), paragraph 11 F, p. 4"
+      },
+      "condition": "F) A probability distribution or a set of distributions can be determined for the variable either through statistical analysis or through use of a formal quantitative survey of expert views:",
+      "levels": null,
+      "examples": []
+    }
+  ]
+}

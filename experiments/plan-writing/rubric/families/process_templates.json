@@ -1,0 +1,2083 @@
+{
+  "id": "process_templates",
+  "title": "Genre-specific section requirements of the corpus templates (PEP 1/12, Rust RFC, KEP, Go design doc, RFC 7322, RFC 3552, Oxide RFD 1, Shape Up)",
+  "criteria": [
+    {
+      "id": "pep1_single_focused_proposal",
+      "name": "Start with an idea for Python",
+      "definition": {
+        "text": "It is highly recommended that a single PEP contain a single key proposal or new idea; the more focused the PEP, the more successful it tends to be.",
+        "ref": "pep1",
+        "locator": "PEP 1, 'Start with an idea for Python'"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep1_acceptance_minimum",
+      "name": "PEP Review & Resolution (minimum criteria)",
+      "definition": {
+        "text": "For a PEP to be accepted it must meet certain minimum criteria. It must be a clear and complete description of the proposed enhancement. The enhancement must represent a net improvement. The proposed implementation, if applicable, must be solid and must not complicate the interpreter unduly.",
+        "ref": "pep1",
+        "locator": "PEP 1, 'PEP Review & Resolution'"
+      },
+      "condition": "The proposed implementation, if applicable",
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep1_preamble",
+      "name": "Preamble",
+      "definition": {
+        "text": "Preamble -- :rfc:`2822` style headers containing meta-data about the PEP, including the PEP number, a short descriptive title (limited to a maximum of 44 characters), the names, and optionally the contact info for each author, etc.",
+        "ref": "pep1",
+        "locator": "PEP 1, 'What belongs in a successful PEP?', item 1"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep1_abstract",
+      "name": "Abstract",
+      "definition": {
+        "text": "Abstract -- a short (~200 word) description of the technical issue being addressed.",
+        "ref": "pep1",
+        "locator": "PEP 1, 'What belongs in a successful PEP?', item 2"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep1_motivation",
+      "name": "Motivation",
+      "definition": {
+        "text": "Motivation -- The motivation is critical for PEPs that want to change the Python language, library, or ecosystem. It should clearly explain why the existing language specification is inadequate to address the problem that the PEP solves. … PEP submissions without sufficient motivation may be rejected.",
+        "ref": "pep1",
+        "locator": "PEP 1, 'What belongs in a successful PEP?', item 3"
+      },
+      "condition": "for PEPs that want to change the Python language, library, or ecosystem",
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep1_specification",
+      "name": "Specification",
+      "definition": {
+        "text": "Specification -- The technical specification should describe the syntax and semantics of any new language feature. The specification should be detailed enough to allow competing, interoperable implementations for at least the current major Python platforms (CPython, Jython, IronPython, PyPy).",
+        "ref": "pep1",
+        "locator": "PEP 1, 'What belongs in a successful PEP?', item 4"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep1_rationale",
+      "name": "Rationale",
+      "definition": {
+        "text": "Rationale -- The rationale fleshes out the specification by describing why particular design decisions were made. It should describe alternate designs that were considered and related work, e.g. how the feature is supported in other languages. The rationale should provide evidence of consensus within the community and discuss important objections or concerns raised during discussion.",
+        "ref": "pep1",
+        "locator": "PEP 1, 'What belongs in a successful PEP?', item 5"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep1_backwards_compatibility",
+      "name": "Backwards Compatibility",
+      "definition": {
+        "text": "Backwards Compatibility -- All PEPs that introduce backwards incompatibilities must include a section describing these incompatibilities and their severity. The PEP must explain how the author proposes to deal with these incompatibilities. PEP submissions without a sufficient backwards compatibility treatise may be rejected outright.",
+        "ref": "pep1",
+        "locator": "PEP 1, 'What belongs in a successful PEP?', item 6"
+      },
+      "condition": "All PEPs that introduce backwards incompatibilities",
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": [
+        "pep661-pr4050-1"
+      ]
+    },
+    {
+      "id": "pep1_security_implications",
+      "name": "Security Implications",
+      "definition": {
+        "text": "Security Implications -- If there are security concerns in relation to the PEP, those concerns should be explicitly written out to make sure reviewers of the PEP are aware of them.",
+        "ref": "pep1",
+        "locator": "PEP 1, 'What belongs in a successful PEP?', item 7"
+      },
+      "condition": "If there are security concerns in relation to the PEP",
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": [
+        "pep661-pr4050-1"
+      ]
+    },
+    {
+      "id": "pep1_how_to_teach_this",
+      "name": "How to Teach This",
+      "definition": {
+        "text": "How to Teach This -- For a PEP that adds new functionality or changes language behavior, it is helpful to include a section on how to teach users, new and experienced, how to apply the PEP to their work.",
+        "ref": "pep1",
+        "locator": "PEP 1, 'What belongs in a successful PEP?', item 8"
+      },
+      "condition": "For a PEP that adds new functionality or changes language behavior",
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": [
+        "pep661-pr4050-1"
+      ]
+    },
+    {
+      "id": "pep1_reference_implementation",
+      "name": "Reference Implementation",
+      "definition": {
+        "text": "The final implementation must include test code and documentation appropriate for either the Python language reference or the standard library reference.",
+        "ref": "pep1",
+        "locator": "PEP 1, 'What belongs in a successful PEP?', item 9"
+      },
+      "condition": "The reference implementation must be completed before any PEP is given status \"Final\", but it need not be completed before the PEP is accepted.",
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep1_rejected_ideas",
+      "name": "Rejected Ideas",
+      "definition": {
+        "text": "Rejected Ideas -- Throughout the discussion of a PEP, various ideas will be proposed which are not accepted. Those rejected ideas should be recorded along with the reasoning as to why they were rejected.",
+        "ref": "pep1",
+        "locator": "PEP 1, 'What belongs in a successful PEP?', item 10"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep1_open_issues",
+      "name": "Open Issues",
+      "definition": {
+        "text": "Open Issues -- While a PEP is in draft, ideas can come up which warrant further discussion. Those ideas should be recorded so people know that they are being thought about but do not have a concrete resolution.",
+        "ref": "pep1",
+        "locator": "PEP 1, 'What belongs in a successful PEP?', item 11"
+      },
+      "condition": "While a PEP is in draft",
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": [
+        "pep661-pr4050-1"
+      ]
+    },
+    {
+      "id": "pep1_acknowledgements",
+      "name": "Acknowledgements",
+      "definition": {
+        "text": "Acknowledgements -- Useful to thank and acknowledge people who have helped develop, discuss, or draft the PEP, or for any other purpose.",
+        "ref": "pep1",
+        "locator": "PEP 1, 'What belongs in a successful PEP?', item 12"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep1_footnotes",
+      "name": "Footnotes",
+      "definition": {
+        "text": "Footnotes -- A collection of footnotes cited in the PEP, and a place to list non-inline hyperlink targets.",
+        "ref": "pep1",
+        "locator": "PEP 1, 'What belongs in a successful PEP?', item 13"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep1_change_history",
+      "name": "Change History",
+      "definition": {
+        "text": "Change History -- A summary of major changes the PEP has undergone, based on discussions and feedback.",
+        "ref": "pep1",
+        "locator": "PEP 1, 'What belongs in a successful PEP?', item 14"
+      },
+      "condition": "This isn't mandatory, so it's left to the PEP author's discretion",
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep1_copyright",
+      "name": "Copyright/license",
+      "definition": {
+        "text": "Copyright/license -- Each new PEP must be placed under a dual license of public domain and CC0-1.0-Universal_",
+        "ref": "pep1",
+        "locator": "PEP 1, 'What belongs in a successful PEP?', item 15"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep12_header_fields",
+      "name": "Header fields",
+      "definition": {
+        "text": "For reference, here are all of the possible header fields (everything in brackets should either be replaced or have the field removed if it has a leading ``*`` marking it as optional and it does not apply to your PEP):",
+        "ref": "pep12",
+        "locator": "PEP 12, 'How to Use This Template'"
+      },
+      "condition": "if it has a leading ``*`` marking it as optional and it does not apply to your PEP",
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep12_section_depth",
+      "name": "Section Headings",
+      "definition": {
+        "text": "You shouldn't have more than five levels of sections in your PEP. If you do, you should consider rewriting it.",
+        "ref": "pep12",
+        "locator": "PEP 12, 'Section Headings'"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep12_abstract",
+      "name": "Abstract",
+      "definition": {
+        "text": "[A short (~200 word) description of the technical issue being addressed.]",
+        "ref": "pep12",
+        "locator": "PEP 12, 'Suggested Sections' (included template pep-0012/pep-NNNN.rst), section 'Abstract'"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep12_motivation",
+      "name": "Motivation",
+      "definition": {
+        "text": "[Clearly explain why the existing language specification is inadequate to address the problem that the PEP solves.]",
+        "ref": "pep12",
+        "locator": "PEP 12, 'Suggested Sections' (included template pep-0012/pep-NNNN.rst), section 'Motivation'"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep12_specification",
+      "name": "Specification",
+      "definition": {
+        "text": "[Describe the syntax and semantics of any new language feature.]",
+        "ref": "pep12",
+        "locator": "PEP 12, 'Suggested Sections' (included template pep-0012/pep-NNNN.rst), section 'Specification'"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep12_rationale",
+      "name": "Rationale",
+      "definition": {
+        "text": "[Describe why particular design decisions were made.]",
+        "ref": "pep12",
+        "locator": "PEP 12, 'Suggested Sections' (included template pep-0012/pep-NNNN.rst), section 'Rationale'"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep12_backwards_compatibility",
+      "name": "Backwards Compatibility",
+      "definition": {
+        "text": "[Describe potential impact and severity on pre-existing code.]",
+        "ref": "pep12",
+        "locator": "PEP 12, 'Suggested Sections' (included template pep-0012/pep-NNNN.rst), section 'Backwards Compatibility'"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep12_security_implications",
+      "name": "Security Implications",
+      "definition": {
+        "text": "[How could a malicious user take advantage of this new feature?]",
+        "ref": "pep12",
+        "locator": "PEP 12, 'Suggested Sections' (included template pep-0012/pep-NNNN.rst), section 'Security Implications'"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep12_how_to_teach_this",
+      "name": "How to Teach This",
+      "definition": {
+        "text": "[How to teach users, new and experienced, how to apply the PEP to their work.]",
+        "ref": "pep12",
+        "locator": "PEP 12, 'Suggested Sections' (included template pep-0012/pep-NNNN.rst), section 'How to Teach This'"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep12_reference_implementation",
+      "name": "Reference Implementation",
+      "definition": {
+        "text": "[Link to any existing implementation and details about its state, e.g. proof-of-concept.]",
+        "ref": "pep12",
+        "locator": "PEP 12, 'Suggested Sections' (included template pep-0012/pep-NNNN.rst), section 'Reference Implementation'"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep12_rejected_ideas",
+      "name": "Rejected Ideas",
+      "definition": {
+        "text": "[Why certain ideas that were brought while discussing this PEP were not ultimately pursued.]",
+        "ref": "pep12",
+        "locator": "PEP 12, 'Suggested Sections' (included template pep-0012/pep-NNNN.rst), section 'Rejected Ideas'"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep12_open_issues",
+      "name": "Open Issues",
+      "definition": {
+        "text": "[Any points that are still being decided/discussed.]",
+        "ref": "pep12",
+        "locator": "PEP 12, 'Suggested Sections' (included template pep-0012/pep-NNNN.rst), section 'Open Issues'"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep12_acknowledgements",
+      "name": "Acknowledgements",
+      "definition": {
+        "text": "[Thank anyone who has helped with the PEP.]",
+        "ref": "pep12",
+        "locator": "PEP 12, 'Suggested Sections' (included template pep-0012/pep-NNNN.rst), section 'Acknowledgements'"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep12_footnotes",
+      "name": "Footnotes",
+      "definition": {
+        "text": "[A collection of footnotes cited in the PEP, and a place to list non-inline hyperlink targets.]",
+        "ref": "pep12",
+        "locator": "PEP 12, 'Suggested Sections' (included template pep-0012/pep-NNNN.rst), section 'Footnotes'"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "pep12_change_history",
+      "name": "Change History",
+      "definition": {
+        "text": "[A summary of major changes the PEP has undergone. Whenever you update the ``Post-History``, add a new bullet item in newest-first (i.e. reverse chronological) order, using the same ``DD-MMM-YYYY`` format, with sub-bullets summarizing the changes.",
+        "ref": "pep12",
+        "locator": "PEP 12, 'Suggested Sections' (included template pep-0012/pep-NNNN.rst), section 'Change History'"
+      },
+      "condition": null,
+      "document_kind": "Python Enhancement Proposal (PEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rust_rfc_summary",
+      "name": "Summary",
+      "definition": {
+        "text": "One paragraph explanation of the feature.",
+        "ref": "rust-rfc-template",
+        "locator": "Rust RFC template (0000-template.md), section 'Summary'"
+      },
+      "condition": null,
+      "document_kind": "Rust RFC",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rust_rfc_motivation",
+      "name": "Motivation",
+      "definition": {
+        "text": "Any changes to Rust should focus on solving a problem that users of Rust are having. This section should explain this problem in detail, including necessary background. It should also contain several specific use cases where this feature can help a user, and explain how it helps.",
+        "ref": "rust-rfc-template",
+        "locator": "Rust RFC template (0000-template.md), section 'Motivation'"
+      },
+      "condition": null,
+      "document_kind": "Rust RFC",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rust_rfc_guide_level_explanation",
+      "name": "Guide-level explanation",
+      "definition": {
+        "text": "Explain the proposal as if it was already included in the language and you were teaching it to another Rust programmer. That generally means: - Introducing new named concepts. - Explaining the feature largely in terms of examples. - Explaining how Rust programmers should think about the feature, and how it should impact the way they use Rust. It should explain the impact as concretely as possible.",
+        "ref": "rust-rfc-template",
+        "locator": "Rust RFC template (0000-template.md), section 'Guide-level explanation'"
+      },
+      "condition": "For implementation-oriented RFCs (e.g. for compiler internals), this section should focus on how compiler contributors should think about the change, and give examples of its concrete impact. For policy RFCs, this section should provide an example-driven introduction to the policy, and explain its impact in concrete terms.",
+      "document_kind": "Rust RFC",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rust_rfc_reference_level_explanation",
+      "name": "Reference-level explanation",
+      "definition": {
+        "text": "This is the technical portion of the RFC. Explain the design in sufficient detail that: - Its interaction with other features is clear. - It is reasonably clear how the feature would be implemented. - Corner cases are dissected by example. The section should return to the examples given in the previous section, and explain more fully how the detailed proposal makes those examples work.",
+        "ref": "rust-rfc-template",
+        "locator": "Rust RFC template (0000-template.md), section 'Reference-level explanation'"
+      },
+      "condition": null,
+      "document_kind": "Rust RFC",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rust_rfc_drawbacks",
+      "name": "Drawbacks",
+      "definition": {
+        "text": "Why should we not do this?",
+        "ref": "rust-rfc-template",
+        "locator": "Rust RFC template (0000-template.md), section 'Drawbacks'"
+      },
+      "condition": null,
+      "document_kind": "Rust RFC",
+      "levels": null,
+      "examples": [
+        "rust-rfc-3013-1",
+        "rust-rfc-3013-2",
+        "rust-rfc-2909-1"
+      ]
+    },
+    {
+      "id": "rust_rfc_rationale_and_alternatives",
+      "name": "Rationale and alternatives",
+      "definition": {
+        "text": "- Why is this design the best in the space of possible designs? - What other designs have been considered and what is the rationale for not choosing them? - What is the impact of not doing this?",
+        "ref": "rust-rfc-template",
+        "locator": "Rust RFC template (0000-template.md), section 'Rationale and alternatives'"
+      },
+      "condition": null,
+      "document_kind": "Rust RFC",
+      "levels": null,
+      "examples": [
+        "rust-rfc-2539-1",
+        "rust-rfc-1861-1"
+      ]
+    },
+    {
+      "id": "rust_rfc_library_or_macro",
+      "name": "Rationale and alternatives",
+      "definition": {
+        "text": "If this is a language proposal, could this be done in a library or macro instead? Does the proposed change make Rust code easier or harder to read, understand, and maintain?",
+        "ref": "rust-rfc-template",
+        "locator": "Rust RFC template (0000-template.md), section 'Rationale and alternatives'"
+      },
+      "condition": "If this is a language proposal",
+      "document_kind": "Rust RFC",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rust_rfc_prior_art",
+      "name": "Prior art",
+      "definition": {
+        "text": "Discuss prior art, both the good and the bad, in relation to this proposal.",
+        "ref": "rust-rfc-template",
+        "locator": "Rust RFC template (0000-template.md), section 'Prior art'"
+      },
+      "condition": "If there is no prior art, that is fine - your ideas are interesting to us whether they are brand new or if it is an adaptation from other languages.",
+      "document_kind": "Rust RFC",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rust_rfc_unresolved_questions",
+      "name": "Unresolved questions",
+      "definition": {
+        "text": "- What parts of the design do you expect to resolve through the RFC process before this gets merged? - What parts of the design do you expect to resolve through the implementation of this feature before stabilization? - What related issues do you consider out of scope for this RFC that could be addressed in the future independently of the solution that comes out of this RFC?",
+        "ref": "rust-rfc-template",
+        "locator": "Rust RFC template (0000-template.md), section 'Unresolved questions'"
+      },
+      "condition": null,
+      "document_kind": "Rust RFC",
+      "levels": null,
+      "examples": [
+        "rust-rfc-3641-1"
+      ]
+    },
+    {
+      "id": "rust_rfc_future_possibilities",
+      "name": "Future possibilities",
+      "definition": {
+        "text": "Think about what the natural extension and evolution of your proposal would be and how it would affect the language and project as a whole in a holistic way.",
+        "ref": "rust-rfc-template",
+        "locator": "Rust RFC template (0000-template.md), section 'Future possibilities'"
+      },
+      "condition": "If you have tried and cannot think of any future possibilities, you may simply state that you cannot think of anything.",
+      "document_kind": "Rust RFC",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_minimum_sections",
+      "name": "Fill out this file as best you can.",
+      "definition": {
+        "text": "At minimum, you should fill in the \"Summary\" and \"Motivation\" sections.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), template instructions"
+      },
+      "condition": "Avoid getting hung up on specific details and instead aim to get the goals of the KEP clarified and merged quickly. The best way to do this is to just start with the high-level sections and fill out details incrementally in subsequent PRs.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_unresolved_markers",
+      "name": "UNRESOLVED",
+      "definition": {
+        "text": "Any KEP marked as `provisional` is a working document and subject to change. You can denote sections that are under active debate as follows:",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), template instructions"
+      },
+      "condition": "Any KEP marked as `provisional`",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_summary",
+      "name": "Summary",
+      "definition": {
+        "text": "This section is incredibly important for producing high-quality, user-focused documentation such as release notes or a development roadmap. … A good summary is probably at least a paragraph in length.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Summary'"
+      },
+      "condition": null,
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_motivation",
+      "name": "Motivation",
+      "definition": {
+        "text": "This section is for explicitly listing the motivation, goals, and non-goals of this KEP. Describe why the change is important and the benefits to users.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Motivation'"
+      },
+      "condition": null,
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_goals",
+      "name": "Goals",
+      "definition": {
+        "text": "List the specific goals of the KEP. What is it trying to achieve? How will we know that this has succeeded?",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Motivation' > 'Goals'"
+      },
+      "condition": null,
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_non_goals",
+      "name": "Non-Goals",
+      "definition": {
+        "text": "What is out of scope for this KEP? Listing non-goals helps to focus discussion and make progress.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Motivation' > 'Non-Goals'"
+      },
+      "condition": null,
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_proposal",
+      "name": "Proposal",
+      "definition": {
+        "text": "This is where we get down to the specifics of what the proposal actually is. This should have enough detail that reviewers can understand exactly what you're proposing, but should not include things like API designs or implementation. What is the desired outcome and how do we measure success?.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Proposal'"
+      },
+      "condition": null,
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_user_stories",
+      "name": "User Stories (Optional)",
+      "definition": {
+        "text": "Detail the things that people will be able to do if this KEP is implemented. Include as much detail as possible so that people can understand the \"how\" of the system. The goal here is to make this feel real for users without getting bogged down.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Proposal' > 'User Stories (Optional)'"
+      },
+      "condition": "(Optional)",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_notes_constraints_caveats",
+      "name": "Notes/Constraints/Caveats (Optional)",
+      "definition": {
+        "text": "What are the caveats to the proposal? What are some important details that didn't come across above? Go in to as much detail as necessary here.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Proposal' > 'Notes/Constraints/Caveats (Optional)'"
+      },
+      "condition": "(Optional)",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_risks_and_mitigations",
+      "name": "Risks and Mitigations",
+      "definition": {
+        "text": "What are the risks of this proposal, and how do we mitigate? Think broadly. For example, consider both security and how this will impact the larger Kubernetes ecosystem. How will security be reviewed, and by whom? How will UX be reviewed, and by whom?",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Proposal' > 'Risks and Mitigations'"
+      },
+      "condition": null,
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_design_details",
+      "name": "Design Details",
+      "definition": {
+        "text": "This section should contain enough information that the specifics of your change are understandable. This may include API specs (though not always required) or even code snippets. If there's any ambiguity about HOW your proposal will be implemented, this is the place to discuss them.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Design Details'"
+      },
+      "condition": null,
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_test_plan",
+      "name": "Test Plan",
+      "definition": {
+        "text": "The goal is to ensure that we don't accept enhancements with inadequate testing. All code is expected to have adequate tests (eventually with coverage expectations).",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Design Details' > 'Test Plan'"
+      },
+      "condition": "Not required until targeted at a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prerequisite_testing_updates",
+      "name": "Prerequisite testing updates",
+      "definition": {
+        "text": "Based on reviewers feedback describe what additional tests need to be added prior implementing this enhancement to ensure the enhancements have also solid foundations.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Test Plan' > 'Prerequisite testing updates'"
+      },
+      "condition": "Not required until targeted at a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_unit_tests",
+      "name": "Unit tests",
+      "definition": {
+        "text": "In principle every added code should have complete unit test coverage, so providing the exact set of tests will not bring additional value. However, if complete unit test coverage is not possible, explain the reason of it together with explanation why this is acceptable.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Test Plan' > 'Unit tests'"
+      },
+      "condition": "Not required until targeted at a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_integration_tests",
+      "name": "Integration tests",
+      "definition": {
+        "text": "For Alpha, describe what tests will be added to ensure proper quality of the enhancement. For Beta and GA, document that tests have been written, have been executed regularly, and have been stable.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Test Plan' > 'Integration tests'"
+      },
+      "condition": "If integration tests are not necessary or useful, explain why. … This question should be filled when targeting a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": [
+        "kep2033-pr3859-1"
+      ]
+    },
+    {
+      "id": "kep_e2e_tests",
+      "name": "e2e tests",
+      "definition": {
+        "text": "For Alpha, describe what tests will be added to ensure proper quality of the enhancement. For Beta and GA, document that tests have been written, have been executed regularly, and have been stable. … We expect no non-infra related flakes in the last month as a GA graduation criteria.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Test Plan' > 'e2e tests'"
+      },
+      "condition": "If e2e tests are not necessary or useful, explain why.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_graduation_criteria",
+      "name": "Graduation Criteria",
+      "definition": {
+        "text": "Define graduation milestones. These may be defined in terms of API maturity, [feature gate] graduations, or as something else. The KEP should keep this high-level with a focus on what signals will be looked at to determine graduation.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Design Details' > 'Graduation Criteria'"
+      },
+      "condition": "Not required until targeted at a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_upgrade_downgrade_strategy",
+      "name": "Upgrade / Downgrade Strategy",
+      "definition": {
+        "text": "If applicable, how will the component be upgraded and downgraded? Make sure this is in the test plan.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Design Details' > 'Upgrade / Downgrade Strategy'"
+      },
+      "condition": "If applicable",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": [
+        "kep127-pr4439-1"
+      ]
+    },
+    {
+      "id": "kep_version_skew_strategy",
+      "name": "Version Skew Strategy",
+      "definition": {
+        "text": "If applicable, how will the component handle version skew with other components? What are the guarantees? Make sure this is in the test plan.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Design Details' > 'Version Skew Strategy'"
+      },
+      "condition": "If applicable",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_questionnaire",
+      "name": "Production Readiness Review Questionnaire",
+      "definition": {
+        "text": "Production readiness reviews are intended to ensure that features merging into Kubernetes are observable, scalable and supportable; can be safely operated in production environments, and can be disabled or rolled back in the event they cause increased failures in production.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Production Readiness Review Questionnaire'"
+      },
+      "condition": "The production readiness review questionnaire must be completed and approved for the KEP to move to `implementable` status and be included in the release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_enable_disable",
+      "name": "How can this feature be enabled / disabled in a live cluster?",
+      "definition": {
+        "text": "How can this feature be enabled / disabled in a live cluster?",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Feature Enablement and Rollback'"
+      },
+      "condition": "This section must be completed when targeting alpha to a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_default_behavior",
+      "name": "Does enabling the feature change any default behavior?",
+      "definition": {
+        "text": "Does enabling the feature change any default behavior? … Any change of default behavior may be surprising to users or break existing automations, so be extremely careful here.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Feature Enablement and Rollback'"
+      },
+      "condition": "This section must be completed when targeting alpha to a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_can_disable",
+      "name": "Can the feature be disabled once it has been enabled (i.e. can we roll back the enablement)?",
+      "definition": {
+        "text": "Can the feature be disabled once it has been enabled (i.e. can we roll back the enablement)? … Describe the consequences on existing workloads (e.g., if this is a runtime feature, can it break the existing applications?).",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Feature Enablement and Rollback'"
+      },
+      "condition": "This section must be completed when targeting alpha to a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_reenable",
+      "name": "What happens if we reenable the feature if it was previously rolled back?",
+      "definition": {
+        "text": "What happens if we reenable the feature if it was previously rolled back?",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Feature Enablement and Rollback'"
+      },
+      "condition": "This section must be completed when targeting alpha to a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_enablement_tests",
+      "name": "Are there any tests for feature enablement/disablement?",
+      "definition": {
+        "text": "Are there any tests for feature enablement/disablement?",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Feature Enablement and Rollback'"
+      },
+      "condition": "This section must be completed when targeting alpha to a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_rollout_failure",
+      "name": "How can a rollout or rollback fail? Can it impact already running workloads?",
+      "definition": {
+        "text": "How can a rollout or rollback fail? Can it impact already running workloads? … Try to be as paranoid as possible - e.g., what if some components will restart mid-rollout?",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Rollout, Upgrade and Rollback Planning'"
+      },
+      "condition": "This section must be completed when targeting beta to a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_rollback_metrics",
+      "name": "What specific metrics should inform a rollback?",
+      "definition": {
+        "text": "What specific metrics should inform a rollback? … What signals should users be paying attention to when the feature is young that might indicate a serious problem?",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Rollout, Upgrade and Rollback Planning'"
+      },
+      "condition": "This section must be completed when targeting beta to a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": [
+        "kep127-pr4439-2"
+      ]
+    },
+    {
+      "id": "kep_prr_upgrade_rollback_tested",
+      "name": "Were upgrade and rollback tested? Was the upgrade->downgrade->upgrade path tested?",
+      "definition": {
+        "text": "Were upgrade and rollback tested? Was the upgrade->downgrade->upgrade path tested? … Describe manual testing that was done and the outcomes.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Rollout, Upgrade and Rollback Planning'"
+      },
+      "condition": "This section must be completed when targeting beta to a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_deprecations",
+      "name": "Is the rollout accompanied by any deprecations and/or removals of features, APIs, fields of API types, flags, etc.?",
+      "definition": {
+        "text": "Is the rollout accompanied by any deprecations and/or removals of features, APIs, fields of API types, flags, etc.? … Even if applying deprecation policies, they may still surprise some users.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Rollout, Upgrade and Rollback Planning'"
+      },
+      "condition": "This section must be completed when targeting beta to a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_feature_in_use",
+      "name": "How can an operator determine if the feature is in use by workloads?",
+      "definition": {
+        "text": "How can an operator determine if the feature is in use by workloads? … Ideally, this should be a metric. Operations against the Kubernetes API (e.g., checking if there are objects with field X set) may be a last resort. Avoid logs or events for this purpose.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Monitoring Requirements'"
+      },
+      "condition": "This section must be completed when targeting beta to a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_feature_working",
+      "name": "How can someone using this feature know that it is working for their instance?",
+      "definition": {
+        "text": "How can someone using this feature know that it is working for their instance? … Please describe all items visible to end users below with sufficient detail so that they can verify correct enablement and operation of this feature.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Monitoring Requirements'"
+      },
+      "condition": "This section must be completed when targeting beta to a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_slos",
+      "name": "What are the reasonable SLOs (Service Level Objectives) for the enhancement?",
+      "definition": {
+        "text": "What are the reasonable SLOs (Service Level Objectives) for the enhancement? … This is your opportunity to define what \"normal\" quality of service looks like for a feature.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Monitoring Requirements'"
+      },
+      "condition": "This section must be completed when targeting beta to a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_slis",
+      "name": "What are the SLIs (Service Level Indicators) an operator can use to determine the health of the service?",
+      "definition": {
+        "text": "What are the SLIs (Service Level Indicators) an operator can use to determine the health of the service?",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Monitoring Requirements'"
+      },
+      "condition": "This section must be completed when targeting beta to a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_missing_metrics",
+      "name": "Are there any missing metrics that would be useful to have to improve observability of this feature?",
+      "definition": {
+        "text": "Are there any missing metrics that would be useful to have to improve observability of this feature? … Describe the metrics themselves and the reasons why they weren't added (e.g., cost, implementation difficulties, etc.).",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Monitoring Requirements'"
+      },
+      "condition": "This section must be completed when targeting beta to a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_dependencies",
+      "name": "Does this feature depend on any specific services running in the cluster?",
+      "definition": {
+        "text": "Does this feature depend on any specific services running in the cluster?",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Dependencies'"
+      },
+      "condition": "This section must be completed when targeting beta to a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_new_api_calls",
+      "name": "Will enabling / using this feature result in any new API calls?",
+      "definition": {
+        "text": "Will enabling / using this feature result in any new API calls?",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Scalability'"
+      },
+      "condition": "For alpha, this section is encouraged: reviewers should consider these questions and attempt to answer them. For beta, this section is required: reviewers must answer these questions.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_new_api_types",
+      "name": "Will enabling / using this feature result in introducing new API types?",
+      "definition": {
+        "text": "Will enabling / using this feature result in introducing new API types?",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Scalability'"
+      },
+      "condition": "For alpha, this section is encouraged: reviewers should consider these questions and attempt to answer them. For beta, this section is required: reviewers must answer these questions.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_cloud_provider_calls",
+      "name": "Will enabling / using this feature result in any new calls to the cloud provider?",
+      "definition": {
+        "text": "Will enabling / using this feature result in any new calls to the cloud provider?",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Scalability'"
+      },
+      "condition": "For alpha, this section is encouraged: reviewers should consider these questions and attempt to answer them. For beta, this section is required: reviewers must answer these questions.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_api_object_size",
+      "name": "Will enabling / using this feature result in increasing size or count of the existing API objects?",
+      "definition": {
+        "text": "Will enabling / using this feature result in increasing size or count of the existing API objects?",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Scalability'"
+      },
+      "condition": "For alpha, this section is encouraged: reviewers should consider these questions and attempt to answer them. For beta, this section is required: reviewers must answer these questions.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_sli_slo_time",
+      "name": "Will enabling / using this feature result in increasing time taken by any operations covered by existing SLIs/SLOs?",
+      "definition": {
+        "text": "Will enabling / using this feature result in increasing time taken by any operations covered by existing SLIs/SLOs?",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Scalability'"
+      },
+      "condition": "For alpha, this section is encouraged: reviewers should consider these questions and attempt to answer them. For beta, this section is required: reviewers must answer these questions.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_resource_usage",
+      "name": "Will enabling / using this feature result in non-negligible increase of resource usage (CPU, RAM, disk, IO, ...) in any components?",
+      "definition": {
+        "text": "Will enabling / using this feature result in non-negligible increase of resource usage (CPU, RAM, disk, IO, ...) in any components?",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Scalability'"
+      },
+      "condition": "For alpha, this section is encouraged: reviewers should consider these questions and attempt to answer them. For beta, this section is required: reviewers must answer these questions.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_resource_exhaustion",
+      "name": "Can enabling / using this feature result in resource exhaustion of some node resources (PIDs, sockets, inodes, etc.)?",
+      "definition": {
+        "text": "Can enabling / using this feature result in resource exhaustion of some node resources (PIDs, sockets, inodes, etc.)? … Focus not just on happy cases, but primarily on more pathological cases",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Scalability'"
+      },
+      "condition": "For alpha, this section is encouraged: reviewers should consider these questions and attempt to answer them. For beta, this section is required: reviewers must answer these questions.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_apiserver_unavailable",
+      "name": "How does this feature react if the API server and/or etcd is unavailable?",
+      "definition": {
+        "text": "How does this feature react if the API server and/or etcd is unavailable?",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Troubleshooting'"
+      },
+      "condition": "This section must be completed when targeting beta to a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_failure_modes",
+      "name": "What are other known failure modes?",
+      "definition": {
+        "text": "What are other known failure modes?",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Troubleshooting'"
+      },
+      "condition": "This section must be completed when targeting beta to a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_prr_slo_not_met",
+      "name": "What steps should be taken if SLOs are not being met to determine the problem?",
+      "definition": {
+        "text": "What steps should be taken if SLOs are not being met to determine the problem?",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), PRR > 'Troubleshooting'"
+      },
+      "condition": "This section must be completed when targeting beta to a release.",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_implementation_history",
+      "name": "Implementation History",
+      "definition": {
+        "text": "Major milestones in the lifecycle of a KEP should be tracked in this section.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Implementation History'"
+      },
+      "condition": null,
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_drawbacks",
+      "name": "Drawbacks",
+      "definition": {
+        "text": "Why should this KEP _not_ be implemented?",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Drawbacks'"
+      },
+      "condition": null,
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_alternatives",
+      "name": "Alternatives",
+      "definition": {
+        "text": "What other approaches did you consider, and why did you rule them out? These do not need to be as detailed as the proposal, but should include enough information to express the idea and why it was not acceptable.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Alternatives'"
+      },
+      "condition": null,
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "kep_infrastructure_needed",
+      "name": "Infrastructure Needed (Optional)",
+      "definition": {
+        "text": "Use this section if you need things from the project/SIG. Examples include a new subproject, repos requested, or GitHub details.",
+        "ref": "kep-template",
+        "locator": "KEP template (keps/NNNN-kep-template/README.md), 'Infrastructure Needed (Optional)'"
+      },
+      "condition": "(Optional)",
+      "document_kind": "Kubernetes Enhancement Proposal (KEP)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "go_design_abstract",
+      "name": "Abstract",
+      "definition": {
+        "text": "[A short summary of the proposal.]",
+        "ref": "go-design-template",
+        "locator": "Go design doc template (golang/proposal design/TEMPLATE.md), section 'Abstract'"
+      },
+      "condition": null,
+      "document_kind": "Go proposal design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "go_design_background",
+      "name": "Background",
+      "definition": {
+        "text": "[An introduction of the necessary background and the problem being solved by the proposed change.]",
+        "ref": "go-design-template",
+        "locator": "Go design doc template (golang/proposal design/TEMPLATE.md), section 'Background'"
+      },
+      "condition": null,
+      "document_kind": "Go proposal design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "go_design_proposal",
+      "name": "Proposal",
+      "definition": {
+        "text": "[A precise statement of the proposed change.]",
+        "ref": "go-design-template",
+        "locator": "Go design doc template (golang/proposal design/TEMPLATE.md), section 'Proposal'"
+      },
+      "condition": null,
+      "document_kind": "Go proposal design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "go_design_rationale",
+      "name": "Rationale",
+      "definition": {
+        "text": "[A discussion of alternate approaches and the trade offs, advantages, and disadvantages of the specified approach.]",
+        "ref": "go-design-template",
+        "locator": "Go design doc template (golang/proposal design/TEMPLATE.md), section 'Rationale'"
+      },
+      "condition": null,
+      "document_kind": "Go proposal design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "go_design_compatibility",
+      "name": "Compatibility",
+      "definition": {
+        "text": "[A discussion of the change with regard to the [compatibility guidelines](https://go.dev/doc/go1compat).]",
+        "ref": "go-design-template",
+        "locator": "Go design doc template (golang/proposal design/TEMPLATE.md), section 'Compatibility'"
+      },
+      "condition": null,
+      "document_kind": "Go proposal design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "go_design_implementation",
+      "name": "Implementation",
+      "definition": {
+        "text": "[A description of the steps in the implementation, who will do them, and when. This should include a discussion of how the work fits into [Go's release cycle](https://go.dev/wiki/Go-Release-Cycle).]",
+        "ref": "go-design-template",
+        "locator": "Go design doc template (golang/proposal design/TEMPLATE.md), section 'Implementation'"
+      },
+      "condition": null,
+      "document_kind": "Go proposal design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "go_design_open_issues",
+      "name": "Open issues (if applicable)",
+      "definition": {
+        "text": "[A discussion of issues relating to this proposal for which the author does not know the solution.",
+        "ref": "go-design-template",
+        "locator": "Go design doc template (golang/proposal design/TEMPLATE.md), section 'Open issues (if applicable)'"
+      },
+      "condition": "This section may be omitted if there are none.",
+      "document_kind": "Go proposal design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "go_design_address_concerns",
+      "name": "Design Documents",
+      "definition": {
+        "text": "The design doc should address any specific concerns raised during the initial discussion.",
+        "ref": "go-proposal",
+        "locator": "Go proposal README, 'Design Documents'"
+      },
+      "condition": null,
+      "document_kind": "Go proposal design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "go_design_one_sentence_per_line",
+      "name": "Design Documents",
+      "definition": {
+        "text": "For ease of review with Gerrit, design documents should be wrapped around the 80 column mark. [Each sentence should start on a new line](https://rhodesmill.org/brandon/2012/one-sentence-per-line/) so that comments can be made accurately and the diff kept shorter.",
+        "ref": "go-proposal",
+        "locator": "Go proposal README, 'Design Documents'"
+      },
+      "condition": null,
+      "document_kind": "Go proposal design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "go_language_change_criteria",
+      "name": "Language changes",
+      "definition": {
+        "text": "As explained in the blog entry, language change proposals should - address an important issue for many people, - have minimal impact on everybody else, and - come with a clear and well-understood solution.",
+        "ref": "go-proposal",
+        "locator": "Go proposal README, 'Language changes'"
+      },
+      "condition": "language change proposals",
+      "document_kind": "Go language change proposal",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_clear_consistent_readable",
+      "name": "RFC Editor's Philosophy",
+      "definition": {
+        "text": "Make the document as clear, consistent, and readable as possible. - Correct larger content/clarity issues; flag any unclear passages for author review. - Fix inconsistencies (e.g., terms that appear in various forms, text that appears multiple times, or inconsistent capitalization).",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 2"
+      },
+      "condition": "If the original wording is a more accurate representation of the technical content being described in the document, it takes precedence over editorial conventions.",
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_language",
+      "name": "Language",
+      "definition": {
+        "text": "The RFC publication language is English. Spelling may be either American or British, as long as an individual document is internally consistent.",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 3.1"
+      },
+      "condition": null,
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_punctuation",
+      "name": "Punctuation",
+      "definition": {
+        "text": "No overstriking (or underlining) is allowed. * When a sentence ended by a period is immediately followed by another sentence, there must be two blank spaces after the period. * A comma is used before the last item of a series",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 3.2"
+      },
+      "condition": null,
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_dns_names_uris",
+      "name": "DNS Names and URIs",
+      "definition": {
+        "text": "DNS names, whether or not in URIs, that are used as generic examples in RFCs should use the particular examples defined in \"Reserved Top Level DNS Names\" [BCP32], to avoid accidental conflicts.",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 3.3"
+      },
+      "condition": null,
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_capitalization",
+      "name": "Capitalization",
+      "definition": {
+        "text": "Capitalization must be consistent within the document and ideally should be consistent with related RFCs.",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 3.4"
+      },
+      "condition": null,
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_citations",
+      "name": "Citations",
+      "definition": {
+        "text": "References and citations must match. That is, there must be a reference for each citation used, and vice versa.",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 3.5"
+      },
+      "condition": null,
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_abbreviations",
+      "name": "Abbreviation Rules",
+      "definition": {
+        "text": "Abbreviations should be expanded in document titles and upon first use in the document. The full expansion of the text should be followed by the abbreviation itself in parentheses.",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 3.6"
+      },
+      "condition": "The exception is an abbreviation that is so common that the readership of RFCs can be expected to recognize it immediately; examples include (but are not limited to) TCP, IP, SNMP, and HTTP.",
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_structure_order",
+      "name": "Structure of an RFC",
+      "definition": {
+        "text": "Within the body of the memo, the order shown above is strongly recommended. Exceptions may be questioned. Outside the body of the memo, the order above is required.",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 4"
+      },
+      "condition": null,
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_title",
+      "name": "Full Title",
+      "definition": {
+        "text": "Choosing a good title for an RFC can be a challenge. A good title should fairly represent the scope and purpose of the document without being either too general or too specific and lengthy.",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 4.2"
+      },
+      "condition": null,
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_abstract",
+      "name": "Abstract Section",
+      "definition": {
+        "text": "Every RFC must have an Abstract that provides a concise and comprehensive overview of the purpose and contents of the entire document, to give a technically knowledgeable reader a general overview of the function of the document.",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 4.3"
+      },
+      "condition": null,
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_abstract_self_contained",
+      "name": "Abstract Section",
+      "definition": {
+        "text": "Note also that an Abstract is not a substitute for an Introduction; the RFC should be self-contained as if there were no Abstract. Similarly, the Abstract should be complete in itself. It will appear in isolation in publication announcements and in the online index of RFCs. Therefore, the Abstract must not contain citations.",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 4.3"
+      },
+      "condition": null,
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_table_of_contents",
+      "name": "Table of Contents Section",
+      "definition": {
+        "text": "A Table of Contents (TOC) is required in all RFCs. It must be positioned after the Copyright Notice and before the Introduction.",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 4.7"
+      },
+      "condition": null,
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_introduction_motivation",
+      "name": "Body of the Memo",
+      "definition": {
+        "text": "Each RFC must include an Introduction section that (among other things) explains the motivation for the RFC and (if appropriate) describes the applicability of the document",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 4.8"
+      },
+      "condition": "(if appropriate)",
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_body_abstract_separable",
+      "name": "Body of the Memo",
+      "definition": {
+        "text": "The body of the memo and the Abstract must be self-contained and separable. This may result in some duplication of text between the Abstract and the Introduction; this is acceptable.",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 4.8"
+      },
+      "condition": null,
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_introduction_first",
+      "name": "Introduction Section",
+      "definition": {
+        "text": "The Introduction section should always be the first section following the TOC (except in the case of MIB module documents).",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 4.8.1"
+      },
+      "condition": "(except in the case of MIB module documents)",
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_requirements_language",
+      "name": "Requirements Language Section",
+      "definition": {
+        "text": "If this interpretation is used, RFC 2119 must be cited (as specified in RFC 2119) and included as a normative reference. Otherwise, the correct interpretation must be specified in the document.",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 4.8.2"
+      },
+      "condition": "Some documents use certain capitalized words (\"MUST\", \"SHOULD\", etc.) to specify precise requirement levels for technical features.",
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_iana_considerations",
+      "name": "IANA Considerations Section",
+      "definition": {
+        "text": "It is helpful for authors to clearly identify where text should be updated to reflect the newly assigned values. For example, the use of \"TBD1\", \"TBD2\", etc., is recommended in the IANA Considerations section and in the body of the memo.",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Sections 4 and 4.8.3"
+      },
+      "condition": "The RFC Editor will remove an IANA Considerations section that says there are no IANA considerations (although such a section is required in the Internet-Draft preceding the RFC).",
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_internationalization",
+      "name": "Internationalization Considerations Section",
+      "definition": {
+        "text": "All RFCs that deal with internationalization issues should have a section describing those issues",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 4.8.4"
+      },
+      "condition": "All RFCs that deal with internationalization issues",
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_security_considerations",
+      "name": "Security Considerations Section",
+      "definition": {
+        "text": "All RFCs must contain a section that discusses the security considerations relevant to the specification; see \"Guidelines for Writing RFC Text on Security Considerations\" [BCP72] for more information.",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 4.8.5"
+      },
+      "condition": null,
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_references",
+      "name": "References Section",
+      "definition": {
+        "text": "Reference lists must indicate whether each reference is normative or informative, where normative references are essential to implementing or understanding the content of the RFC and informative references provide additional information.",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 4.8.6"
+      },
+      "condition": null,
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_reference_style",
+      "name": "References Section",
+      "definition": {
+        "text": "The reference list is solely for recording reference entries. Introductory text is not allowed. The RFC style allows the use of any of a variety of reference styles, as long as they are used consistently within a document.",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 4.8.6"
+      },
+      "condition": null,
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_acknowledgements",
+      "name": "Acknowledgements Section",
+      "definition": {
+        "text": "This optional section may be used instead of, or in addition to, a Contributors section. It is often used by authors to publicly thank those who have provided feedback regarding a document and to note any documents from which text was borrowed.",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 4.10"
+      },
+      "condition": "This optional section",
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_contributors",
+      "name": "Contributors Section",
+      "definition": {
+        "text": "This optional section acknowledges those who have made significant contributions to the document.",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 4.11"
+      },
+      "condition": "This optional section",
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc7322_authors_addresses",
+      "name": "\"Author's Address\" or \"Authors' Addresses\" Section",
+      "definition": {
+        "text": "This required section gives contact information for the author(s) listed in the first-page header. Contact information must include a long-lived email address and optionally may include a postal address and/or telephone number.",
+        "ref": "rfc7322",
+        "locator": "RFC 7322, Section 4.12"
+      },
+      "condition": null,
+      "document_kind": "RFC (RFC Series document / Internet-Draft)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc3552_threat_description",
+      "name": "Writing Security Considerations Sections",
+      "definition": {
+        "text": "There should be a clear description of the kinds of threats on the described protocol or technology. This should be approached as an effort to perform \"due diligence\" in describing all known or foreseeable risks and threats to potential implementers and users.",
+        "ref": "rfc3552",
+        "locator": "RFC 3552, Section 5 'Writing Security Considerations Sections'"
+      },
+      "condition": null,
+      "document_kind": "Security Considerations section of an RFC",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc3552_attack_scope",
+      "name": "Writing Security Considerations Sections",
+      "definition": {
+        "text": "Authors MUST describe 1. which attacks are out of scope (and why!) 2. which attacks are in-scope 2.1 and the protocol is susceptible to 2.2 and the protocol protects against",
+        "ref": "rfc3552",
+        "locator": "RFC 3552, Section 5 'Writing Security Considerations Sections'"
+      },
+      "condition": null,
+      "document_kind": "Security Considerations section of an RFC",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc3552_attack_forms",
+      "name": "Writing Security Considerations Sections",
+      "definition": {
+        "text": "At least the following forms of attack MUST be considered: eavesdropping, replay, message insertion, deletion, modification, and man-in-the-middle. Potential denial of service attacks MUST be identified as well.",
+        "ref": "rfc3552",
+        "locator": "RFC 3552, Section 5 'Writing Security Considerations Sections'"
+      },
+      "condition": null,
+      "document_kind": "Security Considerations section of an RFC",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc3552_cryptographic_protection",
+      "name": "Writing Security Considerations Sections",
+      "definition": {
+        "text": "it should be clearly indicated which portions of the data are protected and what the protections are (i.e., integrity only, confidentiality, and/or endpoint authentication, etc.). Some indication should also be given to what sorts of attacks the cryptographic protection is susceptible. Data which should be held secret (keying material, random seeds, etc.) should be clearly labeled.",
+        "ref": "rfc3552",
+        "locator": "RFC 3552, Section 5 'Writing Security Considerations Sections'"
+      },
+      "condition": "If the protocol incorporates cryptographic protection mechanisms",
+      "document_kind": "Security Considerations section of an RFC",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc3552_authentication_assumptions",
+      "name": "Writing Security Considerations Sections",
+      "definition": {
+        "text": "the security of the authentication method MUST be clearly specified. That is, authors MUST document the assumptions that the security of this authentication method is predicated upon.",
+        "ref": "rfc3552",
+        "locator": "RFC 3552, Section 5 'Writing Security Considerations Sections'"
+      },
+      "condition": "If the technology involves authentication, particularly user-host authentication",
+      "document_kind": "Security Considerations section of an RFC",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc3552_lower_layer_security",
+      "name": "Writing Security Considerations Sections",
+      "definition": {
+        "text": "It is insufficient to simply state that one's protocol should be run over some lower layer security protocol. If a system relies upon lower layer security services for security, the protections those … services are expected to provide MUST be clearly specified. In addition, the resultant properties of the combined system need to be specified.",
+        "ref": "rfc3552",
+        "locator": "RFC 3552, Section 5 'Writing Security Considerations Sections'"
+      },
+      "condition": "If a system relies upon lower layer security services for security",
+      "document_kind": "Security Considerations section of an RFC",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc3552_threat_environment",
+      "name": "Writing Security Considerations Sections",
+      "definition": {
+        "text": "The threat environment addressed by the Security Considerations section MUST at a minimum include deployment across the global Internet across multiple administrative boundaries without assuming that firewalls are in place, even if only to provide justification for why such consideration is out of scope for the protocol.",
+        "ref": "rfc3552",
+        "locator": "RFC 3552, Section 5 'Writing Security Considerations Sections'"
+      },
+      "condition": null,
+      "document_kind": "Security Considerations section of an RFC",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc3552_residual_risk",
+      "name": "Writing Security Considerations Sections",
+      "definition": {
+        "text": "There should be a clear description of the residual risk to the user or operator of that protocol after threat mitigation has been deployed.",
+        "ref": "rfc3552",
+        "locator": "RFC 3552, Section 5 'Writing Security Considerations Sections'"
+      },
+      "condition": null,
+      "document_kind": "Security Considerations section of an RFC",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc3552_misapplication",
+      "name": "Writing Security Considerations Sections",
+      "definition": {
+        "text": "There should also be some discussion of potential security risks arising from potential misapplications of the protocol or technology described in the RFC.",
+        "ref": "rfc3552",
+        "locator": "RFC 3552, Section 5 'Writing Security Considerations Sections'"
+      },
+      "condition": null,
+      "document_kind": "Security Considerations section of an RFC",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "oxide_rfd_timely_not_polished",
+      "name": "Requests for Discussion (RFC 3 spirit)",
+      "definition": {
+        "text": "Notes are encouraged to be timely rather than polished. Philosophical positions without examples or other specifics, specific suggestions or implementation techniques without introductory or background explication, and explicit questions without any attempted answers are all acceptable.",
+        "ref": "oxide-rfd1",
+        "locator": "Oxide RFD 1, introduction (quoting RFC 3)"
+      },
+      "condition": "Depending on their state, RFDs may be quickly iterated on in a branch, discussed actively as part of a pull request to be merged, or commented upon after having been published.",
+      "document_kind": "Oxide Request for Discussion (RFD)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "oxide_rfd_viable_options",
+      "name": "Insights to include in RFDs",
+      "definition": {
+        "text": "Document the viable options (or a subset of options if we can easily rule some out) and the benefits and drawbacks of each option.",
+        "ref": "oxide-rfd1",
+        "locator": "Oxide RFD 1, 'Insights to include in RFDs'"
+      },
+      "condition": "When writing RFDs for technical and core product determination",
+      "document_kind": "Oxide Request for Discussion (RFD)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "oxide_rfd_reasoning",
+      "name": "Insights to include in RFDs",
+      "definition": {
+        "text": "Document our reasoning including data and references wherever possible; making it easy for our future selves (and those who join in the future) to understand the decisions we’ve made and why.",
+        "ref": "oxide-rfd1",
+        "locator": "Oxide RFD 1, 'Insights to include in RFDs'"
+      },
+      "condition": "When writing RFDs for technical and core product determination",
+      "document_kind": "Oxide Request for Discussion (RFD)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "oxide_rfd_determination",
+      "name": "Insights to include in RFDs",
+      "definition": {
+        "text": "Document the determination, see [rfd5] for a definition of determination.",
+        "ref": "oxide-rfd1",
+        "locator": "Oxide RFD 1, 'Insights to include in RFDs'"
+      },
+      "condition": "When writing RFDs for technical and core product determination",
+      "document_kind": "Oxide Request for Discussion (RFD)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "oxide_rfd_economic",
+      "name": "Economic",
+      "definition": {
+        "text": "What is the relative cost of this idea (and/or alternative ideas) in terms of time and money? … What are the implications that this will have on the company over time, both short-term and long-term?",
+        "ref": "oxide-rfd1",
+        "locator": "Oxide RFD 1, 'Insights to include in RFDs' > business and customer considerations"
+      },
+      "condition": "While not applicable in every case",
+      "document_kind": "Oxide Request for Discussion (RFD)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "oxide_rfd_customer_outcomes",
+      "name": "Customer outcomes and impact",
+      "definition": {
+        "text": "What does this idea look like in terms of how it impacts a customer? … What are the outcomes for customers if we implement this idea versus alternatives?",
+        "ref": "oxide-rfd1",
+        "locator": "Oxide RFD 1, 'Insights to include in RFDs' > business and customer considerations"
+      },
+      "condition": "While not applicable in every case",
+      "document_kind": "Oxide Request for Discussion (RFD)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "oxide_rfd_performance",
+      "name": "Performance",
+      "definition": {
+        "text": "How do the trade-offs of this determination impact performace? Is it visible to customers? Is it a regression? Are there any benchmarks that helped lead to the determination?",
+        "ref": "oxide-rfd1",
+        "locator": "Oxide RFD 1, 'Insights to include in RFDs' > business and customer considerations"
+      },
+      "condition": "While not applicable in every case",
+      "document_kind": "Oxide Request for Discussion (RFD)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "oxide_rfd_security",
+      "name": "Security",
+      "definition": {
+        "text": "How to the trade-offs of this determination impact the security of the product?",
+        "ref": "oxide-rfd1",
+        "locator": "Oxide RFD 1, 'Insights to include in RFDs' > business and customer considerations"
+      },
+      "condition": "While not applicable in every case",
+      "document_kind": "Oxide Request for Discussion (RFD)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "oxide_rfd_depth_judgement",
+      "name": "Insights to include in RFDs",
+      "definition": {
+        "text": "Not every RFD is equal. Some have more sense of urgency and therefore might not be as rigorous as others. Some are a documentation of our knowledge thus far on a given topic. All things being said, use your best judgement when it comes to the level of depth to devote to an RFD.",
+        "ref": "oxide-rfd1",
+        "locator": "Oxide RFD 1, 'Insights to include in RFDs'"
+      },
+      "condition": null,
+      "document_kind": "Oxide Request for Discussion (RFD)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "oxide_rfd_metadata",
+      "name": "RFD Metadata and State",
+      "definition": {
+        "text": "At the start of every RFD document, we’d like to include a brief amount of metadata.",
+        "ref": "oxide-rfd1",
+        "locator": "Oxide RFD 1, 'RFD Metadata and State'"
+      },
+      "condition": null,
+      "document_kind": "Oxide Request for Discussion (RFD)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "oxide_rfd_ideation_scope",
+      "name": "RFD Metadata and State (ideation)",
+      "definition": {
+        "text": "A document in the ideation state contains only a description of the topic that the RFD will cover, providing an indication of the scope of the eventual RFD. … It is critical that RFDs in the ideation state are clear and narrowly defined.",
+        "ref": "oxide-rfd1",
+        "locator": "Oxide RFD 1, 'RFD Metadata and State'"
+      },
+      "condition": "RFDs in the ideation state",
+      "document_kind": "Oxide Request for Discussion (RFD)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "shapeup_pitch_five_ingredients",
+      "name": "Write the Pitch",
+      "definition": {
+        "text": "There are five ingredients that we always want to include in a pitch:",
+        "ref": "shapeup-pitch",
+        "locator": "Shape Up ch. 6 'Write the Pitch', introduction"
+      },
+      "condition": null,
+      "document_kind": "Shape Up pitch",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "shapeup_pitch_problem",
+      "name": "Ingredient 1. Problem",
+      "definition": {
+        "text": "Problem — The raw idea, a use case, or something we’ve seen that motivates us to work on this … It’s critical to always present both a problem and a solution together. … The best problem definition consists of a single specific story that shows why the status quo doesn’t work.",
+        "ref": "shapeup-pitch",
+        "locator": "Shape Up ch. 6, 'Ingredient 1. Problem'"
+      },
+      "condition": "How far you have to go to spell out the problem will depend on how much context you share with the people reading the write-up.",
+      "document_kind": "Shape Up pitch",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "shapeup_pitch_appetite",
+      "name": "Ingredient 2. Appetite",
+      "definition": {
+        "text": "Appetite — How much time we want to spend and how that constrains the solution … Stating the appetite in the pitch prevents unproductive conversations.",
+        "ref": "shapeup-pitch",
+        "locator": "Shape Up ch. 6, 'Ingredient 2. Appetite'"
+      },
+      "condition": null,
+      "document_kind": "Shape Up pitch",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "shapeup_pitch_solution",
+      "name": "Ingredient 3. Solution",
+      "definition": {
+        "text": "Solution — The core elements we came up with, presented in a form that’s easy for people to immediately understand … A problem without a solution is unshaped work.",
+        "ref": "shapeup-pitch",
+        "locator": "Shape Up ch. 6, 'Ingredient 3. Solution'"
+      },
+      "condition": null,
+      "document_kind": "Shape Up pitch",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "shapeup_pitch_help_them_see_it",
+      "name": "Help them see it",
+      "definition": {
+        "text": "We need to stay high level, but add a little more concreteness than when we worked alone or with a partner. People who read the pitch and look at the drawings without much context need to “get” the idea. We need more concreteness, but we don’t want to over-specify the design with wireframes or high-fidelity mocks.",
+        "ref": "shapeup-pitch",
+        "locator": "Shape Up ch. 6, 'Help them see it'"
+      },
+      "condition": null,
+      "document_kind": "Shape Up pitch",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "shapeup_pitch_rabbit_holes",
+      "name": "Ingredient 4. Rabbit Holes",
+      "definition": {
+        "text": "Rabbit holes — Details about the solution worth calling out to avoid problems … Sometimes addressing a rabbit hole just requires a few lines of text.",
+        "ref": "shapeup-pitch",
+        "locator": "Shape Up ch. 6, ingredient list and 'Ingredient 4. Rabbit holes'"
+      },
+      "condition": null,
+      "document_kind": "Shape Up pitch",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "shapeup_pitch_no_gos",
+      "name": "Ingredient 5. No Gos",
+      "definition": {
+        "text": "No-gos — Anything specifically excluded from the concept: functionality or use cases we intentionally aren’t covering to fit the appetite or make the problem tractable … Lastly if there’s anything we’re not doing in this concept, it’s good to mention it here.",
+        "ref": "shapeup-pitch",
+        "locator": "Shape Up ch. 6, ingredient list and 'Ingredient 5. No Gos'"
+      },
+      "condition": null,
+      "document_kind": "Shape Up pitch",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "shapeup_right_level_of_abstraction",
+      "name": "Principles of Shaping",
+      "definition": {
+        "text": "When we shape the work, we need to do it at the right level of abstraction: not too vague and not too concrete.",
+        "ref": "shapeup-principles",
+        "locator": "Shape Up ch. 2 'Principles of Shaping', introduction"
+      },
+      "condition": null,
+      "document_kind": "Shape Up pitch",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "shapeup_wireframes_too_concrete",
+      "name": "Wireframes are too concrete",
+      "definition": {
+        "text": "When design leaders go straight to wireframes or high-fidelity mockups, they define too much detail too early. This leaves designers no room for creativity.",
+        "ref": "shapeup-principles",
+        "locator": "Shape Up ch. 2, 'Wireframes are too concrete'"
+      },
+      "condition": null,
+      "document_kind": "Shape Up pitch",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "shapeup_words_too_abstract",
+      "name": "Words are too abstract",
+      "definition": {
+        "text": "On the other end of the spectrum, projects that are too vague don’t work either. When a project is defined in a few words, nobody knows what it means. … Team members don’t have enough information to make trade-offs. They don’t know what to include or leave out.",
+        "ref": "shapeup-principles",
+        "locator": "Shape Up ch. 2, 'Words are too abstract'"
+      },
+      "condition": null,
+      "document_kind": "Shape Up pitch",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "shapeup_rough",
+      "name": "Property 1: It’s rough",
+      "definition": {
+        "text": "Work in the shaping stage is rough. Everyone can tell by looking at it that it’s unfinished. They can see the open spaces where their contributions will go. Work that’s too fine, too early commits everyone to the wrong details.",
+        "ref": "shapeup-principles",
+        "locator": "Shape Up ch. 2, 'Property 1: It’s rough'"
+      },
+      "condition": null,
+      "document_kind": "Shape Up pitch",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "shapeup_solved",
+      "name": "Property 2: It’s solved",
+      "definition": {
+        "text": "Despite being rough and unfinished, shaped work has been thought through. All the main elements of the solution are there at the macro level and they connect together. The work isn’t specified down to individual tasks, but the overall solution is spelled out. … Any open questions or rabbit holes we could see up front have been removed to reduce the project’s risk.",
+        "ref": "shapeup-principles",
+        "locator": "Shape Up ch. 2, 'Property 2: It’s solved'"
+      },
+      "condition": null,
+      "document_kind": "Shape Up pitch",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "shapeup_bounded",
+      "name": "Property 3: It’s bounded",
+      "definition": {
+        "text": "Lastly, shaped work indicates what not to do. It tells the team where to stop. There’s a specific appetite—the amount of time the team is allowed to spend on the project.",
+        "ref": "shapeup-principles",
+        "locator": "Shape Up ch. 2, 'Property 3: It’s bounded'"
+      },
+      "condition": null,
+      "document_kind": "Shape Up pitch",
+      "levels": null,
+      "examples": []
+    }
+  ]
+}

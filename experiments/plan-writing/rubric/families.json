@@ -1,0 +1,637 @@
+{
+  "note": "One rubric per survey family, built only from that family's own published guidance (see families.md). Families whose sources supply methods, bias checks or examples rather than writing criteria have rubric false. Results are identified by rubric id and criterion id.",
+  "generic_levels": {
+    "note": "Used for any criterion whose source publishes no score levels. Worded by the rubric authors and kept minimal; the template's scoring note says that leaving out what a document does not need is not a fault.",
+    "scale": {
+      "min": 1,
+      "max": 5
+    },
+    "levels": {
+      "1": "Does not do what the criterion describes.",
+      "3": "Partly does what the criterion describes.",
+      "5": "Fully does what the criterion describes."
+    }
+  },
+  "families": [
+    {
+      "id": "requirement_standards",
+      "name": "Requirement standards",
+      "rubric": true,
+      "sources": [
+        "incose-gtwr",
+        "iso29148",
+        "nara-ir-quality-standards",
+        "nasa-se-handbook",
+        "rfc2119",
+        "rfc8174"
+      ],
+      "contributes": [
+        "criteria",
+        "methods"
+      ],
+      "not_criteria": [
+        {
+          "source_ref": "nasa-se-handbook",
+          "contributes": "methods",
+          "note": "Appendix D (Requirements Verification Matrix) gives a verification-planning method (one row per 'shall', with source and verification method) rather than a writing criterion."
+        },
+        {
+          "source_ref": "incose-gtwr",
+          "contributes": "methods",
+          "note": "Sections 1 and 5-6 (needs vs requirements, attributes, patterns/templates such as 'When <trigger>, the <SOI> shall <response>') describe how to derive and structure statements; they support C9 but are methods, not further characteristics."
+        }
+      ],
+      "gaps": "ISO/IEC/IEEE 29148: full text is paywalled. The ISO OBP page returned 403 to scripts, and the public VDE preview of the 2018 edition (saved as iso29148_ed2_preview_vde.txt) stops at clause 3, before 5.2.5/5.2.6. The only public source found that quotes the standard's own definitions is NARA's IR Quality Standards (saved as nara_strs.txt). It marks quoted text 'IEEE:', it is the 2011 edition, and NARA says its standards are 'based upon, but are not identical to' 29148:2011. So the six iso29148_* criteria are second-hand quotes. The traceable wording looks NARA-edited. Not quotable from any saved public source: 2011 individual necessary, complete, singular, feasible and verifiable; 2011 set consistent, affordable and bounded; and every 2018-edition definition. The 2018 names (necessary, appropriate, unambiguous, complete, singular, feasible, verifiable, correct, conforming; set: complete, consistent, feasible, comprehensible, able to be validated) appear only in a secondary paraphrase (arXiv 2408.10886 Table I, saved). They match INCOSE GtWR C1-C14 one for one, and GtWR v4 says it draws on 29148. NARA prints the text of 29148's individual 'Complete' under its set-level 'Consistent' row, so that text was not used. INCOSE GtWR v4 was retrieved from a Wayback capture (2024-04-20) of the incose.org PDF. Only the 15 characteristic definitions are included. The 42 rules R1-R42 (Section 4, e.g. R4 defined terms, R7 vague terms) are criteria in their own right and are not included here. NASA App. C is a checklist. Long checklist items are quoted in part, with ' … ' marking each omission. No source in this family publishes performance levels, so levels is null throughout. No examples are attached. None of the verified examples comes from an ISO, INCOSE or NASA document. The RFC errata (b0-b2, b6-b8) are about coverage and self-contradiction, not about RFC 2119/8174 keyword use, and b5 (Berry et al.) is a different source."
+    },
+    {
+      "id": "architecture_design",
+      "name": "Architecture and design practice",
+      "rubric": true,
+      "sources": [
+        "google-design-docs",
+        "iso42010-fdis-2011",
+        "rfc4101"
+      ],
+      "contributes": [
+        "criteria",
+        "examples",
+        "methods"
+      ],
+      "not_criteria": [
+        {
+          "source_ref": "google-design-docs",
+          "contributes": "methods",
+          "note": "'The design doc lifecycle' (creation, review, implementation and iteration, maintenance) describes a review process and when to update the doc, not properties of the text."
+        },
+        {
+          "source_ref": "rfc4101",
+          "contributes": "examples",
+          "note": "Section 4.1.1 (STUN) and Section 6 onward (IKE and others) are worked protocol models that illustrate the criteria; no reviewer judgement is attached, so none were added as rubric examples."
+        },
+        {
+          "source_ref": "iso42010-fdis-2011",
+          "contributes": "methods",
+          "note": "Clauses 6-7 (architecture frameworks, architecture description languages, viewpoint specification) say how to define viewpoints and frameworks, which is method guidance for building an AD rather than a criterion for judging one."
+        }
+      ],
+      "gaps": "ISO/IEC/IEEE 42010: the 2022 edition (reference iso42010) is paywalled, and ISO OBP is not script-accessible. The quotes come from the 2011 FDIS (IEEE P42010/D9) that the official 42010 website once posted. That link is now 404, so a Wayback copy from 2012-02-07 was used, saved as iso42010_fdis_2011.txt. The 2022 edition reworded and restructured parts of Clause 5, so treat these as 2011 requirements. The site's informal AD overview (iso42010_ads.txt) and the 2022 conceptual-model page (iso42010_cm.txt) were saved but not quoted. Design Docs at Google states 'Rule #1 is: Write them in whatever form makes the most sense for the particular project', so its section criteria are advisory. That rule is kept as criterion google_dd_form. RFC 4101 governs a protocol model, an overview placed first or shipped separately, and not the full specification. No source publishes levels. No examples are attached. None of the verified examples is a 42010 architecture description, a Google design doc or a reviewed protocol model. c14 (the TinyMT32 draft) is an IETF document, but its reviewer comment concerns where a warning sits in the abstract, not RFC 4101's model sections."
+    },
+    {
+      "id": "process_templates",
+      "name": "Process templates of the corpus",
+      "rubric": true,
+      "sources": [
+        "go-design-template",
+        "go-proposal",
+        "kep-template",
+        "kep127-pr4439",
+        "oxide-rfd1",
+        "pep1",
+        "pep12",
+        "pep661-pr4050",
+        "pep705-pr2997",
+        "rfc3552",
+        "rfc7322",
+        "rust-rfc-2539",
+        "rust-rfc-3013",
+        "rust-rfc-template",
+        "shapeup-pitch",
+        "shapeup-principles"
+      ],
+      "contributes": [
+        "criteria",
+        "examples",
+        "methods"
+      ],
+      "not_criteria": [
+        {
+          "source_ref": "pep1",
+          "contributes": "methods",
+          "note": "PEP workflow, status transitions and the role of PEP editors/sponsors describe the review process, not the document's content."
+        },
+        {
+          "source_ref": "go-proposal",
+          "contributes": "methods",
+          "note": "The proposal process (brief issue first, design doc only when asked, weekly review meetings, minutes) is a triage method; it implies the condition that most proposals need no design doc at all."
+        },
+        {
+          "source_ref": "oxide-rfd1",
+          "contributes": "methods",
+          "note": "The RFD life-cycle (states prediscussion/ideation/discussion/published/committed/abandoned, branches, PRs) is process; only the state-dependent expectations were kept as conditions."
+        },
+        {
+          "source_ref": "shapeup-pitch",
+          "contributes": "methods",
+          "note": "'Ready to present' and 'How we do it in Basecamp' (post pitches asynchronously, comment to poke holes) describe the betting process."
+        },
+        {
+          "source_ref": "kep-template",
+          "contributes": "methods",
+          "note": "The Release Signoff Checklist and kep.yaml metadata are process gates checked by tooling, not prose criteria."
+        },
+        {
+          "source_ref": "pep661-pr4050",
+          "contributes": "examples",
+          "note": "Example b17: PEP 661 adding the PEP 1 sections it lacked."
+        },
+        {
+          "source_ref": "kep127-pr4439",
+          "contributes": "examples",
+          "note": "Examples b3 and b18: PRR reviewer asked for a measurable rollback signal and a filled Upgrade/Downgrade section."
+        },
+        {
+          "source_ref": "rust-rfc-2539",
+          "contributes": "examples",
+          "note": "Example c0: alternative added to 'Rationale and alternatives' after a reviewer named one."
+        },
+        {
+          "source_ref": "rust-rfc-3013",
+          "contributes": "examples",
+          "note": "Examples c2 and c3: 'Drawbacks' revised from 'no known drawbacks' to named costs after review."
+        },
+        {
+          "source_ref": "pep705-pr2997",
+          "contributes": "examples",
+          "note": "Example b9 (implementation detail cut from a PEP) is not tied by its own material to any PEP 1/PEP 12 section text, so it was not attached."
+        }
+      ],
+      "gaps": "Templates were fetched from their master branches on 2026-10-24. PEP 1 is the copy saved earlier by this project (ext/b/raw/gh/pep-0001.rst, copied into f1), and templates change over time. Examples attached: b17 to the four PEP 1 items PEP 661 added (its brief_source names PEP 1 items 6, 7, 8 and 11); b3 to the KEP PRR rollback-metrics question; b18 to Upgrade / Downgrade Strategy; b4 to Integration tests (its brief_source is that template comment, though no reviewer named the fault); c0 and c1 to rust_rfc_rationale_and_alternatives; c2, c3 and c4 to rust_rfc_drawbacks; c5 to rust_rfc_unresolved_questions. In 2017 the Rust template heading for c1 was 'Alternatives'; it is now 'Rationale and alternatives'. c4 is the author's own revision ('Add actual drawbacks') with no reviewer prompt. Not attached, because their own material does not tie them to a template criterion: b9 (PEP 705), where the reviewer's 'too much implementation detail' is not PEP 1 Backwards Compatibility text; b10 (Rust RFC 2947), where the reviewer's 'implementation detail' objection runs against the template's 'It is reasonably clear how the feature would be implemented'; c14, c21 and c22 (IETF drafts), whose reviewers do not invoke RFC 7322 or RFC 3552. Omitted: RFC 7322 parts the RFC Editor supplies (4.1 first-page header, 4.4 notes, 4.5 status, 4.6 copyright) and the 4.8.6.x reference-format subsections; the Go 2 language-change questionnaire (go2-language-changes.md, not fetched); the KEP Release Signoff Checklist and kep.yaml; Shape Up ch. 5 'Risks and Rabbit Holes' (not fetched; ch. 6 says little about rabbit holes beyond the ingredient line). Shape Up ch. 2 (existing reference shapeup-principles) is included alongside ch. 6. Section descriptions that are only bracketed prompts (PEP 12, Go TEMPLATE.md) are quoted as written, brackets included. KEP PRR criteria take the question heading as their name and quote, with the template comment appended after ' … ' where there is one. No levels: KEP alpha/beta/GA are feature-maturity stages, not quality levels, and none of these sources scores documents."
+    },
+    {
+      "id": "analytic_writing_rubrics",
+      "name": "Analytic writing rubrics",
+      "rubric": true,
+      "sources": [
+        "aacu-value",
+        "six-traits"
+      ],
+      "contributes": [
+        "criteria"
+      ],
+      "not_criteria": [],
+      "gaps": "AAC&U: aacu.org now serves the rubric only through a store checkout, so the PDF was taken from the Wayback Machine copy of the official file (sites/default/files/files/VALUE/WrittenCommunication.pdf, captured 2021-09-18; it says \"all 15 of the VALUE rubrics\", the live page says 16). The PDF carries a large \"Preview\" watermark, whose letters were dropped by font height; cell text was rebuilt from pdftotext word boxes (aacu_parsed.json). The rubric gives no description or glossary entry for \"Control of Syntax and Mechanics\", so that criterion has quote null and only its levels. Level 0 is not a published level; the rubric only encourages a zero below Benchmark (scale_note). 6+1 Traits: Education Northwest publishes no prose trait definitions in the rubric; each trait's \"KEY QUESTION\" is used as the quote, the unlabeled first row as the trait levels, and the lettered rows (A–F) are kept as sub_criteria with their own verbatim levels. Cells were rebuilt from pdftotext word boxes (six_traits_2021_parsed.json) because the six-column layout interleaves in plain text; line-final hyphens and slashes were joined (e.g. \"domain- specific\" -> \"domain-specific\"). The 2021 PDF has no sub-row E under Conventions (A–D, then F) and a Conventions level-3 cell that ends with a stray editorial note (\"” please include grade level specific considerations\"); both are kept verbatim. The rubric is written for grades 3–12 student writing; its handwriting, title, font and white-space rows rarely apply to plan documents, but nothing was removed. Older Education Northwest rubrics (2010 5-point, 2013 6-point) were also downloaded (raw/) but not used; the 2021 file is the one the official page links. No examples attached: none of the verified examples comes from either rubric."
+    },
+    {
+      "id": "plain_language_and_style",
+      "name": "Plain language and style",
+      "rubric": true,
+      "sources": [
+        "diataxis",
+        "fplg",
+        "google-style",
+        "google-tw1",
+        "google-tw2",
+        "gov-uk-writing-guidelines",
+        "ms-style",
+        "narratology-iso24495",
+        "sec-plain-english",
+        "wtd-principles"
+      ],
+      "contributes": [
+        "criteria",
+        "examples",
+        "methods"
+      ],
+      "not_criteria": [
+        {
+          "source_ref": "google-tw2",
+          "contributes": "methods",
+          "note": "Technical Writing Two \"Self-editing\" (adopt a style guide, think like your audience, read it out loud, come back to it later, change the context, find a peer editor) gives revision practices, not properties of the finished document."
+        },
+        {
+          "source_ref": "fplg",
+          "contributes": "methods",
+          "note": "FPLG section V \"Test\" (paraphrase testing, usability testing, controlled comparative studies) describes how to test a document with readers; it is the evaluation method behind ISO principle 4 (usable) rather than a criterion a reader can score from the text."
+        },
+        {
+          "source_ref": "fplg",
+          "contributes": "examples",
+          "note": "The plainlanguage.gov before/after pages (examples a3, a10, a33) are separate example pages, not printed under an FPLG guideline heading, so they are not attached to FPLG criteria."
+        },
+        {
+          "source_ref": "google-style",
+          "contributes": "methods",
+          "note": "The Google developer documentation style guide \"Highlights\" page lists sentence- and markup-level rules (second person, active voice, sentence case, code font, date formats, link text); it states no document-level quality criteria, so none were taken from it."
+        }
+      ],
+      "gaps": "ISO 24495-1: the official text was not read. The ISO OBP preview requires accepting ISO's terms of use (not done without the user's consent) and iso.org returns 403 to scripts; the principle wording is quoted from narratology.co.uk, a consultancy page, and matches the paraphrase on sitecockpit.com (iso24495_sitecockpit.txt). Treat these four quotes as secondary. Selection within sources: only items a reader could score on a whole document were kept. Left out as micro-rules: FPLG \"Use the simplest form of a verb\", \"Avoid hidden verbs\", \"Use must to indicate requirements\", \"Use contractions when appropriate\", \"Don't turn verbs into nouns\", \"Use pronouns to speak directly to readers\", \"Minimize abbreviations\", \"Don't use slashes\", \"Keep subject, verb, and object close together\", \"Avoid double negatives and exceptions to exceptions\", \"Place words carefully\", all of IV \"Write for the web\"; Google TW \"Use acronyms properly\", \"Reduce there is / there are\", \"Reduce subordinate clauses (optional)\", \"Distinguish that from which\", \"Start numbered list items with imperative verbs\", \"Punctuate items appropriately\", the optional Punctuation and Markdown units; GOV.UK \"Avoid footnotes\", \"Do not repeat yourself\" (about page summaries), \"Be careful with contractions\", \"Make requirements clear\", \"Think about your users' choice of words\", the \"Write clear summaries/titles/links/change notes\" pages; Microsoft \"Project friendliness\", capitalization, punctuation, serial comma and spacing tips, \"Revise weak writing\", brand-voice \"Warm and relaxed\"; Write the Docs \"Precursory\", \"Participatory\", \"Nearby\", \"Unique\", \"Discoverable\", \"Addressable\", \"Comprehensive\" (process, source-storage, publication-system or whole-body properties). SEC: all eleven chapter 6 principle headings kept (the user asked for them) even where sentence-level; from chapter 7 only Hierarchy and the text-applicable subheadings Emphasizing text, Keep paragraph length relatively short and Use tables to increase clarity were kept; typeface, type size, justification, line spacing, line length, graphics and color items were left out as print design. Google TW criteria are taken at h2 level, except in \"Organizing large documents\" where the h2 \"Organize a document\" is only an umbrella and its h3s (Outline, Introduce) carry the rules. Example a29 sits in the \"Compare and contrast\" subsection of \"Summarize key points at the start\" and its answer is about what belongs in the opening paragraph, so it is attached to that h2; a15 is the \"Outline exercise\" that follows \"Outline a document\"; a36 is the \"Curse of knowledge\" exercise inside \"Fit documentation to your audience\". Example a8's locator says \"III. Write clearly\" but the FPLG heading is \"III. Write your document\"; the subheading \"i. Use short, simple words\" matches. ISO, GOV.UK, Microsoft, Write the Docs and Diátaxis publish no levels; FPLG, SEC and Google TW publish none either. Diátaxis \"deep quality\" is explicitly not measurable (\"cannot be checked or measured\"), which the quote keeps. Some sources give numeric thresholds (GOV.UK: no more than 5 sentences per paragraph, split sentences over 25 words; Google TW: 3–5 sentences per paragraph) which are kept verbatim in the quotes, not turned into levels."
+    },
+    {
+      "id": "generated_text_evaluation",
+      "name": "Generated-text evaluation",
+      "rubric": true,
+      "sources": [
+        "coh-metrix",
+        "factcc",
+        "factscore",
+        "g-eval",
+        "prometheus",
+        "qags",
+        "summac",
+        "summeval",
+        "xsum-hallucinations"
+      ],
+      "contributes": [
+        "criteria",
+        "examples",
+        "methods"
+      ],
+      "not_criteria": [
+        {
+          "source_ref": "g-eval",
+          "contributes": "methods",
+          "note": "G-Eval prompts an LLM with a task description and one criterion, has it generate chain-of-thought evaluation steps, and weights the 1–5 score by token probabilities; on summarisation it scores the SummEval dimensions rather than defining its own."
+        },
+        {
+          "source_ref": "prometheus",
+          "contributes": "methods",
+          "note": "Prometheus is an open evaluator model trained to grade a response against a user-supplied score rubric (criterion plus five level descriptions) and reference answer, writing feedback before the score; the criteria come from the user."
+        },
+        {
+          "source_ref": "factscore",
+          "contributes": "methods",
+          "note": "FActScore splits long-form generations into atomic facts and reports the fraction supported by a knowledge source."
+        },
+        {
+          "source_ref": "summac",
+          "contributes": "methods",
+          "note": "SummaC runs an NLI model on sentence pairs between source and summary and aggregates the entailment matrix to detect inconsistency."
+        },
+        {
+          "source_ref": "factcc",
+          "contributes": "methods",
+          "note": "FactCC is a weakly supervised classifier trained on rule-transformed summary sentences that labels a claim consistent or inconsistent with its source document."
+        },
+        {
+          "source_ref": "qags",
+          "contributes": "methods",
+          "note": "QAGS generates questions from a summary, answers them against both the summary and the source, and scores consistency by answer agreement."
+        },
+        {
+          "source_ref": "coh-metrix",
+          "contributes": "methods",
+          "note": "Coh-Metrix computes automatic text indices of cohesion, language and readability (for example referential overlap, connectives, LSA similarity)."
+        },
+        {
+          "source_ref": "xsum-hallucinations",
+          "contributes": "examples",
+          "note": "Examples b12 and b13 come from the XSum hallucination annotations (Maynez et al.) and FRANK factuality labels, not from SummEval (which annotated CNN/DailyMail summaries); SummEval does not place them under its consistency dimension, so they are not attached."
+        }
+      ],
+      "gaps": "SummEval publishes only the scale end points (1 = worst, 5 = best); there are no per-level descriptors, so levels holds the two anchors. The paper says summaries were shown \"in sets of 5\", while the Figure 3 interface says \"A-F (6 in total)\"; both are quoted as found. The annotator-facing definitions exist only inside the Figure 3 image; they were OCR-transcribed (summeval_fig3_ocr.txt, raw/summeval_fig3-000.png) and checked by eye against the image, including the source's own wording \"to the fit together and sound naturally\". The not_criteria notes are one-sentence summaries written from the cited papers' known content; they are not quotes and were not re-verified against the papers in this pass. No examples attached: no verified example comes from SummEval."
+    },
+    {
+      "id": "text_organization",
+      "name": "Text organization research",
+      "rubric": true,
+      "sources": [
+        "barzilay-lapata",
+        "garnock-jones-thesis",
+        "gopen-swan",
+        "grice",
+        "halliday-hasan",
+        "minto",
+        "minto-manager138-notes",
+        "minto-strategyu-review",
+        "mit-ocw-grice-handout",
+        "sep-grice",
+        "tanswell-aporia-grice"
+      ],
+      "contributes": [
+        "criteria",
+        "methods"
+      ],
+      "not_criteria": [
+        {
+          "source_ref": "halliday-hasan",
+          "contributes": "methods",
+          "note": "Cohesion in English describes and classifies cohesive ties (reference, substitution, ellipsis, conjunction, lexical cohesion) as a linguistic analysis; it does not state them as writing criteria. Usable as an annotation method for continuity/cohesion checks."
+        },
+        {
+          "source_ref": "barzilay-lapata",
+          "contributes": "methods",
+          "note": "The entity grid is a computational model of local coherence (entity role transitions between sentences) for ranking or scoring texts; it is a measurement method, not a writing criterion."
+        },
+        {
+          "source_ref": "grice",
+          "contributes": "methods",
+          "note": "Grice's maxims describe presumptions of cooperative conversation used to derive implicatures; Grice notes they can be flouted to communicate. They are listed here as criteria because they are phrased as injunctions, but they were not written as a document-quality rubric."
+        }
+      ],
+      "gaps": "Grice 1975 itself (paywalled) was not seen: sub-maxim wording is checked against a MIT OCW handout and two independent quotations, supermaxims and the Cooperative Principle against the SEP 'Paul Grice' entry; page numbers are SEP's (Grice 1989, 26-27). Sources disagree on 'as informative as is required' (OCW handout, Tanswell, Wikipedia) vs 'as informative as required' (Garnock-Jones); the majority wording is used. Minto's book was not seen and barbaraminto.com does not state the rules; the Minto quotes come from a personal reading-notes site (manager138.com) with page references and are corroborated by strategyu.co and a ConsultingMethodology.com PDF, which is weaker than a publisher source. Minto's SCQ (situation-complication-question) introduction and question/answer vertical relationship were not found quoted verbatim with a locator, so they are not criteria. Gopen and Swan text is the American Scientist web edition via a Wayback copy (2021-01-15), not the 1990 print PDF. No source in this family publishes levels."
+    },
+    {
+      "id": "analytic_tradecraft",
+      "name": "Analytic tradecraft",
+      "rubric": true,
+      "sources": [
+        "da-pam-600-67",
+        "icd203",
+        "ipcc-uncertainty",
+        "kent-wep",
+        "ssci-2004-prewar"
+      ],
+      "contributes": [
+        "criteria",
+        "examples",
+        "methods"
+      ],
+      "not_criteria": [
+        {
+          "source_ref": "ipcc-uncertainty",
+          "contributes": "methods",
+          "note": "Paragraphs 1 (agree a process for describing ranges of views), 3 (guard against group convergence and anchoring), 6 (consider all plausible sources of uncertainty) and 7 (assess uncertainty and risk; consider ranges and high-consequence outcomes) direct the author team's process rather than the text, so they are not scored. The closing summary restates paragraphs 2, 8 and 10."
+        },
+        {
+          "source_ref": "ipcc-uncertainty",
+          "contributes": "examples",
+          "note": "Example c13 (AR5 WG1 Summary for Policymakers, D.3) uses the note's calibrated language, but the guidance note does not cite or discuss it, so it is not attached to any ipcc criterion."
+        },
+        {
+          "source_ref": "icd203",
+          "contributes": "methods",
+          "note": "Section E.1.b(1) refers to 'ODNI Analytic Tradecraft Standards Evaluation Rating Criteria' used in product reviews; ICD 203 does not publish them, so no levels are given for the ICD 203 criteria."
+        },
+        {
+          "source_ref": "ssci-2004-prewar",
+          "contributes": "examples",
+          "note": "Examples c6 and c7 (2002 NIE key judgments vs the CIA white paper) are left unattached. The critique (removing 'we judge'/'we assess' turned assessments into statements of fact; Conclusion 85) is the Senate committee's, written in 2004 against the pre-ICD-203 tradecraft. ICD 203 (2007, re-issued 2015) never cites them. They match icd203-t2 and icd203-t3 in substance, but attaching them would claim a tie that ICD 203 does not make."
+        },
+        {
+          "source_ref": "da-pam-600-67",
+          "contributes": "methods",
+          "note": "The quick-screen edit (4-2) and clarity index (4-3) are the pamphlet's own enforcement tools; they are kept as criteria because the pamphlet says they identify violations of, and enforce, the standard (5-1b)."
+        }
+      ],
+      "gaps": "ICD 203 text is the current dni.gov PDF (signed 2 Jan 2015 with later technical amendments, incl. 2022 ombuds changes), fetched via a Wayback copy of 2024-12-22; it is byte-identical to the earlier saved copy. Its PDF text layer drops some spaces ('oflikelihood', 'whichjudgments'), which the whitespace-insensitive check tolerates. The likelihood term table was rebuilt from the column layout and checked term by term, not as running text. Kent is quoted from the CIA CSI web edition (archived 2015 HTML), not the cia.gov PDF named in references.json. The IPCC PDF text layer drops the en dash in '90–95%'; dashes are ignored in the check. Only DA PAM 600-67 publishes anything like levels (the clarity index rules of thumb) and published scores for an attached example (a31: 42 vs 23). Figures 4-1/4-2 and 4-4/4-5 have no entry in the verified example sets, so they are not attached. No example is attached to ICD 203 or IPCC criteria."
+    },
+    {
+      "id": "judge_reliability",
+      "name": "Judge reliability",
+      "rubric": false,
+      "sources": [
+        "burrows-delta",
+        "format-bias",
+        "lc-alpacaeval",
+        "llm-judge-finetuned",
+        "mt-bench",
+        "verbosity-bias"
+      ],
+      "contributes": [
+        "bias_checks"
+      ],
+      "not_criteria": [
+        {
+          "source_ref": "mt-bench",
+          "contributes": "bias_checks",
+          "note": "Checks LLM-as-a-judge for position bias, verbosity bias, self-enhancement bias and limited reasoning ability, against expert and crowd human preferences (MT-Bench, Chatbot Arena)."
+        },
+        {
+          "source_ref": "verbosity-bias",
+          "contributes": "bias_checks",
+          "note": "Checks whether an LLM judge prefers the more verbose of two answers of similar quality more often than humans do, with a proposed metric for that bias."
+        },
+        {
+          "source_ref": "lc-alpacaeval",
+          "contributes": "bias_checks",
+          "note": "Checks and removes length bias in auto-annotator win rates by regressing preferences on length difference and predicting the preference at zero length difference."
+        },
+        {
+          "source_ref": "format-bias",
+          "contributes": "bias_checks",
+          "note": "Checks whether judges and reward models favour format patterns (lists, bold, links, emojis, length) independent of content quality."
+        },
+        {
+          "source_ref": "llm-judge-finetuned",
+          "contributes": "bias_checks",
+          "note": "Checks whether fine-tuned judge models generalise beyond their training scheme (generalisability, fairness, adaptability); they behave as task-specific classifiers and underperform GPT-4 out of domain."
+        },
+        {
+          "source_ref": "burrows-delta",
+          "contributes": "bias_checks",
+          "note": "Stylometric distance over z-scored frequencies of the most common words; used to measure how close a candidate's style is to a reference author so that style-match (self-/author-preference) bias in judge scores can be detected."
+        }
+      ],
+      "gaps": "Notes are our one-sentence summaries, not quotes. The five arXiv papers were checked against their abstracts (saved in f3/bias/). Burrows (2002) is paywalled (OUP returned 403; Crossref has no abstract), so its note rests on the title and general knowledge and was not checked against a saved file."
+    },
+    {
+      "id": "general_style_guidance",
+      "name": "General style guidance (classic texts on writing in general)",
+      "rubric": true,
+      "sources": [
+        "orwell-1946",
+        "quiller-couch-1916",
+        "strunk-1918",
+        "zinsser-2010"
+      ],
+      "contributes": [
+        "criteria",
+        "examples",
+        "methods"
+      ],
+      "not_criteria": [
+        {
+          "source_ref": "strunk-1918",
+          "contributes": "methods",
+          "note": "Chapter I states a condition on all the rules: 'It is an old observation that the best writers sometimes disregard the rules of rhetoric. When they do so, however, the reader will usually find in the sentence some compensating merit, attained at the cost of the violation.' Also: 'it gives in Chapter III only those principles of the paragraph and the sentence which are of the widest application.' Chapter II (punctuation and usage), IV (form), VI (spelling) and the rest of V (word-by-word usage entries) are not scorable document criteria and were left out."
+        },
+        {
+          "source_ref": "strunk-1918",
+          "contributes": "examples",
+          "note": "Rule 9 prints two annotated model paragraphs (Stevenson, Walking Tours; Lecky, The Political Value of History) with sentence-by-sentence function labels; Rule 14 prints a weak-only paragraph of loose sentences. Neither is a before/after pair, so they were not added as examples."
+        },
+        {
+          "source_ref": "orwell-1946",
+          "contributes": "examples",
+          "note": "Ecclesiastes vs parody pair (new example f4-orwell-ecclesiastes) is printed after the 'catalogue of swindles and perversions' as an illustration of the whole catalogue, not under one rule, so it is not attached to a criterion. Orwell's five numbered specimens (Laski, Hogben, a psychology essay, a Communist pamphlet, a Tribune letter) are weak-only."
+        }
+      ],
+      "gaps": "No source in this family publishes score levels; every criterion has levels null and would need anchors from elsewhere. Strunk Chapter III starts at Rule 8 in the 1918 edition, so Rule 8 (paragraph as unit) is included alongside 9-18; Chapters II, IV, VI and most of V are usage/mechanics and were left out. Quiller-Couch's four qualities (Lecture II) are stated as aims, not tests, and his Jargon rules are 'extremely rough rules'. Orwell's essay is still in copyright in the US (Orwell Foundation notice), and Zinsser 2010 is copyrighted: both are quoted in short excerpts only. Zinsser's 'Short is always better than long' has no condition attached and conflicts with sources (Strunk Rule 13, Redish) that say length alone is not the fault. Pinker (classic style, curse of knowledge) and Williams were not added: no openly published verbatim text of Pinker was fetched, and Williams is already in references.json (williams-style) for the aggregate rubric. Overlaps are kept as the sources state them (e.g. Strunk 10 / Orwell iv / Quiller-Couch 'active verb'; Strunk 12 / Quiller-Couch maxim; Strunk 13 / Orwell iii). The Orwell Ecclesiastes pair is recorded as a new example but not attached to a criterion."
+    },
+    {
+      "id": "writing_assessment_rubrics",
+      "name": "Large-scale general writing assessment rubrics",
+      "rubric": true,
+      "sources": [
+        "act-writing-rubric",
+        "act-writing-scores",
+        "asap-aes",
+        "asap-plus-plus",
+        "ellipse-corpus",
+        "gre-aw-scoring",
+        "gre-practice-test-3",
+        "ielts-writing-bd",
+        "ielts-writing-kac",
+        "naep-writing-2011",
+        "naep-writing-2017",
+        "persuade-2.0"
+      ],
+      "contributes": [
+        "criteria",
+        "bias_checks",
+        "examples",
+        "methods"
+      ],
+      "not_criteria": [
+        {
+          "source_ref": "naep-writing-2011",
+          "contributes": "methods",
+          "note": "NAEP scores holistically: 'a response will not be evaluated with a separate score for each writing feature'. The guides are 'preliminary'; 'the language used to describe expectations for the level of performance may differ in the final scoring rubrics', and 'the interpretation, or application, of the rubric will be different at each grade'. Scorers are trained on 'actual responses selected at each grade level'."
+        },
+        {
+          "source_ref": "ielts-writing-bd",
+          "contributes": "methods",
+          "note": "Rating rule printed on every page: 'A script must fully fit the positive features of the descriptor at a particular level. Bolded text indicates negative features that will limit a rating.' The bold marking is lost in the text extraction, so which descriptor phrases are negative features is not recorded here. Band 1 in every criterion also says 'Responses of 20 words or fewer are rated at Band 1.' 'The criteria are weighted equally and the score on the task is the average.' (ielts.org scoring page)."
+        },
+        {
+          "source_ref": "ielts-writing-kac",
+          "contributes": "bias_checks",
+          "note": "Genre clash to keep in mind before reusing IELTS levels on technical documents: 'Candidates should note that scripts may be penalised if they are a) partly or wholly plagiarised, b) not written as full, connected text (e.g. using bullet points in any part of the response, or note form, is not appropriate, etc.).' Task 2 also requires 'a minimum of 250 words'."
+        },
+        {
+          "source_ref": "act-writing-rubric",
+          "contributes": "methods",
+          "note": "Each ACT score row has a holistic lead (e.g. 'Score 6: Responses at this scorepoint demonstrate effective skill in writing an argumentative essay.') not repeated in the domain levels above. Scoring: 'Two trained readers will score your essay on a scale of 1-6 in each of the four writing domains. Each domain score represents the sum of the two readers' scores. If the readers' ratings disagree by more than one point, a third reader will evaluate the essay and resolve the discrepancy.' The rubric is for an argumentative essay on a given issue."
+        },
+        {
+          "source_ref": "gre-practice-test-3",
+          "contributes": "examples",
+          "note": "Official scored sample Issue responses with reader commentaries at every score point ('There are responses and scoring comments for essays with scores of 6, 5, 4, 3, 2, and 1.'), topic: 'The best way for a society to prepare its young people for leadership in government, industry, or other fields is by instilling in them a sense of cooperation, not competition.' Cite by URL and score; essays not copied (ETS copyright). The ETS Issue/Argument pages also point to separate scored-sample pages that were not fetched."
+        },
+        {
+          "source_ref": "ellipse-corpus",
+          "contributes": "examples",
+          "note": "Human-scored analytic traits suitable for calibrating judges on generic writing quality: 'scored for overall holistic language proficiency as well as analytic proficiency scores related to cohesion, syntax, vocabulary, phraseology, grammar, and conventions'. Licence: 'CC BY-NC-SA 4.0'. Test split and raw rater scores are in password-protected zips whose passwords the README publishes. Learner (ELL, grades 8–12) essays, not professional documents. Not downloaded."
+        },
+        {
+          "source_ref": "persuade-2.0",
+          "contributes": "examples",
+          "note": "Holistic essay scores and 'proficiency scores for each argumentative and discourse element' on 25,000+ student essays; licence 'CC BY-NC-SA 4.0'. Useful for element-level effectiveness, not analytic writing traits. Data are on Google Drive links from the README; not downloaded."
+        },
+        {
+          "source_ref": "asap-plus-plus",
+          "contributes": "examples",
+          "note": "Trait scores per essay for ASAP prompts 1–6; CSV headers verified from the first bytes only: prompt 1 'EssayID,Content,Organization,Word Choice,Sentence Fluency,Conventions'; prompt 3 'Essay ID,Content,Prompt Adherence,Language,Narrativity'. No licence stated; underlying essays from the Kaggle ASAP competition (terms not verified). The original ASAP 'Feedback Prize' Kaggle competitions (Learning Agency Lab) were not checked; the ELLIPSE and PERSUADE repos above are their openly licensed releases only as far as their READMEs say (the ELLIPSE README does not mention Kaggle)."
+        }
+      ],
+      "gaps": "All four instruments score student essays on a set prompt (NAEP: grades 4/8/12; GRE/ACT/IELTS: test takers), not professional documents; GRE Issue and ACT are argument tasks and NAEP To Explain is the closest to expository writing. NAEP and GRE are holistic: the NAEP 'Development/Organization/Language' criteria have no separate levels (levels sit only on the holistic To Explain guide) and the GRE five-item reader list has no levels. NAEP guides are labelled 'preliminary'; operational item-specific scoring guides and scored samples in the NAEP Questions Tool were not fetched. The GRE Argument guide applies only to tests before 22 September 2023. IELTS bold 'negative features' could not be recovered from text extraction, and IELTS levels were reconstructed from a 4-column layout; each sentence was verified against the non-layout extraction, but the cell assignment rests on column positions. The ACT Score 3 'Ideas and Analysis' cell needed one hand fix ('given' split across the column boundary). Licences: NAEP is U.S. government work (public domain); ETS, IELTS partners and ACT reserve all rights, so the levels are quoted for internal research and should not be republished wholesale. AAC&U VALUE and 6+1 Traits are already in references.json and were not repeated here. Datasets: ELLIPSE and PERSUADE 2.0 are CC BY-NC-SA 4.0 (non-commercial); ASAP++ states no licence; the Kaggle Feedback Prize competition pages were not checked."
+    },
+    {
+      "id": "generic_text_measures",
+      "name": "Generic automatic text measures and their critiques",
+      "rubric": false,
+      "sources": [
+        "coleman-liau-1975",
+        "dale-chall-1948",
+        "flesch-1948",
+        "flesch-1979",
+        "gunning-1952",
+        "iso24495",
+        "jarrett-redish-2019",
+        "kincaid-1975",
+        "klare-2000",
+        "mclaughlin-1969",
+        "mtld-2010",
+        "our-languages-readability",
+        "redish-2000",
+        "sec-plain-english"
+      ],
+      "contributes": [
+        "bias_checks",
+        "methods"
+      ],
+      "not_criteria": [
+        {
+          "source_ref": "flesch-1979",
+          "contributes": "methods",
+          "note": "Flesch Reading Ease: predicted ease from average sentence length and average word length in syllables. Flesch's own wording: 'Multiply the average sentence length by 1.015. Multiply the average word length by 84.6. Add the two numbers. Subtract this sum from 206.835. The balance is your readability score.' Scale: 'The scale shows scores from 0 to 100. Zero means practically unreadable and 100 means extremely easy.' Original: Flesch 1948 (flesch-1948), not consulted. The Kincaid report's 'Old' row prints the syllable term as '.836 (syllables/100 words)' in OCR, which disagrees with 84.6 per word (0.846 per 100 words); likely OCR or typo, unresolved."
+        },
+        {
+          "source_ref": "kincaid-1975",
+          "contributes": "methods",
+          "note": "Flesch–Kincaid grade level: Flesch's two counts recalculated against the reading grade of Navy enlisted readers. Table 3: 'New: GL = .39 (words/sentence) +11.8 (syllables/word) - 15.59' (GL is grade level). The report states the formulas 'are specifically for Navy use' (derived from 531 personnel reading 18 Rate Training Manual passages)."
+        },
+        {
+          "source_ref": "gunning-1952",
+          "contributes": "methods",
+          "note": "Gunning fog index: years of schooling from average sentence length plus percentage of 'complex' (3+ syllable) words, times 0.4 ('Add the average sentence length and the percentage of complex words; and Multiply the result by 0.4.' — Wikipedia, secondary). Kincaid et al. 1975 also give a Navy 'Fog Count' (easy words + 3 hard words per sentence), a different formula."
+        },
+        {
+          "source_ref": "mclaughlin-1969",
+          "contributes": "methods",
+          "note": "SMOG: reading grade from the count of polysyllabic words in 30 sentences. 'SMOG grade = 3 + square root of polysyllable count.' Panel: 'Count 10 consecutive sentences near the beginning of the text to be assessed, 10 in the middle and 10 near the end.' Calibrated on 100% comprehension, so it reads higher than other formulas."
+        },
+        {
+          "source_ref": "dale-chall-1948",
+          "contributes": "methods",
+          "note": "Dale–Chall: difficulty from the percentage of words not on a list of familiar words plus average sentence length; raw score 0.1579 × (difficult words/words × 100) + 0.0496 × (words/sentences), and 'If the percentage of difficult words is above 5%, then add 3.6365 to the raw score' (Wikipedia, secondary). Critique: the list fixes 1948 fourth-grade meanings ('\"enter\" on a tax form is not the same \"enter\" that fourth-graders know' — Redish 2000)."
+        },
+        {
+          "source_ref": "coleman-liau-1975",
+          "contributes": "methods",
+          "note": "Coleman–Liau: grade from letters per 100 words and sentences per 100 words, so no syllable counting; CLI = 0.0588·L − 0.296·S − 15.8 where 'L is the average number of letters per 100 words and S is the average number of sentences per 100 words.' (Wikipedia, secondary)."
+        },
+        {
+          "source_ref": "mtld-2010",
+          "contributes": "methods",
+          "note": "MTLD (measure of textual lexical diversity): 'calculated as the mean length of word strings that maintain a criterion level of lexical variation'; the authors report it is 'the only index not found to vary as a function of text length' and advise 'using MTLD, vocd-D (or HD-D), and Maas in their studies, rather than any single index'. Criterion TTR threshold and the bidirectional computation are in the full paper, which was not consulted."
+        },
+        {
+          "source_ref": "redish-2000",
+          "contributes": "bias_checks",
+          "note": "Critique for adult technical text: 'For technical materials for adults, using any readability formula means generalizing from situations that are decades old and not directly relevant to the audience or type of material.' 'Readability formulas assume that you are writing prose paragraphs. They count sentence length by going from period to period. If you use bulleted lists to chunk your material and lay your text out with white space, readability formulas will say you have long sentences.' 'The most serious problem with using a readability formula is that a good score does not mean you have a usable or useful document.' Pair: 'I wave my hand.' / 'I waive my rights.' score identically. Redish quotes Klare's limitations: 'Formulas measure only style. They do not touch on content, organization, word order, format, or imagery.'"
+        },
+        {
+          "source_ref": "redish-2000",
+          "contributes": "bias_checks",
+          "note": "Rewriting to the score: 'Klare, Flesch, Gunning, and all the other developers of readability formulas insist that the formulas are not to be used for revision.' Klare (quoted by Redish): 'the temptation simply to substitute an easy word for a hard one, to cut sentences in half, or to eliminate prepositional phrases even when they are needed may produce exactly the opposite of the desired result.' Redish's pair (from Redish and Selzer 1985): 'He is the defendant. He is fifteen years old. He is in his teens. Someone says he stole from the store.' vs 'The defendant is a fifteen-year old teenager who is accused of shoplifting.' — 'The second, longer sentence is actually easier to understand, although it has the poorer readability score.'"
+        },
+        {
+          "source_ref": "jarrett-redish-2019",
+          "contributes": "bias_checks",
+          "note": "Reliability: 'the SMOG Index typically scores at least two grade levels higher than the Dale-Chall Formula. The Gunning Fog Index sometimes comes out three grade levels higher than other formulas.' and 'different computer programs running the same text through the same formula gave different scores.' Lists: 'Just ending each item with or without a period could change your content’s score dramatically.'"
+        },
+        {
+          "source_ref": "sec-plain-english",
+          "contributes": "bias_checks",
+          "note": "SEC Plain English Handbook ch. 9: 'No formula takes into account the content of the document being evaluated. In other words, no formula can tell you if you have conveyed the information clearly' and 'by some formulas’ calculations, Einstein’s theory of relativity reads at a 5th grade level.'"
+        },
+        {
+          "source_ref": "iso24495",
+          "contributes": "bias_checks",
+          "note": "ISO 24495-1, as quoted with permission on the Government of Canada Our Languages blog (our-languages-readability): 'plain language focuses on how successfully readers can use the document rather than on mechanical measures such as readability formulas.' Not checked against the standard itself (paywalled)."
+        }
+      ],
+      "gaps": "These are methods, not criteria. Primary papers for Flesch 1948, Gunning 1952, Dale-Chall 1948 and Coleman-Liau 1975 were not consulted; their formulas were verified only against Flesch's own 1979 restatement (Flesch), the Kincaid report (FK grade level) and Wikipedia snapshots (Fog, Dale-Chall, Coleman-Liau), which are secondary. The Kincaid report text is OCR, and its 'Old' Flesch row reads '.836 (syllables/100 words)', which does not match Flesch's 84.6 per word; unresolved. The MTLD threshold (TTR 0.72) and procedure are not verified (only the PubMed abstract was available). Klare's own text was not consulted; his limitations are quoted from Redish 2000. Schriver 2000 (ACM JCD 24(3)) was downloaded but is image-only and was not used. Coh-Metrix (already in references.json) also computes readability and lexical-diversity indices, but that was not re-verified here."
+    },
+    {
+      "id": "published_examples",
+      "name": "Published examples",
+      "rubric": false,
+      "sources": [
+        "da-pam-600-67",
+        "fplg",
+        "google-tw1",
+        "google-tw2",
+        "gopen-swan",
+        "kent-wep",
+        "kep127-pr4439",
+        "kep2033-pr3859",
+        "pep661-pr4050",
+        "quiller-couch-1916",
+        "rust-rfc-1861",
+        "rust-rfc-2539",
+        "rust-rfc-2909",
+        "rust-rfc-3013",
+        "rust-rfc-3641",
+        "sec-plain-english",
+        "strunk-1918"
+      ],
+      "contributes": [
+        "examples"
+      ],
+      "not_criteria": [],
+      "gaps": "Supplies the stronger/weaker pairs used as examples and fixtures; these sources state no criteria of their own beyond the guidance already listed in the families that publish them."
+    }
+  ]
+}

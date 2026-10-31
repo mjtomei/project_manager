@@ -1,0 +1,583 @@
+{
+  "id": "architecture_design",
+  "title": "Architecture description and design-doc quality (ISO/IEC/IEEE 42010, Design Docs at Google, RFC 4101)",
+  "criteria": [
+    {
+      "id": "iso42010_identification_overview",
+      "name": "Architecture description identification and overview",
+      "definition": {
+        "text": "An architecture description shall identify the system-of-interest and include supplementary information as determined by the project and/or organization.",
+        "ref": "iso42010-fdis-2011",
+        "locator": "ISO/IEC FDIS 42010:2011 (IEEE P42010/D9), Clause 5, 5.2"
+      },
+      "condition": "The verb include when used in Clause 5 indicates that either the information is present in the architecture description or reference to that information is provided therein.",
+      "document_kind": "architecture description",
+      "levels": null,
+      "examples": [],
+      "note": "Quoted from the Final Draft International Standard of the 2011 edition, posted publicly on the official 42010 site (now 404; Wayback copy 2012-02-07). The 2022 second edition (reference iso42010) may word or number this differently."
+    },
+    {
+      "id": "iso42010_evaluation_results",
+      "name": "Architecture description identification and overview",
+      "definition": {
+        "text": "Results from any evaluations of the architecture or its architecture description shall be included.",
+        "ref": "iso42010-fdis-2011",
+        "locator": "ISO/IEC FDIS 42010:2011 (IEEE P42010/D9), Clause 5, 5.2"
+      },
+      "condition": "The verb include when used in Clause 5 indicates that either the information is present in the architecture description or reference to that information is provided therein.",
+      "document_kind": "architecture description",
+      "levels": null,
+      "examples": [],
+      "note": "Quoted from the Final Draft International Standard of the 2011 edition, posted publicly on the official 42010 site (now 404; Wayback copy 2012-02-07). The 2022 second edition (reference iso42010) may word or number this differently."
+    },
+    {
+      "id": "iso42010_stakeholders",
+      "name": "Identification of stakeholders and concerns",
+      "definition": {
+        "text": "An architecture description shall identify the system stakeholders having concerns considered fundamental to the architecture of the system-of-interest.",
+        "ref": "iso42010-fdis-2011",
+        "locator": "ISO/IEC FDIS 42010:2011 (IEEE P42010/D9), Clause 5, 5.3"
+      },
+      "condition": "The following stakeholders shall be considered and when applicable, identified in the architecture description:",
+      "document_kind": "architecture description",
+      "levels": null,
+      "examples": [],
+      "note": "Quoted from the Final Draft International Standard of the 2011 edition, posted publicly on the official 42010 site (now 404; Wayback copy 2012-02-07). The 2022 second edition (reference iso42010) may word or number this differently."
+    },
+    {
+      "id": "iso42010_concerns",
+      "name": "Identification of stakeholders and concerns",
+      "definition": {
+        "text": "An architecture description shall identify the concerns considered fundamental to the architecture of the system-of-interest. The following concerns shall be considered and when applicable, identified in the architecture description: — the purposes of the system; — the suitability of the architecture for achieving the system’s purposes; — the feasibility of constructing and deploying the system;",
+        "ref": "iso42010-fdis-2011",
+        "locator": "ISO/IEC FDIS 42010:2011 (IEEE P42010/D9), Clause 5, 5.3"
+      },
+      "condition": "when applicable",
+      "document_kind": "architecture description",
+      "levels": null,
+      "examples": [],
+      "note": "Quoted from the Final Draft International Standard of the 2011 edition, posted publicly on the official 42010 site (now 404; Wayback copy 2012-02-07). The 2022 second edition (reference iso42010) may word or number this differently."
+    },
+    {
+      "id": "iso42010_concern_stakeholder_association",
+      "name": "Identification of stakeholders and concerns",
+      "definition": {
+        "text": "An architecture description shall associate each identified concern with the identified stakeholders having that concern.",
+        "ref": "iso42010-fdis-2011",
+        "locator": "ISO/IEC FDIS 42010:2011 (IEEE P42010/D9), Clause 5, 5.3"
+      },
+      "condition": null,
+      "document_kind": "architecture description",
+      "levels": null,
+      "examples": [],
+      "note": "Quoted from the Final Draft International Standard of the 2011 edition, posted publicly on the official 42010 site (now 404; Wayback copy 2012-02-07). The 2022 second edition (reference iso42010) may word or number this differently."
+    },
+    {
+      "id": "iso42010_viewpoints",
+      "name": "Architecture viewpoints",
+      "definition": {
+        "text": "An architecture description shall include each architecture viewpoint used therein. Each included architecture viewpoint shall be specified in accordance with the provisions of Clause 7. Each concern identified in accordance with 5.3 shall be framed by at least one viewpoint.",
+        "ref": "iso42010-fdis-2011",
+        "locator": "ISO/IEC FDIS 42010:2011 (IEEE P42010/D9), Clause 5, 5.4"
+      },
+      "condition": "The verb include when used in Clause 5 indicates that either the information is present in the architecture description or reference to that information is provided therein.",
+      "document_kind": "architecture description",
+      "levels": null,
+      "examples": [],
+      "note": "Quoted from the Final Draft International Standard of the 2011 edition, posted publicly on the official 42010 site (now 404; Wayback copy 2012-02-07). The 2022 second edition (reference iso42010) may word or number this differently."
+    },
+    {
+      "id": "iso42010_views",
+      "name": "Architecture views",
+      "definition": {
+        "text": "An architecture description shall include exactly one architecture view for each architecture viewpoint used. Each architecture view shall adhere to the conventions of its governing architecture viewpoint.",
+        "ref": "iso42010-fdis-2011",
+        "locator": "ISO/IEC FDIS 42010:2011 (IEEE P42010/D9), Clause 5, 5.5"
+      },
+      "condition": "The verb include when used in Clause 5 indicates that either the information is present in the architecture description or reference to that information is provided therein.",
+      "document_kind": "architecture description",
+      "levels": null,
+      "examples": [],
+      "note": "Quoted from the Final Draft International Standard of the 2011 edition, posted publicly on the official 42010 site (now 404; Wayback copy 2012-02-07). The 2022 second edition (reference iso42010) may word or number this differently."
+    },
+    {
+      "id": "iso42010_view_known_issues",
+      "name": "Architecture views",
+      "definition": {
+        "text": "recording of any known issues within a view with respect to its governing viewpoint. … “Known issues” per d) include unresolved issues, exceptions and deviations from the conventions.",
+        "ref": "iso42010-fdis-2011",
+        "locator": "ISO/IEC FDIS 42010:2011 (IEEE P42010/D9), Clause 5, 5.5 d) and NOTE 3"
+      },
+      "condition": null,
+      "document_kind": "architecture description",
+      "levels": null,
+      "examples": [],
+      "note": "Quoted from the Final Draft International Standard of the 2011 edition, posted publicly on the official 42010 site (now 404; Wayback copy 2012-02-07). The 2022 second edition (reference iso42010) may word or number this differently."
+    },
+    {
+      "id": "iso42010_models",
+      "name": "Architecture models",
+      "definition": {
+        "text": "An architecture view shall be composed of one or more architecture models. Each architecture model shall include version identification as specified by the organization and/or project. Each architecture model shall identify its governing model kind and adhere to the conventions of that model kind (see 5.4).",
+        "ref": "iso42010-fdis-2011",
+        "locator": "ISO/IEC FDIS 42010:2011 (IEEE P42010/D9), Clause 5, 5.6"
+      },
+      "condition": null,
+      "document_kind": "architecture description",
+      "levels": null,
+      "examples": [],
+      "note": "Quoted from the Final Draft International Standard of the 2011 edition, posted publicly on the official 42010 site (now 404; Wayback copy 2012-02-07). The 2022 second edition (reference iso42010) may word or number this differently."
+    },
+    {
+      "id": "iso42010_known_inconsistencies",
+      "name": "Consistency within an architecture description",
+      "definition": {
+        "text": "An architecture description shall record any known inconsistencies across its architecture models and its views.",
+        "ref": "iso42010-fdis-2011",
+        "locator": "ISO/IEC FDIS 42010:2011 (IEEE P42010/D9), Clause 5, 5.7.1"
+      },
+      "condition": "While consistent architecture descriptions are to be preferred, it is sometimes infeasible or impractical to resolve all inconsistencies for reasons of time, effort, or insufficient information. In such situations, known inconsistencies are to be recorded.",
+      "document_kind": "architecture description",
+      "levels": null,
+      "examples": [],
+      "note": "Quoted from the Final Draft International Standard of the 2011 edition, posted publicly on the official 42010 site (now 404; Wayback copy 2012-02-07). The 2022 second edition (reference iso42010) may word or number this differently."
+    },
+    {
+      "id": "iso42010_consistency_analysis",
+      "name": "Consistency within an architecture description",
+      "definition": {
+        "text": "An architecture description should include an analysis of consistency of its architecture models and its views.",
+        "ref": "iso42010-fdis-2011",
+        "locator": "ISO/IEC FDIS 42010:2011 (IEEE P42010/D9), Clause 5, 5.7.1"
+      },
+      "condition": null,
+      "document_kind": "architecture description",
+      "levels": null,
+      "examples": [],
+      "note": "Quoted from the Final Draft International Standard of the 2011 edition, posted publicly on the official 42010 site (now 404; Wayback copy 2012-02-07). The 2022 second edition (reference iso42010) may word or number this differently."
+    },
+    {
+      "id": "iso42010_correspondences",
+      "name": "Correspondences",
+      "definition": {
+        "text": "Each correspondence in an architecture description shall be identified and identify its participating AD elements.",
+        "ref": "iso42010-fdis-2011",
+        "locator": "ISO/IEC FDIS 42010:2011 (IEEE P42010/D9), Clause 5, 5.7.2"
+      },
+      "condition": null,
+      "document_kind": "architecture description",
+      "levels": null,
+      "examples": [],
+      "note": "Quoted from the Final Draft International Standard of the 2011 edition, posted publicly on the official 42010 site (now 404; Wayback copy 2012-02-07). The 2022 second edition (reference iso42010) may word or number this differently."
+    },
+    {
+      "id": "iso42010_correspondence_rules",
+      "name": "Correspondence rules",
+      "definition": {
+        "text": "An architecture description shall include each correspondence rule applying to it. … For each identified correspondence rule, an architecture description shall record whether the rule holds or otherwise record all known violations.",
+        "ref": "iso42010-fdis-2011",
+        "locator": "ISO/IEC FDIS 42010:2011 (IEEE P42010/D9), Clause 5, 5.7.3"
+      },
+      "condition": "The verb include when used in Clause 5 indicates that either the information is present in the architecture description or reference to that information is provided therein.",
+      "document_kind": "architecture description",
+      "levels": null,
+      "examples": [],
+      "note": "Quoted from the Final Draft International Standard of the 2011 edition, posted publicly on the official 42010 site (now 404; Wayback copy 2012-02-07). The 2022 second edition (reference iso42010) may word or number this differently."
+    },
+    {
+      "id": "iso42010_viewpoint_rationale",
+      "name": "Rationale recording",
+      "definition": {
+        "text": "An architecture description shall include a rationale for each architecture viewpoint included for use per 5.4 in terms of its stakeholders, concerns, model kinds, notations and methods.",
+        "ref": "iso42010-fdis-2011",
+        "locator": "ISO/IEC FDIS 42010:2011 (IEEE P42010/D9), Clause 5, 5.8.1"
+      },
+      "condition": "The verb include when used in Clause 5 indicates that either the information is present in the architecture description or reference to that information is provided therein.",
+      "document_kind": "architecture description",
+      "levels": null,
+      "examples": [],
+      "note": "Quoted from the Final Draft International Standard of the 2011 edition, posted publicly on the official 42010 site (now 404; Wayback copy 2012-02-07). The 2022 second edition (reference iso42010) may word or number this differently."
+    },
+    {
+      "id": "iso42010_decision_rationale",
+      "name": "Rationale recording",
+      "definition": {
+        "text": "An architecture description shall include rationale for each decision considered to be a key architecture decision (per 5.8.2).",
+        "ref": "iso42010-fdis-2011",
+        "locator": "ISO/IEC FDIS 42010:2011 (IEEE P42010/D9), Clause 5, 5.8.1"
+      },
+      "condition": "The verb include when used in Clause 5 indicates that either the information is present in the architecture description or reference to that information is provided therein.",
+      "document_kind": "architecture description",
+      "levels": null,
+      "examples": [],
+      "note": "Quoted from the Final Draft International Standard of the 2011 edition, posted publicly on the official 42010 site (now 404; Wayback copy 2012-02-07). The 2022 second edition (reference iso42010) may word or number this differently."
+    },
+    {
+      "id": "iso42010_alternatives",
+      "name": "Rationale recording",
+      "definition": {
+        "text": "An architecture description should provide evidence of the consideration of alternatives and the rationale for the choices made.",
+        "ref": "iso42010-fdis-2011",
+        "locator": "ISO/IEC FDIS 42010:2011 (IEEE P42010/D9), Clause 5, 5.8.1"
+      },
+      "condition": null,
+      "document_kind": "architecture description",
+      "levels": null,
+      "examples": [],
+      "note": "Quoted from the Final Draft International Standard of the 2011 edition, posted publicly on the official 42010 site (now 404; Wayback copy 2012-02-07). The 2022 second edition (reference iso42010) may word or number this differently."
+    },
+    {
+      "id": "iso42010_decision_recording",
+      "name": "Decision recording",
+      "definition": {
+        "text": "An architecture description should record architecture decisions considered to be key to the architecture of the system-of-interest. It is not practical to record every architecture decision about a system.",
+        "ref": "iso42010-fdis-2011",
+        "locator": "ISO/IEC FDIS 42010:2011 (IEEE P42010/D9), Clause 5, 5.8.2"
+      },
+      "condition": "A decision recording and sharing strategy should be applied by the organization and/or project to establish criteria for selecting key decisions to be recorded and supported with rationales in the architecture description.",
+      "document_kind": "architecture description",
+      "levels": null,
+      "examples": [],
+      "note": "Quoted from the Final Draft International Standard of the 2011 edition, posted publicly on the official 42010 site (now 404; Wayback copy 2012-02-07). The 2022 second edition (reference iso42010) may word or number this differently."
+    },
+    {
+      "id": "iso42010_decision_record_contents",
+      "name": "Decision recording",
+      "definition": {
+        "text": "When recording decisions, the following should be considered: — the decision is uniquely identified; — the decision is stated; — the decision is linked to the system concerns to which it pertains; — the owner of the decision is identified;",
+        "ref": "iso42010-fdis-2011",
+        "locator": "ISO/IEC FDIS 42010:2011 (IEEE P42010/D9), Clause 5, 5.8.2"
+      },
+      "condition": null,
+      "document_kind": "architecture description",
+      "levels": null,
+      "examples": [],
+      "note": "Quoted from the Final Draft International Standard of the 2011 edition, posted publicly on the official 42010 site (now 404; Wayback copy 2012-02-07). The 2022 second edition (reference iso42010) may word or number this differently."
+    },
+    {
+      "id": "google_dd_form",
+      "name": "Anatomy of a design doc",
+      "definition": {
+        "text": "Design docs are informal documents and thus don’t follow a strict guideline for their content. Rule #1 is: Write them in whatever form makes the most sense for the particular project.",
+        "ref": "google-design-docs",
+        "locator": "Design Docs at Google (Ubl, 2020), 'Anatomy of a design doc'"
+      },
+      "condition": null,
+      "document_kind": "software design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "google_dd_context_and_scope",
+      "name": "Context and scope",
+      "definition": {
+        "text": "This section gives the reader a very rough overview of the landscape in which the new system is being built and what is actually being built. This isn’t a requirements doc. Keep it succinct! The goal is that readers are brought up to speed but some previous knowledge can be assumed and detailed info can be linked to. This section should be entirely focused on objective background facts.",
+        "ref": "google-design-docs",
+        "locator": "Design Docs at Google (Ubl, 2020), 'Context and scope'"
+      },
+      "condition": null,
+      "document_kind": "software design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "google_dd_goals_and_non_goals",
+      "name": "Goals and non-goals",
+      "definition": {
+        "text": "A short list of bullet points of what the goals of the system are, and, sometimes more importantly, what non-goals are. Note, that non-goals aren’t negated goals like “The system shouldn’t crash”, but rather things that could reasonably be goals, but are explicitly chosen not to be goals.",
+        "ref": "google-design-docs",
+        "locator": "Design Docs at Google (Ubl, 2020), 'Goals and non-goals'"
+      },
+      "condition": null,
+      "document_kind": "software design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "google_dd_actual_design",
+      "name": "The actual design",
+      "definition": {
+        "text": "This section should start with an overview and then go into details. The design doc is the place to write down the trade-offs you made in designing your software. Focus on those trade-offs to produce a useful document with long-term value. That is, given the context (facts), goals and non-goals (requirements), the design doc is the place to suggest solutions and show why a particular solution best satisfies those goals.",
+        "ref": "google-design-docs",
+        "locator": "Design Docs at Google (Ubl, 2020), 'The actual design'"
+      },
+      "condition": null,
+      "document_kind": "software design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "google_dd_system_context_diagram",
+      "name": "System-context-diagram",
+      "definition": {
+        "text": "In many docs a system-context-diagram can be very useful. Such a diagram shows the system as part of the larger technical landscape and allows readers to contextualize the new design given its environment that they are already familiar with.",
+        "ref": "google-design-docs",
+        "locator": "Design Docs at Google (Ubl, 2020), 'The actual design' > 'System-context-diagram'"
+      },
+      "condition": "In many docs",
+      "document_kind": "software design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "google_dd_apis",
+      "name": "APIs",
+      "definition": {
+        "text": "If the system under design exposes an API, then sketching out that API is usually a good idea. In most cases, however, one should withstand the temptation to copy-paste formal interface or data definitions into the doc as these are often verbose, contain unnecessary detail and quickly get out of date. Instead focus on the parts that are relevant to the design and its trade-offs.",
+        "ref": "google-design-docs",
+        "locator": "Design Docs at Google (Ubl, 2020), 'The actual design' > 'APIs'"
+      },
+      "condition": "If the system under design exposes an API",
+      "document_kind": "software design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "google_dd_data_storage",
+      "name": "Data storage",
+      "definition": {
+        "text": "Systems that store data should likely discuss how and in what rough form this happens. Similar to the advice on APIs, and for the same reasons, copy-pasting complete schema definitions should be avoided. Instead focus on the parts that are relevant to the design and its trade-offs.",
+        "ref": "google-design-docs",
+        "locator": "Design Docs at Google (Ubl, 2020), 'The actual design' > 'Data storage'"
+      },
+      "condition": "Systems that store data",
+      "document_kind": "software design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "google_dd_code_and_pseudocode",
+      "name": "Code and pseudo-code",
+      "definition": {
+        "text": "Design docs should rarely contain code, or pseudo-code except in situations where novel algorithms are described. As appropriate, link to prototypes that show the implementability of the design.",
+        "ref": "google-design-docs",
+        "locator": "Design Docs at Google (Ubl, 2020), 'The actual design' > 'Code and pseudo-code'"
+      },
+      "condition": "except in situations where novel algorithms are described",
+      "document_kind": "software design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "google_dd_degree_of_constraint",
+      "name": "Degree of constraint",
+      "definition": {
+        "text": "On one end of the extreme is the “greenfield software project”, where all we know are the goals, and the solution can be whatever makes the most sense. Such a document may be wide-ranging, but it also needs to quickly define a set of rules that allow zooming in on a manageable set of solutions.",
+        "ref": "google-design-docs",
+        "locator": "Design Docs at Google (Ubl, 2020), 'The actual design' > 'Degree of constraint'"
+      },
+      "condition": null,
+      "document_kind": "software design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "google_dd_alternatives_considered",
+      "name": "Alternatives considered",
+      "definition": {
+        "text": "This section lists alternative designs that would have reasonably achieved similar outcomes. The focus should be on the trade-offs that each respective design makes and how those trade-offs led to the decision to select the design that is the primary topic of the document.",
+        "ref": "google-design-docs",
+        "locator": "Design Docs at Google (Ubl, 2020), 'Alternatives considered'"
+      },
+      "condition": null,
+      "document_kind": "software design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "google_dd_cross_cutting_concerns",
+      "name": "Cross-cutting concerns",
+      "definition": {
+        "text": "This is where your organization can ensure that certain cross-cutting concerns such as security, privacy, and observability are always taken into consideration. These are often relatively short sections that explain how the design impacts the concern and how the concern is addressed.",
+        "ref": "google-design-docs",
+        "locator": "Design Docs at Google (Ubl, 2020), 'Cross-cutting concerns'"
+      },
+      "condition": "In case of dedicated docs for these topics, the central design doc can, of course, reference them instead of going into detail.",
+      "document_kind": "software design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "google_dd_length",
+      "name": "The length of a design doc",
+      "definition": {
+        "text": "Design docs should be sufficiently detailed but short enough to actually be read by busy people. The sweet spot for a larger project seems to be around 10-20ish pages. If you get way beyond that, it might make sense to split up the problem into more manageable sub problems.",
+        "ref": "google-design-docs",
+        "locator": "Design Docs at Google (Ubl, 2020), 'The length of a design doc'"
+      },
+      "condition": "It should also be noted that it is absolutely possible to write a 1-3 page “mini design doc”. This is especially helpful for incremental improvements or sub tasks in an agile project",
+      "document_kind": "software design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "google_dd_not_implementation_manual",
+      "name": "When not to write a design doc.",
+      "definition": {
+        "text": "A clear indicator that a doc might not be necessary are design docs that are really implementation manuals. If a doc basically says “This is how we are going to implement it” without going into trade-offs, alternatives, and explaining decision making (or if the solution is so obvious as to mean there were no trade-offs), then it would probably have been a better idea to write the actual program right away.",
+        "ref": "google-design-docs",
+        "locator": "Design Docs at Google (Ubl, 2020), 'When not to write a design doc.'"
+      },
+      "condition": null,
+      "document_kind": "software design doc",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc4101_model_first",
+      "name": "Introduction",
+      "definition": {
+        "text": "One way to reduce this load is to present the reviewer with a MODEL -- a short description of the system in overview form. … The intention is that the model would either be the first section of the protocol document or be a separate document provided with the protocol.",
+        "ref": "rfc4101",
+        "locator": "RFC 4101, Section 1"
+      },
+      "condition": null,
+      "document_kind": "protocol model (overview section or companion document of a protocol specification)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc4101_three_questions",
+      "name": "The Purpose of a Protocol Model",
+      "definition": {
+        "text": "A protocol model needs to answer three basic questions: 1. What problem is the protocol trying to achieve? 2. What messages are being transmitted and what do they mean? 3. What are the important, but unobvious, features of the protocol?",
+        "ref": "rfc4101",
+        "locator": "RFC 4101, Section 2"
+      },
+      "condition": null,
+      "document_kind": "protocol model (overview section or companion document of a protocol specification)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc4101_not_complete_description",
+      "name": "The Purpose of a Protocol Model",
+      "definition": {
+        "text": "The purpose of a protocol model is explicitly not to provide a complete or alternate description of the protocol being discussed. Instead, it is to provide a big picture overview of the protocol so that readers can quickly understand the essential elements of how it works.",
+        "ref": "rfc4101",
+        "locator": "RFC 4101, Section 2"
+      },
+      "condition": null,
+      "document_kind": "protocol model (overview section or companion document of a protocol specification)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc4101_less_is_more",
+      "name": "Less is more",
+      "definition": {
+        "text": "Humans are only capable of keeping a very small number of pieces of information in their head at once. Because we're interested in ensuring that people get the big picture, we have to dispense with a lot of detail. That's good, not bad. The simpler you can make things the better.",
+        "ref": "rfc4101",
+        "locator": "RFC 4101, Section 3.1"
+      },
+      "condition": null,
+      "document_kind": "protocol model (overview section or companion document of a protocol specification)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc4101_abstraction_is_good",
+      "name": "Abstraction is good",
+      "definition": {
+        "text": "A key technique for representing complex systems is to try to abstract away pieces. … Don't be afraid to compress multiple protocol elements into a single abstract piece for pedagogical purposes.",
+        "ref": "rfc4101",
+        "locator": "RFC 4101, Section 3.2"
+      },
+      "condition": null,
+      "document_kind": "protocol model (overview section or companion document of a protocol specification)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc4101_well_chosen_details",
+      "name": "A few well-chosen details sometimes help",
+      "definition": {
+        "text": "Thus, it's often a good approach to talk about the material in the abstract and then provide a concrete description of one specific piece to bring it into focus. Authors should focus on the normal path. Error cases and corner cases should only be discussed where they help illustrate an important point.",
+        "ref": "rfc4101",
+        "locator": "RFC 4101, Section 3.3"
+      },
+      "condition": null,
+      "document_kind": "protocol model (overview section or companion document of a protocol specification)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc4101_visual_form",
+      "name": "Writing Protocol Models",
+      "definition": {
+        "text": "We recommend a presentation format centered around a few key diagrams, with explanatory text for each. These diagrams should be simple and typically consist of \"boxes and arrows\"",
+        "ref": "rfc4101",
+        "locator": "RFC 4101, Section 4"
+      },
+      "condition": null,
+      "document_kind": "protocol model (overview section or companion document of a protocol specification)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc4101_describe_problem",
+      "name": "Describe the problem you're trying to solve",
+      "definition": {
+        "text": "The most critical task that a protocol model must perform is to explain what the protocol is trying to achieve. … The \"Problem\" section of the model should start with a short statement of the environments in which the protocol is expected to be used. This section should describe the relevant entities and the likely scenarios under which they would participate in the protocol.",
+        "ref": "rfc4101",
+        "locator": "RFC 4101, Section 4.1"
+      },
+      "condition": null,
+      "document_kind": "protocol model (overview section or companion document of a protocol specification)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc4101_trust_relationships",
+      "name": "Describe the problem you're trying to solve",
+      "definition": {
+        "text": "It is particularly important to lay out the trust relationships between the various parties, as these are often unobvious.",
+        "ref": "rfc4101",
+        "locator": "RFC 4101, Section 4.1"
+      },
+      "condition": null,
+      "document_kind": "protocol model (overview section or companion document of a protocol specification)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc4101_broad_overview",
+      "name": "Describe the protocol in broad overview",
+      "definition": {
+        "text": "This diagram should be accompanied with explanatory text that describes the purpose of each message and the MAJOR data elements. This section SHOULD NOT contain detailed descriptions of the protocol messages or of each data element. In particular, bit diagrams, ASN.1 modules, and XML schema SHOULD NOT be shown.",
+        "ref": "rfc4101",
+        "locator": "RFC 4101, Section 4.2"
+      },
+      "condition": null,
+      "document_kind": "protocol model (overview section or companion document of a protocol specification)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc4101_minimal_state_machines",
+      "name": "Describe the protocol in broad overview",
+      "definition": {
+        "text": "However, such state machines should be kept as minimal as possible. Remember that the purpose is to promote high-level comprehension, not complete understanding.",
+        "ref": "rfc4101",
+        "locator": "RFC 4101, Section 4.2"
+      },
+      "condition": "In certain cases, it may be helpful to provide a state machine description of the behavior of network elements.",
+      "document_kind": "protocol model (overview section or companion document of a protocol specification)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc4101_important_features",
+      "name": "Describe any important protocol features",
+      "definition": {
+        "text": "The final section (if there is one) should contain an explanation of any important protocol features that are not obvious from the previous sections.",
+        "ref": "rfc4101",
+        "locator": "RFC 4101, Section 4.3"
+      },
+      "condition": "If there are no important points to be made, they should not populate this section.",
+      "document_kind": "protocol model (overview section or companion document of a protocol specification)",
+      "levels": null,
+      "examples": []
+    }
+  ]
+}
