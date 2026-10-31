@@ -36,8 +36,8 @@ and return a provider name instead of a model identifier.  Any session
 type may be routed; the setting is explicit per role, and a role with no
 model or provider configured runs plain Claude on the CLI default.
 
-Scenario 0 (``qa_interactive``) additionally keeps a pre-split
-plain-model ``qa_scenario`` setting from applying to it; see
+Scenario 0 (``qa_interactive``) additionally keeps applying a pre-split
+plain-model ``qa_scenario`` setting; see
 :func:`_legacy_s0_resolution` for what that compatibility shim does and
 does not inherit.
 """
