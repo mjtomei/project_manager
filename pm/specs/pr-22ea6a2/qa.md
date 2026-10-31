@@ -18,6 +18,12 @@ same manual merge gate, which additionally holds the target's whole unmerged
 dependency closure. `--stop-before-merge` survives only as a deprecated alias
 for it. Scenarios below name `wait-for-merge`.)*
 
+*(Requirements 35–40 and the matching edge cases were added after the
+2026-10-29 `d9f2` iteration and the master integration: held-QA discard, the
+old review loop's launch-lease release, the `in_progress` handoff gate, the
+launch-pending reply, the mixed reset/already-waiting wording, and the
+sign-off-return closure.)*
+
 User-facing surfaces to exercise: the `pm autostart fresh` CLI (which reaches the
 running TUI over the existing session command queue), the TUI key chords
 (`z a` / `z O` / `z A`, plus plain `a` / `O` / `A` / `z`-prefix behaviour), the
@@ -136,6 +142,13 @@ on-disk state in the git-tracked `pm/project.yaml`.
     THEN a new attempt starts (`from_status: in_review`) and one more fresh
     review runs after the next handoff.
 
+35. GIVEN a multi-PR request where one PR is reset and another is already
+    waiting for its implementation turn,
+    WHEN the user runs `pm autostart fresh <reset-pr> <waiting-pr>`,
+    THEN each PR is named by what actually happened to it (one "returned to
+    implementation", the other "already waiting") in the command output and in
+    the TUI log line — the waiting PR is never claimed to have been reset.
+
 ### R5 — Downstream flow: QA, sign-off, manual merge gate, evidence
 
 19. GIVEN a PR that already completed review → QA → sign-off once and is
@@ -159,6 +172,22 @@ on-disk state in the git-tracked `pm/project.yaml`.
     superseded reason (a later repeat does not duplicate it), the sign-off
     record is marked invalidated, and an open sign-off "return" episode is
     closed so nothing relaunches the implementation session with `--fresh`.
+
+36. GIVEN the previous QA run ended `INPUT_REQUIRED` and is *held* (its status
+    row says the answer belongs in the scenario worker pane, still watching for
+    a follow-up),
+    WHEN the user answers in the implementation session instead and runs the
+    fresh request,
+    THEN the held run is discarded — no held QA row or window survives, its
+    resume snapshot is cleared so a TUI restart cannot resurrect it, and the
+    new attempt's QA starts its own fresh run after the new review.
+
+37. GIVEN a sign-off run returned the PR to implementation and that return is
+    still awaiting its fresh implementation launch,
+    WHEN the user resumes the existing pane and runs the fresh request,
+    THEN the return is closed/superseded and the scheduler does not relaunch
+    the implementation session with `--fresh`: the same pane, session and
+    scrollback continue, with no second implementation window.
 
 ### R6 — Rejections, validation, and edge states
 
@@ -197,6 +226,14 @@ on-disk state in the git-tracked `pm/project.yaml`.
     THEN the reset is accepted, the status row explains the wait ("spec
     generation awaiting input" / "implementation window missing; relaunching"),
     and no review starts until the blocking state clears.
+
+38. GIVEN the implementation turn has already completed but the fresh review
+    launch cannot start (e.g. the project store is locked by another command),
+    WHEN the user reads the command reply / the status row,
+    THEN the turn is reported as complete and the review launch as
+    pending/retrying — not as "waiting for the implementation turn"; the
+    attempt stays armed, retries at a bounded cadence, and starts exactly one
+    review once the obstacle clears.
 
 ### R7 — Restart recovery
 
@@ -245,6 +282,21 @@ on-disk state in the git-tracked `pm/project.yaml`.
     superseded so it neither suppresses nor advances the new attempt) and the
     new attempt's QA / sign-off run happens after the new review.
 
+39. GIVEN a review loop is actively running with an iteration in flight (it
+    holds the cross-driver review launch lease),
+    WHEN the user requests a fresh reset,
+    THEN the old loop's lease is released with the reset, so the successor
+    review starts promptly after the handoff and reaches its own verdict — it
+    does not sit waiting on the old lease, stand down as superseded, or leave
+    the PR in `in_review` with no review.
+
+40. GIVEN a fresh attempt whose review has already started (the attempt was
+    consumed) and the PR later returns to `in_progress` (e.g. a sign-off bounce
+    whose relaunch has not happened yet),
+    WHEN the implementation transcript still shows the old completed turn,
+    THEN no second review is started over that old turn: the PR waits for a new
+    implementation turn.
+
 ## Setup
 
 Use the `tui-manual-test.md` instruction: editable install with
@@ -290,6 +342,19 @@ Feature-specific fixture notes:
 - **Status observation:** `pm autostart status` / `pm autostart list` from a pane
   inside the test tmux session, the `a` runs popup, and `pm pr show <pr>` /
   `pm/project.yaml` (read-only) for the record.
+- **Held QA run:** configure the `qa_scenario` fake with an `INPUT_REQUIRED`
+  verdict so the run finalizes and is *held* watching its scenario worker pane
+  (the row reads "QA INPUT_REQUIRED — answer in the scenario worker pane").  The
+  fake cannot answer the follow-up itself; the point of the story is that a
+  fresh reset discards the held run rather than the follow-up succeeding.
+- **Open sign-off return:** configure the `signoff` fake with `SIGNOFF_IMPL` and
+  let the sign-off run bounce the PR to implementation, so
+  `pr["signoff_return"]` is awaiting its fresh launch.  Resume the *existing*
+  implementation pane instead of letting the scheduler relaunch it.
+- **Permission prompt:** a real Claude client records a `permission_prompt`
+  hook event; the same event can be written through the product's hook receiver
+  to model "the session is sitting at a permission prompt" while the
+  implementation transcript shows the turn still running.
 
 ## Edge Cases
 
@@ -330,6 +395,17 @@ Feature-specific fixture notes:
   implementation turn".  Check the missing-window reason by closing the
   implementation window while the attempt waits, and confirm it resolves on
   the next pass once the pane is recreated.
+- A live permission prompt in the implementation window at reset time keeps its
+  own status reason ("permission prompt in implementation window"); it is never
+  reported as a completed turn, and the handoff waits for the answered turn.
+- A per-run transcript path that exists but cannot be read (or a dangling link)
+  falls back to the session's own transcript found by session id; the handoff
+  still fires exactly once rather than stalling on an unreadable file.
+- A held `INPUT_REQUIRED` QA run at reset time is discarded (row, window and
+  resume snapshot); a TUI restart before the new review completes must not
+  re-adopt it.
+- A multi-PR fresh call that mixes a reset PR and an already-waiting PR names
+  each group accurately in the reply and the TUI log.
 
 ## Pass/Fail Criteria
 
