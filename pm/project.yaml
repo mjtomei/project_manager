@@ -14331,7 +14331,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-31T18:30:39.214098+00:00'
+  updated_at: '2026-10-31T20:11:02.479381+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -15048,6 +15048,38 @@ prs:
       next.'
     created_at: '2026-10-31T18:30:13Z'
     last_edited: '2026-10-31T18:30:39Z'
+  - id: note-6f99af4
+    text: 'QA S18 (original bug re-proven on the post-integration head f78417017):
+      PASS, no code change. Fake-github git-backed stand-in in a disposable HOME (no
+      real gh/claude); PYTHONPATH=/workspace over /opt/pm-src. Story 1 - pm pr close
+      "#1" exits 0 with Closing/GitHub closed/Closed #1 (status: closed)/Kept (registry
+      entry, branch feat-superseded-a, workdir)/Reopen/Cleanup on stdout and the dependent
+      warning + both-ways-out hint on stderr; show retains title/branch/workdir/GitHub
+      URL/description/note with status closed; list shows 🚫 #1 [closed] and ⏳ B [pending]
+      <- [pr-252d4dd], list --open only B; stand-in PR #1 CLOSED with head feat-superseded-a
+      still on the backing repo (no --delete-branch); workdir 45-file recursive sha256
+      listing byte-identical (tracked mod, untracked, ignored .cache/, captures/)
+      and git status --porcelain --ignored unchanged. Story 2 - repeat close: one
+      #1 entry, one note, closed_at byte-identical (2026-10-31T20:03:14.139136+00:00),
+      updated_at strictly later, workdir/branch intact. Story 3 - one-shot "pr close"
+      failure (HTTP 403 rate limit): stderr Warning: Could not close GitHub PR: gh:
+      API rate limit exceeded..., exit 0, stdout still Closed + Kept, closed_at stamped
+      20:06:44.433043, entry/note/branch/workdir intact, stand-in still OPEN; retry
+      then prints GitHub PR #1 closed., stand-in CLOSED, closed_at unchanged, updated_at
+      moved. Story 4 - reopen via pm pr edit --status pending prints "status: closed
+      → pending", drops closed_at, keeps title/desc/note/branch/workdir/B depends_on;
+      re-close stamps a strictly later closed_at (20:08:11.658105), all other fields
+      identical, hash snapshot unchanged, branch still on the backing repo. Reproduction
+      tests on this head: 4 passed (test_default_close_retains_entry_and_lifecycle_fields,
+      test_close_closes_github_pr_without_delete_branch, test_remote_branch_still_exists_after_close,
+      test_workdir_is_byte_identical_after_close); same file copied into a detached
+      origin/master worktree: 4 failed, so the tests reproduce the pre-fix bug. Observation
+      (not a defect): pm pr list has no "blocked" marker - the trailing * is the active-PR
+      marker, so B reads identically before and after the reopen; the visible change
+      is A flipping 🚫 [closed] -> ⏳ [pending]. Evidence: /pm-captures/scenarios/18/{close-default,repeat-close,github-failure,retry-close,reopen-reclose}/
+      (cast + mp4 + manifests + sha256 snapshots).'
+    created_at: '2026-10-31T20:11:02Z'
+    last_edited: '2026-10-31T20:11:02Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
