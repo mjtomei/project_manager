@@ -2526,7 +2526,13 @@ R60. **Integration with master (#249, 2026-10-31).** origin/master merged
    structurally (571 PR ids, none lost or duplicated, every entry equal to
    the side that changed it; `project` and `plans` equal master). Tests: the
    recipe file is **239 passed**; `test_qa_artifact_web_ui_recording.py` and
-   `test_qa_loop.py` **145 passed**.
+   `test_qa_loop.py` **145 passed**; full suite `env -u PM_HOST_HOME
+   PATH=/usr/bin:/bin pytest tests/ -q --deselect tests/test_merge_publish.py
+   --deselect tests/test_signoff_integration.py` -> **5315 passed, 1 skipped,
+   121 deselected, 0 failed** (437.90 s), with the `markdown` package
+   installed (without it exactly the 12 `test_markdown_render.py` cases fail
+   with `ModuleNotFoundError`, an environment gap). Evidence:
+   `/pm-captures/integration-master-eaf3372e/`.
 
 ## Non-goals
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
