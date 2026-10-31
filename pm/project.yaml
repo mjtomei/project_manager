@@ -48690,7 +48690,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-10-31T20:26:27.294868+00:00'
+  updated_at: '2026-10-31T22:04:21.275764+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -49048,6 +49048,17 @@ prs:
       and the pre/post-fix evidence are unaffected).'
     created_at: '2026-10-31T20:26:27Z'
     last_edited: '2026-10-31T20:26:27Z'
+  - id: note-01bf255
+    text: 'QA S16 PASS (pm qa debug fail-closed boundary, 5/5 stories: preflight abort,
+      create failure, healthy in-container control, explicitly-disabled host control,
+      window-creation failure). Captures: /pm-captures/scenarios/16/{01-preflight-abort,02-create-failure,03-healthy-container,04-disabled-host,05-window-failure}.
+      Fixture trap for future S16 runs: asciinema 2.1.0 does NOT propagate the wrapped
+      command exit status (`asciinema rec -c false` exits 0), so record the rc inside
+      the recorded script (`pm qa debug repro; rc=$?; echo $rc > f`) or the exit-code
+      Thens (stories 1/2/5) misread as failures. `agg` is not installed; download
+      agg-aarch64-unknown-linux-gnu v1.9.0 to a scratch bin for the mp4 render.'
+    created_at: '2026-10-31T22:04:21Z'
+    last_edited: '2026-10-31T22:04:21Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
