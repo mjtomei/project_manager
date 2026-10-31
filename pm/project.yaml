@@ -34838,7 +34838,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:35:03.724695+00:00'
-  updated_at: '2026-10-31T18:07:25.345765+00:00'
+  updated_at: '2026-10-31T18:27:59.035732+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -35215,6 +35215,34 @@ prs:
       Autostart will use wait_for_merge; no PR merge is authorized by this request.'
     created_at: '2026-10-31T18:07:25.345765+00:00'
     last_edited: '2026-10-31T18:07:25.345765+00:00'
+  - id: note-8ebae2b
+    text: 'INTEGRATION COMPLETE 2026-10-31 (second restart): merged origin/master@eaf3372e
+      into the branch as merge commit acc185d6 and pushed; master untouched at eaf3372e.
+      Conflicts resolved: (1) pm_core/qa_loop.py — master replaced the _write_status()
+      closure with the wider-called _write_dashboard() (S106) and moved the pre-finalize
+      resume snapshot above the final status write (S47); took master structure, _write_dashboard
+      now passes run_id=state.loop_id so all 11 status writes keep the run id, and
+      _persist_scenario_verdicts(..., overall=) + the post-persist _sync_captures_evidence()
+      stay after the persist before the finalize pane; the branch old post-persist
+      _write_resume_file was NOT restored (master moved that snapshot earlier). (2)
+      tests/conftest.py — both sides added an autouse fixture in the same place; kept
+      BOTH _isolated_sessions_tree and master _no_inherited_routing_env. paths.py
+      routing auto-resolved to master fail-closed form with the branch additive create=False
+      reader mode; project.yaml auto-merged with 571 PR ids and all 17 pr-1ae1d2d
+      notes preserved and the signoff provider/effort override intact. Tests on the
+      merged tree: tests/test_captures_provenance.py 77 passed; test_qa_loop+test_qa_planner_handoff+test_workspace_trust+test_captures_dir_mount
+      277 passed; test_prompt_bounds+test_behavior_report+test_signoff+test_signoff_integration
+      337 passed; full suite 5265 passed, 1 skipped, 12 failed — all 12 test_markdown_render
+      "ModuleNotFoundError: No module named markdown", the documented environmental
+      baseline for this container (unrelated to the diff). Post-fix repro re-run against
+      the merged tree: nested fixture records still detected, quarantined to scenarios/_foreign/<run>-<n>
+      with bytes preserved, outer membership recovered from qa_runs/, sign-off block
+      names the run — unchanged behaviour. Spec pm/specs/pr-1ae1d2d/impl.md updated
+      with this reconciliation. Earlier review/QA verdicts are preserved as history
+      but do not cover this integration: fresh review/QA/sign-off is required. No
+      acceptance criteria weakened; no new dependencies; no PR merge authorized.'
+    created_at: '2026-10-31T18:27:58Z'
+    last_edited: '2026-10-31T18:27:58Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
