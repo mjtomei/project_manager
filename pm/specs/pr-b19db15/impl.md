@@ -2488,6 +2488,42 @@ R59. **Three guards the kept recipes carry had no case.** Found by review loop
    No `pm_core/` change; the dropped helper/prompt/verifier work stays
    dropped.
 
+R60. **Integration with master (#249, 2026-10-31).** origin/master merged
+   #249 (`eaf3372e`), which replaced both recording recipes' inline render
+   block with a reusable `render_cast` function: `agg`, then `ffmpeg` with
+   `-vsync vfr -enc_time_base 1/100 -video_track_timescale 100` and a
+   `tpad`/`setpts` final-frame hold (a constant-rate encode of a sparse TUI
+   cast took more than 10 minutes where VFR took about 2), writing
+   `recording.mp4.partial.mp4` and renaming it to `recording.mp4` only after
+   a successful encode, with `-nostdin` so a batch loop cannot lose file
+   names to ffmpeg's stdin. The merge keeps that machinery and this PR's
+   guards:
+   - the block still starts from `cast=<capture-dir>/recording.cast` (the
+     tests locate the block and its cast path by that line);
+   - the capture-directory missing/unwritable checks (R57/R59) and the
+     pre-render `rm -f` of this run's mp4, gif and partial run first, so a
+     refused render acts on nothing and a missing-encoder stop (which never
+     reaches `render_fail`) still clears the previous run's outputs;
+   - `render_fail` removes the gif, the mp4 and the partial, and the stage
+     checks keep their messages: "there is no cast to render", "ffmpeg is
+     not installed", "agg failed on the cast — is 'agg' installed?", "agg
+     wrote no gif", "ffmpeg failed on the gif", "ffmpeg wrote no mp4";
+   - `render_cast` returns non-zero rather than exiting, so a batch caller
+     can keep going; the recipe's own call is `render_cast "$cast" ||
+     render_fail …`, so the block exits non-zero.
+   The one policy clash was the stale video: master's note said a failed
+   render keeps an older completed `recording.mp4` ("do not delete it"),
+   while R8 requires the render step to clear this run's outputs so an
+   earlier run's video cannot be presented as this run's evidence. The
+   merged block keeps R8 (the pre-render `rm` and `render_fail`), and the
+   "Partial output is never published" note was rewritten to say so;
+   master's partial-publish guarantee (the `.partial` file is renamed only
+   on success) is kept. `pm/project.yaml` auto-merged; it was verified
+   structurally (571 PR ids, none lost or duplicated, every entry equal to
+   the side that changed it; `project` and `plans` equal master). Tests: the
+   recipe file is **239 passed**; `test_qa_artifact_web_ui_recording.py` and
+   `test_qa_loop.py` **145 passed**.
+
 ## Non-goals
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
 - **No new helper, prompt block, verifier text, or QA-loop change.** Those

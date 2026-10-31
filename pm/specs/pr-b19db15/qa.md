@@ -49,6 +49,12 @@ recording-recipe bugs that any worker following the recipe hits:
   bit and no *search* bit, which `[ -w ]` alone cannot see — and a render
   that stops before `agg` (a missing encoder) still leaves none of the
   previous run's video or gif behind (R59);
+- the render blocks now use master's `render_cast` (merged from #249,
+  2026-10-31): a variable-frame-rate encode with the final frame held at the
+  GIF's duration, writing `recording.mp4.partial.mp4` and renaming it only
+  after a successful encode. The guards above are unchanged and still run
+  before the renderer; a failed render still exits non-zero and leaves no
+  `recording.mp4`, gif or partial behind (R60 in impl.md).
 - the web-UI finalize/driver/teardown guards stop the block with
   `if … exit 1`, because `: "${VAR:?}"` only stops a *scripted* run — in an
   interactive shell the next line still runs (the `rm` aimed at

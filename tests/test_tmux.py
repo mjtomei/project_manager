@@ -49,16 +49,18 @@ class TestAttachedGroupActiveWindows:
     @patch("pm_core.tmux._run")
     def test_single_query_filters_group_and_attachment(self, run):
         run.return_value = MagicMock(returncode=0, stdout=(
-            "1|@1|base\n2|@2|base~1\n0|@3|base~2\n"
-            "1|@4|other\n1|@5|base-extra\n"
-            "|@6|base~3\n1||base~4\nmalformed\n"
-            "1|@7|base~5|with|pipes\n"))
+            "1|@1|base|base\n2|@2|base|base~1\n0|@3|base|base~2\n"
+            "1|@4||other\n1|@5||base-extra\n"
+            "|@6|base|base~3\n1||base|base~4\nmalformed\n"
+            "1|@7|base|base~5|with|pipes\n"
+            "1|@8|base|myview\n1|@9|scratch|view2\n"))
         assert attached_group_active_windows("base", socket_path="/socket") == {
-            "base": "@1", "base~1": "@2", "base~5|with|pipes": "@7"}
+            "base": "@1", "base~1": "@2", "base~5|with|pipes": "@7",
+            "myview": "@8"}
         run.assert_called_once()
         cmd = run.call_args.args[0]
         assert "list-sessions" in cmd
-        assert "#{session_attached}|#{window_id}|#{session_name}" in cmd
+        assert "#{session_attached}|#{window_id}|#{session_group}|#{session_name}" in cmd
         assert cmd[cmd.index("-S") + 1] == "/socket"
 
     @patch("pm_core.tmux._run")
@@ -66,7 +68,7 @@ class TestAttachedGroupActiveWindows:
         # tmux rewrites control characters (e.g. a tab) in format output to
         # "_" when the server runs under LC_ALL=C, so a tab-separated query
         # silently parsed as zero fields.  The separator must be printable.
-        run.return_value = MagicMock(returncode=0, stdout="1|@1|base\n")
+        run.return_value = MagicMock(returncode=0, stdout="1|@1|base|base\n")
         assert attached_group_active_windows("base") == {"base": "@1"}
         fmt = next(a for a in run.call_args.args[0] if "session_name" in a)
         assert "\t" not in fmt
@@ -460,16 +462,30 @@ class TestCurrentOrBaseSession:
         assert current_or_base_session("proj") == "proj~2"
 
     @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.session_group", return_value="")
     @patch("pm_core.tmux.list_grouped_sessions", return_value=["proj~1", "proj~2"])
     @patch("pm_core.tmux.get_session_name", return_value="other")
     @patch("pm_core.tmux.in_tmux", return_value=True)
-    def test_finds_attached_grouped(self, mock_in, mock_gsn, mock_lg, mock_run):
+    def test_finds_attached_grouped(self, mock_in, mock_gsn, mock_lg, mock_sg, mock_run):
         """When current session is different, finds an attached grouped session."""
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="0\n"),  # proj~1 not attached
             MagicMock(returncode=0, stdout="1\n"),  # proj~2 attached
         ]
         assert current_or_base_session("proj") == "proj~2"
+        mock_sg.assert_called_once_with("other")
+
+    @pytest.mark.parametrize("view", ["myview", "pm-laptop", "my~view"])
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.session_group", return_value="pm-x")
+    @patch("pm_core.tmux.in_tmux", return_value=True)
+    def test_attached_own_view_in_group(self, mock_in, mock_sg, mock_run, view):
+        """A user's own view grouped with the pm session, under any name,
+        is the session to target while it is attached (S124)."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="1\n")
+        with patch("pm_core.tmux.get_session_name", return_value=view):
+            assert current_or_base_session("pm-x") == view
+        mock_sg.assert_called_once_with(view)
 
 
 # ---------------------------------------------------------------------------
@@ -501,6 +517,40 @@ class TestNewWindowGetPane:
         mock_run.return_value = MagicMock(returncode=0)
         result = new_window_get_pane("sess", "review", "bash", "/tmp")
         assert result is None
+
+    def test_returns_the_new_pane_when_the_name_is_taken(self, monkeypatch):
+        """A window of the same name already exists (a QA scenario window
+        that its refiner keeps alive after the worker pane died): the
+        pane returned is the new window's, not the old window's first
+        pane.  Real tmux on a private socket."""
+        import shutil
+        import subprocess
+        import tempfile
+        if not shutil.which("tmux"):
+            import pytest
+            pytest.skip("tmux not installed")
+        d = tempfile.mkdtemp(prefix="pmtmux", dir="/tmp")
+        sock = os.path.join(d, "s")
+        monkeypatch.setenv("PM_TMUX_SOCKET", sock)
+        t = ["tmux", "-S", sock]
+        try:
+            subprocess.run(t + ["new-session", "-d", "-s", "sess", "-n", "main",
+                                "sleep 60"], check=True)
+            old = subprocess.run(
+                t + ["new-window", "-d", "-P", "-F", "#{pane_id}", "-t",
+                     "sess:", "-n", "qa-s1", "sleep 60"],
+                check=True, capture_output=True, text=True).stdout.strip()
+            new = new_window_get_pane("sess", "qa-s1", "sleep 60", d,
+                                      switch=False)
+            panes = subprocess.run(
+                t + ["list-panes", "-s", "-t", "sess", "-F",
+                     "#{window_name} #{pane_id}"],
+                check=True, capture_output=True, text=True).stdout.split("\n")
+            assert new and new != old
+            assert f"qa-s1 {new}" in panes and f"qa-s1 {old}" in panes
+        finally:
+            subprocess.run(t + ["kill-server"], capture_output=True)
+            shutil.rmtree(d, ignore_errors=True)
 
     @patch("pm_core.tmux.get_pane_indices", return_value=[("%5", 0)])
     @patch("pm_core.tmux.current_or_base_session", return_value="sess")

@@ -430,7 +430,8 @@ Once the cast exists, render a `.mp4` sibling so the recording embeds
 in the sign-off HTML report as a `<video controls>` element. `agg`
 renders the cast to frames (GIF), then `ffmpeg` encodes H.264 — there is
 no single cast→video tool worth using (the dedicated ones are orders of
-magnitude slower and fragile). The intermediate GIF is discarded.
+magnitude slower and fragile). The cast is the immutable source: never
+edit or re-record it to fix a render.
 
 Two tools do the two stages. `ffmpeg` is in the QA image; `agg` may not be
 (the image used for QA on 2026-10-27 did not have it, although the bundled
@@ -539,15 +540,16 @@ cast_dir=${cast%/*}
 # Remove this run's outputs before rendering: a failed render (no `agg`, an
 # unreadable cast, an ffmpeg error) then ends with *no* mp4, instead of
 # leaving the previous run's video in the capture directory — which the
-# manifest and the report would present as this run's evidence. The gif goes
-# too, so a failed `agg` cannot fall back to encoding an earlier one.
-rm -f "${cast%.cast}.mp4" "$cast.gif"
+# manifest and the report would present as this run's evidence. The gif and
+# the in-progress partial go too, so a failed `agg` cannot fall back to
+# encoding an earlier one.
+rm -f "${cast%.cast}.mp4" "$cast.gif" "${cast%.cast}.mp4.partial.mp4"
 # One failure shape for the whole render, so the worker sees the same
 # sentence whichever stage broke. A renderer that fails may still leave a
 # partial output behind (verified: a killed `ffmpeg` leaves a non-empty mp4),
 # so the partial file goes too — `test -s` alone would accept it.
 render_fail() {
-    rm -f "$cast.gif" "${cast%.cast}.mp4"
+    rm -f "$cast.gif" "${cast%.cast}.mp4" "${cast%.cast}.mp4.partial.mp4"
     echo "render produced no mp4 — $*" >&2
     exit 1
 }
@@ -568,35 +570,76 @@ command -v ffmpeg >/dev/null || {
         "(e.g. 'apt-get install ffmpeg') and re-run this step" >&2
     exit 1
 }
-agg --idle-time-limit 2 "$cast" "$cast.gif" || render_fail \
-    "agg failed on the cast — is 'agg' installed?"
-# The gif is the *next* stage's input, so check it exists before handing it
-# to ffmpeg — the rule the cast check above applies one stage earlier. An
-# `agg` that reports success and writes nothing (or a 0-byte gif) otherwise
-# surfaces below as "ffmpeg failed on the gif", which sends the worker to the
-# encoder for a renderer that wrote nothing: the same misdiagnosis as
-# reporting a missing cast as an `agg` problem (verified with this block and
-# a stub `agg` that exits 0 without writing: the run said "ffmpeg failed on
-# the gif"). The final `test -s` on the mp4 catches the same shape for the
-# encoder, one stage further on.
-[ -s "$cast.gif" ] || render_fail \
-    "agg wrote no gif (the renderer reported success and wrote nothing)"
-# 2x nearest-neighbor upscale for crisp text — but only while the result
-# stays within iOS hardware-decode limits (4096x2304, H.264 level 5.1).
-# A terminal large enough to blow that budget is already crisp at native
-# size; then just round dimensions down to even (H.264 requires even).
-vf="scale=trunc(iw/2)*2:trunc(ih/2)*2"
-IFS=, read -r gw gh < <(ffprobe -v error -select_streams v:0 \
-    -show_entries stream=width,height -of csv=p=0 "$cast.gif")
-if [ -n "$gw" ] && [ -n "$gh" ] && \
-   [ "$((gw * 2))" -le 4096 ] && [ "$((gh * 2))" -le 2304 ]; then
-    vf="scale=iw*2:ih*2:flags=neighbor"
-fi
-ffmpeg -y -i "$cast.gif" -vf "$vf" \
-    -c:v libx264 -profile:v high -level:v 5.1 -pix_fmt yuv420p -crf 18 \
-    -movflags +faststart "${cast%.cast}.mp4" || render_fail \
-    "ffmpeg failed on the gif"
-rm -f "$cast.gif"
+# render_cast <cast>: <cast> -> sibling recording.mp4 (variable frame rate).
+# Returns non-zero, and publishes no new recording.mp4, if any step fails.
+# The encode writes recording.mp4.partial.mp4 and renames it to
+# recording.mp4 only after a successful encode, so a failed or interrupted
+# render never publishes a partial video under the name the manifest
+# presents. Each stage check below names the stage that broke, in one
+# sentence, so the worker is not sent to the renderer for an encoder failure
+# (or the other way round).
+render_cast() {
+    local cast=$1 gif="$1.gif" mp4="${1%.cast}.mp4"
+    local part="$mp4.partial.mp4" vf gw gh n dur
+    rm -f "$gif" "$part"
+    agg --idle-time-limit 2 "$cast" "$gif" || {
+        echo "agg failed on the cast — is 'agg' installed?" >&2
+        return 1
+    }
+    # The gif is the *next* stage's input, so check it exists before handing it
+    # to ffmpeg — the rule the cast check above applies one stage earlier. An
+    # `agg` that reports success and writes nothing (or a 0-byte gif) otherwise
+    # surfaces below as "ffmpeg failed on the gif", which sends the worker to
+    # the encoder for a renderer that wrote nothing: the same misdiagnosis as
+    # reporting a missing cast as an `agg` problem (verified with this block and
+    # a stub `agg` that exits 0 without writing: the run said "ffmpeg failed on
+    # the gif"). The `test -s` on the partial mp4 catches the same shape for
+    # the encoder, one stage further on.
+    [ -s "$gif" ] || {
+        echo "agg wrote no gif (the renderer reported success and wrote" \
+            "nothing)" >&2
+        return 1
+    }
+    # 2x nearest-neighbor upscale for crisp text — but only while the result
+    # stays within iOS hardware-decode limits (4096x2304, H.264 level 5.1).
+    # A terminal large enough to blow that budget is already crisp at native
+    # size; then just round dimensions down to even (H.264 requires even).
+    vf="scale=trunc(iw/2)*2:trunc(ih/2)*2"
+    IFS=, read -r gw gh < <(ffprobe -v error -select_streams v:0 \
+        -show_entries stream=width,height -of csv=p=0 "$gif")
+    if [ -n "$gw" ] && [ -n "$gh" ] && \
+       [ "$((gw * 2))" -le 4096 ] && [ "$((gh * 2))" -le 2304 ]; then
+        vf="scale=iw*2:ih*2:flags=neighbor"
+    fi
+    # Hold the final screen: clone the last frame and place the clone at
+    # the GIF's total duration (a VFR encode otherwise ends the video
+    # when the last frame starts, dropping its hold).
+    n=$(ffprobe -v error -count_packets -select_streams v:0 \
+        -show_entries stream=nb_read_packets -of csv=p=0 "$gif")
+    dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$gif")
+    [ -n "$n" ] && [ -n "$dur" ] \
+        || { echo "cannot probe the gif $gif" >&2; return 1; }
+    vf="tpad=stop=1:stop_mode=clone,setpts='if(eq(N\,$n)\,$dur/TB\,PTS)',$vf"
+    if ! ffmpeg -nostdin -loglevel error -y -i "$gif" -vf "$vf" \
+           -vsync vfr -enc_time_base 1/100 -video_track_timescale 100 \
+           -c:v libx264 -profile:v high -level:v 5.1 -pix_fmt yuv420p \
+           -crf 18 -movflags +faststart "$part"; then
+        echo "ffmpeg failed on the gif" >&2
+        return 1
+    fi
+    [ -s "$part" ] || { echo "ffmpeg wrote no mp4" >&2; return 1; }
+    # Publish only after a complete encode. A failure to remove the
+    # intermediate gif does not undo a published mp4 (render_fail would
+    # delete it), so the mv is the step whose status matters here.
+    mv -f "$part" "$mp4" || {
+        echo "could not publish $mp4" >&2
+        return 1
+    }
+    rm -f "$gif"
+    return 0
+}
+render_cast "$cast" || render_fail \
+    "the renderer's message above says which stage broke"
 # The mp4 is the required artifact: fail here, visibly, rather than leaving
 # the caller to notice the video is missing (or stale) later. The exit status
 # above is what proves the encode ran; this catches a renderer that reports
@@ -605,8 +648,53 @@ test -s "${cast%.cast}.mp4" || render_fail "ffmpeg wrote no mp4"
 ```
 
 Notes:
-- `--idle-time-limit 2` caps the long pauses a terminal session
-  accumulates, dropping dead air without losing anything worth watching.
+- `--idle-time-limit 2` caps the long pauses a terminal session accumulates,
+  dropping dead air without losing anything worth watching.
+- **Variable frame rate.** agg already merges identical screens into one
+  GIF frame with a long delay. `-vsync vfr` keeps those delays as frame
+  durations instead of padding them out to a constant rate. That padding
+  re-encoded thousands of identical frames: on 33-53 minute TUI casts the
+  constant-rate encode ran for more than 10 minutes at about 900% CPU,
+  while the VFR render finished in about 2 minutes. `-enc_time_base 1/100`
+  and `-video_track_timescale 100` give the GIF's centisecond delays an
+  exact timebase. Without them, the GIF's coarse frame rate becomes the
+  timebase and VFR merges neighbouring frames. (`-vsync` is spelled
+  `-fps_mode` in ffmpeg 5.1+, which still accepts `-vsync`.)
+- **Check the render:** the cloned final frame starts at the GIF's
+  duration, so the mp4 runs that long plus one frame tick (for example
+  5.34 s for a 5.30 s GIF). Its frame count is the GIF's plus one:
+  `ffprobe -v error -show_entries format=duration -of csv=p=0 recording.mp4`
+  and `ffprobe -v error -count_packets -select_streams v:0 -show_entries
+  stream=nb_read_packets -of csv=p=0 recording.mp4`.
+- **Batches: ffmpeg never reads stdin.** Without `-nostdin`, ffmpeg reads
+  its interactive keys from stdin, so a `find ... | while read c; do
+  render_cast "$c"; done` loop loses characters of the next file names to
+  it (seen in QA S46: `/pm-captures/...` became `m-captures/...`, then agg
+  and rm were handed `-c`). Keep `-nostdin`, and give the loop its list
+  another way (`mapfile -t casts < <(find ...)`) or run each call with
+  `</dev/null`.
+- **Partial output is never published.** ffmpeg writes to
+  `recording.mp4.partial.mp4`, which is renamed to `recording.mp4` only
+  after a successful encode; the GIF is deleted only after that rename.
+  The render step also clears this run's outputs before it starts, and its
+  failure path removes the gif and any partial, so a failed render leaves
+  no `recording.mp4` at all — an earlier run's video cannot be presented
+  as this run's evidence. So neither the file existing nor the GIF
+  disappearing shows that this render succeeded: check this `render_cast`
+  call's return status. If you stop a render on purpose, stop the shell
+  running `render_cast` before its `ffmpeg` child, so the cleanup step
+  cannot run. Label any partial output you keep (for example
+  `recording.mp4.INCOMPLETE-...`) and list it in the manifest.
+- **Video time is compressed pause time, not wall time.** Each gap
+  between cast output events is capped at 2 s, so to find the video
+  frame for a wall-clock instant, sum `min(gap, 2)` over the output
+  events up to that instant (cast timestamps are seconds from the
+  header's `timestamp`). Extract the frame on display at video time `vt`
+  with `ffmpeg -i recording.mp4 -vf "select='lte(t\,vt)'" -vsync 0
+  -update 1 frame.png`, which keeps the last frame starting at or before
+  `vt`. On a sparse VFR video, input seeking with `-ss vt` returns the
+  NEXT frame instead. Check a key frame's text against the cast replayed
+  to the same instant (for example with `pyte`) before citing it.
 - H.264 + `yuv420p` is the only combination that decodes everywhere,
   including iOS Safari (VP8/VP9 webm and 4:4:4 chroma do not). 4:2:0
   chroma subsampling would blur colored terminal text at native size,
@@ -618,8 +706,6 @@ Notes:
   visually lossless for this content; favor
   quality — file size is not a concern. `-movflags +faststart` puts the
   moov atom up front so playback starts before the full download.
-  A long, busy session may take several minutes to encode; that's
-  expected and acceptable for a rare case.
 
 ## Manifest format
 
