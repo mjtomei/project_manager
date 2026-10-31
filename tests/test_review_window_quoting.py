@@ -21,6 +21,7 @@ from unittest import mock
 
 import pytest
 
+from pm_core.model_config import get_pr_model_override
 from pm_core.cli import pr as pr_mod
 
 # The ``fake_tmux`` fixture monkeypatches ``pr_mod.subprocess.run`` — that
@@ -377,3 +378,33 @@ def test_review_claude_cmd_uses_tmux_session_tag(fake_tmux, monkeypatch):
     pr_mod._launch_review_window(_make_data(),
                                  _make_pr("t", fake_tmux["workdir"]))
     assert seen and seen[0]["session_tag"] == "test"
+
+
+def test_review_container_uses_selected_route(fake_tmux, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from pm_core import container as cm
+    build = Mock(return_value="ROUTED")
+    wrap = Mock(return_value=("WRAPPED", "review-test"))
+    monkeypatch.setattr(pr_mod, "build_claude_shell_cmd", build)
+    monkeypatch.setattr(cm, "wrap_claude_cmd", wrap)
+    remove = Mock()
+    monkeypatch.setattr(cm, "remove_container", remove)
+    monkeypatch.setattr(cm, "is_container_mode_enabled", lambda: True)
+    resolved = []
+    monkeypatch.setattr("pm_core.model_config.resolve_model_and_provider",
+                        lambda st, **k: resolved.append((st, get_pr_model_override(k["pr_entry"], st))) or
+                        SimpleNamespace(model=None, provider="claude-work",
+                                        effort="high"))
+    # Only review is routed, by a PR role exception over a PR-wide model.
+    pr = {**_make_pr("T", fake_tmux["workdir"]), "model": "opus",
+          "session_models": {"review": "provider:claude-work"}}
+    pr_mod._launch_review_window(_make_data(), pr)
+    assert resolved == [("review", "provider:claude-work")]
+    assert build.call_args.kwargs["container"] is True
+    assert build.call_args.kwargs["provider"] == "claude-work"
+    assert wrap.call_args.kwargs["provider"] == "claude-work"
+    # The old container goes under the session-tagged name the wrapper
+    # creates; the untagged name left a running one to be reused.
+    remove.assert_called_once_with(
+        cm._make_container_name("review-pr-001", session_tag="test"))

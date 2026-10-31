@@ -3,6 +3,8 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from pm_core import signoff
 from pm_core.signoff import (
     SIGNOFF_MERGE, SIGNOFF_REQA, SIGNOFF_REVIEW, SIGNOFF_IMPL, SIGNOFF_BLOCKED,
@@ -275,7 +277,7 @@ class TestPrListLine:
 
 
 class TestSignoffCommand:
-    def _invoke(self, tmp_path, pr, skip_qa=False):
+    def _invoke(self, tmp_path, pr, skip_qa=False, launch_error=None):
         from click.testing import CliRunner
         from pm_core.cli.pr import pr_signoff
         data = {"project": {"active_pr": pr["id"], "base_branch": "master",
@@ -287,9 +289,26 @@ class TestSignoffCommand:
              patch("pm_core.cli.pr.store.locked_update",
                    side_effect=_patch_locked_update_fn(data)), \
              patch("pm_core.cli.pr.trigger_tui_refresh"), \
-             patch("pm_core.signoff.launch_signoff_window") as mock_launch:
+             patch("pm_core.signoff.launch_signoff_window",
+                   side_effect=launch_error) as mock_launch:
             result = CliRunner().invoke(pr_signoff, [pr["id"]])
         return result, mock_launch, data
+
+    def test_container_error_is_a_failed_launch_on_stderr(self, tmp_path):
+        """A routed sign-off whose work route is down raises ContainerError
+        in container mode.  It printed the remedy to stdout and exited 0,
+        so the TUI sign-off driver (stdout discarded, last stderr line shown
+        on failure) logged "launched" and never showed the remedy."""
+        from pm_core.container import ContainerError
+        msg = ("work route 'claude-work' unavailable: router down. "
+               "Remedy: start it, then launch the session again")
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001"}
+        result, mock_launch, _ = self._invoke(
+            tmp_path, pr, launch_error=ContainerError(msg))
+        assert result.exit_code == 1
+        assert result.stderr.strip().splitlines()[-1] == msg
+        assert msg not in result.stdout
 
     def test_wrong_status_rejected(self, tmp_path):
         pr = {"id": "pr-001", "title": "T", "status": "in_progress",
@@ -728,7 +747,8 @@ class TestWindowLaunchWorkdir:
     """
 
     def _launch(self, tmp_path, *, transcript=None, existing=None,
-                head="abc"):
+                head="abc", routed=False, model_settings=None,
+                wrap_error=None):
         from types import SimpleNamespace
         from contextlib import ExitStack
         from unittest.mock import MagicMock
@@ -743,7 +763,10 @@ class TestWindowLaunchWorkdir:
         pr_entry = {"id": "pr-001", "title": "T", "status": "sign_off",
                     "branch": "pm/pr-001", "workdir": str(workdir)}
 
-        new_window = MagicMock(return_value="cl_pane")
+        if model_settings is not None:
+            pr_entry.update(model_settings)
+
+        new_window = self.new_window = MagicMock(return_value="cl_pane")
         with ExitStack() as es:
             p = es.enter_context
             p(patch("pm_core.tmux.has_tmux", return_value=True))
@@ -754,17 +777,22 @@ class TestWindowLaunchWorkdir:
             p(patch("pm_core.tmux.select_window"))
             p(patch("pm_core.paths.workdirs_base", return_value=wdirs))
             p(patch("pm_core.signoff.head_sha", return_value=head))
-            p(patch("pm_core.model_config.resolve_model_and_provider",
-                    return_value=SimpleNamespace(model=None, provider=None,
-                                                 effort=None)))
-            p(patch("pm_core.model_config.get_pr_model_override",
-                    return_value=None))
+            if model_settings is None:
+                p(patch("pm_core.model_config.resolve_model_and_provider",
+                        return_value=SimpleNamespace(model=None, provider="claude-work" if routed else None,
+                                                     effort="high" if routed else None)))
+                p(patch("pm_core.model_config.get_pr_model_override",
+                        return_value=None))
             p(patch("pm_core.prompt_gen.generate_signoff_prompt",
                     return_value="PROMPT"))
-            p(patch("pm_core.claude_launcher.build_claude_shell_cmd",
+            self.build = p(patch("pm_core.claude_launcher.build_claude_shell_cmd",
                     return_value="CLAUDE_CMD"))
+            self.wrap = p(patch("pm_core.container.wrap_claude_cmd",
+                    return_value=("WRAPPED", "signoff-test"),
+                    side_effect=wrap_error))
+            self.remove = p(patch("pm_core.container.remove_container"))
             p(patch("pm_core.container.is_container_mode_enabled",
-                    return_value=False))
+                    return_value=routed))
             p(patch("pm_core.tmux.new_window_get_pane", new_window))
             p(patch("pm_core.tmux.set_shared_window_size"))
             p(patch("pm_core.tmux.switch_sessions_to_window"))
@@ -786,6 +814,47 @@ class TestWindowLaunchWorkdir:
                 data, pr_entry, background=True,
                 transcript=str(transcript) if transcript else None)
         return new_window, workdir
+
+    def test_signoff_launch_honors_pr_role_exception(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        self._launch(tmp_path, routed=True, model_settings={
+            "model": "provider:deepseek-flash",
+            "session_models": {"signoff": "provider:claude-work"}})
+        assert self.build.call_args.kwargs["provider"] == "claude-work"
+        assert self.wrap.call_args.kwargs["provider"] == "claude-work"
+
+    def test_signoff_container_uses_selected_route(self, tmp_path):
+        self._launch(tmp_path, routed=True)
+        assert self.build.call_args.kwargs["container"] is True
+        assert self.build.call_args.kwargs["provider"] == "claude-work"
+        assert self.build.call_args.kwargs["session_tag"] == "x"
+        assert self.wrap.call_args.kwargs["provider"] == "claude-work"
+
+    def test_signoff_removes_the_session_tagged_container_it_recreates(
+            self, tmp_path):
+        """The old container is removed under the name wrap_claude_cmd
+        creates (with the session tag); the untagged name was never used,
+        so a still-running container was reused instead (and, routed,
+        refused when it lacked the route mount)."""
+        self._launch(tmp_path, routed=True)
+        self.remove.assert_called_once()
+        name = self.remove.call_args.args[0]
+        assert name == "pm-x-signoff-" + self.wrap.call_args.kwargs["pr_id"]
+
+    def test_unavailable_route_propagates_and_opens_no_window(self, tmp_path):
+        """The ContainerError reaches `pm pr signoff`, which reports it on
+        stderr with rc 1 (see TestSignoffCommand); nothing is launched."""
+        from pm_core.container import ContainerError
+        with pytest.raises(ContainerError, match="work route"):
+            self._launch(tmp_path, routed=True, wrap_error=ContainerError(
+                "work route 'claude-work' unavailable: x. Remedy: y"))
+        self.new_window.assert_not_called()
+        # The per-PR launch lock was released, so the next launch is not
+        # stuck behind it (non-blocking probe: a leak fails, not hangs).
+        import fcntl
+        lock = tmp_path / "workdirs" / ".signoff-launch-pm-x-pr-001.lock"
+        with open(lock, "w") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
 
     def test_window_creation_uses_workdir_cwd(self, tmp_path):
         new_window, workdir = self._launch(tmp_path)
@@ -865,6 +934,64 @@ class TestLatestQaStatusPath:
         (qa / "pr-999-aaaa" / "qa_status.json").write_text("{}")
         with patch("pm_core.paths.workdirs_base", return_value=tmp_path):
             assert paths.latest_qa_status_path("pr-001") is None
+
+    def test_instruction_run_is_skipped(self, tmp_path):
+        """S120: a ``pm qa run`` of one instruction is never the PR's QA,
+        even when its status is the newest."""
+        import os
+        from pm_core import paths
+        qa = tmp_path / "qa"
+        full = qa / "pr-001-aaaa" / "qa_status.json"
+        cli = qa / "pr-001-cli-pr-001" / "qa_status.json"
+        for st, mtime in ((full, 1000), (cli, 2000)):
+            st.parent.mkdir(parents=True)
+            st.write_text("{}")
+            os.utime(st, (mtime, mtime))
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path):
+            assert paths.latest_qa_status_path("pr-001") == full
+        full.unlink()
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path):
+            assert paths.latest_qa_status_path("pr-001") is None
+
+    def _two_clone_runs(self, tmp_path):
+        """This clone's older run and another clone's newer one of pr-001
+        (two clones share ~/.pm/workdirs/qa), plus an untagged legacy run."""
+        import json
+        import os
+        qa = tmp_path / "qa"
+        runs = {}
+        for name, tag, mtime in (("pr-001-mine", "a-1111", 2000),
+                                 ("pr-001-other", "b-2222", 3000),
+                                 ("pr-001-legacy", None, 1000)):
+            d = qa / name
+            d.mkdir(parents=True)
+            if tag:
+                (d / "qa_run.json").write_text(json.dumps(
+                    {"pr_id": "pr-001", "session_tag": tag}))
+            st = d / "qa_status.json"
+            st.write_text("{}")
+            os.utime(st, (mtime, mtime))
+            runs[name] = st
+        return runs
+
+    def test_another_clones_run_is_skipped_inside_a_pm_session(self, tmp_path):
+        """S90: clone B's newer PASS of the PR is not clone A's QA status."""
+        from pm_core import paths
+        runs = self._two_clone_runs(tmp_path)
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path), \
+                patch("pm_core.qa_loop.get_pm_session", return_value="pm-a-1111"):
+            assert paths.latest_qa_status_path("pr-001") == runs["pr-001-mine"]
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path), \
+                patch("pm_core.qa_loop.get_pm_session", return_value="pm-c-3333"):
+            # A session with no run of its own still sees untagged runs.
+            assert paths.latest_qa_status_path("pr-001") == runs["pr-001-legacy"]
+
+    def test_every_run_counts_outside_a_pm_session(self, tmp_path):
+        from pm_core import paths
+        runs = self._two_clone_runs(tmp_path)
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path), \
+                patch("pm_core.qa_loop.get_pm_session", return_value=None):
+            assert paths.latest_qa_status_path("pr-001") == runs["pr-001-other"]
 
 
 class TestPrompt:

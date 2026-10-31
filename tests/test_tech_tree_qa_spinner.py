@@ -148,3 +148,101 @@ def test_poll_qa_state_unregisters_on_completion(tmp_path, tracker):
 
     assert not tracker.is_tracked("qa:pr-x:s0")
     assert "pr-x" not in app._qa_loops
+
+
+def test_poll_qa_state_drops_keys_of_a_replaced_run(tmp_path, tracker):
+    """z t over a mid-turn run: the old run's scenario keys are never
+    polled or unregistered again, so the node spun forever after the
+    new run finished (S30)."""
+    from pm_core.tui.qa_loop_ui import poll_qa_state
+    from pm_core.tui.tech_tree import qa_pane_state
+    old = _make_transcript(tmp_path, "old.jsonl")
+    tracker.register("qa:pr-x:s3", "%32", str(old))   # superseded, mid-turn
+    tracker.register("qa:pr-y:s3", "%40", str(old))   # another PR's run
+    app = _FakeApp(tracker)
+    # The fresh run, still planning: no scenario panes yet.
+    app._qa_loops["pr-x"] = _make_state("pr-x", [])
+    app._qa_loops["pr-y"] = _make_state(
+        "pr-y", [_make_scenario(3, "%40", str(old))])
+
+    with patch("pm_core.tmux.pane_exists", return_value=True), \
+         patch("pm_core.hook_events.read_event", return_value=None):
+        poll_qa_state(app)
+
+    assert not tracker.is_tracked("qa:pr-x:s3")
+    assert qa_pane_state(tracker, "pr-x") == "idle"
+    assert tracker.is_tracked("qa:pr-y:s3")
+
+
+def test_pruned_planning_run_reads_like_a_first_run_in_the_picker(
+        tmp_path, tracker, monkeypatch):
+    """Pruning the last old subkey while the fresh run is still planning
+    clears the qa runtime action: the picker shows no stale badge (a first
+    run in planning has none either), not the old run's dead panes."""
+    from pm_core import hook_events
+    from pm_core import runtime_state as rs
+    # The picker badge reads hook events: no event yet means [working].
+    monkeypatch.setattr(hook_events, "_HOOKS_BASE", tmp_path / "hooks")
+    from pm_core.cli.session import _format_action_status
+    from pm_core.tui.qa_loop_ui import poll_qa_state
+    old = _make_transcript(tmp_path, "old.jsonl")
+    tracker.register("qa:pr-x:s3", "%32", str(old))
+    tracker.register("qa:pr-y:s3", "%40", str(old))
+    assert _format_action_status("pr-x", "qa") == " [working]"
+    app = _FakeApp(tracker)
+    app._qa_loops["pr-x"] = _make_state("pr-x", [])          # planning
+    app._qa_loops["pr-y"] = _make_state(
+        "pr-y", [_make_scenario(3, "%40", str(old))])
+
+    with patch("pm_core.tmux.pane_exists", return_value=True), \
+         patch("pm_core.hook_events.read_event", return_value=None):
+        poll_qa_state(app)
+
+    assert rs.get_action_state("pr-x", "qa") == {}
+    assert _format_action_status("pr-x", "qa") == ""
+    assert set(rs.get_action_state("pr-y", "qa")["panes"]) == {"s3"}
+    assert _format_action_status("pr-y", "qa") == " [working]"
+
+
+def test_prune_keeps_the_current_runs_panes(tmp_path, tracker):
+    from pm_core import runtime_state as rs
+    from pm_core.tui.qa_loop_ui import poll_qa_state
+    old = _make_transcript(tmp_path, "old.jsonl")
+    tracker.register("qa:pr-x:s3", "%32", str(old))
+    app = _FakeApp(tracker)
+    app._qa_loops["pr-x"] = _make_state(
+        "pr-x", [_make_scenario(5, "%50", str(old))])
+
+    with patch("pm_core.tmux.pane_exists", return_value=True), \
+         patch("pm_core.hook_events.read_event", return_value=None):
+        poll_qa_state(app)
+
+    assert not tracker.is_tracked("qa:pr-x:s3")
+    assert tracker.is_tracked("qa:pr-x:s5")
+    entry = rs.get_action_state("pr-x", "qa")
+    assert entry["state"] == "running"
+    assert set(entry["panes"]) == {"s5"}
+
+
+def test_queued_launch_keeps_the_runs_mid_turn_keys(tmp_path, tracker):
+    """S36: a queued launch narrows state.scenarios to the scenario being
+    launched for its whole refiner turn; the replaced-run prune then dropped
+    the run's own mid-turn worker, so the node stopped spinning and the
+    picker lost the qa entry for that minute."""
+    from pm_core import runtime_state as rs
+    from pm_core.tui.qa_loop_ui import poll_qa_state
+    from pm_core.tui.tech_tree import qa_pane_state
+    t = _make_transcript(tmp_path)
+    s2 = _make_scenario(2, "%14", str(t))
+    s3 = _make_scenario(3, None, None)
+    app = _FakeApp(tracker)
+    state = _make_state("pr-x", [s2, s3])
+    app._qa_loops["pr-x"] = state
+    with patch("pm_core.tmux.pane_exists", return_value=True), \
+         patch("pm_core.hook_events.read_event", return_value=None):
+        poll_qa_state(app)
+        state.scenarios = [s3]          # _launch_next_queued's swap
+        poll_qa_state(app)
+    assert tracker.is_tracked("qa:pr-x:s2")
+    assert qa_pane_state(tracker, "pr-x") == "active"
+    assert set(rs.get_action_state("pr-x", "qa")["panes"]) == {"s2"}

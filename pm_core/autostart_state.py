@@ -31,6 +31,7 @@ from collections import Counter
 from datetime import datetime, timezone
 
 from pm_core import graph
+from pm_core.pr_utils import usable_prs
 
 SCHEMA = "pm.autostart.status/1"
 
@@ -84,8 +85,11 @@ def now_iso() -> str:
 # ---------------------------------------------------------------------------
 
 def transitive_deps(prs: list[dict], target_id: str) -> set[str]:
-    """Return the set of all PR IDs that ``target_id`` transitively depends on."""
-    pr_map = {pr["id"]: pr for pr in prs}
+    """Return the set of all PR IDs that ``target_id`` transitively depends on.
+
+    Entries without an id are skipped: callers pass the raw project.yaml
+    list, and a hand-edited id-less entry killed the TUI's poll (S94)."""
+    pr_map = {pr["id"]: pr for pr in usable_prs(prs)}
     deps: set[str] = set()
     stack = [target_id]
     while stack:
@@ -145,7 +149,7 @@ def merge_holds(prs: list[dict], targets: dict) -> dict[str, dict]:
     are not held (nothing left to merge, and they would otherwise show up as
     "released" when the target goes).
     """
-    status = {pr["id"]: pr.get("status") for pr in prs}
+    status = {pr["id"]: pr.get("status") for pr in usable_prs(prs)}
     holds: dict[str, dict] = {}
     for t, rec in (targets or {}).items():
         if not is_wait_target(rec):
@@ -597,8 +601,8 @@ def build_status(inp: dict) -> dict:
     ``wait_for_merge`` targets rather than ignored, so an old caller cannot
     silently permit a merge.
     """
-    prs = inp.get("prs") or []
-    pr_map = {p["id"]: p for p in prs if p.get("id")}
+    prs = usable_prs(inp.get("prs"))
+    pr_map = {p["id"]: p for p in prs}
     targets: dict[str, dict] = inp.get("targets") or {}
     legacy_stop = inp.get("stop_before_merge")
     if _legacy_ids(legacy_stop):
