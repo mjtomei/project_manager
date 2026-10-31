@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-31T21:40:40.053840+00:00'
+  updated_at: '2026-10-31T22:16:38.669850+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5456,6 +5456,35 @@ prs:
       (impl.md i3 section).'
     created_at: '2026-10-31T21:40:39Z'
     last_edited: '2026-10-31T21:40:39Z'
+  - id: note-2f2c207
+    text: 'Review loop 703c i6 (commit 77b805ad; no requirement changes; full suite
+      5335 passed / 1 skipped). Verification pass over the integrated head; one discovery
+      gap of the class 3cc7 i1 closed for the ambient branch, plus two spec corrections.
+      (1) _find_tui_pane()''s cwd branch selected the hosting server with _select_session_socket()
+      but discarded the returned socket, so the 3cc7 i1 fallback ("scan the identified
+      session''s server even when list_pm_sessions() does not report it — that function
+      enumerates socket files") only ever ran for the branch that identified the session
+      from inside tmux. From a plain shell whose cwd names a live private session
+      whose socket file was removed (an old pm''s kill, or a cleaned /tmp/pm-sessions)
+      and whose registry TUI entry is gone (heal testing), the scan list stayed empty
+      and discovery returned (None, None) although the server was known. The branch
+      now records the selected socket; the variable is renamed ambient_server -> identified_server,
+      since it is no longer only the ambient server. Test: test_last_resort_scans_the_cwd_server_without_a_socket_file
+      (verified to fail without the change: (None, None)). (2) impl.md R5 now records
+      the session_group() base resolution added in 703c i3 (the requirement body listed
+      the detach steps without it), and R3.4 says either branch''s server is scanned,
+      not only the ambient one. (3) The 703c i5 iteration had a PR note but no impl.md
+      section; added retroactively. Validation: full suite 5335 passed / 1 skipped
+      / 0 failed (scratch pytest<9 + markdown, PATH without the push-proxy git, TMUX/TMUX_PANE/PM_*/PM_HOST_HOME
+      cleared; log at /pm-captures/review-703c-i6/full-suite.log); pm/specs/pr-073910f/session_start_smoke.py
+      re-run end to end on a disposable socket with TMUX_TMPDIR on a scratch dir (private
+      server created, PM_TMUX_SOCKET in the session env, the global env and the hooks,
+      default server untouched); pm session list re-checked read-only in this container
+      ("No pm sessions found.", no socket dir created). No live session, server or
+      shared host configuration was touched; the new test is unit-level and binds
+      no tmux server.'
+    created_at: '2026-10-31T22:16:38Z'
+    last_edited: '2026-10-31T22:16:38Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
