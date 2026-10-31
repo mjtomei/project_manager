@@ -45512,7 +45512,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
-  updated_at: '2026-10-31T18:07:25.345765+00:00'
+  updated_at: '2026-10-31T18:20:46.267867+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -46272,6 +46272,30 @@ prs:
       wait_for_merge; no PR merge is authorized by this request.'
     created_at: '2026-10-31T18:07:25.345765+00:00'
     last_edited: '2026-10-31T18:07:25.345765+00:00'
+  - id: note-5055e05
+    text: 'MASTER INTEGRATION 2 COMPLETE 2026-10-31 (user-authorized implementation
+      return). origin/master eaf3372e (#249, QA workers via Claude mixed workers)
+      merged INTO this branch: merge commit 9657aab5, spec commit 3d0b1f7c, both pushed.
+      Branch was one integration behind (4a74d880). Two additive conflicts resolved
+      by hand: pm/project.yaml (kept this PR record''s 41 notes + model/session_models
+      incl. the claude-work-xhigh-249 sign-off override, then master new PR records;
+      571 PRs, YAML valid) and tests/test_review_loop_terminal_state.py (both appended
+      blocks kept). Code auto-merged and was verified at every fresh-flow/master intersection:
+      _poll_impl_idle keeps master S79 trust-watch guard + the fresh native-transcript
+      recovery; recorded_qa_verdict keeps master open-return fence + fresh timestamp
+      + SUPERSEDED fences; _auto_review_idle_prs still consumes the handoff marker;
+      signoff new return-launch claim machinery is compatible (reset sets awaiting=None+resolved_at
+      so no --fresh relaunch); pane_idle keeps both master user_prompt/Stop second-turn
+      detection and this PR idle_prompt re-arm; _derive keeps the fresh wait reasons;
+      _deferred_startup keeps both guards. TESTS: full suite 5331 passed, 1 skipped,
+      12 failed - all 12 in tests/test_markdown_render.py for a missing  package in
+      this container; with markdown>=3.5 installed the file is 13/13 green, effective
+      5344 passed / 1 skipped / 0 failed. Targeted fresh/verdict/pane/review/signoff
+      suites: 799 passed. No merge to master, nothing force-pushed, master untouched.
+      Earlier QA findings and the two scenario-authoring conflicts in the notes still
+      stand for the fresh review/QA pass. Handing off to native review/QA now.'
+    created_at: '2026-10-31T18:20:46Z'
+    last_edited: '2026-10-31T18:20:46Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
