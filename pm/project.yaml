@@ -48690,7 +48690,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-10-31T22:59:11.669037+00:00'
+  updated_at: '2026-10-31T23:47:08.693773+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -49084,6 +49084,29 @@ prs:
       leaving that window with one pane (observed, scan unaffected).'
     created_at: '2026-10-31T22:59:11Z'
     last_edited: '2026-10-31T22:59:11Z'
+  - id: note-146fdae
+    text: 'QA S20 (concurrent shared container setting) — substantive behaviour verified,
+      one scenario-text clause unachievable. Isolated fixture: scratch HOME, private
+      tmux socket, stub podman (info exit 125 while runtime-up absent) and stub claude
+      (host-launch marker + sleep). Story 1: simultaneous TUI `pr qa pr-c2e829e` and
+      CLI `pm qa run --pr pr-c257c6d` both fail closed with cause + both remedies;
+      distinct per-PR status files (no cross-reference); no QA windows; no containers;
+      host-launch.log absent; 60/60 `pm container status` samples taken during both
+      runs read `Container mode:  enabled` + `Runtime available: no`, and `~/.pm/settings/container-enabled`
+      stayed `true`. Story 2 (runtime restored): the retry created `pm-<tag>-qa-pr-c257c6d-cli-pr-c257c6d-s1`
+      (Up), the qa-<B> and qa-<B>-s1 windows, and an s1 start command of `podman exec
+      -it pm-...-s1 ... claude ...`; Beta status rewritten overall="" window_name=qa-<B>-s1;
+      Alpha status hash + note list unchanged; mode still enabled; no host launch.
+      SCENARIO FIX NEEDED (not a code bug): the story-2 Then "retry.out shows Running
+      1 scenario(s)..." cannot hold in this fixture — `qa_loop._launch_scenarios_in_containers`
+      blocks until all concretizers finish and `state.latest_output = "Running N scenario(s)..."`
+      is set only after it returns, while the fixture refiner is the sleeping claude
+      stub, so the run stays in concretization and `timeout 60` kills it (rc=124).
+      Either drop that clause or make the refiner complete (e.g. fake-claude emitting
+      REFINED_STEPS_END) and let the worker sleep. Captures: /pm-captures/scenarios/20/{summary.md,story1-tui,story1-cli,story2-retry}.
+      Verdict: INPUT_REQUIRED for that one clause.'
+    created_at: '2026-10-31T23:47:08Z'
+    last_edited: '2026-10-31T23:47:08Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
