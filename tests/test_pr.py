@@ -354,3 +354,73 @@ def test_focus_review_window_outside_tmux_is_a_noop(tmp_path):
         assert focus(pr) is None
 
     find.assert_not_called()
+
+
+def test_pr_start_refreshes_the_other_drivers_transcript(tmp_path):
+    """The single impl launcher keeps every driver's tracking link fresh.
+
+    A base-return relaunch can be started by the TUI auto-start catch-up (or
+    a manual ``pm pr start``), which writes the transcript symlink only into
+    *its* dir.  The CLI auto-sequence dir would keep pointing at the killed
+    session, read its last idle event, and never see the rework turn — so its
+    completion handoff would never advance.
+    """
+    import os
+    from types import SimpleNamespace
+
+    root, _ = _make_project(tmp_path, status="in_progress")
+    stale = root / "transcripts" / "auto-sequence" / PR / f"impl-{PR}.jsonl"
+    stale.parent.mkdir(parents=True)
+    stale.symlink_to("/nonexistent/killed-session.jsonl")
+    tdir = root / "transcripts" / "run-tui"
+    tdir.mkdir(parents=True)
+    transcript = tdir / f"impl-{PR}.jsonl"
+    new_target = "/tmp/rework-session.jsonl"
+
+    def fake_build(**kw):
+        # ``pm pr start --transcript`` creates the symlink.
+        transcript.symlink_to(new_target)
+        return "claude-cmd"
+
+    win = {"id": "@1", "index": 0}
+    committed = SimpleNamespace(
+        returncode=0, stdout=(root / "project.yaml").read_text(), stderr="")
+    runner = CliRunner()
+    with mock.patch.object(pr_mod, "state_root", return_value=root), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"), \
+         mock.patch.object(pr_mod, "_get_pm_session", return_value="pm-test"), \
+         mock.patch.object(pr_mod, "_workdir_is_dirty", return_value=True), \
+         mock.patch.object(pr_mod.git_ops, "is_git_repo", return_value=True), \
+         mock.patch.object(pr_mod.git_ops, "run_git", return_value=committed), \
+         mock.patch.object(pr_mod, "build_claude_shell_cmd",
+                           side_effect=fake_build), \
+         mock.patch.object(pr_mod, "find_claude", return_value="/bin/claude"), \
+         mock.patch.object(tmux_mod, "session_exists", return_value=True), \
+         mock.patch.object(tmux_mod, "find_window_by_name",
+                           side_effect=[None, win]), \
+         mock.patch.object(tmux_mod, "new_window"), \
+         mock.patch.object(tmux_mod, "set_shared_window_size"), \
+         mock.patch("pm_core.container.is_container_mode_enabled",
+                    return_value=False), \
+         mock.patch("pm_core.container.wrap_claude_cmd",
+                    side_effect=lambda cmd, *a, **k: (cmd, None)):
+        result = runner.invoke(pr_mod.pr, [
+            "start", "--background", "--transcript", str(transcript), PR])
+    assert result.exit_code == 0, result.output
+    assert os.readlink(stale) == new_target
+
+
+def test_base_return_retires_the_review_window(tmp_path):
+    """A base return must not leave a reviewer writer behind."""
+    from pm_core.cli import pr as pr_mod
+    root, _ = _make_project(tmp_path, status="in_review")
+    pr_entry = _pr(root)
+    win = {"id": "@9", "index": 2, "name": "review-#42"}
+    with mock.patch.object(pr_mod, "_get_pm_session", return_value="pm-test"), \
+         mock.patch.object(tmux_mod, "find_window_by_name", return_value=win), \
+         mock.patch.object(tmux_mod, "kill_window") as kill, \
+         mock.patch("pm_core.home_window.park_if_on"):
+        pr_mod._retire_review_window_for_return(pr_entry)
+    # Kill by the id returned by the lookup (the sign-off retire pattern),
+    # not by the name we searched for.
+    kill.assert_called_once_with("pm-test", "@9")

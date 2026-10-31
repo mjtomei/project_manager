@@ -259,6 +259,27 @@ class TestRunReviewLoopSync:
         assert mock_review.call_count == 3
 
     @patch("pm_core.review_loop._run_claude_review")
+    def test_max_iterations_bounds_this_run_not_the_absolute_number(
+            self, mock_review):
+        """A loop continuing after many transcripts still gets its full budget.
+
+        ``_start_loop`` seeds a fresh loop with ``next_review_iteration`` so
+        earlier evidence is never overwritten.  The safety cap must therefore
+        count the iterations *this* run performs: with an absolute bound, a
+        PR already carrying ``max_iterations`` transcripts would run zero
+        iterations and report no verdict at all.
+        """
+        mock_review.return_value = "**NEEDS_WORK**"
+        state = ReviewLoopState(pr_id="pr-001", iteration=48,
+                                adopt_in_flight=False)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA,
+                                      transcript_dir="/tmp", max_iterations=3)
+        assert mock_review.call_count == 3
+        assert result.iteration == 51
+        assert result.iterations_performed == 3
+        assert result.latest_verdict == VERDICT_NEEDS_WORK
+
+    @patch("pm_core.review_loop._run_claude_review")
     def test_stop_requested_after_iteration(self, mock_review):
         def side_effect(*args, **kwargs):
             # Simulate user requesting stop — _run_claude_review returns
@@ -814,6 +835,82 @@ class TestGenerateReviewPromptInputRequired:
         assert "INPUT_REQUIRED" in prompt
         # Should explain that it's reserved for genuine ambiguities
         assert "needs the user's attention" in prompt
+
+
+# --- pre-review base integration gate --------------------------------------
+
+class TestBaseConflictIteration:
+    """The base gate returning the PR to implementation is routing, not a
+    failed review: no iteration is recorded and the loop stops cleanly."""
+
+    @patch("pm_core.review_loop._run_claude_review")
+    def test_base_conflict_stops_without_history(self, mock_review):
+        from pm_core.review_loop import BaseConflictError, VERDICT_BASE_CONFLICT
+        mock_review.side_effect = BaseConflictError(
+            "base_conflict: CONFLICTS with master: shared.txt")
+        state = ReviewLoopState(pr_id="pr-001")
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA,
+                                      transcript_dir="/tmp")
+        assert result.latest_verdict == VERDICT_BASE_CONFLICT
+        assert result.history == []
+        assert result.iteration == 0
+        assert result.running is False
+
+    @patch("pm_core.review_loop._run_claude_review")
+    def test_base_conflict_on_a_long_lived_pr_performed_nothing(
+            self, mock_review):
+        """The completion message must not claim the earlier iterations.
+
+        A fresh loop is seeded from the PR's existing transcripts, so a bounce
+        before its first iteration leaves the absolute counter at the number
+        of earlier iterations.  The TUI's "Review loop done … (N iterations)"
+        line reads the performed count, which is zero here — otherwise a PR
+        with 12 prior transcripts reports twelve reviews for a loop that ran
+        none.
+        """
+        from pm_core.review_loop import BaseConflictError, VERDICT_BASE_CONFLICT
+        from pm_core.tui.review_loop_ui import _done_iteration_count
+        mock_review.side_effect = BaseConflictError("base_conflict: x")
+        state = ReviewLoopState(pr_id="pr-001", iteration=12,
+                                adopt_in_flight=False)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA,
+                                      transcript_dir="/tmp")
+        assert result.latest_verdict == VERDICT_BASE_CONFLICT
+        assert result.iteration == 12          # numbering is preserved
+        assert result.iterations_performed == 0
+        assert _done_iteration_count(result) == 0
+
+    def test_done_iteration_count_falls_back_to_the_counter(self):
+        """A state without the recorded count keeps the previous rendering."""
+        from pm_core.tui.review_loop_ui import _done_iteration_count
+        state = ReviewLoopState(pr_id="pr-001", iteration=3)
+        # Declared on the state (not a dynamic attribute), so a loop that has
+        # not run reports "unknown" as ``None`` rather than raising.
+        assert state.iterations_performed is None
+        assert _done_iteration_count(state) == 3
+        state.iterations_performed = 0
+        assert _done_iteration_count(state) == 0
+
+    def test_launch_rc3_raises_base_conflict(self, tmp_path):
+        from pm_core.review_loop import BaseConflictError, _launch_review_window
+        failed = MagicMock()
+        failed.returncode = 3
+        failed.stdout = "base_conflict: conflicts\n"
+        failed.stderr = "Review not started — returned to implementation.\n"
+        with patch("pm_core.review_loop.subprocess.run", return_value=failed):
+            with pytest.raises(BaseConflictError):
+                _launch_review_window("pr-001", "/tmp")
+
+
+class TestNextReviewIteration:
+    def test_continues_after_existing_transcripts(self, tmp_path):
+        from pm_core.review_loop import next_review_iteration
+        for n in (1, 3):
+            (tmp_path / f"review-pr-001-i{n}.jsonl").write_text("{}")
+        (tmp_path / "review-pr-001.jsonl").write_text("{}")
+        (tmp_path / "review-pr-002-i9.jsonl").write_text("{}")
+        assert next_review_iteration(str(tmp_path), "pr-001") == 3
+        assert next_review_iteration(str(tmp_path / "missing"), "pr-001") == 0
 
 
 # --- _launch_review_window failure ---

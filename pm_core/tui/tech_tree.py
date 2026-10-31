@@ -43,6 +43,9 @@ VERDICT_MARKERS = {
     "TIMEOUT": "⏱",
     "ERROR": "!",
     "INPUT_REQUIRED": "⏸",
+    # The review loop routed the PR back to implementation before any
+    # reviewer ran (base integration conflict) — not a failed review.
+    "BASE_CONFLICT": "⇤",
     "LAUNCH_FAILED": "↻",
     "HOLD": "⏸",
     "CLOSED": "·",
@@ -55,6 +58,7 @@ VERDICT_STYLES = {
     "TIMEOUT": "bold red",
     "ERROR": "bold red",
     "INPUT_REQUIRED": "bold red",
+    "BASE_CONFLICT": "bold yellow",
     "LAUNCH_FAILED": "bold red",
     "HOLD": "bold yellow",
     "CLOSED": "dim",

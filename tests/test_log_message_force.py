@@ -911,3 +911,68 @@ def test_focus_suppressed_answer_visible_over_sticky():
                return_value=True):
         qa_loop_ui.focus_or_start_qa(app, "pr-001")
     assert shown[-1] == " QA window for pr-001 ready (focus suppressed)"
+
+
+def test_command_error_visible_during_sticky():
+    """QA S2 (pr-f0f4129): pressing `d` on a PR whose base return is open
+    ran `pm pr review`, which refuses (exit 3) — but the refusal was a plain
+    message, so a sticky "Review loop done … BASE_CONFLICT" held the line and
+    the key read as a no-op.  The TUI-side loop-start refusal
+    (review_loop_ui._start_loop) already forces for the same reason."""
+    import asyncio
+    from pm_core.tui import pr_view
+
+    app, shown = _stub_app()
+    app._root = None
+    app._load_state = lambda: None
+    _log(app, "Review loop done for pr-001: ⇤ BASE_CONFLICT (0 iterations)",
+         sticky=10)
+
+    class _Proc:
+        returncode = 3
+
+        async def communicate(self):
+            return (b"",
+                    b"base_conflict: still conflicts with the same HEAD/base "
+                    b"pair; rework pending\n"
+                    b"Review not started \xe2\x80\x94 implementation rework "
+                    b"pending.\n")
+
+    async def _fake_shell(*args, **kwargs):
+        return _Proc()
+
+    with patch.object(pr_view, "_run_shell_async", _fake_shell):
+        asyncio.run(pr_view._run_command_async(
+            app, "pr review pr-001", ["pr", "review", "pr-001"],
+            "Reviewing", force_errors=True))
+
+    assert "implementation rework pending" in shown[-1]
+
+
+def test_command_error_still_yields_to_sticky_by_default():
+    """The force is scoped to the review action: other commands keep the
+    existing policy (a plain failure does not clobber a sticky message)."""
+    import asyncio
+    from pm_core.tui import pr_view
+
+    app, shown = _stub_app()
+    app._root = None
+    app._load_state = lambda: None
+    _log(app, "Review loop done for pr-001: ⇤ BASE_CONFLICT (0 iterations)",
+         sticky=10)
+
+    class _Proc:
+        returncode = 1
+
+        async def communicate(self):
+            return b"", b"boom\n"
+
+    async def _fake_shell(*args, **kwargs):
+        return _Proc()
+
+    with patch.object(pr_view, "_run_shell_async", _fake_shell):
+        asyncio.run(pr_view._run_command_async(
+            app, "pr merge pr-001", ["pr", "merge", "pr-001"], "Merging"))
+
+    assert "boom" not in shown[-1]
+    assert "Review loop done" in shown[-1]

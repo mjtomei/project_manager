@@ -448,6 +448,12 @@ class ProjectManagerApp(App):
         # Pane idle tracker: detects when implementation windows go idle
         from pm_core.pane_idle import PaneIdleTracker
         self._pane_idle_tracker = PaneIdleTracker()
+        # Base-return handoff (base_check): per-PR cached completion verdict
+        # (keyed to the return episode and the idle turn it was computed for)
+        # and the last relaunch-attempt time, so the 5 s poll neither refetches
+        # the base nor re-takes the project.yaml lock on every tick.
+        self._base_completion_checks: dict = {}
+        self._base_launch_attempts: dict = {}
         # PRs whose post-publish main-repo update window is open (tracked
         # by _poll_impl_idle; the merge itself never resolves conflicts)
         self._pending_merge_prs: set[str] = set()

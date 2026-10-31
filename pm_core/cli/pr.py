@@ -667,6 +667,32 @@ def pr_show(pr_id: str):
             click.echo(f"Integration: {ret_integ.get('status') or '?'} "
                        f"with {base}")
             _path_list_lines(ret_integ)
+    # A base-conflict return recorded by the pre-review / pre-QA gate (a
+    # separate document from the sign-off return, so it gets its own block).
+    from pm_core import base_check as _base_check
+    base_ret = _base_check.last_return(pr_entry)
+    if base_ret:
+        click.echo("\n## Base integration return")
+        for label, key in (
+            ("Verdict", "verdict"),
+            ("Stage", "stage"),
+            ("Review iteration", "iteration"),
+            ("HEAD", "head"),
+            ("Base branch", "base_branch"),
+            ("Base sha", "base_sha"),
+            ("Target", "target_repo"),
+            ("Attempt", "attempt"),
+            ("Reason", "reason"),
+            ("Awaiting", "awaiting"),
+            ("Resolved", "resolved_at"),
+            ("Resolved reason", "resolved_reason"),
+            ("Needs human", "needs_human"),
+            ("Apply error", "apply_error"),
+        ):
+            val = base_ret.get(key)
+            if val:
+                click.echo(f"{label}: {val}")
+        _path_list_lines(base_ret)
     integ = pr_entry.get("integration") or {}
     if integ:
         click.echo("\n## Integration")
@@ -1205,11 +1231,20 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                     win = tmux_mod.find_window_by_name(pm_session, window_name)
                     if win:
                         tmux_mod.set_shared_window_size(pm_session, win["id"])
-                # A sign-off IMPL return is now being worked on.  Cleared
-                # before the echo, which fails (EPIPE) when the TUI that
-                # launched this restarted meanwhile (see _launch_review_window).
+                # A sign-off IMPL / base-conflict return is now being worked
+                # on.  Cleared before the echo, which fails (EPIPE) when the
+                # TUI that launched this restarted meanwhile (see
+                # _launch_review_window).
                 from pm_core.signoff import clear_return_awaiting
                 clear_return_awaiting(root, pr_id, "impl", session_opened=True)
+                from pm_core import base_check
+                base_check.clear_return_awaiting(root, pr_id)
+                # Every driver watching this PR's impl pane (TUI run dir,
+                # CLI auto-sequence dir) must follow the new session: the
+                # relaunch may have come from only one of them, and a stale
+                # symlink makes the others read the killed session's last
+                # idle event (a base-return handoff would never advance).
+                base_check.share_impl_transcript(root, pr_id, transcript)
                 click.echo(f"Launched Claude in tmux window '{window_name}' (session: {pm_session})")
                 return
             except Exception as e:
@@ -1223,6 +1258,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     click.echo("Launching Claude...")
     from pm_core.signoff import clear_return_awaiting
     clear_return_awaiting(root, pr_id, "impl", session_opened=True)
+    from pm_core import base_check
+    base_check.clear_return_awaiting(root, pr_id)
     launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh,
                   provider=resolved_provider, model=resolved_model, effort=_resolution.effort,
                   session_type="impl")
@@ -1576,6 +1613,105 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         click.echo(f"Review window error: {e}")
 
 
+def _retire_review_window_for_return(pr_entry: dict) -> None:
+    """Close the PR's review window when a base return sends it to impl.
+
+    A return must not leave a reviewer writer behind (the review-loop prompt
+    can fix/commit).  Mirrors sign-off's ``retire_signoff_run`` on a bounce;
+    a WAIT/self-heal path never reaches here (the return already retired it).
+    """
+    session = _get_pm_session()
+    if not session or not pr_entry.get("workdir"):
+        return
+    try:
+        from pm_core import home_window
+        window_name = f"review-{_pr_display_id(pr_entry)}"
+        win = tmux_mod.find_window_by_name(session, window_name)
+        if win:
+            # Kill by id, not name (the ``park_if_on``/sign-off pattern): the
+            # name is what we searched for, the id is unambiguous.
+            home_window.park_if_on(session, win["id"])
+            tmux_mod.kill_window(session, win["id"])
+            _log.info("base return: retired review window %s", window_name)
+    except Exception:
+        _log.debug("base return: retiring the review window failed",
+                   exc_info=True)
+
+
+def _review_post_gate_refusal(root, pr_id: str) -> tuple[int, str] | None:
+    """Re-read the PR after the gate's network round-trip.
+
+    Returns ``(exit_code, why)`` when the reviewer must not start, else
+    ``None``.  The gate fetches the base, so a concurrent merge, a phase
+    transition or a conflict return recorded by another driver can land
+    inside it.  The first-iteration path guards its ``in_review`` write
+    atomically; the already-``in_review`` branch writes no status, so it has
+    no such guard and needs this re-read (it is the normal path for review
+    iterations >= 2).  Without it a reviewer starts beside the
+    implementation rework the return just launched.
+
+    Exit code 3 is the routing code ``review_loop`` maps to
+    ``VERDICT_BASE_CONFLICT``: no reviewer ran, and the PR is being reworked.
+    """
+    from pm_core import base_check
+    try:
+        pr = store.get_pr(store.load(root), pr_id)
+    except Exception as e:  # a read failure must not block a review
+        _log.warning("review post-gate re-read for %s failed: %s", pr_id, e)
+        return None
+    if pr is None:
+        # Removed from the project inside the fetch (``pm pr close``/remove):
+        # the first-iteration path refuses an absent entry too, so a reviewer
+        # must not be launched against one.  ``run_qa_sync``'s post-gate
+        # re-read classifies this the same way.
+        return 1, "was removed from the project during the base check"
+    if base_check.has_open_return(pr):
+        return 3, ("was returned to implementation for a base conflict "
+                   "during the base check")
+    if pr.get("status") not in ("in_progress", "in_review"):
+        return 1, "left the pre-review phase during the base check"
+    return None
+
+
+def _review_base_gate(root, pr_entry: dict, *, review_iteration: int,
+                      transcript: str | None, review_loop: bool,
+                      review_loop_id: str) -> int | None:
+    """Pre-flight base integration gate for a review about to start.
+
+    Returns an exit code when the reviewer must NOT start (a conflict or an
+    open return).  A retryable probe failure is reported and the review
+    proceeds — sign-off still performs the authoritative check.
+    """
+    from pm_core import base_check
+    stage = (base_check.STAGE_REVIEW_ITERATION
+             if (review_iteration or 0) > 1 else base_check.STAGE_REVIEW)
+    try:
+        res = base_check.gate(
+            root, pr_entry["id"], stage,
+            iteration=review_iteration or None, transcript=transcript,
+            resume_loop=bool(review_loop and review_loop_id))
+    except Exception as e:  # the gate never blocks a caller
+        _log.warning("review base gate for %s failed: %s", pr_entry["id"], e)
+        return None
+    if res.decision in (base_check.CONFLICT, base_check.WAIT):
+        # The return owns the PR: never leave a raced transition in_review.
+        base_check.ensure_impl_status(root, pr_entry["id"])
+        if res.decision == base_check.CONFLICT:
+            _retire_review_window_for_return(pr_entry)
+        click.echo(f"base_conflict: {res.reason}")
+        if res.decision == base_check.CONFLICT:
+            click.echo("Review not started — returned to implementation.",
+                       err=True)
+        else:
+            click.echo("Review not started — implementation rework pending.",
+                       err=True)
+        return 3
+    if res.decision == base_check.RETRY:
+        click.echo(f"Base integration check failed (retryable): {res.reason}; "
+                   "continuing review", err=True)
+    return None
+
+
 @pr.command("review")
 @click.argument("pr_id", default=None, required=False)
 @click.option("--fresh", is_flag=True, default=False, help="Kill existing review window and create a new one")
@@ -1589,7 +1725,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
 @click.option("--no-window", is_flag=True, default=False, hidden=True,
               help="Only transition to in_review; the caller's review loop "
                    "launches the window itself (used by auto-start)")
-def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: bool, review_iteration: int, review_loop_id: str, transcript: str | None, no_window: bool):
+@click.option("--skip-base-check", is_flag=True, default=False, hidden=True,
+              help="The caller already ran the base integration gate "
+                   "(auto-sequence); do not fetch the base again")
+def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: bool, review_iteration: int, review_loop_id: str, transcript: str | None, no_window: bool, skip_base_check: bool = False):
     """Mark a PR as in_review and launch a review window.
 
     On a PR that is already past the review step (``qa`` / ``sign_off``) this
@@ -1630,6 +1769,29 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         click.echo(f"PR {pr_id} is already in_review.")
         if no_window:
             return
+        if not skip_base_check:
+            code = _review_base_gate(
+                root, pr_entry, review_iteration=review_iteration,
+                transcript=transcript, review_loop=review_loop,
+                review_loop_id=review_loop_id)
+            if code:
+                raise SystemExit(code)
+        # This branch writes no status, so the atomic guard below (which only
+        # runs on the first-iteration path) does not cover it: re-read after
+        # the gate's fetch before launching a reviewer.  It runs even when the
+        # caller already gated (``--skip-base-check``): that gate was its own
+        # network round-trip, so a return another driver recorded after it is
+        # just as invisible here, and the re-read is a cheap local load.
+        refusal = _review_post_gate_refusal(root, pr_id)
+        if refusal:
+            code, why = refusal
+            if code == 3:
+                from pm_core import base_check
+                base_check.ensure_impl_status(root, pr_id)
+                _retire_review_window_for_return(pr_entry)
+            click.echo(f"PR {_pr_display_id(pr_entry)} {why}; review "
+                       f"not started.", err=True)
+            raise SystemExit(code)
         _launch_review_window(data, pr_entry, fresh=fresh, background=background,
                               review_loop=review_loop,
                               review_iteration=review_iteration,
@@ -1668,6 +1830,16 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
                 f"status unchanged (no new review started).")
         return
 
+    # Base integration pre-check: a conflict returns the PR to
+    # implementation instead of starting a review on code that cannot merge.
+    if not skip_base_check and not no_window:
+        code = _review_base_gate(
+            root, pr_entry, review_iteration=review_iteration,
+            transcript=transcript, review_loop=review_loop,
+            review_loop_id=review_loop_id)
+        if code:
+            raise SystemExit(code)
+
     # For GitHub backend: upgrade draft PR to ready for review (before lock)
     backend_name = data["project"].get("backend", "vanilla")
     gh_pr_number = pr_entry.get("gh_pr_number")
@@ -1683,14 +1855,50 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         else:
             click.echo("Warning: Failed to upgrade draft PR. It may already be ready or was closed.", err=True)
 
+    entered = {"ok": False, "why": "", "code": 1}
+    from pm_core import base_check
+
     def apply(data):
         pr = store.get_pr(data, pr_id)
         if not pr:
+            # Removed inside the gate's fetch (``pm pr close``/remove): name
+            # it, so the refusal below is not an empty reason.
+            entered["why"] = "was removed from the project during the base check"
+            return
+        # The pre-flight base check above is a network round-trip.  A
+        # concurrent merge/close (e.g. a GitHub sync) landing inside that
+        # window must not be demoted to in_review: it would un-merge the PR
+        # in project.yaml and start a reviewer against a finished PR.  Nor
+        # may a PR that moved on to qa/sign_off be pulled back: those phases
+        # own the PR, and demoting would strand the running driver.  Only
+        # the pre-review statuses may be advanced (in_review is idempotent —
+        # a concurrent review may have written it already).
+        if pr.get("status") not in ("in_progress", "in_review"):
+            entered["why"] = "left the pre-review phase during the base check"
+            entered["code"] = 1
+            return
+        # The base can also move *into* a conflict inside that same window
+        # (another driver's gate, or the TUI completion check, records a
+        # return).  The return owns the PR now: writing in_review and
+        # launching a reviewer would put a review writer beside the
+        # implementation rework the return just started.  Exit 3 is the
+        # routing code ``review_loop`` maps to ``VERDICT_BASE_CONFLICT`` (no
+        # reviewer ran), not a launch failure.
+        if base_check.has_open_return(pr):
+            entered["why"] = ("was returned to implementation for a base "
+                              "conflict during the base check")
+            entered["code"] = 3
             return
         pr["status"] = "in_review"
         _record_status_timestamp(pr, "in_review")
+        entered["ok"] = True
 
     store.locked_update(root, apply)
+    if not entered["ok"]:
+        click.echo(
+            f"PR {_pr_display_id(pr_entry)} {entered['why']}; review not "
+            f"started.", err=True)
+        raise SystemExit(entered["code"])
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
     if no_window:
@@ -3724,33 +3932,66 @@ def _retire_signoff_window(session: str, pr_entry: dict, tdir: Path) -> None:
     signoff_mod.retire_signoff_run(session, pr_entry, tdir)
 
 
+def _impl_idle_tracker(pr_entry: dict, tdir: Path, pane_id: str):
+    """Register+poll the impl pane once; ``(tracker, pr_id)`` or None.
+
+    Both idle readers below need the same registration (hook events are keyed
+    by the session id recovered from the transcript symlink); they only differ
+    in what they read back.  None means "nothing to read yet" — no transcript
+    symlink (the session never launched) or no recoverable session id.
+    """
+    from pm_core.pane_idle import PaneIdleTracker
+
+    pr_id = pr_entry["id"]
+    transcript = tdir / f"impl-{pr_id}.jsonl"
+    if not transcript.exists():
+        return None
+    from pm_core.claude_launcher import pane_runs_transcript
+    if not pane_runs_transcript(pane_id, pr_entry.get("workdir"), transcript):
+        # Another driver (the TUI) launched this pane; the symlink is an
+        # earlier session's, whose idle event says nothing about it (S79).
+        return None
+    tracker = PaneIdleTracker()
+    try:
+        tracker.register(pr_id, pane_id, str(transcript))
+    except ValueError:
+        return None
+    tracker.poll(pr_id)
+    return tracker, pr_id
+
+
 def _check_impl_idle(session: str, pr_entry: dict, tdir: Path) -> tuple[bool, bool]:
     """Return (idle, gone): polls the impl pane via PaneIdleTracker.
 
     *idle* is True when the Claude session has emitted ``idle_prompt``.
     *gone* is True when the tmux pane disappeared.
     """
-    from pm_core.pane_idle import PaneIdleTracker
-
-    pr_id = pr_entry["id"]
     pane_id = _impl_window_pane(session, pr_entry)
     if not pane_id:
         return False, True
-    transcript = tdir / f"impl-{pr_id}.jsonl"
-    if not transcript.exists():
+    polled = _impl_idle_tracker(pr_entry, tdir, pane_id)
+    if polled is None:
         return False, False
-    from pm_core.claude_launcher import pane_runs_transcript
-    if not pane_runs_transcript(pane_id, pr_entry.get("workdir"), transcript):
-        # Another driver (the TUI) launched this pane; the symlink is an
-        # earlier session's, whose idle event says nothing about it (S79).
-        return False, False
-    tracker = PaneIdleTracker()
-    try:
-        tracker.register(pr_id, pane_id, str(transcript))
-    except ValueError:
-        return False, False
-    tracker.poll(pr_id)
+    tracker, pr_id = polled
     return tracker.is_idle(pr_id), tracker.is_gone(pr_id)
+
+
+def _impl_idle_since(session: str, pr_entry: dict, tdir: Path) -> float | None:
+    """When the impl pane last went idle (None when it is not idle).
+
+    Used by the base-return completion handoff to require a settle window: an
+    idle turn is not finished work while a background test/edit may still be
+    running.  Kept separate from :func:`_check_impl_idle` so its patch point
+    (and two-value contract) is unchanged.
+    """
+    pane_id = _impl_window_pane(session, pr_entry)
+    if not pane_id:
+        return None
+    polled = _impl_idle_tracker(pr_entry, tdir, pane_id)
+    if polled is None:
+        return None
+    tracker, pr_id = polled
+    return tracker.idle_since(pr_id)
 
 
 def _older_than(path: Path | None, iso_ts: str | None) -> bool:
@@ -3863,17 +4104,54 @@ def _qa_run_owned_elsewhere(status_path: Path | None) -> bool:
 
 
 def _launch_review_iteration(pr_id: str, tdir: Path, iteration: int, *,
-                             fresh: bool, review_loop: bool = True) -> None:
+                             fresh: bool, review_loop: bool = True,
+                             root: Path | None = None) -> str | None:
     """Launch review *iteration* in the background for auto-sequence.
 
     Its transcript lives under *tdir* with review-loop iteration naming so
     a later tick finds the verdict (:func:`_check_review_verdict`).
+
+    Runs the base integration gate first: a conflict records the return and
+    relaunches implementation, and this returns a ``base_conflict: ...``
+    status line instead of launching the reviewer.  The gate result is
+    passed through so ``pr_review`` does not fetch the base again.
     """
+    from pm_core import base_check
+    root = root or state_root()
+    stage = (base_check.STAGE_REVIEW_ITERATION if iteration > 1
+             else base_check.STAGE_REVIEW)
+    # ``gate`` derives the relaunched impl transcript directory from this
+    # path's parent, so pass the iteration's transcript file (not ``tdir``
+    # itself, whose parent would put ``impl-<pr>.jsonl`` one level too high
+    # and leave this driver's idle tracker watching a missing symlink).
+    res = base_check.gate(
+        root, pr_id, stage, iteration=iteration,
+        transcript=tdir / f"review-{pr_id}-i{iteration}.jsonl")
+    if res.decision in (base_check.CONFLICT, base_check.WAIT):
+        base_check.ensure_impl_status(root, pr_id)
+        if res.decision == base_check.CONFLICT:
+            _retire_review_window_for_return(
+                store.get_pr(store.load(root), pr_id) or {})
+        return f"base_conflict: {res.reason}"
+    if res.decision == base_check.RETRY:
+        click.echo(f"note: base check failed (retryable): {res.reason}",
+                   err=True)
     transcript = tdir / f"review-{pr_id}-i{iteration}.jsonl"
-    click.get_current_context().invoke(
-        pr_review, pr_id=pr_id, fresh=fresh, background=True,
-        review_loop=review_loop, review_iteration=iteration,
-        review_loop_id="", transcript=str(transcript))
+    try:
+        click.get_current_context().invoke(
+            pr_review, pr_id=pr_id, fresh=fresh, background=True,
+            review_loop=review_loop, review_iteration=iteration,
+            review_loop_id="", transcript=str(transcript), skip_base_check=True)
+    except SystemExit as e:
+        # ``pr_review``'s post-gate guard refuses with exit 3 when another
+        # driver recorded a base return inside this launch's window (no
+        # reviewer ran).  This helper's contract is a status line, not a
+        # process exit: the tick must report the routing and stay alive.
+        if e.code == 3:
+            return ("base_conflict: returned to implementation during the "
+                    "review launch")
+        raise
+    return None
 
 
 @pr.command("auto-sequence")
@@ -3915,7 +4193,10 @@ def pr_auto_sequence(pr_id: str):
         return
 
     from pm_core.signoff import open_return, return_awaiting
+    from pm_core import base_check
     awaiting = return_awaiting(pr_entry)
+    base_return = base_check.open_return(pr_entry)
+    base_awaiting = base_check.return_awaiting(pr_entry)
 
     if status == "in_progress":
         if spec_gen.has_pending_spec(pr_entry):
@@ -3923,6 +4204,19 @@ def pr_auto_sequence(pr_id: str):
             return
         if not pm_session:
             click.echo("paused: no pm tmux session")
+            return
+        if base_awaiting == "impl":
+            # A base-conflict return whose fresh rework session never
+            # launched (interrupted right after the handoff): an idle old
+            # session is not finished work.  One launcher wins.
+            if not base_check.claim_impl_launch(root, pr_id):
+                click.echo("running: impl")
+                return
+            ok, detail = base_check.launch_impl(root, pr_id, tdir)
+            if not ok:
+                click.echo(f"paused: base rework relaunch failed: {detail}")
+                return
+            click.echo("base_conflict: returning to impl (relaunched)")
             return
         if awaiting == "impl":
             # Sign-off routed this back but the rework session never
@@ -3953,6 +4247,18 @@ def pr_auto_sequence(pr_id: str):
         if not idle:
             click.echo("running: implementation")
             return
+        if base_return is not None:
+            # An idle turn is not completion: a base-rework handoff only
+            # advances once the conflict is actually reconciled (or the
+            # pair moved).  Background tests/edits keep the tree dirty and
+            # the pair unchanged, so they do not qualify.
+            idle_since = _impl_idle_since(pm_session, pr_entry, tdir)
+            done = base_check.impl_completion(
+                root, pr_id, pr_entry, idle_since=idle_since,
+                transcript_dir=tdir)
+            if not done.complete:
+                click.echo(f"running: implementation ({done.reason})")
+                return
         # Idle and no spec_pending → advance to review.  Persist the
         # transcript symlink under the auto-sequence dir so the next tick
         # can locate the verdict.  Use review-loop iteration naming so
@@ -3966,15 +4272,27 @@ def pr_auto_sequence(pr_id: str):
         # iteration because the TUI ran the earlier reviews (S77).
         _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
         next_iter = latest_iter + 1
-        _launch_review_iteration(
-            pr_id, tdir, next_iter, review_loop=False,
+        blocked = _launch_review_iteration(
+            pr_id, tdir, next_iter, review_loop=False, root=root,
             fresh=latest_iter > 0 or open_return(pr_entry) is not None)
+        if blocked:
+            click.echo(blocked)
+            return
         click.echo("advanced: in_review")
         return
 
     if status == "in_review":
         if not pm_session:
             click.echo("paused: no pm tmux session")
+            return
+        if base_return is not None:
+            # A raced transition back to in_review while the return owns the
+            # PR: repair the status and never advance (a stale PASS would
+            # otherwise flip it to qa and spawn a throwaway QA driver).
+            base_check.ensure_impl_status(root, pr_id)
+            click.echo(
+                f"base_conflict: "
+                f"{base_return.get('reason') or 'base rework pending'}")
             return
         # A native review loop (including its bounded failed-launch retries)
         # owns this PR's review launch; a second --fresh launch here would
@@ -4000,7 +4318,11 @@ def pr_auto_sequence(pr_id: str):
                 click.echo("running: review")
                 return
             next_iter = latest_iter + 1
-            _launch_review_iteration(pr_id, tdir, next_iter, fresh=True)
+            blocked = _launch_review_iteration(pr_id, tdir, next_iter,
+                                               fresh=True, root=root)
+            if blocked:
+                click.echo(blocked)
+                return
             click.echo(
                 f"sign_off: returning to review (iteration {next_iter})")
             return
@@ -4047,7 +4369,11 @@ def pr_auto_sequence(pr_id: str):
             # machinery in the launched window writes to the next
             # iteration transcript.
             next_iter = latest_iter + 1
-            _launch_review_iteration(pr_id, tdir, next_iter, fresh=True)
+            blocked = _launch_review_iteration(pr_id, tdir, next_iter,
+                                               fresh=True, root=root)
+            if blocked:
+                click.echo(blocked)
+                return
             click.echo(f"review: needs_work, retrying iteration {next_iter}")
             return
 
@@ -4055,13 +4381,27 @@ def pr_auto_sequence(pr_id: str):
         if _review_window_pane(pm_session, pr_entry) is None:
             # Review window absent — launch a review-loop iteration.
             next_iter = max(latest_iter, 0) + 1
-            _launch_review_iteration(pr_id, tdir, next_iter, fresh=False)
+            blocked = _launch_review_iteration(pr_id, tdir, next_iter,
+                                               fresh=False, root=root)
+            if blocked:
+                click.echo(blocked)
+                return
             click.echo("advanced: review_relaunched")
             return
         click.echo("running: review")
         return
 
     if status == "qa":
+        if base_return is not None:
+            # A raced transition into qa must not advance a PR its base
+            # return owns: a stale qa_status.json would otherwise hand the
+            # PR to sign-off (a second writer) beside the rework.  Keep the
+            # status in_progress, as the gates do.
+            base_check.ensure_impl_status(root, pr_id)
+            click.echo(
+                f"base_conflict: "
+                f"{base_return.get('reason') or 'base rework pending'}")
+            return
         overall, _path = _qa_status_for(pr_id)
         # The status predates sign-off's return (REQA, or rework that must be
         # re-verified): it is the run sign-off already judged, not the re-run.
@@ -4125,7 +4465,11 @@ def pr_auto_sequence(pr_id: str):
             trigger_tui_refresh()
             _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
             next_iter = latest_iter + 1
-            _launch_review_iteration(pr_id, tdir, next_iter, fresh=True)
+            blocked = _launch_review_iteration(pr_id, tdir, next_iter,
+                                               fresh=True, root=root)
+            if blocked:
+                click.echo(blocked)
+                return
             click.echo(
                 f"qa: needs_work, returning to review (iteration {next_iter})"
             )
@@ -4287,7 +4631,11 @@ def pr_auto_sequence(pr_id: str):
         if hop == "review":
             _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
             next_iter = latest_iter + 1
-            _launch_review_iteration(pr_id, tdir, next_iter, fresh=True)
+            blocked = _launch_review_iteration(pr_id, tdir, next_iter,
+                                               fresh=True, root=root)
+            if blocked:
+                click.echo(blocked)
+                return
             click.echo(
                 f"sign_off: returning to review (iteration {next_iter})")
             return
@@ -4381,6 +4729,18 @@ def pr_qa_run_bg(pr_id: str, loop_id: str | None):
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
+    # A base-conflict return owns the PR: never launch the QA planner on it.
+    # Checked before the status transition so an in_review PR whose rework is
+    # still pending is not flipped to qa on the way to an early return.
+    from pm_core import base_check
+    if base_check.has_open_return(pr_entry):
+        # Close a raced in_review->qa transition as the other gates do: the
+        # completion handoff only polls in_progress PRs.
+        base_check.ensure_impl_status(root, pr_id)
+        _log.info("pr_qa_run_bg: %s has an open base return; skipping QA",
+                  pr_id)
+        return
+
     # Transition to qa if necessary.  The launching tick has normally done
     # it already; only lock when there is something to write, and wait out
     # a busy project.yaml (another pm command) rather than die before the
@@ -4416,6 +4776,14 @@ def pr_qa_run_bg(pr_id: str, loop_id: str | None):
                   pr_id, pr_entry.get("status"))
         return
 
+    # A return recorded concurrently (after the check above, before the
+    # transition landed) still owns the PR: re-check before opening QA.
+    if base_check.has_open_return(pr_entry):
+        base_check.ensure_impl_status(root, pr_id)
+        _log.info("pr_qa_run_bg: %s has an open base return; skipping QA",
+                  pr_id)
+        return
+
     from pm_core.signoff import clear_return_awaiting
     clear_return_awaiting(root, pr_id, "qa", session_opened=True)
     # Mirror this CLI-driven run into the shared per-PR runtime state.  Only
@@ -4438,6 +4806,10 @@ def pr_qa_run_bg(pr_id: str, loop_id: str | None):
         if _is_setup_error(e):
             record_setup_stop(state, e)
         raise SystemExit(1)
+    if state.base_returned:
+        _log.info("pr_qa_run_bg: %s returned to implementation for a base "
+                  "conflict before QA planning: %s", pr_id,
+                  state.base_return_reason)
     if state.latest_verdict:
         _rs.set_action_state(pr_id, "qa", "done", verdict=state.latest_verdict)
     else:

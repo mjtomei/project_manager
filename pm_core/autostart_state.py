@@ -471,6 +471,17 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
         idle = (inp.get("impl_idle") or {}).get(pr_id)
         if idle == "waiting":
             return phase, "waiting", "permission prompt in implementation window"
+        # A base-conflict return owns an in_progress PR: the idle turn is
+        # not a pending review transition, it is the rework (or its launch).
+        ret = pr.get("base_return")
+        if isinstance(ret, dict) and ret.get("verdict") \
+                and not ret.get("resolved_at"):
+            if ret.get("needs_human"):
+                return phase, "paused", "base integration conflict needs a human"
+            if ret.get("awaiting") == "impl":
+                return phase, "running", "base conflict; relaunching implementation"
+            return (phase, "running",
+                    "base conflict; implementation reconciling the base")
         if idle == "idle":
             return phase, "running", "impl idle; review transition pending"
         return phase, "running", "implementing"

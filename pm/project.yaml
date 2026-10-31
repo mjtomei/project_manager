@@ -37879,11 +37879,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-22T03:54:03.261607+00:00'
+  updated_at: '2026-10-28T20:01:45.534961+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-f5475d4
+    text: 'From pr-f0f4129 (base-integration gate): `pm_core.base_check.share_impl_transcript`
+      now runs from `pm pr start` on every implementation launch and re-points every
+      driver''s `transcripts/*/impl-<pr>.jsonl` (TUI run dir + auto-sequence dir)
+      at the new session. It only touches symlinks; a finalized copy (real file from
+      `finalize_transcript`) is renamed to `<name>.finalized` instead of being deleted.
+      The remaining overwrite is in `claude_launcher.build_claude_shell_cmd`, which
+      unlinks whatever exists at the launch transcript path (including a finalized
+      copy) before creating its symlink — that is the piece this PR did not change.'
+    created_at: '2026-10-28T20:01:45Z'
+    last_edited: '2026-10-28T20:01:45Z'
 - id: pr-ccdec71
   plan: bugs
   title: 'Bug: pm pr auto-sequence reports "advanced: review_relaunched" when the
@@ -46896,6 +46907,948 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-f0f4129
+  plan: bugs
+  title: Check base integration before review iterations and QA; return conflicts
+    to implementation
+  branch: pm/pr-f0f4129-check-base-integration-before-review-iterations-an
+  status: in_progress
+  depends_on: []
+  description: 'Sign-off is correctly detecting integration conflicts, but doing so
+    after repeated review and QA wastes completed work. User requested an automated
+    conflict check before starting review, before moving to another review iteration,
+    and before starting QA, returning to implementation for the base merge when necessary.
+
+
+    Check the latest configured base against the current PR HEAD in an isolated candidate,
+    without mutating the product workdir, index, or refs. Cover the supported TUI,
+    CLI/background and resumed native transition paths. If integration conflicts,
+    do not launch the downstream reviewer/planner: record the exact PR HEAD/base pair,
+    conflict paths/reason and intended return stage, then hand off once to implementation
+    to merge/reconcile the base. Implementation completion must be genuine before
+    fresh review starts; an idle notification while background tests or edits are
+    unfinished must not launch a concurrent writer. Preserve completed review outcomes,
+    transcript/evidence history, dirty files, stashes, fixtures, drafts, model routing,
+    spec-review setting and manual merge gates.
+
+
+    Clean integration continues the intended phase; do not turn every clean base advance
+    into an unconditional full review/QA reset. Fetch/probe failures are explicit
+    retryable failures, not proof of a conflict or approval. Sign-off remains the
+    final integrated-candidate authority. Reuse existing integration primitives where
+    appropriate and coordinate with #253/pr-5cee3d5 evidence reuse. This differs from
+    #246/pr-62fdd54, which synchronizes the PR workdir to its own upstream branch
+    before planning.
+
+
+    Make the transition idempotent across repeated polls, controller restart, concurrent
+    PRs, stale callbacks and base movement. Never run implementation/review/QA writers
+    concurrently for this handoff, drop existing evidence, merge the PR, force-push,
+    or change the user''s policies. Avoid an endless return loop for an unchanged
+    unresolved HEAD/base pair.
+
+
+    Acceptance: real Git conflict reproductions at each of the three transition points;
+    clean and unchanged base paths; another review iteration; base moving during handoff;
+    dirty workdirs retained; fetch failures; restart/late callback races and exactly
+    one implementation owner. Reproduce background-test idle handoff and ensure it
+    does not qualify as completed implementation. Test meaningful behavior, and live
+    QA must verify the transition and preserved evidence. Deliver the implementation
+    through ordinary review/QA/work-Opus sign-off with wait_for_merge. User authorized
+    standalone start on 2026-10-28.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/274
+  gh_pr_number: 274
+  created_at: '2026-10-28T13:41:51.469975+00:00'
+  updated_at: '2026-10-31T18:39:33.198634+00:00'
+  started_at: '2026-10-28T13:44:04.216828+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-225dd0b
+    text: 'Impl ready for review (7483ca55). New `pm_core/base_check.py` wraps `integration.check_integration`
+      as a pre-flight gate. Choke points: `pm pr review` (TUI loop iterations + one-shots;
+      exit 3 -> `review_loop.BaseConflictError` -> `VERDICT_BASE_CONFLICT`, no iteration
+      recorded), `qa_loop.run_qa_sync` (before the QA workdir/Scenario 0/planner),
+      `pr_auto_sequence` (`_launch_review_iteration` + in_progress completion/relaunch),
+      and the TUI scheduler (`_start_loop`, `_auto_start_review_loops/_qa_loops`,
+      `start_qa`). Conflict -> `pr["base_return"]` (pair/stage/conflicts/attempt/awaiting/launch_claim)
+      + in_progress + one claimed impl relaunch; `pr["base_check"]` carries the retry
+      record; a note and `$CAP/integration.json` are the evidence. Completion (`impl_completion`)
+      needs the launch (awaiting cleared), idle settle, no merge/rebase, no tracked
+      edits (untracked + pm project.yaml ignored) and a fresh check that is no longer
+      the conflict; same pair never bounces again, moved-base conflicts supersede
+      (capped, then needs_human). Fetch errors are retryable: writer-launch gate proceeds
+      (fail open, sign-off is authoritative), completion waits. Review loops continue
+      iteration numbering from existing transcripts. Tests: tests/test_base_check.py
+      (real git, 3 stages, concurrency, cap, dirty/pm-state, moved base), tests/test_tui_base_return.py,
+      additions to test_review_loop/test_pr_auto_sequence. Pre/post CLI captures in
+      $CAP/impl/{pre,post}-fix/review-conflict/. Full suite: 4085 passed; only pre-existing
+      env failures (markdown module missing, hook test needs PM_HOST_HOME unset).'
+    created_at: '2026-10-28T14:50:54Z'
+    last_edited: '2026-10-28T14:50:54Z'
+  - id: note-146a785
+    text: 'Final impl HEAD 35c8d634 (linear on 093f0ac6; the note commit is HEAD~1).
+      Full suite: 4086 passed, 1 skipped; only the pre-existing env failures remain
+      (tests/test_markdown_render.py needs the `markdown` package; tests/test_hook_events.py::test_installer_writes_standalone_receiver
+      needs PM_HOST_HOME unset). Live TUI/CLI review trigger from the host: press
+      `d` on #274 or run `pm pr review pr-f0f4129` from the base pm dir (this impl
+      container cannot reach the host TUI).'
+    created_at: '2026-10-28T15:02:01Z'
+    last_edited: '2026-10-28T15:02:22Z'
+  - id: note-139fb81
+    text: 'Review-loop 8bac i1 fixes (on a1b9e152). (1) impl_completion now requires
+      idle evidence from *after* the relaunch: clear_return_awaiting stamps `launched_at`,
+      so the killed session''s idle_prompt (still readable through another driver''s
+      stale impl-<pr>.jsonl symlink) can no longer pass the settle window and start
+      a reviewer beside the rework writer. (2) launch_impl re-points the other drivers''
+      impl-<pr>.jsonl symlinks at the new session (_share_impl_transcript) so the
+      TUI run dir and auto-sequence dir keep tracking it — without that, (1) would
+      stall a manual `d` conflict. (3) base_return stores conflicts/overlap bounded
+      like integration.compact with *_total preserved (project.yaml is git-tracked).
+      (4) pr_auto_sequence''s qa branch refuses to advance a PR whose base return
+      is open, so a stale qa_status.json PASS cannot hand it to sign-off. (5) BASE_CONFLICT
+      renders in the tech tree; unused base_check.summary removed; _check_impl_idle/_impl_idle_since
+      share one pane poll. Spec updated (R6 idle-evidence clause, R12 qa guard). Full
+      suite: 4119 passed, 1 skipped, 13 failed — all pre-existing env (12x test_markdown_render
+      needs the `markdown` package; test_hook_events::test_installer_writes_standalone_receiver
+      needs PM_HOST_HOME unset). Overlap for pr-9ee4d64 (transcript overwrite after
+      a return): next_review_iteration + _share_impl_transcript now own parts of that
+      space.'
+    created_at: '2026-10-28T15:43:39Z'
+    last_edited: '2026-10-28T15:43:39Z'
+  - id: note-71808a3
+    text: 'Review-loop 8bac i2 fixes. (1) A capped (`needs_human`) base return was
+      a permanent dead end: gate/impl_completion short-circuited before re-checking,
+      so even a hand-reconciled clean base left the PR stuck with no `pm` command
+      to clear it — contradicting the note''s "a human must reconcile the base before
+      review/QA resumes". They now still run the integration check and resolve on
+      a clean base, while never writing another episode/note while it still conflicts.
+      (2) `_launch_review_iteration` passed the auto-sequence *directory* to gate,
+      whose `_transcript_dir` uses `.parent` — the relaunched `impl-<pr>.jsonl` landed
+      one level too high; now passes the iteration transcript file. (3) Raced in_review/qa
+      + open return: pr_auto_sequence guards the in_review branch (repair status,
+      never advance on a stale PASS) and pr_qa_run_bg checks before the in_review->qa
+      flip. (4) evaluate drops its unused stage param; the review-loop launch timeout
+      is 360s so the in-subprocess gate fetch/relaunch is not mistaken for an ERROR.
+      Tests: cap recovery, transcript path, in_review guard, qa-run-bg status; removed
+      a tautological assertion. Full suite: 4123 passed, 1 skipped, 13 pre-existing
+      env failures (markdown module, PM_HOST_HOME hook test). (2026-10-28T16:55:00Z)'
+    created_at: '2026-10-28T16:45:00Z'
+    last_edited: '2026-10-28T16:45:00Z'
+  - id: note-dc6ef32
+    text: 'Review-loop a6f7 i2 fixes. (1) impl_completion: a missing idle timestamp
+      is now "no evidence" instead of skipping both the IDLE_SETTLE_SECONDS window
+      and the launched_at (post-relaunch) guard — a caller that could not read the
+      pane turn could declare completion and start a reviewer beside the rework writer.
+      (2) review_loop_ui._start_loop: the open-base-return refusal now repairs a raced
+      in_review status via base_check.ensure_impl_status; the base-return completion
+      handoff only polls in_progress PRs, so a stale in_review (a callback writing
+      it before the return landed, e.g. the `pr review --no-window` auto-start path)
+      left the rework with no reviewer and no completion check — symmetric with start_qa/start_or_stop_qa_loop,
+      which already repair. (3) Tests: real-git coverage for the review-iteration
+      transition point (stage/iteration recorded, exactly one impl launch), the idle-evidence
+      requirement, and the raced-status repair. Spec R6/R13 updated. Full suite: 4129
+      passed, 1 skipped, 13 failed — all pre-existing env (12x test_markdown_render
+      needs the `markdown` package; test_hook_events::test_installer_writes_standalone_receiver
+      needs PM_HOST_HOME unset). Note: tests must run with /usr/bin first in PATH
+      here — the container `git` wrapper proxies fetch/ls-remote and breaks the real-git
+      fixtures.'
+    created_at: '2026-10-28T18:05:11Z'
+    last_edited: '2026-10-28T18:05:11Z'
+  - id: note-5c29bc5
+    text: 'Review-loop a6f7 i4 fixes (on cb1f9f3b). (1) `share_impl_transcript` is
+      now called by `pm pr start` itself (the single implementation launcher), not
+      only by `base_check.launch_impl`. The TUI auto-start catch-up (`_start_pr_quiet
+      --fresh`) and a manual `pm pr start` wrote their `impl-<pr>.jsonl` symlink into
+      only their own dir, so the CLI auto-sequence dir kept pointing at the killed
+      session — it read that session''s idle event forever and its base-return handoff
+      never advanced ("running: implementation (no idle evidence from the rework session
+      yet)") if the TUI that relaunched it went away. The helper also accepts a direct
+      JSONL path (not just a symlink) and is public now. (2) `clear_return_awaiting`
+      drops a previous attempt''s `apply_error`, so `pm pr show` stops reporting a
+      failure the successful launch replaced. (3) The TUI completion cache is keyed
+      to the idle event it was computed for: a later hook event invalidates the cached
+      verdict instead of reusing it to start a reviewer beside a fresh turn. (4) Removed
+      the dead 2-tuple fallback in `_poll_impl_idle`''s resume loop. Tests: pr_start
+      refresh (real fixture, git/tmux mocked), direct-path sharing, apply_error clearing,
+      cache re-check on a new idle event. Spec R6 updated. Independently reproduced
+      the gate: conflict → exit 3, in_progress, exact HEAD/base pair, one note; after
+      reconciling + clearing awaiting → return resolved, in_review. Full suite: 4140
+      passed, 1 skipped, 13 failed — all pre-existing env (12x test_markdown_render
+      needs the `markdown` package; test_hook_events::test_installer_writes_standalone_receiver
+      needs PM_HOST_HOME unset).'
+    created_at: '2026-10-28T19:25:51Z'
+    last_edited: '2026-10-28T19:25:51Z'
+  - id: note-9fce3d2
+    text: 'Review-loop a6f7 i6 fixes. (1) `_retire_review_window_for_return` now kills
+      the review window by the id `find_window_by_name` returned, matching `home_window.park_if_on`/`signoff.retire_signoff_run`;
+      killing by name could target a different window when the name also parses as
+      an index. (2) `base_check.tracked_dirty` exempts only pm''s exact state paths
+      (project.yaml / .lock at the repo root or under pm/); the old `parent.name ==
+      "pm"` match ignored a real tracked edit at e.g. `sub/pm/project.yaml` and could
+      declare the rework complete beside unfinished work. (3) `PaneIdleTracker.idle_since`
+      docstring now says it is the last hook event timestamp (a Stop after idle_prompt
+      only widens the settle window). Tests: new `test_pm_state_exemption_is_path_exact`
+      (real git), a real-tracker `idle_since` test, and the retire-window assertion
+      updated to the id. Full suite before these edits: 4155 passed, 1 skipped; touched
+      files re-run green. Residual (documented in the spec, unchanged): a writer-launch
+      gate self-heals an open return once the base is clean and the tree quiescent,
+      which cannot detect a mid-turn impl session with a clean tree; `impl_completion`
+      (idle evidence) remains the normal resolver. (2026-10-28T20:35:00Z)'
+    created_at: '2026-10-28T20:31:46Z'
+    last_edited: '2026-10-28T20:31:46Z'
+  - id: note-1e0f803
+    text: 'Review-loop a6f7 i7 fixes. (1) `pr_view._run_command_async` allows 360s
+      for `pr review`: the pre-review base gate fetches and relaunches implementation
+      (`pm pr start`, bounded at 300s) inside that subprocess, so the old 300s budget
+      could report a timeout for a conflict that was actually recorded (now matches
+      `review_loop._launch_review_window`). (2) `_base_completion_tick` clears the
+      in-flight marker when `run_worker` cannot be spawned (a leftover marker made
+      every later tick report "checking base integration", stalling the handoff until
+      a restart) and logs one INFO line per distinct completed verdict (spec R13 "logs
+      a wait reason once"). (3) `impl_completion` tolerates a null/corrupt `base_return`
+      (the `resume_loop` read raised, which the guard reported as a failed check on
+      every poll). (4) `autostart_state._derive` names the base rework for an in_progress
+      PR with an open return instead of "impl idle; review transition pending". Tests:
+      null base_return, worker-spawn recovery, autostart status. Spec R6/R13/R14 updated.
+      Full suite: 4146 passed, 1 skipped; the autostart change was validated by 239
+      autostart/TUI tests after it landed.'
+    created_at: '2026-10-28T21:27:27Z'
+    last_edited: '2026-10-28T21:27:27Z'
+  - id: note-b023900
+    text: 'Review-loop a6f7 i8 fixes. (1) `pr_review`''s `in_review` write now refuses
+      (exit 1, no window) when the PR became merged/closed during the pre-flight gate''s
+      fetch — the gate widened a window that could otherwise un-mark a merge in project.yaml
+      and launch a reviewer against a finished PR. (2) `run_qa_sync` re-checks merged/closed
+      after the gate (its "as late as possible" check now precedes a network round-trip).
+      (3) `return_to_impl` treats a non-dict `base_return` (a string/list from a hand-edited
+      yaml) as "no previous return" instead of raising inside the locked update, which
+      the gate reported as "the PR left the phase" and left the PR in review with
+      an unreconcilable base. (4) `share_impl_transcript` compares resolved paths,
+      so a relatively-spelled transcript is not renamed to `.finalized` (moving the
+      evidence) by its own refresh. (5) `_base_completion_tick` reports "no project
+      root" instead of passing None to `store.load`. (6) `_stamp` reuses `cli.helpers._record_status_timestamp`.
+      Tests: non-dict base_return, relative transcript, merge-during-gate at both
+      choke points, missing project root — each verified to fail without its fix.
+      Spec R2/R3/R6/R13/R15 + test plan updated. Full suite: 4152 passed, 1 skipped
+      (test_markdown_render needs the `markdown` package).'
+    created_at: '2026-10-28T22:06:24Z'
+    last_edited: '2026-10-28T22:06:24Z'
+  - id: note-f76d5aa
+    text: 'Review-loop a6f7 i9 fixes (on da968668). (1) A capped (`needs_human`) base
+      return could never complete from the TUI/auto-sequence handoff: the capped record
+      launches nothing, so it had no `launched_at` of its own and `impl_completion`
+      fell back to its creation time, which always postdates the previous rework session''s
+      idle turn — the "idle evidence must postdate the relaunch" guard then rejected
+      it forever, so a human who reconciled the base left the PR stuck (R8''s "impl_completion
+      still re-runs the check" was unreachable). A superseding return now keeps the
+      superseded episode''s `launched_at`; a fresh launch overwrites it via `clear_return_awaiting`.
+      (2) `share_impl_transcript` now stores an absolute link target: a relatively-spelled
+      transcript (a direct path, or a relative link target) previously became a dangling
+      symlink in every other driver''s directory. (3) `pr_review`''s `in_review` write
+      refuses unless the PR is still `in_progress`/`in_review`, so a qa/sign_off transition
+      landing inside the gate''s fetch is not demoted (the old guard covered only
+      merged/closed); the refusal now says "left the pre-review phase". (4) The note/prompt
+      path lists use `integration.omitted_path_count` (the shared rule) instead of
+      re-deriving "(+N more)" — a hand-edited record with fewer stored paths than
+      the total rendered the wrong count. Tests: real-git capped-return recovery (no
+      new launch; the previous session''s idle turn resolves it), absolute target,
+      qa/sign_off demotion refusal — each verified to fail without its fix. Spec R3/R6/R8
+      + test plan updated. Full suite: 4155 passed, 1 skipped, 0 failed (excluding
+      tests/test_markdown_render.py, which needs the `markdown` package). One test_push_proxy
+      socket test flaked once under a full-suite -x run and passes in isolation (158
+      passed) — unrelated to this PR.'
+    created_at: '2026-10-28T23:08:48Z'
+    last_edited: '2026-10-28T23:08:48Z'
+  - id: note-4935bfd
+    text: 'Review-loop a6f7 i10 fixes. (1) `pr_review`s `in_review` write now also
+      refuses while an open base return exists, and names which refusal fired: the
+      gate is a network round-trip, so another driver (the TUI completion check, a
+      concurrent gate) can record a conflict return inside that window, and writing
+      in_review then launched a reviewer beside the rework the return had just started.
+      (2) `run_qa_sync` re-checks an open base return after the gate (next to the
+      existing merged/closed re-check) and reports base_returned instead of creating
+      the QA workdir/planner. Tests: a return recorded during the gate at each choke
+      point (test_pr_review_does_not_start_beside_a_return_recorded_during_the_gate,
+      test_qa_run_sync_waits_when_a_return_lands_during_the_gate), both verified to
+      fail without their fix (the QA one reached tmux window creation). Spec R3 +
+      test plan items 18-19 updated. Full suite: 4157 passed, 1 skipped, 0 failed
+      (excluding tests/test_markdown_render.py, which needs the `markdown` package).'
+    created_at: '2026-10-28T23:38:05Z'
+    last_edited: '2026-10-28T23:38:05Z'
+  - id: note-d5b4378
+    text: 'Review-loop a6f7 i11 fixes (on ce70877d). (1) `pr_review`s already-`in_review`
+      branch — the normal path for review iterations >= 2 — ran the base gate and
+      then launched the reviewer without re-reading the PR; that branch writes no
+      status, so it had none of the atomic guard the first-iteration path uses, and
+      a base return another driver recorded inside the gate fetch started a reviewer
+      beside the rework it had just launched (the i10 race, in the other branch).
+      It now re-reads after the gate (`_review_post_gate_refusal`): an open return
+      exits 3 (the routing code `review_loop` maps to VERDICT_BASE_CONFLICT, so no
+      iteration is recorded and the loop is not marked ERROR) and a PR that left the
+      pre-review phase exits 1. The first-iteration atomic guard now exits 3 for the
+      return case too, so both iterations classify the same event the same way (`test_pr_review_does_not_start_beside_a_return_recorded_during_the_gate`
+      updated 1 -> 3). (2) The TUI base-rework catch-up was one-shot: `_poll_impl_idle`
+      called `_catch_up_base_impl` once and then `mark_active`, which pins the tracker
+      so the branch is not re-entered until a new hook event — and an idle old session
+      never emits one. A claim still held by the gates own `pm pr start`, or one released
+      by a failed launch (`release_impl_claim` keeps `awaiting`, e.g. a pending spec),
+      therefore stranded the PR with no launcher and no completion check (nothing
+      else drives a manual TUI sessions relaunch). The catch-up is now retryable:
+      the idle turn is left unconsumed for a base return (the sign-off branch keeps
+      `mark_active`; `check_and_start` drives its relaunch) and attempts are throttled
+      to BASE_LAUNCH_RETRY_SECONDS because each takes the project.yaml lock. A successful
+      in-process relaunch now reloads `app._data` — `pm pr start` cleared `awaiting`
+      on disk and no CLI-subprocess reload follows this launch, so the stale marker
+      would otherwise keep the tick in the awaiting branch and never reach the completion
+      check. Also `_base_completion_checks`/`_base_launch_attempts` are initialised
+      in `App.__init__`. Tests: the in_review-branch race (fails without the guard:
+      the reviewer window is launched), the retried catch-up (throttled, idle not
+      consumed), the post-launch reload. Spec R3/R13 + test plan updated. Full suite:
+      4159 passed, 1 skipped; the only failure is the known `test_push_proxy` socket
+      flake (passes in isolation).'
+    created_at: '2026-10-29T00:58:05Z'
+    last_edited: '2026-10-29T00:58:05Z'
+  - id: note-recovery-master-20261029
+    text: 'USER AUTHORIZED RECOVERY: restart through implementation to merge the latest
+      batch from origin/master before further review or QA. Preserve all existing
+      dirty source, local PR registry/routing, notes, stashes, QA planner/spec edits,
+      untracked evidence and transcripts; interrupted changes are owned work, not
+      disposable noise. First inspect the saved prior review/QA evidence and current
+      git state. Safely preserve and reconcile that work, fetch origin/master, merge
+      it INTO this existing PR branch, resolve conflicts preserving both master fixes
+      and this PR''s behavior, run relevant checks, commit and push only this PR branch
+      when complete. Do not reset/force-push master or merge the PR into master. Record
+      exact integrated master SHA and validation; do not hand off until integration
+      and needed checks are complete. All pending user decisions remain unwaived;
+      if any blocks implementation, report INPUT_REQUIRED. Keep primary DeepSeek1017/high
+      and explicit work Opus5.5/xhigh signoff override. Native review/QA must follow
+      implementation; prior QA evidence is not a pass for the integrated head.
+
+
+      Incident 2026-10-29 01:06 UTC: #267 QA S10 refiner inherited the REAL tmux session,
+      launched a scratch PR there, then mistakenly killed pm-project_manager-5b29c418
+      as test cleanup. S9/S12 recreated scratch TUIs under that real session and S12
+      polluted shared tmux PATH/PYTHONPATH and shared autostart breadcrumb state.
+      Original transcripts, dirty patches, untracked files and QA results are preserved
+      under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z.
+      This was infrastructure interruption, not an acceptance verdict. NEVER operate
+      on the user''s real tmux session or shared host configuration for test setup/cleanup.
+      Test with an explicit dedicated tmux socket, isolated PM state/config paths,
+      and verified fixture identity; inherited TMUX/TMUX_PANE, global tmux set-environment,
+      shared ~/.pm breadcrumbs and broad cleanup are unsafe. If isolation cannot be
+      established, stop and report INPUT_REQUIRED. #278 is the existing per-session
+      tmux isolation PR; this is concrete incident evidence for its coverage.'
+    created_at: '2026-10-29T01:30:33.195814+00:00'
+  - id: note-user-restart-all-20261029
+    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart
+      this PR in implementation and merge latest origin/master INTO this existing
+      PR branch before any new review/QA. User explicitly released old review/QA holds
+      for this restart; preserve all earlier questions, answers, verdicts and evidence
+      and re-evaluate after integration rather than invent answers or waive acceptance.
+      Preserve dirty source, planner/spec edits, local registry/routing, stashes,
+      untracked files and all evidence. The interrupted work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
+      inspect its per-PR backup and original transcripts as needed. Safely reconcile
+      interrupted changes and current master, test, commit and push only this PR branch.
+      Never force-push/reset master or merge the PR into master. Report integrated
+      master SHA and tests; only then hand off to native review/QA. Keep assigned
+      primary/helper model and explicit work Opus5.5/xhigh signoff override. No new
+      dependencies or unrelated work are authorized.
+
+      Test isolation is mandatory: #267 S10 refiner killed the REAL pm-project_manager-5b29c418
+      session after mistaking a test PR launch for ownership of that session. S9/S12
+      inherited ambient tmux context and recreated test TUIs under that real name;
+      S12 changed global tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use
+      an explicit dedicated test tmux socket and isolated state/config, verify fixture
+      ownership; never mutate the user''s real session or shared host configuration
+      as test cleanup. Preserve the failed-run evidence. #278 is the existing per-session
+      tmux-isolation fix. Do not relaunch old QA fixture workers.'
+    created_at: '2026-10-29T01:33:53.678599+00:00'
+    last_edited: '2026-10-29T01:33:53.678599+00:00'
+  - id: note-a45c9c1
+    text: 'Master integration 2026-10-29 (implementation restart). Merged origin/master
+      4a74d88085edffcc300cb21f31777a798d647782 into this branch as merge commit f92802e4
+      (parents d2c9b62e + 4a74d880) and pushed it to origin. Resolved 7 conflicted
+      files keeping both sides: pm_core/review_loop.py (both verdict constant groups
+      and both ReviewLoopState field groups; master launch-timeout try/except kept
+      with _LAUNCH_TIMEOUT raised 120s to 360s so the in-subprocess base-gate fetch
+      plus pm pr start relaunch is not mistaken for a loop error; BaseConflictError
+      kept and still handled before the generic failure path so a gate exit 3 is never
+      retried as a launch failure), pm_core/cli/pr.py (auto-sequence in_review branch
+      keeps the open-base-return refusal ahead of master review-loop launch-owner
+      guard), pm_core/tui/auto_start.py (QA-loop open-return guard before master owed-REQA
+      starter split), pm_core/tui/qa_loop_ui.py (start_qa open-return guard before
+      _enter_qa_status; master post-transition clear_return_awaiting stays), pm_core/tui/review_loop_ui.py
+      and tech_tree.py (both verdict icon/style sets), pm/project.yaml (all 515 master
+      PR entries plus pr-f0f4129, no duplicate ids, YAML valid). Validation on the
+      merged tree: full suite 4563 passed, 1 skipped, 0 failed (14 deselected: test_markdown_render
+      needs the markdown package, test_hook_events::test_installer_writes_standalone_receiver
+      needs PM_HOST_HOME unset). PR suites under an isolated tmux socket: test_base_check
+      + test_tui_base_return + test_review_loop + test_pr_auto_sequence + test_qa_loop
+      + test_pr + test_pane_idle 358 passed; master new suites test_review_launch_retry
+      + test_owed_reqa + test_autostart_multi_target 248 passed. Test isolation per
+      the 2026-10-29 incident: TMUX_TMPDIR on a dedicated socket with TMUX/TMUX_PANE
+      unset; the host tmux server and shared config were not touched. Preserved: prior
+      review transcripts and evidence, the leak-run backup, captures (fix unchanged,
+      so the pre/post-fix captures were reused), model routing (deepseek-flash/high
+      primary, claude-work-xhigh signoff), skip_qa and manual merge gates. Prior QA
+      is not a pass for this integrated head: native review then QA must run on f92802e4.'
+    created_at: '2026-10-29T01:57:41Z'
+    last_edited: '2026-10-29T01:57:41Z'
+  - id: note-dd5c3d9
+    text: 'Review-loop be50 i1 fixes (on 565bf839). (1) base_check now reads pr["base_check"]
+      through a _check_record() helper: the four call sites used `pr.get("base_check")
+      or {}`, which raises AttributeError on a string/list from a hand-edited project.yaml.
+      gate() caught that and failed open (the integration check never ran, so a conflict
+      was never recorded) and impl_completion reported "completion check failed" on
+      every poll — a PR stuck with an open base return nobody could resolve. Non-dict
+      now reads as "no record", the same guard open_return/last_return already give
+      base_return. (2) _start_loop''s open-base-return refusal returned None instead
+      of the documented False. (3) Dropped a stale "tolerate a 2-tuple" comment in
+      _auto_review_idle_prs. Tests: real-git coverage for a corrupt base_check on
+      the conflict path and on the probe-failure recorder (both verified to fail without
+      the fix); the refused _start_loop now asserts `is False`. Spec R5 + test plan
+      items 21 + the QA-choke-point file attribution updated. Full suite: 4566 passed,
+      1 skipped, 13 failed — all pre-existing env (12x test_markdown_render needs
+      the `markdown` package; test_hook_events::test_installer_writes_standalone_receiver
+      needs PM_HOST_HOME unset). Non-blocking observations left for later: (a) the
+      documented gate self-heal can resolve an open return while a mid-turn impl session
+      has a clean tree, starting a reviewer beside it (impl_completion is the normal
+      resolver; unchanged); (b) the CLI auto-sequence path runs one ls-remote per
+      tick through impl_completion while a return is open and the impl is idle (the
+      TUI throttles at BASE_CHECK_POLL_SECONDS); (c) worst-case gate latency (fetch
+      waiting on the 300s repo lock plus a 300s `pm pr start`) can exceed the 360s
+      review child budget, reported as a timeout for a conflict that was recorded
+      (self-corrects on the next loop start: gate -> WAIT -> exit 3); (d) next_review_iteration
+      continues numbering against the loop''s max_iterations=50 safety cap, so a PR
+      with many prior iterations gets fewer per loop restart. (2026-10-29T03:20:00Z)'
+    created_at: '2026-10-29T02:26:03Z'
+    last_edited: '2026-10-29T02:26:25Z'
+  - id: note-00093c0
+    text: 'Review-loop be50 i2 fixes (on e942a64e). (1) impl_completions "no open
+      base return" branch read pr["base_return"].get("resume_loop") directly: a hand-edited
+      non-dict value (a string, a list, a number) raised AttributeError, which the
+      outer guard reported as "completion check failed" on every poll — the permanently
+      stuck handoff R6 forbids. open_return already treats every non-dict as "no return";
+      the resume_loop read now does too (only the null case had a test). (2) The TUI
+      completion tick reached base_check.git_op_in_progress/tracked_dirty with a workdir
+      recorded on the PR but no longer present on disk; both raise FileNotFoundError
+      (subprocess cwd) and the tick runs inside the shared poll timer, so the exception
+      would break QA/sign-off polling for every PR. The guard now requires the directory
+      to exist, matching impl_completions own check; five existing TUI tests that
+      relied on a nonexistent /wd now give the tick a real directory. (3) Dropped
+      redundant local re/Path imports in next_review_iteration (both are module-level).
+      Tests: parametrized non-dict base_return (string/list/int) and a deleted-workdir
+      tick case, each verified to fail without its fix. Spec test plan items 22-23
+      added. Full suite: 4569 passed, 1 skipped, 0 failed (tests/test_markdown_render.py
+      ignored — needs the markdown package; test_hook_events::test_installer_writes_standalone_receiver
+      deselected — needs PM_HOST_HOME unset).'
+    created_at: '2026-10-29T03:06:31Z'
+    last_edited: '2026-10-29T03:06:31Z'
+  - id: note-939f064
+    text: 'QA S2 refiner (2026-10-29), verified live in an isolated fixture: two environment
+      traps. (1) The container git wrapper (~/.local/bin/git) proxies fetch/ls-remote,
+      so the pre-review gate''s fetch of the local test repo fails -> RETRY (fail
+      open) -> the reviewer launches and no base return is recorded. Put /usr/bin
+      ahead of ~/.local/bin on PATH for the TUI and every pm command (fake-claude
+      and claude still resolve from ~/.local/bin). (2) A fake-claude impl pane refreshes
+      its idle_prompt hook every 2s, so base_check.impl_completion''s IDLE_SETTLE_SECONDS
+      never elapses and the TUI auto-handoff cannot resolve a base return in a fake
+      fixture; resolve it with the documented manual `d` self-heal (gate re-checks
+      a quiescent tree) and then `zz d` to restart the loop. Refined S2 steps carry
+      both.'
+    created_at: '2026-10-29T04:39:05Z'
+    last_edited: '2026-10-29T04:39:05Z'
+  - id: note-2abda19
+    text: 'QA S2 incidental fix: the plain-`d` base-return refusal was swallowed by
+      a sticky log message. `review_pr` runs `pm pr review` through `_run_command_async`,
+      which logged the child stderr as a plain message; the loop-done message is sticky
+      for 10s, so pressing `d` right after a bounce showed nothing (TUI debug log:
+      "hidden by sticky message") even though the PR correctly stayed in_progress
+      with no reviewer and no iteration. The sibling `zz d` refusal in `review_loop_ui._start_loop`
+      already forces. Added `force_errors` to `run_command`/`_run_command_async`,
+      passed from `review_pr`; scoped to the review action so other commands keep
+      the existing policy. Regression tests: test_command_error_visible_during_sticky
+      and test_command_error_still_yields_to_sticky_by_default (both verified to fail
+      without the fix). Captures: /pm-captures/scenarios/2/{pre,post}-fix/.'
+    created_at: '2026-10-29T05:14:59Z'
+    last_edited: '2026-10-29T05:14:59Z'
+  - id: note-d8e8900
+    text: 'QA scenario 4 (impl->review handoff after a base-conflict return) must
+      NOT drive the impl pane with fake-claude: its impl session re-emits idle_prompt
+      every 2 s, so idle_since never ages past IDLE_SETTLE_SECONDS (5 s) and every
+      tick reports "implementation just went idle; letting it settle" — the handoff
+      never advances. Use a one-shot claude stand-in instead: a `claude` script early
+      on the pane PATH that writes the Claude-format JSONL transcript (~/.claude/projects/<mangled-cwd>/<sid>.jsonl),
+      writes exactly ONE ~/.pm/hooks/<sid>.json idle_prompt event, then sleeps forever.
+      Validated end to end on 2026-10-29: `pm pr auto-sequence` gives "base_conflict:
+      CONFLICTS with master@<sha>: <path>", then "running: implementation (HEAD and
+      base unchanged since the return)" / "(uncommitted edits remain)", and after
+      fetch+merge+commit+push "advanced: in_review" with a review-<pr> window, Resolved
+      timestamp and an unchanged base branch. Panes ignore the tmux server PATH, so
+      prepend via an isolated HOME ~/.bashrc, keeping /usr/bin ahead of ~/.local/bin
+      (the push-proxy git wrapper breaks the gate local fetch).'
+    created_at: '2026-10-29T05:47:24Z'
+    last_edited: '2026-10-29T05:47:24Z'
+  - id: note-fe92b7b
+    text: 'QA scenario 4 (impl->review handoff after a base return): PASS on the integrated
+      head, all three stories on a throwaway local-backend PR (pr-95325c4). Idle-but-unfinished
+      rework polls print "running: implementation (HEAD and base unchanged since the
+      return)" with no review window and no Resolved line; a tracked uncommitted edit
+      prints "(uncommitted edits remain)" and still does not advance; untracked fixtures
+      and a git stash survive untouched; after a real fetch+merge+commit+push the
+      same poll prints "advanced: in_review", opens review-pr-95325c4, keeps the BASE_CONFLICT
+      record with Resolved: <ts> / "up to date with master@e5b47e09", keeps the note,
+      leaves both impl- and review-i1 transcripts in the auto-sequence dir, and leaves
+      master at its original sha. Capture: /pm-captures/scenarios/4/handoff/ (recording.mp4
+      + manifest). Fixture used a one-shot claude stand-in (one transcript, one idle_prompt
+      event, then idle) rather than fake-claude, whose impl session re-emits idle_prompt
+      every 2 s and never ages past IDLE_SETTLE_SECONDS.'
+    created_at: '2026-10-29T06:00:32Z'
+    last_edited: '2026-10-29T06:00:32Z'
+  - id: note-58087c9
+    text: 'QA scenario 5 (concurrent drivers) found and fixed one bug: the base-rework
+      catch-up did not survive a plain TUI restart. `_poll_impl_idle` registers an
+      implementation pane from `get_transcript_dir(app)/impl-<pr>.jsonl`; a plain
+      `pm tui restart` re-execs with `_auto_start_run_id = None` (the breadcrumb is
+      only written for a merge-restart marker), so the run dir is a fresh `transcripts/manual-<hex>`
+      with no links, `PaneIdleTracker.register` raises for every PR launched by an
+      earlier TUI/auto-start run, and the catch-up is skipped silently. An open `base_return`
+      then has no launcher and no completion check until some external `pm pr auto-sequence`
+      tick happens to run — the stranding R6 forbids. Fixed in 1e58b787: fall back
+      to an `impl-<pr>.jsonl` link another driver already wrote (`transcripts/<run>/`
+      or `transcripts/auto-sequence/<pr>/`, newest link first). `share_impl_transcript`
+      re-points those links on relaunch and a stale link''s idle turn is still rejected
+      by `impl_completion`''s post-relaunch guard, so the fallback cannot manufacture
+      completion. Verified live on an isolated fixture: pre-fix a restarted TUI logged
+      no `impl_idle` line for the returned PR for 2+ minutes and never relaunched
+      it; post-fix it tracks the pane and relaunched the stranded rework exactly once
+      (`impl_idle: relaunched base rework for pr-b04fc41`, one new launch line for
+      that workdir, awaiting cleared, launched_at set, one pr-<id> window). Captures:
+      /pm-captures/scenarios/5/{race,pre-fix,post-fix,duplicate,qa-phase}/. Full suite
+      after the fix: 4573 passed, 1 skipped, 0 failed (test_markdown_render needs
+      the `markdown` package; test_hook_events::test_installer_writes_standalone_receiver
+      needs PM_HOST_HOME unset). Two scenario assertions are unreachable as written
+      and are not defects: `pm autostart status` cannot show `base conflict; relaunching
+      implementation` after a plain restart (auto-start is off with no targets), and
+      the TUI catch-up only runs when the impl pane has emitted `idle_prompt`, which
+      a stand-in that never saw the sentinel has not.'
+    created_at: '2026-10-29T07:14:49Z'
+    last_edited: '2026-10-29T07:14:49Z'
+  - id: note-5ff3896
+    text: 'QA scenario 7 (retryable probe failures + sign-off ownership): PASS on
+      b1b4e95f, all three stories, runtime evidence not code reading. (1) Unreachable
+      base at a writer launch: with master renamed away, `pm pr review` printed "Base
+      integration check failed (retryable): fetch master from <project> failed: fatal:
+      couldn''t find remote ref refs/heads/master; continuing review", marked the
+      PR in_review, opened review-<pr>, exit 0; base_check = decision retry / retryable
+      true / status error / base_sha null / attempts 1 / retry_after checked_at+30s;
+      no base_return. (2) Unreachable base during the completion handoff: the conflict
+      tick returned to impl (BASE_CONFLICT, attempt 1, fresh impl session, no review
+      window/transcript); after the base went away, tick 1 re-fetched and printed
+      the retryable error (attempts 1, retry_after +30s), the two immediate ticks
+      printed "recent base check failed; retrying after the backoff" with checked_at/attempts
+      unchanged, the post-retry_after tick re-fetched to attempts 2 with retry_after
+      +60s, and the next immediate tick backed off again; PR stayed in_progress with
+      the open return (resolved_at null) and never advanced. (3) Sign-off owns integration:
+      after a clean sign-off integration check (up_to_date, head 2e3f91b0, master@1e55120e)
+      and master moving to a revision that merge-trees with <<<<<<<, the routing tick
+      still launched the hop — "sign_off: returning to review (iteration 2)", review-<pr>
+      opened, review-i2.jsonl created, review-i1.jsonl + impl-<pr>.jsonl byte-identical
+      (sha256), note intact, no base_return, integration left at the pre-move base_sha;
+      `pm pr merge` refused (no sign-off verdict) and the PR stayed in_review. Fixture:
+      isolated HOME, private tmux socket (PM_TMUX_SOCKET), one-shot `claude` stand-in
+      that emits exactly one idle_prompt, /usr/bin git; captures /pm-captures/scenarios/7/{story1,story2,story3}.
+      No issues found, nothing changed.'
+    created_at: '2026-10-29T07:56:30Z'
+    last_edited: '2026-10-29T07:56:30Z'
+  - id: note-03fdd6f
+    text: 'Review-loop 30a9 i1 fixes (on 43e5166e). (1) `_base_completion_tick` now
+      expires an in-flight completion check after `BASE_CHECK_IN_FLIGHT_SECONDS` (900
+      s — above the 300 s integration repo lock plus the 300 s `pm pr start` the gate
+      allows) instead of trusting the marker forever: the worker fetches the base
+      and `git fetch` has no timeout of its own, so a hung network call pinned the
+      handoff at "checking base integration" until a restart, the same stuck handoff
+      the spawn-failure path already clears. The spawn timestamp doubles as an attempt
+      token, so an expired worker late write cannot replace the newer check verdict;
+      overlapping checks are otherwise idempotent (an unchanged pair never bounces
+      twice, resolving an already-resolved return is a no-op). (2) `test_poll_impl_idle_registers_from_a_shared_transcript_after_restart`
+      no longer leaks an unawaited `_catch_up_base_impl` worker coroutine (it patched
+      only the registration path), which was the suites RuntimeWarning. Tests: stale-marker
+      expiry (fails without the expiry — `impl_completion` never runs) and superseded-worker
+      drop (fails without the token), both verified failing pre-fix. Spec R13 + test
+      plan item 24 updated. Full suite: 4575 passed, 1 skipped, 0 failed (test_markdown_render
+      needs the `markdown` package; test_hook_events::test_installer_writes_standalone_receiver
+      needs PM_HOST_HOME unset).'
+    created_at: '2026-10-29T08:31:46Z'
+    last_edited: '2026-10-29T08:31:46Z'
+  - id: note-3a4e654
+    text: 'Review-loop 5c3e i1 fixes (on 2de66e5c). (1) `run_review_loop_sync`''s
+      `max_iterations` now counts the iterations *this run* performs (`state.iteration
+      - start_iteration`) instead of the absolute iteration number. A fresh loop continues
+      numbering after the PR''s existing transcripts (`next_review_iteration`, so
+      earlier evidence is never overwritten), so an absolute bound silently ran **zero**
+      iterations — and reported no verdict — for a long-lived PR already carrying
+      `max_iterations` transcripts; this PR''s own iteration count (a6f7 i1-i11, be50
+      i1-i2, 30a9, 5c3e) makes that reachable. (2) `return_to_impl` keeps the open
+      episode''s `resume_loop` marker when it is superseded, the same way it already
+      keeps `launched_at`: a one-shot gate (a manual `d`, `resume_loop=False`) superseding
+      a review-loop bounce dropped the marker, so the interrupted loop never restarted
+      after the rework even though the episode originated from a loop. (3) `base_check.impl_transcript_links`
+      is now the single scan for a PR''s `transcripts/*/impl-<pr>.jsonl` links, shared
+      by `share_impl_transcript` (re-point them all) and `tui/review_loop_ui._shared_impl_transcript`
+      (watch the newest after a restart); the two had duplicated the glob patterns
+      and the rationale comment. Tests: a loop seeded at iteration 48 with `max_iterations=3`
+      runs three iterations (48->51); a one-shot gate supersede keeps `resume_loop=True`.
+      Both verified failing without their fix. Spec R6/R10 + test plan items 25-26
+      updated. Full suite: 4577 passed, 1 skipped, 0 failed (test_markdown_render
+      needs the `markdown` package; test_hook_events::test_installer_writes_standalone_receiver
+      needs PM_HOST_HOME unset). Reviewed but not changed (documented residuals):
+      the writer-launch gate self-heal can resolve an open return while a mid-turn
+      impl has a clean tree (impl_completion is the normal resolver); the CLI auto-sequence
+      runs one ls-remote per tick through impl_completion; worst-case gate latency
+      (300s repo lock + 300s `pm pr start`) can exceed the 360s review child budget;
+      `pm/project.yaml` carries ~700 lines of unrelated YAML re-wrapping from pm''s
+      own save (systemic, not this PR''s choice).'
+    created_at: '2026-10-29T09:26:36Z'
+    last_edited: '2026-10-29T09:26:36Z'
+  - id: note-a22f638
+    text: 'Review-loop 5c3e i2 fixes (on e4cf27be). (1) `base_check.resolve_return`
+      and `ensure_impl_status` now pre-read and skip the `locked_update` when there
+      is nothing to change (no open return / status already `in_progress`): `gate`
+      calls `resolve_return` on every clean review/QA gate and the TUI calls `ensure_impl_status`
+      from the event loop, and a `locked_update` takes the global project.yaml lock
+      and rewrites the whole (2.5 MB here) git-tracked file (~1 s), so the unconditional
+      write stalled the event loop and competed with the TUI''s own 2 s lock budget
+      on every clean gate. (2) `impl_completion`''s clean path now records the `proceed`
+      verdict (`_record_decision`) like the writer-launch gate: without it the PR
+      kept the last retryable `base_check` record after a successful completion, so
+      `_retry_open` kept suppressing the next gate''s fetch until that backoff expired
+      and the stored record still reported a probe failure for an episode that was
+      over. (3) The TUI base-rework catch-up now also runs when the PR has no impl
+      pane at all: the idle-gated catch-up could never fire for a return whose `--fresh`
+      relaunch killed the old window and then failed (or whose window the user closed),
+      leaving `awaiting: impl` with no launcher and no completion check in a manual
+      TUI session (auto-start off). The CLI auto-sequence already relaunches on that
+      `gone` signal; the launch claim still keeps one owner. Tests: the two no-op
+      guards (mocked `locked_update` must not be called, and the mutation still happens
+      when it is needed), the clean-completion `base_check` record, the no-pane catch-up
+      (verified to fail without the fix — the catch-up is never called) and its negative
+      (a missing pane with no return relaunches nothing). Spec R13 + test plan item
+      27 updated. Full suite: 4594 passed, 1 skipped, 0 failed. Reviewed but not changed
+      (documented residual, added to the earlier list): `_run_qa_sync` now runs the
+      base gate (a fetch) before `write_run_record`, widening the window in which
+      another TUI''s scheduler cannot yet see this QA run and could start a second
+      planner for the same PR; closing it properly needs an atomic QA-run claim (the
+      workdir does not exist yet at gate time), so it is left for the QA-ownership
+      work rather than half-fixed here.'
+    created_at: '2026-10-29T09:50:42Z'
+    last_edited: '2026-10-29T09:50:42Z'
+  - id: note-02687d4
+    text: 'Review-loop 5c3e i2 second pass (on f17568f1). (1) The already-`in_review`
+      branch of `pm pr review` now runs `_review_post_gate_refusal` even when the
+      caller already gated (`--skip-base-check`, the auto-sequence path): that gate
+      was its own network round-trip, so a base return another driver recorded after
+      it was invisible and the reviewer launched beside the rework — the exact R3
+      writer-beside-return case, in the branch that writes no status and therefore
+      has no atomic guard. `_launch_review_iteration` now converts an exit 3 raised
+      by the command it invokes into its own `base_conflict: ...` status line (its
+      contract is a status line, not a process exit); other refusal codes still propagate,
+      so a genuine error is not masked. (2) `run_qa_sync`''s post-gate re-read now
+      treats a PR removed from the project during the fetch like `merged`/`closed`
+      (absent from the freshly loaded data) instead of falling through to "not merged/closed"
+      and creating a QA workdir/window for a PR that no longer exists; the pre-gate
+      check already aborted on that. Tests: the skip-base-check re-read (verified
+      to fail without the fix — the reviewer window is launched), the exit-3 conversion
+      plus the non-3 re-raise, and the removed-during-the-gate QA abort (verified
+      to fail without the fix — the QA workdir is created). Spec R3 + test plan items
+      28-29 updated. Full suite after both passes: 4598 passed, 1 skipped, 0 failed.
+      Reviewed but not fixed (documented in R7 as a known limitation; needs a design
+      change, not a gate fix): the supersede path in `return_to_impl` mints a fresh
+      `launch_claim` without consulting the existing one, and `clear_return_awaiting`/`release_impl_claim`
+      act on whichever open return has `awaiting == impl` rather than on the episode
+      their launcher created. If two drivers run `impl_completion` on the same idle
+      returned PR while the base moves between their two fetches, both see a moved
+      pair, both supersede and both launch (`--fresh`, so the second kills the first),
+      and a late `clear_return_awaiting` can stamp `launched_at` from the other driver''s
+      launch — which weakens the post-relaunch idle guard. Closing it needs an episode/generation
+      token threaded through `pm pr start`; the single-driver paths (the normal case)
+      remain one-owner as specified.'
+    created_at: '2026-10-29T10:05:28Z'
+    last_edited: '2026-10-29T10:05:28Z'
+  - id: note-b941602
+    text: 'Review-loop 5c3e i3 fixes (on c6c010fe). (1) A clean review/QA gate could
+      clear a conflict return another driver recorded inside its own fetch: the base
+      moved between the two fetches, one check saw clean and the other conflict, and
+      the clean one resolve_return closed the new episode. The caller post-gate re-read
+      only sees an *open* return, so it then launched a reviewer beside the rework
+      the return had just started. resolve_return now takes expect_ts and closes only
+      the episode the check was based on; gate re-reads after resolving and returns
+      wait when a return is still open (so it no longer stamps a clean base_check
+      over it), and impl_completion clean path reports not-complete instead of resolving
+      the superseding episode. The existing caller-level race tests patch gate itself,
+      so they never exercised this path (reproduced with the real gate: PROCEED +
+      the return resolved). (2) pr_review already-in_review branch (review iterations
+      >= 2) launched a reviewer for a PR removed from the project during the gate
+      fetch (its post-gate re-read returned None for an absent entry). Now exits 1
+      with no window, matching run_qa_sync post-gate re-read and the first-iteration
+      atomic guard; the first-iteration refusal also names the removal instead of
+      an empty reason. Tests: a return recorded inside the gate own clean check survives
+      it; the same race in the completion check reports not-complete; resolve_return(expect_ts)
+      leaves a superseding episode open while still closing the one it names; a removed
+      PR gets no reviewer on iteration 2. Each verified failing without its fix. Spec
+      R3/R4 + test plan items 30-31 updated. Full suite: 4588 passed, 1 skipped, 0
+      failed (tests/test_markdown_render.py ignored, needs the markdown package; test_hook_events::test_installer_writes_standalone_receiver
+      deselected, needs PM_HOST_HOME unset).'
+    created_at: '2026-10-29T10:53:24Z'
+    last_edited: '2026-10-29T10:53:24Z'
+  - id: note-186cf38
+    text: 'Review-loop 2aa0 i1 (on fae20ece). (1) `_poll_impl_idle` did not refresh
+      `app._data` after a *verified* base completion: `impl_completion` resolved the
+      return on disk, but the poll iterates the in-memory snapshot, and nothing else
+      reloads it when the bounce came from a one-shot gate (`resume_loop` unset) with
+      auto-start off — the resume pass only runs for a loop-origin bounce and `_auto_review_idle_prs`
+      only runs with auto-start enabled. `open_return(pr)` therefore stayed truthy,
+      so every later tick re-entered the base-return branch and re-ran the completion
+      check (a full `store.load` of the multi-MB project.yaml in a worker) every BASE_CHECK_POLL_SECONDS
+      forever for an episode that was already over, and a manual `zz d` was refused
+      with "base integration rework pending" for up to the 300 s background-sync reload
+      window on a reason that was no longer true. The tick now reloads `app._data`
+      (best effort) once the verdict is consumed, matching `_catch_up_base_impl` after
+      an in-process relaunch. Test: `_poll_impl_idle` with a resolved-on-disk return
+      and a stale snapshot asserts the idle turn is consumed and the snapshot no longer
+      carries the open return; verified failing without the fix. Spec R13 + test plan
+      item 32. Full suite: 4589 passed, 1 skipped, 0 failed (test_hook_events::test_installer_writes_standalone_receiver
+      deselected, needs PM_HOST_HOME unset; tests/test_markdown_render.py run separately,
+      13 passed). Evidence: /pm-captures/review-2aa0-i1/full-suite.log. Reviewed but
+      not changed (unchanged residuals, already documented): the writer-launch gate
+      self-heal can resolve an open return while a mid-turn impl has a clean tree
+      (impl_completion is the normal resolver); the CLI auto-sequence runs one ls-remote
+      per tick through impl_completion; worst-case gate latency (300 s repo lock +
+      300 s `pm pr start`) can exceed the 360 s review child budget; `_run_command_async`s
+      360 s budget is now global to every async TUI command (deliberate, matches review_loop._LAUNCH_TIMEOUT);
+      `pr start`s foreground (non-tmux) fallback clears `awaiting`/stamps `launched_at`
+      without re-pointing transcript links, so the TUI handoff waits for idle evidence
+      that never arrives until a `d` gate self-heal or a new hook event — recoverable,
+      not stranded; `pm/project.yaml` carries ~700 lines of unrelated YAML re-wrapping
+      from pms own save (systemic, not this PRs choice).'
+    created_at: '2026-10-29T11:51:42Z'
+    last_edited: '2026-10-29T11:51:42Z'
+  - id: note-dc9e585
+    text: 'Review-loop 3b50 i1 fix (on fdf6c8bd). (1) The review loop completion line
+      reported the absolute iteration counter, which a fresh loop now seeds from the
+      PR existing iteration transcripts (`next_review_iteration`), so a base bounce
+      before the first iteration read "⇤ BASE_CONFLICT (12 iterations)" for a loop
+      that ran none — a misleading line in this PR own headline scenario on a long-lived
+      PR. `run_review_loop_sync` now records `iterations_performed` (the history delta
+      for this run) and `_done_iteration_count` renders that, falling back to the
+      counter for a state that never ran (a hand-built test state). Tests: a fresh
+      loop seeded at iteration 12 that bounces reports 0 performed while the counter
+      stays 12 (numbering preserved); a loop that runs three iterations reports 3;
+      the fallback keeps the old rendering; and a `_poll_loop_state_inner` test asserts
+      the rendered line is "(0 iterations)". Verified failing without the fix (the
+      old rendering prints "(12 iterations)"). Spec R13 + test plan item 33 updated.
+      Full suite: 4606 passed, 1 skipped, 0 failed (markdown installed to the session
+      scratchpad; PM_HOST_HOME unset; PATH=/usr/bin:/bin so the push-proxy git wrapper
+      stays out of the real-git tests). Reviewed but not changed (unchanged residuals,
+      already documented in R7/R13 and the 2aa0 i1 note): the supersede path in `return_to_impl`
+      can still double-launch if two drivers run `impl_completion` while the base
+      moves between their fetches (needs an episode/generation token); the writer-launch
+      gate self-heal can resolve an open return while a mid-turn impl has a clean
+      tree; the CLI auto-sequence runs one ls-remote per tick through `impl_completion`;
+      worst-case gate latency can exceed the 360 s review child budget; the TUI review-loop
+      resume path runs `pm pr review --no-window` synchronously on the event loop
+      (same as the existing auto-review path); the QA gate deliberately applies only
+      to a `qa`-status PR, so pressing `t` on an `in_progress` PR still starts QA
+      without the base check (pre-existing, and `test_qa_gate_skips_when_status_left_qa`
+      pins the decision); `pm/project.yaml` carries unrelated YAML re-wrapping from
+      pm own save (verified: only pr-f0f4129 added and one cross-PR note on pr-9ee4d64;
+      no PR entry or field changed).'
+    created_at: '2026-10-29T13:35:18Z'
+    last_edited: '2026-10-29T13:35:18Z'
+  - id: note-3111567
+    text: 'Review-loop 3b50 i2 fixes. (1) `ReviewLoopState.iterations_performed` is
+      now a declared field (`int | None = None`) instead of an undeclared attribute
+      set in `run_review_loop_sync` and read back through `getattr`; the spec documents
+      it as a field, and None still means "this loop never ran" so `_done_iteration_count`
+      keeps the counter fallback. (2) A gate that loses the return race (`return_to_impl`
+      returns None because another driver recorded the return inside this gate fetch)
+      built its WAIT result from the pre-fetch snapshot, which has no return: status/head/base_sha/conflicts
+      were empty while the log said "return already recorded". It now reports the
+      episode the existing post-loss re-read finds. (3) `_shared_impl_transcript`
+      fell back to `pm_home()` and scanned `~/.pm/transcripts` (never holds these
+      links — transcripts live under the project root); it returns None instead, like
+      `_base_completion_tick`/`_catch_up_base_impl`. (4) `_auto_review_idle_prs` unpacks
+      its documented (pr_id, pr, resume) 3-tuple; the only 2-tuple caller was its
+      own retarget regression test, updated. Tests: test_losing_gate_reports_the_episode_that_landed
+      (verified failing without (2)), the iteration-2 race test now asserts the documented
+      exit 3, the fallback test pins the field default; spec test plan item 34. Full
+      suite: 4607 passed, 1 skipped, 0 failed (markdown in the session scratchpad,
+      PM_HOST_HOME unset, PATH=/usr/bin:/bin so the push-proxy git wrapper stays out
+      of the real-git tests). Reviewed but not changed (already-documented residuals,
+      unchanged): the supersede path in `return_to_impl` can still double-launch if
+      two drivers run `impl_completion` while the base moves between their fetches
+      (needs an episode/generation token); the writer-launch gate self-heal can resolve
+      an open return while a mid-turn impl has a clean tree; the CLI auto-sequence
+      runs one ls-remote per tick through `impl_completion`; worst-case gate latency
+      (300 s repo lock + 300 s `pm pr start`) can exceed the 360 s review child budget;
+      the TUI review-loop resume path runs `pm pr review --no-window` synchronously
+      on the event loop; the QA gate deliberately applies only to a `qa`-status PR;
+      `_run_qa_sync` runs the gate before `write_run_record` (second-planner window,
+      needs an atomic QA-run claim); `pm/project.yaml` carries unrelated YAML re-wrapping
+      from pm own save (verified: only pr-f0f4129 added, one cross-PR note on pr-9ee4d64,
+      no entry or field lost).'
+    created_at: '2026-10-29T14:02:32Z'
+    last_edited: '2026-10-29T14:02:32Z'
+  - id: note-8e3ed4a
+    text: 'Review-loop 3b50 i3 fix (on 49ecd21c). (1) `base_check._retry_after` computed
+      `RETRY_MIN_SECONDS * 2 ** (attempts - 1)` straight from `pr["base_check"]["attempts"]`,
+      which lives in the git-tracked project.yaml. A hand-edited `attempts: 10000000`
+      makes that int too large to multiply into a float (`OverflowError`) and a much
+      larger one allocates for a long time before that; the raise escapes `_record_error`''s
+      locked update, so the probe failure is never persisted — `_retry_open` keeps
+      reading the stale record and the backoff the gate/completion check rely on never
+      advances. The exponent is now clamped before the shift (the delay saturates
+      at RETRY_MAX_SECONDS by attempt 5 anyway), the same corrupt-yaml hardening the
+      module already applies to `base_return`/`base_check`. Test: `test_huge_attempts_value_still_records_a_probe_failure`
+      (verified failing without the fix — `retry_after` is never written because the
+      recorder raises). Spec R5 + test plan item 35; R10 now documents why a fresh
+      loop sets `adopt_in_flight=False` (a seeded `next_review_iteration` would otherwise
+      be treated as an in-flight iteration and could adopt an older live pane verdict)
+      while a restored breadcrumb loop keeps the default; test plan item 36. Full
+      suite: 4593 passed, 1 skipped, 1 deselected (test_markdown_render needs the
+      `markdown` package; test_hook_events::test_installer_writes_standalone_receiver
+      needs PM_HOST_HOME unset).'
+    created_at: '2026-10-29T14:22:01Z'
+    last_edited: '2026-10-29T14:22:01Z'
+  - id: note-4e23105
+    text: 'Review-loop 3b50 i4 fixes (on 27533b66). (1) `base_check.launch_impl` now
+      refuses when there is no live pm tmux session instead of running `pm pr start`:
+      without one, `pr_start` falls back to a foreground `claude` (no window, no transcript
+      symlink) and returns 0, so `launch_impl` reported a launch, `clear_return_awaiting`
+      marked the handshake satisfied, and the completion check waited for idle evidence
+      from a pane that does not exist — the stranded handoff R6 forbids. Reachable
+      from a manual `pm pr review` outside a pm session (the gate runs before `_launch_review_window`''s
+      own session check) and from a machine without `claude` on PATH (`pr_start` prints
+      the prompt and exits 0). The guard mirrors `pr_start`''s own window-creation
+      condition (`_get_pm_session()` + `session_exists`), so it can never refuse a
+      launch that would have created a window; the claim is released, `apply_error`
+      recorded and `awaiting` kept, so the next TUI/CLI pass relaunches. (2) `claim_impl_launch`
+      pre-reads and skips the `locked_update` when the return is not awaiting an impl
+      launch or another driver''s claim is still live: `_catch_up_base_impl` retries
+      it every `BASE_LAUNCH_RETRY_SECONDS` and a handshake that keeps failing (a pending
+      spec, a broken workdir) awaits for a long time, so each no-op took the global
+      project.yaml lock and rewrote the whole large, git-tracked file — the same rule
+      `resolve_return`/`ensure_impl_status` already follow. The eligibility check
+      is now one `_claimable` helper used by both the pre-read and the locked update,
+      so they cannot drift. Tests: `test_launch_without_a_pm_session_keeps_the_handshake_awaiting`
+      and `test_claim_impl_launch_skips_the_write_when_nothing_to_claim`, both verified
+      failing without their fix; the two tests that run the real `launch_impl` now
+      give it a session. Spec R13 + edge cases + test plan items 37-38. Full suite:
+      4597 passed, 1 skipped, 0 failed (test_markdown_render needs the `markdown`
+      package; test_hook_events::test_installer_writes_standalone_receiver needs PM_HOST_HOME
+      unset).'
+    created_at: '2026-10-29T14:48:37Z'
+    last_edited: '2026-10-29T14:48:37Z'
+  - id: note-09775d4
+    text: 'User-authorized restart from the main PM session on 2026-10-31 after #249
+      merged as eaf3372e60d1717bd97cc50b5e0b04c6df881fa1. Resume this existing PR
+      in its existing workdir. First integrate current origin/master INTO THIS PR
+      branch, preserving its intended behavior and all earlier review/QA corrections;
+      resolve real code/test conflicts and validate the combined behavior before handing
+      off for a fresh review/QA/sign-off sequence. Do not merge this PR into master
+      or push/reset/delete master or other branches. This is a user-directed implementation
+      return, not a reviewer/sign-off verdict. GitHub reports the PR conflicts with
+      current master; reconcile that before resuming the prior review/QA work. Retain
+      all original source, dirty files, stashes, drafts, fixtures and captures. Existing
+      uncommitted content may have been intentionally excluded; inspect its provenance
+      instead of automatically committing it. Preserve every PR record and unrelated
+      local metadata during project.yaml reconciliation. Do not weaken acceptance
+      criteria, choose unresolved user policy questions or reuse stale PASS results.
+      Historical captures have been copied intact to the main session captures; overwritten
+      filename collisions are backed up in the host migration record. Main session
+      is pm-project_manager-c5a1006b; keep old restored sessions idle. Assigned models
+      and explicit work-Opus sign-off override remain unchanged. Autostart will use
+      wait_for_merge; no PR merge is authorized by this request.'
+    created_at: '2026-10-31T18:07:25.345765+00:00'
+    last_edited: '2026-10-31T18:07:25.345765+00:00'
+  - id: note-f52bb13
+    text: 'Master integration 2026-10-31 (user-authorized implementation restart)
+      is complete and pushed. Merge commit 40c2ebc8 merges origin/master eaf3372e60d1717bd97cc50b5e0b04c6df881fa1
+      (which carries #249/pr-592e4bd) into this branch; read-only `pm pr signoff integrate
+      pr-f0f4129` reports "up to date with master@eaf3372e" (head 40c2ebc8, candidate
+      tree 42c040ba). No history was rewritten, nothing force-pushed, master untouched,
+      PR not merged.
+
+
+      Conflicts resolved (15 hunks / 9 files), both feature sets kept:
+
+      - pm_core/cli/pr.py: pr_start clears both the sign-off return (master session_opened=True,
+      since the echo can fail with EPIPE after a TUI restart) and base_return, then
+      re-points the transcript links; the CLI pane-identity guard (S79, pane_runs_transcript)
+      moved into the shared _impl_idle_tracker so both _check_impl_idle and the base-return
+      _impl_idle_since reject a link naming another driver session; _launch_review_iteration
+      keeps the exit-3 -> "base_conflict:" status line and master fresh=... or open_return(...);
+      pr_qa_run_bg keeps the pre-transition base-return refusal.
+
+      - pm_core/review_loop.py: _LAUNCH_TIMEOUT stays 360 s (above the gate 300 s
+      relaunch) and keeps master _IN_FLIGHT_SYMLINK_GRACE.
+
+      - pm_core/tui/review_loop_ui.py: _announce_loop_done (master extraction of the
+      completion message) renders _done_iteration_count, so a fresh loop seeded from
+      a long-lived PR transcripts still reports the iterations it performed; the restart
+      fallback to a shared impl-<pr>.jsonl link runs before master pane_runs_transcript
+      check, so a restarted TUI tracks the live session and still rejects another
+      driver pane.
+
+      - pm_core/tui/qa_loop_ui.py: start_qa/start_or_stop_qa_loop keep the base-return
+      refusal on top of master _enter_qa_status(app, pr_id, pr, caller, lock_timeout=...)
+      contract. start_qa refusal returns None, not False: False is the project.yaml
+      load/lock contract the review->QA hand-off retries every tick with a lock-busy
+      message.
+
+      - pm_core/qa_loop.py: the QA gate post-fetch re-read now goes through _load_project_waiting
+      (RQ37) like every other load in _run_qa_sync, so a project.yaml that became
+      unloadable under the fetch ends the run quietly on a stop request instead of
+      raising out of the QA thread. That re-read is one more store.load in a planning
+      run; tests/test_qa_load_failures.py names it GATE_POST in its load-index mapping.
+
+      - pm_core/tui/pr_view.py: keep master escape() on command stderr/exception text
+      and this PR force=force_errors for a base-conflict refusal (so it is not swallowed
+      by a sticky message).
+
+      - tests: kept both sides (base-gate tests + master launch-retry/terminal-state
+      tests); PaneIdleTracker.idle_since now reports None for a Stop-started new turn
+      (master S35 semantics), and the settle-window test/docstring follow it.
+
+
+      pm/project.yaml auto-merged (no resolver conflict): 572 unique records (all
+      571 from master plus pr-f0f4129), every note from this branch present, no entry
+      or field lost; the only entry differing from master is pr-9ee4d64 (this branch
+      own cross-PR note). Existing dirty files, stashes, fixtures, drafts, captures,
+      model routing and the sign-off setting are untouched.
+
+
+      Full suite after the final edits: 5321 passed, 1 skipped, 0 failed (markdown
+      installed in the session scratchpad; PM_HOST_HOME unset; PATH=/usr/bin:/bin
+      so the push-proxy git wrapper stays out of the real-git tests). Spec pm/specs/pr-f0f4129/impl.md
+      gained R16 documenting these reconciliation decisions.
+
+
+      Handoff: this implementation container cannot reach the host TUI, so the fresh
+      review/QA/sign-off sequence starts from the base pm dir: press `d` on #274 or
+      run `pm pr review pr-f0f4129` there. Do not reuse the pre-merge review/QA results;
+      this head is a new integrated candidate.'
+    created_at: '2026-10-31T18:39:33Z'
+    last_edited: '2026-10-31T18:39:33Z'
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    signoff: provider:claude-work-xhigh-249
+  session_effort:
+    signoff: high
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f0f4129-check-base-integration-before-review-fb6d03d0
 - id: pr-5d53171
   plan: bugs
   title: 'Bug: stopping a QA run while a scenario PASS is mid-verification still aggregates

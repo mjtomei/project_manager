@@ -25,8 +25,10 @@ FAILURES = {
         2, "No such file or directory", "/x/pm/project.yaml"),
 }
 
-# store.load calls of a planning run in the harness, in order.
-START, START2, GUARD_PRE, GUARD_POST, GUARD_MID, SPEC_GATE = range(6)
+# store.load calls of a planning run in the harness, in order.  GATE_POST is
+# the pre-QA base integration gate's re-read after its fetch (base_check);
+# the merge guards follow it, then the spec gate.
+START, START2, GATE_POST, GUARD_PRE, GUARD_POST, GUARD_MID, SPEC_GATE = range(7)
 
 
 def _data(tmp_path):

@@ -54,6 +54,9 @@ VERDICT_LAUNCH_FAILED = "LAUNCH_FAILED"
 VERDICT_HOLD = "HOLD"
 VERDICT_CLOSED = "CLOSED"
 VERDICT_ERROR = "ERROR"
+# The pre-review base integration gate found a conflict: the PR was returned
+# to implementation and no reviewer ran.  Deliberate routing, not a failure.
+VERDICT_BASE_CONFLICT = "BASE_CONFLICT"
 
 ALL_VERDICTS = (VERDICT_PASS, VERDICT_NEEDS_WORK, VERDICT_INPUT_REQUIRED)
 
@@ -76,9 +79,13 @@ REVIEW_LAUNCH_CLAIM_TTL = 180.0      # cross-driver launch lease TTL
 REVIEW_LAUNCH_CLAIM_WAIT = 15.0      # bounded wait for another owner to go
 # Upper bound on one ``pm pr review`` launch opening its window.  A
 # container-mode launch spends most of it creating the container before the
-# window exists.  (The relauncher's subprocess timeout adds the sign-off
+# window exists.  The pre-review base gate runs inside that same child: on a
+# conflict it fetches the base and relaunches implementation (``pm pr
+# start``, itself bounded at 300s), so keep the outer budget above that — a
+# slow fetch or launch must not be mistaken for a loop error instead of the
+# exit-3 routing.  (The relauncher's subprocess timeout adds the sign-off
 # return's clear wait, see _launch_review_window.)
-_LAUNCH_TIMEOUT = 120
+_LAUNCH_TIMEOUT = 360                # `pm pr review` child timeout
 # How long a resumed loop waits for a launch that has not written its
 # iteration transcript symlink yet (pm start-up before the launcher runs).
 _IN_FLIGHT_SYMLINK_GRACE = 15
@@ -153,6 +160,18 @@ class ReviewLoopState:
     _transcript_dir: str | None = None
     # INPUT_REQUIRED: set to True while polling for follow-up verdict
     input_required: bool = False
+    # Iterations *this run* performed, set by ``run_review_loop_sync`` from the
+    # history delta.  ``iteration`` is seeded from the PR's existing iteration
+    # transcripts (``next_review_iteration``, so evidence is never overwritten),
+    # so the counter also names earlier loops' work and cannot be rendered as
+    # "this loop did N reviews".  ``None`` means the loop never ran (a
+    # hand-built state), where the counter is the best available answer.
+    iterations_performed: int | None = None
+    # A restored (breadcrumb) loop may have an iteration in flight: adopt its
+    # live pane instead of relaunching.  A *fresh* loop that starts after the
+    # PR's existing iteration transcripts must not adopt (there is nothing in
+    # flight); _start_loop clears this for those.
+    adopt_in_flight: bool = True
     # Failed-launch retry episode (persisted in the breadcrumb).
     retry_iteration: int = 0
     launch_attempts: int = 0
@@ -211,6 +230,29 @@ def parse_review_verdict(output: str) -> str:
             return verdict
     # If no clear verdict, assume needs work if there's output
     return VERDICT_NEEDS_WORK if output.strip() else VERDICT_PASS
+
+
+def next_review_iteration(transcript_dir: str, pr_id: str) -> int:
+    """Highest existing iteration number for *pr_id* under *transcript_dir*.
+
+    A fresh loop starts after the PR's completed iterations instead of
+    overwriting ``review-<pr>-i1.jsonl``: a base-conflict return, a sign-off
+    REVIEW bounce or a TUI restart must preserve the earlier review
+    transcripts and evidence.  Returns 0 when none exist.
+    """
+    d = Path(transcript_dir)
+    if not d.is_dir():
+        return 0
+    pattern = re.compile(rf"review-{re.escape(pr_id)}-i(\d+)\.jsonl$")
+    best = 0
+    try:
+        for p in d.iterdir():
+            m = pattern.match(p.name)
+            if m and (p.is_file() or p.is_symlink()):
+                best = max(best, int(m.group(1)))
+    except OSError:
+        return 0
+    return best
 
 
 def _compute_review_window_name(pr_data: dict) -> str:
@@ -374,6 +416,14 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
                                 stdout=stdout, artifact=artifact,
                                 retryable=True, reason="timeout") from e
     elapsed = time.monotonic() - t0
+    if result.returncode == 3:
+        # The pre-review base integration gate refused the launch: the PR
+        # was returned to implementation (or its rework is still pending).
+        # No reviewer ran, so this is routing, not an error.
+        detail = ((result.stderr or "").strip() or (result.stdout or "").strip())
+        _log.info("review_loop: base integration gate returned pr=%s: %s",
+                  pr_id, detail[:500])
+        raise BaseConflictError(detail or "base integration conflict")
     if result.returncode != 0:
         stderr = _as_text(result.stderr).strip()
         stdout = _as_text(result.stdout).strip()
@@ -487,6 +537,15 @@ def _get_pm_session() -> str | None:
 
 class PaneKilledError(Exception):
     """Raised when the review pane disappears before producing a verdict."""
+
+
+class BaseConflictError(Exception):
+    """The pre-review base integration gate returned the PR to implementation.
+
+    Raised by :func:`_launch_review_window` when ``pm pr review`` exits 3 —
+    no reviewer ran, so the loop ends with
+    :data:`VERDICT_BASE_CONFLICT` instead of an error.
+    """
 
 
 def _verdict_output_if_present(transcript: str | None) -> str | None:
@@ -1449,10 +1508,27 @@ def run_review_loop_sync(
     # False.
 
     last_done = state.history[-1].iteration if state.history else 0
-    adopt = state.iteration > last_done
+    adopt = state.adopt_in_flight and state.iteration > last_done
+    # ``max_iterations`` caps the iterations *this run* performs, not the
+    # absolute iteration number.  A fresh loop now continues numbering after
+    # the PR's existing transcripts (``next_review_iteration``, so evidence is
+    # never overwritten), so an absolute bound would silently run zero
+    # iterations for a PR that already carries ``max_iterations``
+    # transcripts — a long-lived PR that keeps bouncing between review and
+    # implementation.  ``start_iteration`` is the counter this pass began at.
+    start_iteration = state.iteration
+    # Iterations this pass actually performs, for the completion message.  The
+    # absolute counter is seeded from the PR's existing transcripts
+    # (``next_review_iteration``), so it does not say how much *this* loop ran:
+    # a base bounce before the first iteration leaves it at the number of
+    # earlier iterations, and "⇤ BASE_CONFLICT (12 iterations)" would report
+    # twelve reviews for a loop that ran none.  History entries are appended
+    # once per completed iteration (an adopted iteration included) and never
+    # for a refused launch, so their delta is the performed count.
+    history_start = len(state.history)
 
     try:
-        while state.iteration < max_iterations or adopt:
+        while state.iteration - start_iteration < max_iterations or adopt:
             if state.stop_requested:
                 _log.info("review_loop: stop requested after %d iterations", state.iteration)
                 break
@@ -1483,6 +1559,17 @@ def run_review_loop_sync(
                         state, pm_root, pr_data, transcript_dir,
                         state.iteration,
                     )
+            except BaseConflictError as e:
+                # The base gate returned the PR to implementation before the
+                # reviewer started.  No iteration ran: keep the counter where
+                # it was so the next loop continues from the same number (the
+                # transcript-based numbering also skips this attempt).
+                _log.info("review_loop: base conflict on iteration %d: %s",
+                          state.iteration, e)
+                state.iteration = max(0, state.iteration - 1)
+                state.latest_verdict = VERDICT_BASE_CONFLICT
+                state.latest_output = str(e)
+                break
             except PaneKilledError as e:
                 _log.warning("review_loop: pane killed on iteration %d: %s", state.iteration, e)
                 state.latest_verdict = VERDICT_KILLED
@@ -1589,10 +1676,11 @@ def run_review_loop_sync(
             if state.stop_requested:
                 break
 
-        if state.iteration >= max_iterations:
+        if state.iteration - start_iteration >= max_iterations:
             _log.warning("review_loop: hit max iterations (%d)", max_iterations)
 
     finally:
+        state.iterations_performed = max(0, len(state.history) - history_start)
         state.running = False
         _release_lease(state)
 

@@ -212,7 +212,10 @@ def review_pr(app, fresh: bool = False) -> None:
         transcript_arg = f" --transcript {tdir}/review-{pr_id}.jsonl"
     fresh_arg = " --fresh" if fresh else ""
     cmd = f"pr review{fresh_arg}{transcript_arg} {pr_id}"
-    run_command(app, cmd, working_message=action_key, action_key=action_key)
+    # force_errors: a base-integration refusal (exit 3) must be visible even
+    # when the just-finished loop's sticky message still holds the log line.
+    run_command(app, cmd, working_message=action_key, action_key=action_key,
+                force_errors=True)
 
 
 def signoff_pr(app, fresh: bool = False) -> None:
@@ -800,13 +803,18 @@ def handle_command_submitted(app, cmd: str) -> None:
 
 
 def run_command(app, cmd: str, working_message: str | None = None,
-                action_key: str | None = None) -> None:
+                action_key: str | None = None,
+                force_errors: bool = False) -> None:
     """Execute a pm sub-command.
 
     Args:
         cmd: The command to run (e.g., "pr start pr-001")
         working_message: Optional message to show while running (enables async mode)
         action_key: Optional key for in-flight tracking (set before calling this)
+        force_errors: Show the command's failure even while a sticky message
+            (e.g. "Review loop done") holds the log line.  Used by ``d``: its
+            base-integration refusal answers the key, and a refusal the user
+            cannot see reads as the key having done nothing.
     """
     parts = shlex.split(cmd)
     if not parts:
@@ -816,7 +824,8 @@ def run_command(app, cmd: str, working_message: str | None = None,
 
     if working_message:
         # Run async with spinner
-        app.run_worker(_run_command_async(app, cmd, parts, working_message, action_key))
+        app.run_worker(_run_command_async(app, cmd, parts, working_message,
+                                          action_key, force_errors))
     else:
         # Run sync for quick commands
         # The typed command is text too: "pr note add … 'creds[work]'" lost
@@ -857,7 +866,8 @@ def _run_command_sync(app, parts: list[str]) -> None:
 
 
 async def _run_command_async(app, cmd: str, parts: list[str], working_message: str,
-                             action_key: str | None = None) -> None:
+                             action_key: str | None = None,
+                             force_errors: bool = False) -> None:
     """Run a command asynchronously with animated spinner."""
     import asyncio
     import itertools
@@ -885,7 +895,12 @@ async def _run_command_async(app, cmd: str, parts: list[str], working_message: s
             stderr=asyncio.subprocess.PIPE,
         )
 
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+        # A `pr review` runs the pre-review base gate inside this subprocess:
+        # on a conflict it fetches the base and relaunches implementation
+        # (`pm pr start`, itself bounded at 300s).  Keep the budget above that
+        # (matches review_loop._launch_review_window) so a slow relaunch is
+        # not reported as a command timeout instead of the routing it was.
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=360)
         spinner_running = False
         stdout_text = stdout.decode() if stdout else ""
         stderr_text = stderr.decode() if stderr else ""
@@ -898,17 +913,21 @@ async def _run_command_async(app, cmd: str, parts: list[str], working_message: s
         elif proc.returncode == 0:
             app.log_message(f"✓ {working_message} done")
         if proc.returncode != 0 and stderr_text.strip():
+            # The TUI-side loop-start refusal (review_loop_ui._start_loop)
+            # forces for the same reason: this answers the user's key and may
+            # land while a sticky message holds the line.
             app.log_message(
-                f"Error: {escape(stderr_text.strip().split(chr(10))[-1])}")
+                f"Error: {escape(stderr_text.strip().split(chr(10))[-1])}",
+                force=force_errors)
 
     except asyncio.TimeoutError:
         spinner_running = False
         _log.exception("command timed out: %s", cmd)
-        app.log_message("Error: Command timed out")
+        app.log_message("Error: Command timed out", force=force_errors)
     except Exception as e:
         spinner_running = False
         _log.exception("command failed: %s", cmd)
-        app.log_message(f"Error: {escape(str(e))}")
+        app.log_message(f"Error: {escape(str(e))}", force=force_errors)
     finally:
         if action_key:
             app._inflight_pr_action = None

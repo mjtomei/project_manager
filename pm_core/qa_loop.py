@@ -318,6 +318,12 @@ class QALoopState:
     _guard_load_problem: str = ""
     # Set by qa_loop_ui after the completion callback has run once
     _ui_complete_notified: bool = False
+    # Pre-QA base integration gate: the PR was returned to implementation
+    # instead of starting the planner.  Not a QA verdict — the run never
+    # started, so no note/verdict/lifecycle transition is produced.
+    base_returned: bool = False
+    base_return_reason: str = ""
+    _ui_base_return_notified: bool = False
     # Idle-tracker keys qa_loop_ui registered for this run's panes.  A
     # queued launch temporarily narrows ``scenarios`` to the one being
     # launched, so this (not ``scenarios``) tells this run's keys apart
@@ -5406,6 +5412,66 @@ def _run_qa_sync(
         state.running = False
         state.latest_verdict = "ERROR"
         state.latest_output = f"Workdir for {state.pr_id} does not exist on this machine and could not be created"
+        return state
+
+    # Pre-QA base integration gate: a conflict returns the PR to
+    # implementation instead of launching the planner and wasting a full
+    # QA cycle.  Runs before the QA workdir, Scenario 0 or any window.
+    from pm_core import base_check
+    gate = base_check.gate(pm_root, pr_id, base_check.STAGE_QA, data=data)
+    if gate.decision in (base_check.CONFLICT, base_check.WAIT):
+        _log.info("QA not started for %s: %s", pr_id, gate.reason)
+        # The return owns the PR; never leave a raced transition in qa.
+        base_check.ensure_impl_status(pm_root, pr_id)
+        state.running = False
+        state.base_returned = True
+        state.base_return_reason = gate.reason
+        return state
+    if gate.decision == base_check.RETRY:
+        _log.warning("QA %s: base check failed (retryable): %s; continuing",
+                     pr_id, gate.reason)
+
+    # The gate re-reads the base (a network round-trip), so the merged/closed
+    # re-check above is no longer "as late as possible before any QA window".
+    # Re-check here so a merge/close landing during the fetch cannot start a
+    # QA planner and window against a finished PR.  Waits for project.yaml
+    # like every other load in this function (RQ37): a file that became
+    # unloadable under the fetch must end the run quietly on a stop request,
+    # not raise out of the QA thread.
+    loaded = _load_project_waiting(pm_root, state, "the base check", on_update)
+    if loaded is None:
+        state.running = False
+        return state
+    data = loaded
+    after_gate = next((p for p in data.get("prs", []) if p.get("id") == pr_id),
+                      None)
+    # A PR removed during the fetch is gone, not eligible: the pre-gate check
+    # aborts when the PR is not in the data, and this re-check must classify
+    # the same way instead of letting ``None`` fall through to "not
+    # merged/closed" and opening a QA workdir/window for a PR that no longer
+    # exists.
+    if after_gate is None \
+            or after_gate.get("status") in ("merged", "closed"):
+        _log.info("QA aborted: %s is %s after the base check; not running QA",
+                  pr_id,
+                  (after_gate or {}).get("status") or "no longer in the project")
+        state.running = False
+        return state
+
+    # The base can also move into a conflict inside that same window (another
+    # driver's gate, or the TUI completion check, records a return).  The
+    # return owns the PR now: opening the planner would put a QA writer beside
+    # the implementation rework it just started.
+    landed = base_check.open_return(after_gate)
+    if landed is not None:
+        base_check.ensure_impl_status(pm_root, pr_id)
+        _log.info("QA not started for %s: a base return landed during the "
+                  "check", pr_id)
+        state.running = False
+        state.base_returned = True
+        state.base_return_reason = (
+            landed.get("reason")
+            or "a base integration conflict was recorded during the base check")
         return state
 
     # Create QA workdir
