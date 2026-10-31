@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-31T20:00:52.082688+00:00'
+  updated_at: '2026-10-31T20:42:44.939858+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37657,6 +37657,31 @@ prs:
       work stays dropped.'
     created_at: '2026-10-31T20:00:51Z'
     last_edited: '2026-10-31T20:00:51Z'
+  - id: note-290e303
+    text: 'Review loop 928f i2: one recipe gap plus two step-2 cleanup guarantees
+      with no case. (1) The web-UI recipe produced-files list and manifest example
+      did not name Playwright auto-named page@<hash>.webm. A driver killed before
+      the rename leaves it (verified live in this container with real Playwright chromium-1223
+      and node 22.22.2: SIGKILL 4 s into a recording driver left page@….webm, 15,249
+      bytes, ffprobe duration 3.12 s), and the finalize step transcodes only recording.webm,
+      so nothing else removes or explains it — a worker following the list leaves
+      a playable video of the killed run out of the manifest (the manifest/directory-disagree
+      class R44/R45 fixed for server.pid and the kept recording.webm). Both now name
+      it, with when it survives. (2) Step 2 driver.mjs check has to stay after its
+      attempt cleanup: moving it above the rm left the whole file green (247 passed)
+      and left the earlier attempt complete webm/mp4/trace/screenshots/protocol logs/manifest
+      for the finalize step (verified live with the recipe own block: pre-fix rc 1
+      with all eight still there, post-fix the directory is empty). (3) Narrowing
+      step 2 retry cleanup ./*.webm glob to ./recording.webm also left the file green
+      and kept the earlier attempt auto-named video through a failed retry. Both cases
+      now seed the earlier attempt outputs and require them gone; the two mutations
+      fail 3 and 2 cases and pass on the unmodified recipe. Tests: tests/test_qa_artifact_recording_recipes.py
+      247 passed; full suite env -u PM_HOST_HOME PATH=/usr/bin:/bin pytest tests/
+      -q --deselect tests/test_merge_publish.py --deselect tests/test_signoff_integration.py
+      -> 5323 passed, 1 skipped, 121 deselected, 0 failed (439.68 s). Evidence: /pm-captures/review-928f-i2/.
+      No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-31T20:42:44Z'
+    last_edited: '2026-10-31T20:42:44Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
