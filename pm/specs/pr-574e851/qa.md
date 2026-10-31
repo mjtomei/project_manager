@@ -16,6 +16,16 @@ This spec is written against the user-visible surfaces: `pm qa run`,
 `pm qa debug`, the TUI QA loop (`t` / auto-start), the QA status file
 (`qa_status.json`), PR notes, tmux windows, and `pm container status`.
 
+**Integration note (2026-10-31).** This branch now contains #249
+(pr-592e4bd) merged from `master@eaf3372e`. Earlier QA verdicts were
+recorded against pre-integration revisions and are historical; a fresh QA
+sequence runs against the combined head. The integration keeps every
+fail-closed path above and adds #249's container-recreation on relaunch
+(see R11): a lost container that can be recreated is recreated, not failed;
+only an unrecreatable one ends the run `ERROR`. #249's new queued-status,
+in-window relaunch, resume-ownership and provider-routing behaviour must
+keep working alongside the fail-closed boundary.
+
 ## Grounded code paths (from the diff)
 
 - `pm_core/container.py`: `_runtime_status()` keeps the cause (missing binary,
