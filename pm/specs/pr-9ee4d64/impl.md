@@ -96,10 +96,17 @@ Required behaviour:
 - The bulk sweeps (`_finalize_all_transcripts`, watcher completion) skip
   transcripts whose session is still live: running review loops
   (`app._review_loops[pr].running`), running watcher loops
-  (`app._watcher_manager.list_watchers()`), and live
-  impl/review/signoff/merge tmux windows. A disable must not freeze a
+  (`app._watcher_manager.list_watchers()`), live idle-tracker entries,
+  and impl/review/merge (plus sign-off for a watcher sweep) transcripts
+  whose session a *live* pane of the pm session still runs.  Liveness is
+  checked on the pane, not the window name: a dead or finished pane must
+  not keep a transcript a symlink forever.  A disable must not freeze a
   collector that is still polling.  This matters because the TUI
   auto-start watcher and the review loops share one run directory.
+  The disable sweep may freeze a sign-off transcript even while its
+  window is open — auto-start being off means the sign-off driver no
+  longer steps that PR — while a watcher-completion sweep (auto-start
+  still on) keeps it live.
 - `_finalize_all_transcripts` also finalizes symlinks already sitting in
   `archive/` so archived sessions survive Claude transcript pruning.
 
@@ -272,18 +279,31 @@ available in the run dir:
 ### `pm_core/tui/auto_start.py`
 
 - `_live_transcript_owners(app)` returns `(exact_names, prefixes)` of
-  transcripts whose session may still be writing: every
-  `review-<pr>-<loop_id>-i*` of a running review loop, every
-  `<watcher-type>-i*` of a running watcher loop, and the canonical path
-  of each live impl/review/sign-off/merge window (window names come from
-  `autostart_state._window_names`).  A running loop also marks the legacy
-  prefix `review-<pr>-i`: a loop restored from a pre-upgrade breadcrumb
-  polls the legacy shared iteration name, and freezing it would hide the
-  verdict it appends later.  Loop-scoped names can never match that
-  prefix (the loop id is hex, so it never starts with `i`).
-- `_live_transcript_skip(app)` wraps that as the `skip` predicate.
+  the transcripts a loop *structurally* owns: every
+  `review-<pr>-<loop_id>-i*` of a running review loop and every
+  `<watcher-type>-i*` of a running watcher loop.  A running loop also
+  marks the legacy prefix `review-<pr>-i`: a loop restored from a
+  pre-upgrade breadcrumb polls the legacy shared iteration name, and
+  freezing it would hide the verdict it appends later.  Loop-scoped names
+  can never match that prefix (the loop id is hex, so it never starts
+  with `i`).  `exact_names` is now empty: step windows are resolved by
+  :func:`_live_read_transcripts` instead (a window name alone cannot tell
+  a live session from a finished or dead pane).
+- `_live_read_transcripts(app, tdir, *, include_signoff=False)` returns
+  the absolute paths a reader still polls: live idle-tracker entries, a
+  running review loop's current iteration transcript (resolved through
+  `resolve_iteration_transcript`, so a resumed legacy loop is covered),
+  and impl/review/merge (plus sign-off when *include_signoff*) transcripts
+  whose session id appears in a live pane's start command
+  (`tmux.live_pane_start_commands`, which lists only non-dead panes).
+  The session is resolved through `_app_session`, so a stub app's
+  non-string `_session_name` never reaches tmux.
+- `_live_transcript_skip(app, tdir=None, *, include_signoff=False)`
+  combines both: a name is live when it matches an owner name/prefix or
+  its absolute path is in `_live_read_transcripts`.
 - `_finalize_all_transcripts`: call
-  `finalize_transcript_dir(tdir, skip=_live_transcript_skip(app))`.
+  `finalize_transcript_dir(tdir, skip=_live_transcript_skip(app, tdir))`
+  (disable sweep, no sign-off keep-alive).
 
 ### `pm_core/tui/watcher_ui.py`, `pm_core/cli/watcher.py`
 
@@ -291,8 +311,10 @@ available in the run dir:
 - The TUI auto-start watcher shares its run directory with the
   auto-start review loops, so its completion sweep must pass the same
   `skip` predicate; otherwise a completing watcher freezes a loop that is
-  still polling (the 2026-10-28 failure mode).  The CLI watcher uses a
-  private `watcher-<token>` directory and needs no skip.
+  still polling (the 2026-10-28 failure mode).  It passes the run dir and
+  `include_signoff=True`: the sweep runs while auto-start is still on, so
+  a sign-off the driver is polling must stay live.  The CLI watcher uses
+  a private `watcher-<token>` directory and needs no skip.
 
 ## Ambiguities (resolved)
 
@@ -472,10 +494,11 @@ Applied on top of the design above; keep them when editing the code.
   loop-scoped-over-legacy precedence in `resolve_iteration_transcript`
   (including a dangling loop-scoped link, which is the current attempt
   before Claude writes its native JSONL) is now pinned by tests.
-- `_live_transcript_owners` resolves the tmux session through
-  `auto_start._app_session` (review d468 i1) instead of the raw
-  `_session_name`: a stub app's attribute may be a non-string, which must
-  never be handed to `tmux list-windows` from inside a bulk finalize.
+- The tmux session for a bulk finalize is resolved through
+  `auto_start._app_session` (review d468 i1; now used by
+  `_live_read_transcripts`) instead of the raw `_session_name`: a stub
+  app's attribute may be a non-string, which must never be handed to
+  tmux from inside a bulk finalize.
 - `resolve_iteration_transcript` falls back to the legacy iteration name
   only while that path is a symlink (review d468 i2).  A *frozen* legacy
   transcript is a completed iteration of an earlier loop — loop
@@ -548,12 +571,63 @@ Applied on top of the design above; keep them when editing the code.
   path); a regenerated one still adopts a legacy in-flight iteration
   through `resolve_iteration_transcript`'s legacy fallback.
 
+## Master integration (2026-10-31, merge of `origin/master` eaf3372e)
+
+The 2026-10-31 user-authorized restart merged current `origin/master`
+(`eaf3372e`, #249) into this branch.  Conflicts were resolved in
+`pm/project.yaml`, `pm_core/claude_launcher.py` and
+`pm_core/tui/auto_start.py`; the combined behaviour is:
+
+- `claude_launcher.finalize_transcript` keeps this PR's
+  ownership-checked, archive-writing version (master's simple
+  unlink+copy version is superseded), and master's new
+  `pane_runs_transcript` helper is kept alongside it.
+- Master's S31 fix (`_live_read_transcripts`: a disable must not freeze a
+  transcript the idle tracker or a live pane still reads) is combined
+  with this PR's structural owner sweep rather than replacing it:
+  `_live_transcript_skip` now consults both.  Master's review-loop branch
+  of that scan resolves its iteration path through
+  `resolve_iteration_transcript`, so a loop-scoped (or resumed legacy)
+  iteration is covered.
+- `_live_read_transcripts` uses `_app_session` (this PR's d468-i1
+  hardening) instead of the raw `_session_name`.
+- The disable sweep (`_finalize_all_transcripts`) follows master's
+  semantics for sign-off — a live sign-off window's transcript is frozen,
+  because auto-start off means the sign-off driver stops stepping the
+  PR — while the watcher-completion sweep passes
+  `include_signoff=True`, because it runs with auto-start still on.
+- `auto_start._adopt_return_review` (master's S79 fix: adopt the live
+  review window a sign-off REVIEW return already launched) now creates
+  the adopted link at the *loop-scoped* name for the new loop, not the
+  legacy shared `review-<pr>-i1.jsonl`; the loop adopts it as its
+  in-flight iteration.
+- `review_loop._adopt_in_flight_review`'s in-flight-launch wait (master's
+  S82/S133 fix) resolves the transcript through
+  `resolve_iteration_transcript`, so it waits on the path the launch
+  actually writes (loop-scoped, or a resumed loop's legacy link).
+- Master's launch-retry/discovery refactor continues to resolve every
+  iteration path through `resolve_iteration_transcript`; no new legacy
+  path construction was introduced outside the auto-sequence CLI, whose
+  private `auto-sequence/<pr>/` dir deliberately keeps monotonic legacy
+  names.
+
+Verified after integration: full suite **5240 passed / 1 skipped**
+(`python3 -m pytest tests`, 7m04s, with the `markdown` package installed
+for `test_markdown_render`).  The pre/post-fix repro
+(`/pm-captures/impl/post-fix/transcript-archive/repro.py --expect fixed`)
+still reports all three symptoms fixed at the integrated HEAD.  Two
+master tests needed adapting to loop-scoped naming: the S79 adoption test
+(`tests/test_return_driver_handoff.py`) now expects the adopted link at
+`review-<pr>-<loop_id>-i1.jsonl`, and the two live-owner unit tests in
+`tests/test_transcript_archive.py` now pin `_live_read_transcripts`
+(live-pane, not window-name, liveness).
+
 ## Known limitations (accepted)
 
-- **Step windows are treated as live for the whole sweep.**  A disable
-  while a step window is open leaves that step's canonical transcript a
-  symlink (never frozen), because an idle-looking pane is not provably
-  done.  It is archived on the next launch that reuses the path
+- **A live pane keeps its step's transcript live for the whole sweep.**
+  A disable while a live pane still runs a step's session leaves that
+  step's canonical transcript a symlink (never frozen), because an
+  idle-looking pane is not provably done.  It is archived on the next launch that reuses the path
   (`build_claude_shell_cmd`), so pre-return sessions are still preserved;
   only a final session whose path is never reused stays a link until
   Claude prunes it.  Distinguishing idle from running would need the pane

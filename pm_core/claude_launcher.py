@@ -227,6 +227,7 @@ def _fake_claude_args(config: dict, session_id: str | None = None,
         ("body_batch", "--body-batch"),
         ("body_delay", "--body-delay"),
         ("hold", "--hold"),
+        ("idle_once_after", "--idle-once-after"),
         ("display_bullet", "--display-bullet"),
     ):
         if cfg_key in effective:
@@ -283,17 +284,25 @@ def peek_fake_verdicts(session_tag: str | None = None) -> dict:
     return out
 
 
-def _resolve_provider(provider: str | None = None):
+def _resolve_provider(provider: str | None = None, model: str | None = None):
     """Resolve provider config and return (env_vars, model_flag, run_env).
 
     Shared helper for launch_claude, launch_claude_print, and
     launch_claude_print_background to avoid repeating the same pattern.
+    ``model_flag`` is the effective ``--model`` value (an explicit *model*
+    overrides the provider's).  The routing environment is built from that
+    selection, as build_claude_shell_cmd's (providers.launch_env).
     """
-    from pm_core.providers import get_provider
-    provider_cfg = get_provider(provider)
-    provider_env = provider_cfg.env_vars()
-    model_flag = provider_cfg.model_flag()
-    run_env = {**os.environ, **provider_env} if provider_env else None
+    from pm_core.providers import get_provider, launch_env
+    provider_cfg = get_provider(provider, strict=bool(provider))
+    model_flag = model or provider_cfg.model_flag()
+    provider_env, unset = launch_env(provider_cfg, provider_cfg.env_vars(),
+                                     model_flag)
+    run_env = None
+    if provider_env or any(v in os.environ for v in unset):
+        run_env = {**os.environ, **provider_env}
+        for var in unset:
+            run_env.pop(var, None)
     return provider_env, model_flag, run_env
 
 SESSION_REGISTRY = ".pm-sessions.json"
@@ -669,10 +678,8 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
     if not claude and fc_config is None:
         raise FileNotFoundError("claude CLI not found. Install it first.")
 
-    # Resolve provider for env vars and model flag
-    _, provider_model_flag, run_env = _resolve_provider(provider)
-    # Explicit model param overrides provider's model_flag
-    model_flag = model or provider_model_flag
+    # Resolve provider for env vars and model flag (explicit model wins)
+    _, model_flag, run_env = _resolve_provider(provider, model)
 
     # Try to resume existing session, or generate new session ID
     session_id = None
@@ -796,8 +803,8 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
     if not claude and fc_config is None:
         raise FileNotFoundError("claude CLI not found. Install it first.")
 
-    # Resolve provider
-    _, model_flag, run_env = _resolve_provider(provider)
+    # Resolve provider (explicit model wins over the provider's)
+    _, effective_model, run_env = _resolve_provider(provider, model)
     cleanup_path: str | None = None
     if fc_config is not None:
         cmd = [_FAKE_CLAUDE_BIN]
@@ -806,8 +813,6 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
         cmd = [claude]
         if _skip_permissions():
             cmd.append("--dangerously-skip-permissions")
-        # Explicit model takes precedence over provider model_flag
-        effective_model = model or model_flag
         if effective_model:
             cmd.extend(["--model", effective_model])
         if effort:
@@ -866,9 +871,10 @@ def _claude_project_dir(cwd: str) -> Path:
     """Compute Claude's project directory for a given working directory.
 
     Claude Code stores transcripts in ~/.claude/projects/{mangled-path}/
-    where the path has '/' replaced with '-' and '.' replaced with '-'.
+    where every character of the path other than ASCII letters and digits
+    (``/``, ``.``, ``_``, spaces, ...) is replaced with '-'.
     """
-    mangled = cwd.replace("/", "-").replace(".", "-")
+    mangled = re.sub(r"[^a-zA-Z0-9]", "-", cwd)
     return Path.home() / ".claude" / "projects" / mangled
 
 
@@ -884,6 +890,7 @@ def build_claude_shell_cmd(
     effort: str | None = None,
     write_dir: str | None = None,
     session_type: str | None = None,
+    container: bool = False,
     env_out: dict[str, str] | None = None,
 ) -> str:
     """Build a claude shell command string with proper flags and logging.
@@ -918,6 +925,11 @@ def build_claude_shell_cmd(
             exist on the host, pass the corresponding host path here so
             the file can be written.  The command will still reference the
             file via ``cwd`` (the path claude sees at runtime).
+        container: The command runs inside a pm container.  Only matters
+            for ``router`` providers (pm_core.worker_route): the command
+            then starts the in-container bridge forwarder first and never
+            starts claude if it fails; on the host a router provider's
+            ``launcher`` replaces the ``claude`` executable.
         env_out: Receives the provider environment variables.  They are
             **never** interpolated into the returned command: that string is
             logged (``log_shell_command``), stored as the tmux
@@ -926,7 +938,13 @@ def build_claude_shell_cmd(
             environment: ``tmux`` pane helpers write a private env file the
             pane sources (``env=`` argument), foreground launches use
             ``os.execvpe(..., env=...)``, and ``send_keys`` sources the same
-            kind of file.
+            kind of file.  Only the names of the routing variables the
+            launch unsets (``env -u NAME``) appear in the command.  A router
+            provider requires it (ValueError otherwise).
+
+    An explicitly named *provider* that is not configured raises
+    :class:`~pm_core.providers.ProviderNotFoundError` instead of silently
+    launching on the built-in claude provider.
     """
     # When transcript is requested, generate a UUID and create a symlink
     if transcript and cwd:
@@ -963,15 +981,41 @@ def build_claude_shell_cmd(
 
     # Resolve provider configuration.  Values stay out of the command string
     # (see ``env_out``); the caller transports them via the process env.
-    provider_env, model_flag, _ = _resolve_provider(provider)
+    from pm_core.providers import get_provider, launch_env
+    provider_cfg = get_provider(provider, strict=bool(provider))
+    # Explicit model param overrides provider's model_flag
+    effective_model = model or provider_cfg.model_flag()
+
+    # Router providers (pm_core.worker_route): command-scoped, never global.
+    if provider_cfg.type == "router":
+        from pm_core import worker_route
+        route_prefix, provider_env, exe = worker_route.launch_parts(
+            provider_cfg, container=container)
+    else:
+        route_prefix, provider_env, exe = "", provider_cfg.env_vars(), "claude"
+    # The routing environment comes from this selection alone: what it
+    # needs is assigned (subagents pinned to the session's model included),
+    # every other routing variable is unset (not emptied), so nothing the
+    # caller's environment carries -- pm run inside a routed session -- picks
+    # this session's model or account (providers.launch_env).
+    provider_env, unset = launch_env(provider_cfg, provider_env,
+                                     effective_model)
     if provider_env:
         if env_out is not None:
             env_out.update(provider_env)
+        elif provider_cfg.type == "router":
+            # Without its environment (ANTHROPIC_BASE_URL) a routed session
+            # would run on whatever account the launching shell carries.
+            raise ValueError(
+                f"provider {provider!r} is a router: the caller must pass "
+                "env_out so its environment reaches the launched process")
         else:
             _log.warning(
                 "provider %r needs env vars (%s) but the caller did not pass "
                 "env_out; they will not reach the launched process",
                 provider or "<default>", ", ".join(sorted(provider_env)))
+    # Only names: unsetting carries no value.
+    env_prefix = ("env " + "".join(f"-u {v} " for v in unset)) if unset else ""
 
     from pm_core.paths import skip_permissions_enabled, fake_claude_config_for_type
     fc_config = fake_claude_config_for_type(session_type, session_tag)
@@ -983,7 +1027,7 @@ def build_claude_shell_cmd(
         fake_args = _fake_claude_args(fc_config, session_id=session_id,
                                       session_type=session_type,
                                       session_tag=session_tag)
-        cmd = shlex.quote(_FAKE_CLAUDE_BIN) + " " + " ".join(shlex.quote(a) for a in fake_args)
+        cmd = env_prefix + shlex.quote(_FAKE_CLAUDE_BIN) + " " + " ".join(shlex.quote(a) for a in fake_args)
         log_shell_command(cmd, prefix="claude")
         return cmd
     else:
@@ -1003,10 +1047,8 @@ def build_claude_shell_cmd(
             if os.path.isdir(cwd):
                 cd_prefix = f"cd {shlex.quote(cwd)} && "
         skip = " --dangerously-skip-permissions" if skip_permissions_enabled(session_tag) else ""
-        cmd = f"{cd_prefix}claude{skip}"
+        cmd = f"{cd_prefix}{route_prefix}{env_prefix}{exe}{skip}"
 
-    # Explicit model param overrides provider's model_flag
-    effective_model = model or model_flag
     if effective_model:
         cmd += f" --model {shlex.quote(effective_model)}"
 
@@ -1421,6 +1463,22 @@ def pane_transcript_path(pane_id: str, workdir: str | None) -> Path | None:
     else:
         return None
     return transcript_path_for(cwd, m.group(1))
+
+
+def pane_runs_transcript(pane_id: str, workdir: str | None,
+                         transcript_path: str | Path) -> bool:
+    """Whether *pane_id* runs the session the *transcript_path* symlink names.
+
+    Drivers keep one ``impl-<pr>.jsonl`` symlink per run dir, so a pane
+    another driver launched meets this driver's symlink to an *earlier*
+    session.  A pane whose start command shows no session id cannot be
+    checked and counts as a match.
+    """
+    own = pane_transcript_path(pane_id, workdir)
+    if own is None:
+        return True
+    return session_id_from_transcript(own) == \
+        session_id_from_transcript(transcript_path)
 
 
 def finalize_transcript(transcript_path: Path,

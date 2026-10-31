@@ -696,46 +696,58 @@ def test_watcher_completion_skips_a_live_review_loop(env):
     assert idle.is_file() and not idle.is_symlink()
 
 
-def test_live_owners_follow_step_windows(env, monkeypatch):
-    """A live step window marks that step's canonical transcript live."""
+def test_live_read_transcripts_follow_a_live_pane(env, monkeypatch):
+    """A live pane running the transcript's session keeps it live.
+
+    Step windows are not inferred from a window name alone: a dead or
+    finished pane must not keep the transcript a symlink forever
+    (pr-592e4bd S31 merged this with the pr-9ee4d64 sweep).
+    """
     from pm_core import tmux as tmux_mod
     from pm_core.tui import auto_start
 
-    app = _fake_app(env, session="pm-x", prs=[
-        {"id": "pr-abc", "gh_pr_number": 241},
-    ])
-    monkeypatch.setattr(tmux_mod, "list_windows",
-                        lambda session: [{"name": "#241"},
-                                         {"name": "signoff-#241"}])
-    exact, prefixes = auto_start._live_transcript_owners(app)
-    assert "impl-pr-abc.jsonl" in exact
-    assert "signoff-pr-abc.jsonl" in exact
-    assert "review-pr-abc.jsonl" not in exact
-    assert prefixes == set()
+    app = _fake_app(env, session="pm-x")
+    tdir = env.tmp / "transcripts" / "run"
+    tdir.mkdir(parents=True)
+    sid = _sid()
+    p = tdir / "impl-pr-abc.jsonl"
+    _link(p, _native(env.cwd, sid, "RUNNING"))
+
+    monkeypatch.setattr(tmux_mod, "live_pane_start_commands",
+                        lambda session: [f"claude --session-id {sid}"])
+    live = auto_start._live_read_transcripts(app, tdir)
+    assert os.path.abspath(p) in live
+
+    # A dead pane is not listed by live_pane_start_commands, so its
+    # transcript is not live.
+    monkeypatch.setattr(tmux_mod, "live_pane_start_commands",
+                        lambda session: [])
+    assert auto_start._live_read_transcripts(app, tdir) == set()
 
 
-def test_live_owners_ignore_a_stub_app_session(env, monkeypatch):
+def test_live_read_transcripts_ignore_a_stub_app_session(env, monkeypatch):
     """A stub app's ``_session_name`` is not a real tmux session.
 
     ``_app_session`` filters a non-string before it can reach tmux, so the
-    window lookup is skipped and the sweep still runs (with no step-window
+    pane lookup is skipped and the sweep still runs (with no step-window
     skips) instead of raising from inside a bulk finalize.
     """
     from pm_core import tmux as tmux_mod
     from pm_core.tui import auto_start
 
-    app = _fake_app(env, session=object(), prs=[{"id": "pr-abc"}])
+    app = _fake_app(env, session=object())
+    tdir = env.tmp / "transcripts" / "run"
+    tdir.mkdir(parents=True)
     calls: list = []
 
-    def _list_windows(session):
+    def _live_pane_start_commands(session):
         calls.append(session)
         return []
 
-    monkeypatch.setattr(tmux_mod, "list_windows", _list_windows)
-    exact, prefixes = auto_start._live_transcript_owners(app)
+    monkeypatch.setattr(tmux_mod, "live_pane_start_commands",
+                        _live_pane_start_commands)
+    assert auto_start._live_read_transcripts(app, tdir) == set()
     assert calls == []
-    assert exact == set()
-    assert prefixes == set()
 
 
 def test_disable_finalizes_idle_transcripts_and_archives(env):

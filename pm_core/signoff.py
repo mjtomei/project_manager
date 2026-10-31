@@ -416,10 +416,12 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
     from pm_core.claude_launcher import build_claude_shell_cmd
     from pm_core import pane_registry, home_window
     from pm_core.model_config import (
-        resolve_model_and_provider, get_pr_model_override,
+        resolve_model_and_provider,
     )
 
-    if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
+    # Background (auto-sequence) launches switch no client: see
+    # _launch_review_window.
+    if not tmux_mod.has_tmux() or not (background or tmux_mod.in_tmux()):
         print("Sign-off window requires tmux.")
         return
 
@@ -491,7 +493,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
 
         _resolution = resolve_model_and_provider(
             "signoff",
-            pr_model=get_pr_model_override(pr_entry),
+            pr_entry=pr_entry,
             project_data=data,
         )
 
@@ -503,7 +505,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         # mounted host path via write_dir.
         from pm_core.container import (
             is_container_mode_enabled, _CONTAINER_WORKDIR,
-            wrap_claude_cmd, ContainerError, remove_container, _make_container_name,
+            wrap_claude_cmd, remove_container, _make_container_name,
         )
         if is_container_mode_enabled():
             _claude_cwd = _CONTAINER_WORKDIR
@@ -512,6 +514,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             _claude_cwd = workdir
             _claude_write_dir = None
 
+        _stag = pm_session.removeprefix("pm-") if pm_session else None
         env: dict[str, str] = {}
         claude_cmd = build_claude_shell_cmd(
             prompt=signoff_prompt,
@@ -522,22 +525,24 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             provider=_resolution.provider,
             effort=_resolution.effort,
             session_type="signoff",
+            session_tag=_stag,
+            container=is_container_mode_enabled(),
             env_out=env)
 
         branch = pr_entry.get("branch", "")
         if is_container_mode_enabled():
-            remove_container(_make_container_name(f"signoff-{pr_id}"))
-            _stag = pm_session.removeprefix("pm-") if pm_session else None
-            try:
-                claude_cmd, _cname = wrap_claude_cmd(
-                    claude_cmd, workdir, label=f"signoff-{pr_id}",
-                    allowed_push_branch=branch,
-                    session_tag=_stag,
-                    pr_id=pr_id,
-                    env=env)
-            except ContainerError as e:
-                print(str(e))
-                return
+            remove_container(_make_container_name(f"signoff-{pr_id}",
+                                                  session_tag=_stag))
+        # A ContainerError (e.g. a route bridge or container that cannot
+        # be set up) propagates: `pm pr signoff` reports it on stderr
+        # with rc 1.
+        claude_cmd, _cname = wrap_claude_cmd(
+            claude_cmd, workdir, label=f"signoff-{pr_id}",
+            allowed_push_branch=branch,
+            session_tag=_stag,
+            pr_id=pr_id,
+            provider=_resolution.provider,
+            env=env)
 
         # background -> don't steal focus (auto-sequence); explicit switch below
         # moves exactly the sessions that were watching the old window.
@@ -779,7 +784,12 @@ RETURN_LAUNCH_CLAIM_SECONDS = 180
 # by the sign-off hop that performs the transition: that hop may have to
 # defer behind a live ``pm qa run``, and holding the claim would block the
 # owed start for the whole RETURN_LAUNCH_CLAIM_SECONDS after that run ends.
+# ``pm pr auto-sequence`` claims only after its provider check passes (a
+# refused launch must leave it unclaimed for the tick after a fix).
 _CLAIMED_RETURN_HOPS = ("impl", "review")
+# How long a launcher whose session opened keeps waiting for project.yaml's
+# lock to clear ``awaiting`` (S77: a holder past the 2 s timeout left it set).
+RETURN_CLEAR_WAIT_SECONDS = RETURN_LAUNCH_CLAIM_SECONDS
 
 
 def claim_return_launch(root: Path, pr_id: str, hop: str,
@@ -810,7 +820,6 @@ def claim_return_launch(root: Path, pr_id: str, hop: str,
     transition superseded must not be launched off a stale read.
     """
     from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
     won = {"ok": False}
 
     # Cheap snapshot pre-check before the locked update.  ``locked_update``
@@ -826,10 +835,15 @@ def claim_return_launch(root: Path, pr_id: str, hop: str,
     except Exception:
         snapshot = None       # unreadable: let the locked update decide/report
     else:
-        if not _launch_claimable(snapshot, hop, require_status, now):
+        if not _launch_claimable(snapshot, hop, require_status,
+                                 datetime.now(timezone.utc)):
             return False
 
     def _apply(data):
+        # Read the clock under the lock: a claimant that waited on it would
+        # otherwise date its check before a claim written while it waited,
+        # see that claim as from the future (not fresh), and launch too.
+        now = datetime.now(timezone.utc)
         pr = store.get_pr(data, pr_id)
         if not _launch_claimable(pr, hop, require_status, now):
             return
@@ -843,6 +857,16 @@ def claim_return_launch(root: Path, pr_id: str, hop: str,
         _log.warning("claim sign-off return launch for %s: %s", pr_id, e)
         return False
     return won["ok"]
+
+
+def _claim_fresh(rec: dict, hop: str, now) -> bool:
+    """*rec* holds a *hop* launch claim younger than the expiry."""
+    claim = rec.get("launch_claim") or {}
+    try:
+        age = (now - parse_ts(claim.get("at"))).total_seconds()
+    except (TypeError, ValueError):
+        return False
+    return claim.get("hop") == hop and 0 <= age < RETURN_LAUNCH_CLAIM_SECONDS
 
 
 def _launch_claimable(pr: dict | None, hop: str, require_status: str | None,
@@ -859,31 +883,72 @@ def _launch_claimable(pr: dict | None, hop: str, require_status: str | None,
     if require_status is not None \
             and (pr or {}).get("status") != require_status:
         return False
-    claim = rec.get("launch_claim") or {}
-    try:
-        age = (now - parse_ts(claim.get("at"))).total_seconds()
-    except (TypeError, ValueError):
-        age = None
-    return not (claim.get("hop") == hop and age is not None
-                and 0 <= age < RETURN_LAUNCH_CLAIM_SECONDS)
+    return not _claim_fresh(rec, hop, now)
 
 
-def clear_return_awaiting(root: Path, pr_id: str, hop: str) -> None:
-    """The routed *hop* launched a fresh session: stop forcing a relaunch."""
+def return_launch_claimed(pr: dict | None, hop: str) -> bool:
+    """A driver claimed the *hop* re-run less than the expiry ago.
+
+    The QA driver clears ``awaiting`` as it starts, then replaces the judged
+    run's qa window; until its own window and status exist, only the claim
+    (kept for the qa hop, see :func:`clear_return_awaiting`) says it runs.
+    """
+    from datetime import datetime, timezone
+    rec = (pr or {}).get("signoff_return")
+    return isinstance(rec, dict) and _claim_fresh(
+        rec, hop, datetime.now(timezone.utc))
+
+
+def clear_return_awaiting(root: Path, pr_id: str, hop: str,
+                          timeout: float = store.LOCK_TIMEOUT_SECONDS,
+                          *, session_opened: bool = False,
+                          ts: str | None = None) -> bool | None:
+    """The routed *hop* launched a fresh session: stop forcing a relaunch.
+
+    False when the lock was not acquired within *timeout* (a caller that
+    must not wait passes ``store.NO_WAIT`` and retries), else True.  A
+    *session_opened* caller (a CLI launch or detached driver whose session
+    runs regardless) keeps waiting past *timeout*, up to
+    RETURN_CLEAR_WAIT_SECONDS, rather than leave ``awaiting`` and the hop's
+    claim behind that session (the first driver after the claim expired
+    would launch a second --fresh session over it).  Other callers (the
+    TUI's start_qa, on its main thread) give up after *timeout*: None, and
+    the caller retries with ``store.NO_WAIT``.  With *ts*, only the return
+    recorded at *ts* is cleared (a retry must not clear a later return).
+    """
+    def _waiting(pr):
+        rec = (pr or {}).get("signoff_return")
+        return (isinstance(rec, dict) and rec.get("awaiting") == hop
+                and (ts is None or rec.get("ts") == ts))
     def _apply(data):
         pr = store.get_pr(data, pr_id)
-        rec = (pr or {}).get("signoff_return")
-        if isinstance(rec, dict) and rec.get("awaiting") == hop:
+        if _waiting(pr):
+            rec = pr["signoff_return"]
             rec["awaiting"] = None
-            rec.pop("launch_claim", None)
+            if hop != "qa":
+                # A qa claim outlives ``awaiting``: the new run has no qa
+                # window yet (return_launch_claimed).  It expires by itself.
+                rec.pop("launch_claim", None)
 
     try:
         data = store.load(root)
-        if return_awaiting(store.get_pr(data, pr_id)) != hop:
-            return
-        store.locked_update(root, _apply)
+        if not _waiting(store.get_pr(data, pr_id)):
+            return True
+        try:
+            store.locked_update(root, _apply, timeout=timeout)
+        except store.StoreLockTimeout as e:
+            if timeout == store.NO_WAIT:
+                return False
+            if not session_opened:
+                _log.warning("clear sign-off return for %s: %s", pr_id, e)
+                return None
+            _log.warning("clear sign-off return for %s: %s; waiting up to "
+                         "%ss more", pr_id, e, RETURN_CLEAR_WAIT_SECONDS)
+            store.locked_update(root, _apply,
+                                timeout=RETURN_CLEAR_WAIT_SECONDS)
     except Exception as e:
         _log.warning("clear sign-off return for %s: %s", pr_id, e)
+    return True
 
 
 def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:

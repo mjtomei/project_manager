@@ -241,6 +241,12 @@ Cross-cutting setup for every scenario:
 - **Malformed / truncated breadcrumb** (`iteration_sessions` not an object):
   the restart still restores the remaining loops and auto-start state rather
   than abandoning the run.
+- **A step window whose pane has exited**: step-window liveness is
+  checked on the pane, not the window name, so a disable finalizes the
+  transcript of a dead or finished pane.  A live sign-off pane keeps its
+  transcript for a *watcher-completion* sweep (auto-start still on) but
+  not for the disable sweep (auto-start off — the sign-off driver stops
+  stepping the PR).
 - **Archive subdirectory is not current**: sign-off/review readers and
   launch stamps never mistake an archived entry for the live transcript.
 - **Merge finalize has no session id**: the archive copy is still written

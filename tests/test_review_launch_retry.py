@@ -112,6 +112,24 @@ def test_exhaustion_is_an_explicit_retryable_failure_not_a_verdict(tmp_path):
     assert result.retry_ready_at > 0
 
 
+def test_last_attempt_failed_marks_only_a_finished_failed_attempt(tmp_path):
+    """S133: the flag a resumed loop reads to skip the in-flight wait is set
+    by a failed attempt and is never set while an attempt runs."""
+    state = ReviewLoopState(pr_id=PR)
+    seen = []
+
+    def fake_review(*_a, **_k):
+        seen.append(state.last_attempt_failed)
+        raise ReviewLaunchError("provider down", retryable=True)
+
+    with patch.object(review_loop, "_run_claude_review", side_effect=fake_review):
+        result = _run(state, tmp_path)
+    assert result.latest_verdict == VERDICT_LAUNCH_FAILED
+    assert seen == [False, False, False]
+    assert result.last_attempt_failed is True
+    assert result.retry_iteration == result.iteration == 1
+
+
 def test_non_retryable_failure_stops_after_one_attempt(tmp_path):
     state = ReviewLoopState(pr_id=PR)
     err = ReviewLaunchError("401 unauthorized", retryable=False, reason="auth")

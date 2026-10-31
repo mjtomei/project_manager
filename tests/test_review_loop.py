@@ -452,6 +452,159 @@ class TestResumeInFlightIteration:
         assert mock_review.call_args.kwargs["iteration"] == 2
 
 
+class _Clock:
+    """Fake monotonic clock: each sleep() advances it."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps = 0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, s):
+        self.sleeps += 1
+        self.now += s
+
+
+class TestAdoptWaitsForInFlightLaunch:
+    """S82: a TUI restart while the loop's container-mode ``pm pr review``
+    was still creating its container left no window to adopt yet, so the
+    resumed loop relaunched the same iteration and two review windows ran.
+    The resumed loop now waits for that launch's window."""
+
+    def _setup(self, tmp_path, *, symlink=True, started=False):
+        import uuid
+        tdir = tmp_path / "t"
+        tdir.mkdir()
+        target = tmp_path / f"{uuid.uuid4()}.jsonl"
+        if started:
+            target.write_text("{}\n")
+        if symlink:
+            (tdir / "review-pr-001-i1.jsonl").symlink_to(target)
+        # The breadcrumb restores ``iteration_attempted``: the pre-restart
+        # loop had started this iteration's launch.
+        state = ReviewLoopState(pr_id="pr-001", iteration=1,
+                                _transcript_dir=str(tdir),
+                                iteration_attempted=True)
+        return state, str(tdir)
+
+    def _adopt(self, state, tdir, panes):
+        from pm_core import review_loop
+        clock = _Clock()
+        find = MagicMock(side_effect=panes)
+        with patch("pm_core.review_loop._get_pm_session", return_value="pm-s"), \
+             patch("pm_core.review_loop._find_claude_pane", find), \
+             patch("pm_core.review_loop.time.monotonic", clock.monotonic), \
+             patch("pm_core.review_loop.time.sleep", clock.sleep), \
+             patch("pm_core.hook_events.read_event", return_value=None), \
+             patch("pm_core.review_loop._poll_for_verdict",
+                   return_value="**PASS**") as poll:
+            out = review_loop._adopt_in_flight_review(state, _PR_DATA, tdir)
+        return out, poll, find, clock
+
+    def test_adopts_window_that_opens_after_restart(self, tmp_path):
+        state, tdir = self._setup(tmp_path)
+        # (discovery looks the window's pane up again once it opened)
+        out, poll, find, clock = self._adopt(
+            state, tdir, [None] * 12 + ["%7"] * 3)
+        assert out == "**PASS**"
+        assert poll.call_args.args[0] == "%7"
+        assert clock.sleeps == 11  # the first of the 12 misses is the pre-wait lookup
+
+    def test_session_that_ran_without_window_is_rerun(self, tmp_path):
+        state, tdir = self._setup(tmp_path, started=True)
+        out, poll, find, clock = self._adopt(state, tdir, [None] * 5)
+        assert out is None
+        poll.assert_not_called()
+        assert clock.sleeps == 0
+
+    def test_launch_that_never_opens_gives_up_at_launch_timeout(self, tmp_path):
+        from pm_core.review_loop import _LAUNCH_TIMEOUT
+        state, tdir = self._setup(tmp_path)
+        out, poll, find, clock = self._adopt(state, tdir, [None] * 500)
+        assert out is None
+        poll.assert_not_called()
+        assert clock.now == _LAUNCH_TIMEOUT
+
+    def test_missing_symlink_waits_only_the_short_grace(self, tmp_path):
+        from pm_core.review_loop import _IN_FLIGHT_SYMLINK_GRACE
+        state, tdir = self._setup(tmp_path, symlink=False)
+        out, poll, find, clock = self._adopt(state, tdir, [None] * 500)
+        assert out is None
+        assert clock.now == _IN_FLIGHT_SYMLINK_GRACE
+
+    def test_failed_attempts_symlink_is_not_waited_on(self, tmp_path):
+        """S133: after this iteration's last launch attempt failed (an
+        auto-start re-arm, a restart inside the backoff), its dangling
+        symlink is that dead attempt's: nothing is in flight to wait for."""
+        state, tdir = self._setup(tmp_path)
+        state.retry_iteration = 1
+        state.last_attempt_failed = True
+        out, poll, find, clock = self._adopt(state, tdir, [None] * 500)
+        assert out is None
+        poll.assert_not_called()
+        assert clock.sleeps == 0
+
+    def test_failed_attempt_of_an_earlier_iteration_still_waits(self, tmp_path):
+        from pm_core.review_loop import _LAUNCH_TIMEOUT
+        state, tdir = self._setup(tmp_path)
+        state.retry_iteration = 0  # the flag is about another iteration
+        state.last_attempt_failed = True
+        out, poll, find, clock = self._adopt(state, tdir, [None] * 500)
+        assert out is None
+        assert clock.now == _LAUNCH_TIMEOUT
+
+    def test_rearmed_loop_relaunches_at_once(self, tmp_path):
+        """S133: a re-armed LAUNCH_FAILED loop resumed at iteration 1 with no
+        history relaunched only after waiting the whole launch timeout on
+        the failed attempt's symlink.  It now relaunches straight away."""
+        from pm_core.review_loop import AttemptDiscovery
+        state, tdir = self._setup(tmp_path)
+        state.retry_iteration = 1
+        state.last_attempt_failed = True
+        state.latest_verdict = "LAUNCH_FAILED"
+        clock = _Clock()
+        at_launch = []
+
+        def relaunch(*_a, **kw):
+            at_launch.append(clock.now)
+            return "**PASS**"
+
+        with patch("pm_core.review_loop._get_pm_session", return_value="pm-s"), \
+             patch("pm_core.review_loop._find_claude_pane", return_value=None), \
+             patch("pm_core.review_loop._discover_iteration",
+                   return_value=AttemptDiscovery("launch")), \
+             patch("pm_core.review_loop._claim_launch", return_value=True), \
+             patch("pm_core.review_loop._pr_is_terminal", return_value=False), \
+             patch("pm_core.review_loop.time.monotonic", clock.monotonic), \
+             patch("pm_core.review_loop.time.sleep", clock.sleep), \
+             patch("pm_core.review_loop._run_claude_review",
+                   side_effect=relaunch) as run:
+            result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir=tdir)
+        assert run.call_count == 1
+        assert run.call_args.kwargs["iteration"] == 1
+        assert at_launch == [0.0]
+        assert result.latest_verdict == VERDICT_PASS
+        assert result.last_attempt_failed is False
+
+    def test_resumed_loop_does_not_relaunch_late_window(self, tmp_path):
+        state, tdir = self._setup(tmp_path)
+        clock = _Clock()
+        with patch("pm_core.review_loop._get_pm_session", return_value="pm-s"), \
+             patch("pm_core.review_loop._find_claude_pane",
+                   side_effect=[None, None] + ["%7"] * 5), \
+             patch("pm_core.review_loop.time.monotonic", clock.monotonic), \
+             patch("pm_core.review_loop.time.sleep", clock.sleep), \
+             patch("pm_core.hook_events.read_event", return_value=None), \
+             patch("pm_core.review_loop._poll_for_verdict", return_value="**PASS**"), \
+             patch("pm_core.review_loop._run_claude_review") as relaunch:
+            result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir=tdir)
+        relaunch.assert_not_called()
+        assert result.iteration == 1
+        assert result.latest_verdict == VERDICT_PASS
+
+
 class TestStartReviewLoopBackground:
     @patch("pm_core.review_loop._run_claude_review")
     def test_runs_in_background_thread(self, mock_review):
@@ -687,3 +840,60 @@ class TestGenerateReviewPromptInputRequired:
         assert "INPUT_REQUIRED" in prompt
         # Should explain that it's reserved for genuine ambiguities
         assert "needs the user's attention" in prompt
+
+
+# --- _launch_review_window failure ---
+
+def test_launch_failure_is_an_error_verdict_without_traceback(caplog):
+    """A ``pm pr review`` launch that exits non-zero (a work route down)
+    ends the loop with a LAUNCH_FAILED verdict (pr-e040aeb: retryable, not
+    an agent verdict) naming the child's stderr, and is logged without a
+    traceback (S84: one ERROR line in the pm debug log)."""
+    import logging
+    from pm_core import review_loop
+    err = "work route 'w' unavailable: router not reachable at 127.0.0.1:1"
+
+    def launch_only(pr_id, pm_root, pr_data, **kw):
+        review_loop._launch_review_window(pr_id, pm_root, iteration=kw["iteration"])
+
+    logger = logging.getLogger("pm.review_loop")  # propagate=False
+    logger.addHandler(caplog.handler)
+    try:
+        with patch.object(review_loop.subprocess, "run", return_value=MagicMock(
+                returncode=1, stdout="", stderr=err)), \
+                patch.object(review_loop, "REVIEW_LAUNCH_BACKOFF_BASE", 0.01), \
+                patch.object(review_loop, "REVIEW_LAUNCH_BACKOFF_MAX", 0.01), \
+                patch.object(review_loop, "_run_claude_review", side_effect=launch_only):
+            state = ReviewLoopState(pr_id="pr-001")
+            run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+    finally:
+        logger.removeHandler(caplog.handler)
+    assert state.latest_verdict == review_loop.VERDICT_LAUNCH_FAILED
+    assert state.latest_output == f"Review window launch failed (rc=1): {err}"
+    failed = [r for r in caplog.records
+              if "review launch failed on iteration" in r.getMessage()]
+    assert len(failed) == 1 and err in failed[0].getMessage()
+    assert caplog.records and all(r.exc_info is None for r in caplog.records)
+
+
+# --- _launch_review_window child timeout ---
+
+def test_launch_child_outlives_the_return_clear_wait():
+    """The ``pm pr review --fresh --review-loop`` child may wait up to
+    RETURN_CLEAR_WAIT_SECONDS past its lock timeout to clear a sign-off
+    return's ``awaiting`` after its window opened; the loop must not kill
+    it first (S81: a 150 s project.yaml holder left ``awaiting`` and the
+    claim behind the live window, and a tick relaunched over it)."""
+    from pm_core import review_loop, store
+    from pm_core.signoff import RETURN_CLEAR_WAIT_SECONDS
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen.update(kw)
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with patch.object(review_loop.subprocess, "run", side_effect=fake_run):
+        review_loop._launch_review_window("pr-x", "/tmp", iteration=1)
+    assert seen["timeout"] >= (review_loop._LAUNCH_TIMEOUT
+                               + store.LOCK_TIMEOUT_SECONDS
+                               + RETURN_CLEAR_WAIT_SECONDS)
