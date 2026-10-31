@@ -177,10 +177,11 @@ merge, watcher) runs Claude Code with a model and effort chosen per role:
 Effort follows the same order, with the selected provider's own `effort`
 between the PR's setting and the project's.
 
-The choice is explicit and independent per role: any session type may be
-routed to a provider, and a role with no model or provider configured
-runs plain `claude` on the CLI default. Routing one role does not move
-the others.
+The choice is explicit and per role: any session type may be routed to a
+provider. A role with no setting of its own falls back to its parent
+(the QA sub-roles follow `qa`, `signoff` follows `review`), and with
+nothing configured at all the session runs plain `claude` on the CLI
+default. Routing one role never moves an unrelated role.
 
 A model value is a model name (`opus`, `claude-opus-5-5`, ...) or
 `provider:<name>` for a provider defined on this host in

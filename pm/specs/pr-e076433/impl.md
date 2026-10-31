@@ -148,7 +148,8 @@ container launches, and the no-configuration default (plain Claude).
   s0's model for legacy configs, which the task forbids.  Keep it, with
   explicit documentation and tests.  No migration is performed; users who
   want to take control set `qa_interactive` explicitly, and
-  `pm model show` already labels the inherited value `(s0 legacy)`.
+  `pm pr model show` (and the TUI) label the inherited value
+  `(s0 legacy)`.
 - **A4 — Backward-compatible alias for the old constant/module.**  None
   is added: both are internal (no public API, no entry point), and the
   task asks to rename them.  Historical specs keep their old spellings.

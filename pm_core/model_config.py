@@ -308,8 +308,8 @@ def _legacy_s0_resolution(project_data: dict | None) -> ModelResolution | None:
 
     Retiring the shim would silently move s0 to the CLI default for every
     config that sets only ``qa_scenario``, so it is retained.  Setting
-    ``qa_interactive`` explicitly takes control, and ``pm model show``
-    labels an inherited value ``(s0 legacy)``.
+    ``qa_interactive`` explicitly takes control, and ``pm pr model show``
+    (and the TUI) label an inherited value ``(s0 legacy)``.
     """
     legacy = resolve_model_and_provider("qa_scenario",
                                         project_data=project_data)

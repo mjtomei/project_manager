@@ -4,8 +4,9 @@ endpoint that holds its own upstream credentials).
 A *route* is a ``type: router`` provider in ``~/.pm/providers.yaml`` (see
 pm_core.providers).  It is selected like any model, per role: every
 session type pm launches may be routed, and the setting is explicit --
-a role with no model or provider configured runs plain ``claude`` on the
-CLI default.  For example
+a role with no setting of its own follows its parent role, and with
+nothing configured at all runs plain ``claude`` on the CLI default.  For
+example
 
     pm model set impl provider:<name> --project
     pm model set signoff provider:<name> --project
