@@ -2504,6 +2504,10 @@ R60. **Integration with master (#249, 2026-10-31).** origin/master merged
      pre-render `rm -f` of this run's mp4, gif and partial run first, so a
      refused render acts on nothing and a missing-encoder stop (which never
      reaches `render_fail`) still clears the previous run's outputs;
+   - step 0 (both recipes' preamble and the CLI scaffold) clears an
+     interrupted render's `recording.mp4.partial.mp4` with the other render
+     outputs, so a capture that fails before its own render cannot present
+     an earlier partial as this run's evidence;
    - `render_fail` removes the gif, the mp4 and the partial, and the stage
      checks keep their messages: "there is no cast to render", "ffmpeg is
      not installed", "agg failed on the cast — is 'agg' installed?", "agg
