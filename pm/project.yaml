@@ -38218,7 +38218,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-29T07:06:10.282609+00:00'
+  updated_at: '2026-10-31T18:07:25.345765+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -39555,6 +39555,32 @@ prs:
       that its slash-command-echo bug is fixed here (baa8 i3).'
     created_at: '2026-10-29T03:00:16Z'
     last_edited: '2026-10-29T03:00:16Z'
+  - id: note-a2230b3
+    text: 'QA planning 2026-10-29 (scenarios 25-29 on 6faf7496, integrated head).
+      Spec updated in pm/specs/pr-a80bde5/qa.md (uncommitted): new R14 (a wait longer
+      than REVIEW_LAUNCH_CLAIM_TTL keeps launch ownership — sign-off re-QA item) and
+      R15 (a failed launch/retry never reports waiting/INPUT_REQUIRED — sign-off re-QA
+      item), R13 extended with the 5228-i1 rule that resuming is published before
+      running goes up, Pass/Fail criteria + regression list extended (test_restart_during_wait_on_another_drivers_transcript,
+      test_discovery_verdict_names_the_transcript_it_came_from, test_retry_reports_the_discovered_verdicts_transcript,
+      test_resume_of_a_restored_wait_publishes_resuming_before_running, test_follow_up_wait_refreshes_the_launch_lease),
+      and a mandatory isolation paragraph added to Setup (dedicated tmux socket +
+      private HOME, per the test-session-leak incident). Scenarios: 25 reported-bug
+      non-reproduction on the integrated head (full lifecycle + the diff reproduction
+      tests + concurrent text/JSON readers); 26 restart during a wait (adopt, resuming-only
+      neutral state sampled tightly, answered-before-restart, verdict in the restart
+      gap, stop during wait); 27 a wait on a pane the loop adopted from another driver
+      (own review-<pr>-i<N>.jsonl missing or naming a dead session — review e2e9 i1
+      / 5228 i1), including restart re-adoption; 28 image-only answer is an answer
+      and a task boundary (dde08d1b) plus empty/slash-command records; 29 long wait
+      >180 s, failing launches, unrelated holds, autostart removal mid-follow-up.
+      Note for the runner: scenario 27s precondition (pane session != the loops own
+      per-iteration transcript) is hard to produce by pure user action; construct
+      it with the interactive stand-in plus a seeded breadcrumb/resume state, and
+      if the shape cannot be produced live say so explicitly rather than passing the
+      story on code reading alone.'
+    created_at: '2026-10-29T04:22:08Z'
+    last_edited: '2026-10-29T04:22:08Z'
   - id: note-f474ed3
     text: 'S25 concretizer 2026-10-29: scenario refined and live-verified end-to-end
       at this HEAD (whole repro file 49 passed; TestLiveFlow + TestRestartAdoption
@@ -39716,6 +39742,30 @@ prs:
       checks to the review episode. (2026-10-29T07:06:00Z)'
     created_at: '2026-10-29T07:06:10Z'
     last_edited: '2026-10-29T07:06:10Z'
+  - id: note-4daf28e
+    text: 'User-authorized restart from the main PM session on 2026-10-31 after #249
+      merged as eaf3372e60d1717bd97cc50b5e0b04c6df881fa1. Resume this existing PR
+      in its existing workdir. First integrate current origin/master INTO THIS PR
+      branch, preserving its intended behavior and all earlier review/QA corrections;
+      resolve real code/test conflicts and validate the combined behavior before handing
+      off for a fresh review/QA/sign-off sequence. Do not merge this PR into master
+      or push/reset/delete master or other branches. This is a user-directed implementation
+      return, not a reviewer/sign-off verdict. The read-only integration check found
+      substantive conflicts in: pm/project.yaml, pm_core/tui/auto_start.py. The prior
+      SIGNOFF_MERGE is historical evidence for its recorded revisions, not approval
+      of a new integration. Retain all original source, dirty files, stashes, drafts,
+      fixtures and captures. Existing uncommitted content may have been intentionally
+      excluded; inspect its provenance instead of automatically committing it. Preserve
+      every PR record and unrelated local metadata during project.yaml reconciliation.
+      Do not weaken acceptance criteria, choose unresolved user policy questions or
+      reuse stale PASS results. Historical captures have been copied intact to the
+      main session captures; overwritten filename collisions are backed up in the
+      host migration record. Main session is pm-project_manager-c5a1006b; keep old
+      restored sessions idle. Assigned models and explicit work-Opus sign-off override
+      remain unchanged. Autostart will use wait_for_merge; no PR merge is authorized
+      by this request.'
+    created_at: '2026-10-31T18:07:25.345765+00:00'
+    last_edited: '2026-10-31T18:07:25.345765+00:00'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high

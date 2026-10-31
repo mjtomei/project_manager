@@ -76,6 +76,16 @@ The tester works in a throwaway project inside the workdir (see
    model. Verdicts must be driven this way (transcript + hook), never by
    scraping or editing pane text.
 
+**Isolation (mandatory).** Never test in the user's real tmux session or
+against the shared host configuration. Use an explicit dedicated tmux socket
+(`tmux -L <test-socket>` / `PM_TMUX_SOCKET`), a private `HOME` (or at least
+private `~/.pm` state: breadcrumb, `autostart-resume.json`, sessions, runtime
+state) and a throwaway project, and verify that the fixture you are about to
+restart/stop is yours before acting. A shared `~/.pm/breadcrumb.json` is
+global to the machine: another QA scenario restarting concurrently can consume
+it, so a private HOME is the reliable fix (QA scenario 22 note). Never mutate
+global tmux environment variables as test cleanup.
+
 Cross-cutting: after each action, observe the CLI (`pm autostart status` and
 `--json`) and the TUI (runs popup, tech-tree marker, log line). Allow a couple
 of seconds for the ~2 s transcript poll; do not rely on a fixed sleep as the
@@ -256,6 +266,32 @@ as "answered; follow-up running" for a question nobody answered) or a
 `waiting` state for a wait the human answered before the restart. (Review
 e386 i2/i3; regressions `test_adopt_decision_never_reads_as_an_answered_follow_up`
 and `test_adopt_decision_of_an_answered_wait_never_reads_as_waiting`.)
+The resuming flag must already be up when the resumed loop is published as
+`running` — the window between `_start_loop` marking it running and the loop
+thread's first statement must not read as an answered follow-up. (Review 5228
+i1; regression `test_resume_of_a_restored_wait_publishes_resuming_before_running`.)
+
+R14. **A long wait keeps launch ownership.**
+GIVEN an unanswered INPUT_REQUIRED wait with auto-start active and other
+drivers able to launch reviews for the same PR.
+WHEN the wait lasts longer than the review launch lease TTL (180 s).
+THEN the loop keeps the launch lease refreshed while it waits: no other
+driver (autostart scheduler, `pm pr auto-sequence`, a second TUI) launches a
+fresh iteration over the live question pane, the question stays on screen in
+the same window/pane and the iteration number does not advance, and
+answering it afterwards still clears the wait and resolves the follow-up.
+
+R15. **A failed launch never masquerades as a human question.**
+GIVEN an in_review PR whose review launches keep failing (Claude cannot
+start / produces no transcript), so the loop is in its bounded retry
+episode or has exhausted it.
+WHEN status is read during and after the retries.
+THEN the PR reports the failed/retrying review state (a `LAUNCH_FAILED`
+verdict, retry evidence while it is still retrying) with
+`review.input_required=false` — never `waiting / review INPUT_REQUIRED`, and
+never a human-question notice. When a later launch succeeds, the iteration
+runs normally and no stale INPUT_REQUIRED state or notice appears. A
+permission/trust hold is reported as the hold, not as a wait.
 
 ## Edge cases
 
@@ -345,6 +381,13 @@ already finished is finalized normally.
   the answer re-arms the wait (R5c).
 - Also FAIL if a PASS follow-up followed by a non-task wakeup turn (e.g. a
   `/loop` tick) is recorded as NEEDS_WORK or relaunches an iteration (R5b).
+- Also FAIL if a wait longer than the launch lease TTL (180 s) is relaunched
+  over, if the question pane is replaced while it waits, or if answering it
+  afterwards no longer works (R14).
+- Also FAIL if a failed review launch (or an exhausted retry episode) reports
+  `waiting / review INPUT_REQUIRED`, raises a human-question notice, or
+  leaves stale `input_required` state behind after a later successful launch
+  (R15).
 - The reproduction tests from the diff
   (`tests/test_review_input_required_state.py`: `TestLiveFlow`,
   `TestRestartAdoption` — including
@@ -366,7 +409,14 @@ already finished is finalized normally.
   review baa8 i2/i3 (wakeup-turn guard, local-command transparency), the
   status payload gained `review.resuming` at baa8 i1, and review e386 i2/i3
   fixed the adopt-decision publish order and made transparent records
-  turn-neutral — so run these against the current HEAD.
+  turn-neutral — so run these against the current HEAD. Add the later
+  regressions: `test_restart_during_wait_on_another_drivers_transcript`
+  (missing/dead own transcript, review 5228 i1),
+  `test_discovery_verdict_names_the_transcript_it_came_from` and
+  `test_retry_reports_the_discovered_verdicts_transcript` (review e2e9 i1),
+  `test_resume_of_a_restored_wait_publishes_resuming_before_running`
+  (review 5228 i1), and
+  `test_follow_up_wait_refreshes_the_launch_lease` (R14).
 
 ## Ambiguities
 
