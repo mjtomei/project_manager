@@ -757,7 +757,11 @@ semantic decisions:
   `test_reverify_waits_on_the_verifier_pane` now asserts the bounded poller
   is given the verifier's own pane; the branch's
   `test_reverification_tolerates_verifier_pane_closing` asserts the
-  fresh-verifier fallback; master's poll-timer test uses a settled PR
+  fresh-verifier fallback; master's two legacy verdict-reminder tests
+  (`test_worker_route.py::TestPollLoopNoRouteGating`) now assert the
+  bounded recovery's *resume* request for an API-error idle and that a
+  recovery send to a vanished pane does not end the run; master's
+  poll-timer test uses a settled PR
   because this branch's `_has_active_pr` is status-only.
 
 ## QA S35 — concurrent runs and the shared poll timer (2026-10-29)
