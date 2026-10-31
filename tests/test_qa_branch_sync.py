@@ -516,6 +516,18 @@ class TestRunQaSyncBranchSync:
         assert state.planning_base == u
         assert seen["pinned"] == u and seen["worker_tests"] == u
 
+    def test_early_exit_still_records_scenario_start(self, repos):
+        """A run that stops before planning still records the first scenario
+        index it would have used.  Master records ``scenario_start`` before
+        any early exit because the TUI resume scan orders a PR's runs by it;
+        this PR's sync sits before the planner build, so the assignment must
+        stay above it."""
+        s = repos
+        _worker_push(s)  # app code imported -> route to review, no planning
+        state, seen, _pr = _run_qa(s)
+        assert "planner_reads" not in seen and "pinned" not in seen
+        assert state.scenario_start == 1
+
     def test_upstream_moves_during_planning_refuses_handoff(self, repos):
         s = repos
         moved = {}

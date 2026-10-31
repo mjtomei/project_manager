@@ -5807,6 +5807,14 @@ def _run_qa_sync(
         state.latest_output = "Planning QA scenarios..."
         _notify()
 
+        # First scenario index the planner would be given.  It does not read
+        # the workdir, and it is recorded before any early exit (a sync hold,
+        # a route to review) so a run that plans no scenarios still orders
+        # against the PR's other runs on TUI resume (qa_loop_ui._run_order).
+        # The planner prompt/command are still built after the branch sync.
+        scenario_start = _next_scenario_offset(state.pr_id, state.loop_id) + 1
+        state.scenario_start = scenario_start
+
         # If the main QA window already exists, remember which sessions
         # were watching it so we can switch them to the replacement window
         # (same pattern as the review loop's --fresh window replacement).
@@ -5873,8 +5881,6 @@ def _run_qa_sync(
 
         # Built after the branch sync so nothing the prompt reads from the
         # workdir predates it.
-        scenario_start = _next_scenario_offset(state.pr_id, state.loop_id) + 1
-        state.scenario_start = scenario_start
         planner_prompt = prompt_gen.generate_qa_planner_prompt(
             data, state.pr_id, session,
             scenario_start=scenario_start,
