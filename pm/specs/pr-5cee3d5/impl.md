@@ -1263,3 +1263,79 @@ conflicted; the merge keeps both sides:
 claim now goes through master's `claim_return_launch(..., require_status="qa")`
 — i.e. the reconciled `_launch_claimable`, so the hand-edited-state rule
 applies to the owed-REQA claim too.
+
+## Integration with master: #249 and the QA-driving work (pr-592e4bd)
+
+A later base (`master@eaf3372e`, PR #249 / pr-592e4bd) carries the QA-driving
+and return-launch ownership work: `usable_prs` filtering, `session_group`
+resolution for grouped tmux views, `TmuxCommandError`, the QA run
+start/stop/driven records, `_check_qa_launch`, `pr model` commands, the
+return-launch claim refactor (`_claim_fresh`), the transcript finalization
+that skips live readers, and a large `qa_loop_ui` / `review_loop_ui` rework.
+Five files conflicted; the merge keeps both sides:
+
+- `pm_core/autostart_state.py` — both sides added an import: this PR's
+  `graph` (the hand-edited `depends_on` reader) and master's
+  `pm_core.pr_utils.usable_prs`. Both are kept.
+- `pm_core/tui/app.py` — the same shape: this PR's `graph` and master's
+  `rich.markup.escape` join the existing imports.
+- `pm_core/signoff.py` — master refactored the launch-claim freshness check
+  into `_claim_fresh(rec, hop, now)` and `_launch_claimable` now delegates to
+  it. This PR's hand-edited-state guard (a non-mapping `launch_claim` must
+  read as absent, not raise `AttributeError` out of every driver that
+  reconciles an owed return) moved *into* `_claim_fresh`
+  (`claim = _mapping(rec.get("launch_claim"))`), so the guard now covers
+  `return_launch_claimed` and every other caller as well. The older inline
+  duplicate is gone.
+- `pm_core/tui/qa_loop_ui.py` — `_record_qa_note`'s `apply()` conflicted:
+  master added a de-duplication check (a TUI restart re-processes a
+  completion whose snapshot was kept for a pending follow-up; the run is
+  identified by its workdir suffix) and this PR added the hand-edited-state
+  guard (`notes` that is not a list, a member that is not a mapping, an id
+  that is not a string). Both are kept: the guard normalizes `notes` and
+  `existing_ids` first, and the run match goes through `_this_run_note`,
+  which also refuses a member whose `text` is not a string (master's
+  `(n.get("text") or "").startswith(...)` raised on an int).
+- `pm/project.yaml` — see below.
+
+Everything else auto-merged and both sides' guards are present in the merged
+`pr_auto_sequence`: master's `run_driven_elsewhere` / `_qa_run_driven` /
+`_qa_run_starting` / `_qa_run_owned_elsewhere` / `review_loop_owns_launch`
+waits sit beside this PR's `effective_verdict` / `approval_justification_problem`
+coercion, and the sign-off REQA hop still claims through
+`claim_return_launch(..., require_status="qa")` — i.e. the reconciled
+`_launch_claimable`/`_claim_fresh`, so the hand-edited-state rule applies to
+the owed-REQA claim too. `pm_core/merge_integrity.py` was not touched by this
+base, so this PR's ported guards there are unchanged.
+
+`pm/project.yaml` was reconciled with this PR's own resolver, and the
+resolver **refused** the document as-is: `prs: both sides reordered records
+differently` (25 records moved on this branch, 32 on the base, relative to
+`4a74d880` — the order of `prs` in this repository's own registry has drifted
+on both sides through earlier merges). That is the documented policy
+("ordering changes are preserved when only one side reordered; conflicting
+reorders are a conflict") and it stays: the resolver will not invent an
+order. The merge was therefore reconciled by *content* with the same
+resolver after normalizing each side's `prs` order to `base order for shared
+records, then that side's own additions`, which is exactly the order the
+resolver produces when the reorder check passes:
+
+- 580 PR records (524 on this branch, 571 on the base, 515 shared) and 22
+  plans; no id from either side is missing, no duplicate id;
+- the base's `project.active_pr` wins (the documented UI-cursor rule) and
+  every other `project` field is identical to the base's;
+- `pr-5cee3d5` keeps this branch's status and its 114 notes;
+- an independent preservation check (every field where only one side differs
+  from the merge base must carry that side's value in the result) reports
+  zero lost changes across `prs`, `plans` and the top-level keys.
+
+Validation: the full suite passes on the merged tree — 5494 passed, 1
+skipped, 0 failed (with the `markdown` package installed; without it the 12
+tests in `tests/test_markdown_render.py` fail on the missing module, an
+environment gap rather than this merge).
+
+The QA-driving / return-launch surfaces are exactly the ones this
+reconciliation touched, so the merged tree needs a fresh review and targeted
+QA of the owed-REQA deferral and launch-ownership paths (the newest QA spec
+section, R17, covers them) before any earlier QA PASS can be reused; the
+merge itself changes no other behaviour of this PR.

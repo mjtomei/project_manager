@@ -44036,7 +44036,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-31T18:07:25.345765+00:00'
+  updated_at: '2026-10-31T18:30:32.069703+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -46598,6 +46598,32 @@ prs:
       wait_for_merge; no PR merge is authorized by this request.'
     created_at: '2026-10-31T18:07:25.345765+00:00'
     last_edited: '2026-10-31T18:07:25.345765+00:00'
+  - id: note-a7d6b75
+    text: 'impl 2026-10-31: merged origin/master@eaf3372e (#249, pr-592e4bd) INTO
+      the PR branch as eb634efa. Conflicts: pm/project.yaml, pm_core/autostart_state.py,
+      pm_core/signoff.py, pm_core/tui/app.py, pm_core/tui/qa_loop_ui.py. (1) autostart_state/app.py:
+      union of imports (this PR''s graph + master''s usable_prs / rich.markup.escape).
+      (2) signoff.py: master moved claim freshness into _claim_fresh(); this PR''s
+      hand-edited-state guard (a non-mapping launch_claim reads as absent) moved INTO
+      _claim_fresh, so it now covers return_launch_claimed too; the older inline duplicate
+      is gone. (3) qa_loop_ui.py _record_qa_note: kept master''s restart de-duplication
+      (match the run by its workdir suffix) and this PR''s hand-edited-state guard;
+      the run match goes through _this_run_note so a non-string text cannot raise.
+      (4) project.yaml: this PR''s resolver REFUSED the document as-is (''prs: both
+      sides reordered records differently'' — the registry order has drifted on both
+      sides; that is its documented policy), so content was merged with the same resolver
+      after normalizing each side''s prs order to base-order-for-shared + that side''s
+      additions: 580 PR records (524 ours / 571 theirs / 515 shared), 22 plans, no
+      id lost from either side, no duplicates, base active_pr wins, every other project
+      field equals the base''s, pr-5cee3d5 keeps its status and 114 notes, and an
+      independent preservation check reports zero lost changes. pm_core/merge_integrity.py
+      was not touched by this base. Validation: full suite 5494 passed, 1 skipped,
+      0 failed (markdown installed; without it the 12 tests/test_markdown_render.py
+      tests fail on the missing module). The owed-REQA / return-launch paths are exactly
+      what this merge touched, so they need a fresh review and targeted QA (qa.md
+      R17) before any earlier PASS is reused.'
+    created_at: '2026-10-31T18:30:31Z'
+    last_edited: '2026-10-31T18:30:31Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
