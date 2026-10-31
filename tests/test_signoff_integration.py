@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 from unittest.mock import MagicMock, patch
 
+import os
 import pytest
 from click.testing import CliRunner
 
@@ -414,6 +417,203 @@ def test_cli_qa_status_older_than_an_impl_return_does_not_advance(tmp_path):
     qa.assert_called_once()
 
 
+def _qa_run_record(home, started_at, **extra):
+    import json
+    qa_wd = home / ".pm" / "workdirs" / "qa" / f"{PR}-{int(started_at)}"
+    qa_wd.mkdir(parents=True)
+    (qa_wd / "qa_run.json").write_text(json.dumps(
+        {"pr_id": PR, "loop_id": "x", "started_at": started_at, **extra}))
+
+
+@pytest.mark.parametrize("run_after_return, window, record, launched", [
+    (True, "@7", {}, False), (True, "@7", {"session_tag": "test"}, False),
+    (False, "@7", {}, True), (True, None, {}, True),
+    (True, "@7", {"session_tag": "other-clone"}, True),
+    (True, "@7", {"pr_id": f"{PR}x"}, True)])
+def test_cli_qa_return_whose_rerun_started_is_left_to_it(
+        tmp_path, monkeypatch, run_after_return, window, record, launched):
+    """S87: the TUI started the REQA re-run while project.yaml was busy and
+    its clear of ``awaiting`` is still pending.  A tick that got the lock at
+    the release must not launch a second QA driver over that run; a qa
+    window from a run that started before the return (the judged run) is
+    still relaunched over, and so is a newer run record without a window
+    (that run ended or died before opening one), or one another clone (or
+    another PR) launched: nothing in this clone drives the re-run."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    ts = "2026-10-27T04:07:14+00:00"
+    start = signoff.parse_ts(ts).timestamp() + (15 if run_after_return
+                                                 else -120)
+    _qa_run_record(tmp_path / "home", start, **record)
+    claim = MagicMock(return_value=True)
+    result, _, _, qa = _seq(
+        tmp_path, _returned("qa", "qa", ts=ts),
+        **{"pm_core.cli.pr._qa_status_for": {"return_value": (None, None)},
+           "pm_core.cli.pr.tmux_mod.find_window_by_name":
+               {"return_value": window},
+           "pm_core.qa_loop.get_pm_session": {"return_value": "pm-test"},
+           "pm_core.cli.pr._check_qa_launch": {"return_value": None},
+           "pm_core.signoff.claim_return_launch": {"new": claim}})
+    assert result.exit_code == 0, result.output
+    if launched:
+        assert result.output.strip() == "running: qa (launched)"
+        qa.assert_called_once()
+    else:
+        assert result.output.strip() == "running: qa"
+        qa.assert_not_called()
+        claim.assert_not_called()
+
+
+@pytest.mark.parametrize("awaiting, run_age, after_return, record, launched", [
+    (None, 3, True, {}, False), ("qa", 3, True, {}, False),
+    (None, 3, False, {}, True), ("qa", 3, False, {}, True),
+    (None, 400, True, {}, True), ("qa", 400, True, {}, True),
+    (None, 3, True, {"session_tag": "other-clone"}, True)])
+def test_cli_qa_return_whose_rerun_is_still_starting_is_left_to_it(
+        tmp_path, monkeypatch, awaiting, run_age, after_return, record,
+        launched):
+    """S91: the TUI's REQA hop started the re-run (no launch claim) and, with
+    the lock free, cleared ``awaiting`` at once; for seconds its run kills
+    the judged run's windows and plans before its own qa window exists.  A
+    tick in that gap must not launch qa-run-bg (two ticks 2 s apart each
+    did).  A run record from before the return, older than a claim's
+    expiry, or another clone's still leaves the tick to launch."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    now = time.time()
+    start = now - run_age
+    ret = start + (-1 if after_return else 1)
+    ts = datetime.fromtimestamp(ret, timezone.utc).isoformat()
+    _qa_run_record(tmp_path / "home", start, **record)
+    claim = MagicMock(return_value=True)
+    entry = _returned("qa", "qa", ts=ts)
+    entry["signoff_return"]["awaiting"] = awaiting
+    result, _, _, qa = _seq(
+        tmp_path, entry,
+        **{"pm_core.cli.pr._qa_status_for": {"return_value": (None, None)},
+           "pm_core.cli.pr.tmux_mod.find_window_by_name":
+               {"return_value": None},
+           "pm_core.qa_loop.get_pm_session": {"return_value": "pm-test"},
+           "pm_core.cli.pr._check_qa_launch": {"return_value": None},
+           "pm_core.signoff.claim_return_launch": {"new": claim}})
+    assert result.exit_code == 0, result.output
+    if launched:
+        assert result.output.strip() == "running: qa (launched)"
+        qa.assert_called_once()
+    else:
+        assert result.output.strip() == "running: qa"
+        qa.assert_not_called()
+        claim.assert_not_called()
+
+
+@pytest.mark.parametrize("owner_alive, launched", [(True, False),
+                                                    (False, True)])
+def test_cli_qa_return_waits_for_a_run_driven_from_before_it(
+        tmp_path, monkeypatch, owner_alive, launched):
+    """S120: the user's ``pm qa run`` started before sign-off's REQA return
+    and its process still drives it.  A tick must not launch the re-run
+    over it (qa-run-bg kills its windows as stale and runs a second loop
+    beside it); once that process is gone the tick launches."""
+    import json
+    from pm_core import qa_loop
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    ret = time.time() - 60
+    ts = datetime.fromtimestamp(ret, timezone.utc).isoformat()
+    _qa_run_record(tmp_path / "home", ret - 65, loop_id=f"cli-{PR}")
+    qa_wd = (tmp_path / "home" / ".pm" / "workdirs" / "qa"
+             / f"{PR}-{int(ret - 65)}")
+    owner = os.getppid() if owner_alive else 2 ** 22 + 12345
+    (qa_wd / "qa_resume.json").write_text(json.dumps(
+        {"pr_id": PR, "loop_id": f"cli-{PR}", "owner_pid": owner,
+         "owner_start": qa_loop._proc_start_time(owner)}))
+    claim = MagicMock(return_value=True)
+    result, _, _, qa = _seq(
+        tmp_path, _returned("qa", "qa", ts=ts),
+        **{"pm_core.cli.pr._qa_status_for": {"return_value": (None, None)},
+           "pm_core.cli.pr.tmux_mod.find_window_by_name":
+               {"return_value": {"id": "@7", "index": "3"}},
+           "pm_core.qa_loop.get_pm_session": {"return_value": "pm-test"},
+           "pm_core.cli.pr._check_qa_launch": {"return_value": None},
+           "pm_core.signoff.claim_return_launch": {"new": claim}})
+    assert result.exit_code == 0, result.output
+    if launched:
+        assert result.output.strip() == "running: qa (launched)"
+        qa.assert_called_once()
+    else:
+        assert result.output.strip() == "running: qa"
+        qa.assert_not_called()
+        claim.assert_not_called()
+
+
+def test_cli_instruction_run_pass_after_the_return_is_not_the_rerun(
+        tmp_path, monkeypatch):
+    """S120: a ``pm qa run`` of one instruction that ends PASS after the
+    REQA return is the newest qa_status.json, but not the PR's QA: the tick
+    launches the full re-run instead of advancing to sign-off on it."""
+    import json
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    ret = time.time() - 60
+    ts = datetime.fromtimestamp(ret, timezone.utc).isoformat()
+    qa_root = tmp_path / "home" / ".pm" / "workdirs" / "qa"
+    for name, mtime in ((f"{PR}-judged", ret - 300),
+                        (f"{PR}-cli-{PR}", ret + 30)):
+        (qa_root / name).mkdir(parents=True)
+        st = qa_root / name / "qa_status.json"
+        st.write_text(json.dumps({"pr_id": PR, "overall": "PASS"}))
+        os.utime(st, (mtime, mtime))
+    claim = MagicMock(return_value=True)
+    result, _, _, qa = _seq(
+        tmp_path, _returned("qa", "qa", ts=ts),
+        **{"pm_core.paths.pm_home": {"return_value": tmp_path / "home" / ".pm"},
+           "pm_core.cli.pr.tmux_mod.find_window_by_name":
+               {"return_value": None},
+           "pm_core.qa_loop.get_pm_session": {"return_value": "pm-test"},
+           "pm_core.cli.pr._check_qa_launch": {"return_value": None},
+           "pm_core.signoff.claim_return_launch": {"new": claim}})
+    assert result.exit_code == 0, result.output
+    assert "advanced: sign_off" not in result.output
+    assert result.output.strip() == "running: qa (launched)"
+    qa.assert_called_once()
+
+
+@pytest.mark.parametrize("awaiting", ["qa", None])
+@pytest.mark.parametrize("owner_alive, launched", [(True, False),
+                                                    (False, True)])
+def test_cli_qa_run_whose_window_was_closed_is_left_to_its_driver(
+        tmp_path, monkeypatch, awaiting, owner_alive, launched):
+    """S89: the user closed the re-run's qa window while its TUI driver was
+    still running.  A tick must not start a second driver while the run's
+    snapshot owner lives (awaiting still pending, or already cleared), and
+    still relaunches once that driver is gone."""
+    import json
+    from pm_core import qa_loop
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    # Older than a launch claim's expiry: only the live owner counts.
+    ret = time.time() - 600
+    ts = datetime.fromtimestamp(ret, timezone.utc).isoformat()
+    start = ret + 22
+    _qa_run_record(tmp_path / "home", start)
+    qa_wd = tmp_path / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-{int(start)}"
+    owner = os.getppid() if owner_alive else 2 ** 22 + 12345
+    (qa_wd / "qa_resume.json").write_text(json.dumps(
+        {"pr_id": PR, "loop_id": "x", "owner_pid": owner,
+         "owner_start": qa_loop._proc_start_time(owner)}))
+    result, _, _, qa = _seq(
+        tmp_path, _returned("qa", "qa", ts=ts, awaiting=awaiting),
+        **{"pm_core.cli.pr._qa_status_for": {"return_value": (None, None)},
+           "pm_core.cli.pr.tmux_mod.find_window_by_name":
+               {"return_value": None},
+           "pm_core.qa_loop.get_pm_session": {"return_value": "pm-test"},
+           "pm_core.cli.pr._check_qa_launch": {"return_value": None},
+           "pm_core.signoff.claim_return_launch":
+               {"new": MagicMock(return_value=True)}})
+    assert result.exit_code == 0, result.output
+    if launched:
+        assert result.output.strip() == "running: qa (launched)"
+        qa.assert_called_once()
+    else:
+        assert result.output.strip() == "running: qa"
+        qa.assert_not_called()
+
+
 def _review_transcripts(tmp_path, *iters):
     tdir = tmp_path / "transcripts" / "auto-sequence" / PR
     tdir.mkdir(parents=True)
@@ -437,6 +637,20 @@ def test_cli_impl_rework_review_continues_iteration_numbering(tmp_path):
     # The open window reviewed the pre-return code: replace, don't adopt.
     assert kwargs["fresh"] is True
 
+
+def test_cli_impl_rework_review_replaces_window_of_tui_reviews(tmp_path):
+    """QA S77: the TUI ran the earlier reviews (its own transcript dir), so
+    this tick's dir has no iteration.  The rework's review still must not
+    adopt the pre-return review window: the tick switched to it, whose
+    verdict predates the return, and the PR sat in_review with no review."""
+    result, _, review, _ = _seq(
+        tmp_path, _returned("in_progress", "impl", awaiting=None),
+        **{"pm_core.cli.pr._check_impl_idle": {"return_value": (True, False)}})
+    assert result.exit_code == 0, result.output
+    assert "advanced: in_review" in result.output
+    kwargs = review.call_args.kwargs
+    assert kwargs["review_iteration"] == 1
+    assert kwargs["fresh"] is True
 
 def test_cli_first_review_advance_keeps_existing_window(tmp_path):
     result, _, review, _ = _seq(
@@ -526,6 +740,7 @@ def test_tui_qa_pass_not_handed_to_signoff_while_reqa_awaits(tmp_path):
     p = _returned("qa", "qa")
     p["depends_on"] = []
     app = FakeApp([p], root=tmp_path)
+    store.save({"project": app._data["project"], "prs": [p]}, tmp_path)
     app._auto_start = True
     app._auto_start_targets = {PR: st.make_target_record("t")}
     app._auto_start_run_id = "run"
@@ -792,6 +1007,102 @@ def test_claim_return_launch_has_one_winner_until_cleared(tmp_path):
     assert signoff.claim_return_launch(tmp_path, PR, "review") is False
 
 
+@pytest.mark.parametrize("status,hop", [("in_review", "review"),
+                                        ("in_progress", "impl")])
+def test_clear_waits_out_a_lock_holder_past_its_timeout(tmp_path, status, hop):
+    """QA S77: project.yaml's lock was held past the 2 s timeout as the
+    relaunched session opened.  The clear gave up with a warning, so
+    ``awaiting`` and the hop's claim outlived that session, and the first
+    tick after the claim expired launched a second --fresh session."""
+    now = datetime.now(timezone.utc).isoformat()
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master", "backend": "local"},
+                "prs": [_returned(status, hop,
+                                  launch_claim={"hop": hop, "at": now})]},
+               tmp_path)
+    held = threading.Event()
+
+    def hold(seconds):
+        with store._lock(tmp_path):
+            held.set()
+            time.sleep(seconds)
+
+    # A caller that must not wait still gets False at once (it retries).
+    t = threading.Thread(target=hold, args=(0.3,))
+    t.start()
+    held.wait()
+    t0 = time.monotonic()
+    assert signoff.clear_return_awaiting(
+        tmp_path, PR, hop, timeout=store.NO_WAIT) is False
+    assert time.monotonic() - t0 < 0.25
+    t.join()
+    assert signoff.return_awaiting(store.get_pr(store.load(tmp_path), PR)) == hop
+
+    # A caller whose session did not open (the TUI's start_qa, on its main
+    # thread) still gives up after its timeout, leaving ``awaiting`` set.
+    held.clear()
+    t = threading.Thread(target=hold, args=(0.6,))
+    t.start()
+    held.wait()
+    t0 = time.monotonic()
+    assert signoff.clear_return_awaiting(tmp_path, PR, hop, timeout=0.2) is None
+    assert time.monotonic() - t0 < 0.5
+    t.join()
+    assert signoff.return_awaiting(store.get_pr(store.load(tmp_path), PR)) == hop
+
+    held.clear()
+    t = threading.Thread(target=hold, args=(0.6,))
+    t.start()
+    held.wait()
+    assert signoff.clear_return_awaiting(tmp_path, PR, hop, timeout=0.2,
+                                         session_opened=True) is True
+    t.join()
+    ret = store.get_pr(store.load(tmp_path), PR)["signoff_return"]
+    assert ret["awaiting"] is None and "launch_claim" not in ret
+    assert signoff.claim_return_launch(tmp_path, PR, hop) is False
+
+def test_qa_launch_claim_outlives_awaiting(tmp_path):
+    """QA S68: the qa driver clears ``awaiting`` before it replaces the
+    judged run's qa window, so its claim must still say a run is starting
+    (a tick in that gap launched a second driver)."""
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master", "backend": "local"},
+                "prs": [_returned("qa", "qa")]}, tmp_path)
+    assert signoff.claim_return_launch(tmp_path, PR, "qa") is True
+    signoff.clear_return_awaiting(tmp_path, PR, "qa")
+    p = store.get_pr(store.load(tmp_path), PR)
+    assert p["signoff_return"]["awaiting"] is None
+    assert signoff.return_launch_claimed(p, "qa") is True
+    assert signoff.return_launch_claimed(p, "review") is False
+    assert signoff.claim_return_launch(tmp_path, PR, "qa") is False
+    p["signoff_return"]["launch_claim"]["at"] = "2000-01-01T00:00:00+00:00"
+    assert signoff.return_launch_claimed(p, "qa") is False
+
+
+def test_claim_waiting_on_the_lock_sees_a_claim_written_meanwhile(
+        tmp_path, monkeypatch):
+    """QA S71: the hop tick and a qa tick both waited on project.yaml's lock
+    (an editor saving it).  The qa tick got it first and claimed; the hop
+    tick, which had read the clock before waiting, saw that claim as from
+    the future, took it over and launched a second driver."""
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master", "backend": "local"},
+                "prs": [_returned("qa", "qa")]}, tmp_path)
+    real = store.locked_update
+    other = []
+
+    def other_tick_first(root, fn, *a, **kw):
+        if not other:
+            other.append(None)
+            time.sleep(0.01)
+            other.append(signoff.claim_return_launch(root, PR, "qa"))
+        return real(root, fn, *a, **kw)
+
+    monkeypatch.setattr(store, "locked_update", other_tick_first)
+    assert signoff.claim_return_launch(tmp_path, PR, "qa") is False
+    assert other == [None, True]
+
+
 def test_claim_return_launch_expires(tmp_path):
     p = _returned("in_review", "review",
                   launch_claim={"hop": "review",
@@ -925,6 +1236,46 @@ def test_tui_review_catch_up_takes_the_return_launch_claim(tmp_path, claimed):
     if not claimed:
         rec = store.get_pr(store.load(tmp_path), PR)["signoff_return"]
         assert rec["launch_claim"]["hop"] == "review"
+
+
+@pytest.mark.parametrize("case", ["finished", "running", "unannounced",
+                                  "handoff_pending"])
+def test_tui_review_return_written_behind_a_finished_loop_starts_it(
+        tmp_path, case):
+    """S83 story 3 E: the PR's review loop had finished (PASS) before QA and
+    sign-off; `pm edit` then made the return a REVIEW one (in_review,
+    ``awaiting: review``).  Every auto-start pass skipped the PR on its
+    finished loop, so the return waited for good.  A finished loop gives
+    way to a waiting return; a running one is never replaced, nor one whose
+    PASS the poll tick has not yet announced and handed to QA (a pending
+    hand-off would move the PR to qa under the new review)."""
+    from pm_core.tui import review_loop_ui
+    from pm_core import autostart_state as st
+    from pm_core.review_loop import ReviewLoopState
+    from pm_core.tui import auto_start
+    from tests.test_autostart_multi_target import FakeApp
+    p = _returned("in_review", "review")
+    p["depends_on"] = []
+    p["workdir"] = str(tmp_path)
+    app = FakeApp([p], root=tmp_path)
+    app._auto_start = True
+    app._auto_start_targets = {PR: st.make_target_record("t")}
+    app._auto_start_run_id = "run"
+    old = ReviewLoopState(pr_id=PR)
+    old.running = case == "running"
+    old.latest_verdict = "" if old.running else "PASS"
+    old._ui_notified_done = case in ("finished", "handoff_pending")
+    if case == "handoff_pending":
+        review_loop_ui._pending_auto_qa(app)[PR] = (
+            "transition", store.LOCK_BUSY_REASON)
+    app._review_loops[PR] = old
+    store.save(app._data, tmp_path)
+    with patch("pm_core.tui.review_loop_ui._start_loop") as start, \
+         patch.object(auto_start, "get_transcript_dir", return_value=tmp_path):
+        auto_start._auto_start_review_loops(app, [p])
+    replaced = case == "finished"
+    assert start.called is replaced
+    assert (app._review_loops.get(PR) is old) is not replaced
 
 
 def test_worktree_candidate_ignores_rerere_resolutions(w):
