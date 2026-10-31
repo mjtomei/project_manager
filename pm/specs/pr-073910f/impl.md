@@ -1381,3 +1381,64 @@ scratch dir (private server, session env, global env and hooks correct;
 default server untouched).  No live session, server or shared host
 configuration was touched; every new test is unit-level and binds no tmux
 server.
+
+## Master integration (2026-10-31, origin/master eaf3372e / #249)
+
+The PR conflicted with master (GitHub reported the conflict once #249
+merged).  `origin/master` @ `eaf3372e` (merge base `4a74d880`, 544 commits,
+113 files) was merged into this branch.  Three files conflicted:
+
+1. **`pm/project.yaml`** — resolved with pm's own `store.merge_3way` over
+   the index stages, master as *ours* and the branch as *theirs* (theirs
+   wins true conflicts, so the branch's PR entry and notes win where both
+   changed while master's newer state wins everywhere the branch left it
+   alone).  Validated with `store.load(validate=True)` plus an id/notes
+   superset check: every PR/plan id from either side appears exactly once
+   and all of `pr-073910f`'s notes are present.
+2. **`pm_core/tmux.py`** — both sides added different helpers at the same
+   two spots.  Kept both: master's `TmuxCommandError` and `session_group`
+   (the S118/S121/S124 group resolution) alongside the branch's
+   `socket_path_from_tmux_env` / `resolve_ambient_socket` /
+   `export_ambient_socket`, `server_alive`,
+   `find_session_server` / `find_exact_session_server` and the
+   `use_env=False` default-server addressing (R4.3).
+3. **`pm_core/cli/helpers.py`** — semantic reconciliation:
+   - `_get_current_pm_session()` keeps the branch's `OSError` degrade
+     (tmux missing while `$TMUX` is set → "not inside a pm session") but
+     resolves the session through master's
+     `pane_registry.pm_session_name()` instead of a local `~` strip, so a
+     user's own grouped view under any name (S118/S121/S124) still
+     resolves to its pm session.
+   - `_get_pm_session()` keeps master's `-C`/`PM_PROJECT` project override
+     **and** the branch's hosting-server selection on both paths: the
+     override-derived session also gets `_select_session_socket()`,
+     because a command run outside tmux must address the private server
+     or it concludes a live session is gone (R3.6).
+
+Also reconciled: master's new
+`tests/test_cli_helpers.py::TestPmSessionOutsidePmTmux` stubbed
+`session_exists` without `use_env`, while `find_session_server()` probes
+the default server with `session_exists(target, use_env=False)`; the
+merged tree raised `TypeError` instead of resolving the session.  The stub
+now accepts `use_env`.
+
+No other semantic conflict surfaced.  Master's `pm_session_name` rollouts
+in `session.py` (hooks, popups, pickers) and in
+`tmux.current_or_base_session` are independent of the socket-isolation
+code, and the branch's `_find_tui_pane` rewrite replaced master's older
+version in full (master did not touch that function).
+
+Validation on the integrated head (`21ab6ddc`):
+- full suite **5325 passed / 1 skipped / 0 failed / 0 errors** (437 s;
+  scratch `pytest<9` + `markdown`, `PATH` without the push-proxy `git`,
+  `TMUX`/`TMUX_PANE`/`PM_*`/`PM_HOST_HOME` cleared); log at
+  `/pm-captures/pr-073910f-integration-eaf3372e/full-suite.log`;
+- `pm/specs/pr-073910f/session_start_smoke.py` re-run end to end on a
+  disposable socket with `TMUX_TMPDIR` on a scratch dir: private server
+  created, `PM_TMUX_SOCKET` in the session env, the global env and the
+  hooks, default server untouched;
+- `pm session list` in this container (read-only): "No pm sessions
+  found.", no socket directory created.
+
+Every earlier QA PASS result predates this merge and is **stale**; this PR
+needs a fresh review/QA/sign-off sequence.
