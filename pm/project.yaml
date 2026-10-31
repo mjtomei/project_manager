@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-31T21:18:54.052461+00:00'
+  updated_at: '2026-10-31T21:40:40.053840+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5423,6 +5423,39 @@ prs:
       notes unchanged and non-blocking (impl.md i3 section).'
     created_at: '2026-10-31T21:18:53Z'
     last_edited: '2026-10-31T21:18:53Z'
+  - id: note-bf5039d
+    text: 'Review loop 703c i5 (commit bce01f9d; no requirement changes; full suite
+      5334 passed / 1 skipped). Verification pass over the integrated head; one misleading
+      API contract, two stale docs, one pre-existing README error. (1) _select_session_socket()
+      returned None for a session that lives on the *default* server even though it
+      had just selected that server (it points PM_TMUX_SOCKET at the default socket
+      explicit path). A future caller reading the return value as "session not found"
+      would be wrong exactly for legacy sessions — the case this PR is most careful
+      about. It now returns the socket in effect (private path, or the default server
+      path) and None only when nothing was found and the ambient setting was left
+      untouched; no caller used the value, so behaviour is unchanged. Tests: TestSelectSessionSocketReturnValue
+      (private / legacy / not-found-and-ambient-preserved; the legacy case fails with
+      the old return). (2) _register_tmux_bindings() docstring still said bindings
+      "survive across sessions (tmux bindings are global)"; with per-session servers
+      they are per server and a fresh server starts empty, so the call on create *and*
+      reattach is now required rather than an optimisation. (3) impl.md R3.2 still
+      said `pm session kill` "unlinks the socket file" unconditionally (i8 gated it
+      on server_alive()), and both find_exact_session_server() and session_kill refer
+      to a requirement "R8" that existed only in qa.md; R8 (exact match + concurrent-start
+      convergence) is now recorded in impl.md and R3.2 points at server_alive(). (4)
+      Incidental, pre-existing: the README shared-session join example `pm session
+      --dir <owner repo>` omits the flag the command requires ("--dir requires --global
+      or --group"); fixed to `pm session --global --dir ...   # repeat the owner flag`.
+      Validation: full suite 5334 passed / 1 skipped (scratch pytest<9 + markdown,
+      PATH without the push-proxy git, TMUX/TMUX_PANE/PM_*/PM_HOST_HOME cleared);
+      pm/specs/pr-073910f/session_start_smoke.py re-run end to end on a disposable
+      socket (private server, session env, global env and hooks correct; default server
+      untouched); pm session list re-checked read-only in this container. No live
+      session, server or shared host configuration was touched; the new tests are
+      unit-level and bind no tmux server. Residual notes unchanged and non-blocking
+      (impl.md i3 section).'
+    created_at: '2026-10-31T21:40:39Z'
+    last_edited: '2026-10-31T21:40:39Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
