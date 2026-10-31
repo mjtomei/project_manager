@@ -21,10 +21,11 @@ provider, account or effort**.
   `CONTAINER_SESSION_TYPES = ("impl", "review", "signoff") +
   ROUTED_SESSION_TYPES` is the full set that runs in a pm container in
   container mode.
-- Routing eligibility is not gated by either constant: any session type
-  may select `provider:<name>` through `PM_MODEL`, a PR override, project
-  `model_config`, or a global setting
-  (`pm_core/model_config.py:resolve_model_and_provider`).
+- Routing eligibility is not gated by either constant: any role in
+  `model_config.SESSION_TYPES` may select `provider:<name>` through
+  `PM_MODEL`, a PR override, project `model_config`, or a global setting
+  (`pm_core/model_config.py:resolve_model_and_provider`).  (Non-loop
+  interactive sessions such as `guide`/`plan` are not model-targetable.)
 - Call sites of the module: `pm_core/model_settings.py`,
   `pm_core/providers.py`, `pm_core/claude_launcher.py`,
   `pm_core/container.py`, `pm_core/tui/model_screen.py`,
@@ -61,9 +62,10 @@ that run in scenario containers).  Keep `CONTAINER_SESSION_TYPES` as the
 union of `("impl", "review", "signoff")` and the scenario types.
 
 Document explicitly, on both constants, that they describe **container
-placement**, not routing eligibility: any session type may be routed, and
-these constants only decide which launches reach a route through the
-container bridge and which scenario containers need the bridge mount.
+placement**, not routing eligibility: any role in the model-config set
+may be routed, and these constants only decide which launches reach a
+route through the container bridge and which scenario containers need
+the bridge mount.
 
 Update every use (`pm_core/qa_loop.py` `_require_scenario_setup`,
 `_route_mounts`, `check_qa_providers`; `pm_core/model_settings.py`;
@@ -139,8 +141,8 @@ container launches, and the no-configuration default (plain Claude).
 - **A1 — `pm model show` section label.**  The current label is already
   `Routes:`; the "worker routes" text is a code comment.  Resolution:
   change the comment and make the header explicitly role-neutral:
-  `Routes (roles set to a provider):`.  Update the ten tests that split on
-  the old header.  No content change.
+  `Routes (roles set to a provider):`.  Update the eight tests that split
+  on the old header.  No content change.
 - **A2 — Module name.**  The task suggests `router_route`; chosen.  It
   matches `route_bridge` and describes "the route of a router provider"
   without naming a role.
@@ -193,8 +195,12 @@ container launches, and the no-configuration default (plain Claude).
 - `pytest tests/test_model_settings.py` — 43 passed.
 - Full suite (`pytest -q`) — **5207 passed, 1 skipped** (pytest 8.4.2,
   `PYTHONPATH=/workspace`).
-- `grep -rn 'worker_route|ROUTED_SESSION_TYPES'` — only historical records
-  (`pm/project.yaml` notes, `pm/specs/pr-592e4bd/*`); no code or test.
+- Review-loop b287 i3 re-verified after documentation-only edits: targeted
+  three files **386 passed**; full suite **5207 passed, 1 skipped**.
+  Evidence: `/pm-captures/review-b287-i3/`.
+- `grep -rnE 'worker_route|ROUTED_SESSION_TYPES'` — only historical records
+  (`pm/project.yaml` notes, `pm/specs/pr-592e4bd/*`, and this spec's
+  pre-change description); no code or test.
 - New regressions: `TestPlacement` (constant identity, routing not
   restricted, only scenario roles checked/mounted) and the Scenario-0
   legacy tests in `tests/test_model_config.py` (project/global plain-model

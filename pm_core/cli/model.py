@@ -89,7 +89,7 @@ def model_show():
             click.echo(line)
 
     # Router providers: where each explicitly routed role actually goes.
-    # Any session type may be routed; the setting is explicit per role.
+    # Any role may be routed; the setting is explicit per role.
     from pm_core import router_route
     from pm_core.container import is_container_mode_enabled
     from pm_core.model_config import PR_SESSION_TYPES, get_pr_model_override

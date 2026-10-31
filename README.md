@@ -177,8 +177,8 @@ merge, watcher) runs Claude Code with a model and effort chosen per role:
 Effort follows the same order, with the selected provider's own `effort`
 between the PR's setting and the project's.
 
-The choice is explicit and per role: any session type may be routed to a
-provider. A role with no setting of its own falls back to its parent
+The choice is explicit and per role: any of those roles may be routed to
+a provider. A role with no setting of its own falls back to its parent
 (the QA sub-roles follow `qa`, `signoff` follows `review`), and with
 nothing configured at all the session runs plain `claude` on the CLI
 default. Routing one role never moves an unrelated role.

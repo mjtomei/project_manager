@@ -2,11 +2,11 @@
 endpoint that holds its own upstream credentials).
 
 A *route* is a ``type: router`` provider in ``~/.pm/providers.yaml`` (see
-pm_core.providers).  It is selected like any model, per role: every
-session type pm launches may be routed, and the setting is explicit --
-a role with no setting of its own follows its parent role, and with
-nothing configured at all runs plain ``claude`` on the CLI default.  For
-example
+pm_core.providers).  It is selected like any model, per role: every role
+in ``model_config.SESSION_TYPES`` may be routed, and the setting is
+explicit -- a role with no setting of its own follows its parent role,
+and with nothing configured at all runs plain ``claude`` on the CLI
+default.  For example
 
     pm model set impl provider:<name> --project
     pm model set signoff provider:<name> --project
@@ -19,7 +19,7 @@ provider's ``api_base`` and model names to Claude -- never a token.
 This module owns everything route-specific outside the launch command:
 
   * :func:`describe` -- the ``route=... model=... via=...`` line shown in
-    QA and session logs and status so the selection is visible without
+    session logs and status so the selection is visible without
     credentials;
   * :func:`setup_problem` -- the provider settings a launch cannot work
     without.  :func:`launch_parts` raises :class:`RouteSetupError` for them,
@@ -64,7 +64,8 @@ _log = configure_logger("pm.router_route")
 # The QA session types that run in scenario containers (refiner, worker):
 # a scenario container mounts the bridge for whichever of them is routed.
 # Placement only -- routing eligibility is not limited to these types: any
-# session type may select a provider, on the host or through the bridge.
+# role in the model-config set may select a provider, on the host or
+# through the bridge.
 SCENARIO_CONTAINER_TYPES = ("qa_concretize", "qa_scenario")
 # Session types that run inside a pm container in container mode, so a
 # route reaches them through the container bridge: impl, review and

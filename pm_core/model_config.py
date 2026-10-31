@@ -32,9 +32,10 @@ For external/local model servers, configure a provider via ``pm provider``
             review: opus               # use a model name shortcut
 
 Values prefixed with ``provider:`` are resolved via the provider system
-and return a provider name instead of a model identifier.  Any session
-type may be routed; the setting is explicit per role, and a role with no
-model or provider configured runs plain Claude on the CLI default.
+and return a provider name instead of a model identifier.  Any role in
+``SESSION_TYPES`` may be routed; the setting is explicit per role, and a
+role with no model or provider configured runs plain Claude on the CLI
+default.
 
 Scenario 0 (``qa_interactive``) additionally keeps applying a pre-split
 plain-model ``qa_scenario`` setting; see
