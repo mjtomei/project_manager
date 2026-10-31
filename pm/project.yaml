@@ -38424,7 +38424,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-31T18:07:25.345765+00:00'
+  updated_at: '2026-10-31T18:28:40.511420+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -39972,6 +39972,46 @@ prs:
       by this request.'
     created_at: '2026-10-31T18:07:25.345765+00:00'
     last_edited: '2026-10-31T18:07:25.345765+00:00'
+  - id: note-75ce830
+    text: 'Integration complete (2026-10-31, user-authorized restart). Integrated
+      master SHA: eaf3372e60d1717bd97cc50b5e0b04c6df881fa1 (#249, route QA execution
+      workers through Claude) — merge-base == origin/master, so no further merge is
+      needed. Merge commit 1bddea18 on the existing branch; nothing merged into master.
+
+
+      Conflicts were limited to pm/project.yaml and pm_core/tui/auto_start.py; review_loop.py,
+      autostart_state.py and review_loop_ui.py auto-merged and were reviewed hunk
+      by hunk. (1) auto_start._finalize_all_transcripts: master generalized this PRs
+      QA-17 fix into _live_read_transcripts; master is kept and the PRs name-prefix
+      rule retained as a fallback so a running loops review-<pr>- symlinks are never
+      frozen even when _transcript_dir is unknown. tests/test_autostart_disable_transcripts.py
+      passes unchanged. (2) review_loop.py: masters last_attempt_failed / _wait_for_launching_window
+      / extended launch timeout coexist with this PRs result["transcript"] threading;
+      the adopt-wait gate, waiter, lease keepalive and finally-clears are unchanged.
+      (3) review_loop_ui.py: masters _announce_loop_done and pending-QA-handoff rework
+      replaced the inline block; this PRs resuming-before-running flag and completion
+      finalize path are intact. (4) project.yaml resolved with store.merge_3way: 573
+      PRs, no duplicates, every master entry untouched by this branch byte-identical,
+      all 58 of this PRs notes preserved.
+
+
+      Also preserved and committed the previously uncommitted QA planning spec (R14
+      long-wait lease, R15 failed-launch-is-not-a-wait, R13 resuming-before-running,
+      mandatory test isolation) and its two PR notes. The untracked verify-*-followup.md
+      files remain untracked in the workdir.
+
+
+      Validation at 1bddea18: FULL SUITE 5258 passed, 1 skipped, 0 failed (460 s;
+      markdown installed); targeted wait-state suites 98 passed; review/autostart
+      suites (test_review_launch_retry, test_breadcrumb_review_loop, test_review_loop,
+      test_tui_pidfile, test_qa_input_required, test_autostart_multi_target, test_autostart_disable_transcripts,
+      test_autostart_transcript_finalize) 536 passed. Pre-fix repro and post-fix captures
+      were not re-recorded this session (the fix is unchanged); prior QA evidence
+      is not a pass for this head. Handing off to native review; live TUI/stand-in
+      QA (including the 2026-10-29 scenarios 25-29 and the R14/R15 items) is still
+      owed for this head.'
+    created_at: '2026-10-31T18:28:40Z'
+    last_edited: '2026-10-31T18:28:40Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
