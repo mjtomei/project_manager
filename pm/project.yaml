@@ -45908,7 +45908,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/267
   gh_pr_number: 267
   created_at: '2026-10-27T19:03:40.643246+00:00'
-  updated_at: '2026-10-31T22:19:09.456750+00:00'
+  updated_at: '2026-10-31T23:21:41.358593+00:00'
   started_at: '2026-10-27T19:04:56.616056+00:00'
   reviewed_at: null
   merged_at: null
@@ -46201,6 +46201,23 @@ prs:
       no inherited TMUX; real session/shared ~/.pm untouched. Captures: /pm-captures/scenarios/22/.'
     created_at: '2026-10-31T22:19:09Z'
     last_edited: '2026-10-31T22:19:09Z'
+  - id: note-40c6a2e
+    text: 'QA S25 incidental fix @7ba4af77: the ws watcher toggle started a duplicate
+      watcher instead of stopping the running one after the first start/stop cycle.
+      WatcherManager.find_by_type returned the first registered watcher of a type,
+      and finished watchers stay registered for the verdict display, so the toggle
+      read a stale stopped instance (running=False) and started another watcher, whose
+      window creation killed the previous pane (KILLED). find_by_type now prefers
+      a running instance and falls back to the first stopped one; regression test
+      test_watcher_loop.py::TestWatcherManager::test_find_by_type_prefers_running_over_stale_stopped
+      (pre-existing on master, identical code). Scenario 25 itself passed all three
+      stories: no-targets prompt is the observation-only block, explicit T1/T2 targets
+      appear in add order with D on the managed line only and U absent, and the incident-shaped
+      saved state (targets as dict) is rejected, quarantined byte-identical, leaves
+      auto-start off, and the resumed watcher gets the no-targets prompt instead of
+      inheriting the saved target list. Captures: /pm-captures/scenarios/25/.'
+    created_at: '2026-10-31T23:21:41Z'
+    last_edited: '2026-10-31T23:21:41Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
