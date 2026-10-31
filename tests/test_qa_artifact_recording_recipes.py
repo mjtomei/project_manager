@@ -242,6 +242,22 @@ def _stub_tool(bindir, name, body="exit 1\n"):
     return path
 
 
+def _expand_tilde(path, home):
+    """Resolve a leading ``~`` the way the block's own shell does.
+
+    The recipes accept a ``~/…`` capture directory, and their shells expand
+    it. A stub receives its paths through variables, where a tilde is *not*
+    expanded (``out='~/cap/x'; cat >> "$out"`` writes to a literal ``~``
+    directory), so a case that runs a block with ``~/cap`` has to give the
+    stub and this helper's own file operations the expanded spelling while
+    the block text keeps what a worker typed.
+    """
+    s = str(path)
+    if home and (s == "~" or s.startswith("~/")):
+        return Path(str(home) + s[1:])
+    return Path(s)
+
+
 def _drive_recorder_statement(stmt, tmp_path, env_extra=None, asci_body=None):
     """Run a scaffold's recorder statement, then its pane command.
 
@@ -1257,7 +1273,7 @@ def test_failed_render_leaves_no_video(name, tmp_path):
 def _run_render(name, tmp_path, agg_body=None, ffprobe_body=None,
                 ffmpeg_body=None, with_cast=True, cast_body=None,
                 capture=None, capdir_mode=None, create_capture_dir=True,
-                mv_body=None):
+                mv_body=None, home=None):
     """Run a recipe's render block against stubbed ``agg``/``ffprobe``/``ffmpeg``.
 
     Returns ``(proc, mp4_path, gif_path)``. The stubs are the real stage
@@ -1272,15 +1288,18 @@ def _run_render(name, tmp_path, agg_body=None, ffprobe_body=None,
     ``create_capture_dir=False`` leaves the directory absent, so a case can
     model a path that is not there. ``mv_body`` stubs ``mv``, which the render
     uses only to publish the finished mp4, so a case can model a rename that
-    fails.
+    fails. ``home`` is the ``HOME`` the block runs with, and the directory a
+    ``~/…`` capture path is expanded against for this helper's own file
+    operations (the block text keeps the tilde spelling, which the block's
+    shell expands).
     """
     capture = tmp_path if capture is None else capture
     block = _render_block(name)
     cast_rel = re.search(r"^cast=(\S+)$", block, re.M).group(1)
     block = (block.replace("<capture-dir>", str(capture))
                   .replace("<short-name>", "run"))
-    cast = Path(cast_rel.replace("<capture-dir>", str(capture))
-                       .replace("<short-name>", "run"))
+    cast = _expand_tilde(Path(cast_rel.replace("<capture-dir>", str(capture))
+                                     .replace("<short-name>", "run")), home)
     if create_capture_dir:
         cast.parent.mkdir(parents=True, exist_ok=True)
         if with_cast:
@@ -1308,6 +1327,8 @@ def _run_render(name, tmp_path, agg_body=None, ffprobe_body=None,
     if mv_body is not None:
         _stub_tool(bindir, "mv", mv_body)
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}")
+    if home is not None:
+        env["HOME"] = str(home)
     if capdir_mode is not None:
         cast.parent.chmod(capdir_mode)
     try:
@@ -1448,6 +1469,31 @@ def test_render_refuses_a_relative_capture_dir(name, tmp_path):
         f"{name}: the refused render published the stale cast's video")
     assert not stale.with_name(stale.name + ".gif").exists(), (
         f"{name}: the refused render ran the renderer")
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_render_accepts_a_tilde_capture_dir(name, tmp_path):
+    """The render block's guard accepts the documented ``~/`` spelling.
+
+    The block is pasted on its own and carries its own absolute-path guard,
+    whose message says "absolute path (or start with ~/)". Only the refusal
+    half had a case: narrowing this guard's pattern to ``/*`` left the whole
+    file green (262 passed) and the block then refused a documented-valid
+    path. ``cast=~/…`` expands the tilde in the block's own assignment, so
+    the render writes under ``$HOME``.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    r, mp4, gif = _run_render(name, tmp_path, capture=Path("~/cap"), home=home)
+
+    assert r.returncode == 0, r.stderr
+    assert "must be an absolute path" not in r.stderr, (
+        f"{name}: a ~/ capture dir was refused: " + r.stderr)
+    assert mp4.read_bytes() == b"mp4", (
+        f"{name}: the render did not publish its mp4 under $HOME")
+    assert str(mp4).startswith(str(home)), (
+        f"{name}: the render wrote outside the directory ~/ names: "
+        + str(mp4))
 
 
 @pytest.mark.parametrize("name", RECIPES)
@@ -4269,6 +4315,11 @@ case "$sub" in
       if [ "$STUB_MODE" != notranscript ]; then
           case "$cmd" in
             *">>"*) out=${cmd#*>> }; out=${out%% *}
+                    # The recipe's pipe command may name the capture
+                    # directory as ``~/…`` (a documented spelling); the real
+                    # pane shell expands that, so model it here rather than
+                    # writing into a literal ``~`` directory.
+                    case "$out" in "~/"*) out="$HOME/${out#"~/"}";; esac
                     printf 'pane output\n' >> "$out" ;;
           esac
       fi
@@ -4496,8 +4547,14 @@ def _run_block(raw, mode, tmp_path, target=False, env_extra=None,
     block = (raw.replace("<capture-dir>", str(capture))
                 .replace("<short-name>", "run")
                 .replace("<command-to-record>", "echo hi"))
+    # A ``~/…`` capture directory is expanded by the block's own shell, but
+    # the stub receives its paths through variables, where a tilde is not
+    # expanded — so the stub and this helper's file operations need the
+    # expanded spelling while the block text keeps what a worker typed.
+    home = (env_extra or {}).get("HOME")
+    stub_capture = _expand_tilde(capture, home)
     for rel, content in (files or {}).items():
-        p = capture / sub / rel
+        p = stub_capture / sub / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content)
     # Shorten every numeric deadline so the failing cases finish quickly.
@@ -4509,16 +4566,16 @@ def _run_block(raw, mode, tmp_path, target=False, env_extra=None,
     block = re.sub(r"\+\s*\d+\s*\)\)", "+ 2 ))", block)
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}",
                STUB_STATE=str(state), STUB_MODE=mode,
-               STUB_CAST=str(capture / sub / "recording.cast"),
+               STUB_CAST=str(stub_capture / sub / "recording.cast"),
                **(env_extra or {}))
     if "recorder.status" in raw:
         # The CLI scaffold's pane command records asciinema's own exit status;
         # the stub cannot run the pane command, so it writes the status the
         # recipe's step 4 reads.
-        env["STUB_STATUS_FILE"] = str(capture / sub / "recorder.status")
+        env["STUB_STATUS_FILE"] = str(stub_capture / sub / "recorder.status")
     r = subprocess.run(["bash"], input=block, env=env, cwd=cwd,
                        capture_output=True, text=True, timeout=timeout)
-    return r, capture / sub / "recording.cast"
+    return r, stub_capture / sub / "recording.cast"
 
 
 def _run_capture_block(name, mode, tmp_path, target=False, env_extra=None):
@@ -5149,6 +5206,59 @@ class TestCaptureFlowExecution:
         assert (home / "cap").is_dir(), (
             f"{name}: the block did not create the capture directory under "
             "$HOME")
+
+    def test_step_two_accepts_a_tilde_capture_dir(self, tmp_path):
+        """The claim step's own guard accepts the documented ``~/`` spelling.
+
+        Step 2 is a separate paste with its own absolute-path guard (R56), and
+        its claim is canonicalized with ``pwd -P`` so ``~/cap`` and the
+        absolute spelling are one claim.
+        ``test_a_tilde_capture_dir_is_accepted`` runs only step 0 / the CLI
+        preamble: narrowing step 2's pattern to ``/*`` left the whole file
+        green (262 passed) and the block refused a documented-valid path. The
+        pipe's command is a literal ``cat >> ~/…``,
+        which the pane's shell expands (verified live on tmux 3.2a with a
+        private server: the transcript is written under ``$HOME/cap``).
+        """
+        home = tmp_path / "home"
+        (home / "cap").mkdir(parents=True)
+        r, _cast = _run_block(_step_two_block(), "ok", tmp_path, target=True,
+                              capture=Path("~/cap"),
+                              env_extra={"HOME": str(home)})
+
+        assert r.returncode == 0, (
+            "step 2 refused a ~/ capture dir: " + r.stderr)
+        assert "must be an absolute path" not in r.stderr, r.stderr
+        claim = tmp_path / "state" / "claim.pm-test"
+        assert claim.exists(), "step 2 took no claim on the capture directory"
+        assert claim.read_text().strip() == str(home / "cap"), (
+            "the claim is not the canonical directory the tilde spelling "
+            "names: " + claim.read_text())
+        assert (home / "cap" / "transcript.log").exists(), (
+            "the transcript pipe did not write under $HOME")
+
+    def test_cli_scaffold_accepts_a_tilde_capture_dir(self, tmp_path):
+        """The no-TTY scaffold's guard accepts the documented ``~/`` spelling.
+
+        The scaffold repeats the preamble's guard in the block a worker
+        pastes whole (R34), and only the preamble's half had an acceptance
+        case: narrowing the scaffold's pattern to ``/*`` left the whole file
+        green (262 passed) and the block refused a documented-valid path
+        before it created anything.
+        """
+        home = tmp_path / "home"
+        home.mkdir()
+        r, cast = _run_block(
+            _scaffold_block(_recipe_text("cli-recording.md")), "oneshot",
+            tmp_path, capture=Path("~/cap"), env_extra={"HOME": str(home)})
+
+        assert r.returncode == 0, (
+            "the CLI scaffold refused a ~/ capture dir: " + r.stderr)
+        assert "must be an absolute path" not in r.stderr, r.stderr
+        assert cast.stat().st_size > 0, (
+            "the scaffold wrote no cast under $HOME")
+        assert str(cast).startswith(str(home)), (
+            "the scaffold wrote outside the directory ~/ names: " + str(cast))
 
     def test_step_zero_does_not_kill_a_pm_session_that_shares_the_prefix(
             self, tmp_path):
