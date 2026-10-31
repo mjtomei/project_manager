@@ -1161,6 +1161,52 @@ class TestFindTuiPaneAcrossServers:
 
         assert helpers._find_tui_pane() == (None, None)
 
+    def test_own_grouped_view_resolves_the_ambient_session(self, monkeypatch):
+        """A user's own view of a pm session still identifies that session.
+
+        tmux reports the *view's* name for a shared pane while that view's
+        client is the most recently active one (S118/S121/S124), and the
+        view need not be named ``pm-*``.  A raw ``pm-`` prefix test misses
+        the ambient session and falls through to the unscoped cross-server
+        scan, which here returns pm-b's TUI pane — the cross-session damage
+        this PR exists to prevent.
+        """
+        from pm_core.cli import helpers
+        from pm_core import pane_registry
+
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: True)
+        monkeypatch.setattr(helpers.tmux_mod, "get_session_name",
+                            lambda: "myview")
+        # The real resolver: ``pm_session_name`` resolves the view through
+        # the session group tmux reports.
+        monkeypatch.setattr(helpers.tmux_mod, "session_group",
+                            lambda name: "pm-a" if name == "myview" else "")
+        monkeypatch.setattr(helpers.tmux_mod, "pane_exists", lambda p: True)
+        # The cwd is a workdir clone, so it names a session nobody runs and
+        # cannot rescue the lookup.
+        monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-elsewhere")
+        monkeypatch.setattr(helpers.tmux_mod, "session_exists",
+                            lambda *a, **kw: False)
+        # pm-b sorts first, so an unscoped scan returns its pane.
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions",
+                            lambda: [{"name": "pm-b", "socket": "/tmp/b",
+                                      "attached": 0, "shared": False},
+                                     {"name": "pm-a", "socket": "/tmp/a",
+                                      "attached": 0, "shared": False}])
+
+        def registry(name):
+            pane = "%2" if name == "pm-a" else "%1"
+            return {"windows": {"@1": {"panes": [
+                {"id": pane, "role": "tui"}]}}}
+
+        monkeypatch.setattr(pane_registry, "load_registry", registry)
+        monkeypatch.setattr(helpers.tmux_mod, "_tmux_cmd",
+                            lambda *a, **kw: ["tmux"])
+
+        assert helpers._find_tui_pane() == ("%2", "pm-a")
+
     def test_explicit_session_selects_its_server(self, monkeypatch, tmp_path):
         from pm_core.cli import helpers
         from pm_core import pane_registry

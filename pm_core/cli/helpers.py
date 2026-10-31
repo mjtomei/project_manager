@@ -1403,7 +1403,8 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     the caller target it via ``PM_TMUX_SOCKET``.
 
     If session is provided, uses that. Otherwise:
-    - If in a pm- tmux session, uses current session
+    - If inside a pm session (including a user's own grouped view of one,
+      whose name need not be ``pm-*``), uses that session
     - Otherwise, tries to find session matching current directory (only
       when the process is not inside a pm session: there the ambient
       session wins, see the comment on the cwd branch)
@@ -1441,6 +1442,18 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     if tmux_mod.in_tmux():
         try:
             current_session = tmux_mod.get_session_name()
+            if current_session:
+                # Resolve a user's own grouped view (S118/S121/S124): tmux
+                # reports the view's name for a shared pane while that
+                # view's client is the most recently active one, and the
+                # view need not be named ``pm-*``.  A raw prefix test would
+                # miss the ambient session here and fall through to the
+                # unscoped cross-server scan below, which can return
+                # *another* pm session's TUI pane — the cross-session
+                # damage this lookup exists to avoid.  Same resolution as
+                # ``_get_current_pm_session``.
+                current_session = pane_registry.pm_session_name(
+                    current_session)
         except OSError:
             # tmux missing/unexecutable while $TMUX is set (a forwarded
             # pane environment, or a container without tmux).  Discovery

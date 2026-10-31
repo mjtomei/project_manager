@@ -101,7 +101,12 @@ sessions today).
    identified session is the ambient one, its server is scanned even if
    `list_pm_sessions()` does not report it — that function enumerates
    socket *files*, and a live server can outlive an unlinked socket
-   (review-loop 3cc7 i1).
+   (review-loop 3cc7 i1).  The current-pane branch resolves the ambient
+   name through `pane_registry.pm_session_name()` rather than a raw `pm-`
+   prefix test, so a user's own grouped view of a pm session
+   (S118/S121/S124, whose name need not be `pm-*`) still identifies that
+   session instead of falling through to the unscoped scan
+   (review-loop 703c i1).
 5. `pm_core/tmux.py` gains `list_pm_sessions()` and
    `socket_path_from_tmux_env()`; `pm_core/paths.py` gains
    `session_socket_path()` / `ensure_socket_dir()`.
@@ -1442,3 +1447,45 @@ Validation on the integrated head (`21ab6ddc`):
 
 Every earlier QA PASS result predates this merge and is **stale**; this PR
 needs a fresh review/QA/sign-off sequence.
+
+## Review iteration (2026-10-31, review-loop 703c i1)
+
+First review pass over the integrated head after the `eaf3372e` (#249)
+merge.  No requirement changes.  One cross-session hazard in TUI-pane
+discovery, of exactly the class this change exists to remove:
+
+1. **`_find_tui_pane()`'s current-pane branch missed a user's own grouped
+   view of a pm session.**  The branch took `tmux_mod.get_session_name()`
+   and accepted it only when the raw name started with `pm-`.  But tmux
+   reports the *view's* name for a pane in a shared window while that
+   view's client is the most recently active one (verified on tmux 3.4:
+   after `tmux new-session -d -t pm-base -s myview`,
+   `display-message -t %0 -p '#{session_name}'` returns `myview`, while
+   `#{session_group}` for that view is `pm-base`), and S118/S121/S124
+   explicitly allow such a view to be named anything — including
+   `pm-laptop`, which is *not* the session.  With the raw test, the
+   ambient session was not identified and the lookup fell through to the
+   cwd branch (useless from a workdir clone) and then to the *unscoped*
+   cross-server scan, which returns the first server's live registered TUI
+   pane: `pm tui send` / `view` / `restart` from inside pm-a could drive
+   pm-b's TUI — the cross-session damage 7af7 i1/i2/i3 closed for the
+   other branches, still open here.  The branch now resolves through
+   `pane_registry.pm_session_name()` (the same resolution
+   `_get_current_pm_session()` uses), so a view — whatever its name —
+   identifies its pm session, and a view named `pm-laptop` no longer
+   shadows a different session of that name.  Non-pm tmux sessions are
+   unchanged (`session_group` is empty, the name still fails the `pm-`
+   test) and the `OSError` degrade still covers a missing tmux (the
+   `session_group` query is inside the same `try`).  Test:
+   `test_own_grouped_view_resolves_the_ambient_session` (verified to fail
+   without the resolution: it returned pm-b's `%1`).
+
+Also checked and left alone: `pm_core/cli/guide.py::_in_pm_tmux_session()`
+has the same raw `pm-` prefix test, but it only decides whether `pm guide`
+runs the guided flow, never which server or pane is addressed, so it is
+not a cross-session hazard (pre-existing, out of scope).
+
+Validation on the integrated head: full suite re-run after the edit (see
+the PR note for this iteration); no live session, server or shared host
+configuration was touched, and the new test is unit-level (it binds no
+tmux server).
