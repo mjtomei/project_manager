@@ -603,3 +603,59 @@ scheduler holds only on `PASS`/`INPUT_REQUIRED`, so a recorded `ERROR` is
 restartable and re-fails the preflight, writing another QA workdir and a
 duplicate QA ERROR note). Both are integration consequences of the new
 terminal status value, not of the launch boundary itself.
+
+## Integration with master@eaf3372e (2026-10-31, user-authorized)
+
+#249 (pr-592e4bd) merged as `eaf3372e` and changed the same QA launch code.
+The merge was reconciled by hand; the fail-closed contract is unchanged and
+the trunk's newer lifecycle/UI work is kept.
+
+- **Queued-status wiring is the same fix on both sides, under two names.**
+  The branch (868d48e8) added `_status_scenarios` + `_queued_indices`; master
+  added `_status_scenarios` + `_status_queued` for the same purpose (a
+  capped launch must keep queued scenarios in `qa_status.json`). The merged
+  code uses master's `_status_queued` name everywhere; the branch's own
+  tests were updated. No behaviour is lost — both sides pass the full
+  scenario list and the queued index set.
+- **A lost container is recreated before the run fails.** Master's S78 work
+  added `_ensure_scenario_container`: a scenario whose worker pane died and
+  whose container was removed/stopped under a live run is recreated under the
+  same name from its host clone and scratch, then the worker is relaunched
+  inside it. That is *not* a downgrade — the run stays in container mode — so
+  it is kept, and R4's "container gone → ERROR" now applies only when the
+  recreation itself fails. `_ensure_scenario_container` raises
+  `ContainerLaunchError` (cause + remedy, "no host relaunch") instead of
+  master's INPUT_REQUIRED, so an unrecreatable container is still an
+  infrastructure ERROR, never an invented scenario verdict.
+  Consequence for QA: a force-removed container that can be recreated now
+  recovers in container mode (previously it failed closed). QA must
+  distinguish "removed and recreatable" from "removable but not recreatable"
+  (e.g. remove the scenario clone too) when exercising the lost-container
+  failure.
+- **Relaunch keeps master's in-window relaunch.** When the scenario window
+  still has live panes (its refiner or verifier), the worker is split back
+  into that window instead of creating a second window of the same name;
+  when the whole window is gone, a fresh one is created. The relaunch still
+  takes the run's persisted `use_containers` (never a fresh runtime probe)
+  and still passes `session=None` only for a container run.
+- **The retry path keeps master's snapshot-on-relaunch** (`_write_resume_file`
+  immediately after a successful relaunch, S43) and re-raises
+  `ProviderNotFoundError` after writing the dashboard (S106); the
+  `ContainerLaunchError` raise propagates through both to
+  `_execute_and_finalize`'s handler and publishes `overall="ERROR"`.
+- **TUI resume adoption keeps both checks**: master's clone-ownership guard
+  (S43: a run another clone is driving is not adopted) runs first, then the
+  branch's status-file read that preserves a recovered `ERROR`'s cause
+  (`status_error`) for the QA note.
+- **Registry reconciliation.** `pm/project.yaml` was merged with
+  `pm_core.store.merge_3way(base, ours=master, theirs=branch)` over the git
+  index stages, preserving every PR record from both sides (576 PRs, 22
+  plans, unique ids) and all of this branch's notes. `project.active_pr` is
+  the base session's live selection, not this branch's change, so master's
+  newer value was kept.
+- **Unchanged contract.** Fresh-run preflight, initial container launch,
+  queued launch, resume re-validation, `pm qa debug` and `pm qa run` still
+  abort with cause+remedy and zero host launches when the runtime is
+  unusable; explicitly disabled mode still runs on the host; host-only roles
+  (Scenario 0, planner, verifier, finalizer, authoring helpers) are
+  unchanged.

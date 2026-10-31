@@ -34,8 +34,11 @@ This spec is written against the user-visible surfaces: `pm qa run`,
     `_poll_tmux_verdicts` (queued scenarios and relaunches) and publishes
     `ERROR`.
   - `_relaunch_scenario_window(..., use_containers)` — a container run with no
-    container, or a container that is no longer running, raises instead of
-    relaunching on the host; host runs keep the old behaviour.
+    container name raises instead of relaunching on the host; a container that
+    is no longer running is recreated under the same name (master's S78
+    `_ensure_scenario_container`), and only if that recreation fails does it
+    raise `ContainerLaunchError` (never a host relaunch, never an invented
+    verdict). Host runs keep the old behaviour.
   - `_resume_qa_sync` — a snapshot with `use_containers=true` re-validates the
     runtime and aborts `ERROR` if it is unusable; a snapshot with
     `use_containers=false` stays a host run even if container mode is now on.
@@ -213,10 +216,15 @@ shared-launcher (review) fail-closed behaviour.
 - **Then** the worker is relaunched inside the *same* container (container
   exec), not on the host.
 - **When** another actor instead force-removes the container and its window
-  dies,
-- **Then** the run ends `ERROR` stating the container is gone, refuses to
-  relaunch on the host, and any other scenario's live container and pane are
-  left untouched.
+  dies, and the container *can* be recreated from the scenario's host clone,
+- **Then** it is recreated under the same name and the worker is relaunched
+  inside it (still container mode, never the host) — this is #249's S78
+  recreation, kept by the integration and not a downgrade.
+- **When** the container cannot be recreated (e.g. its host clone is also
+  gone, or the runtime is unusable), and its window dies,
+- **Then** the run ends `ERROR` stating the container is gone and could not
+  be recreated, refuses to relaunch on the host, and any other scenario's
+  live container and pane are left untouched.
 
 ### R12 — A queued scenario's container failure also fails the run closed
 - **Given** a container-mode run with a concurrency cap so a later scenario is
@@ -331,7 +339,8 @@ shared-launcher (review) fail-closed behaviour.
 | Image tag does not exist | ERROR naming the image; failed container not left behind |
 | Two scenarios, one container fails to create | Run ERROR; the other live container/pane preserved |
 | Worker window dies, container alive | Relaunch inside the same container |
-| Worker window dies, container removed | Run ERROR; no host relaunch; other scenarios preserved |
+| Worker window dies, container removed but recreatable | Container recreated (same name); worker relaunched inside it; never the host |
+| Worker window dies, container removed and not recreatable | Run ERROR (cause + remedy); no host relaunch; other scenarios preserved |
 | Queued scenario dequeued while runtime is down | Run ERROR; no INPUT_REQUIRED for it |
 | Capped run launches its first batch | Status pane/`qa_status.json` keep every planned scenario; the rest show `queued` |
 | Container exists but its window cannot be created | Run ERROR; only that container released; no INPUT_REQUIRED |

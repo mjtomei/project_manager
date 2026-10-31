@@ -2037,6 +2037,10 @@ class TestSessionName:
         monkeypatch.setattr(app_mod.tmux_mod, "in_tmux", lambda: True)
         monkeypatch.setattr(app_mod.tmux_mod, "get_session_name",
                             lambda: "pm-demo-c5a1006b~3")
+        # The group lookup (S118) asks about that session by name, not the
+        # current client.
+        monkeypatch.setattr(app_mod.tmux_mod, "session_group",
+                            lambda name: "")
 
         def _no_bare_query(*a, **k):  # pragma: no cover - must not run
             raise AssertionError("current_session_name must target the pane")

@@ -16,8 +16,15 @@ manual ``i`` key (``pr_view.signoff_pr``) stays recommendation-only.
 
 from pm_core.paths import configure_logger
 from pm_core import store
+from pm_core.tui.auto_start import CONFIRM_HOLD_SECONDS
 
 _log = configure_logger("pm.tui.signoff_ui")
+
+# Hand-off outcome lines ("→ sign-off", a lock "waits" or "Error:") are
+# forced and held like auto-start's other confirmations: under skip_qa they
+# follow the sticky "Review loop done … PASS" line in the same frame, which
+# dropped them unseen (S50).  The hold queues them behind the line before.
+_SHOWN = {"force": True, "hold": CONFIRM_HOLD_SECONDS}
 
 
 def _driven(app, pr_id: str) -> bool:
@@ -55,14 +62,34 @@ def _load_pr(app, pr_id: str) -> dict | None:
     return store.get_pr(data, pr_id)
 
 
-def start_signoff(app, pr_id: str) -> None:
+def _lock_waits(app) -> set:
+    """PR ids whose sign-off hand-off already said it waits for the lock."""
+    s = getattr(app, "_signoff_lock_waits", None)
+    if not isinstance(s, set):
+        s = set()
+        app._signoff_lock_waits = s
+    return s
+
+
+def start_signoff(app, pr_id: str,
+                  lock_timeout: float = store.LOCK_TIMEOUT_SECONDS
+                  ) -> bool | None:
     """Hand a QA-passed (or skip_qa review-passed) PR to the sign-off step.
 
     Transitions ``qa`` (or ``in_review`` under ``skip_qa``) -> ``sign_off``
     and runs one :func:`step`, which adopts an existing fresh verdict or
     launches the router window in the background.
+
+    Callers that retry on the poll timer (a QA completion follow-up, the
+    scheduler pass) pass ``lock_timeout=store.NO_WAIT``: while another pm
+    process holds the lock (an open ``pm edit``) it says so once and
+    returns False, without a 2 s wait or an "Error:" line per retry
+    (RQ38).  A one-shot caller (the skip_qa review PASS, which nothing
+    retries) keeps the default wait, so a brief holder does not lose the
+    hand-off.
     """
     if not _driven(app, pr_id):
+        _lock_waits(app).discard(pr_id)
         return
     project = (app._data or {}).get("project") or {}
     entry = ("qa", "in_review") if project.get("skip_qa") else ("qa",)
@@ -77,17 +104,37 @@ def start_signoff(app, pr_id: str) -> None:
             p["status"] = "sign_off"
             _record_status_timestamp(p, "sign_off")
 
+    waiting = _lock_waits(app)
     try:
-        store.locked_update(app._root, apply)
-    except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
-        app.log_message(f"Error: {e}")
+        store.locked_update(app._root, apply, timeout=lock_timeout)
+    except store.StoreLockTimeout as e:
+        if lock_timeout == store.NO_WAIT:
+            if pr_id not in waiting:
+                waiting.add(pr_id)
+                _log.warning("start_signoff: %s waits for the project.yaml "
+                             "lock", pr_id)
+                app.log_message(
+                    f"Sign-off for {pr_id} waits for project.yaml to be "
+                    f"unlocked: {store.LOCK_BUSY_REASON}", **_SHOWN)
+            return False
+        waiting.discard(pr_id)
+        app.log_message(f"Error: {e}", **_SHOWN)
+        _log.warning("start_signoff: StoreLockTimeout for %s: %s", pr_id, e)
+        return False
+    except store.ProjectYamlParseError as e:
+        waiting.discard(pr_id)
+        # Forced only for the one-shot caller: a retried one meets the same
+        # unloadable file on every tick.
+        app.log_message(f"Error: {e}",
+                        **(_SHOWN if lock_timeout != store.NO_WAIT else {}))
         _log.warning("start_signoff: %s for %s: %s", type(e).__name__, pr_id, e)
-        return
+        return False  # project.yaml could not be loaded: retry
+    waiting.discard(pr_id)
     if moved["from"]:
         _log.info("start_signoff: %s %s -> sign_off", pr_id, moved["from"])
         _launched_at(app).pop(pr_id, None)
         _reload(app)
-        app.log_message(f"Auto-start: {pr_id} → sign-off")
+        app.log_message(f"Auto-start: {pr_id} → sign-off", **_SHOWN)
     step(app, pr_id)
 
 
@@ -154,6 +201,7 @@ async def _launch_quiet(app, pr_id: str, transcript) -> None:
     """
     import asyncio
     import sys
+    from rich.markup import escape
     from pm_core.tui._shell import _run_shell_async
 
     cmd = [sys.executable, "-m", "pm_core.wrapper", "pr", "signoff",
@@ -173,7 +221,8 @@ async def _launch_quiet(app, pr_id: str, transcript) -> None:
             except ProcessLookupError:
                 pass
         _log.exception("signoff_ui: launch failed for %s", pr_id)
-        app.log_message(f"[red]Sign-off launch failed[/] for {pr_id}: {e}")
+        app.log_message(f"[red]Sign-off launch failed[/] for {pr_id}: "
+                        f"{escape(str(e))}")
         return
     finally:
         _inflight(app).discard(pr_id)
@@ -181,8 +230,12 @@ async def _launch_quiet(app, pr_id: str, transcript) -> None:
         err = (stderr.decode(errors="replace") if stderr else "").strip()
         _log.warning("signoff_ui: pm pr signoff %s exit=%s: %s",
                      pr_id, proc.returncode, err[:200])
+        # Text, not markup (as auto_start's failed `pm pr start` line): a
+        # stray "[...]" in the reason would be dropped, and "[/...]" makes
+        # the log line refuse the whole message.
+        reason = err.splitlines()[-1] if err else f"exit {proc.returncode}"
         app.log_message(f"[red]Sign-off launch failed[/] for {pr_id}: "
-                        f"{err.splitlines()[-1] if err else proc.returncode}")
+                        f"{escape(reason)}")
     else:
         _log.info("signoff_ui: pm pr signoff %s launched", pr_id)
     _reload(app)
@@ -399,9 +452,18 @@ def advance_all(app, prs: list[dict] | None = None) -> None:
                 step(app, pr_id, store.get_pr(disk, pr_id))
             elif (status == "qa" and pr_id not in app._qa_loops
                   and _auto_start.recorded_qa_verdict(pr_id, pr) == "PASS"
-                  and signoff_mod.return_awaiting(pr) != "qa"):
+                  and (signoff_mod.return_awaiting(pr) != "qa"
+                       or not _auto_start._awaiting_on_disk(
+                           app, pr_id, "qa"))):
                 # (A sign-off REQA return still waiting for its QA run must
-                # not be handed back to sign-off on the old PASS.)
-                start_signoff(app, pr_id)
+                # not be handed back to sign-off on the old PASS.  The
+                # tree's copy can say it waits after the re-run's start
+                # cleared it on disk.)
+                # Retried on the next pass, so never wait for the lock.
+                start_signoff(app, pr_id, lock_timeout=store.NO_WAIT)
+        except store.StoreLockTimeout as e:
+            # Another pm process is writing project.yaml; the next pass
+            # retries, so this is not a failure worth a traceback.
+            _log.warning("signoff_ui: advance of %s deferred: %s", pr_id, e)
         except Exception:
             _log.exception("signoff_ui: advance failed for %s", pr_id)

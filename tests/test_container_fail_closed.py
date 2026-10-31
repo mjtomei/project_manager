@@ -378,6 +378,9 @@ def test_relaunch_refuses_host_when_container_run_has_no_container(
 
 
 def test_relaunch_refuses_when_container_lost(tmp_path, home):
+    """A lost container is recreated; when that fails the run fails closed
+    (infrastructure ERROR) instead of relaunching the worker on the host or
+    recording an invented INPUT_REQUIRED verdict."""
     state = QALoopState(pr_id="pr-c")
     state.qa_workdir = str(tmp_path)
     scenario = QAScenario(index=1, title="S1", focus="f",
@@ -391,13 +394,20 @@ def test_relaunch_refuses_when_container_lost(tmp_path, home):
         stack.enter_context(patch.object(container_mod,
                                          "container_is_running",
                                          return_value=False))
+        stack.enter_context(patch.object(container_mod,
+                                         "create_qa_container",
+                                         side_effect=RuntimeError("image gone")))
         new_window = stack.enter_context(patch(
             "pm_core.tmux.new_window_get_pane", return_value="%1"))
-        with pytest.raises(ContainerLaunchError):
+        with pytest.raises(ContainerLaunchError) as excinfo:
             qa_loop._relaunch_scenario_window(
                 scenario, state, {}, {"id": "pr-c", "branch": "b"},
                 "pm-s", str(tmp_path), use_containers=True)
 
+    msg = str(excinfo.value)
+    assert "pm-x" in msg and "image gone" in msg
+    assert "pm container disable" in msg
+    assert scenario.index not in state.scenario_verdicts
     new_window.assert_not_called()
 
 
@@ -868,7 +878,7 @@ def test_initial_launch_keeps_queued_scenarios_visible(tmp_path, home):
     # The launch helper is told about every scenario, not just the batch it
     # is about to start, so its status write can keep the queue visible.
     assert kwargs["_status_scenarios"] == scenarios
-    assert kwargs["_queued_indices"] == {2}
+    assert kwargs["_status_queued"] == {2}
 
     status = json.loads((tmp_path / "qa" / "qa_status.json").read_text())
     by_index = {s["index"]: s for s in status["scenarios"]}
@@ -914,7 +924,7 @@ def test_initial_launch_keeps_queued_scenarios_visible_in_tmux_mode(
         _launch_scenarios_in_tmux(
             state, {}, {"id": "pr-c", "branch": "b"}, "pm-s",
             None, str(tmp_path),
-            _status_scenarios=[s1, s2], _queued_indices={2},
+            _status_scenarios=[s1, s2], _status_queued={2},
         )
 
     status = json.loads((tmp_path / "qa_status.json").read_text())
