@@ -427,9 +427,11 @@ workdirs are touched.
     `test_start_does_not_record_a_start_on_a_concurrently_closed_pr` and
     `test_review_does_not_resurrect_a_concurrently_closed_pr` (both fail on
     the previous head — the probe shows `start` claiming the active pointer
-    and `review` printing "marked as in_review").  `pm pr signoff`,
-    `pm pr qa-run-bg` and the auto-sequence bounce already guard their apply
-    on the expected source status, so a concurrent close no-ops there.
+    and `review` printing "marked as in_review").  `pm pr qa-run-bg` and the
+    auto-sequence bounce already guard their apply on the expected source
+    status, so a concurrent close no-ops there; `pm pr signoff` did not (its
+    apply no-oped but the command still claimed the transition and launched a
+    window) — see item 50.
 46. `pm pr review <closed>` names the reopen (QA S3): the terminal guard at
     the top of `pr_review` printed a bare `PR <id> is already closed.`, the
     one lifecycle refusal that did not name `pm pr edit <id> --status
@@ -477,6 +479,25 @@ workdirs are touched.
     is ready before, blocked after, and pins the wording) and the new
     assertion in `test_remove_warns_dependents_reference_the_removed_record`
     — both fail on the previous head.
+
+50. `pm pr signoff` re-checks terminal status under the lock (QA S22): the
+    `qa` -> `sign_off` transition was guarded only by `pr.get("status") ==
+    status` on the pre-lock snapshot, so when a concurrent `pm pr close` won
+    the lock the apply no-oped but the command still printed "PR #N marked as
+    sign_off." and opened `signoff-#N` against the closed record, exit 0 — the
+    one launch command whose window could contradict the registry (item 45's
+    claim that sign-off's status guard covered this was wrong: the guard
+    stopped the write, not the claim or the launch).  The transition and the
+    decision to launch are now one `store.locked_update`:
+    `helpers._terminal_status_at_lock` is checked on the freshly loaded entry,
+    the transition is decided from that fresh status (not the pre-lock
+    snapshot), and a terminal result exits 1 with "PR <id> became <status>
+    while opening the sign-off — not marked sign_off and no sign-off window
+    was opened." before any window is created.  Covered by
+    `test_signoff_does_not_launch_against_a_concurrently_closed_pr` (fails on
+    the previous head — the probe shows "PR pr-001 marked as sign_off." and
+    exit 0).  Observed end to end in QA S22: close-wins rounds print the new
+    message, open no `signoff-#1` window, and leave the record `closed`.
 
 The pre-existing `tests/test_pr_enhancements.py:746`
 (`TestGitHubCloseResilience`) asserted the *old* destructive outcome (workdir

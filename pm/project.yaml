@@ -14331,7 +14331,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-31T20:27:59.066519+00:00'
+  updated_at: '2026-10-31T21:34:11.999541+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -15102,6 +15102,60 @@ prs:
       record from a non-`pm-` session name. Captures: /pm-captures/scenarios/19/{story1-close-during-review,story2-close-during-qa-planning,story3-cleanup-resources}/.'
     created_at: '2026-10-31T20:27:58Z'
     last_edited: '2026-10-31T20:27:58Z'
+  - id: note-0baafe0
+    text: 'S22 refiner probe (head f78417017; disposable-HOME sandbox, git-backed
+      fake-github, no real GitHub). Verified close-vs-launch races: (1) `pm pr review`
+      at-lock guard works — close-wins exits 1 with "PR <id> became closed while opening
+      the review — not marked in_review and no review window was opened."; review-wins
+      opens review-<display> then the close closes it. (2) `pm pr signoff` has NO
+      equivalent at-lock/live guard — when the close wins the lock its apply no-ops
+      (record stays closed, sign_off_at None) but the command still prints "PR #N
+      marked as sign_off." and opens signoff-#N against the closed record (rc 0);
+      observed 4/4 close-wins rounds. QA S22 should flag this. (3) sync-github apply
+      guard holds: final closed, stand-in PR OPEN, no reopen (though "Updated 1 PR(s)."
+      is printed from the pre-lock count even when the apply skipped). (4) two simultaneous
+      closes both exit 0, one entry + one closed_at, workdir and remote branch survive;
+      --remove deletes only the registry entry. (5) held flock >2s: close rc 1 with
+      "Could not acquire lock on .../project.yaml.lock within 2.0s ...", registry
+      untouched; retry after release succeeds. Recipe to force both orderings: hold
+      project.yaml.lock with flock ~1.2s, queue close, then queue the launch; on release
+      the two 50ms pollers race — run 4-6 rounds.'
+    created_at: '2026-10-31T21:07:19Z'
+    last_edited: '2026-10-31T21:07:19Z'
+  - id: note-4f2d37a
+    text: 'QA S22 (concurrent close against review, sign-off, QA launch, sync, --remove,
+      held lock) — one real bug found and fixed in this push. (1) `pm pr signoff`
+      had no at-lock/live terminal guard: when a concurrent `pm pr close` won the
+      store lock its apply no-oped, but the command still printed `PR #1 marked as
+      sign_off.`, opened `signoff-#1` against the closed record and exited 0 (a 20
+      ms sampler showed qa→closed, never sign_off; 4/6 close-wins rounds pre-fix).
+      The transition and the launch are now one `store.locked_update` that calls `helpers._terminal_status_at_lock`
+      on the freshly loaded entry and decides from the fresh status; a terminal result
+      exits 1 with `PR <id> became <status> while opening the sign-off — not marked
+      sign_off and no sign-off window was opened.` New test `test_signoff_does_not_launch_against_a_concurrently_closed_pr`
+      fails on the previous head (probe: `PR pr-001 marked as sign_off.`, rc 0). Spec
+      impl.md item 50 added; item 45 corrected (its claim that signoff''s status guard
+      covered this was wrong — the guard stopped the write, not the claim or the launch).
+      (2) Verified at runtime on the fixed head in a disposable-HOME sandbox against
+      the git-backed fake-github stand-in, no real GitHub: review vs close both orderings
+      (review-wins prints marked as in_review + Opened review window review-#1; close-wins
+      exits 1 with the at-lock message, no window); sign-off vs close (post-fix close-wins:
+      new message, no signoff-#1, record closed); QA from the TUI command bar vs close
+      (QA loop creates qa-#1-s0/qa-#1 then its post-creation guard tears both down,
+      record closed); sync-github vs close --keep-github (final closed, stand-in stays
+      OPEN, B pending with depends_on, pr ready empty; sync still prints `Updated
+      1 PR(s).` from its pre-lock count when the close won — recorded as the scenario
+      asked); two simultaneous closes (both rc 0, one entry, one closed_at, neither
+      claims removal, workdir + remote branch survive) and close vs close --remove
+      (remove prints Removed registry entry + Kept, losing close says "was removed
+      concurrently; nothing to close", repeat --remove -> PR not found rc 1); held
+      flock >2s (rc 1 with the exact lock message, project.yaml byte-identical, retry
+      succeeds with a fresh closed_at). No tracebacks. Full suite 5277 passed, 1 skipped,
+      0 failed (/pm-captures/scenarios/22/full-suite/full-suite.log). Evidence: /pm-captures/scenarios/22/{story1-review-vs-close,story3-tui-qa-vs-close,story4-sync-vs-close,story5-concurrent-remove,story6-held-lock}
+      plus pre-fix/ and post-fix/story2-signoff-vs-close (cast + mp4 + transcript
+      + driver + manifest).'
+    created_at: '2026-10-31T21:34:11Z'
+    last_edited: '2026-10-31T21:34:11Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249

@@ -22,6 +22,7 @@ from click.testing import CliRunner
 from pm_core import container as container_mod
 from pm_core import graph, pr_cleanup, store
 from pm_core import pr_sync
+from pm_core import signoff as signoff_mod
 from pm_core import tmux as tmux_mod
 from pm_core.cli import pr as pr_mod
 from pm_core.fake_github import REAL_GIT, FakeGitHubBackend
@@ -1121,6 +1122,30 @@ def test_review_does_not_resurrect_a_concurrently_closed_pr(tmp_path):
 
     assert result.exit_code != 0, result.output
     assert "closed" in result.output.lower()
+    assert not launch.called
+    entry = _load_entry(project["pm_dir"])
+    assert entry["status"] == "closed"
+    assert entry["closed_at"] == "2026-09-01T00:00:00+00:00"
+
+
+def test_signoff_does_not_launch_against_a_concurrently_closed_pr(tmp_path):
+    """`pm pr signoff` writes the qa -> sign_off transition under the store
+    lock and then launches the sign-off window; a close landing in that window
+    must win.  The command must not claim the transition and must not open a
+    window against the terminal record (pr-62ad13d)."""
+    project = _make_project(tmp_path, status="qa", with_dependent=False)
+    racing = _racing_close(project["pm_dir"])
+    runner = CliRunner()
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=project["pm_dir"]), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"), \
+         mock.patch.object(pr_mod.store, "locked_update", racing), \
+         mock.patch.object(signoff_mod, "launch_signoff_window") as launch:
+        result = runner.invoke(pr_mod.pr, ["signoff", "pr-001"])
+
+    assert result.exit_code != 0, result.output
+    assert "closed" in result.output.lower()
+    assert "marked as sign_off" not in result.output
     assert not launch.called
     entry = _load_entry(project["pm_dir"])
     assert entry["status"] == "closed"

@@ -1836,13 +1836,38 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
             f"(expected qa or sign_off).", err=True)
         raise SystemExit(1)
 
-    if status in entry_statuses:
-        def apply(d):
-            pr = store.get_pr(d, pr_id)
-            if pr and pr.get("status") == status:
-                pr["status"] = "sign_off"
-                _record_status_timestamp(pr, "sign_off")
-        store.locked_update(root, apply)
+    # The transition and the launch are separated by the store lock: a
+    # `pm pr close`/merge that lands between this command's pre-lock snapshot
+    # and its apply must win.  Claiming "marked as sign_off" and opening a
+    # sign-off window against a record that has become terminal would
+    # resurrect a retired PR's phase and contradict the record
+    # (pr-62ad13d), exactly like the start/review at-lock guards.
+    terminal_at_lock: str | None = None
+    transitioned = False
+
+    def apply(d):
+        nonlocal terminal_at_lock, transitioned
+        pr = store.get_pr(d, pr_id)
+        if not pr:
+            return
+        terminal_at_lock = _terminal_status_at_lock(pr)
+        if terminal_at_lock:
+            return
+        # Decide from the freshly loaded status, not the pre-lock snapshot:
+        # a concurrent edit may already have moved the PR to sign_off.
+        if pr.get("status") in entry_statuses:
+            pr["status"] = "sign_off"
+            _record_status_timestamp(pr, "sign_off")
+            transitioned = True
+
+    store.locked_update(root, apply)
+    if terminal_at_lock:
+        click.echo(
+            f"PR {pr_id} became {terminal_at_lock} while opening the "
+            f"sign-off — not marked sign_off and no sign-off window was "
+            f"opened.", err=True)
+        raise SystemExit(1)
+    if transitioned:
         click.echo(f"PR {_pr_display_id(pr_entry)} marked as sign_off.")
         trigger_tui_refresh()
 
