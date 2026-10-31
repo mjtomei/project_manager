@@ -171,15 +171,20 @@ inherits the saved target list.
 GIVEN a running TUI and several shells WHEN the user runs `pm autostart add`,
 `pm autostart remove`, `pm autostart status` and a rejected `all` at the same
 time THEN every invocation gets its own reply, the final target set is exactly
-the additive union of the successful adds minus removes, duplicate adds are
-idempotent, and no status reply ever reports `all` or a wildcard scope.
+the additive union of the successful adds minus removes (for distinct PR ids;
+a concurrent add+remove of the *same* id is order-dependent, and each reply
+must report what that invocation actually did), duplicate adds are idempotent,
+and no status reply ever reports `all` or a wildcard scope.
 
 GIVEN a scheduler pass in progress WHEN a target is removed mid-pass THEN no
 PR that is no longer in scope is started.
 
-GIVEN two projects sharing one `~/.pm` WHEN project A's saved state is present
-and project B's TUI restarts THEN B rejects it (targets not found in this
-project), stays off, and A's running auto-start is unaffected.
+GIVEN two sessions/projects sharing one `~/.pm` WHEN project A's
+session-scoped saved state is present and project B's TUI restarts THEN B
+leaves the file untouched for its owner (it is not consumed or quarantined),
+restores nothing, stays off, and A's running auto-start is unaffected.  An
+*unscoped* (pre-session-field) saved state naming targets unknown to B is
+rejected, quarantined, and B stays off.
 
 ## Setup (cross-cutting)
 
@@ -228,6 +233,8 @@ project), stays off, and A's running auto-start is unaffected.
 - Two rapid rejections (distinct quarantine filenames, evidence not overwritten).
 - `pm autostart all` from CLI, command bar, and the raw command queue.
 - Removal racing a scheduler pass; two adds of the same PR at once.
+- Breadcrumb `session` naming this session / another session / another
+  session's `~N` group / a non-string (corrupt).
 
 ## Pass / fail criteria
 
@@ -268,5 +275,12 @@ project), stays off, and A's running auto-start is unaffected.
   unchanged; `ok` is an additive top-level field (note-33a61cb) so a captured
   status snapshot is self-describing. A status reply with `ok: false` is an
   owner-side failure, not an empty success.
+- **Shared `~/.pm` breadcrumb ownership** — the breadcrumb is one file per PM
+  home. A `session` field naming another session (or another session's base,
+  ignoring a `~N` group suffix) means the file belongs to that session's next
+  mount: the current mount leaves it in place and restores nothing. Only an
+  unscoped file, or one owned by this session, is parsed; rejection then
+  quarantines it. A non-string `session` value is corruption and reads as
+  unscoped (never as an owner that no mount could ever match).
 
 No **[UNRESOLVED]** ambiguities.

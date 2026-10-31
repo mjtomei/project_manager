@@ -39616,7 +39616,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/267
   gh_pr_number: 267
   created_at: '2026-10-27T19:03:40.643246+00:00'
-  updated_at: '2026-10-29T05:51:47.604559+00:00'
+  updated_at: '2026-10-31T18:07:25.345765+00:00'
   started_at: '2026-10-27T19:04:56.616056+00:00'
   reviewed_at: null
   merged_at: null
@@ -39763,6 +39763,28 @@ prs:
       merge gate applies.'
     created_at: '2026-10-29T02:22:07Z'
     last_edited: '2026-10-29T02:22:07Z'
+  - id: note-4dae242
+    text: 'QA planner 2026-10-28: locked scenarios 9-12 (interrupted by the 2026-10-29
+      test-session leak) contain expectations that no longer match the integrated
+      head, plus one unsafe setup; do not re-run them verbatim. (1) Policy rename:
+      the master integration collapsed the old stop_before_merge policy into the single
+      wait_for_merge policy. --stop-before-merge is now only a deprecated alias for
+      --wait-for-merge; pm autostart status/list --json reports policy/effective_policy
+      wait_for_merge, text shows [wait-for-merge], the O-key log says "(will wait
+      for merge)", and the sign-off reason reads "waiting for manual merge (held by
+      ...)". S9 stop_before_merge / "will stop before merge" assertions, S10 T2 policy/reason
+      assertions, and S11 "T2 default policy stop-before-merge" (new targets now default
+      to wait_for_merge) are stale; assert wait_for_merge instead. (2) Isolation:
+      S12 setup runs tmux set-environment -g PYTHONPATH and rm -f ~/.pm/autostart-resume.json
+      against the shared host - the same class of shared-state mutation that caused
+      the 2026-10-29 test-session leak. Any re-run must use a dedicated HOME (pm_home()
+      != ~/.pm), a unique PM_TMUX_SOCKET, no inherited TMUX/TMUX_PANE, and must not
+      touch the real pm-project_manager-5b29c418 session or shared ~/.pm files. Fresh
+      scenarios 13-18 cover the gaps (incident reproduction, saved merge-gate folding,
+      restart lifecycle, two-session concurrency, watcher scope, restored merge holds)
+      with isolation stated in every GIVEN.'
+    created_at: '2026-10-29T03:20:33Z'
+    last_edited: '2026-10-29T03:20:33Z'
   - id: note-38d2f15
     text: 'QA S18 (restored target set carries its merge holds) PASS on integrated
       head afea729a. Restore path verified end-to-end with a dedicated HOME + PM_TMUX_SOCKET:
@@ -39813,6 +39835,30 @@ prs:
       yields integration `in_base` and coerces SIGNOFF_MERGE → SIGNOFF_BLOCKED. (2026-10-29T05:55:00Z)'
     created_at: '2026-10-29T05:51:47Z'
     last_edited: '2026-10-29T05:51:47Z'
+  - id: note-3d47f88
+    text: 'User-authorized restart from the main PM session on 2026-10-31 after #249
+      merged as eaf3372e60d1717bd97cc50b5e0b04c6df881fa1. Resume this existing PR
+      in its existing workdir. First integrate current origin/master INTO THIS PR
+      branch, preserving its intended behavior and all earlier review/QA corrections;
+      resolve real code/test conflicts and validate the combined behavior before handing
+      off for a fresh review/QA/sign-off sequence. Do not merge this PR into master
+      or push/reset/delete master or other branches. This is a user-directed implementation
+      return, not a reviewer/sign-off verdict. The read-only integration check found
+      substantive conflicts in: pm/project.yaml, pm_core/tui/auto_start.py, tests/test_qa_loop.py.
+      The prior SIGNOFF_MERGE is historical evidence for its recorded revisions, not
+      approval of a new integration. Retain all original source, dirty files, stashes,
+      drafts, fixtures and captures. Existing uncommitted content may have been intentionally
+      excluded; inspect its provenance instead of automatically committing it. Preserve
+      every PR record and unrelated local metadata during project.yaml reconciliation.
+      Do not weaken acceptance criteria, choose unresolved user policy questions or
+      reuse stale PASS results. Historical captures have been copied intact to the
+      main session captures; overwritten filename collisions are backed up in the
+      host migration record. Main session is pm-project_manager-c5a1006b; keep old
+      restored sessions idle. Assigned models and explicit work-Opus sign-off override
+      remain unchanged. Autostart will use wait_for_merge; no PR merge is authorized
+      by this request.'
+    created_at: '2026-10-31T18:07:25.345765+00:00'
+    last_edited: '2026-10-31T18:07:25.345765+00:00'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
