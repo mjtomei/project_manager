@@ -313,7 +313,7 @@ def qa_regression(test_id: str, session: str | None, file_prs: bool):
     """
     from pathlib import Path
     from pm_core import qa_instructions
-    from pm_core.cli.helpers import _find_tui_pane
+    from pm_core.cli.helpers import _find_live_tui_pane
     from pm_core.regression_prompts import build_regression_test_prompt
     from pm_core.claude_launcher import launch_claude
 
@@ -331,9 +331,14 @@ def qa_regression(test_id: str, session: str | None, file_prs: bool):
     body = item.get("body", "")
     title = item.get("title", test_id)
 
-    pane_id, sess = _find_tui_pane(session)
+    pane_id, sess = _find_live_tui_pane(session)
     if not sess:
         click.echo("No pm tmux session found. Start one with 'pm session'.", err=True)
+        raise SystemExit(1)
+    # The runner drives the TUI through this pane, so a session whose TUI
+    # pane is gone (stale --session, killed TUI) is not a usable target.
+    if not pane_id:
+        click.echo(f"No TUI pane found in session '{sess}'.", err=True)
         raise SystemExit(1)
 
     full_prompt = build_regression_test_prompt(

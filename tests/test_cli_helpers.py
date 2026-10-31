@@ -401,8 +401,11 @@ class TestPmSessionOutsidePmTmux:
         monkeypatch.setattr(no_pm_tmux, "_get_session_name_for_cwd",
                             lambda: "pm-proj-1234")
         live = set()
-        monkeypatch.setattr(tmux_mod, "session_exists",
-                            lambda name, socket_path=None: name.lstrip("=") in live)
+        # ``use_env`` is part of session_exists's signature and is passed by
+        # find_session_server's default-server probe (per-session sockets).
+        monkeypatch.setattr(
+            tmux_mod, "session_exists",
+            lambda name, socket_path=None, use_env=True: name.lstrip("=") in live)
         assert loop_shared.get_pm_session() is None
         live.add("pm-proj-1234")
         assert loop_shared.get_pm_session() == "pm-proj-1234"
@@ -484,6 +487,38 @@ class TestFindLiveTuiPane:
              self._panes('%9 pm-other "pm _tui"\n'):
             assert _find_live_tui_pane("pm-test") == (None, "pm-test")
 
+    def test_pane_id_reused_on_another_server_is_not_returned(self):
+        """Pane ids are only unique per tmux server (per-session sockets).
+
+        A stale registry entry for a session that no longer exists must not
+        be resolved against whatever server this process is attached to: the
+        recorded ``%6`` here is a live pane of a *different* session, and
+        handing it to ``pm tui send``/``view`` would drive the wrong pane.
+        """
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        data = self._registry(
+            {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             patch("pm_core.tmux.find_session_server",
+                   return_value=(None, False)), \
+             self._panes("%6 pm-other bash\n"):
+            assert _find_live_tui_pane("pm-gone") == (None, "pm-gone")
+
+    def test_live_pane_in_a_grouped_session_still_counts(self):
+        """A grouped session's name is normalised before comparing."""
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        data = self._registry(
+            {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             patch("pm_core.tmux.find_session_server",
+                   return_value=(None, False)), \
+             self._panes('%6 pm-test~1 "pm _tui"\n'):
+            assert _find_live_tui_pane("pm-test") == ("%6", "pm-test")
+
     def test_tmux_unavailable_degrades_to_no_live_tui(self):
         from pm_core.cli.helpers import _find_live_tui_pane
 
@@ -510,9 +545,9 @@ class TestFindLiveTuiPane:
         """A hand-started TUI has no registry entry until heal_registry
         runs; ``pm tui view -s S`` must still resolve its live pane.
 
-        ``_find_tui_pane`` only consults the registry when a session is
-        passed, so it returns ``(None, None)`` here — the live-pane scan
-        is what makes the explicit-session path work at all."""
+        ``_find_tui_pane`` returns ``(None, "pm-test")`` here — the session
+        name with no recorded pane — so the live-pane scan is what makes
+        the explicit-session path work at all."""
         from pm_core.cli.helpers import _find_live_tui_pane
 
         empty = {"session": "pm-test", "windows": {}, "generation": "1"}

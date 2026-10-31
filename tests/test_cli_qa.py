@@ -7,7 +7,7 @@ from click.testing import CliRunner
 
 from pm_core.cli.qa import (
     qa_list, qa_show, qa_edit, qa_add_instruction, qa_add_artifact,
-    qa_add_regression, qa_docs,
+    qa_add_regression, qa_regression, qa_docs,
 )
 
 
@@ -90,6 +90,60 @@ def test_authoring_prompt_includes_doc_and_target_path(tmp_path):
     assert "artifact recipe" in prompt
     # Ground-truth section embedded
     assert "## File format" in prompt or "pm QA library" in prompt
+
+
+def _seed_regression(pm_root: Path) -> None:
+    reg = pm_root / "qa" / "regression"
+    reg.mkdir(parents=True)
+    (reg / "reg-test.md").write_text(
+        "---\ntitle: Reg Test\ndescription: smoke\n---\nrun the thing")
+
+
+def test_qa_regression_reports_a_missing_session(tmp_path):
+    """No resolvable pm session at all: nothing to drive, nothing launched."""
+    _seed_regression(tmp_path)
+    with patch("pm_core.cli.qa.state_root", return_value=tmp_path), \
+         patch("pm_core.cli.helpers._find_live_tui_pane",
+               return_value=(None, None)), \
+         patch("pm_core.claude_launcher.launch_claude") as launch:
+        result = CliRunner().invoke(qa_regression, ["reg-test"])
+    assert result.exit_code == 1
+    assert "No pm tmux session found" in result.output
+    launch.assert_not_called()
+
+
+def test_qa_regression_requires_a_live_tui_pane(tmp_path):
+    """The runner drives the TUI, so a dead recorded pane is not a target.
+
+    ``_find_live_tui_pane`` reports the session name even when the TUI
+    pane is gone (history/frames callers need that); launching a runner
+    against it would fail on the first ``pm tui send``.
+    """
+    _seed_regression(tmp_path)
+    with patch("pm_core.cli.qa.state_root", return_value=tmp_path), \
+         patch("pm_core.cli.helpers._find_live_tui_pane",
+               return_value=(None, "pm-stale")), \
+         patch("pm_core.claude_launcher.launch_claude") as launch:
+        result = CliRunner().invoke(qa_regression, ["reg-test"])
+    assert result.exit_code == 1
+    assert "No TUI pane found in session 'pm-stale'." in result.output
+    launch.assert_not_called()
+
+
+def test_qa_regression_launches_with_the_live_pane(tmp_path):
+    _seed_regression(tmp_path)
+    with patch("pm_core.cli.qa.state_root", return_value=tmp_path), \
+         patch("pm_core.cli.helpers._find_live_tui_pane",
+               return_value=("%42", "pm-test")), \
+         patch("pm_core.claude_launcher.launch_claude",
+               return_value=0) as launch:
+        result = CliRunner().invoke(qa_regression, ["reg-test"])
+    assert result.exit_code == 0
+    prompt = launch.call_args.args[0]
+    # The prompt names the session and the live pane the runner must drive.
+    assert "pm-test" in prompt
+    assert "%42" in prompt
+    assert launch.call_args.kwargs["session_key"] == "qa-regression:reg-test"
 
 
 def test_qa_add_regression_creates_in_regression_dir(tmp_path):

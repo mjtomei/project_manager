@@ -83,6 +83,32 @@ def _mark_tmux_session(env: dict) -> None:
         env["PM_IN_TMUX_SESSION"] = "1"
 
 
+# Must match pm_core.paths.SHARED_SOCKET_DIR.  Kept inline so the wrapper
+# does not import pm_core before it has chosen which pm_core to run (a
+# session override / pm_root would otherwise be shadowed by the installed
+# copy).  See tmux.socket_path_from_tmux_env for the full resolver.
+_PM_SOCKET_DIR = "/tmp/pm-sessions"
+
+
+def _mark_tmux_socket(env: dict) -> None:
+    """Export the private pm tmux socket when running under one.
+
+    Panes inherit ``PM_TMUX_SOCKET`` from the session environment, but
+    ``run-shell`` hooks and ``display-popup`` bodies only reliably inherit
+    ``$TMUX``.  Resolving it here — before any pm command runs — makes
+    every tmux call inside hooks/popups target the session's own server.
+    Ordinary (non-pm) tmux sessions are left alone.
+    """
+    if env.get("PM_TMUX_SOCKET"):
+        return
+    raw = env.get("TMUX")
+    if not raw:
+        return
+    path = raw.rsplit(",", 2)[0]
+    if path and os.path.dirname(path) == _PM_SOCKET_DIR:
+        env["PM_TMUX_SOCKET"] = path
+
+
 def _is_session_ipc_command(argv: list[str]) -> bool:
     """Return True for hidden commands that drive session-level IPC.
 
@@ -176,6 +202,7 @@ def main():
     4. Installed pm_core.
     """
     _mark_tmux_session(os.environ)
+    _mark_tmux_socket(os.environ)
     is_ipc = _is_session_ipc_command(sys.argv)
 
     selected_root: str | None = None
@@ -221,6 +248,7 @@ def main_for_session(session_tag: str):
     every other invocation goes through :func:`main`.
     """
     _mark_tmux_session(os.environ)
+    _mark_tmux_socket(os.environ)
 
     selected_root: str | None = None
     chosen_via: str = "dispatcher"

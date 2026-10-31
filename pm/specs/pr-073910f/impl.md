@@ -1,0 +1,1581 @@
+# Implementation Spec — Per-session tmux server isolation (pr-073910f)
+
+## Problem
+
+Every pm session currently shares the user's default tmux server (socket
+`/tmp/tmux-<uid>/default`) unless `--global`/`--group` was passed. A command
+that targets "the current client" or "the server" rather than a specific
+pane/session can therefore act on an unrelated pm session. Confirmed incident
+(#263 QA S25, 2026-10-28): `quit_app()` in `pm_core/tui/pane_ops.py` ran bare
+`tmux detach-client`, which detached the user from a *different* pm session
+(#249) on the shared server. Key delivery was targeted correctly; the
+subsequent client operation was not.
+
+The partial infrastructure already exists:
+
+- `pm_core/tmux.py::_tmux_cmd()` prepends `-S <socket>` when an explicit
+  `socket_path` is given or `PM_TMUX_SOCKET` is set.
+- `pm_core/paths.py::shared_socket_path(tag)` returns
+  `/tmp/pm-sessions/pm-<tag>` and `ensure_shared_socket_dir()` creates the
+  1777 directory.
+- `pm_core/cli/session.py::_session_start()` computes that socket only when
+  `--global`/`--group` is used, and only then sets `PM_TMUX_SOCKET` in the
+  process, the TUI command, and the tmux session environment.
+
+## Requirements (grounded in code)
+
+### R1 — Every pm session gets a dedicated tmux server
+
+`pm_core/cli/session.py::_session_start()` must, for **all** sessions
+(shared or not):
+
+1. Compute the session name first (`_get_current_pm_session()` /
+   `_get_session_name_for_cwd()` / `--dir` tag), then derive the session tag
+   from that name (`session_name.removeprefix("pm-")`).
+2. Compute `socket_path = str(paths.session_socket_path(tag))`, i.e.
+   `/tmp/pm-sessions/pm-<tag>`. `paths.session_socket_path()` is the new
+   canonical name; `paths.shared_socket_path()` remains as an alias.
+3. `ensure_socket_dir()` (existing `ensure_shared_socket_dir` renamed with an
+   alias) before first use.
+4. Set `os.environ["PM_TMUX_SOCKET"] = socket_path` immediately, so every
+   subsequent `tmux_mod` call (`create_session`, `split_pane`,
+   `create_grouped_session`, `pane_layout.rebalance`, …) targets the private
+   server without threading the argument through every call site.
+5. Pass `PM_TMUX_SOCKET` in the TUI command prefix (`PM_TMUX_SOCKET=... pm
+   _tui`) and via `tmux set-environment` for the session, exactly as the
+   shared path does today.
+6. Also `set-environment -g PM_TMUX_SOCKET <path>` on the private server so
+   server-level `run-shell` hooks and popups see it explicitly (tmux 3.4
+   already exposes `$TMUX` there; the global env is belt-and-braces and is
+   the documented propagation contract).
+
+Because `PM_SHARE_MODE` is mixed into `get_session_tag()`, shared and private
+sessions already hash to different tags and therefore different sockets; no
+extra branching is required beyond keeping the existing shared setup
+(`ensure_socket_dir`, permission/ACL grants, `window-size=smallest`).
+
+### R2 — Grouped sessions keep working on the private server
+
+`create_grouped_session()` (`tmux new-session -d -t base -s base~N`) and the
+group helpers (`list_grouped_sessions`, `find_unattached_grouped_session`,
+`next_grouped_session_name`, `list_clients_in_group`, `detach_client`,
+`session_group`) must all run against the same socket. They take
+`socket_path` and otherwise fall back to `PM_TMUX_SOCKET`; R1 makes that
+variable always present. (`current_or_base_session()` takes no
+`socket_path` — it resolves the current pane through the ambient server, so
+it is only correct from a process whose `PM_TMUX_SOCKET` is already
+selected; every caller is.) `_session_start()` must pass the computed
+`socket_path` explicitly on the create/attach path (as it does for shared
+sessions today).
+
+### R3 — Locate sessions by socket (attach/list/discovery)
+
+1. `pm session` (attach) uses the deterministic socket for the target tag; no
+   ambient-state guessing. `--print-connect` prints `tmux -S <socket> attach`
+   for private sessions too (not only shared ones).
+2. `pm session kill` targets the server that hosts the session (private
+   socket preferred, legacy default server as fallback), kills grouped
+   sessions then the base, and unlinks the socket file (tmux leaves it behind
+   after `kill-server` / last-session exit — verified).  Session selection
+   tries the cwd-derived name first and the ambient session second, choosing
+   the first that is actually running — so a workdir clone kills the session
+   hosting it, while a different project's ambient session is never preferred
+   over the cwd's live one.  The destructive lookup matches the session name
+   **exactly** (`find_exact_session_server`, target `=name`): a bare tmux
+   target is a prefix match, so a surviving grouped session `pm-x~1` must not
+   make `pm-x` look alive to kill (QA scenario 6; discovery keeps prefix
+   matching on purpose — see `find_session_server`).
+3. New `pm session list` enumerates pm sessions across **all** pm servers:
+   every `pm-*` socket in `/tmp/pm-sessions/` plus the default server
+   (legacy). It reports base session name, socket, attached client count,
+   and marks shared sessions. Stale/foreign sockets are skipped, not fatal.
+4. `pm_core/cli/helpers.py::_find_tui_pane()` (used by every `pm tui`
+   subcommand) resolves the server for an explicit `--session`, the current
+   pane, the cwd-derived session, and finally scans pm servers for a live
+   TUI pane. It selects `PM_TMUX_SOCKET` for the found session before
+   returning, so callers' `tmux_mod` calls hit the right server. The cwd
+   lookup only applies when the process is *not* inside a pm session: there
+   the ambient session wins, because a running session derived from the cwd
+   would otherwise be resolved from inside a different pm session (review
+   loop 7af7 i3). The final scan covers *all* servers only when neither
+   branch above identified a session (a plain shell); when one did, it is
+   scoped to that session's server, because pane ids are per server and
+   `pm tui send` delivers keys unscoped (review-loop 7af7 i1).  When the
+   identified session is the ambient one, its server is scanned even if
+   `list_pm_sessions()` does not report it — that function enumerates
+   socket *files*, and a live server can outlive an unlinked socket
+   (review-loop 3cc7 i1).  The current-pane branch resolves the ambient
+   name through `pane_registry.pm_session_name()` rather than a raw `pm-`
+   prefix test, so a user's own grouped view of a pm session
+   (S118/S121/S124, whose name need not be `pm-*`) still identifies that
+   session instead of falling through to the unscoped scan
+   (review-loop 703c i1).
+5. `pm_core/tmux.py` gains `list_pm_sessions()` and
+   `socket_path_from_tmux_env()`; `pm_core/paths.py` gains
+   `session_socket_path()` / `ensure_socket_dir()`.
+6. `pm_core/cli/helpers.py::_get_pm_session()` also selects the server that
+   hosts the resolved session.  Commands that address a session by name
+   (`pm pr start`, `pm pr review`, `pm meta`, `pm container build`,
+   `pm session home`, `home_window.refresh_home`, …) resolve the session
+   outside tmux as well, where there is no ambient `PM_TMUX_SOCKET`/`$TMUX`;
+   without this they would query the default server and silently conclude a
+   live private session is gone.  The lookup is skipped when the process is
+   already inside a pm session, so the common in-pane path pays nothing.
+
+### R4 — Explicit propagation to subprocesses, hooks and popups
+
+1. `pm_core/wrapper.py::main()` and `main_for_session()` resolve the ambient
+   socket at process start: `PM_TMUX_SOCKET` if set, else the socket in
+   `$TMUX` **when it lives under `/tmp/pm-sessions/`**, and export it. This
+   covers `run-shell` hooks (`pm _pane-closed`, `_pane-opened`,
+   `_window-resized`, `_pane-exited`, `_pane-switch`) and `display-popup`
+   bodies (`pm _popup-show`, `_popup-picker`, `_popup-cmd`), which inherit
+   `$TMUX` but not `PM_TMUX_SOCKET` (verified on tmux 3.4).
+2. `pm_core/cli/__init__.py::main()` does the same for `python -m pm_core`.
+3. `_tmux_cmd()` gains a `use_env=False` switch so callers can explicitly
+   address the **default** server (legacy detection, `pm session list`).
+   `session_exists()` forwards it.
+   **`use_env=False` alone is not enough**: the tmux *binary* falls back to
+   the socket named by `$TMUX` whenever no `-S` is given (verified on tmux
+   3.4), so a process running inside a pm pane still reaches the private
+   server.  `pm_core/paths.py::default_socket_path()`
+   (`$TMUX_TMPDIR`/`/tmp` + `tmux-<uid>/default`) is therefore passed as
+   `-S` wherever the default server is meant: `session_exists(use_env=False)`,
+   `list_pm_sessions()`'s default-server pass, `session_kill`'s legacy
+   branch, and `helpers._use_tmux_socket(None)`.  Without this,
+   `pm session list` run from inside a pm pane listed the current private
+   server a second time as "(default server)", and legacy detection, legacy
+   kill and `pm tui -s <legacy>` from inside another pm session could
+   address the wrong server.  (A user who runs tmux with `-L <name>` keeps
+   the default server unused; those legacy sessions are not found — the
+   same as before this change.)
+4. Fix `pm_core/qa_status.py::_find_attached_session()` / `_switch_to_window()`
+   to build tmux argv with `tmux_mod._tmux_cmd(...)` instead of bare `tmux`,
+   so QA panes on a private server switch the right client.
+5. Do not rely on `display-popup` propagating `PM_TMUX_SOCKET` (existing QA
+   note pr-2d0588a); the `$TMUX` resolver in (1) is the contract.
+
+### R5 — Fix the actual detach bug
+
+`pm_core/tui/pane_ops.py::quit_app()` must never run bare `detach-client`.
+New `tmux_mod.detach_current_client()`:
+
+1. Read `$TMUX_PANE`, resolve its window (`pane_window_id`).
+2. `list-clients` on the session's server; keep clients whose
+   `client_session` is the base session or a `base~N` grouped session **and**
+   whose session's active window equals the TUI pane's window.
+3. Detach the most recently active candidate by TTY
+   (`detach-client -t <tty>`). Ties are resolved by `client_created`.
+4. If no candidate matches, fall back to `detach-client -s <session>` for the
+   first attached session in the group; if none, do nothing.
+5. Return whether a client was detached; `quit_app()` still calls `app.exit()`
+   when not in tmux.
+
+This keeps a multi-client attach within one pm session working and, combined
+with the private server, cannot reach another pm session.
+
+### R5b — Never adopt an ambient session this HOME does not know
+
+`_known_ambient_session()` returns the ambient `$TMUX_PANE` session only
+when that session's pane registry exists in the **current** HOME.
+`_session_start()` resolves its target through
+`_resolve_start_session_name()` (ambient or cwd-derived); `pm session
+kill`/`mobile` include the ambient session as a fallback candidate only
+when it is known.  Otherwise the cwd-derived name is used.  Without this guard, a
+process running under a different HOME (tests, tooling, a temporary sandbox)
+that inherits `$TMUX`/`$TMUX_PANE` adopts a foreign session, sees an empty
+registry, concludes the TUI is missing, and respawns a TUI into the live
+session.  Regression tests cover both branches.
+
+### R6 — Rollout safety (existing live sessions)
+
+New sessions get private servers. Existing sessions on the default server
+must be left untouched:
+
+1. If the private socket has no session **and** a session with the same name
+   exists on the default server, `_session_start()` attaches to the legacy
+   session and prints a one-line note that `pm session kill` + `pm session`
+   migrates it. No migration, no detach, no restart, no kill is performed
+   automatically. `_resolve_session_socket()` returns `None` so nothing is
+   propagated into the session, but it exports
+   `PM_TMUX_SOCKET=str(default_socket_path())`: *clearing* the variable is
+   not enough, because with no `-S` the tmux binary follows `$TMUX`, which
+   from inside another pm pane names that session's private server — the
+   legacy session would look missing and the create path would duplicate it
+   on the wrong server (same failure mode as R4.3).
+2. `pm session kill` is the only command that removes the legacy session, and
+   only when the user explicitly runs it.
+3. Never call `kill-server`; use `kill-session` for the base/grouped sessions
+   and unlink the socket file afterwards.
+4. No destructive QA/tests against the user's live server: every fixture uses
+   its own disposable socket under a temp dir (or `/tmp` when the pytest
+   path would exceed the ~108-byte Unix socket limit).
+
+### R7 — Long paths and stale sockets
+
+1. Unix socket paths are limited (~108 bytes). If
+   `/tmp/pm-sessions/pm-<tag>` is too long, `session_socket_path()` falls back
+   to `/tmp/pm-sessions/pm-<md5(tag)>` (deterministic, 35 chars). Discovery is
+   unaffected because session names are read from the server, not the
+   filename.
+2. A stale socket file (server SIGKILLed) is left on disk; `has-session`
+   returns non-zero and tmux reuses the path on the next `new-session`
+   (verified). `session_exists()` therefore remains the liveness check.
+3. Private sockets are created by tmux with mode 0600 (verified); shared
+   sessions keep the existing chmod/`server-access` path.  Because the
+   socket directory is world-writable, private sessions refuse to use an
+   existing socket file owned by another UID (shared sessions skip this
+   check — the sharing user owns the socket by design).
+
+## Implicit requirements
+
+- **Session-name ↔ tag invariant**: `_session_tag_from_name()` and
+  `_get_session_name_for_cwd()` already assume `pm-<tag>`; the socket must be
+  derived from the final session name (not re-derived from cwd) so workdir
+  clones and `--dir` joins resolve the same server.
+- **No double sessions during rollout**: a private session and a legacy
+  session with the same name must not both be created. Legacy detection runs
+  before the create path.
+- **Hooks are per server**: `_register_tmux_bindings()` installs bindings and
+  hooks through `_tmux_cmd`, so R1 automatically scopes them. It must run
+  after `PM_TMUX_SOCKET` is set (it does — called from `_session_start`).
+- **Pane registry keys stay `pm-<tag>`**: registry files, capture dirs,
+  runtime state, and session configs are keyed by the session name, which is
+  unchanged. Only the tmux server changes.
+- **`pm session --print-connect` / TUI "connect" screen** must show the
+  socket command for private sessions too (`pane_ops.show_connect`).
+- **`pm session mobile`** must resolve the private socket when run outside
+  the session (it calls `session_exists`/`list_windows` by name).
+- **Existing tests** that assert `_tmux_cmd` output must keep passing: the
+  `$TMUX` fallback lives in the CLI/wrapper entry points, not in
+  `_tmux_cmd`, and is gated to sockets under the pm socket directory.
+
+## Ambiguities and resolutions
+
+1. **"Update pm session attach/list commands"** — there is no `pm session
+   list` command today; `pm session` itself is the attach command. Resolution:
+   make `pm session` (attach), `--print-connect`, `kill`, `mobile`, and the
+   `pm tui` discovery path socket-aware, and add a new `pm session list`
+   across servers. This is the smallest interpretation that satisfies
+   "locate sessions by their sockets".
+2. **Socket directory for private sessions** — the task suggests
+   `/tmp/pm-sessions/pm-{tag}`, which is the existing shared dir (1777).
+   Resolution: keep that path (as instructed). tmux creates private sockets
+   mode 0600, and shared sessions retain their explicit chmod/ACL path, so
+   private servers are not connectable by other users on tmux 3.4. A future
+   per-uid directory is noted as a hardening option, not implemented here.
+3. **Legacy session handling** — "preserve existing live sessions … do not
+   migrate" could mean (a) attach to the legacy session or (b) start a
+   duplicate private session and leave the legacy one running. Resolution:
+   (a). It preserves the live controller exactly, avoids two servers owning
+   the same pane-registry keys, and the user retires the legacy session
+   explicitly via `pm session kill`.
+4. **Global environment propagation** — set `set-environment -g` on the
+   private server *and* resolve from `$TMUX` at entry. Resolution: both.
+   `$TMUX` is the verified mechanism for popups/hooks on tmux 3.4; the
+   global env documents intent and helps subprocesses that sanitize env.
+5. **Detaching with multiple clients on the same grouped session** — a pane
+   cannot identify which client pressed the key. Resolution: prefer the
+   client viewing the TUI's window with the most recent activity; ties fall
+   back to creation order. Still scoped to one pm session/server.
+
+No **[UNRESOLVED]** ambiguities.
+
+## Edge cases
+
+- `pm session` from inside another pm session for a different repo: the
+  ambient session name wins (existing behavior), and the socket is derived
+  from that name, not the ambient `PM_TMUX_SOCKET`.
+- `pm session --dir` for a shared session: tag includes `PM_SHARE_MODE`
+  (set by `--global`/`--group`), so the shared socket is computed.
+- `pm session kill` with a stale socket file and no server: reports "no
+  session" and unlinks the stale file.
+- `pm session list` when `/tmp/pm-sessions` does not exist: lists legacy
+  default-server pm sessions only.
+- A socket owned by another user / unreadable: `list-sessions` fails, row is
+  skipped with a debug log; never raises.
+- Very long repo names: hashed socket filename (R7).
+- `pm tui send -s pm-<tag>` from outside tmux: `_find_tui_pane` selects the
+  private socket and verifies the pane still exists before returning it.
+- TUI `q` pressed while the session is unattached: no client to detach; the
+  TUI logs and continues rather than issuing a server-wide detach.
+- `--global`/`--group` still set `window-size=smallest` on base + grouped
+  sessions and still grant `server-access` on the private/shared socket.
+- Non-git directory: session name falls back to `pm-<dir>-00000000`; the tag
+  is taken from that name, so a deterministic socket still exists.
+
+## Incident during implementation (recorded honestly)
+
+While validating `_session_start`, an unisolated smoke script inherited the
+live session's `TMUX`/`TMUX_PANE` and ran under a temporary HOME.  It adopted
+the live session `pm-project_manager-5b29c418`, found an empty pane registry
+(temp HOME), and split a stray `pm _tui` pane (`%2639`) into the live `@333`
+main window; the stray TUI also wrote itself into the real pane registry and
+removed the live TUI pidfile.
+
+Before the stop instruction, cleanup killed the stray pane, killed grouped
+session `pm-project_manager-5b29c418~2` (the shepherd reports `~2` pre-existed,
+so this was an unauthorized kill of an unattached grouped session), removed
+the `%2639` registry entry, and rewrote the live pidfile with controller pid
+3432234.  No client was detached; the base session, `~1`, controller
+`%580`/3432234 and user client 2379769 were not touched.  A guide pane
+`%2640` remains under shepherd review.  All further live-session actions
+stopped on instruction.
+
+R5b is the root-cause guard.  Every destructive fixture must clear
+`TMUX`, `TMUX_PANE`, `PM_TMUX_SOCKET`, `PM_SHARE_MODE`, `PM_IN_TMUX_SESSION`
+and `PM_PROJECT` **before importing pm_core**, use a disposable HOME and
+socket directory, and bind every mutation to that socket.  The preserved
+smoke script is preserved at `pm/specs/pr-073910f/session_start_smoke.py`,
+was rewritten accordingly, and passes without touching the live server.
+
+## Acceptance
+
+1. Unit tests: socket path derivation (deterministic, prefix, long-path
+   hash), `$TMUX` parsing/eligibility, `use_env=False`, precise detach
+   selection, `list_pm_sessions` parsing, `_find_tui_pane` socket scan.
+2. Integration tests with **disposable sockets** (never the live server):
+   two servers, each with a session, panes, hooks and an attached client.
+   Running `quit_app`/`detach_current_client` and `pm session kill`-style
+   cleanup on server A leaves server B's client attached and its sessions,
+   panes and hooks intact. Hooks set with `set-hook -g` on A are absent on B.
+3. `pm session` in a fresh repo creates `/tmp/pm-sessions/pm-<tag>`, sets
+   `PM_TMUX_SOCKET` in panes, and `pm session list` shows it.
+4. A legacy default-server session is attached without being migrated or
+   killed, with an explanatory note.
+
+## Review iteration (2026-10-28, review-loop b972 i1)
+
+Two gaps found reviewing the first implementation:
+
+1. **`use_env=False` did not reach the default server.** The tmux binary
+   honours `$TMUX` when no `-S` is given, so from inside a pm pane
+   `pm session list` listed the current private server a second time as
+   "(default server)", and legacy detection / `pm session kill`'s legacy
+   branch / `pm tui -s <legacy>` could address the wrong server.  Fixed by
+   adding `paths.default_socket_path()` and passing it as `-S` wherever the
+   default server is meant (`session_exists(use_env=False)`,
+   `list_pm_sessions()`, `session_kill`, `helpers._use_tmux_socket(None)`).
+   Regression tests added.  Also added the `shared` flag to
+   `list_pm_sessions()` rows / `pm session list` (R3.3).
+2. **Commands that address a session by name stopped finding private
+   sessions outside tmux.** `pm meta`, `pm container build`,
+   `pm session home`, `pm pr start`/`review`/`merge` and
+   `home_window.refresh_home` resolve the session through
+   `_get_pm_session()`; with no ambient `PM_TMUX_SOCKET`/`$TMUX` they
+   queried the default server and silently degraded.  `_get_pm_session()`
+   now selects the hosting server for the cwd-derived session (skipped
+   when already inside a pm session, so the in-pane path is unchanged).
+
+Also made two pre-existing `tests/test_shared_sessions.py` assertions
+independent of an ambient `PM_TMUX_SOCKET`: every pm pane now exports it,
+so those tests failed when run from inside a pm session.
+
+## Review iteration (2026-10-28, review-loop b972 i2)
+
+The i1 lesson (R4.3: `use_env=False` alone does not reach the default
+server) had not been applied to the legacy rollout path, and two smaller
+gaps surfaced:
+
+1. **The legacy branch still relied on `$TMUX`.** `_resolve_session_socket()`
+   *cleared* `PM_TMUX_SOCKET` for a legacy session, so every later
+   `_tmux_cmd()` ran without `-S` and the tmux binary followed `$TMUX`.  Run
+   from inside another pm pane that names that session's private server, so
+   the legacy session looked missing and `_session_start()` would create a
+   duplicate session on the wrong server (reachable when the ambient session
+   is not known to this HOME, i.e. exactly the R5b scenario).  It now exports
+   `PM_TMUX_SOCKET=str(default_socket_path())`; the returned `socket_path`
+   stays `None` so nothing is propagated into the session (R6.1).
+2. **`pm session --print-connect` skipped the R5b guard.** It used
+   `_get_current_pm_session()` directly while `pm session` used
+   `_resolve_start_session_name()`, so the printed command could name a
+   foreign session that `pm session` would refuse to adopt.  Both now use
+   `_resolve_start_session_name()`.
+3. **`pm qa regression -s <session>` accepted a session with no TUI pane.**
+   `_find_tui_pane()` deliberately returns the session name when the pane is
+   gone (history/frames read files keyed by the session), but the QA runner
+   drives that pane, so it now requires a live `pane_id` and errors with the
+   session name instead of launching a runner that cannot interact.
+4. The private-socket ownership refusal now names the remedy (the socket's
+   owner must remove a stale file; a 1777 directory's sticky bit prevents
+   anyone else from doing it).
+
+## Review iteration (2026-10-28, review-loop b972 i3)
+
+Three quality/robustness items, no requirement changes:
+
+1. **One source of truth for "which server hosts this session".** The
+   private-socket-then-default-server lookup was implemented four times
+   (`session._pick_existing_session`, `session_kill`,
+   `pm session --print-connect`, `helpers._select_session_socket`) and had
+   already diverged once across i1/i2.  New
+   `tmux.find_session_server(name) -> (socket_path, is_private)` (R4.3
+   semantics: the private socket is probed first, the default server is
+   returned by its *explicit* path, `(None, False)` when neither has the
+   session) is now the only implementation; all four call sites use it.
+   `_resolve_session_socket()`'s legacy detection uses it too, so "no
+   private session but one on the default server" is expressed once.
+2. **`_find_tui_pane()` no longer leaks env mutations on failure.**  The
+   cross-server scan re-points `PM_TMUX_SOCKET` at each server in turn; when
+   nothing is found it now restores the ambient value, so a failed lookup
+   cannot leave the process addressing an unrelated server.
+3. **Integration fixtures respect the AF_UNIX path limit.**  The two
+   disposable-server tests now take a `short_sock_dir` fixture that falls back to
+   a short `/tmp` directory when the pytest `tmp_path` would exceed the
+   ~108-byte socket-path limit (the contract R6.4 already documented).
+
+New tests: `find_session_server` (private wins / explicit default / missing
+/ non-pm names never map to a pm socket), `pm session kill` targeting the
+private socket, the legacy default socket, and the not-found stale-socket
+cleanup, plus the `_find_tui_pane` env-restoration case.
+
+## Review iteration (2026-10-28, review-loop b972 i4)
+
+Verification pass over the whole change set plus test-coverage gaps; no
+requirement changes.
+
+1. **The grouped-session detach path had no integration coverage.**  The
+   existing disposable-server test attaches its client to the *base*
+   session, but `pm session` always attaches to a grouped session
+   (`base~N`), so the production shape (TUI pane in the base session,
+   client attached to `~1`) was only covered by a mock.  New
+   `test_detach_targets_client_of_grouped_session` builds a real
+   base + `~1` pair on a disposable socket, attaches a real client to
+   `~1`, and asserts `detach_current_client()` removes that client while
+   leaving both sessions alive.  Verified manually first; it passes.
+2. **`pm session --print-connect`, `pm session list` and the TUI connect
+   screen had no tests** (R3.1 / R3.3 / implicit requirement).  Added
+   `TestPrintConnect` (private socket command vs. legacy plain attach),
+   `TestSessionListCommand` (header, private row, `(default server)`,
+   `(shared)` marker, empty listing) and `TestShowConnect` (socket
+   command, legacy plain attach, no-session message).
+3. **`pm session list` column width is computed from the data** instead of
+   a fixed 40 columns, so long session names no longer misalign the
+   client count and socket.
+4. Removed a dead `try/except (OSError, ValueError)` around a `Path`
+   comparison in `socket_path_from_tmux_env` (a `$TMUX` value cannot
+   contain a NUL byte) and corrected the `ConnectScreen` docstring, which
+   still said "for shared sessions".
+
+Full suite: 4139 passed / 1 skipped.
+
+## Review iteration (2026-10-28, review-loop b972 i5)
+
+Robustness and truthfulness of the detach result; no requirement changes.
+
+1. **`detach_current_client()` claimed a detach that did not happen.**  Both
+   the precise (`detach-client -t <tty>`) and the session-level fallback
+   (`detach-client -s <session>`) branches discarded the command's exit
+   status and returned `True` unconditionally.  `quit_app()` uses the return
+   value to decide what to log, so a failed detach was reported as success.
+   Both branches now return `False` and log a warning when tmux rejects the
+   command (the common real cause is the client disappearing between
+   `list-clients` and `detach-client`).
+2. **The session-level detach fallback had no unit test.**  Added
+   `test_falls_back_to_session_detach` (client attached to a grouped session
+   viewing a *different* window, so the per-window match finds nothing) and
+   `test_failed_detach_is_not_reported_as_success`.
+3. **`list_pm_sessions()` now debug-logs skipped servers**, matching the
+   documented edge case ("row is skipped with a debug log"): stale sockets
+   (server exited), sockets owned by another user, non-socket entries and
+   unreadable entries in the shared socket directory.
+
+Full suite: 4141 passed / 1 skipped.
+
+## Review iteration (2026-10-28, review-loop b972 i6)
+
+Verification pass plus small clarity/coverage fixes; no requirement changes.
+
+1. **The legacy rollout note said "shared default tmux server".**  In pm,
+   "shared" means `--global`/`--group`; the legacy session is private and is
+   only on the default server because it predates per-session servers.
+   Reworded to "was started before per-session tmux servers and still runs
+   on the default tmux server", with a comment so the word does not creep
+   back.
+2. **`pm session kill`'s ambient-candidate wiring had no test.**  The
+   `_known_ambient_session()` guard (R5b) and `_pick_existing_session()`
+   (R3.2) are unit-tested individually, but nothing asserted the two-line
+   wiring in `session_kill`.  Added
+   `test_kills_the_ambient_session_when_the_cwd_one_is_absent` (a workdir
+   clone kills the session hosting it, on that session's socket) and
+   `test_ignores_an_ambient_session_this_home_does_not_know` (a foreign
+   HOME's inherited session is never killed).  `_invoke` gained optional
+   `ambient` / `hosting_for` knobs for the per-name case.
+3. **`list_pm_sessions()` import tidy:** `default_socket_path` is imported
+   once beside `SHARED_SOCKET_DIR` instead of inside the `collect()`
+   closure on every server.
+
+Also re-verified the full `_session_start` path end-to-end with
+`pm/specs/pr-073910f/session_start_smoke.py` on a disposable socket (private
+server, session env, global env and hooks all correct; the default server
+untouched).
+
+Full suite: 4143 passed / 1 skipped.
+
+## Master integration (2026-10-29)
+
+`origin/master` @ `4a74d88085edffcc300cb21f31777a798d647782` (merge base
+`89e3c501`) was merged into this branch, 215 commits.  No textual conflicts.
+One **semantic** conflict that a clean auto-merge could not catch:
+
+1. **`_find_tui_pane()` gained a second owner while this PR was open.**
+   Master added `_find_live_tui_pane()` / `_live_panes_and_tuis()` and a test
+   asserting that `_find_tui_pane("pm-test")` still returns the recorded pane
+   even when it is dead, because `pm autostart` reports a stale pidfile from
+   it.  This PR had made `_find_tui_pane()` liveness-aware (i2) and required
+   the session to exist.  Reconciled by responsibility:
+   - explicit-session branch: returns the **recorded** pane with no
+     `session_exists`/`pane_exists` gate (new `_recorded_tui_pane()`), so
+     master's autostart contract and the i2 "return the session name even
+     when it is gone" rule both hold;
+   - in-tmux, cwd and cross-server branches: keep the liveness check
+     (`_registry_tui_pane()`), because there the answer decides *which
+     server* is being addressed;
+   - `pm qa regression` was the one pane-*driving* caller still using
+     `_find_tui_pane()`; it now uses `_find_live_tui_pane()`, which is
+     master's sanctioned live-pane filter.  The i2 requirement (the runner
+     drives the pane, so it must be alive) is unchanged — only the mechanism
+     moved to the shared helper.
+2. **Discovery must degrade when tmux cannot run.**
+   `tmux.find_session_server()` now returns `(None, False)` on `OSError`
+   (tmux missing/unexecutable) instead of propagating out of
+   `_select_session_socket()` and `_find_tui_pane()`.  Master's
+   `test_tmux_unavailable_degrades_to_no_live_tui` documents the contract.
+3. The preserved smoke script's default-server probe now passes
+   `-S str(paths.default_socket_path())` instead of relying on a bare
+   `tmux` (the R4.3 lesson: the binary follows `$TMUX` when no `-S` is
+   given).
+
+Also committed on top of the merge: the interrupted working tree from the
+2026-10-29 test-session-leak restart (shared `_resolve_target_session()` for
+`pm session kill`/`mobile`, flag validation before `--print-connect` prints
+a command, and their tests).  It was verified byte-identical to the
+shepherd's preserved `pr-278/dirty.patch` before being committed.
+
+Validation on the integrated head:
+- full suite: **4557 passed / 1 skipped**;
+- `pm/specs/pr-073910f/session_start_smoke.py` re-run end-to-end on a
+  disposable socket (private server, session env, global env and hooks
+  correct; default server untouched).
+
+## Review iteration (2026-10-29, review-loop d1c0 i1)
+
+Verification pass over the integrated head; one user-visible fix, one
+consistency tidy, one new test, plus a documented limitation.  No
+requirement changes.
+
+1. **The printed connect command for a *legacy* session still depended on
+   ambient `$TMUX`.**  Both `pm session --print-connect` and the TUI
+   "connect" screen emitted `tmux attach -t <session>` when the session
+   lives on the default server.  That is correct from a plain shell and
+   from inside the same legacy session, but pasted into another pm pane a
+   bare `tmux` follows `$TMUX` and attaches to *that* pane's private
+   server — the exact R4.3 failure mode this PR removes everywhere else.
+   Both now print `tmux -S <default_socket_path()> attach -t <session>`,
+   which is correct from any context (and names the session, because one
+   default server can host several legacy pm sessions).  The TUI screen
+   now resolves the hosting server through `tmux.find_session_server()`
+   instead of probing the private socket itself, so the two surfaces share
+   one implementation.  Tests: `TestPrintConnect` and `TestShowConnect`
+   updated, plus a new "private session without `PM_TMUX_SOCKET`" case.
+2. **`_find_live_tui_pane()` derived the base session name with
+   `rsplit("~", 1)`** while every other call site uses
+   `pane_registry.base_session_name()` (`split("~")[0]`).  Switched to the
+   shared helper for one definition of "grouped session base".
+3. **`find_session_server()`'s `OSError` contract had no direct test.**
+   The master-integration note relies on it degrading to `(None, False)`
+   when tmux cannot run; added `test_tmux_unavailable_degrades_to_none`.
+4. **`pm session kill` unlinked the socket of a *live* server.**  When the
+   session name is not found (`find_session_server()` → `None`) the branch
+   assumed the socket file was stale and removed it.  A live server whose
+   base session was killed elsewhere can still host grouped sessions
+   (`pm-x~1`), and unlinking its socket strands every client attached to
+   it (new clients create a fresh server at the same path).  New
+   `tmux.server_alive(socket_path)` (`list-sessions` on that socket, True
+   when tmux cannot be run so nothing is deleted on a guess) gates the
+   unlink.  Tests: `test_missing_session_keeps_a_live_socket` (mock) and
+   `test_server_alive_distinguishes_stale_from_live` (disposable socket).
+
+Known limitation (documented, not fixed — fail-safe by design): R5b's
+guard accepts an ambient session only when
+`~/.pm/pane-registry/<session>.json` exists in the *current* HOME.  A user
+who joined someone else's `--global`/`--group` session has no registry
+file in their own HOME, so a plain `pm session` started inside that
+session never re-joins it — from a **workdir clone** *or* from the repo
+directory itself — and instead creates a separate private session for that
+user.  (d1c0 i10 correction: the earlier claim that "from the repo
+directory the cwd-derived tag equals the shared tag" was wrong.  The share
+mode is part of the tag hash, and `_session_start` clears `PM_SHARE_MODE`
+when no `--global`/`--group` flag is passed, so the plain tag is the
+*private* one — verified directly: `get_session_tag` for one repo returns
+a different hash with and without `PM_SHARE_MODE`.  Re-joining does work
+when the joiner repeats the flag — `pm session --global` from the repo
+directory recomputes the shared tag and attaches to the shared socket —
+and always works via the documented
+`pm session --global --dir <owner's repo>/pm`.)  This is the same
+trade-off as the i5 note (deleting the registry file while a session is
+live makes `pm session` create a separate session); adopting the ambient
+session without proof of local ownership is what caused the 2026-10-28
+incident.
+
+## Review iteration (2026-10-29, review-loop d1c0 i2)
+
+Verification pass over the integrated head; two robustness fixes of the
+same class the previous iterations addressed.  No requirement changes.
+
+1. **Discovery crashed instead of degrading when tmux cannot be run.**
+   `find_session_server()` already returns `(None, False)` on `OSError`
+   (master's `test_tmux_unavailable_degrades_to_no_live_tui` documents
+   the contract), but the rest of the same scan still propagated the
+   error: `_find_tui_pane()` called `session_exists()`/`pane_exists()`
+   unguarded and `list_pm_sessions()` called `_run()` unguarded, so
+   `_find_tui_pane()` and `_find_live_tui_pane()` (no explicit session)
+   raised `OSError` on a machine without an executable tmux.  All three
+   now degrade — "no session" / "no server" — instead of crashing, which
+   is what every caller (`pm autostart`, `pm tui view`, `trigger_tui_reload`,
+   `pm pr merge`'s window cleanup) already assumes.
+   Test: `test_no_tmux_degrades_to_no_session`.
+2. **`pm session kill` could unlink a live server's socket on the legacy
+   path.**  d1c0 i1 gated the "session not found" unlink on
+   `server_alive()`, but the legacy branch (session killed on the
+   *default* server, `on_private` False) still unlinked the private
+   socket path whenever *any* file existed there.  A file at that path
+   can belong to a live server hosting only grouped sessions of another
+   name; unlinking it strands their clients.  The unlink is now
+   `on_private or (exists and not server_alive(...))`: the private kill
+   still removes the file it just emptied, the legacy kill only removes
+   a socket nothing answers on.
+   Tests: `test_legacy_kill_keeps_a_live_private_socket`,
+   `test_legacy_kill_removes_a_stale_private_socket`.
+
+Re-verified end to end with `pm/specs/pr-073910f/session_start_smoke.py`
+on a disposable socket (private server, session env, global env and hooks
+correct; default server untouched).
+
+Residual notes unchanged and still non-blocking: the uid ownership check
+exists only on `pm session` start (other paths fail closed — a 0600 socket
+owned by another user cannot be connected to, so discovery falls back to
+the default server); the `/tmp/pm-sessions` literal stays duplicated in
+`wrapper._mark_tmux_socket` and `qa_status._tmux_argv` by design (no early
+`pm_core` import); pane IDs are no longer globally unique across servers
+but every consumer resolves a pane together with its session/socket; R5b
+relies on the pane registry file, so deleting it while a session is live
+makes `pm session` create a separate session rather than adopt the live
+one (fail-safe); the TUI connect screen keeps a bare
+`tmux attach -t <name>` as a last resort when no server hosts the session
+*and* `PM_TMUX_SOCKET` is unset (unreachable for a live session: every
+private session exports the variable and legacy sessions are found by
+`find_session_server`).
+
+## Review iteration (2026-10-29, review-loop d1c0 i3)
+
+Verification pass over the integrated head; one reuse cleanup and one
+robustness fix in `detach_current_client` (R5).  No requirement changes.
+
+1. **`detach_current_client()` re-implemented two existing helpers.**
+   It issued its own `display -t <pane> -p "#{window_id}"` (exactly
+   `tmux.pane_window_id`) and its own per-client "is this client's session
+   viewing the TUI's window" query (exactly `tmux.sessions_on_window`,
+   already used by the review loop, sign-off, watcher and home window).
+   Two implementations of "which sessions are looking at this window" is
+   the divergence risk the i3 note fixed for
+   `_pick_existing_session`/`find_session_server`.  Both helpers now take
+   an optional `socket_path` (positional signature unchanged) and
+   `detach_current_client` uses them: one window query for the pane, one
+   per *session* in the group instead of one per client.  Behaviour is
+   unchanged, including the "no resolvable pane window → any session in
+   the group counts" fallback.
+2. **A non-numeric `client_activity`/`client_created` crashed the quit
+   path.**  `int(activity or 0)` raised `ValueError` out of the TUI's
+   Ctrl-Q handler.  tmux always prints integers, but `list_pm_sessions()`
+   already parses the same kind of field defensively
+   (`attached.isdigit()`), so both now share a small `_int_or_zero()`
+   helper.
+
+New tests: `test_explicit_socket_is_used_for_every_call` (every tmux
+query carries `-S <socket>` when the caller passes `socket_path=`, not
+just the detach) and `test_tolerates_non_numeric_client_timestamps`.
+
+Incidental fix (outside this PR's scope, noted on the PR): three
+`tests/test_tui_pidfile.py::TestSignalDelivery` tests used PID 1234 as a
+stand-in for a live TUI and assumed it was not a zombie.  In a container
+where PID 1 does not reap, an unreaped child can land on that PID (it did
+here, after tmux panes' `sleep` children were killed), so the tests failed
+with "process is a zombie" on an unmodified tree.  They now pin
+`is_zombie` to False; zombie handling keeps its own real-process test.
+
+Residual notes unchanged and still non-blocking: the uid ownership check
+exists only on `pm session` start (other paths fail closed — a 0600 socket
+owned by another user cannot be connected to, so discovery falls back to
+the default server); the `/tmp/pm-sessions` literal stays duplicated in
+`wrapper._mark_tmux_socket` and `qa_status._tmux_argv` by design (no early
+`pm_core` import); pane IDs are no longer globally unique across servers
+but every consumer resolves a pane together with its session/socket; R5b
+relies on the pane registry file, so deleting it while a session is live
+makes `pm session` create a separate session rather than adopt the live
+one (fail-safe); the TUI connect screen keeps a bare
+`tmux attach -t <name>` as a last resort when no server hosts the session
+*and* `PM_TMUX_SOCKET` is unset (unreachable for a live session).
+
+## Review iteration (2026-10-29, review-loop d1c0 i4)
+
+Verification pass over the integrated head; one cross-server correctness
+fix, no requirement changes.
+
+1. **`_find_live_tui_pane()` could match a pane id against the wrong
+   server.**  Pane ids are only unique *within* one tmux server, and every
+   pm session now has its own.  When an explicit `--session` was not found
+   on any server (`find_session_server()` → `(None, False)`: a stale
+   registry left by a killed session, or a wrong `--session` typed from
+   inside another pm session), `_find_tui_pane()` still returned the
+   registry's recorded pane id while `PM_TMUX_SOCKET` kept naming the
+   *current* session's server.  `_find_live_tui_pane()` then checked that
+   id against `list-panes -a` on the wrong server, and because ids restart
+   per server (`%5` exists on every one) `pm tui send` / `pm tui view -s
+   <stale>` could drive an unrelated pane of another session — the class
+   of cross-session damage this PR exists to prevent.
+   `_live_panes_and_tuis()` now returns a `pane_id → session_name` map
+   instead of a bare id set, and the recorded pane is accepted only when
+   the pane's own session (grouped suffix normalised through
+   `pane_registry.base_session_name`) is the session being resolved.
+   Everything else is unchanged: a live pane in a grouped session still
+   counts, and the "fall back to a live `pm _tui` pane in the same
+   session" path is untouched.
+
+New tests: `test_pane_id_reused_on_another_server_is_not_returned` and
+`test_live_pane_in_a_grouped_session_still_counts`.
+
+Validation: full suite **4567 passed / 1 skipped / 1 failed** (the run
+used a scratch `pytest<9` + `markdown` on `PYTHONPATH`, `PATH` without the
+push-proxy `git`, and `TMUX`/`TMUX_PANE`/`PM_*` cleared).  The single
+failure is environment-only:
+`tests/test_hook_events.py::test_installer_writes_standalone_receiver`
+returns early because `PM_HOST_HOME` (`/home/matt`) differs from `HOME`
+(`/home/pm`); `hook_install.py` is untouched by this PR and that file
+passes 20/20 with `PM_HOST_HOME` unset.
+
+Residual notes unchanged and still non-blocking (see the i3 section).
+
+## Review iteration (2026-10-29, review-loop d1c0 i5)
+
+Verification pass over the integrated head; no requirement changes.  The
+whole change set was re-read against R1–R7, the suite re-run, and the
+preserved smoke script re-executed.
+
+1. **`server_alive()`'s "cannot probe" contract had no test.**  The
+   docstring promises that an unprobeable socket (tmux missing or not
+   executable) counts as *alive* so `pm session kill` never unlinks on a
+   guess — the one branch where being wrong destroys state.  Added
+   `TestServerAlive`: `test_live_and_stale_sockets` (returncode 0 vs 1)
+   and `test_unprobeable_socket_counts_as_alive` (`_run` raising
+   `OSError`).  The disposable-socket integration test still covers the
+   real-server case.
+2. **The call-time `SHARED_SOCKET_DIR` import in
+   `tmux.socket_path_from_tmux_env()` looked like an oversight.**  It is
+   load-bearing: a module-level `from … import` would freeze the original
+   `Path`, so re-pointing `paths.SHARED_SOCKET_DIR` (tests, and the smoke
+   script's disposable socket directory) would no longer be seen.  Now
+   commented.
+3. **`detach_current_client()`'s failure comment described a caller that
+   does not exist** ("…and to decide whether to keep the TUI running
+   unattached"); `quit_app` uses the return value only for logging.  The
+   comment now names the real cause (the client disappearing between
+   `list-clients` and `detach-client`).
+4. **The private-socket ownership refusal intentionally precedes legacy
+   detection.**  A squatted socket at the private path therefore refuses
+   `pm session` even when the user's own session lives on the default
+   server and would never connect to that socket.  Kept (fail closed on a
+   hostile condition rather than routing around it) and now says so in a
+   comment, so it does not read as an ordering accident.
+
+Validation on the integrated head: full suite **4570 passed / 1 skipped**
+(`PM_HOST_HOME` unset, so the environment-only `test_installer_writes_standalone_receiver`
+early return noted in i4 does not apply; scratch `pytest<9`, `PATH`
+without the push-proxy `git`, `TMUX`/`TMUX_PANE`/`PM_*` cleared).
+`pm/specs/pr-073910f/session_start_smoke.py` re-run end to end on a
+disposable socket: private server created, `PM_TMUX_SOCKET` in the
+session env, the global env and the hooks, default server untouched.
+No live session, server or shared host configuration was touched.
+
+Residual notes unchanged and still non-blocking (see the i3 section).
+
+## Review iteration (2026-10-29, review-loop d1c0 i6)
+
+Verification pass over the integrated head; no requirement changes.  Three
+reuse/coverage items in the TUI-pane discovery code, all in
+`pm_core/cli/helpers.py`:
+
+1. **`_find_tui_pane()`'s last-resort scan re-implemented the tmux query
+   that `_live_panes_and_tuis()` already performs.**  It ran its own
+   `list-panes -a` with a different format string
+   (`pane_current_command` *and* `pane_start_command`) and decided "is this
+   a TUI pane" by substring-matching the concatenation, while
+   `_find_live_tui_pane()` uses `_live_panes_and_tuis()` and its
+   `pane_start_command`-only rule.  Two definitions of "a pane running the
+   TUI" is the divergence risk the i3 note removed elsewhere.  The scan now
+   iterates `_live_panes_and_tuis()` per server, so the rule lives in one
+   place.  (The `pane_current_command` half could not match a real
+   `pm _tui` pane anyway: the foreground process is `pm`/`python`, not
+   `_tui`.)  This also closes a "degrade, never crash" gap: the old call
+   was an unguarded `subprocess.run`, so an `OSError` raised after
+   `list_pm_sessions()` had succeeded would have escaped `_find_tui_pane()`
+   — the contract i2 established for the rest of the scan.
+2. **`_recorded_tui_pane()` and `_registry_tui_pane()` each walked the
+   registry looking for `role="tui"`.**  Both now share
+   `_iter_registry_tui_panes()`; the liveness filter stays only in
+   `_registry_tui_pane()`.
+3. **`_canonical_session()` was a third copy of "strip the `~N` suffix"**
+   (`_canonical_session`, `pane_registry.base_session_name`, and the inline
+   `split("~", 1)` in `find_session_server`).  It now delegates to
+   `base_session_name()`, matching the i1 change to `_find_live_tui_pane()`.
+
+Also documented (docstring only): `_find_tui_pane()` always returns the
+*base* session name, normalising a grouped `pm-x~2` — the registry, pidfile
+and history/frames files are all keyed by the base name, so this is what
+makes `pm tui frames -s pm-x~2` read the file the TUI actually wrote.
+
+New tests: `test_last_resort_finds_an_unregistered_tui_pane` (the direct
+scan's success path, previously untested — only its failure path was) and
+`TestSessionMobileServerSelection::test_status_queries_the_hosting_server`
+(`pm session mobile`'s `_select_session_socket()` wiring, previously
+untested; without it the status query hits the default server and reports a
+live private session as "not running").
+
+Validation on the integrated head: full suite **4572 passed / 1 skipped**
+(scratch `pytest<9` + `markdown`, `PATH` without the push-proxy `git`,
+`TMUX`/`TMUX_PANE`/`PM_*`/`PM_HOST_HOME` cleared).
+`pm/specs/pr-073910f/session_start_smoke.py` re-run end to end on a
+disposable socket: private server created, `PM_TMUX_SOCKET` in the session
+env, the global env and the hooks, default server untouched.
+
+Residual notes unchanged and still non-blocking (see the i3 section).
+
+## Review iteration (2026-10-29, review-loop d1c0 i7)
+
+Verification pass over the integrated head; one correctness fix in session
+selection.  No requirement changes.  Share mode is mixed into the session
+tag (`get_session_tag`), so a `--global`/`--group` session and the private
+session for the same repo are different sessions on different sockets.
+Two paths ignored that when reusing the ambient session:
+
+1. **`pm session --global` run from inside a private session attached to
+   the private session and shared nothing.**  `_resolve_start_session_name()`
+   preferred the ambient session (whose pane registry proves it belongs to
+   this HOME) over the share-mode-tagged cwd name, so
+   `_resolve_session_socket()` derived the *private* socket, found the
+   private session running, and took the attach path — where no
+   `set_shared_socket_permissions`/`server-access` grant is made (they only
+   run on the create path).  The socket stayed 0600, so nobody could join,
+   and the private session was additionally given `window-size=smallest`
+   for its group.  Verified end to end on a disposable socket before the
+   fix: `pm session --global` created nothing and printed
+   `Attaching to session 'pm-…~1'`; after the fix it creates the
+   shared-tag session on its own socket and prints
+   `Session shared with all users.`
+2. **`pm session kill --global` run from inside a private session killed
+   the private session.**  `_resolve_target_session()` tried the cwd name
+   (share-mode tag, not running) and then the ambient session, which is
+   private — so the first *running* candidate was the private session and
+   it was killed.  Verified end to end on a disposable socket before the
+   fix (`Killed session 'pm-…'`, private server gone); after the fix it
+   reports `No session 'pm-…<shared tag>' found` and leaves the private
+   session running.
+
+Fix: the ambient session is now only reused when it was created with the
+same share mode.  New `tmux.get_session_environment(session, key)` reads a
+session variable (``None`` when unset, marked-for-removal, or tmux cannot
+be queried); `session._ambient_share_mode()` uses it for `PM_SHARE_MODE`,
+which shared sessions record in their session environment at creation —
+names cannot be compared for workdir clones, whose git-root hash never
+matches the session hosting them.  `_ambient_session_for_share_mode(wanted)`
+keeps the ambient candidate only on a same-name fast path or a matching
+recorded mode, and both call sites use it:
+
+- `_resolve_start_session_name(shared)` — with `--global`/`--group` the
+  ambient must match; without them the ambient session is adopted as it
+  is, whatever mode it has, so a plain `pm session` inside a shared
+  session still reattaches to it rather than creating a private twin.
+  `pm session --print-connect` passes the same flag so the printed command
+  names the session that would actually be attached.
+- `_resolve_target_session()` — `kill`/`mobile` filter the ambient fallback
+  by the mode they run under (`PM_SHARE_MODE`, inherited from the pane when
+  no flags are given).  The workdir-clone fallback (R3.2) still works,
+  including inside a shared session.
+
+Known limitation (safe direction): a shared session created by an old pm
+that did not record `PM_SHARE_MODE` in its session environment is read as
+private, so `pm session kill` from a workdir clone inside it reports "no
+session" instead of killing it; passing `--global`/`--group` (which uses
+the tag-derived cwd name) or running from the repo directory is unaffected.
+
+New tests: `TestGetSessionEnvironment` (value / unset / marked-for-removal
+/ tmux missing), an integration check that the variable is read from the
+named server, `TestStartSessionName::test_shared_start_never_adopts_a_private_ambient_session`
+and `::test_shared_start_reuses_a_shared_ambient_session`,
+`TestSessionKillServerSelection::test_shared_kill_never_falls_back_to_a_private_ambient`
+and `::test_shared_kill_still_falls_back_to_a_shared_ambient`,
+`TestResolveTargetSession::test_ambient_session_with_a_different_share_mode_is_ignored`
+and `::test_ambient_share_mode_reads_the_session_environment`.  The kill
+unit tests now pin `_ambient_share_mode` so no unit test can query a real
+tmux server.
+
+Validation: see the PR note for this iteration (full suite + disposable
+smoke test, no live session or server touched).
+
+## Review iteration (2026-10-29, review-loop d1c0 i8)
+
+Verification pass over the integrated head; no requirement changes.  Two
+correctness/cleanup items, both of the class the earlier iterations fixed:
+
+1. **`pm session kill` unlinked a live private server's socket.**  d1c0 i1
+   gated the *not-found* unlink on `server_alive()` and i2 applied the same
+   rule to the *legacy* branch, but the branch that kills a session found
+   on its own private socket still unlinked unconditionally
+   (`on_private or …`).  The kill removes this session's base + grouped
+   sessions, but the server can survive it — a session on that socket that
+   is not part of the group (a stray or hand-made one) or a `kill-session`
+   that failed — and unlinking a live server's socket strands every client
+   attached to it.  The unlink now follows the same rule in all branches:
+   remove the file only when no server answers on it.  The normal case is
+   unchanged (the server exits with its last session, the file is left
+   behind and removed).  Tests:
+   `test_private_kill_keeps_a_socket_a_server_still_answers_on` and
+   `test_private_kill_removes_the_emptied_socket`.
+2. **Dead branch in `_find_live_tui_pane()`.**  The master-integration
+   reconciliation left a `sess = session` fallback with a comment saying
+   `_find_tui_pane` "only consults the registry when a session is given"
+   and returns `(None, None)` for a session with no `tui` entry.  That has
+   not been true since the same change made the explicit-session branch
+   return the base name unconditionally, so the fallback was unreachable
+   and the comment misleading.  Removed; the live-pane scan below it is
+   what resolves an explicit session with no recorded pane, and the stale
+   test docstring that repeated the claim is corrected.
+3. Corrected the `_resolve_start_session_name()` docstring (and the i7
+   section above): a plain `pm session` inside a shared session reattaches
+   because the ambient *session* is adopted as-is, not because its share
+   mode is inherited (`_session_start` clears `PM_SHARE_MODE`).
+4. Coverage for R4.4, which was only checked as a source literal: new
+   `TestQaStatusSocketRouting` imports `qa_status` (with
+   `logging.basicConfig` patched out, since importing it installs a file
+   logger) and asserts `_switch_to_window`/`_find_attached_session` build
+   `tmux -S <PM_TMUX_SOCKET>` argv, fall back to a `$TMUX` value only when
+   it names a pm socket, and leave an ordinary tmux session alone.
+
+Residual notes unchanged and still non-blocking (see the i3 section).  One
+more, inert today: `_session_start`'s `is_shared` comes from the flags, so
+an ambient shared session adopted by a plain `pm session` is still treated
+as private for the socket-ownership check.  That is currently unreachable
+for a joining user (R5b requires a local pane registry, which a joiner
+does not have, so they never adopt the shared session) and harmless for
+the owner (they own the socket), so the guard is left as it is.
+
+## Review iteration (2026-10-29, review-loop d1c0 i9)
+
+Verification pass over the integrated head; no requirement changes.  One
+test gap in the PR's central requirement, one stale user-facing string, one
+"degrade, never crash" hole in discovery, one import tidy.
+
+1. **R1 had no automated coverage of the create path.**  Everything in the
+   suite asserted pieces (`_resolve_session_socket` exports the path,
+   `set_environment`/`set_global_environment` are called, …); nothing ran
+   `_session_start` and checked the result.  The end-to-end check lived
+   only in `pm/specs/pr-073910f/session_start_smoke.py`, which is not run
+   by the suite.  New `TestSessionStartCreatesPrivateServer` runs
+   `_session_start` against a disposable socket with an isolated `HOME`
+   (patched `SHARED_SOCKET_DIR` and `default_socket_path`, hooks install
+   and `attach` stubbed, the TUI pane replaced by `sleep`), then asserts:
+   the session and its `~1` grouped session exist on the deterministic
+   private socket; `create_session` received that socket and a
+   `PM_TMUX_SOCKET=<socket> pm _tui` command; the variable is exported in
+   the process, in the session environment and in the server's global
+   environment; the `after-kill-pane` hook is installed there; the client
+   attaches to `pm-…~1` on that socket; and nothing was created on the
+   default server (which is itself a disposable path, never the real one).
+2. **`_find_tui_pane()`'s in-tmux branch was the last unguarded probe.**
+   d1c0 i2 made the rest of the scan degrade when tmux cannot be run, but
+   `tmux_mod.get_session_name()` still raised `OSError` out of
+   `pm tui view` / `pm autostart` when `$TMUX` was set and no tmux binary
+   was available (a forwarded pane environment, or a container without
+   tmux).  It now falls through to the cwd/cross-server branches.  Test:
+   `test_tmux_missing_inside_a_pane_degrades_to_no_session`.
+3. **The TUI help still said "Show shared connect command"** although the
+   `C` screen now shows the connect command for every session (the i4
+   iteration fixed the docstring but not this user-facing row).
+4. `pm session mobile`'s `_select_session_socket` import moved from inside
+   the command to the module-level `pm_core.cli.helpers` import block,
+   matching the rest of the module (no circular-import constraint).
+
+Validation: full suite re-run after these edits; no live session, server
+or shared host configuration was touched (every fixture used a disposable
+socket and an isolated `HOME`).
+
+Residual notes unchanged and still non-blocking (see the i3 section).
+
+## Review iteration (2026-10-29, review-loop d1c0 i10)
+
+Verification pass over the integrated head; no requirement changes.  One
+fail-closed hardening in the private-socket ownership check and one
+documentation correction.
+
+1. **The private-socket ownership check followed symlinks.**  The socket
+   directory is world-writable (1777, sticky), so another local user can
+   create `pm-<tag>` there.  `Path(socket_path).stat()` resolves a link, so
+   a *dangling* symlink raised `OSError`, the check fell back to
+   `owner = os.getuid()`, and the squatted path was accepted — tmux would
+   then bind a server socket at the attacker-chosen target path.  The check
+   now uses `lstat()`, i.e. it inspects the directory entry itself: a link
+   planted by another user reports *their* uid and is refused.  A real
+   socket owned by us behaves exactly as before.  Test:
+   `test_refuses_a_symlink_planted_at_the_socket_path` (verified to fail
+   with `stat()` and pass with `lstat()`).
+2. **The documented joiner limitation was wrong about the repo
+   directory.**  The i1 section claimed a collaborator who joined a
+   `--global`/`--group` session can still re-join from the repo directory
+   because "the cwd-derived tag equals the shared tag".  It does not: the
+   share mode is mixed into the tag hash, and `_session_start` clears
+   `PM_SHARE_MODE` when no `--global`/`--group` flag is passed, so the
+   plain tag is the *private* one (verified directly: `get_session_tag`
+   for one repo returns a different hash with and without
+   `PM_SHARE_MODE`).  A plain `pm session` therefore starts a separate
+   private session for the joiner from any directory; re-joining works
+   when the joiner repeats the flag (`pm session --global`, which
+   recomputes the shared tag) or uses the documented `--dir` form.  The
+   behaviour is unchanged and remains the fail-safe trade-off; only the
+   claim was corrected.
+
+Validation on the integrated head: full suite **4591 passed / 1 skipped**
+after these edits (4590 + the new symlink test; scratch `pytest<9` +
+`markdown` on `PYTHONPATH`, `PATH` without the push-proxy `git`,
+`TMUX`/`TMUX_PANE`/`PM_*`/`PM_HOST_HOME` cleared).  The new test was
+checked in both directions (fails with `stat()`, passes with `lstat()`),
+and `pm/specs/pr-073910f/session_start_smoke.py` was re-run after the
+edits (disposable socket, isolated `HOME`, `TMUX_TMPDIR` on a scratch
+dir): private server created, `PM_TMUX_SOCKET` in the session env, the
+global env and the hooks, default server untouched.  `pm session list` was
+also re-verified end to end against disposable private/shared/legacy
+servers (private + `(shared)` + `(default server)` rows, stale non-socket
+entry skipped).  No live session, server or shared host configuration was
+touched.
+
+Residual notes unchanged and still non-blocking (see the i3 section).
+
+## Review iteration (2026-10-29, review-loop d1c0 i11)
+
+Verification pass over the integrated head; no requirement changes.  Two
+"degrade, never crash" / truthful-state fixes, both in code that runs on
+the paths this PR exists to protect:
+
+1. **`_find_tui_pane()`'s failure restore used a value it had already
+   overwritten.**  The cross-server scan re-points `PM_TMUX_SOCKET` at
+   each server it probes and restores the "ambient" value when nothing is
+   found — but that value was read *after* the cwd branch had already
+   called `_select_session_socket()`, so when the cwd session was running
+   with no live TUI pane the "restore" put the process back on the cwd
+   session's server rather than the one it came in with.  The value is
+   now captured on entry, before any branch can select a server, so the
+   documented contract ("a failed lookup leaves the process where it
+   was") actually holds.  Test:
+   `test_failed_lookup_restores_the_original_socket` (verified to fail
+   with the late capture: it restored the cwd session's socket).
+2. **`detach_current_client()` could raise out of the TUI's quit
+   handler.**  Every other tmux probe in this change degrades when tmux
+   cannot be run (i2/i6/i9), but `detach_current_client()` called
+   `pane_window_id()`/`_run()` unguarded, so an `OSError` from a missing
+   or unexecutable tmux (a container, or a forwarded `$TMUX` without the
+   binary) propagated into `quit_app()`.  The body moved to
+   `_detach_current_client()` and the public function now logs a warning
+   and returns `False`, i.e. "nothing to detach".  Test:
+   `test_tmux_missing_does_not_crash_the_quit_path` (verified to fail
+   with the guard removed).
+
+Validation on the integrated head: full suite re-run after these edits
+(see the PR note for this iteration).  No live session, server or shared
+host configuration was touched; both new tests are unit-level and touch no
+tmux server.
+
+Residual notes unchanged and still non-blocking (see the i3 section).
+
+## Review iteration (2026-10-29, review-loop d1c0 i12)
+
+Verification pass over the integrated head; no requirement changes.  Three
+fail-closed/consistency items, all in code that guards the isolation
+boundary:
+
+1. **`ensure_socket_dir()` could accept a socket directory that is not
+   sticky.**  The d1c0-era `try: chmod(0o1777) except OSError: pass` was
+   added so a directory another user already created (the normal 1777
+   case) is usable, but it swallowed *every* failure.  If the directory is
+   world-writable without the sticky bit, any local user can unlink or
+   replace another user's socket — and the uid check in `pm session` start
+   cannot prevent that, because it runs once, before tmux binds the
+   socket.  The failure path now re-checks the mode and raises unless the
+   sticky bit is set, restoring the fail-closed behaviour of the original
+   unconditional `chmod` while still allowing a legitimate 1777 directory
+   owned by someone else.  Tests:
+   `test_tolerates_a_sticky_dir_it_does_not_own` and
+   `test_refuses_a_non_sticky_dir_it_cannot_fix`.
+2. **The TUI connect screen lost the `-t <session>` for a legacy session
+   whose socket was already in the environment.**  d1c0 i1 made
+   `show_connect()` name the session when it lives on the default server,
+   but only on the branch where `PM_TMUX_SOCKET` is unset.  The rollout
+   path (`_resolve_session_socket`'s legacy branch) exports the *default*
+   server's socket, so a TUI restarted into a legacy session takes the
+   other branch and printed `tmux -S /tmp/tmux-<uid>/default attach` with
+   no `-t` — ambiguous whenever more than one legacy pm session is on that
+   server.  The env path now applies the same rule.  Test:
+   `test_legacy_session_with_the_default_socket_in_the_env`.
+3. **`list_pm_sessions()` followed symlinks in the world-writable socket
+   directory.**  It used `Path.is_socket()` (a `stat`, so symlinks are
+   resolved) and `Path.stat()` for the shared/private mode probe, while
+   d1c0 i10 hardened the `pm session` ownership check to `lstat` for
+   exactly this reason.  A link another user plants at `pm-<tag>` could
+   therefore be listed as one of our servers, with its target's mode
+   reported.  Both now use `lstat`, so a link is skipped like any other
+   non-socket entry.  Test:
+   `test_skips_a_symlink_planted_in_the_socket_dir` (verified to fail with
+   `is_socket()`: the planted link was listed).
+
+Validation on the integrated head: full suite **4597 passed / 1 skipped**
+(4593 + the four new tests; scratch `pytest<9` + `markdown` on
+`PYTHONPATH`, `PATH` without the push-proxy `git`,
+`TMUX`/`TMUX_PANE`/`PM_*`/`PM_HOST_HOME` cleared).
+`pm/specs/pr-073910f/session_start_smoke.py` re-run end to end on a
+disposable socket with `TMUX_TMPDIR` on a scratch dir: private server
+created, `PM_TMUX_SOCKET` in the session env, the global env and the
+hooks, default server untouched.  No live session, server or shared host
+configuration was touched.
+
+Residual notes unchanged and still non-blocking (see the i3 section).
+
+## Review iteration (2026-10-29, review-loop 7af7 i1)
+
+Verification pass over the integrated head; no requirement changes.  One
+cross-session hazard in TUI-pane discovery — the failure mode this PR
+exists to remove, reintroduced by the R3.4 fallback:
+
+1. **The cross-server fallback in `_find_tui_pane()` could resolve to a
+   *different* pm session's TUI.**  R3.4 says the scan falls back to "all
+   pm servers for a live TUI pane", and that is right for a plain shell
+   (`pm tui view` with no session anywhere).  But the scan was unconditional,
+   so when the process *was* inside a pm session whose registered TUI pane
+   was gone (heal testing, a respawn that did not update the registry), the
+   loop walked `/tmp/pm-sessions` in sorted order and returned the first
+   server's live `pm _tui` pane.  Pane ids are only unique per server and
+   `pm tui send` delivers keys unscoped, so `pm tui send g` from inside
+   `pm-a` could drive `pm-b`'s TUI — the cross-session damage this change
+   exists to prevent.  Before this PR the same fallback ran `list-panes -a`
+   on the *ambient* server, so it could only ever find the current
+   session's pane; scanning per-socket servers silently widened it.
+   `_find_tui_pane()` now records the session its branches identified (the
+   in-tmux pm session, else a running cwd-derived session) and scopes both
+   the registry scan and the last-resort `pm _tui` scan to that session's
+   server.  With no session identified (a plain shell) every server is
+   still scanned, so `pm tui view` from outside pm keeps working.  Test:
+   `test_fallback_never_crosses_to_another_pm_session` (verified to fail
+   without the scope: it returned `pm-b`'s pane).
+
+Validation on the integrated head: full suite re-run after the edit (see
+the PR note for this iteration).  No live session, server or shared host
+configuration was touched; the new test is unit-level.
+
+Residual notes unchanged and still non-blocking (see the i3 section).
+
+## Review iteration (2026-10-29, review-loop 7af7 i2)
+
+Verification pass over the integrated head; no requirement changes.  Three
+items, all of the class the previous iterations fixed:
+
+1. **The i1 scope was per *server*, but a server is not a session.**  The
+   last-resort `pm _tui` scan in `_find_tui_pane()` was scoped to the
+   identified session's server, and then returned the first `pm _tui` pane
+   it found there.  That is exact for a private server (one session per
+   server), but the legacy default server hosts *every* pre-isolation pm
+   session: from inside legacy `pm-a` with its registry entry gone, the
+   scan could return `pm-b`'s live TUI, and `pm tui send` delivers keys
+   unscoped — the same cross-session damage i1 removed, one level down.
+   The pane's base session is now compared with the row's session
+   (`info["name"]`), which is exact in both cases (with no session
+   identified, every row is one base session).  Test:
+   `test_last_resort_never_crosses_sessions_on_one_server` (verified to
+   fail without the comparison: it returned `pm-b`'s pane).
+2. **`ensure_socket_dir()`'s fail-closed refusal surfaced as a traceback.**
+   The d1c0 i12 guard raises when the shared directory is world-writable
+   without the sticky bit (another user could unlink our socket, which the
+   uid check cannot prevent because it runs once, before tmux binds).
+   `_resolve_session_socket()` now reports it as an actionable message
+   (which directory, and that it must be owned by the user or be 1777)
+   instead of letting the `OSError` escape.  Test:
+   `test_unusable_socket_dir_reports_the_fix`.
+3. **`_get_current_pm_session()` crashed when tmux cannot be run.**  Every
+   other probe in the module degrades (d1c0 i2/i6/i9/i11), but this one
+   called `get_session_name()` unguarded; with `$TMUX` set and no tmux
+   binary (a forwarded pane environment, or a container without tmux) it
+   raised `OSError` out of `pm session mobile` and `pm session
+   --print-connect` (both of which now reach it through the ambient
+   session lookup).  It returns `None` ("not inside a pm session") now,
+   and uses `pane_registry.base_session_name()` for the `~N` strip, like
+   the other call sites i6 unified.  Test:
+   `test_tmux_missing_inside_a_pane_degrades_to_no_session`.
+
+Validation on the integrated head: full suite re-run after these edits
+(see the PR note for this iteration); `pm/specs/pr-073910f/session_start_smoke.py`
+re-run end to end on a disposable socket (`TMUX_TMPDIR` on a scratch dir):
+private server created, `PM_TMUX_SOCKET` in the session env, the global
+env and the hooks, default server untouched; `pm session list` re-verified
+end to end against disposable private/shared servers (private row,
+`(shared)` marker, grouped `~1` collapsed, non-socket/stale entries
+skipped).  No live session, server or shared host configuration was
+touched.
+
+Residual notes unchanged and still non-blocking (see the i3 section).
+
+## Review iteration (2026-10-29, review-loop 7af7 i3)
+
+Verification pass over the integrated head; no requirement changes.  One
+cross-session hazard in TUI-pane discovery — the same failure mode i1/i2
+closed for the fallback scan, still open one branch earlier:
+
+1. **`_find_tui_pane()`'s cwd branch could resolve to a *different* pm
+   session.**  The branch "try the session matching the current directory"
+   ran unconditionally, and its result was returned even when the in-tmux
+   branch had already identified the ambient pm session.  From inside
+   `pm-a` with its TUI pane unregistered (heal testing, a respawn that did
+   not update the registry), a cwd inside another project whose session
+   `pm-b` was running resolved to *`pm-b`'s* pane and re-pointed
+   `PM_TMUX_SOCKET` at `pm-b`'s server.  `pm tui send`/`view`/`restart`
+   deliver keys to a bare pane id and `pm pr merge` kills windows by
+   session name, so the consequence is the cross-session damage this
+   change exists to prevent.  The cwd lookup now runs only when nothing
+   identified a session, i.e. from a plain shell — which is what it was
+   for (`pm tui view` from outside a pm session keeps working, and a pm
+   pane whose cwd is the session's own repo is unaffected because the
+   ambient branch already answered).  Test:
+   `test_cwd_session_does_not_override_the_ambient_one` (verified to fail
+   without the guard: it returned `pm-b`'s `%9` and selected
+   `/tmp/pm-sessions/pm-b`).
+2. Corrected the `_find_tui_pane()` docstring, which claimed it returns
+   `(None, None)` only "when no session can be identified at all": the
+   implicit path also returns `(None, None)` when a session was identified
+   but no live TUI pane was found (the explicit-`--session` path is the one
+   that always returns the name).
+
+Validation on the integrated head: full suite re-run after these edits
+(see the PR note for this iteration); `pm/specs/pr-073910f/session_start_smoke.py`
+re-run end to end on a disposable socket (`TMUX_TMPDIR` on a scratch dir):
+private server created, `PM_TMUX_SOCKET` in the session env, the global
+env and the hooks, default server untouched.  No live session, server or
+shared host configuration was touched; the new test is unit-level and
+binds no tmux server.
+
+Residual notes unchanged and still non-blocking (see the i3 section of this
+document).
+
+## Review iteration (2026-10-29, review-loop 0e4c i1)
+
+Verification pass over the integrated head; no requirement changes.  The
+change set was re-read against R1–R7, the suite re-run, and the review
+looked specifically for behaviour the suite does not assert.
+
+1. **`pm qa regression`'s dead-pane guard had no test.**  The b972 i2
+   change made the runner require a *live* TUI pane (`_find_live_tui_pane`
+   reports the session name even when the recorded pane is gone, because
+   history/frames callers need that), but nothing asserted either the
+   refusal or the launch path.  Added to `tests/test_cli_qa.py`:
+   `test_qa_regression_reports_a_missing_session`,
+   `test_qa_regression_requires_a_live_tui_pane` (verified to fail with
+   the guard removed: the command launched a runner against a dead pane)
+   and `test_qa_regression_launches_with_the_live_pane` (the prompt names
+   the session and the pane the runner must drive).
+
+Nothing else surfaced: the socket derivation, the default-server
+addressing rule (R4.3), the discovery scoping fixes (7af7 i1–i3), the
+detach selection (R5), the rollout path (R6) and the fail-closed socket
+directory/ownership checks (d1c0 i10/i12) all match the spec, and every
+other new helper already has direct coverage.
+
+Cross-PR, out of scope here: `pane_registry.base_session_name()` (now the
+single "grouped session base" definition, which this PR switched three
+more call sites to) truncates at the first `~`, so a repo directory whose
+name contains `~` yields a session name the registry/pidfile/capture
+lookups then disagree on.  Pre-existing (the previous `rsplit` call site
+was wrong for base-session panes too) and filed as **pr-6de8207**; the fix
+belongs in `get_session_tag()` (sanitise the tag), not in the callers.
+
+Validation on the integrated head: full suite re-run after the edit (see
+the PR note for this iteration).  No live session, server or shared host
+configuration was touched; the new tests are unit-level and bind no tmux
+server.
+
+Residual notes unchanged and still non-blocking (see the i3 section of this
+document).
+
+## QA scenario 6 fixes (2026-10-29)
+
+QA scenario 6 ("Concurrent starts, kills, lists and attaches") found two
+defects against its THEN bullets; both are fixed in the same commit as this
+section (`qa: converge concurrent session starts and make session kill
+match exactly`).  No requirement changes.
+
+1. **Paired simultaneous `pm session` starts crashed the loser.**  Both
+   invocations pass the caller's `session_exists` check and then race into
+   `new-session`; the loser gets "duplicate session" and died with an
+   unhandled `CalledProcessError` *before* the attach (the grouped session
+   `new-session -t pm-x -s pm-x~1` has the same race on the attach path).
+   `create_session` / `create_grouped_session` now treat the failure as a
+   lost race only when the exact name exists afterwards
+   (`has-session -t =name`) and converge on the winner's session; any other
+   failure is still re-raised.  Tests: `TestConcurrentCreate` (converge and
+   re-raise for both create paths).
+2. **`pm session kill` destroyed a live grouped session.**  tmux resolves a
+   bare `-t pm-x` as a *prefix*, so `has-session -t pm-x` also matched a
+   surviving `pm-x~1`: with the base already killed elsewhere, the kill
+   reported "Killed session 'pm-x'.", killed the grouped session (detaching
+   its client) and unlinked the live server's socket.  New
+   `tmux.find_exact_session_server()` (target `=name`) is used by the
+   destructive path only; `find_session_server` keeps prefix matching, so
+   `pm tui view -s pm-x` still reaches the group's TUI after the base is
+   gone (verified both ways at runtime).  Tests: the prefix/exact cases in
+   `TestFindSessionServer`, plus
+   `TestSessionKillServerSelection::test_kill_uses_the_exact_matcher_not_prefix`
+   — the other kill tests stub both resolvers identically, so they cannot
+   catch a revert of the kill path to prefix matching.
+
+Residual, filed as **pr-ea98f71** and out of scope here: a concurrent start
+can still false-positive the "TUI pane missing — respawning..." heal path,
+because the create path clears the pane registry before `new-session`; the
+final state still converges.
+
+Validation: full suite 4612 passed / 1 skipped on the QA-fix commit
+(before the review-loop edits below).
+
+## Review iteration (2026-10-29, review-loop 3cc7 i1)
+
+Verification pass over the QA scenario 6 fix commit; no requirement
+changes.  One test gap in that fix, one documentation gap, and one
+discovery robustness gap of the class the earlier iterations closed.
+
+1. **The kill path's exact-match wiring had no test.**  The QA fix made
+   `pm session kill` resolve the session through
+   `find_exact_session_server`, but
+   `TestSessionKillServerSelection._invoke` stubs `find_session_server`
+   and `find_exact_session_server` with the *same* resolver, so a revert
+   to prefix matching would have passed every kill test.  New
+   `test_kill_uses_the_exact_matcher_not_prefix` makes the two disagree
+   the way tmux does (prefix finds the surviving `pm-x~1`, exact finds
+   nothing) and asserts `No session ... found.`, no `kill-session` calls
+   and the live server's socket left in place; verified to fail with
+   `session_kill` reverted to `find_session_server`.
+2. **`impl.md` had no record of the QA scenario 6 fixes.**  Added the
+   "QA scenario 6 fixes" section above and extended R3.2 with the
+   exact-match rule.
+3. **The last-resort TUI scan could not see a server whose socket file is
+   gone.**  `_find_tui_pane` scopes the scan to the identified session's
+   server through `list_pm_sessions()`, which enumerates socket *files*.
+   A live server can outlive an unlinked socket (an old pm's kill, or a
+   cleaned `/tmp/pm-sessions`), and when that session's registry entry is
+   also gone — the one case the last-resort scan exists for — discovery
+   returned `(None, None)` although `pm tui view` from inside the session
+   used to find the pane (the pre-change scan ran on the ambient server).
+   The in-tmux branch now records `resolve_ambient_socket()` and, when
+   `list_pm_sessions()` does not report the identified session, scans that
+   server directly.  Test:
+   `test_last_resort_scans_the_ambient_server_without_a_socket_file`
+   (verified to fail without the fallback).
+
+Validation on the integrated head: full suite **4614 passed / 1 skipped**
+(4612 + the two new tests).  `pm/specs/pr-073910f/session_start_smoke.py`
+was re-run end to end on a disposable socket with `TMUX_TMPDIR` on a
+scratch dir (private server, session env, global env and hooks correct;
+default server untouched).  No live session, server or shared host
+configuration was touched; every new test is unit-level and binds no tmux
+server.
+
+## Master integration (2026-10-31, origin/master eaf3372e / #249)
+
+The PR conflicted with master (GitHub reported the conflict once #249
+merged).  `origin/master` @ `eaf3372e` (merge base `4a74d880`, 544 commits,
+113 files) was merged into this branch.  Three files conflicted:
+
+1. **`pm/project.yaml`** — resolved with pm's own `store.merge_3way` over
+   the index stages, master as *ours* and the branch as *theirs* (theirs
+   wins true conflicts, so the branch's PR entry and notes win where both
+   changed while master's newer state wins everywhere the branch left it
+   alone).  Validated with `store.load(validate=True)` plus an id/notes
+   superset check: every PR/plan id from either side appears exactly once
+   and all of `pr-073910f`'s notes are present.
+2. **`pm_core/tmux.py`** — both sides added different helpers at the same
+   two spots.  Kept both: master's `TmuxCommandError` and `session_group`
+   (the S118/S121/S124 group resolution) alongside the branch's
+   `socket_path_from_tmux_env` / `resolve_ambient_socket` /
+   `export_ambient_socket`, `server_alive`,
+   `find_session_server` / `find_exact_session_server` and the
+   `use_env=False` default-server addressing (R4.3).
+3. **`pm_core/cli/helpers.py`** — semantic reconciliation:
+   - `_get_current_pm_session()` keeps the branch's `OSError` degrade
+     (tmux missing while `$TMUX` is set → "not inside a pm session") but
+     resolves the session through master's
+     `pane_registry.pm_session_name()` instead of a local `~` strip, so a
+     user's own grouped view under any name (S118/S121/S124) still
+     resolves to its pm session.
+   - `_get_pm_session()` keeps master's `-C`/`PM_PROJECT` project override
+     **and** the branch's hosting-server selection on both paths: the
+     override-derived session also gets `_select_session_socket()`,
+     because a command run outside tmux must address the private server
+     or it concludes a live session is gone (R3.6).
+
+Also reconciled: master's new
+`tests/test_cli_helpers.py::TestPmSessionOutsidePmTmux` stubbed
+`session_exists` without `use_env`, while `find_session_server()` probes
+the default server with `session_exists(target, use_env=False)`; the
+merged tree raised `TypeError` instead of resolving the session.  The stub
+now accepts `use_env`.
+
+No other semantic conflict surfaced.  Master's `pm_session_name` rollouts
+in `session.py` (hooks, popups, pickers) and in
+`tmux.current_or_base_session` are independent of the socket-isolation
+code, and the branch's `_find_tui_pane` rewrite replaced master's older
+version in full (master did not touch that function).
+
+Validation on the integrated head (`21ab6ddc`):
+- full suite **5325 passed / 1 skipped / 0 failed / 0 errors** (437 s;
+  scratch `pytest<9` + `markdown`, `PATH` without the push-proxy `git`,
+  `TMUX`/`TMUX_PANE`/`PM_*`/`PM_HOST_HOME` cleared); log at
+  `/pm-captures/pr-073910f-integration-eaf3372e/full-suite.log`;
+- `pm/specs/pr-073910f/session_start_smoke.py` re-run end to end on a
+  disposable socket with `TMUX_TMPDIR` on a scratch dir: private server
+  created, `PM_TMUX_SOCKET` in the session env, the global env and the
+  hooks, default server untouched;
+- `pm session list` in this container (read-only): "No pm sessions
+  found.", no socket directory created.
+
+Every earlier QA PASS result predates this merge and is **stale**; this PR
+needs a fresh review/QA/sign-off sequence.
+
+## Review iteration (2026-10-31, review-loop 703c i1)
+
+First review pass over the integrated head after the `eaf3372e` (#249)
+merge.  No requirement changes.  One cross-session hazard in TUI-pane
+discovery, of exactly the class this change exists to remove:
+
+1. **`_find_tui_pane()`'s current-pane branch missed a user's own grouped
+   view of a pm session.**  The branch took `tmux_mod.get_session_name()`
+   and accepted it only when the raw name started with `pm-`.  But tmux
+   reports the *view's* name for a pane in a shared window while that
+   view's client is the most recently active one (verified on tmux 3.4:
+   after `tmux new-session -d -t pm-base -s myview`,
+   `display-message -t %0 -p '#{session_name}'` returns `myview`, while
+   `#{session_group}` for that view is `pm-base`), and S118/S121/S124
+   explicitly allow such a view to be named anything — including
+   `pm-laptop`, which is *not* the session.  With the raw test, the
+   ambient session was not identified and the lookup fell through to the
+   cwd branch (useless from a workdir clone) and then to the *unscoped*
+   cross-server scan, which returns the first server's live registered TUI
+   pane: `pm tui send` / `view` / `restart` from inside pm-a could drive
+   pm-b's TUI — the cross-session damage 7af7 i1/i2/i3 closed for the
+   other branches, still open here.  The branch now resolves through
+   `pane_registry.pm_session_name()` (the same resolution
+   `_get_current_pm_session()` uses), so a view — whatever its name —
+   identifies its pm session, and a view named `pm-laptop` no longer
+   shadows a different session of that name.  Non-pm tmux sessions are
+   unchanged (`session_group` is empty, the name still fails the `pm-`
+   test) and the `OSError` degrade still covers a missing tmux (the
+   `session_group` query is inside the same `try`).  Test:
+   `test_own_grouped_view_resolves_the_ambient_session` (verified to fail
+   without the resolution: it returned pm-b's `%1`).
+
+Also checked and left alone: `pm_core/cli/guide.py::_in_pm_tmux_session()`
+has the same raw `pm-` prefix test, but it only decides whether `pm guide`
+runs the guided flow, never which server or pane is addressed, so it is
+not a cross-session hazard (pre-existing, out of scope).
+
+Validation on the integrated head: full suite re-run after the edit (see
+the PR note for this iteration); no live session, server or shared host
+configuration was touched, and the new test is unit-level (it binds no
+tmux server).
+
+## Review iteration (2026-10-31, review-loop 703c i2)
+
+Verification pass over the integrated head; no requirement changes.  One
+gap in the fail-closed socket-directory guard (d1c0 i12) — the only
+finding this iteration:
+
+1. **`ensure_socket_dir()` accepted a sticky directory it cannot write
+   to.**  The d1c0 i12 hardening re-checked the mode after a failed
+   `chmod`, but only for the *sticky* bit, while its own comment says the
+   directory "is fine only when it already has the mode we need" (1777).
+   A root-owned `1755 /tmp/pm-sessions` — sticky, but not world-writable —
+   therefore passed the guard, and the failure surfaced much later as an
+   opaque "couldn't create socket" from tmux instead of the actionable
+   message `pm session` prints for this refusal.  The re-check now
+   requires `S_ISVTX` **and** `S_IWOTH`, matching the contract: without
+   the sticky bit another user can unlink our socket, and without
+   world-write we cannot create one.  Test:
+   `test_refuses_a_sticky_dir_it_cannot_write` (verified to fail without
+   the world-write test).  The existing 1777-and-0777 cases are
+   unchanged.
+
+Nothing else surfaced.  The i1 grouped-view resolution in
+`_find_tui_pane()`, the socket derivation and default-server addressing
+(R4.3), the discovery scoping (7af7 i1–i3, 3cc7 i1), the precise detach
+(R5), the rollout path (R6) and the socket-directory/ownership checks
+(d1c0 i10/i12) all match the spec, and every new helper has direct
+coverage.
+
+Re-checked and left alone (unchanged from i1's documented call):
+`pm_core/cli/guide.py::_in_pm_tmux_session()` keeps its raw ``pm-``
+prefix test.  It only decides whether `pm guide` execs in place or
+launches a new pane; it never selects a server or a pane, so a user's
+own grouped view there costs a spare pane, not cross-session damage.
+
+Validation on the integrated head: full suite re-run after the edit (see
+the PR note for this iteration); no live session, server or shared host
+configuration was touched, and the new test is unit-level (it binds no
+tmux server).
+
+## Review iteration (2026-10-31, review-loop 703c i3)
+
+Verification pass over the integrated head; no requirement changes.  One
+gap in the precise-detach resolution (R5.2), plus a spec correction:
+
+1. **`detach_current_client()` derived the base session by splitting the
+   name at `~`, which a user's own grouped view defeats.**  tmux reports
+   the most recently active view's name for a pane in a shared window
+   (verified on this machine: with `pm-x`, `pm-x~1` and `myview` all
+   grouped, `display-message -t <base pane> '#{session_name}'` returned
+   `myview` while `'#{session_group}'` returned `pm-x`), and S118/S121/S124
+   let that view be named anything.  `session.split("~", 1)[0]` therefore
+   took `myview` for the base, so `list_grouped_sessions()` returned
+   nothing and `sessions_on_window()` covered only the view itself: the
+   candidate set collapsed to the view's client, and Ctrl-Q could detach
+   a *different* client of the same pm session than the one that pressed
+   it (the client attached to `pm-x~1` and viewing the TUI window stayed
+   attached while the view's client was dropped).  This is the same
+   resolution 703c i1 fixed in `_find_tui_pane()` and the one
+   `pane_registry.pm_session_name()`/`current_or_base_session()` already
+   use.  `tmux.session_group()` now takes an optional `socket_path` (the
+   rest of the group helpers already did) and `_detach_current_client()`
+   derives the base through it, falling back to the `~` split when the
+   session is ungrouped (or the query fails).  The candidate set is then
+   the base + `base~N` that R5.2 defines.  Test:
+   `test_resolves_the_pm_base_through_the_session_group` (verified to fail
+   without the fix: it detached the view's client `/dev/pts/9` instead of
+   `/dev/pts/1`).  A user view's client is still not a *candidate* unless
+   the view is named `base~N`; that matches R5.2 and the ambiguity #5
+   resolution (a pane cannot identify which client pressed the key).
+2. **The spec claimed `current_or_base_session()` accepts `socket_path`.**
+   It does not (it resolves the current pane through the ambient server),
+   so R2 now says so and records why that is still correct: every caller
+   runs with `PM_TMUX_SOCKET` already selected.  `session_group()` was
+   added to R2's list of group helpers that do take it.
+
+Nothing else surfaced.  The socket derivation and default-server
+addressing (R4.3), discovery scoping (7af7 i1–i3, 3cc7 i1, 703c i1), the
+rollout path (R6) and the socket-directory/ownership checks (d1c0
+i10/i12, 703c i2) all match the spec, and every new helper has direct
+coverage.
+
+Validation on the integrated head: full suite re-run after the edit (see
+the PR note for this iteration); `pm/specs/pr-073910f/session_start_smoke.py`
+re-run end to end on a disposable socket; no live session, server or
+shared host configuration was touched, and the new test is unit-level (it
+binds no tmux server).

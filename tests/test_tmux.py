@@ -38,6 +38,7 @@ from pm_core.tmux import (
     find_unattached_grouped_session,
     sessions_on_window,
     attached_group_active_windows,
+    create_grouped_session,
 )
 
 
@@ -132,6 +133,49 @@ class TestCreateSession:
         assert "new-session" in cmd
         assert "-d" in cmd
         assert "-s" in cmd
+
+
+class TestConcurrentCreate:
+    """Paired ``pm session`` starts race between the existence check and
+    ``new-session``; the loser gets "duplicate session" and must converge
+    on the winner's session instead of crashing with a traceback."""
+
+    @patch("pm_core.tmux.session_exists")
+    @patch("pm_core.tmux.subprocess.run")
+    def test_create_session_converges_on_duplicate(self, mock_run, exists):
+        mock_run.side_effect = subprocess.CalledProcessError(
+            1, ["tmux", "new-session"])
+        exists.return_value = True
+        create_session("proj", "/home/user", "bash")  # must not raise
+        # the duplicate is confirmed with an exact-name probe
+        assert exists.call_args[0][0] == "=proj"
+
+    @patch("pm_core.tmux.session_exists")
+    @patch("pm_core.tmux.subprocess.run")
+    def test_create_session_reraises_a_real_failure(self, mock_run, exists):
+        mock_run.side_effect = subprocess.CalledProcessError(
+            1, ["tmux", "new-session"])
+        exists.return_value = False
+        with pytest.raises(subprocess.CalledProcessError):
+            create_session("proj", "/home/user", "bash")
+
+    @patch("pm_core.tmux.session_exists")
+    @patch("pm_core.tmux.subprocess.run")
+    def test_grouped_session_converges_on_duplicate(self, mock_run, exists):
+        mock_run.side_effect = subprocess.CalledProcessError(
+            1, ["tmux", "new-session"])
+        exists.return_value = True
+        create_grouped_session("proj", "proj~1")  # must not raise
+        assert exists.call_args[0][0] == "=proj~1"
+
+    @patch("pm_core.tmux.session_exists")
+    @patch("pm_core.tmux.subprocess.run")
+    def test_grouped_session_reraises_a_real_failure(self, mock_run, exists):
+        mock_run.side_effect = subprocess.CalledProcessError(
+            1, ["tmux", "new-session"])
+        exists.return_value = False
+        with pytest.raises(subprocess.CalledProcessError):
+            create_grouped_session("proj", "proj~1")
 
 
 # ---------------------------------------------------------------------------
