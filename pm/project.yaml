@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-31T20:42:44.939858+00:00'
+  updated_at: '2026-10-31T21:22:19.345997+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37682,6 +37682,33 @@ prs:
       No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-31T20:42:44Z'
     last_edited: '2026-10-31T20:42:44Z'
+  - id: note-91bc119
+    text: 'Review loop 928f i3: one leftover in the kept web-UI recipe, the PR''s
+      own class (a completion check that cannot tell a finished artifact from a failed
+      one, plus a false success that destroys the source) — and no pm_core/ change.
+      The finalize step''s ffmpeg was the one render call without -nostdin (both recording
+      recipes'' render_cast has it; QA S46 is the batch-loop input loss it prevents).
+      Verified with the recipe''s own block and real ffmpeg 4.4.2: fed on stdin (how
+      a scripted worker or an automated agent runs it), ffmpeg ate the first two bytes
+      of the next line and bash answered "bash: line 83: he: command not found" (rc
+      0, the mp4 produced, the webm removed); run from a file with `q` on stdin (ffmpeg''s
+      quit key), ffmpeg exited 0 after writing a 262-byte, 0-frame mp4 that the step''s
+      `test -s` accepts, and the step then ran `rm -f recording.webm` — the only copy
+      of the driver''s video — so the capture lost its recording while the step reported
+      success. Fix: `ffmpeg -nostdin` in the finalize block, and the manifest example''s
+      `ffmpeg -i recording.webm …` line carries it too. New test test_web_ui_finalize_never_consumes_the_script_on_stdin
+      runs the recipe''s own block on stdin against a stub ffmpeg that consumes one
+      byte unless -nostdin is given and requires no "command not found" noise, rc
+      0, the mp4 and no webm; it fails against the pre-fix block ("bash: line 83:
+      The: command not found"). Tests: recipe file 248 passed (was 247); related suites
+      145 passed; full suite env -u PM_HOST_HOME PATH=/usr/bin:/bin pytest tests/
+      -q --deselect tests/test_merge_publish.py --deselect tests/test_signoff_integration.py
+      -> 5324 passed, 1 skipped, 121 deselected, 0 failed (443.49 s). Evidence: /pm-captures/review-928f-i3/
+      (probe-stdin.log, mutation-check.log, suite.log, README.md, scripts/). impl.md
+      R63 + Files/verification and qa.md updated. The dropped helper/prompt/verifier
+      work stays dropped.'
+    created_at: '2026-10-31T21:22:03Z'
+    last_edited: '2026-10-31T21:22:19Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
