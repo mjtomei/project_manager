@@ -784,8 +784,8 @@ a remedy that would do nothing. It stops when the binary it just installed
 still does not resolve (`~/.local/bin` not on `PATH`) or still does not run,
 instead of exiting 0 and leaving the render to ask the same question, which
 sends the worker back to the same block. The render block
-also checks that `ffmpeg` exists, because a missing encoder otherwise reads
-as a bad gif:
+also checks that `ffmpeg` and `ffprobe` exist, because a missing encoder or
+prober otherwise reads as a bad gif:
 
 ```
 # Install when agg is missing *or* the one on PATH does not run. The bundled
@@ -921,6 +921,22 @@ render_fail() {
 command -v ffmpeg >/dev/null || {
     echo "ffmpeg is not installed — the render step needs it; install it" \
         "(e.g. 'apt-get install ffmpeg') and re-run this step" >&2
+    exit 1
+}
+# ... and the prober, which the encode depends on: ffprobe measures the gif
+# (dimensions, packet count, duration) and the final-frame hold is built from
+# those answers. Without it both probes answer nothing and the block reports
+# "cannot probe the gif" — the gif blamed for a tool that is not installed,
+# the same misdiagnosis the encoder check above exists to prevent, one tool
+# over (verified: with ffmpeg on PATH and no ffprobe, rc 1 with that message).
+# `ffprobe` ships with ffmpeg in the usual packages, but a hand-built or
+# trimmed encoder need not include it, and the block has to say which of the
+# two is missing. Checked before the agg render, like the encoder, so a
+# missing prober costs no encode.
+command -v ffprobe >/dev/null || {
+    echo "ffprobe is not installed — the render step needs it to measure the" \
+        "gif; install it (e.g. 'apt-get install ffmpeg', which provides both)" \
+        "and re-run this step" >&2
     exit 1
 }
 # render_cast <cast>: <cast> -> sibling recording.mp4 (variable frame rate).

@@ -973,6 +973,18 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   `pm_core/docs/qa_library.md` documents. The tmux template omitted it until
   R65 (the CLI and web-UI templates already had it); this is a document
   check, not a scenario surface.
+- A render block runs on a host with `ffmpeg` but no `ffprobe` → it must stop
+  with "ffprobe is not installed — the render step needs it to measure the
+  gif; install it (e.g. 'apt-get install ffmpeg', which provides both)" before
+  it renders anything, not report "cannot probe the gif" for a gif that is
+  fine (R66). The usual `ffmpeg` packages provide both; this is the trimmed
+  or hand-built encoder.
+- The web-UI finalize is killed while its transcode runs (worker timeout,
+  session end, container stop) → the capture directory holds
+  `recording.mp4.partial.mp4` and **no** `recording.mp4`; the partial is not
+  this run's video and the manifest names it when it survives (R66). The
+  finalize writes the partial and renames only after a complete encode, as
+  both recording recipes' `render_cast` already did.
 
 ## Pass / Fail criteria
 

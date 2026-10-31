@@ -1525,18 +1525,19 @@ def test_render_publishes_through_a_partial_name(name, tmp_path):
         "mp4")
 
 
-def _run_render_without_ffmpeg(name, tmp_path):
-    """Run a recipe's render block on a PATH that holds no ``ffmpeg``.
+def _run_render_without(name, tmp_path, missing="ffmpeg"):
+    """Run a recipe's render block on a PATH that holds no ``missing`` tool.
 
-    A host may well have a real ``ffmpeg`` on ``PATH``, so the bindir carries
-    the block's other tools (stubbed ``agg``/``ffprobe``, symlinked coreutils)
-    and nothing else — the encoder has to be genuinely absent. The capture
-    directory is seeded with a *previous* run's ``recording.mp4`` and
-    ``recording.cast.gif``, because the missing-encoder stop is the one render
-    failure that does not go through ``render_fail``: only the block's own
-    pre-render ``rm`` keeps that path from leaving the earlier run's video
+    A host may well have a real ``ffmpeg``/``ffprobe`` on ``PATH``, so the
+    bindir carries the block's other tools (stubbed ``agg`` and the tool that
+    is present, symlinked coreutils) and nothing else — the missing one has to
+    be genuinely absent. The capture directory is seeded with a *previous*
+    run's ``recording.mp4``, ``recording.cast.gif`` and interrupted
+    ``recording.mp4.partial.mp4``, because a stop at either tool guard is a
+    render failure that does not go through ``render_fail``: only the block's
+    own pre-render ``rm`` keeps that path from leaving the earlier run's video
     behind (verified live: with the ``rm`` removed the block exits 1 with the
-    same message and both files survive).
+    same message and all three files survive).
     """
     bash = shutil.which("bash")
     block = _render_block(name)
@@ -1556,8 +1557,16 @@ def _run_render_without_ffmpeg(name, tmp_path):
     bindir.mkdir()
     _stub_tool(bindir, "agg", (
         'for a in "$@"; do last=$a; done\nprintf gif > "$last"\n'))
-    _stub_tool(bindir, "ffprobe", (
-        'case "$*" in *width,height*) echo 640,480 ;; *) echo h264 ;; esac\n'))
+    if missing != "ffprobe":
+        _stub_tool(bindir, "ffprobe", (
+            'case "$*" in *width,height*) echo 640,480 ;;\n'
+            '  *nb_read_packets*) echo 6 ;;\n'
+            '  *format=duration*) echo 0.60 ;;\n'
+            '  *) echo h264 ;;\n'
+            'esac\n'))
+    if missing != "ffmpeg":
+        _stub_tool(bindir, "ffmpeg", (
+            'for a in "$@"; do last=$a; done\nprintf mp4 > "$last"\n'))
     for tool in ("rm", "cat", "sh", "date", "uname", "mkdir", "chmod"):
         for d in ("/bin", "/usr/bin"):
             if (Path(d) / tool).exists():
@@ -1591,7 +1600,7 @@ def test_render_names_a_missing_encoder(name, tmp_path):
     evidence (verified live). The seeded files below are what pins that
     ordering.
     """
-    r, mp4, gif = _run_render_without_ffmpeg(name, tmp_path)
+    r, mp4, gif = _run_render_without(name, tmp_path, missing="ffmpeg")
     partial = Path(str(mp4) + ".partial.mp4")
 
     assert r.returncode != 0, r.stderr
@@ -1603,6 +1612,51 @@ def test_render_names_a_missing_encoder(name, tmp_path):
     assert not gif.exists(), (
         f"{name}: the render left a gif behind — either it ran agg before "
         "noticing the encoder was missing, or it kept the previous run's gif")
+    assert not mp4.exists(), (
+        f"{name}: a render that could not run left the previous run's "
+        "recording.mp4 behind, so the capture looks successful with a stale "
+        "video")
+    assert not partial.exists(), (
+        f"{name}: a render that could not run left an interrupted render's "
+        f"{partial.name} behind, so the capture looks like a render in "
+        "progress")
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_render_names_a_missing_prober(name, tmp_path):
+    """A missing ``ffprobe`` is not an unreadable gif.
+
+    The block guards the encoder because a missing tool otherwise reads as a
+    bad *input*, and ``ffprobe`` is used even earlier: it measures the gif's
+    dimensions and builds the final-frame hold from its packet count and
+    duration. Without a guard, a host with ``ffmpeg`` but no ``ffprobe``
+    answers "ffprobe: command not found" three times and then reports
+    "cannot probe the gif <path>" — the gif blamed for a tool that is not
+    installed, the same misdiagnosis the encoder guard exists to prevent, one
+    tool over (verified against the pre-fix blocks: rc 1 with that message
+    and no ``ffprobe`` anywhere on ``PATH``). ``ffprobe`` ships with ffmpeg in
+    the usual packages, but a hand-built or trimmed encoder need not include
+    it, and the block has to say which of the two is missing.
+
+    Like the missing-encoder stop, this one runs after the pre-render ``rm``
+    and before ``agg``: the seeded previous run's mp4, gif and partial must be
+    gone, not left for the manifest to present as this run's evidence.
+    """
+    r, mp4, gif = _run_render_without(name, tmp_path, missing="ffprobe")
+    partial = Path(str(mp4) + ".partial.mp4")
+
+    assert r.returncode != 0, r.stderr
+    assert "ffprobe is not installed" in r.stderr, (
+        f"{name}: a missing prober is not named: " + r.stderr)
+    assert "cannot probe the gif" not in r.stderr, (
+        f"{name}: a missing prober is still reported as an unreadable gif: "
+        + r.stderr)
+    assert "ffprobe: command not found" not in r.stderr, (
+        f"{name}: the block ran ffprobe before noticing it was missing, so "
+        "the worker sees the shell's error instead of the recipe's: "
+        + r.stderr)
+    assert not gif.exists(), (
+        f"{name}: the render ran agg although the prober was missing")
     assert not mp4.exists(), (
         f"{name}: a render that could not run left the previous run's "
         "recording.mp4 behind, so the capture looks successful with a stale "
@@ -2446,6 +2500,64 @@ def test_web_ui_failed_transcode_leaves_no_partial_mp4(tmp_path):
     assert "transcode produced no mp4" in r.stderr, r.stderr
     assert not (capdir / "recording.mp4").exists(), (
         "a failed transcode left its partial mp4 as this run's recording")
+
+
+def test_web_ui_finalize_publishes_through_a_partial_name(tmp_path):
+    """An interrupted transcode must not publish under the final name.
+
+    The exit-status check catches an ffmpeg that *fails*, but not one the
+    worker's shell no longer lives to see: a finalize killed while ffmpeg ran
+    (the worker timed out, its session ended, the container was stopped) runs
+    no cleanup at all. Writing straight to ``recording.mp4`` then leaves a
+    non-empty partial — verified here with a stub that writes the output and
+    SIGKILLs the block's shell — under the exact name the manifest and the
+    report present as this run's video. The recording recipes' ``render_cast``
+    publishes through ``recording.mp4.partial.mp4`` and renames only after a
+    complete encode for this reason; the finalize step was the one render call
+    that published directly.
+
+    The partial is named in the produced-files list and the manifest example
+    (``test_web_ui_produced_files_list_names_the_files_a_failed_run_keeps``),
+    and both step 1's and step 2's cleanups clear it.
+    """
+    block = _web_ui_finalize_block()
+
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    (capdir / "recording.webm").write_bytes(b"webm")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    # Write the output the way real ffmpeg does, then kill the shell that
+    # would have checked its status — the shape no in-block cleanup can run.
+    # The shell's pid comes from a launcher that `exec`s bash, so the stub
+    # cannot signal the wrong process (the test runner) if bash ever execs
+    # its child instead of forking.
+    pidfile = tmp_path / "block-shell.pid"
+    _stub_tool(bindir, "ffmpeg",
+               'for a in "$@"; do last=$a; done\n'
+               'printf partial > "$last"\n'
+               'kill -9 "$(cat "$BLOCK_PID_FILE")"\n')
+    launcher = tmp_path / "launch-block.sh"
+    launcher.write_text('#!/bin/sh\necho $$ > "$BLOCK_PID_FILE"\nexec bash\n')
+    launcher.chmod(0o755)
+    env = dict(os.environ, CAPDIR=str(capdir),
+               BLOCK_PID_FILE=str(pidfile),
+               PATH=f"{bindir}:{os.environ['PATH']}")
+    r = subprocess.run([str(launcher)], input=block, env=env,
+                       capture_output=True, text=True)
+
+    assert r.returncode != 0, (
+        "the block exited 0 although its shell was killed mid-transcode")
+    assert not (capdir / "recording.mp4").exists(), (
+        "a finalize killed mid-transcode published its partial mp4 under "
+        "recording.mp4, the name the manifest and the report present as this "
+        "run's video")
+    assert (capdir / "recording.mp4.partial.mp4").exists(), (
+        "the interrupted transcode left nothing under the partial name, so "
+        "the recipe's produced-files list cannot explain what it leaves")
+    assert (capdir / "recording.webm").exists(), (
+        "the interrupted finalize dropped the webm, the only complete "
+        "recording")
 
 
 def test_web_ui_transcode_that_writes_nothing_leaves_no_mp4(tmp_path):
@@ -3656,9 +3768,9 @@ def test_web_ui_clears_a_previous_video():
     assert clear, (
         "web-ui recipe keeps an earlier run's webm/mp4, so a failed driver "
         "transcodes the previous run into this run's recording")
-    for artifact in ("*.webm", "recording.mp4", "trace.zip",
-                     "dom.html", "http.log", "sse.log", "server.pid",
-                     "manifest.md", "*.png"):
+    for artifact in ("*.webm", "recording.mp4", "recording.mp4.partial.mp4",
+                     "trace.zip", "dom.html", "http.log", "sse.log",
+                     "server.pid", "manifest.md", "*.png"):
         assert artifact in clear, (
             f"web-ui recipe leaves a previous run's {artifact} in place, so a "
             "failed driver presents the earlier run's evidence as this run's")
@@ -3677,8 +3789,27 @@ def test_web_ui_clears_a_previous_video():
     rm = finalize_block.index('rm -f "$CAPDIR/recording.mp4"')
     assert rm < finalize_block.index("\nffmpeg "), (
         "web-ui recipe only drops the old mp4 after the transcode")
+    assert ('rm -f "$CAPDIR/recording.mp4" '
+            '"$CAPDIR/recording.mp4.partial.mp4"') in finalize_block, (
+        "web-ui recipe does not clear an interrupted transcode's partial "
+        "before it starts, so the next attempt resumes into it")
+    assert ('mv -f "$CAPDIR/recording.mp4.partial.mp4" '
+            '"$CAPDIR/recording.mp4"') in finalize_block, (
+        "web-ui recipe publishes the transcode under the final name without "
+        "a rename, so an interrupted encode leaves a partial mp4 as this "
+        "run's recording")
     assert 'test -s "$CAPDIR/recording.mp4"' in finalize_block, (
         "web-ui recipe does not check that the transcode produced the mp4")
+    # Step 2's attempt cleanup (a driver retried alone) must clear the
+    # partial too, for the same reason step 1 does.
+    attempt = text.split("### 2. Drive Chromium", 1)[1].split("### 3.", 1)[0]
+    attempt_joined = re.sub(r"\\\n\s*", " ", attempt)
+    attempt_rm = next((ln for ln in attempt_joined.splitlines()
+                       if ln.startswith("rm -f") and "./*.webm" in ln), None)
+    assert attempt_rm and "./recording.mp4.partial.mp4" in attempt_rm, (
+        "web-ui step 2's retry cleanup keeps an interrupted transcode's "
+        "partial, so a retried attempt that fails presents it as this run's "
+        "recording")
 
 
 def _web_ui_layer2_block():
@@ -3710,7 +3841,7 @@ def test_web_ui_produced_files_list_names_the_playwright_link():
 
 
 def test_web_ui_produced_files_list_names_the_files_a_failed_run_keeps():
-    """Three files the flow leaves in the capture directory are not listed.
+    """Four files the flow leaves in the capture directory are not listed.
 
     ``server.pid`` is written by step 1 and removed by the teardown, so it is
     present exactly when a run stopped before the teardown — a failed driver,
@@ -3723,11 +3854,16 @@ def test_web_ui_produced_files_list_names_the_files_a_failed_run_keeps():
     recording (verified live in this container: SIGKILLing a recording driver
     leaves ``page@b87f….webm``, which ffprobe reports as 3.12 s), and the
     finalize step transcodes only ``recording.webm``, so nothing else ever
-    removes or explains it. The recipe's manifest section asks for "every
-    file above", and the recording recipes' lists already name their failure
-    evidence (R17), so a worker following this list leaves all three out of
-    ``## Files`` while the capture directory holds them — the same "the
-    manifest and the directory disagree" class, one file over.
+    removes or explains it. ``recording.mp4.partial.mp4`` is the finalize
+    step's in-progress output: it is renamed onto ``recording.mp4`` only after
+    a complete encode, so a step killed mid-encode (the shell gone, so no
+    cleanup runs) leaves it behind while no mp4 exists — the file the next
+    reader must not mistake for this run's video, and therefore one the
+    manifest has to name when it is there. The recipe's manifest section asks
+    for "every file above", and the recording recipes' lists already name
+    their failure evidence (R17), so a worker following this list leaves all
+    four out of ``## Files`` while the capture directory holds them — the same
+    "the manifest and the directory disagree" class, one file over.
 
     The manifest's own ``## Files`` example has to name them too, not only the
     produced-files list: that example is what a worker copies into the
@@ -3745,7 +3881,8 @@ def test_web_ui_produced_files_list_names_the_files_a_failed_run_keeps():
     # section", so the example's *file list* — the indented heading — is what
     # has to name it.
     files = manifest.split("\n    ## Files", 1)[1]
-    for fname in ("server.pid", "recording.webm", "page@<hash>.webm"):
+    for fname in ("server.pid", "recording.webm", "page@<hash>.webm",
+                  "recording.mp4.partial.mp4"):
         assert fname in produced, (
             "the produced-files list never names " + fname + ", which the "
             "flow leaves in the capture directory (a run stopped before the "

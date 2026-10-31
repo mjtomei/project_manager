@@ -46,6 +46,12 @@ substitutes the per-PR captures directory — `$(pm qa captures-path
   Playwright records VP8 webm natively; the finalize step transcodes it
   to H.264 mp4 so it plays everywhere including iOS Safari (VP8/VP9
   webm does not decode on iOS).
+- `recording.mp4.partial.mp4` — the finalize step's in-progress output. The
+  transcode writes this name and renames it onto `recording.mp4` only after
+  a complete encode, so the partial survives only when the step was killed
+  mid-encode (a worker or session torn down while ffmpeg ran). It is never
+  this run's video: mention it in the manifest when it survives, and do not
+  present it as the recording.
 - `recording.webm` — Playwright's native video. The finalize step drops it
   once the mp4 exists, so it survives only when the transcode failed (it is
   kept deliberately, so the step can be retried without re-driving the UI) —
@@ -154,6 +160,10 @@ mkdir -p "$CAPDIR" || {
 # `: "${CAPDIR:?}"` form below. Without it `"$CAPDIR"/*.png` and `*.webm`
 # would expand against the filesystem root and the cleanup would target every
 # PNG and webm there.
+# An interrupted finalize's `recording.mp4.partial.mp4` goes with them: the
+# transcode writes that name and renames it onto `recording.mp4` only after a
+# complete encode, so a finalize killed mid-encode leaves the partial and no
+# `recording.mp4` — the name the manifest and the report present.
 # `server.pid` (written below) goes too: a stale one would make the teardown
 # signal whatever process has since reused that pid.
 # The previous run's `manifest.md` goes with them: it is the document that
@@ -162,7 +172,7 @@ mkdir -p "$CAPDIR" || {
 # the previous run and naming a video this `rm` just deleted. `driver.mjs` is
 # the one file here that is deliberately *not* cleared: it is the run's input
 # (the adapted skeleton), not its evidence, and a retry drives the same one.
-rm -f "$CAPDIR/recording.mp4" \
+rm -f "$CAPDIR/recording.mp4" "$CAPDIR/recording.mp4.partial.mp4" \
       "$CAPDIR/trace.zip" "$CAPDIR/dom.html" \
       "$CAPDIR/http.log" "$CAPDIR/sse.log" "$CAPDIR/server.pid" \
       "$CAPDIR/manifest.md" \
@@ -320,8 +330,12 @@ cd "$CAPDIR" || {                            # where driver.mjs lives
 # any file check. The mp4 goes too: an earlier attempt that was already
 # finalized leaves the primary artifact, and a retry that fails would then end
 # with that video as the only recording the manifest can present as this
-# run's. The paths are relative because the `cd` above succeeded. The
-# manifest goes too: it is the document that says what this capture is
+# run's. The interrupted transcode's `recording.mp4.partial.mp4` goes with
+# it: the finalize step publishes under that name and renames only on
+# success, so a step killed mid-encode leaves it beside no mp4, and a retry
+# that fails must not present it as this run's recording. The paths are
+# relative because the `cd` above succeeded. The manifest goes too: it is
+# the document that says what this capture is
 # (workdir, the app URL, `## Files`), and an attempt that already reached the
 # finalize step leaves one whose `## Files` names the `recording.mp4` this
 # `rm` just deleted — so a retry that fails would end with a manifest
@@ -334,8 +348,8 @@ cd "$CAPDIR" || {                            # where driver.mjs lives
 # without this the retried capture presents the earlier attempt's route
 # snapshots and event stream as this run's (step 1 clears them for a fresh
 # run for exactly that reason; this covers the step-2-only retry).
-rm -f ./recording.mp4 ./*.webm ./trace.zip ./dom.html ./*.png ./manifest.md \
-      ./http.log ./sse.log
+rm -f ./recording.mp4 ./recording.mp4.partial.mp4 ./*.webm ./trace.zip \
+      ./dom.html ./*.png ./manifest.md ./http.log ./sse.log
 # The driver this block runs is the one the prose above says to save here.
 # Without it `node driver.mjs` answers "Cannot find module …/driver.mjs" and
 # the run-failure message below would report that as a driver that ran and
@@ -497,7 +511,10 @@ const shot = (page, name) =>
 ### 3. Finalize: transcode the video to H.264 mp4
 
 Playwright's native recording is VP8 webm, which iOS Safari cannot
-decode. Transcode to H.264 and keep only the mp4:
+decode. Transcode to H.264 and keep only the mp4. The encode publishes
+through `recording.mp4.partial.mp4` and renames onto `recording.mp4` only
+after a complete encode, so an interrupted transcode never leaves a file
+under the name the manifest and the report present:
 
 ```bash
 # The placeholders above are shell variables; a block pasted into a fresh
@@ -533,8 +550,10 @@ fi
 }
 # Drop the old mp4 first: ffmpeg leaves an existing output untouched when it
 # fails, so a failed transcode would otherwise keep the previous run's video
-# as this run's recording.
-rm -f "$CAPDIR/recording.mp4"
+# as this run's recording. The interrupted transcode's partial goes with it —
+# a finalize killed mid-encode leaves it, and the next attempt must not
+# resume into it.
+rm -f "$CAPDIR/recording.mp4" "$CAPDIR/recording.mp4.partial.mp4"
 # No webm means there is nothing to transcode, and that is *not* an ffmpeg
 # problem: the driver block checks the driver's exit status, but a driver that
 # exits 0 without recording (`recordVideo` dropped while adapting it, or a
@@ -556,10 +575,16 @@ command -v ffmpeg >/dev/null || {
         "(e.g. 'apt-get install ffmpeg') and re-run this step" >&2
     exit 1
 }
-# Check ffmpeg's own exit status as well as the file. A failed or killed
-# transcode leaves a *partial* mp4 behind (verified: a killed ffmpeg leaves a
-# non-empty output), which the `test -s` below accepts — the same
-# header-only-cast problem as the recording step, one artifact over.
+# The encode writes `recording.mp4.partial.mp4` and renames it onto
+# `recording.mp4` only after a complete encode. That is what keeps a partial
+# transcode from being published under the name the manifest and the report
+# present: a killed ffmpeg leaves a non-empty output (verified: 267,945 bytes
+# on SIGKILL), and a finalize killed while ffmpeg ran — the worker or its
+# session torn down — never reaches any cleanup below. Under the final name
+# that partial would sit beside no valid video and read as this run's
+# recording; under the partial name it is what it says it is. It is also the
+# handle for a killed *ffmpeg* that the shell survives: the exit status below
+# catches that one.
 # `-nostdin` is load-bearing, not style. ffmpeg reads the worker's stdin
 # unless told not to, and this block runs with the *block itself* on stdin
 # whenever a worker scripts a capture or an automated agent executes it
@@ -577,23 +602,38 @@ command -v ffmpeg >/dev/null || {
 # reason; this was the one render call without it.
 ffmpeg -nostdin -y -i "$CAPDIR/recording.webm" -c:v libx264 -profile:v high \
     -pix_fmt yuv420p -crf 18 -movflags +faststart \
-    "$CAPDIR/recording.mp4" || {
-    rm -f "$CAPDIR/recording.mp4"
+    "$CAPDIR/recording.mp4.partial.mp4" || {
+    rm -f "$CAPDIR/recording.mp4.partial.mp4"
     echo "transcode produced no mp4 — ffmpeg failed on the driver's webm" >&2
     exit 1
 }
-# The mp4 is the required artifact: fail here, visibly, rather than leaving
-# the caller to notice the video is missing later. The webm is kept until the
-# mp4 exists so a failed transcode can be retried without re-driving the UI.
-# A renderer that reports success and writes nothing leaves an *empty* mp4
-# behind, and an output that is left on a failed step is what the recording
-# recipes' render step removes for the same reason (verified: this branch
-# exits 1 but used to leave a 0-byte recording.mp4 the manifest could list as
-# this run's video).
-test -s "$CAPDIR/recording.mp4" || {
-    rm -f "$CAPDIR/recording.mp4"
+# The partial is the artifact until it is renamed: fail here, visibly, rather
+# than publishing an empty file. The webm is kept until the mp4 exists so a
+# failed transcode can be retried without re-driving the UI. A renderer that
+# reports success and writes nothing leaves an *empty* partial behind, and an
+# output that is left on a failed step is what the recording recipes' render
+# step removes for the same reason (verified: this branch exits 1 but used to
+# leave a 0-byte recording.mp4 the manifest could list as this run's video).
+[ -s "$CAPDIR/recording.mp4.partial.mp4" ] || {
+    rm -f "$CAPDIR/recording.mp4.partial.mp4"
     echo "transcode produced no mp4 — ffmpeg wrote nothing; check the" \
         "driver's webm" >&2
+    exit 1
+}
+# Publish only after a complete encode. The rename is what makes the partial
+# this run's video; if it fails, remove the partial rather than leave it
+# looking like a finished recording.
+mv -f "$CAPDIR/recording.mp4.partial.mp4" "$CAPDIR/recording.mp4" || {
+    rm -f "$CAPDIR/recording.mp4.partial.mp4"
+    echo "could not publish $CAPDIR/recording.mp4" >&2
+    exit 1
+}
+# The mp4 is the required artifact: fail here, visibly, rather than leaving
+# the caller to notice the video is missing later. The rename above is what
+# proves the encode finished; this is the backstop for a published file that
+# is not there (another process removing it between the rename and this line).
+test -s "$CAPDIR/recording.mp4" || {
+    echo "transcode produced no mp4 — the published mp4 is not there" >&2
     exit 1
 }
 rm -f "$CAPDIR/recording.webm"
@@ -742,6 +782,9 @@ fencing deep:
 
     - `recording.mp4` — the rendered walk-through, transcoded to H.264
       from Playwright's native webm.
+    - `recording.mp4.partial.mp4` — the finalize step's in-progress output,
+      present only when the transcode was killed before it published (a
+      partial recording, not this run's video).
     - `recording.webm` — Playwright's native video; kept only when the
       transcode failed, so step 3 can be retried without re-driving the UI.
     - `page@<hash>.webm` — Playwright's auto-named video, present only when
