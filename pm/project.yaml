@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-31T19:56:36.120245+00:00'
+  updated_at: '2026-10-31T20:17:55.079437+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5330,6 +5330,37 @@ prs:
       is unit-level and binds no tmux server.'
     created_at: '2026-10-31T19:56:36Z'
     last_edited: '2026-10-31T19:56:36Z'
+  - id: note-31ecf41
+    text: 'Review loop 703c i2 (commit 9ecdc971; full suite 5327 passed / 1 skipped).
+      No requirement changes. Verification pass over the integrated head; one gap
+      in the fail-closed socket-directory guard. (1) ensure_socket_dir() accepted
+      a sticky directory it cannot write to: the d1c0 i12 hardening re-checked the
+      mode after a failed chmod, but only for the sticky bit, while its own comment
+      says the directory "is fine only when it already has the mode we need" (1777).
+      A root-owned 1755 /tmp/pm-sessions — sticky but not world-writable — therefore
+      passed the guard, and the failure surfaced much later as an opaque "couldn''t
+      create socket" from tmux instead of the actionable message pm session prints
+      for this refusal. The re-check now requires S_ISVTX AND S_IWOTH: without the
+      sticky bit another user can unlink our socket (the uid check runs once, before
+      tmux binds), and without world-write we cannot create one at all. Test: test_refuses_a_sticky_dir_it_cannot_write
+      (verified to fail without the world-write test); the existing 1777 and 0777
+      cases are unchanged. Also re-verified on this machine that tmux reports the
+      most recently active client''s session for display-message -t %pane #{session_name}
+      while #{session_group} names the pm base, which confirms both the i1 grouped-view
+      fix and detach_current_client()''s `session.split("~", 1)[0]` group derivation.
+      Re-checked and left alone (unchanged from i1''s documented call): guide._in_pm_tmux_session()
+      keeps its raw pm- prefix test — it only decides whether pm guide execs in place
+      or opens a new pane, never which server or pane is addressed. Validation on
+      the integrated head: full suite 5327 passed / 1 skipped (scratch pytest<9 +
+      markdown on PYTHONPATH, PATH without the push-proxy git, TMUX/TMUX_PANE/PM_*/PM_HOST_HOME
+      cleared); pm/specs/pr-073910f/session_start_smoke.py re-run end to end on a
+      disposable socket (private server, session env, global env, hooks correct; default
+      server untouched); pm/project.yaml loads with 573 PRs and this PR''s 34 notes
+      intact. No live session, server or shared host configuration was touched; the
+      new test is unit-level and binds no tmux server. Residual notes unchanged and
+      non-blocking (see the i3 section of impl.md).'
+    created_at: '2026-10-31T20:17:42Z'
+    last_edited: '2026-10-31T20:17:55Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
