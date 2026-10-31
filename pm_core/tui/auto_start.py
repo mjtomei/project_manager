@@ -36,6 +36,7 @@ from pm_core.paths import configure_logger, pm_home
 from pm_core import store, graph
 from pm_core import tui_pidfile
 from pm_core import autostart_state
+from pm_core.pr_utils import usable_prs
 from pm_core.autostart_state import (
     POLICY_AUTO, POLICY_WAIT, REPLY_DIR, WAIT_KEY,
 )
@@ -82,7 +83,7 @@ def managed_ids(app, prs: list[dict] | None = None) -> set[str] | None:
     if is_all_mode(app):
         return None
     if prs is None:
-        prs = (app._data or {}).get("prs") or []
+        prs = usable_prs((app._data or {}).get("prs"))
     return autostart_state.managed_ids(prs, get_targets(app))
 
 
@@ -99,7 +100,7 @@ def merge_holds(app, prs: list[dict] | None = None) -> dict[str, dict]:
     targets never do.
     """
     if prs is None:
-        prs = (app._data or {}).get("prs") or []
+        prs = usable_prs((app._data or {}).get("prs"))
     targets = _targets(app) if is_enabled(app) else {}
     return autostart_state.merge_holds(prs, targets)
 
@@ -257,6 +258,7 @@ def save_breadcrumb(app) -> None:
             "retry_ready_at": rstate.retry_ready_at,
             "last_session_id": rstate.last_session_id,
             "iteration_attempted": rstate.iteration_attempted,
+            "last_attempt_failed": rstate.last_attempt_failed,
             "stale_session_id": rstate.stale_session_id,
             "stale_pane_session_id": rstate.stale_pane_session_id,
             # Which retry attempt the user has already been told about: a
@@ -429,6 +431,8 @@ async def consume_breadcrumb(app) -> None:
                 last_session_id=loop_data.get("last_session_id", "") or "",
                 iteration_attempted=bool(
                     loop_data.get("iteration_attempted", False)),
+                last_attempt_failed=bool(
+                    loop_data.get("last_attempt_failed", False)),
                 stale_session_id=loop_data.get("stale_session_id", "") or "",
                 stale_pane_session_id=(
                     loop_data.get("stale_pane_session_id", "") or ""),
@@ -559,14 +563,66 @@ def _adopt_live_qa(app) -> None:
         _log.warning("auto_start: QA adoption scan failed", exc_info=True)
 
 
+# Transcripts the TUI's idle polling (_poll_impl_idle) keeps reading after
+# auto-start is disabled; it registers them lazily on a later poll.
+_LAZY_TRACKED_RE = re.compile(r"^(?:impl|merge|review)-(?!.*-i\d+\.jsonl$).+\.jsonl$")
+
+
+def _live_read_transcripts(app, tdir: Path) -> set[str]:
+    """Paths in *tdir* that a reader still polls after auto-start is off.
+
+    - live idle-tracker entries (impl / merge / non-loop review panes);
+    - a running review loop's current iteration transcript (the loop polls
+      it itself; ``_poll_impl_idle`` skips PRs with running loops);
+    - impl / merge / review windows not registered yet: a live pane of the
+      pm session runs that session (its ``--session-id`` / ``--resume``).
+    Sign-off transcripts are not among them: the sign-off driver only
+    steps auto-start-driven PRs.
+    """
+    from pm_core import tmux as tmux_mod
+    from pm_core.claude_launcher import _PANE_SESSION_RE, session_id_from_transcript
+    live: set[str] = set()
+    tracker = getattr(app, "_pane_idle_tracker", None)
+    if tracker is not None:
+        for key in tracker.tracked_keys():
+            path = tracker.get_transcript_path(key)
+            if path and not tracker.is_gone(key):
+                live.add(os.path.abspath(path))
+    for pr_id, state in (getattr(app, "_review_loops", None) or {}).items():
+        if state.running and getattr(state, "_transcript_dir", None):
+            live.add(os.path.abspath(os.path.join(
+                state._transcript_dir, f"review-{pr_id}-i{state.iteration}.jsonl")))
+    session = getattr(app, "_session_name", None)
+    if session:
+        ids: set[str] = set()
+        for cmd in tmux_mod.live_pane_start_commands(session):
+            ids.update(_PANE_SESSION_RE.findall(cmd))
+        for p in tdir.iterdir():
+            if (_LAZY_TRACKED_RE.match(p.name) and p.is_symlink()
+                    and session_id_from_transcript(p) in ids):
+                live.add(os.path.abspath(p))
+    return live
+
+
 def _finalize_all_transcripts(app) -> None:
-    """Finalize all transcript symlinks in the current run directory."""
+    """Finalize all transcript symlinks in the current run directory.
+
+    Skips transcripts a reader still polls: a copy freezes them, so e.g. a
+    repo-update (merge) window waiting on INPUT_REQUIRED would never have
+    its later MERGED detected, and a running review loop would never see
+    its verdict.  Those stay symlinks to Claude's own transcript (as in a
+    run that is never disabled).
+    """
     tdir = get_transcript_dir(app)
     if not tdir or not tdir.is_dir():
         return
     from pm_core.claude_launcher import finalize_transcript
+    live = _live_read_transcripts(app, tdir)
     for p in tdir.iterdir():
         if p.is_symlink() and p.suffix == ".jsonl":
+            if os.path.abspath(p) in live:
+                _log.info("transcript: %s is still read live — not finalized", p)
+                continue
             finalize_transcript(p)
 
 
@@ -730,6 +786,12 @@ def add_targets(app, ids: list[str], policy: str | None = None,
         _log.info("auto_start: target %s %s policy=%s source=%s", pr_id,
                   "added" if is_new else "re-armed", current, source)
     _sync_enabled(app)
+    # An explicit (re-)add asks for a scheduler pass now, which retries
+    # every in-scope start, the targets' dependencies included: a start
+    # failure already shown is said again, or a retry that fails the same
+    # way (a provider still misconfigured) would leave only the targets
+    # line.
+    _start_failures_shown(app).clear()
     released = sorted(held_before - set(merge_holds(app)))
     if released:
         _log.info("auto_start: released merge holds on %s", released)
@@ -826,6 +888,7 @@ def enable_all(app) -> dict:
     """Explicit whole-backlog mode (the legacy targetless auto-start)."""
     app._auto_start_all = True
     _sync_enabled(app)
+    _start_failures_shown(app).clear()
     app.log_message("Auto-start: ON (all ready PRs — explicit backlog mode)",
                     force=True, hold=CONFIRM_HOLD_SECONDS)
     _log.info("auto_start: all-mode enabled")
@@ -891,7 +954,7 @@ def on_state_loaded(app, old_statuses: dict,
     """
     if not old_statuses or not is_enabled(app):
         return
-    prs = (app._data or {}).get("prs") or []
+    prs = usable_prs((app._data or {}).get("prs"))
     terminal = autostart_state.TERMINAL_STATUSES
     newly = [p["id"] for p in prs
              if p.get("id") in old_statuses
@@ -963,7 +1026,7 @@ async def check_and_start(app) -> None:
     if not app._root:
         return
 
-    prs = app._data.get("prs") or []
+    prs = usable_prs(app._data.get("prs"))
 
     _prune_completed_targets(app, prs)
     if not is_enabled(app):
@@ -999,9 +1062,17 @@ async def check_and_start(app) -> None:
         if pr.get("status") == "pending":
             _log.info("auto_start: starting ready PR %s", pr_id)
             # Forced past sticky messages, but not past the "targets +="
-            # confirmation's hold: then it's deferred until the hold ends.
-            held = time.monotonic() < getattr(app, "_log_hold_until", 0.0)
-            app.log_message(f"Auto-start: starting {pr_id}", force=not held)
+            # confirmation's hold (nor its queued confirmations waiting
+            # for their flush): then it's queued behind them with a hold
+            # of its own.  Merely deferred, it was dropped unseen when a
+            # start that failed within the hold queued its (newer) failure
+            # line (S53).
+            from pm_core.tui.app import log_line_held
+            if log_line_held(app):
+                app.log_message(f"Auto-start: starting {pr_id}",
+                                force=True, hold=CONFIRM_HOLD_SECONDS)
+            else:
+                app.log_message(f"Auto-start: starting {pr_id}", force=True)
         else:
             # ``pm pr start --background`` no-ops when the window exists.
             _log.info("auto_start: ensuring impl window for in_progress PR %s",
@@ -1037,7 +1108,7 @@ async def check_and_start(app) -> None:
     if started:
         # Reload state after starting PRs
         app._load_state()
-        prs = app._data.get("prs") or []
+        prs = usable_prs(app._data.get("prs"))
 
     if not is_enabled(app):
         return
@@ -1114,7 +1185,7 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
         return
 
     if prs is None:
-        prs = app._data.get("prs") or []
+        prs = usable_prs(app._data.get("prs"))
 
     from pm_core.tui.review_loop_ui import _schedule_retry_rearm, _start_loop
     for pr in prs:
@@ -1131,69 +1202,91 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
         if loop:
             if loop.running:
                 continue
-            if not _retryable_launch_failure(loop):
-                continue
-            # _start_loop would bail on these; clearing the failure flags
-            # first would then strand the target, so check them up front.
-            if not pr.get("workdir"):
-                continue
-            from pm_core import tmux as _tmux
-            if not _tmux.in_tmux():
-                continue
-            if _retry_rearm_blocked(loop):
-                # Still cooling down: keep a timer armed so the re-arm does
-                # not depend on an unrelated TUI event landing after the
-                # cooldown (the episode cap schedules nothing — it is final).
-                ready_at = float(getattr(loop, "retry_ready_at", 0.0) or 0.0)
-                if ready_at > time.time():
-                    _schedule_retry_rearm(app, loop)
-                continue
-            # A sign-off REVIEW return still waiting for its launch is a
-            # second ``--fresh`` launcher for the same window; take its
-            # claim first (exactly like the fresh-loop path below) so the
-            # re-armed loop and the return cannot kill each other's session.
-            if _yield_to_pending_review_return(app, pr_id):
-                continue
-            _log.info("auto_start: re-arming retryable review launch for %s "
-                      "(episode %d)", pr_id, getattr(loop, "retry_episodes", 0) + 1)
-            # Held like the "targets +=" confirmation: _start_loop logs
-            # "Review loop resumed …" in the same tick, so the single-line
-            # log would otherwise show only that later message — the re-arm
-            # announcement would be logged but never visible.
-            app.log_message(f"Auto-start: retrying review launch for {pr_id}",
-                            hold=CONFIRM_HOLD_SECONDS)
-            # Cleared before the thread starts (it must not resume the
-            # spent budget), restored if _start_loop bails so the failure
-            # stays retryable instead of being silently disarmed.  This is
-            # a new episode, so the per-episode retry notice key is cleared
-            # too: its attempt 2 must be announced even though the previous
-            # episode already announced an attempt with that number.
-            saved = (loop.retry_episodes, loop.launch_attempts,
+            if _retryable_launch_failure(loop):
+                # _start_loop would bail on these; clearing the failure
+                # flags first would then strand the target, so check them
+                # up front.
+                if not pr.get("workdir"):
+                    continue
+                from pm_core import tmux as _tmux
+                if not _tmux.in_tmux():
+                    continue
+                if _retry_rearm_blocked(loop):
+                    # Still cooling down: keep a timer armed so the re-arm
+                    # does not depend on an unrelated TUI event landing
+                    # after the cooldown (the episode cap schedules nothing
+                    # — it is final).
+                    ready_at = float(getattr(loop, "retry_ready_at", 0.0)
+                                     or 0.0)
+                    if ready_at > time.time():
+                        _schedule_retry_rearm(app, loop)
+                    continue
+                # A sign-off REVIEW return still waiting for its launch is a
+                # second ``--fresh`` launcher for the same window; take its
+                # claim first (exactly like the fresh-loop path below) so
+                # the re-armed loop and the return cannot kill each other's
+                # session.
+                if _yield_to_pending_review_return(app, pr_id):
+                    continue
+                _log.info("auto_start: re-arming retryable review launch for "
+                          "%s (episode %d)", pr_id,
+                          getattr(loop, "retry_episodes", 0) + 1)
+                # Held like the "targets +=" confirmation: _start_loop logs
+                # "Review loop resumed …" in the same tick, so the
+                # single-line log would otherwise show only that later
+                # message — the re-arm announcement would be logged but
+                # never visible.
+                app.log_message(
+                    f"Auto-start: retrying review launch for {pr_id}",
+                    hold=CONFIRM_HOLD_SECONDS)
+                # Cleared before the thread starts (it must not resume the
+                # spent budget), restored if _start_loop bails so the
+                # failure stays retryable instead of being silently
+                # disarmed.  This is a new episode, so the per-episode retry
+                # notice key is cleared too: its attempt 2 must be announced
+                # even though the previous episode already announced an
+                # attempt with that number.
+                saved = (loop.retry_episodes, loop.launch_attempts,
+                         loop.next_retry_at, loop.launch_retryable,
+                         loop.retry_ready_at, loop._ui_notified_retry)
+                loop.retry_episodes = getattr(loop, "retry_episodes", 0) + 1
+                loop.launch_attempts = 0
+                loop.next_retry_at = 0.0
+                loop.launch_retryable = False
+                loop.retry_ready_at = 0.0
+                loop._ui_notified_retry = 0
+                tdir = loop._transcript_dir or str(get_transcript_dir(app))
+                try:
+                    started = _start_loop(app, pr_id, pr,
+                                          transcript_dir=str(tdir),
+                                          resume_state=loop)
+                except Exception:
+                    # A raising starter must not silently disarm the failure
+                    # either; restore the episode exactly as for a False
+                    # return.
+                    _log.exception("auto_start: re-arm for %s raised", pr_id)
+                    started = False
+                if not started:
+                    (loop.retry_episodes, loop.launch_attempts,
                      loop.next_retry_at, loop.launch_retryable,
-                     loop.retry_ready_at, loop._ui_notified_retry)
-            loop.retry_episodes = getattr(loop, "retry_episodes", 0) + 1
-            loop.launch_attempts = 0
-            loop.next_retry_at = 0.0
-            loop.launch_retryable = False
-            loop.retry_ready_at = 0.0
-            loop._ui_notified_retry = 0
-            tdir = loop._transcript_dir or str(get_transcript_dir(app))
-            try:
-                started = _start_loop(app, pr_id, pr,
-                                      transcript_dir=str(tdir),
-                                      resume_state=loop)
-            except Exception:
-                # A raising starter must not silently disarm the failure
-                # either; restore the episode exactly as for a False return.
-                _log.exception("auto_start: re-arm for %s raised", pr_id)
-                started = False
-            if not started:
-                (loop.retry_episodes, loop.launch_attempts,
-                 loop.next_retry_at, loop.launch_retryable,
-                 loop.retry_ready_at, loop._ui_notified_retry) = saved
-                _log.warning("auto_start: re-arm for %s did not start; "
-                             "keeping the retryable failure", pr_id)
-            continue
+                     loop.retry_ready_at, loop._ui_notified_retry) = saved
+                    _log.warning("auto_start: re-arm for %s did not start; "
+                                 "keeping the retryable failure", pr_id)
+                continue
+            from pm_core.tui.review_loop_ui import _pending_auto_qa
+            if (not loop._ui_notified_done
+                    or pr_id in _pending_auto_qa(app)
+                    or not _awaiting_on_disk(app, pr_id, "review")):
+                continue
+            # A sign-off REVIEW return written behind this TUI (`pm edit`,
+            # another clone's sign-off) owes the PR a fresh review that this
+            # finished loop never ran; the TUI's own REVIEW hop drops the
+            # loop the same way.  Kept, it left the return waiting for good
+            # (S83).  Not before the poll tick has announced the loop and
+            # handed its PASS to QA: dropped sooner, that hand-off was lost,
+            # and a pending one (project.yaml busy) moved the PR to qa under
+            # the new review.
+            app._review_loops.pop(pr_id, None)
         # Skip if no workdir (shouldn't happen for in_review, but guard)
         if not pr.get("workdir"):
             continue
@@ -1201,7 +1294,10 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
         # restart after the hop): the loop's --fresh launch would kill one
         # a concurrent `pm pr auto-sequence` tick is starting, so take the
         # return's launch claim first (as the impl catch-up does).
-        if _yield_to_pending_review_return(app, pr_id):
+        if _awaiting_on_disk(app, pr_id, "review"):
+            if _yield_to_pending_review_return(app, pr_id):
+                continue
+        elif _adopt_return_review(app, pr):
             continue
         _log.info("auto_start: starting review loop for %s", pr_id)
         app.log_message(f"Auto-start: review loop for {pr_id}")
@@ -1255,7 +1351,7 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         return
 
     if prs is None:
-        prs = app._data.get("prs") or []
+        prs = usable_prs(app._data.get("prs"))
 
     for pr in prs:
         if pr.get("status") != "qa":
@@ -1279,7 +1375,11 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         # overwrites this record.
         recorded = recorded_qa_verdict(pr_id, pr)
         from pm_core.signoff import return_awaiting
-        if recorded in QA_HOLD_VERDICTS and return_awaiting(pr) != "qa":
+        # (The tree's copy keeps ``awaiting: qa`` after the re-run's start
+        # cleared it on disk; only the file says the return still waits.)
+        if recorded in QA_HOLD_VERDICTS and (
+                return_awaiting(pr) != "qa"
+                or not _awaiting_on_disk(app, pr_id, "qa")):
             _log.debug("auto_start: %s QA already ended %s, not relaunching",
                        pr_id, recorded)
             continue
@@ -1292,6 +1392,9 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         if run_driven_elsewhere(pr_id):
             _log.debug("auto_start: %s QA driven elsewhere, not starting",
                        pr_id)
+            # A ``pm qa run`` instruction run ends without a PR verdict:
+            # look again once it may be over (S111).
+            _recheck_after_driver(app)
             continue
         # Skip if no workdir
         if not pr.get("workdir"):
@@ -1331,6 +1434,94 @@ def _recheck_after_claim(app) -> None:
 
     app._return_claim_recheck = True
     set_timer(RETURN_LAUNCH_CLAIM_SECONDS + 5, _fire)
+
+
+# How often a pass is re-run while another process drives a run auto-start
+# left alone (see _recheck_after_driver).
+DRIVER_RECHECK_SECONDS = 30
+
+
+def _recheck_after_driver(app) -> None:
+    """Run another scheduler pass once a run driven elsewhere may be over.
+
+    A ``pm qa run`` instruction run ends without a PR verdict, so full QA
+    is still due once it exits; the TUI has no periodic auto-start pass, so
+    without this the PR would sit in qa until some unrelated event (S111).
+    A ``qa-run-bg`` driver records its verdict and the re-run pass then
+    finds the run ended.  The pass re-arms this while the run lives; one
+    pending re-check covers every PR.
+    """
+    set_timer = getattr(app, "set_timer", None)
+    if set_timer is None or getattr(app, "_driver_recheck", False):
+        return
+
+    def _fire():
+        app._driver_recheck = False
+        app.run_worker(check_and_start(app))
+
+    app._driver_recheck = True
+    set_timer(DRIVER_RECHECK_SECONDS, _fire)
+
+
+def _adopt_return_review(app, pr: dict) -> bool:
+    """Adopt the live review window of an already-launched REVIEW return.
+
+    Once a sign-off REVIEW return has launched (``awaiting`` cleared), its
+    review window may belong to another driver: a ``pm pr auto-sequence``
+    tick, or this TUI before a restart dropped its in-memory loop.  A new
+    loop's ``--fresh`` launch would kill that window and review again (S79),
+    so poll it as the loop's in-flight iteration instead.  Only a session
+    active since the return is adopted: an older window reviewed the code
+    sign-off sent back.  Returns True when a loop was started on it.
+    """
+    from pm_core.claude_launcher import pane_transcript_path
+    from pm_core.review_loop import (
+        ReviewLoopState, _compute_review_window_name, _find_claude_pane,
+    )
+    from pm_core.signoff import open_return, parse_ts
+
+    pr_id = pr["id"]
+    try:
+        disk_pr = store.get_pr(store.load(app._root), pr_id) or {}
+    except Exception:
+        _log.debug("auto_start: reload for %s failed", pr_id, exc_info=True)
+        return False
+    rec = open_return(disk_pr)
+    session = getattr(app, "_session_name", None)
+    if not rec or rec.get("hop") != "review" or rec.get("awaiting") \
+            or not session:
+        return False
+    pane_id = _find_claude_pane(session, _compute_review_window_name(disk_pr))
+    if not pane_id:
+        return False
+    transcript = pane_transcript_path(pane_id, disk_pr.get("workdir"))
+    if transcript is None:
+        return False
+    try:
+        # Not written yet: the session was launched moments ago.
+        if transcript.exists() and \
+                transcript.stat().st_mtime < parse_ts(rec.get("ts")).timestamp():
+            return False
+    except (OSError, TypeError, ValueError):
+        return False
+    tdir = get_transcript_dir(app)
+    link = tdir / f"review-{pr_id}-i1.jsonl"
+    try:
+        tdir.mkdir(parents=True, exist_ok=True)
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to(transcript)
+    except OSError as e:
+        _log.warning("auto_start: cannot adopt review window of %s: %s",
+                     pr_id, e)
+        return False
+    _log.info("auto_start: adopting the open review window of %s "
+              "(pane %s, session transcript %s)", pr_id, pane_id, transcript)
+    from pm_core.tui.review_loop_ui import _start_loop
+    state = ReviewLoopState(pr_id=pr_id, iteration=1,
+                            _transcript_dir=str(tdir))
+    _start_loop(app, pr_id, pr, transcript_dir=str(tdir), resume_state=state)
+    return True
 
 
 def _awaiting_on_disk(app, pr_id: str, hop: str) -> bool:
@@ -1379,12 +1570,37 @@ async def _start_pr_quiet(app, pr_id: str, fresh: bool = False) -> None:
     stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
 
     if proc.returncode != 0:
-        stderr_text = stderr.decode() if stderr else ""
+        stderr_text = (stderr.decode(errors="replace") if stderr else "").strip()
         _log.warning("auto_start: pm pr start %s failed: %s", pr_id, stderr_text[:200])
         if isinstance(quiet, dict):
             quiet.pop(pr_id, None)
+        # The reason is the last stderr line, as for a failed sign-off
+        # launch (e.g. an impl whose provider is not set up, with its
+        # remedy).  No periodic pass retries this start, so it is shown
+        # like the other one-shot errors: forced and held.  Every later
+        # scheduler pass starts the PR again (an in_progress PR whose spec
+        # awaits approval fails each time), so a reason is said once per
+        # PR until a start goes through.
+        reason = (stderr_text.splitlines()[-1] if stderr_text
+                  else f"exit {proc.returncode}")
+        if _start_failures_shown(app).get(pr_id) != reason:
+            _start_failures_shown(app)[pr_id] = reason
+            from rich.markup import escape
+            app.log_message(f"[red]Auto-start: pm pr start {pr_id} "
+                            f"failed[/]: {escape(reason)}",
+                            force=True, hold=CONFIRM_HOLD_SECONDS)
     else:
+        _start_failures_shown(app).pop(pr_id, None)
         _log.info("auto_start: pm pr start %s succeeded", pr_id)
+
+
+def _start_failures_shown(app) -> dict:
+    """PR id -> the ``pm pr start`` failure reason last shown for it."""
+    d = getattr(app, "_auto_start_failures_shown", None)
+    if not isinstance(d, dict):
+        d = {}
+        app._auto_start_failures_shown = d
+    return d
 
 
 # ---------------------------------------------------------------------------
@@ -1400,7 +1616,7 @@ def collect_status_inputs(app) -> dict:
     """
     from pm_core import tmux as tmux_mod
 
-    prs = (app._data or {}).get("prs") or []
+    prs = usable_prs((app._data or {}).get("prs"))
     enabled = is_enabled(app)
     managed = managed_ids(app, prs)
 

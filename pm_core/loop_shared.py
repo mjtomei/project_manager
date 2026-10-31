@@ -35,9 +35,22 @@ _log = configure_logger("pm.loop_shared")
 
 
 def get_pm_session() -> str | None:
-    """Get the pm tmux session name."""
-    from pm_core.cli.helpers import _get_current_pm_session
-    return _get_current_pm_session()
+    """Get the pm tmux session name.
+
+    Inside a pm session's pane, that session.  Elsewhere (a QA driver that
+    ``pm pr auto-sequence`` spawned from a shell outside tmux, from a non-pm
+    tmux session or from a PR workdir with ``-C``) the live pm session of
+    the project this process works on, or None when it is not running.
+    """
+    from pm_core import tmux as tmux_mod
+    from pm_core.cli.helpers import _get_current_pm_session, _get_pm_session
+    current = _get_current_pm_session()
+    if current:
+        return current
+    session = _get_pm_session()
+    if session and tmux_mod.session_exists(f"={session}"):
+        return session
+    return None
 
 
 def find_claude_pane(session: str, window_name: str) -> str | None:
@@ -959,6 +972,7 @@ def wait_for_follow_up_verdict(
     wait_timeout: float = 15,
     stop_check: Callable[[], bool] | None = None,
     log_prefix: str = "loop_shared",
+    pane_id: str | None = None,
     baseline_line: int | None = None,
 ) -> str | None:
     """Block for the next hook-driven idle on an existing pane and return
@@ -981,7 +995,9 @@ def wait_for_follow_up_verdict(
     the transcript is returned immediately, without waiting for a hook event
     (its idle event predates this call, so it would never wake the loop).
 
-    Hook-driven only — requires *transcript_path*.
+    Hook-driven only — requires *transcript_path*.  The wait ends when
+    the window has no pane left, or, given *pane_id*, when that pane is
+    gone (for a session that shares its window with another one).
 
     This wait is an intentional human interaction after ``INPUT_REQUIRED``
     (the user works in the pane), so it is deliberately **not** bounded by
@@ -989,6 +1005,7 @@ def wait_for_follow_up_verdict(
     to produce an expected verdict.
     """
     from pm_core import hook_events
+    from pm_core import tmux as tmux_mod
     from pm_core.claude_launcher import session_id_from_transcript
     from pm_core.verdict_transcript import find_verdict_turn
 
@@ -1022,8 +1039,8 @@ def wait_for_follow_up_verdict(
         return hit.text or hit.verdict
 
     while not (stop_check and stop_check()):
-        pane_id = find_claude_pane(session, window_name)
-        if not pane_id:
+        if not (tmux_mod.pane_exists(pane_id) if pane_id
+                else find_claude_pane(session, window_name)):
             _log.warning("%s: pane gone during follow-up wait", log_prefix)
             return None
 

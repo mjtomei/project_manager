@@ -79,7 +79,14 @@ REVIEW_LAUNCH_BACKOFF_MAX = 60.0     # cap for the exponential backoff
 REVIEW_LAUNCH_REARM_SECONDS = 60.0   # auto-start cooldown after exhaustion
 REVIEW_LAUNCH_CLAIM_TTL = 180.0      # cross-driver launch lease TTL
 REVIEW_LAUNCH_CLAIM_WAIT = 15.0      # bounded wait for another owner to go
-_LAUNCH_TIMEOUT = 120                # `pm pr review` child timeout
+# Upper bound on one ``pm pr review`` launch opening its window.  A
+# container-mode launch spends most of it creating the container before the
+# window exists.  (The relauncher's subprocess timeout adds the sign-off
+# return's clear wait, see _launch_review_window.)
+_LAUNCH_TIMEOUT = 120
+# How long a resumed loop waits for a launch that has not written its
+# iteration transcript symlink yet (pm start-up before the launcher runs).
+_IN_FLIGHT_SYMLINK_GRACE = 15
 _WINDOW_WAIT = 2.0                   # wait for the tmux window to appear
 _LEASE_REFRESH_SECONDS = 30.0        # keepalive while polling a review
 _DISCOVERY_GRACE = 2.0               # wait for a starting pane's session id
@@ -167,6 +174,12 @@ class ReviewLoopState:
     # may pre-retry rediscovery adopt a transcript/verdict it finds: before
     # that, any existing transcript belongs to an earlier loop run.
     iteration_attempted: bool = False
+    # True from a failed launch attempt until the next attempt starts.  The
+    # failed child already wrote the iteration's transcript symlink (to a
+    # session that never ran), so a resumed loop (an auto-start re-arm, a
+    # restart inside the backoff) must not wait on it as an in-flight
+    # launch: nothing of this loop is in flight (S133).
+    last_attempt_failed: bool = False
     # Session id of the iteration's transcript symlink *before* this loop
     # first attempted the iteration.  The transcript dir outlives a loop,
     # so after a failed launch that symlink can still point at an earlier
@@ -333,10 +346,20 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
     cmd.append(pr_id)
     _log.info("relauncher: pr=%s iteration=%s loop_id=%s attempt=%s cmd=%s",
               pr_id, iteration, loop_id, attempt, cmd)
+    # After opening a sign-off review return's window the child keeps
+    # waiting out a busy project.yaml for up to RETURN_CLEAR_WAIT_SECONDS
+    # past its lock timeout to clear ``awaiting``.  Killed sooner, it
+    # leaves ``awaiting`` and the hop's claim behind the live window, and
+    # the first tick after the claim expires launches a second --fresh
+    # review over it (S81).
+    from pm_core import store
+    from pm_core.signoff import RETURN_CLEAR_WAIT_SECONDS
+    timeout = (_LAUNCH_TIMEOUT + store.LOCK_TIMEOUT_SECONDS
+               + RETURN_CLEAR_WAIT_SECONDS)
     t0 = time.monotonic()
     try:
         result = subprocess.run(cmd, cwd=pm_root, capture_output=True,
-                                text=True, timeout=_LAUNCH_TIMEOUT)
+                                text=True, timeout=timeout)
     except subprocess.TimeoutExpired as e:
         stderr = _as_text(getattr(e, "stderr", ""))
         stdout = _as_text(getattr(e, "stdout", ""))
@@ -345,9 +368,9 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
             loop_id=loop_id, attempt=attempt, cmd=cmd, returncode=None,
             stdout=stdout, stderr=stderr, workdir=workdir,
             stale_session_id=stale_session_id,
-            note=f"launch timed out after {_LAUNCH_TIMEOUT}s")
+            note=f"launch timed out after {timeout}s")
         detail = _concise_launch_detail(stderr, stdout)
-        msg = (f"Review window launch timed out after {_LAUNCH_TIMEOUT}s: "
+        msg = (f"Review window launch timed out after {timeout}s: "
                f"{detail}")
         if artifact:
             msg += f" (artifact: {artifact})"
@@ -922,6 +945,42 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
     return content
 
 
+def _wait_for_launching_window(session: str, window_name: str,
+                               transcript: str) -> str | None:
+    """Wait for the window of an iteration launch still in flight.
+
+    A TUI restart can land while the pre-restart loop's ``pm pr review``
+    is still running: its transcript symlink is written but its session
+    has not started, and in container mode the window only opens once the
+    container exists.  Relaunching then would open a second review window
+    for the same iteration, so wait for this launch's window (bounded by
+    the launch timeout).  A symlink whose session already wrote its
+    transcript means that session ran and its window is gone: nothing to
+    wait for.  Returns the window's pane, or ``None``.
+    """
+    import os
+    t0 = time.monotonic()
+    waited = False
+    while True:
+        pane_id = _find_claude_pane(session, window_name)
+        if pane_id:
+            if waited:
+                _log.info("review_loop: in-flight launch opened %s after %.1fs",
+                          window_name, time.monotonic() - t0)
+            return pane_id
+        elapsed = time.monotonic() - t0
+        if os.path.lexists(transcript):
+            if os.path.exists(transcript) or elapsed >= _LAUNCH_TIMEOUT:
+                return None
+        elif elapsed >= _IN_FLIGHT_SYMLINK_GRACE:
+            return None
+        if not waited:
+            _log.info("review_loop: no %s window yet; waiting for the "
+                      "in-flight launch (transcript=%s)", window_name, transcript)
+            waited = True
+        time.sleep(1)
+
+
 def _poll_adopted_review(state: ReviewLoopState, pane_id: str,
                          transcript: str, pr_data: dict) -> str | None:
     """Read a just-landed verdict or poll an adopted review pane.
@@ -966,6 +1025,22 @@ def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
         return None
     from pm_core.claude_launcher import session_id_from_transcript
 
+    session = _get_pm_session()
+    if session:
+        window_name = _compute_review_window_name(pr_data)
+        if not _find_review_claude_pane(session, window_name,
+                                        pr_data.get("workdir")) \
+                and not (state.last_attempt_failed
+                         and state.retry_iteration == state.iteration):
+            # A launch still in flight at the restart has no window yet
+            # (container mode opens it once the container exists): wait
+            # for it rather than relaunch a second review over it (S82).
+            # Not after this iteration's last attempt failed: its symlink
+            # is that dead attempt's, and waiting on it held every
+            # re-armed episode for the whole launch timeout (S133).
+            _wait_for_launching_window(
+                session, window_name,
+                f"{transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl")
     discovery = _discover_iteration(
         state, pr_data, transcript_dir, state.iteration,
         allow_recovery=(state.iteration_attempted
@@ -1114,6 +1189,7 @@ def _clear_launch_failure(state: ReviewLoopState) -> None:
     state.last_launch_error = ""
     state.last_launch_artifact = None
     state.launch_retryable = False
+    state.last_attempt_failed = False
     # The TUI announces each retry attempt once, keyed on the attempt
     # number.  The key is per episode (attempts restart at 1), so a new
     # episode must forget what the previous one announced — otherwise its
@@ -1266,6 +1342,7 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
         # From here on a transcript/verdict for this iteration may be ours:
         # rediscovery may adopt it instead of launching a duplicate.
         state.iteration_attempted = True
+        state.last_attempt_failed = False
         # Each launch attempt gets its own bounded grace for a pane that is
         # still starting.  A counter carried over from an earlier attempt
         # would replace a just-started session on the first pending check of
@@ -1281,6 +1358,7 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
         except ReviewHoldError:
             raise
         except ReviewLaunchError as e:
+            state.last_attempt_failed = True
             state.last_launch_error = str(e)
             state.last_launch_artifact = e.artifact
             state.launch_retryable = e.retryable

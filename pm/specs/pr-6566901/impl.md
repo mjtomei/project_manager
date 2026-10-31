@@ -530,7 +530,8 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   still waiting on the concurrency cap showed as *pending* instead of
   *queued* (and disappeared from the status pane) until a later rewrite.
   Both launchers take `_status_scenarios` (the full list) and
-  `_queued_indices` (the still-queued set) and pass them to
+  `_status_queued` (the still-queued set; named `_queued_indices` before the
+  2026-10-31 master integration) and pass them to
   `_write_status_file`; the initial launch in `run_qa_sync` and every
   queued relaunch in `_launch_next_queued` supply them. Regression tests:
   `TestQueuedScenariosStayVisible` in `tests/test_qa_loop.py`.
@@ -695,6 +696,69 @@ into this branch. The conflict resolution keeps both sides' behaviour:
 * **Project registry.** `pm/project.yaml` conflicts were resolved as a union
   of both sides' PR entries and notes (518 PRs, no duplicate ids, no lost
   notes); `active_pr` takes master's value.
+
+## Integration with master (2026-10-31)
+
+`origin/master` at `eaf3372e60d1717bd97cc50b5e0b04c6df881fa1` (the merge of
+#249, pr-592e4bd) was merged into this branch. `pm/project.yaml` was again
+resolved with `store.merge_3way` over the index stages (master as *ours*,
+the branch as *theirs*): 578 PRs, no duplicate ids, every note from both
+sides present, and this PR's `model` / `session_models` (including the
+work-Opus sign-off override) unchanged. The code conflicts and the
+semantic decisions:
+
+* **Shared poll timer (QA S35 vs. #249).** The branch's status-only
+  `_has_active_pr` and `_qa_poll_needed` are kept (they deliberately do not
+  require `workdir`; QA creates it itself). Master's `_qa_needs_poll` is
+  subsumed by `_qa_poll_needed`, and master's `_pending_auto_qa` retry set
+  is added to the stop predicate
+  (`qa_running = _qa_poll_needed(app) or bool(_pending_auto_qa(app))`).
+* **Completion line (RQ37/RQ40 vs. NO_VERDICT).** Master's
+  `_announce_loop_done` (review→QA hand-off, failed-launch retry re-arm,
+  `hold=CONFIRM_HOLD_SECONDS`) is kept and now builds its line with this
+  branch's `_format_completion_message`, so `NO_VERDICT` and the escaped
+  error detail survive; `_announce_loop_done` no longer duplicates the
+  message text.
+* **QA window focus.** Master's held-run message ("QA for <pr> is waiting
+  for input …") is kept ahead of the "Focused QA window" line, and the
+  branch's `force=True` (QA s26) stays on that line. `start_qa` uses
+  master's `_ensure_qa_poll_timer` and keeps `force=focus` (QA s39).
+* **Recovered-run mirror (S34 vs. S47).** `_resume_incomplete_qa` keeps
+  master's two-tick retry (`recorded = _on_qa_complete(...)`,
+  `state._ui_pending`, re-queue + `_ensure_qa_poll_timer`) and records the
+  **recovered** verdict (`state.latest_verdict`, i.e. `STOPPED` after a
+  finalize stop) rather than the raw `overall` in runtime_state.
+* **STOPPED teardown vs. the up-front result write.** #249 moved the QA
+  note/transition write to the top of `_on_qa_complete`
+  (`_record_completion`), which would have written a note for a stopped
+  run. `_record_completion` now skips the note for `VERDICT_STOPPED` just
+  as it already does for `setup_stop`; the STOPPED and `setup_stop` log
+  branches both remain.
+* **QA tick loop.** The branch's bounded `MissingOutputRecovery` tick loop
+  replaces master's legacy `_last_reminder_sent` / `_reminder_timeout`
+  nudge (`qa-verdict-reminder-timeout` now only tunes the settle interval,
+  as the spec requires). `_send_keys_if_alive` became dead once master's
+  `_send_submitted` + `try/except` guarded both follow-up sites (worker
+  re-evaluation and verifier re-check); it and its tests were removed. The
+  worker re-evaluation keeps master's `followup_sent` gating.
+* **Verifier re-check.** The bounded `poll_for_verdict` (with
+  `baseline_line`) is kept for the machine-driven re-check, and master's
+  fresh-verifier fallback is layered on: a send that races a closed pane
+  clears `verifier_pane_id` and re-runs `_verify_single_scenario` instead of
+  failing the scenario as "pane disappeared".
+* **Resume snapshot.** `_write_resume_file` persists both the branch's
+  `stop_requested` and master's `result_recorded_by` under the lock, with
+  master's re-serialise-on-change structure; `build_resume_state` restores
+  both.
+* **Launcher parameter name.** The scenario launchers take master's
+  `_status_queued` (the still-queued set) instead of the branch's
+  `_queued_indices`; call sites and tests were renamed.
+* **Tests.** Both sides' new tests are kept. Master's
+  `test_reverify_waits_on_the_verifier_pane` now asserts the bounded poller
+  is given the verifier's own pane; the branch's
+  `test_reverification_tolerates_verifier_pane_closing` asserts the
+  fresh-verifier fallback; master's poll-timer test uses a settled PR
+  because this branch's `_has_active_pr` is status-only.
 
 ## QA S35 — concurrent runs and the shared poll timer (2026-10-29)
 

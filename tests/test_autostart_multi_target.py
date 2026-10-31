@@ -357,6 +357,21 @@ def _enabled_app(prs, targets, tmp_path, wait=()):
 
 
 class TestCheckAndStart:
+    def test_id_less_entry_does_not_break_the_pass(self, tmp_path):
+        """S94: a hand-edited entry without an id (status qa) ahead of the
+        targets is skipped, not raised on (KeyError: 'id')."""
+        prs = [{"title": "no id", "status": "qa"}, _pr("a"), _pr("x")]
+        app = _enabled_app(prs, ["a"], tmp_path, wait=["a"])
+        started = []
+
+        async def fake_start(_app, pr_id):
+            started.append(pr_id)
+
+        with patch.object(auto_start, "_start_pr_quiet", fake_start):
+            asyncio.run(auto_start.check_and_start(app))
+        assert started == ["a"]
+        assert app._auto_start_targets["a"][st.WAIT_KEY] is True
+
     def test_two_independent_targets_both_launch(self, tmp_path):
         prs = [_pr("a"), _pr("b"), _pr("x")]
         app = _enabled_app(prs, ["a", "b"], tmp_path)
@@ -1405,6 +1420,128 @@ class TestCursorFollowsActivePr:
             asyncio.run(auto_start._start_pr_quiet(app, "u"))
         assert "u" in app._quiet_activations
 
+    def test_failed_start_shows_its_reason_on_the_log_line(self):
+        """A routed impl start whose work route is down exits 1 with the
+        remedy as its last stderr line.  That reached only the pm log, so
+        the TUI said "Auto-start: starting u" and nothing else, and no
+        periodic pass retries it.  It is shown like a failed sign-off
+        launch, forced and held (one-shot), once per reason: later
+        scheduler passes start the PR again and may fail the same way."""
+        app = FakeApp([_pr("u")])
+        app._quiet_activations = {}
+        shown = []
+        app.log_message = lambda msg, **kw: shown.append((msg, kw))
+        remedy = ("work route 'claude-work' unavailable: router not "
+                  "reachable at 127.0.0.1:8790. Remedy: start the router "
+                  "[claude-mixed]; then launch the impl session again")
+        result = {"rc": 1, "err": remedy}
+
+        class _P:
+            @property
+            def returncode(self):
+                return result["rc"]
+
+            async def communicate(self):
+                return b"", f"Checking out...\n{result['err']}\n".encode()
+
+        async def fake_shell(*a, **k):
+            return _P()
+
+        def start():
+            with patch("pm_core.tui.auto_start._run_shell_async", fake_shell):
+                asyncio.run(auto_start._start_pr_quiet(app, "u"))
+
+        start()
+        assert len(shown) == 1
+        msg, kw = shown[0]
+        assert "u" in msg and "failed" in msg
+        # Rendered as text, not markup: the remedy's brackets survive.
+        from rich.text import Text
+        assert Text.from_markup(msg).plain.endswith(remedy)
+        assert kw == {"force": True, "hold": auto_start.CONFIRM_HOLD_SECONDS}
+        assert "u" not in app._quiet_activations
+
+        start()  # the next pass fails the same way: not said again
+        assert len(shown) == 1
+        result["err"] = "Review: pm pr spec-approve u  (or press 'V' in TUI)"
+        start()  # a different reason is said
+        assert len(shown) == 2 and shown[1][0].endswith(result["err"])
+        result["rc"] = 0
+        start()  # a start that goes through clears it ...
+        result["rc"] = 1
+        start()  # ... so the same failure later is said again
+        assert len(shown) == 3 and shown[2][0] == shown[1][0]
+
+    @pytest.mark.parametrize("rearm", ["add_targets", "enable_all"])
+    def test_explicit_rearm_says_a_shown_start_failure_again(self, rearm):
+        """Re-adding a target (or ``autostart all``) asks for a start now.
+        If that retry fails for the reason already shown (route still
+        down), the reason is said again, not just the targets line."""
+        app = FakeApp([_pr("u", status="in_progress")])
+        app._quiet_activations = {}
+        failures = []
+        app.log_message = lambda msg, **kw: (
+            failures.append(msg) if "failed" in msg else None)
+        reason = "work route 'claude-work' unavailable: x. Remedy: y"
+
+        class _P:
+            returncode = 1
+
+            async def communicate(self):
+                return b"", reason.encode()
+
+        async def fake_shell(*a, **k):
+            return _P()
+
+        def start():
+            with patch("pm_core.tui.auto_start._run_shell_async", fake_shell):
+                asyncio.run(auto_start._start_pr_quiet(app, "u"))
+
+        auto_start.add_targets(app, ["u"])
+        start()
+        start()
+        assert len(failures) == 1
+        if rearm == "add_targets":
+            auto_start.add_targets(app, ["u"])  # already a target: re-armed
+        else:
+            auto_start.enable_all(app)
+        start()
+        assert len(failures) == 2 and failures[1] == failures[0]
+
+    def test_rearming_a_target_says_its_dependencys_shown_failure_again(self):
+        """The pass an explicit re-arm asks for starts the target's whole
+        closure, so a dependency whose start failed (route down) is retried
+        too.  Its reason was shown once; the retry must say it again, not
+        only the targets line (the target itself never started)."""
+        app = FakeApp([_pr("d", status="in_progress"),
+                       _pr("t", deps=["d"])])
+        app._quiet_activations = {}
+        failures = []
+        app.log_message = lambda msg, **kw: (
+            failures.append(msg) if "failed" in msg else None)
+        reason = "work route 'claude-work' unavailable: x. Remedy: y"
+
+        class _P:
+            returncode = 1
+
+            async def communicate(self):
+                return b"", reason.encode()
+
+        async def fake_shell(*a, **k):
+            return _P()
+
+        def start_d():
+            with patch("pm_core.tui.auto_start._run_shell_async", fake_shell):
+                asyncio.run(auto_start._start_pr_quiet(app, "d"))
+
+        auto_start.add_targets(app, ["t"])
+        start_d()
+        start_d()
+        assert len(failures) == 1 and "pm pr start d failed" in failures[0]
+        auto_start.add_targets(app, ["t"])  # re-arm the target, not d
+        start_d()
+        assert len(failures) == 2 and failures[1] == failures[0]
+
 
 def test_predates_open_return_accepts_z_suffix():
     """runtime_state / return timestamps may end in "Z" (Python 3.10's
@@ -1414,3 +1551,14 @@ def test_predates_open_return_accepts_z_suffix():
                              "ts": "2026-10-22T01:00:00Z"}}
     assert _predates_open_return("2026-10-22T00:59:00Z", pr)
     assert not _predates_open_return("2026-10-22T01:00:05+00:00", pr)
+
+
+def test_closures_skip_id_less_entries():
+    """S94: sign-off's advance_all passes the raw project.yaml list; an
+    id-less entry raised KeyError: 'id' in transitive_deps (TUI poll died)."""
+    prs = [{"title": "no id", "status": "qa"}, _pr("d"), _pr("a", deps=["d"])]
+    assert st.managed_ids(prs, ["a"]) == {"a", "d"}
+    wait = st.make_target_record("test")
+    wait[st.WAIT_KEY] = True
+    assert st.merge_holds(prs, {"a": wait}) == {"a": {"targets": ["a"]},
+                                                "d": {"targets": ["a"]}}

@@ -257,6 +257,31 @@ class TestEntryPointFocus:
             focus_or_start_qa(app, "pr-001")
         assert _started_state(bg).focus_on_create is True
 
+    @pytest.mark.parametrize("running,held,said", [
+        (False, True, "QA for pr-001 is waiting for input — answer in its "
+                      "scenario worker pane; the loop is still watching"),
+        (True, False, "Focused QA window for pr-001"),
+        (False, False, "Focused QA window for pr-001"),
+    ])
+    def test_t_with_window_focuses_and_says_a_held_run_waits(
+            self, tmp_path, running, held, said):
+        """t on a PR whose QA window is open focuses it and starts nothing.
+        A held run (waiting for the user's answer) says so (S132)."""
+        from pm_core.tui.qa_loop_ui import focus_or_start_qa
+        app = _make_app(tmp_path)
+        app._qa_loops["pr-001"] = QALoopState(
+            pr_id="pr-001", running=running, held=held)
+        with patch("pm_core.tui.qa_loop_ui.start_qa_background") as bg, \
+                patch("pm_core.tui.qa_loop_ui.get_pm_session", return_value="pm-test"), \
+                patch("pm_core.tmux.find_window_by_name", return_value="@3"), \
+                patch("pm_core.tmux.select_window") as select, \
+                patch("pm_core.runtime_state.consume_suppress_switch",
+                      return_value=False):
+            focus_or_start_qa(app, "pr-001")
+        bg.assert_not_called()
+        select.assert_called_once_with("pm-test", "qa-pr-001")
+        assert app.log_message.call_args.args[0] == said
+
     @pytest.mark.parametrize("suppress", [False, True])
     def test_t_adopts_pending_background_start(self, tmp_path, monkeypatch, suppress):
         """An explicit t promotes the accepted run, without a duplicate worker.
