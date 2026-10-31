@@ -71,8 +71,64 @@ class TestResolveModel:
             "session_models": {"review": "sonnet", "signoff": "opus"}}}}
         assert resolve_model("signoff", project_data=data) == "opus"
 
+    @patch("pm_core.model_config.get_global_setting_value", return_value=None)
+    def test_blank_or_non_string_project_entries_count_as_absent(self, _gsv,
+                                                                 monkeypatch):
+        """``signoff:`` left blank under model_config.session_models must not
+        raise at every sign-off launch (nor hide the parent type's model),
+        as for a PR's role entries."""
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        for bad in (None, "", "  ", 5, {"model": "x"}):
+            data = {"project": {"model_config": {"session_models": {
+                "signoff": bad, "review": "provider:claude-work"}}}}
+            res = resolve_model_and_provider("signoff", project_data=data)
+            assert res.provider == "claude-work"
+            data["project"]["model_config"]["session_models"].pop("review")
+            res = resolve_model_and_provider("signoff", project_data=data)
+            assert (res.model, res.provider) == (None, None)
+
+    @pytest.mark.parametrize("mc", [None, {"session_models": None},
+                                    {"session_effort": None}],
+                             ids=["model_config", "session_models",
+                                  "session_effort"])
+    @patch("pm_core.model_config.get_global_setting_value", return_value=None)
+    def test_blank_blocks_count_as_empty(self, _gsv, mc, monkeypatch):
+        """A block whose entries are all commented out loads as None.  It
+        selects nothing, so no launch may raise on it: every type, also
+        under a PR override (effort is resolved for every launch)."""
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        monkeypatch.delenv("PM_EFFORT", raising=False)
+        data = {"project": {"model_config": mc}}
+        for st in SESSION_TYPES:
+            res = resolve_model_and_provider(st, project_data=data)
+            assert (res.model, res.provider, res.effort) == (None, None, None)
+        res = resolve_model_and_provider("impl", pr_model="provider:claude-work",
+                                         project_data=data)
+        assert res.provider == "claude-work"
+
+    @patch("pm_core.model_config.get_global_setting_value", return_value=None)
+    def test_blank_block_keeps_the_other_block(self, _gsv, monkeypatch):
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        monkeypatch.delenv("PM_EFFORT", raising=False)
+        data = {"project": {"model_config": {
+            "session_models": None, "session_effort": {"qa": "high"}}}}
+        res = resolve_model_and_provider("qa_scenario", project_data=data)
+        assert (res.model, res.effort) == (None, "high")
+
 
 class TestEffortResolution:
+    @patch("pm_core.model_config.get_global_setting_value", return_value=None)
+    def test_blank_or_non_string_effort_entries_count_as_absent(self, _gsv,
+                                                                monkeypatch):
+        """As for model entries: a blank level must not hide the parent
+        type's, and a non-string one must not reach --effort."""
+        monkeypatch.delenv("PM_EFFORT", raising=False)
+        for bad in (None, "", "  ", 5):
+            data = {"project": {"model_config": {"session_effort": {
+                "signoff": bad, "review": "high"}}}}
+            res = resolve_model_and_provider("signoff", project_data=data)
+            assert res.effort == "high"
+
     def test_defaults_are_none(self):
         """With no config, effort is None (use CLI default)."""
         result = resolve_model_and_provider("review")
@@ -172,6 +228,113 @@ class TestGetPrModelOverride:
 
     def test_absent(self):
         assert get_pr_model_override({}) is None
+
+    def test_signoff_exception_keeps_other_roles_on_pr_model(self, monkeypatch):
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        pr = {"model": "provider:deepseek-flash",
+              "session_models": {"signoff": "provider:claude-work"}}
+        for role in SESSION_TYPES:
+            res = resolve_model_and_provider(
+                role, pr_model=get_pr_model_override(pr, role))
+            expected = "claude-work" if role == "signoff" else "deepseek-flash"
+            assert res.provider == expected
+        monkeypatch.setenv("PM_MODEL", "provider:environment")
+        assert resolve_model_and_provider(
+            "signoff", pr_model=get_pr_model_override(pr, "signoff")
+        ).provider == "environment"
+
+    def test_pr_role_inheritance_and_specific_precedence(self):
+        pr = {"model": "opus", "session_models": {
+            "review": "provider:claude-work", "qa": "sonnet",
+            "qa_scenario": "provider:glm-flash"}}
+        assert get_pr_model_override(pr, "signoff") == "provider:claude-work"
+        assert get_pr_model_override(pr, "qa_planning") == "sonnet"
+        assert get_pr_model_override(pr, "qa_scenario") == "provider:glm-flash"
+        assert get_pr_model_override(pr, "impl") == "opus"
+
+    def test_malformed_session_models_fall_back_to_the_pr_model(self):
+        """A non-mapping value (hand-edited YAML) is ignored, never
+        indexed: a string would otherwise match a role by substring."""
+        for bad in ("provider:qa-route", ["qa"], 3):
+            pr = {"model": "opus", "session_models": bad}
+            assert get_pr_model_override(pr, "qa") == "opus"
+
+    def test_blank_or_non_string_role_entries_count_as_absent(self,
+                                                              monkeypatch):
+        """``signoff:`` left blank must not drop the PR model (silently
+        moving sign-off to the project default), and a non-string entry
+        must not raise at every launch of the role."""
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        for bad in (None, "", "  ", 5, {"model": "x"}):
+            pr = {"model": "provider:deepseek-flash",
+                  "session_models": {"signoff": bad}}
+            assert get_pr_model_override(pr, "signoff") == \
+                "provider:deepseek-flash"
+            res = resolve_model_and_provider(
+                "signoff", pr_model=get_pr_model_override(pr, "signoff"))
+            assert res.provider == "deepseek-flash"
+            # The parent role's entry still applies over the PR model.
+            pr["session_models"]["review"] = "provider:claude-work"
+            assert get_pr_model_override(pr, "signoff") == \
+                "provider:claude-work"
+
+    def test_qa_roles_resolve_their_pr_exception(self, monkeypatch):
+        """QA launches resolve through qa_loop._resolve_qa_model.  A worker
+        exception reaches only the worker: s0 (qa_interactive) and the
+        planner keep the PR-wide model, and the refiner inherits ``qa``."""
+        from pm_core import qa_loop
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        pr = {"model": "opus", "session_models": {
+            "qa_scenario": "provider:claude-work", "qa": "sonnet"}}
+        got = {st: qa_loop._resolve_qa_model(pr, {}, session_type=st)
+               for st in ("qa_scenario", "qa_concretize", "qa_planning")}
+        assert got["qa_scenario"].provider == "claude-work"
+        assert got["qa_concretize"].model == "sonnet"
+        assert got["qa_planning"].model == "sonnet"
+        s0 = qa_loop._resolve_interactive_model(pr, {})
+        assert (s0.model, s0.provider) == ("sonnet", None)
+
+    def test_plain_worker_exception_does_not_move_s0(self, monkeypatch):
+        """The s0 legacy fallback (a plain-model ``qa_scenario`` from before
+        ``qa_interactive``) is for project config: a PR's worker exception
+        to a plain model leaves s0 on the project/default model."""
+        from pm_core import qa_loop
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        monkeypatch.setattr("pm_core.model_config.get_global_setting_value",
+                            lambda *a, **k: "")
+        pr = {"session_models": {"qa_scenario": "haiku"}}
+        assert qa_loop._resolve_qa_model(
+            pr, {}, session_type="qa_scenario").model == "haiku"
+        s0 = qa_loop._resolve_interactive_model(pr, {})
+        assert (s0.model, s0.provider) == (None, None)
+        legacy = {"project": {"model_config": {
+            "session_models": {"qa_scenario": "sonnet"}}}}
+        assert qa_loop._resolve_interactive_model(pr, legacy).model == "sonnet"
+
+    def test_merge_window_resolves_its_pr_exception(self, tmp_path,
+                                                    monkeypatch):
+        from types import SimpleNamespace
+        from pm_core.cli import pr as pr_mod
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+        seen = []
+        monkeypatch.setattr(
+            "pm_core.model_config.resolve_model_and_provider",
+            lambda st, **k: seen.append((st, get_pr_model_override(k["pr_entry"], st))) or
+            SimpleNamespace(model=None, provider="claude-work", effort=None))
+        pr = {"id": "pr-001", "model": "provider:deepseek-flash",
+              "session_models": {"merge": "provider:claude-work"}}
+        with patch.object(pr_mod, "tmux_mod") as tm, \
+             patch.object(pr_mod, "prompt_gen"), \
+             patch.object(pr_mod, "build_claude_shell_cmd",
+                          return_value="claude") as build, \
+             patch.object(pr_mod, "_get_pm_session", return_value="pm-s"), \
+             patch("pm_core.paths.get_global_setting", return_value=False):
+            tm.find_window_by_name.return_value = None
+            pr_mod._launch_merge_window({"project": {}}, pr, "conflict",
+                                         cwd=str(tmp_path))
+        assert seen == [("merge", "provider:claude-work")]
+        assert build.call_args.kwargs["provider"] == "claude-work"
 
 
 class TestBuildClaudeShellCmd:
@@ -312,6 +475,13 @@ class TestValidateModelConfig:
         assert validate_model_config(None) == []
         assert validate_model_config({}) == []
 
+    def test_blank_blocks_are_valid(self):
+        """A blank block selects nothing; it is not malformed."""
+        from pm_core.model_config import validate_model_config
+        for mc in (None, {"session_models": None, "session_effort": None}):
+            assert validate_model_config(
+                {"project": {"model_config": mc}}) == []
+
     def test_unknown_session_type_in_models_flagged(self):
         from pm_core.model_config import validate_model_config
         data = {"project": {"model_config": {
@@ -335,3 +505,512 @@ class TestValidateModelConfig:
         }}}
         errors = validate_model_config(data)
         assert any("extreme" in e for e in errors)
+
+    def test_pr_session_models_problems_flagged(self):
+        """A typo'd PR role would leave that role on the PR-wide model."""
+        from pm_core.model_config import validate_model_config
+        data = {"prs": [
+            {"id": "pr-a", "model": "opus",
+             "session_models": {"sign_off": "provider:claude-work"}},
+            {"id": "pr-b", "session_models": "provider:claude-work"},
+            {"id": "pr-c", "session_models": {"signoff": "sonnet"}},
+            {"id": "pr-d", "model": "opus"},
+        ]}
+        errors = validate_model_config(data)
+        assert len(errors) == 2
+        assert "prs[pr-a].session_models" in errors[0] and "sign_off" in errors[0]
+        assert errors[1] == "prs[pr-b].session_models must be a mapping"
+
+    def test_pr_watcher_entry_flagged_as_not_a_pr_session(self):
+        """Review 0f64 i2: the watcher is project-wide (``pm watcher``
+        resolves it with no PR), so a PR's ``watcher`` entry does nothing;
+        it was accepted silently."""
+        from pm_core.model_config import validate_model_config
+        data = {"prs": [{"id": "pr-a", "session_models": {
+            "watcher": "provider:claude-work", "impl": "sonnet"}}]}
+        errors = validate_model_config(data)
+        assert len(errors) == 1, errors
+        assert errors[0].startswith(
+            "prs[pr-a].session_models: 'watcher' is not a PR session")
+        assert "pm model set watcher <model> --project" in errors[0]
+
+    def test_pr_session_models_bad_values_flagged(self):
+        """Blank or non-string role entries are ignored, so say so."""
+        from pm_core.model_config import validate_model_config
+        data = {"prs": [{"id": "pr-a", "session_models": {
+            "signoff": None, "review": 5, "impl": "sonnet"}}]}
+        errors = validate_model_config(data)
+        assert len(errors) == 2
+        assert errors[0].startswith("prs[pr-a].session_models['signoff']")
+        assert "None is not a model name" in errors[0]
+        assert errors[1].startswith("prs[pr-a].session_models['review']")
+
+    def test_pr_non_string_model_flagged(self):
+        """Review 0f64 i3: a hand-edited non-string PR ``model`` fails the
+        launches that use it, and nothing reported it."""
+        from pm_core.model_config import validate_model_config
+        data = {"prs": [{"id": "pr-a", "model": 5},
+                        {"id": "pr-b", "model": "provider:claude-work"},
+                        {"id": "pr-c", "model": None}]}
+        errors = validate_model_config(data)
+        assert errors == ["prs[pr-a].model: 5 is not a model name or "
+                          "'provider:<name>' (launches that use it fail)"]
+
+    @pytest.mark.parametrize("empty", ["", 0, [], {}, False])
+    def test_pr_empty_model_flagged_as_ignored(self, empty, monkeypatch):
+        """Review 0f64 i4: an empty hand-edited PR ``model`` selects
+        nothing at launch (the project settings apply), so it is reported
+        as ignored, not as failing launches."""
+        from pm_core.model_config import (
+            get_pr_model_override, resolve_model_and_provider,
+            validate_model_config)
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        pr = {"id": "pr-a", "model": empty}
+        data = {"project": {"model_config": {
+                    "session_models": {"impl": "claude-sonnet-5-5"}}},
+                "prs": [pr]}
+        res = resolve_model_and_provider(
+            "impl", pr_model=get_pr_model_override(pr, "impl"),
+            project_data=data)
+        assert res.model == "claude-sonnet-5-5"
+        assert validate_model_config(data) == [
+            f"prs[pr-a].model: {empty!r} is not a model name or "
+            "'provider:<name>' (ignored; the project settings apply)"]
+
+    def test_project_session_models_bad_values_flagged(self):
+        """Blank or non-string project entries are ignored, so say so."""
+        from pm_core.model_config import validate_model_config
+        data = {"project": {"model_config": {"session_models": {
+            "signoff": None, "review": 5, "impl": "sonnet"}}}}
+        errors = validate_model_config(data)
+        assert len(errors) == 2
+        assert errors[0].startswith("model_config.session_models['signoff']")
+        assert "None is not a model name" in errors[0]
+        assert errors[1].startswith("model_config.session_models['review']")
+
+    def test_non_mapping_model_config_still_checks_prs(self):
+        from pm_core.model_config import validate_model_config
+        data = {"project": {"model_config": "opus"},
+                "prs": [{"id": "pr-a", "session_models": {"bogus": "x"}}]}
+        errors = validate_model_config(data)
+        assert errors[0] == "model_config must be a mapping"
+        assert any("prs[pr-a]" in e and "bogus" in e for e in errors)
+
+
+def test_model_show_lists_pr_overrides_and_their_problems(tmp_path,
+                                                          monkeypatch):
+    from click.testing import CliRunner
+    from pm_core import store
+    from pm_core.cli import model as model_cli
+    monkeypatch.delenv("PM_MODEL", raising=False)
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master"},
+                "prs": [{"id": "pr-a", "model": "provider:deepseek-flash",
+                         "session_models": {"signoff": "provider:claude-work",
+                                            "sign_off": "opus"}},
+                        {"id": "pr-b", "title": "no override"}]}, tmp_path)
+    monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
+    out = CliRunner().invoke(model_cli.model, ["show"]).output
+    assert "pr-a  model  -> provider:deepseek-flash" in out
+    assert "pr-a  signoff model  -> provider:claude-work" in out
+    assert "pr-b" not in out
+    assert "Problems in project.yaml model settings" in out
+    assert "prs[pr-a].session_models: unknown session type 'sign_off'" in out
+
+
+@pytest.mark.parametrize("mc", ["opus", {"session_models": "impl"},
+                                {"session_effort": "review"}],
+                         ids=["string", "models_block", "effort_block"])
+def test_model_show_reports_a_malformed_model_config(tmp_path, monkeypatch, mc):
+    """`pm model show` is where the model setting problems are listed (and
+    what a provider error points to), so a model_config that cannot be
+    resolved per type is reported there, not a traceback."""
+    from click.testing import CliRunner
+    from pm_core import store
+    from pm_core.cli import model as model_cli
+    monkeypatch.delenv("PM_MODEL", raising=False)
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master", "model_config": mc},
+                "prs": [{"id": "pr-a",
+                         "session_models": {"bogus": "x"}}]}, tmp_path)
+    monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
+    result = CliRunner().invoke(model_cli.model, ["show"])
+    out = result.output
+    assert result.exit_code == 0, (out, result.exception)
+    assert "Effective config not shown: model_config is malformed" in out
+    assert "must be a mapping" in out
+    assert "pr-a  bogus model  -> x" in out
+    assert "prs[pr-a].session_models: unknown session type 'bogus'" in out
+
+
+def test_model_show_reports_a_blank_project_entry(tmp_path, monkeypatch):
+    """A blank value under model_config.session_models is shown as a
+    problem; the per-type table still resolves (it crashed before)."""
+    from click.testing import CliRunner
+    from pm_core import store
+    from pm_core.cli import model as model_cli
+    monkeypatch.delenv("PM_MODEL", raising=False)
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master", "model_config": {
+                                "session_models": {"signoff": None,
+                                                   "review": "opus"}}},
+                "prs": []}, tmp_path)
+    monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
+    result = CliRunner().invoke(model_cli.model, ["show"])
+    out = result.output
+    assert result.exit_code == 0, (out, result.exception)
+    assert "Effective config per session type:" in out
+    assert any(line.split()[:2] == ["signoff", "opus"]
+               for line in out.splitlines())
+    assert "model_config.session_models['signoff']: None is not a model" in out
+
+
+
+def _blank_block_project(tmp_path, monkeypatch, mc):
+    from pm_core import store
+    from pm_core.cli import model as model_cli
+    monkeypatch.delenv("PM_MODEL", raising=False)
+    monkeypatch.delenv("PM_EFFORT", raising=False)
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master", "model_config": mc},
+                "prs": []}, tmp_path)
+    monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
+    return model_cli
+
+
+_BLANK_BLOCKS = pytest.mark.parametrize(
+    "mc", [None, {"session_models": None, "session_effort": None}],
+    ids=["model_config", "blocks"])
+
+
+@_BLANK_BLOCKS
+def test_model_show_resolves_blank_blocks(tmp_path, monkeypatch, mc):
+    from click.testing import CliRunner
+    model_cli = _blank_block_project(tmp_path, monkeypatch, mc)
+    result = CliRunner().invoke(model_cli.model, ["show"])
+    out = result.output
+    assert result.exit_code == 0, (out, result.exception)
+    assert "Effective config per session type:" in out
+    assert "malformed" not in out and "Problems" not in out
+
+
+@_BLANK_BLOCKS
+def test_model_set_and_unset_fill_a_blank_block(tmp_path, monkeypatch, mc):
+    """`pm model set ... --project`, which the route remedies name, raised
+    TypeError on a blank block; unset raised AttributeError."""
+    from click.testing import CliRunner
+    from pm_core import store
+    model_cli = _blank_block_project(tmp_path, monkeypatch, mc)
+    runner = CliRunner()
+    result = runner.invoke(model_cli.model, ["unset", "signoff", "--project"])
+    assert result.exit_code == 0, (result.output, result.exception)
+    assert "No project overrides set for 'signoff'" in result.output
+    result = runner.invoke(model_cli.model, ["set", "signoff", "opus",
+                                             "--effort", "high", "--project"])
+    assert result.exit_code == 0, (result.output, result.exception)
+    assert store.load(tmp_path)["project"]["model_config"] == {
+        "session_models": {"signoff": "opus"},
+        "session_effort": {"signoff": "high"}}
+    result = runner.invoke(model_cli.model, ["unset", "signoff", "--project"])
+    assert result.exit_code == 0, (result.output, result.exception)
+    assert "model_config" not in store.load(tmp_path)["project"]
+
+
+def test_model_show_lists_routes_that_pr_overrides_select(tmp_path,
+                                                          monkeypatch):
+    """S53: with the route chosen only by PR overrides (`model:
+    provider:<route>`) `pm model show` listed the overrides but no Routes
+    section, so where those PRs' sessions go was not shown.  Each PR override
+    that selects a route gets one line per distinct route, naming the types
+    it covers."""
+    from click.testing import CliRunner
+    from pm_core import store, worker_route
+    from pm_core.cli import model as model_cli
+    monkeypatch.delenv("PM_MODEL", raising=False)
+    monkeypatch.setattr(worker_route, "describe",
+                        lambda res, **kw: f"route={res.provider}")
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master"},
+                "prs": [{"id": "pr-a", "model": "provider:claude-work"},
+                        {"id": "pr-b", "model": "opus",
+                         "session_models": {"signoff": "provider:claude-work"}},
+                        {"id": "pr-c", "title": "no override"}]}, tmp_path)
+    monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
+    out = CliRunner().invoke(model_cli.model, ["show"]).output
+    routes = out.split("Routes:\n", 1)[1].splitlines()
+    assert "  pr-a (all types) route=claude-work" in routes
+    # signoff and the types that inherit from it (none here) only.
+    b = [r for r in routes if r.startswith("  pr-b ")]
+    assert b == ["  pr-b (signoff) route=claude-work"], routes
+    assert not any("pr-c" in r for r in routes)
+
+
+def test_model_show_routes_name_only_the_types_a_pr_override_decides(
+        tmp_path, monkeypatch):
+    """Review 0f64 i1: a PR's Routes line also listed types its override
+    leaves to the project, so a PR whose own exception is a plain model
+    (S54's R: qa_scenario -> haiku) read "pr-r (qa_concretize)
+    route=claude-work", as if its override selected the project's route."""
+    from click.testing import CliRunner
+    from pm_core import store, worker_route
+    from pm_core.cli import model as model_cli
+    monkeypatch.delenv("PM_MODEL", raising=False)
+    monkeypatch.setattr(worker_route, "describe",
+                        lambda res, **kw: f"route={res.provider}")
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master",
+                            "model_config": {"session_models": {
+                                "qa_concretize": "provider:claude-work"}}},
+                "prs": [{"id": "pr-r", "session_models": {
+                            "qa_scenario": "claude-haiku-5-5"}},
+                        {"id": "pr-q", "session_models": {
+                            "qa_scenario": "provider:claude-work"}}]},
+               tmp_path)
+    monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
+    out = CliRunner().invoke(model_cli.model, ["show"]).output
+    routes = out.split("Routes:\n", 1)[1].splitlines()
+    assert any(r.split() == ["qa_concretize", "route=claude-work"]
+               for r in routes), routes
+    assert not any("pr-r" in r for r in routes), routes
+    assert [r for r in routes if "pr-q" in r] == [
+        "  pr-q (qa_scenario) route=claude-work"], routes
+
+
+def test_model_show_pr_routes_never_count_the_project_watcher(tmp_path,
+                                                             monkeypatch):
+    """Review 0f64 i2: a PR's Routes line counted the watcher, which a PR
+    override never reaches (``pm watcher`` resolves it with no PR), so a PR
+    whose override routes every PR session but one listed "watcher" among
+    its types."""
+    from click.testing import CliRunner
+    from pm_core import store, worker_route
+    from pm_core.cli import model as model_cli
+    from pm_core.model_config import PR_SESSION_TYPES
+    monkeypatch.delenv("PM_MODEL", raising=False)
+    monkeypatch.setattr(worker_route, "describe",
+                        lambda res, **kw: f"route={res.provider}")
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master"},
+                "prs": [{"id": "pr-a", "model": "provider:claude-work"},
+                        {"id": "pr-i", "model": "provider:claude-work",
+                         "session_models": {"impl": "opus"}}]}, tmp_path)
+    monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
+    out = CliRunner().invoke(model_cli.model, ["show"]).output
+    routes = out.split("Routes:\n", 1)[1].splitlines()
+    assert "  pr-a (all types) route=claude-work" in routes, routes
+    i = [r for r in routes if r.startswith("  pr-i ")]
+    others = ", ".join(st for st in PR_SESSION_TYPES if st != "impl")
+    assert i == [f"  pr-i ({others}) route=claude-work"], routes
+    assert not any("watcher" in r for r in routes), routes
+
+
+def test_model_show_pr_route_line_is_not_split_by_project_effort(
+        tmp_path, monkeypatch):
+    """S55: a project session_effort (qa_scenario/qa_concretize high, the
+    production setup) split a PR routed for every type into two Routes
+    lines by effort, so neither said "all types".  One line per route; the
+    efforts that differ are named on it."""
+    from click.testing import CliRunner
+    from pm_core import store, worker_route
+    from pm_core.cli import model as model_cli
+    monkeypatch.delenv("PM_MODEL", raising=False)
+    monkeypatch.setattr(
+        worker_route, "describe",
+        lambda res, **kw: f"route={res.provider} effort={res.effort or '(default)'}")
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master",
+                            "model_config": {"session_effort": {
+                                "qa_scenario": "high",
+                                "qa_concretize": "high"}}},
+                "prs": [{"id": "pr-a", "model": "provider:claude-work"},
+                        {"id": "pr-b", "model": "opus",
+                         "session_models": {"signoff": "provider:claude-work"}}]},
+               tmp_path)
+    monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
+    out = CliRunner().invoke(model_cli.model, ["show"]).output
+    routes = out.split("Routes:\n", 1)[1].splitlines()
+    a = [r for r in routes if r.startswith("  pr-a ")]
+    assert a == ["  pr-a (all types) route=claude-work effort=high "
+                 "(qa_scenario, qa_concretize), (default) otherwise"], routes
+    assert [r for r in routes if r.startswith("  pr-b ")] == [
+        "  pr-b (signoff) route=claude-work effort=(default)"], routes
+
+
+def test_model_show_pr_route_lines_with_the_real_route_description(
+        tmp_path, monkeypatch):
+    """Review 6915 i1: the PR Routes tests above stub ``describe``, which
+    is how S55's effort split stayed invisible to them.  Here a configured
+    router provider goes through the real ``worker_route.describe``: the
+    production line (every type routed, qa_scenario/qa_concretize high)
+    and S56's W shape (a plain-model impl exception, mixed efforts) are
+    one line each, the effort summary in the effort field before via=."""
+    import yaml
+    from click.testing import CliRunner
+    from pm_core import container, model_config, providers, store, worker_route
+    from pm_core.cli import model as model_cli
+    for var in ("PM_MODEL", "PM_EFFORT", "PM_PROVIDER"):
+        monkeypatch.delenv(var, raising=False)
+    home = tmp_path / "pmhome"
+    home.mkdir()
+    for mod in (providers, worker_route):
+        monkeypatch.setattr(mod, "pm_home", lambda: home)
+    monkeypatch.setattr(model_config, "get_global_setting_value",
+                        lambda name: None)
+    monkeypatch.setattr(container, "is_container_mode_enabled", lambda: False)
+    (home / "providers.yaml").write_text(yaml.safe_dump({"providers": {
+        "claude-work": {"type": "router", "api_base": "http://127.0.0.1:1",
+                        "model": "work/claude-opus-5-5"}}}))
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    store.save({"project": {"name": "t", "repo": str(proj),
+                            "base_branch": "master",
+                            "model_config": {"session_effort": {
+                                "qa_scenario": "high",
+                                "qa_concretize": "high"}}},
+                "prs": [{"id": "pr-a", "model": "provider:claude-work"},
+                        {"id": "pr-w", "model": "provider:claude-work",
+                         "session_models": {"impl": "opus"}}]}, proj)
+    monkeypatch.setattr(model_cli, "state_root", lambda: proj)
+    out = CliRunner().invoke(model_cli.model, ["show"]).output
+    routes = out.split("Routes:\n", 1)[1].splitlines()
+    tail = ("route=claude-work model=work/claude-opus-5-5 effort=high "
+            "(qa_scenario, qa_concretize), (default) otherwise via=host")
+    assert [r for r in routes if r.startswith("  pr-a ")] == [
+        f"  pr-a (all types) {tail}"], routes
+    others = ", ".join(st for st in model_config.PR_SESSION_TYPES
+                       if st != "impl")
+    assert [r for r in routes if r.startswith("  pr-w ")] == [
+        f"  pr-w ({others}) {tail}"], routes
+
+
+def _real_route_project(tmp_path, monkeypatch, *, containers):
+    """The production route setup (S58) behind the real describe: router
+    provider claude-work, project qa_scenario/qa_concretize on it at high
+    effort, pr-a routed for every type, pr-c on the project default."""
+    import yaml
+    from pm_core import container, model_config, providers, store, worker_route
+    from pm_core.cli import model as model_cli
+    for var in ("PM_MODEL", "PM_EFFORT", "PM_PROVIDER"):
+        monkeypatch.delenv(var, raising=False)
+    home = tmp_path / "pmhome"
+    home.mkdir()
+    for mod in (providers, worker_route):
+        monkeypatch.setattr(mod, "pm_home", lambda: home)
+    monkeypatch.setattr(model_config, "get_global_setting_value",
+                        lambda name: None)
+    monkeypatch.setattr(container, "is_container_mode_enabled",
+                        lambda: containers)
+    (home / "providers.yaml").write_text(yaml.safe_dump({"providers": {
+        "claude-work": {"type": "router", "api_base": "http://127.0.0.1:1",
+                        "model": "work/claude-opus-5-5"}}}))
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    store.save({"project": {"name": "t", "repo": str(proj),
+                            "base_branch": "master",
+                            "model_config": {
+                                "session_models": {
+                                    "qa_concretize": "provider:claude-work",
+                                    "qa_scenario": "provider:claude-work"},
+                                "session_effort": {
+                                    "qa_concretize": "high",
+                                    "qa_scenario": "high"}}},
+                "prs": [{"id": "pr-a", "model": "provider:claude-work"},
+                        {"id": "pr-c", "title": "no override"}]}, proj)
+    monkeypatch.setattr(model_cli, "state_root", lambda: proj)
+    from click.testing import CliRunner
+    result = CliRunner().invoke(model_cli.model, ["show"])
+    assert result.exit_code == 0, result.output
+    return result.output.split("Routes:\n", 1)[1].splitlines()
+
+
+def test_model_show_routes_name_the_container_bridge_in_container_mode(
+        tmp_path, monkeypatch):
+    """S58: Routes were built without container mode, so in container mode
+    every line said via=host, while impl, review, sign-off and the QA
+    refiner/worker reach the route through the container bridge (their QA
+    launch lines say via=container-bridge).  Container-run types now say
+    container-bridge and host-run types host; a PR routed for every type
+    gets one line per path, each type exactly once."""
+    from pm_core.model_config import PR_SESSION_TYPES
+    from pm_core.worker_route import CONTAINER_SESSION_TYPES
+    routes = _real_route_project(tmp_path, monkeypatch, containers=True)
+    route = "route=claude-work model=work/claude-opus-5-5"
+    assert f"  qa_scenario    {route} effort=high via=container-bridge" \
+        in routes, routes
+    assert f"  qa_concretize  {route} effort=high via=container-bridge" \
+        in routes, routes
+    bridge = [st for st in PR_SESSION_TYPES if st in CONTAINER_SESSION_TYPES]
+    host = [st for st in PR_SESSION_TYPES if st not in CONTAINER_SESSION_TYPES]
+    assert bridge == ["impl", "review", "qa_scenario", "qa_concretize",
+                      "signoff"]
+    assert [r for r in routes if r.startswith("  pr-a ")] == [
+        f"  pr-a ({', '.join(bridge)}) {route} effort=high (qa_scenario, "
+        "qa_concretize), (default) otherwise via=container-bridge",
+        f"  pr-a ({', '.join(host)}) {route} effort=(default) via=host",
+    ], routes
+    assert not any("pr-c" in r or "watcher" in r for r in routes), routes
+
+
+def test_model_show_routes_stay_on_host_outside_container_mode(
+        tmp_path, monkeypatch):
+    """S58: host mode keeps via=host everywhere and one (all types) line."""
+    routes = _real_route_project(tmp_path, monkeypatch, containers=False)
+    route = "route=claude-work model=work/claude-opus-5-5"
+    assert routes == [
+        f"  qa_scenario    {route} effort=high via=host",
+        f"  qa_concretize  {route} effort=high via=host",
+        f"  pr-a (all types) {route} effort=high (qa_scenario, "
+        "qa_concretize), (default) otherwise via=host",
+    ], routes
+
+
+def test_model_show_pr_routes_defer_to_pm_model(tmp_path, monkeypatch):
+    """Review 0f64 i6: with PM_MODEL set (it beats every PR override), the
+    PR Routes lines still credited each PR override with PM_MODEL's route,
+    so a PR whose override is a plain model read "pr-b (all types)
+    route=claude-work"."""
+    from click.testing import CliRunner
+    from pm_core import store, worker_route
+    from pm_core.cli import model as model_cli
+    monkeypatch.setenv("PM_MODEL", "provider:claude-work")
+    monkeypatch.setattr(worker_route, "describe",
+                        lambda res, **kw: f"route={res.provider}")
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master"},
+                "prs": [{"id": "pr-a", "model": "provider:other"},
+                        {"id": "pr-b", "model": "opus",
+                         "session_models": {"qa_scenario": "haiku"}}]},
+               tmp_path)
+    monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
+    result = CliRunner().invoke(model_cli.model, ["show"])
+    assert result.exit_code == 0, result.output
+    routes = result.output.split("Routes:\n", 1)[1].splitlines()
+    assert any(r.split() == ["impl", "route=claude-work"] for r in routes)
+    assert not any(r.startswith(("  pr-a ", "  pr-b ")) for r in routes), \
+        routes
+
+
+@pytest.mark.parametrize("bad", [5, ["provider:claude-work"], {"x": 1}])
+def test_model_show_survives_a_non_string_pr_model(tmp_path, monkeypatch,
+                                                   bad):
+    """Review 0f64 i3: the PR Routes lines (S53 66404830) resolved a
+    hand-edited non-string PR ``model`` and crashed ``pm model show``
+    (AttributeError), the command a model setting problem is meant to be
+    found with.  It now lists no route for it and names the problem."""
+    from click.testing import CliRunner
+    from pm_core import store, worker_route
+    from pm_core.cli import model as model_cli
+    monkeypatch.delenv("PM_MODEL", raising=False)
+    monkeypatch.setattr(worker_route, "describe",
+                        lambda res, **kw: f"route={res.provider}")
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master"},
+                "prs": [{"id": "pr-a", "model": "provider:claude-work"},
+                        {"id": "pr-x", "model": bad}]}, tmp_path)
+    monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
+    result = CliRunner().invoke(model_cli.model, ["show"])
+    assert result.exit_code == 0, result.output
+    routes = result.output.split("Routes:\n", 1)[1]
+    assert "  pr-a (all types) route=claude-work" in routes
+    assert "pr-x (" not in routes
+    assert "prs[pr-x].model:" in result.output

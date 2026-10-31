@@ -489,8 +489,13 @@ def qa_run(instruction_id: str, pr_id: str | None):
         steps=f"Follow the instruction file {filename}",
     )
 
-    loop_id = f"cli-{pr_id}"
+    loop_id = qa_loop.instruction_run_loop_id(pr_id)
     qa_workdir = qa_loop.create_qa_workdir(pr_id, loop_id)
+    # The loop id is fixed, so an earlier run's start record is still here.
+    # It names that run's process, long gone: auto-start would take this
+    # run for nobody's and start full QA over it (S111).  This run writes
+    # its own.
+    (qa_workdir / "qa_run.json").unlink(missing_ok=True)
 
     state = qa_loop.QALoopState(
         pr_id=pr_id,
@@ -509,6 +514,12 @@ def qa_run(instruction_id: str, pr_id: str | None):
             click.echo(f"  [{s.latest_verdict or '...'}] {s.latest_output}")
 
     state = qa_loop.run_qa_sync(state, root, pr_data, on_update, max_scenarios=1)
+    # The resume snapshot is for a TUI to finish a run whose driver died.
+    # Left behind, the TUI's resume scan recovered this one instruction's
+    # verdict as the PR's QA result once this process exited, and handed
+    # the PR to sign-off without full QA (S111).
+    if state.latest_verdict:
+        qa_loop.clear_resume_file(qa_workdir)
 
     verdict = state.latest_verdict or "UNKNOWN"
     click.echo(f"\nResult: {verdict}")

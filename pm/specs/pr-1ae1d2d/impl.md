@@ -76,12 +76,45 @@ restart). Two files conflicted:
     `_sync_captures_evidence` were re-inserted after the loop's final-status
     write, so the completion re-sync runs on every iteration (including a
     reopened held run).
-  - All four early-exit `_sync_captures_evidence(..., scenarios=[])` calls and
+  - All three early-exit `_sync_captures_evidence(..., scenarios=[])` calls and
     the two start-of-run syncs (`run_qa_sync`, `resume_qa_sync`) survived
     unchanged.
 
 No behavioural loss on either side: master's hold logic and this PR's evidence
 provenance are orthogonal and compose.
+
+Merge note (updated 2026-10-31): after #249 landed, this branch was merged
+again with `origin/master@eaf3372e`. Two files conflicted; `paths.py`,
+`cli/qa.py`, `signoff.py`, `prompt_gen.py` and `behavior_report.py`
+auto-merged to this PR's additive hunks on top of master.
+
+- `tests/conftest.py` — both sides added an autouse fixture in the same
+  place. Resolution: keep **both** — this PR's `_isolated_sessions_tree`
+  (captures/evidence never lands in the runner's real `~/.pm/sessions`) and
+  master's `_no_inherited_routing_env` (tests run as if from a plain shell).
+  They are independent and neither subsumes the other.
+- `pm_core/qa_loop.py` — master replaced the `_write_status()` closure with
+  the more widely-called `_write_dashboard()` (S106) and moved the
+  pre-finalize resume snapshot above the final status write (S47). Resolution:
+  - take master's `_write_dashboard()` and delete the branch's now-superseded
+    `_write_status()` closure; `_write_dashboard()`'s `_write_status_file`
+    call carries this PR's `run_id=state.loop_id`, so all 11 call sites keep
+    emitting the run id (R4).
+  - `_execute_and_finalize` keeps master's restructured snapshot ordering;
+    this PR's `_persist_scenario_verdicts(..., overall=…)` and the
+    post-persist `_sync_captures_evidence(state, overall=state.latest_verdict)`
+    remain after the persist, before the finalize pane. The branch's old
+    post-persist `_write_resume_file` is not restored — master moved that
+    snapshot earlier, and duplicating it would re-introduce the S47 ordering.
+  - The three early-exit `_sync_captures_evidence(..., scenarios=[])` calls
+    and both start-of-run syncs (`_run_qa_sync`, `_resume_qa_sync`) survived
+    unchanged.
+
+Verification on the merged tree: `tests/test_captures_provenance.py` 77
+passed; `test_qa_loop`+`test_qa_planner_handoff`+`test_workspace_trust`+
+`test_captures_dir_mount` 277 passed; `test_prompt_bounds`+
+`test_behavior_report`+`test_signoff`+`test_signoff_integration` 337 passed;
+full suite result recorded in the PR note.
 
 ## 1. Requirements
 
