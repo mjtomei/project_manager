@@ -280,6 +280,62 @@ def test_container_create_failure_raises_instead_of_host_launch(tmp_path, home):
     assert state.scenario_verdicts == {}
 
 
+def test_launch_failure_releases_only_the_failed_scenarios_container(
+        tmp_path, home):
+    """R7: a failed launch releases only that attempt's own container.
+
+    Containers and windows already created for the run's other scenarios are
+    left alive for inspection — no broad cleanup on the error path.
+    """
+    state = QALoopState(pr_id="pr-c", planning_phase=False)
+    state.qa_workdir = str(tmp_path)
+    state.session_tag = "s"
+    s1 = QAScenario(index=1, title="S1", focus="f")
+    s2 = QAScenario(index=2, title="S2", focus="f")
+    state.scenarios = [s1, s2]
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+
+    created: list[str] = []
+
+    def _create(**kwargs):
+        created.append(kwargs["name"])
+        if kwargs["name"].endswith("-s2"):
+            raise container_mod.ContainerError("image not found")
+        return kwargs["name"]
+
+    with ExitStack() as stack:
+        stack.enter_context(patch("pm_core.qa_loop._resolve_qa_model",
+                                  return_value=SimpleNamespace(
+                                      model=None, provider=None, effort=None)))
+        stack.enter_context(patch(
+            "pm_core.qa_loop.create_scenario_workdir",
+            return_value=(clone, scratch)))
+        stack.enter_context(patch.object(container_mod,
+                                         "create_qa_container",
+                                         side_effect=_create))
+        remove = stack.enter_context(
+            patch.object(container_mod, "remove_container"))
+        new_window = stack.enter_context(patch(
+            "pm_core.tmux.new_window_get_pane", return_value="%1"))
+        stack.enter_context(patch("pm_core.qa_loop._write_status_file"))
+
+        with pytest.raises(qa_loop.ContainerLaunchError) as excinfo:
+            qa_loop._launch_scenarios_in_containers(
+                state, {}, {"id": "pr-c", "branch": "pm/c"}, "pm-s",
+                None, str(tmp_path))
+
+    assert "scenario 2" in str(excinfo.value)
+    # Only the failed attempt's exact container was released.
+    assert remove.call_count == 1
+    assert remove.call_args.args[0].endswith("-s2")
+    # The other scenario's container and window were created and kept.
+    assert any(name.endswith("-s1") for name in created)
+    assert new_window.call_count == 1
+
+
 def test_container_window_failure_is_a_launch_error(tmp_path, home):
     """A scenario whose container was created but whose tmux window cannot be
     created has nothing able to run in that container.  That is the same

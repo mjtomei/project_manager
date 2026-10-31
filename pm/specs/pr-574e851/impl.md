@@ -215,8 +215,13 @@ run's `use_containers` from `_poll_tmux_verdicts`:
   `ContainerLaunchError` (a container run has no host fallback).
 - `use_containers and scenario.container_name`: verify
   `container_is_running(name)` (try/except; any exception = not running).
-  If not running → raise `ContainerLaunchError` ("container … is no longer
-  running; refusing to relaunch the worker on the host").
+  A stopped/removed container is first recreated under the same name from
+  the scenario's host clone and scratch — master's
+  `_ensure_scenario_container` (#249/S78), kept by the integration; this is
+  a recovery inside container mode, not a downgrade. Only when the container
+  cannot be recreated → raise `ContainerLaunchError` ("container … is no
+  longer running and could not be recreated; refusing to relaunch the worker
+  on the host").
 - host runs (`use_containers` False) keep the existing host relaunch.
 - pass `session=None if scenario.container_name else session` to
   `_build_scenario_run_cmd` (do not consult the runtime to shape the prompt).
@@ -236,8 +241,10 @@ In `_resume_qa_sync`, after reading `use_containers` from the snapshot
   now enabled (the run's mode was explicitly host; live host workers are not
   retroactively containerized).
 
-Extend the local `_abort` helper with an optional `error: str | None = None`
-that also sets `state._error`.
+Publish that failure through `_fail_run_infrastructure` (the same helper as
+R2/R3) rather than through the local `_abort` helper, which stays for the
+other resume failures (no session, missing workdir) and takes no error
+argument.
 
 ### R6 — `pm qa debug` fails closed
 
@@ -317,7 +324,7 @@ No **[UNRESOLVED]** ambiguities.
 | enabled + scenario window cannot be created after its container exists | ERROR (same launch-failure path); that container released; no INPUT_REQUIRED, no leak |
 | enabled + queued scenario create failure | ERROR from inside `_execute_and_finalize`; no host launch |
 | enabled + worker pane dies, container still running | existing retry → relaunch in the same container |
-| enabled + worker pane dies, container gone | `ContainerLaunchError` → ERROR, no host relaunch |
+| enabled + worker pane dies, container gone | recreated under the same name and the worker relaunched inside it (no downgrade); only when recreation fails → `ContainerLaunchError` → ERROR, no host relaunch |
 | enabled + resume snapshot True + runtime now down | ERROR via `_abort`; no host; `_error` preserved |
 | enabled + resume snapshot False | host resume (run mode preserved) |
 | disabled + resume snapshot False | host resume unchanged |
@@ -659,3 +666,31 @@ the trunk's newer lifecycle/UI work is kept.
   unusable; explicitly disabled mode still runs on the host; host-only roles
   (Scenario 0, planner, verifier, finalizer, authoring helpers) are
   unchanged.
+
+## Review iteration (421e i1)
+
+Re-audited the integrated head (`d88ed2f9`, master@eaf3372e merged) against
+R1-R7 and the acceptance list. The fail-closed boundary is intact: fresh-run
+preflight, initial container launch, queued launch and relaunch (inside
+`_poll_tmux_verdicts`), resume re-validation, `pm qa debug` and `pm qa run`
+all abort with cause+remedy and zero host launches when the runtime is
+unusable; healthy runtime still launches in-container; explicitly disabled
+mode still runs on the host. Changes made:
+
+- **The poll loop's post-relaunch verdict guard no longer claims a removed
+  behaviour.** It said "its container could not be recreated: the verdict
+  says why", but a lost container now fails the run closed
+  (`ContainerLaunchError`) instead of recording an INPUT_REQUIRED, so the
+  guard is only reachable for a scenario that already carries a verdict
+  (e.g. an unverified PASS whose pane died). Its `latest_output` now reports
+  the recorded verdict and that the relaunch failed, instead of the stale
+  "INPUT_REQUIRED (container gone)" label. The matching test's docstring is
+  updated to describe the defensive guard.
+- **R4, the edge-case table and R5 above are synced to the integrated
+  code**: a lost container is recreated first (only an unrecreatable one
+  fails the run), and the resume preflight publishes through
+  `_fail_run_infrastructure`, not `_abort(error=…)`.
+- **Test gap closed for R7**: `test_launch_failure_releases_only_the_failed_scenarios_container`
+  runs two scenarios, fails the second's create, and asserts the first's
+  container and window are kept while only the failed attempt's exact
+  container is released (no broad cleanup).

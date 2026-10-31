@@ -4797,11 +4797,17 @@ def _poll_tmux_verdicts(
                         _last_scenario_hook_ts.pop(scenario.index, None)
                         continue
                     if scenario.index in state.scenario_verdicts:
-                        # Its container could not be recreated: the
-                        # verdict says why, and retrying cannot help.
+                        # It already carries a verdict (e.g. an unverified
+                        # PASS whose pane died): keep it and stop retrying,
+                        # because a relaunch cannot produce a new one.  A
+                        # lost container no longer reaches this branch — the
+                        # relaunch recreates it, and when it cannot, raises
+                        # ContainerLaunchError so the run fails closed.
+                        recorded = state.scenario_verdicts[scenario.index]
                         state.latest_output = (
                             f"Scenario {scenario.index} ({scenario.title}): "
-                            f"INPUT_REQUIRED (container gone)")
+                            f"{recorded} (relaunch failed; keeping its "
+                            "recorded verdict)")
                         pending.discard(scenario.index)
                         verdicts_changed = True
                         _notify()

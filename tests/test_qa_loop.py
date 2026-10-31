@@ -2104,9 +2104,14 @@ class TestScenarioRetryLogic:
         assert names == ["running", "create", "remove"]
 
     def test_failed_recreate_stops_the_retry_ladder(self, tmp_path):
-        """The poll loop takes the relaunch's INPUT_REQUIRED as final: one
-        relaunch attempt, no further retries, and the retry and outcome
-        are surfaced as latest_output for the TUI."""
+        """A scenario that already carries a verdict is not retried.
+
+        The relaunch no longer records a verdict (a lost container now fails
+        the run closed with ``ContainerLaunchError``), so this exercises the
+        poll loop's defensive guard: when a scenario already has a verdict,
+        one relaunch attempt is made, the scenario is dropped from the retry
+        ladder, and the retry and outcome are surfaced as latest_output for
+        the TUI."""
         from pm_core.qa_loop import _poll_tmux_verdicts
 
         scenario = QAScenario(index=5, title="S78 one", focus="t")
@@ -2136,7 +2141,8 @@ class TestScenarioRetryLogic:
         assert state.scenario_verdicts[5] == VERDICT_INPUT_REQUIRED
         assert "Scenario 5 window died — retry 1/10 (backoff 5s)" in outputs
         assert state.latest_output == (
-            "Scenario 5 (S78 one): INPUT_REQUIRED (container gone)")
+            "Scenario 5 (S78 one): INPUT_REQUIRED (relaunch failed; keeping "
+            "its recorded verdict)")
 
     def test_backoff_formula(self):
         """Verify exponential backoff: 5 * 2^retries = 5, 10, 20, 40..."""
