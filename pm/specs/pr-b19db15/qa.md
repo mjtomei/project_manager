@@ -381,6 +381,26 @@ recording-recipe bugs that any worker following the recipe hits:
   and S22 may re-observe that a failed render leaves no
   `recording.mp4.partial.mp4` beside no mp4.
 
+- the manifest has to name the video a killed driver leaves (review loop 928f
+  i2): the web-UI driver renames Playwright's video onto `recording.webm` only
+  after a complete walk-through, so a driver killed before the rename leaves
+  Playwright's auto-named `page@<hash>.webm` — a valid, playable *partial*
+  recording (verified live in this container: SIGKILLing a recording driver
+  left `page@b87f….webm`, which ffprobe reports as 3.12 s) that the finalize
+  step never touches, because it transcodes only `recording.webm`. The
+  produced-files list and the manifest's `## Files` example omitted it, while
+  the manifest section asks for "every file above" and the example is what a
+  worker copies — the "manifest and directory disagree" class R44/R45 fixed
+  for `server.pid` and the kept `recording.webm`. Both now name it. No
+  behavioural change, so no scenario gains a new surface; S26 may re-observe
+  that a killed driver's capture directory holds the auto-named video and
+  that the manifest names it. Two step-2 cleanup guarantees are pinned by the
+  same pass (test coverage only): the missing-driver refusal must still clear
+  the earlier attempt's outputs (moving the check above the attempt cleanup
+  left them — including the complete `recording.webm` — in place), and the
+  retry cleanup's `./*.webm` glob must take the auto-named video, not only
+  `recording.webm`.
+
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.
 

@@ -50,6 +50,12 @@ substitutes the per-PR captures directory — `$(pm qa captures-path
   once the mp4 exists, so it survives only when the transcode failed (it is
   kept deliberately, so the step can be retried without re-driving the UI) —
   mention it in the manifest when it does.
+- `page@<hash>.webm` — Playwright's auto-named video, left only when the
+  driver was killed before it renamed the video onto `recording.webm`. It is
+  a valid, playable *partial* recording, not this run's video: the finalize
+  step transcodes only `recording.webm`, and step 1's and step 2's `*.webm`
+  cleanups remove it before another attempt, so the killed run is the one
+  that keeps it. Mention it in the manifest when it survives.
 - `driver.mjs` — the driver that produced this capture: the adapted
   skeleton (locators, interactions, side-channel trigger). Keep it in the
   capture directory so a reviewer can see what was actually driven.
@@ -707,6 +713,9 @@ fencing deep:
       from Playwright's native webm.
     - `recording.webm` — Playwright's native video; kept only when the
       transcode failed, so step 3 can be retried without re-driving the UI.
+    - `page@<hash>.webm` — Playwright's auto-named video, present only when
+      the driver was killed before the rename (a partial recording, not this
+      run's video).
     - `driver.mjs` — the Playwright driver that produced this capture (the
       adapted skeleton: locators, interactions, side-channel trigger).
     - `trace.zip` — Playwright trace; `npx playwright show-trace trace.zip`.

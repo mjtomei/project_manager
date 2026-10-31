@@ -2908,11 +2908,33 @@ def test_web_ui_driver_block_refuses_a_missing_driver(tmp_path, driver_shape):
     for that reason, the rule every stage-input check in the recording
     recipes' render blocks follows (an artifact that exists but is empty is
     not an input).
+
+    The check also has to sit *after* the block's attempt cleanup, because a
+    retry pasted with the driver saved in the workdir is a step-2 failure path
+    like any other and R21 requires every one of them to leave no earlier
+    attempt's artifact. Moving the check above the ``rm`` left the whole file
+    green (247 passed) and the earlier attempt's complete
+    ``recording.mp4``/``recording.webm``/trace/screenshots/manifest in place —
+    the recording the finalize step would then present as this run's, and a
+    manifest naming the files that were supposed to be gone (verified live
+    with the recipe's own block: pre-fix rc 1 with all eight files still in
+    the capture directory, post-fix the directory holds nothing).
     """
     capdir = tmp_path / "cap"
     capdir.mkdir()                    # no driver.mjs was saved
     if driver_shape == "empty":
         (capdir / "driver.mjs").write_text("")
+    stale = {"recording.mp4": "an earlier attempt's video\n",
+             "recording.webm": "an earlier attempt\n",
+             "page@0123456789abcdef.webm": "an earlier auto-named video\n",
+             "trace.zip": "an earlier trace\n",
+             "dom.html": "<html>an earlier dump</html>\n",
+             "01-loaded.png": "an earlier screenshot\n",
+             "http.log": "an earlier protocol snapshot\n",
+             "sse.log": "data: an earlier attempt\n",
+             "manifest.md": "## Files\n- `recording.mp4` — an earlier attempt\n"}
+    for name, content in stale.items():
+        (capdir / name).write_text(content)
     r = _run_driver_block(capdir, _fake_playwright(tmp_path / "global"))
     assert r.returncode != 0, (
         "the block ran with no driver.mjs to run"
@@ -2925,6 +2947,11 @@ def test_web_ui_driver_block_refuses_a_missing_driver(tmp_path, driver_shape):
         "a missing driver.mjs is reported as a driver that ran and failed, "
         "so the worker debugs a file that does not exist: " + r.stderr)
     assert "driver saw" not in r.stdout, r.stdout
+    for name in stale:
+        assert not (capdir / name).exists(), (
+            f"the block refused a missing driver.mjs but left an earlier "
+            f"attempt's {name} behind, so a later finalize presents the "
+            "earlier attempt's recording as this run's")
 
 
 def test_web_ui_driver_block_names_a_missing_node(tmp_path):
@@ -3046,11 +3073,27 @@ def test_web_ui_driver_failure_is_reported_and_clears_stale_outputs(tmp_path):
     earlier attempt's route snapshots and event stream as this run's. Step 1
     clears them for a fresh run for exactly that reason (R18); this covers
     the step-2-only retry the block exists for.
+
+    Playwright's auto-named ``page@<hash>.webm`` is in the set too, for the
+    reason step 1 globs ``*.webm`` rather than ``recording.webm``: a driver
+    killed before the rename leaves that name instead, and it is a valid,
+    playable partial recording. Narrowing this block's ``./*.webm`` glob to
+    ``./recording.webm`` left the whole file green (247 passed) while the
+    earlier attempt's auto-named video survived the failed retry.
     """
     capdir = tmp_path / "cap"
     capdir.mkdir()
     stale = {"recording.mp4": "an earlier attempt's video\n",
              "recording.webm": "an earlier attempt\n",
+             # Playwright's auto-named video: the driver renames it onto
+             # recording.webm only after a complete walk-through, so a killed
+             # driver leaves this name instead. Narrowing the cleanup's
+             # `./*.webm` glob to `./recording.webm` left the whole file green
+             # (247 passed) and kept this file — a valid, playable partial
+             # recording (verified live: ffprobe reports a duration for a
+             # SIGKILLed driver's page@<hash>.webm) — for the retried capture
+             # to present as its own.
+             "page@0123456789abcdef.webm": "an earlier attempt's auto-named video\n",
              "trace.zip": "an earlier trace\n",
              "dom.html": "<html>an earlier dump</html>\n",
              "01-loaded.png": "an earlier screenshot\n",
@@ -3474,23 +3517,30 @@ def test_web_ui_produced_files_list_names_the_playwright_link():
 
 
 def test_web_ui_produced_files_list_names_the_files_a_failed_run_keeps():
-    """Two files the flow leaves in the capture directory are not listed.
+    """Three files the flow leaves in the capture directory are not listed.
 
     ``server.pid`` is written by step 1 and removed by the teardown, so it is
     present exactly when a run stopped before the teardown — a failed driver,
     which step 2 tells the worker not to finalize, is the ordinary case.
     ``recording.webm`` is kept deliberately when the transcode fails, so the
-    step can be retried without re-driving the UI. The recipe's manifest
-    section asks for "every file above", and the recording recipes' lists
-    already name their failure evidence (R17), so a worker following this list
-    leaves both out of ``## Files`` while the capture directory holds them —
-    the same "the manifest and the directory disagree" class, two files over.
+    step can be retried without re-driving the UI. ``page@<hash>.webm`` is
+    Playwright's auto-named video: the driver renames it onto
+    ``recording.webm`` only after a complete walk-through, so a driver killed
+    before the rename leaves it behind — a valid, playable *partial*
+    recording (verified live in this container: SIGKILLing a recording driver
+    leaves ``page@b87f….webm``, which ffprobe reports as 3.12 s), and the
+    finalize step transcodes only ``recording.webm``, so nothing else ever
+    removes or explains it. The recipe's manifest section asks for "every
+    file above", and the recording recipes' lists already name their failure
+    evidence (R17), so a worker following this list leaves all three out of
+    ``## Files`` while the capture directory holds them — the same "the
+    manifest and the directory disagree" class, one file over.
 
     The manifest's own ``## Files`` example has to name them too, not only the
     produced-files list: that example is what a worker copies into the
     manifest, and the ``node_modules`` line is pinned in both places for the
     same reason (``test_web_ui_produced_files_list_names_the_playwright_link``)
-    — the example listed it while these two were still missing.
+    — the example listed it while these were still missing.
     """
     text = _recipe_text("web-ui-recording.md")
     produced = text.split("## What this recipe produces", 1)[1].split(
@@ -3502,12 +3552,13 @@ def test_web_ui_produced_files_list_names_the_files_a_failed_run_keeps():
     # section", so the example's *file list* — the indented heading — is what
     # has to name it.
     files = manifest.split("\n    ## Files", 1)[1]
-    for fname in ("server.pid", "recording.webm"):
+    for fname in ("server.pid", "recording.webm", "page@<hash>.webm"):
         assert fname in produced, (
             "the produced-files list never names " + fname + ", which the "
             "flow leaves in the capture directory (a run stopped before the "
-            "teardown; a failed transcode), so the manifest's `## Files` "
-            "section and the directory disagree")
+            "teardown; a failed transcode; a driver killed before the "
+            "rename), so the manifest's `## Files` section and the directory "
+            "disagree")
         assert fname in files, (
             "the manifest's `## Files` example does not name " + fname + ", "
             "although the produced-files list says to mention it when it "
