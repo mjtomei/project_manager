@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-31T20:17:55.079437+00:00'
+  updated_at: '2026-10-31T20:53:50.258448+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5361,6 +5361,36 @@ prs:
       non-blocking (see the i3 section of impl.md).'
     created_at: '2026-10-31T20:17:42Z'
     last_edited: '2026-10-31T20:17:55Z'
+  - id: note-57826b3
+    text: 'Review loop 703c i3 (commit 3436b445; full suite 5328 passed / 1 skipped).
+      No requirement changes. One gap in the precise detach (R5.2) plus a spec correction.
+      (1) detach_current_client() derived the base session with session.split("~",
+      1)[0]. tmux reports the most recently active view name for a pane in a shared
+      window (verified here: with pm-x, pm-x~1 and myview grouped, display-message
+      -t <base pane> #{session_name} returned myview while #{session_group} returned
+      pm-x), and S118/S121/S124 let such a view be named anything — so a view named
+      myview became the "base": list_grouped_sessions() returned nothing and sessions_on_window()
+      covered only the view, collapsing the candidate set to the view client. Ctrl-Q
+      could then detach a different client of the same pm session than the one that
+      pressed it (the ~1 client viewing the TUI stayed attached while the view client
+      was dropped). The base now comes from tmux.session_group(), which gained an
+      optional socket_path like the rest of the group helpers, with the ~ split as
+      the fallback when the session is ungrouped or the query fails; the candidate
+      set is the base + base~N that R5.2 defines. Test: test_resolves_the_pm_base_through_the_session_group
+      (verified to fail without the fix: it detached the view client /dev/pts/9 instead
+      of /dev/pts/1). (2) impl.md R2 claimed current_or_base_session() accepts socket_path;
+      it does not (it resolves the current pane through the ambient server), so R2
+      now says so and records why every caller is still correct. Validation on the
+      integrated head: full suite 5328 passed / 1 skipped (scratch pytest<9 + markdown,
+      PATH without the push-proxy git, TMUX/TMUX_PANE/PM_*/PM_HOST_HOME cleared);
+      pm/specs/pr-073910f/session_start_smoke.py re-run end to end on a disposable
+      socket with TMUX_TMPDIR on a scratch dir (private server, session env, global
+      env and hooks correct; default server untouched); pm session list and pm session
+      --print-connect re-checked read-only. No live session, server or shared host
+      configuration was touched; the new test is unit-level and binds no tmux server.
+      Residual notes unchanged and non-blocking (impl.md i3 section).'
+    created_at: '2026-10-31T20:53:50Z'
+    last_edited: '2026-10-31T20:53:50Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
