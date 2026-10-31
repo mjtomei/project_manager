@@ -401,8 +401,11 @@ class TestPmSessionOutsidePmTmux:
         monkeypatch.setattr(no_pm_tmux, "_get_session_name_for_cwd",
                             lambda: "pm-proj-1234")
         live = set()
-        monkeypatch.setattr(tmux_mod, "session_exists",
-                            lambda name, socket_path=None: name.lstrip("=") in live)
+        # ``use_env`` is part of session_exists's signature and is passed by
+        # find_session_server's default-server probe (per-session sockets).
+        monkeypatch.setattr(
+            tmux_mod, "session_exists",
+            lambda name, socket_path=None, use_env=True: name.lstrip("=") in live)
         assert loop_shared.get_pm_session() is None
         live.add("pm-proj-1234")
         assert loop_shared.get_pm_session() == "pm-proj-1234"
