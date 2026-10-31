@@ -1,6 +1,6 @@
-"""Unix-socket bridge from QA containers to a host-loopback model router.
+"""Unix-socket bridge from pm containers to a host-loopback model router.
 
-QA containers run under slirp4netns, so the host router on
+Containers run under slirp4netns, so the host router on
 ``127.0.0.1:<port>`` is unreachable from inside them, and publishing it on a
 routable address would expose a credential-bearing endpoint.  Instead:
 
@@ -184,9 +184,9 @@ def ensure_container_forwarder(sock_path: str, port: int,
     label = f" {route!r}" if route else ""
     remedy = ("Remedy: on the host run 'pm provider test "
               f"{route or '<route>'} --container' and fix what it reports; "
-              "if the socket is not mounted in this container, restart QA "
-              "(or remove the container and launch the session again) so "
-              "the container is recreated with it.")
+              "if the socket is not mounted in this container, remove the "
+              "container and launch the session again so it is recreated "
+              "with the mount.")
     if not os.path.exists(sock_path):
         return _fail(f"route{label} socket {sock_path} is not mounted in "
                      f"this container. {remedy}")

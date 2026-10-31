@@ -443,9 +443,10 @@ def provider_test(name: str | None, quick: bool, in_container: bool,
     function calling (required for Claude Code's agentic workflows).
     If NAME is omitted, tests the default provider.
 
-    For a router provider, runs the same preflight pm runs before every
-    routed launch (router port, launcher, and with --container the bridge
-    into a container); --live sends one prompt.
+    For a router provider, checks its settings and the router's port and,
+    with --container, the bridge into a throwaway pm container.  A launch
+    does not wait on that check: a router that is down fails inside the
+    session like any other provider.  --live sends one prompt.
     """
     from pm_core.providers import (
         get_provider, check_provider, ProviderNotFoundError,
