@@ -2,11 +2,21 @@
 
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
 from pm_core import container, qa_loop, tmux
+
+
+def _failure_discards(discard):
+    """Discards made after a failed launch: they carry the captured identity.
+
+    A fresh container launch first discards (ownership-checked, by plain
+    name) an earlier run's container still holding that name (S130); that
+    pre-clean is not part of the failure handling under test.
+    """
+    return [c for c in discard.call_args_list if c.kwargs]
 
 
 @pytest.fixture
@@ -29,6 +39,11 @@ def scenario_state(tmp_path, monkeypatch):
         return "cid"
     monkeypatch.setattr(container, "create_qa_container", create)
     monkeypatch.setattr(qa_loop, "_resolve_qa_model", MagicMock())
+    # Master's up-front provider check and route mounts (pr-592e4bd) are
+    # not under test here.
+    monkeypatch.setattr(qa_loop, "_require_scenario_setup", lambda *a, **k: None)
+    monkeypatch.setattr(qa_loop, "_route_mounts", lambda *a, **k: {})
+    monkeypatch.setattr(tmux, "pane_exists", lambda pane: True)
     monkeypatch.setattr(qa_loop, "_build_scenario_run_cmd",
                         lambda *a, **k: ("worker", str(clone)))
     return state, scenario
@@ -109,8 +124,9 @@ def test_concretizer_launch_failure_keeps_real_error(scenario_state, monkeypatch
     elif failure == "exception":
         assert "can't find session: pm-t" in state.scenario_verdict_reasons[1]
     if containers:
-        discard.assert_called_once_with(
-            scenario.container_name, container_id="cid", generation="captured-generation")
+        assert _failure_discards(discard) == [call(
+            scenario.container_name, container_id="cid", generation="captured-generation")]
+        assert discard.call_args_list[0] == call(scenario.container_name)
     else:
         discard.assert_not_called()
 
@@ -144,8 +160,8 @@ def test_failed_container_create_stays_targetable(scenario_state, monkeypatch):
     assert qa_loop._is_launch_failure(state, 1)
     assert "keyring exhausted" in state.scenario_verdict_reasons[1]
     assert not state.scenario_verdicts
-    discard.assert_called_once_with(scenario.container_name,
-                                    container_id=None, generation=None)
+    assert _failure_discards(discard) == [call(
+        scenario.container_name, container_id=None, generation=None)]
 
 
 @pytest.mark.parametrize("failure", ["clone", "instruction", "artifact"])
@@ -258,11 +274,11 @@ def test_worker_split_failure_keeps_real_launch_error(scenario_state, monkeypatc
     assert scenario.window_name is None
     release.assert_not_called()
     if containers and viewed == set():
-        discard.assert_called_once_with(
+        assert _failure_discards(discard) == [call(
             scenario.container_name, container_id="cid", generation="captured-generation",
-            allowed_owner_panes={"%5"})
+            allowed_owner_panes={"%5"})]
     else:
-        discard.assert_not_called()
+        assert _failure_discards(discard) == []
     assert scenario.pane_id is None
     if failure == "exception":
         assert "can't find pane: %5" in state.scenario_verdict_reasons[1]

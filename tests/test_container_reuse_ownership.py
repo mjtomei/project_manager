@@ -125,10 +125,12 @@ def test_stopped_reuse_checks_owner_before_removing(monkeypatch, ownership):
     owners.assert_called_once_with(NAME, "cid")
 
 
-def test_qa_relaunch_passes_captured_ownership(monkeypatch):
+def test_qa_relaunch_passes_captured_ownership(monkeypatch, tmp_path):
+    # The relaunch re-ensures from the scenario's host clone, which must exist.
     scenario = qa_loop.QAScenario(index=1, title="test", focus="", steps="",
                                  container_name=NAME, container_id="cid",
-                                 container_generation="old", worktree_path="/w")
+                                 container_generation="old",
+                                 worktree_path=str(tmp_path))
     state = qa_loop.QALoopState(pr_id="pr-aaaa", scenarios=[scenario])
     def create(**kwargs):
         assert kwargs["reuse_identity"] == {"id": "cid", "generation": "old"}
@@ -136,5 +138,6 @@ def test_qa_relaunch_passes_captured_ownership(monkeypatch):
         return "cid"
     monkeypatch.setattr(cm, "create_qa_container", create)
     monkeypatch.setattr(cm, "load_container_config", cm.ContainerConfig)
+    monkeypatch.setattr(qa_loop, "_route_mounts", lambda *a, **k: {})
     assert qa_loop._ensure_scenario_container(scenario, state, {})
     assert scenario.container_generation == "new"

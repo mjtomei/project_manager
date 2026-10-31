@@ -735,7 +735,7 @@ class _Runtime:
         self.handlers = handlers
         self.calls = []
 
-    def __call__(self, *args, check=True, timeout=30):
+    def __call__(self, *args, check=True, timeout=30, env=None):
         self.calls.append(args)
         h = self.handlers.get(args[0])
         r = h(*args) if callable(h) else (h or _cp(0, "cid\n"))

@@ -92,7 +92,12 @@ def test_interactive_command_keeps_exit_release(monkeypatch):
 
 
 @pytest.mark.parametrize("returncode,stdout,expected", [
-    (0, "pm-t:@1\npm-t~2:@2\npm-other:@3\n", {"@1", "@2"}),
+    (0, "pm-t::@1\npm-t~2:pm-t:@2\npm-other::@3\n", {"@1", "@2"}),
+    # A user's own view grouped with the pm session under another name
+    # (S121/S124) is reported through its session group.
+    (0, "myview:pm-t:@4\nmy~view:pm-t~1:@5\nelse:pm-other:@6\n", {"@4", "@5"}),
+    # The pre-group two-field output is malformed now (fail closed).
+    (0, "pm-t:@1\n", None),
     (1, "", None), (0, "malformed", None), (0, "", set()),
     # tmux rewrites a tab separator to '_' unless the client is UTF-8, so the
     # old tab-delimited output must be treated as malformed (fail closed).

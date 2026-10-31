@@ -721,8 +721,8 @@ def test_queued_scenarios_stay_queued_on_the_dashboard_during_launches(
     ]
     seen = []
 
-    def launch(st, *a, _status_scenarios=None, _queued_indices=None, **k):
-        seen.append(([s.index for s in _status_scenarios], set(_queued_indices)))
+    def launch(st, *a, _status_scenarios=None, _status_queued=None, **k):
+        seen.append(([s.index for s in _status_scenarios], set(_status_queued)))
         sc = st.scenarios[0]
         sc.window_name = f"qa-s{sc.index}"
         sc.pane_id = f"%{sc.index}"

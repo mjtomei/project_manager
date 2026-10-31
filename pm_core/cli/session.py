@@ -770,7 +770,8 @@ def pane_closed_cmd():
 @click.argument("pane_id")
 def pane_opened_cmd(session: str, window: str, pane_id: str):
     """Internal: handle tmux after-split-window hook."""
-    pane_layout.handle_pane_opened(session, window, pane_id)
+    pane_layout.handle_pane_opened(pane_registry.pm_session_name(session),
+                                   window, pane_id)
 
 
 def _pin_popup_body(body: str, session: str, window: str | None) -> str:
@@ -870,7 +871,7 @@ def window_resized_cmd(session: str, window: str):
 
     _log.info("_window-resized: ENTERED session=%s window=%s pid=%d", session, window, os.getpid())
 
-    base = pane_registry.base_session_name(session)
+    base = pane_registry.pm_session_name(session)
     data = pane_registry.load_registry(base)
     wdata = pane_registry.get_window_data(data, window)
     if not wdata["panes"]:
@@ -896,7 +897,7 @@ def window_resized_cmd(session: str, window: str):
 
     _log.info("_window-resized: debounce won, rebalancing %s:%s", session, window)
     tmux_mod.unzoom_pane(session, window)
-    result = pane_layout.rebalance(session, window)
+    result = pane_layout.rebalance(base, window, query_session=session)
     _log.info("_window-resized: rebalance returned %s", result)
 
 
@@ -947,7 +948,7 @@ def rebalance_cmd():
         click.echo("Must be run from within a tmux session.", err=True)
         raise SystemExit(1)
 
-    session = tmux_mod.get_session_name()
+    session = pane_registry.pm_session_name(tmux_mod.get_session_name())
     window = tmux_mod.get_window_id(session)
 
     # Check for panes (read-only) then reset user_modified under lock
@@ -1612,23 +1613,23 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     )
     saw_disappear = False
 
-    # For fresh-mode actions, the on-disk runtime_state entry from a
-    # prior completed run may still read 'done'/'failed' at popup start
-    # — the launcher hasn't yet overwritten it because the TUI hasn't
-    # drained the SIGUSR2 queue.  Snapshot the initial entry so the
-    # terminal-state short-circuit below can distinguish stale terminal
-    # state (must wait through the launcher's transitions) from a
-    # genuine terminal state produced by this invocation.  Track the
-    # full (state, updated_at) identity rather than state alone so a
-    # rapid stale-done → fresh-done transition still trips the flag.
-    if fresh:
-        _initial_entry = _rs.get_action_state(pr_id, action) or {}
-        initial_state_key = (
-            _initial_entry.get("state"),
-            _initial_entry.get("updated_at"),
-        )
-    else:
-        initial_state_key = (None, None)
+    # The on-disk runtime_state entry from a prior completed run may
+    # still read 'done'/'failed' at popup start — the launcher hasn't yet
+    # overwritten it because the TUI hasn't drained the SIGUSR2 queue
+    # (fresh-mode actions), or the new run writes its state only once
+    # its windows exist (a plain ``qa`` start after a finished run, S92).
+    # Snapshot the initial entry so the terminal-state short-circuit
+    # below can distinguish stale terminal state (must wait through the
+    # launcher's transitions) from a genuine terminal state produced by
+    # this invocation.  Track the full (state, updated_at) identity
+    # rather than state alone so a rapid stale-done → fresh-done
+    # transition still trips the flag.
+    _initial_entry = _rs.get_action_state(pr_id, action) or {}
+    initial_state_key = (
+        _initial_entry.get("state"),
+        _initial_entry.get("updated_at"),
+    )
+    initial_terminal = initial_state_key[0] in ("done", "failed")
     saw_state_change = False
 
     _log.info(
@@ -1726,7 +1727,7 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                     owner_gone_since = None
             entry = _rs.get_action_state(pr_id, action)
             cur_state = entry.get("state") if entry else None
-            if fresh and not saw_state_change:
+            if not saw_state_change:
                 cur_key = (
                     (entry.get("state") if entry else None),
                     (entry.get("updated_at") if entry else None),
@@ -1788,9 +1789,13 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
             # it once the TUI drains the queue.  Treat the action as
             # non-terminal until we observe *some* change to the entry,
             # at which point any subsequent terminal state is genuinely
-            # from this invocation.
+            # from this invocation.  Other actions get the same guard
+            # when the entry was already terminal at popup start:
+            # exiting on it would report the prior run's verdict and
+            # drop a q/Esc meant to keep focus off the new run's window.
             terminal = (cur_state in ("done", "failed")
-                        and (not fresh or saw_state_change))
+                        and (saw_state_change
+                             or not (fresh or initial_terminal)))
             if terminal and not window_open:
                 verdict = (entry.get("verdict") if entry else "") or ""
                 failed = cur_state == "failed" or verdict in ("ERROR", "KILLED")
@@ -1841,6 +1846,8 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
             spin = frames[i % len(frames)]
             if fresh and initial_window_ids and not saw_disappear:
                 label = "rebuilding window"
+            elif initial_terminal and not saw_state_change:
+                label = "queued"  # the prior run's verdict, not this one's
             elif cur_state == "failed":
                 v = (entry.get("verdict") if entry else "") or ""
                 label = f"failed ({v})" if v else "failed"
@@ -1927,7 +1934,7 @@ def _run_picker_command(cmd: str, session: str) -> None:
         # multiple commands across concurrent picker invocations.
         from pm_core.cli.helpers import submit_tui_command
         tui_cmd = cmd[4:]
-        base = pane_registry.base_session_name(session)
+        base = pane_registry.pm_session_name(session)
         result = submit_tui_command(base, tui_cmd)
         if not result.ok:
             _log.warning("picker dispatch failed: %s", result.message)
@@ -1986,7 +1993,7 @@ def _session_pm_argv(session: str, args: list[str]) -> list[str]:
     """
     import sys
     import pm_core
-    tag = _session_tag_from_name(session) or ""
+    tag = _session_tag_from_name(pane_registry.pm_session_name(session)) or ""
     dispatcher_root = str(Path(pm_core.__file__).parent.parent)
     return [sys.executable, "-c", _SESSION_PM_BOOTSTRAP,
             dispatcher_root, tag] + list(args)
@@ -2039,7 +2046,7 @@ def popup_picker_cmd(session: str, window_name: str):
         _wait_dismiss()
         raise SystemExit(code)
 
-    base = pane_registry.base_session_name(session)
+    base = pane_registry.pm_session_name(session)
     rp = pane_registry.registry_path(base)
     _log.info("popup-picker invoked: session=%r window=%r base=%r registry_path=%s exists=%s HOME=%r module=%s",
               session, window_name, base, rp, rp.exists(),
@@ -2052,7 +2059,7 @@ def popup_picker_cmd(session: str, window_name: str):
     # client's session, not whichever client tmux considers current.
     os.environ[tmux_mod.POPUP_SESSION_ENV] = session
 
-    saved_root = _resolve_root_from_session(session)
+    saved_root = _resolve_root_from_session(base)
     try:
         root = saved_root if saved_root is not None else state_root()
         # Validate the raw snapshot below: the general loader repairs invalid
@@ -2623,7 +2630,7 @@ def popup_picker_cmd(session: str, window_name: str):
 @click.argument("session")
 def popup_cmd_cmd(session: str):
     """Internal: pm command prompt for tmux popup."""
-    base = pane_registry.base_session_name(session)
+    base = pane_registry.pm_session_name(session)
     rp = pane_registry.registry_path(base)
     _log.info("popup-cmd invoked: session=%r base=%r registry_path=%s exists=%s HOME=%r module=%s",
               session, base, rp, rp.exists(),
@@ -2638,7 +2645,7 @@ def popup_cmd_cmd(session: str):
     # Inherit the session's persisted root so user commands resolve
     # project state correctly even if the popup's cwd is outside the
     # repo or in a deleted workdir.
-    saved_root = _resolve_root_from_session(session)
+    saved_root = _resolve_root_from_session(base)
     if saved_root is not None:
         os.environ["PM_PROJECT"] = str(saved_root)
 

@@ -746,6 +746,7 @@ class TestBreadcrumbRoundTrip:
         state.launch_retryable = True
         state.last_launch_error = "container setup failed"
         state._ui_notified_retry = 2
+        state.last_attempt_failed = True
         save_app = _make_app(review_loops={"pr-001": state}, root=tmp_path)
 
         with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
@@ -755,6 +756,7 @@ class TestBreadcrumbRoundTrip:
 
         data = json.loads((tmp_path / "autostart-resume.json").read_text())
         assert data["review_loops"]["pr-001"]["_ui_notified_retry"] == 2
+        assert data["review_loops"]["pr-001"]["last_attempt_failed"] is True
 
         restore_app = _make_app(auto_start=False, root=tmp_path)
         restore_app._update_display = MagicMock()
@@ -780,6 +782,9 @@ class TestBreadcrumbRoundTrip:
         assert rstate.launch_attempts == 2
         assert rstate._ui_notified_retry == 2, (
             "the resumed loop must remember which attempt was announced")
+        # A restart inside the backoff: the failed attempt's symlink is not
+        # an in-flight launch for the resumed loop to wait on (S133).
+        assert rstate.last_attempt_failed is True
 
 
 # ---------------------------------------------------------------------------

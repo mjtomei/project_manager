@@ -612,10 +612,63 @@ class TestCreateContainer:
                 workdir=Path("/w"),
             )
 
-        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
-                                 if c.args[0] == "run"))
-        assert "ANTHROPIC_API_KEY=sk-test" in args_str
-        assert "CUSTOM_VAR=custom_val" in args_str
+        run_call = next(c for c in mock_docker.call_args_list
+                        if c.args[0] == "run")
+        args_str = " ".join(run_call.args)
+        # Passed by name; values go through the runtime's environment so
+        # they never reach the logged / raised command line.
+        assert "-e ANTHROPIC_API_KEY " in args_str
+        assert "-e CUSTOM_VAR " in args_str
+        assert "sk-test" not in args_str
+        assert "custom_val" not in args_str
+        env = run_call.kwargs["env"]
+        assert env["ANTHROPIC_API_KEY"] == "sk-test"
+        assert env["CUSTOM_VAR"] == "custom_val"
+
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container.remove_container")
+    def test_failed_create_does_not_expose_env_values(
+            self, mock_rm, mock_exists, _mock_running, _mock_runtime):
+        """Regression: a failed ``run`` logged and raised the full argv,
+        including ``-e ANTHROPIC_API_KEY=<key>``."""
+        import io
+        import logging
+        import subprocess
+        # pm.container does not propagate (file logger), so listen on it
+        # directly, at DEBUG to include the per-command debug line.
+        logger = logging.getLogger("pm.container")
+        buf = io.StringIO()
+        handler = logging.StreamHandler(buf)
+        old_level = logger.level
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+        def runtime(cmd, **kwargs):
+            # Nothing exists under the name yet; only ``run`` itself fails.
+            if cmd[1] == "run":
+                return MagicMock(returncode=125, stdout="", stderr="boom")
+            if cmd[1] in ("inspect", "ps"):
+                return MagicMock(returncode=1, stdout="",
+                                 stderr="Error: no such container test")
+            return MagicMock(returncode=0, stdout="", stderr="")
+        try:
+            with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-SECRET"}), \
+                 patch("pm_core.container.subprocess.run",
+                       side_effect=runtime) as run:
+                # pr-1139060: a failed run is a classified launch error that
+                # keeps the runtime's own stderr, not a bare CalledProcessError.
+                with pytest.raises(ContainerError) as exc:
+                    create_container(name="test", config=ContainerConfig(),
+                                     workdir=Path("/w"))
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(old_level)
+        assert "container runtime failed" in buf.getvalue()
+        assert "SECRET" not in buf.getvalue()
+        assert "SECRET" not in str(exc.value)
+        assert "boom" in str(exc.value)
+        run_call = next(c for c in run.call_args_list if c.args[0][1] == "run")
+        assert "SECRET" not in " ".join(run_call.args[0])
+        assert run_call.kwargs["env"]["ANTHROPIC_API_KEY"] == "sk-ant-SECRET"
 
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary", return_value=None)

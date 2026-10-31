@@ -238,12 +238,16 @@ def test_resume_scan_restores_a_held_runs_floor_claim(tmp_path, monkeypatch):
 
     monkeypatch.setattr(qa_loop, "_floor_slot", {})
     monkeypatch.setattr(qa_loop, "resume_owned_elsewhere", lambda _d: False)
+    project = {"prs": [{"id": "pr-001", "status": "qa"}]}
     app = SimpleNamespace(
         _qa_loops={}, _root=tmp_path, log_message=lambda *a, **k: None,
-        call_from_thread=lambda *a, **k: None)
+        call_from_thread=lambda *a, **k: None,
+        # The scan reads the project's PRs (another project's runs are not
+        # this TUI's) and the tree's shown status (pr-592e4bd S39/S41).
+        _data=project, _load_state=lambda: None)
     spawned = []
     with patch("pathlib.Path.home", return_value=home), \
-         patch("pm_core.store.load", return_value={}), \
+         patch("pm_core.store.load", return_value=project), \
          patch("pm_core.store.get_pr",
                return_value={"id": "pr-001", "status": "qa"}), \
          patch("pm_core.qa_loop.resume_qa_background",

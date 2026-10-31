@@ -389,8 +389,12 @@ def container_cleanup(pr_id: str | None):
 
     names = []
     for line in lines:
+        # Split on whitespace, not "\t": podman 3.x prints the format's
+        # "\t" as spaces, and container names never contain whitespace.
         parts = line.split(None, 1)
-        name = parts[0].strip()
+        if not parts:
+            continue
+        name = parts[0]
         status = parts[1].strip() if len(parts) > 1 else ""
         # The name filter matches substrings — never touch e.g. "npm-cache".
         if not name.startswith(CONTAINER_PREFIX):

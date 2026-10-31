@@ -60,6 +60,11 @@ def test_cancelled_preparation_does_not_launch_or_record_verdict(tmp_path, monke
 
     monkeypatch.setattr(qa_loop, "create_scenario_workdir", clone_workdir)
     monkeypatch.setattr(qa_loop, "_resolve_qa_model", MagicMock())
+    # Master's up-front provider check and route mounts (pr-592e4bd) are
+    # not under test here.
+    monkeypatch.setattr(qa_loop, "_require_scenario_setup", lambda *a, **k: None)
+    monkeypatch.setattr(qa_loop, "_route_mounts", lambda *a, **k: {})
+    monkeypatch.setattr(tmux, "pane_exists", lambda pane: True)
     monkeypatch.setattr(container, "load_container_config", MagicMock())
     allocation = MagicMock(side_effect=create)
     monkeypatch.setattr(container, "create_qa_container", allocation)
@@ -123,6 +128,11 @@ def test_cancelled_retry_does_not_attach_worker(tmp_path, monkeypatch, stage):
         return "worker", str(tmp_path)
 
     monkeypatch.setattr(qa_loop, "_resolve_qa_model", MagicMock())
+    # Master's up-front provider check and route mounts (pr-592e4bd) are
+    # not under test here.
+    monkeypatch.setattr(qa_loop, "_require_scenario_setup", lambda *a, **k: None)
+    monkeypatch.setattr(qa_loop, "_route_mounts", lambda *a, **k: {})
+    monkeypatch.setattr(tmux, "pane_exists", lambda pane: True)
     monkeypatch.setattr(container, "is_container_mode_enabled", lambda: True)
     monkeypatch.setattr(container, "_runtime_available", lambda: True)
     monkeypatch.setattr(container, "load_container_config", MagicMock())

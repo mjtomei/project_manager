@@ -1,6 +1,7 @@
 """Tests for pm_core.fake_claude and the pm fake-claude CLI command."""
 
 import json
+import re
 import subprocess
 import sys
 from io import StringIO
@@ -424,7 +425,8 @@ class TestRunFakeClaudeNoVerdict:
         with patch("pm_core.fake_claude._stdin_is_tty", return_value=True), \
              patch("pm_core.fake_claude._hold_open") as mock_hold:
             self._capture(verdict="PASS", preamble=0, hold=None)
-        mock_hold.assert_called_once_with(None, session_id=None)
+        mock_hold.assert_called_once_with(None, session_id=None,
+                                          idle_once_after=None)
 
     def test_verdict_session_exits_without_tty(self):
         with patch("pm_core.fake_claude._stdin_is_tty", return_value=False), \
@@ -1436,6 +1438,55 @@ class TestTranscriptAndHook:
         assert first == 100.0
         assert second == 200.0
 
+    def _held_emissions(self, monkeypatch, **hold_kw):
+        """Run _hold_open on a scripted clock; return emission times."""
+        from pm_core import fake_claude
+        clock = [0.0]
+        emitted = []
+
+        def sleep(t):
+            clock[0] += max(0.0, t)
+
+        def select_(r, w, x, timeout):
+            if timeout is None or clock[0] + timeout >= 60.0:
+                clock[0] = max(clock[0], 60.0)
+                return (r, [], [])  # someone types into the pane at t=60
+            clock[0] += timeout
+            return ([], [], [])
+        monkeypatch.setattr(fake_claude.time, "monotonic", lambda: clock[0])
+        monkeypatch.setattr(fake_claude.time, "sleep", sleep)
+        monkeypatch.setattr(fake_claude.select, "select", select_)
+        monkeypatch.setattr(fake_claude, "_emit_idle_hook",
+                            lambda sid: emitted.append(clock[0]))
+        fake_claude._hold_open(session_id=self.SID, **hold_kw)
+        return emitted
+
+    def test_idle_once_after_emits_a_single_idle_hook(self, monkeypatch):
+        """S29: one idle per turn, like real Claude, so a loop waiting on
+        the pane (review INPUT_REQUIRED) sees no repeat idle events."""
+        assert self._held_emissions(monkeypatch, hold=None,
+                                    idle_once_after=25) == [25.0]
+
+    def test_idle_once_after_with_bounded_hold(self, monkeypatch):
+        assert self._held_emissions(monkeypatch, hold=40,
+                                    idle_once_after=25) == [25.0]
+
+    def test_default_hold_keeps_refreshing_the_idle_hook(self, monkeypatch):
+        emitted = self._held_emissions(monkeypatch, hold=None)
+        assert len(emitted) > 20 and emitted[0] == 0.0
+
+    def test_idle_once_after_reaches_the_cli_and_launcher(self):
+        from click.testing import CliRunner
+        from pm_core.claude_launcher import _fake_claude_args
+        from pm_core.cli.fake_claude import emit_cmd
+        args = _fake_claude_args({"verdicts": ["INPUT_REQUIRED"],
+                                  "idle_once_after": 25})
+        assert args[args.index("--idle-once-after") + 1] == "25"
+        with patch("pm_core.fake_claude.run_fake_claude") as run:
+            CliRunner().invoke(emit_cmd, ["--verdict", "PASS",
+                                          "--idle-once-after", "25"])
+        assert run.call_args.kwargs["idle_once_after"] == 25.0
+
     def test_no_verdict_session_with_id_writes_transcript(self, tmp_path, monkeypatch):
         """No-verdict sessions with a session_id still produce a transcript."""
         self._run(tmp_path, monkeypatch, verdict="NONE")
@@ -1459,13 +1510,65 @@ class TestTranscriptHookCLI:
         )
         assert result.returncode == 0
         assert "PASS" in result.stdout
-        mangled = str(tmp_path).replace("/", "-").replace(".", "-")
+        # Claude Code's mangling: every non-alphanumeric character -> "-"
+        # (pytest dirs contain "_").
+        mangled = re.sub(r"[^a-zA-Z0-9]", "-", str(tmp_path))
         transcript = (tmp_path / ".claude" / "projects" / mangled
                       / f"{self.SID}.jsonl")
         assert transcript.exists()
         assert '"type": "assistant"' in transcript.read_text()
         hook = tmp_path / ".pm" / "hooks" / f"{self.SID}.json"
         assert hook.exists()
+
+
+    def _hook_timestamps(self, tmp_path, extra):
+        """Run the real bin/fake-claude (bounded hold) and sample its hook
+        file every 50 ms; return the distinct idle_prompt timestamps."""
+        import os
+        import time
+        env = {**os.environ, "HOME": str(tmp_path)}
+        hook = tmp_path / ".pm" / "hooks" / f"{self.SID}.json"
+        proc = subprocess.Popen(
+            [sys.executable, str(BIN_FAKE_CLAUDE),
+             "--verdict", "INPUT_REQUIRED", "--preamble", "0",
+             "--session-id", self.SID, "--hold", "4.5", *extra],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            cwd=str(tmp_path), env=env)
+        seen = []
+        deadline = time.monotonic() + 15
+        while proc.poll() is None and time.monotonic() < deadline:
+            try:
+                ts = json.loads(hook.read_text())["timestamp"]
+            except (OSError, ValueError, KeyError):
+                ts = None
+            if ts is not None and ts not in seen:
+                seen.append(ts)
+            time.sleep(0.05)
+        if proc.poll() is None:
+            proc.kill()
+        assert proc.wait(timeout=5) == 0
+        return seen
+
+    def test_executable_idle_once_after_emits_a_single_idle(self, tmp_path):
+        """S29: the launcher execs bin/fake-claude (its own argparse), not
+        the click CLI — the flag must reach run_fake_claude there too."""
+        seen = self._hook_timestamps(tmp_path, ["--idle-once-after", "1"])
+        assert len(seen) == 1
+
+    def test_executable_refreshes_idle_by_default(self, tmp_path):
+        assert len(self._hook_timestamps(tmp_path, [])) >= 2
+
+    def test_executable_parser_accepts_idle_once_after(self):
+        import importlib.machinery
+        import importlib.util
+        loader = importlib.machinery.SourceFileLoader(
+            "bin_fake_claude", str(BIN_FAKE_CLAUDE))
+        mod = importlib.util.module_from_spec(
+            importlib.util.spec_from_loader("bin_fake_claude", loader))
+        loader.exec_module(mod)
+        args, rest = mod._build_parser().parse_known_args(
+            ["--verdict", "PASS", "--idle-once-after", "25"])
+        assert args.idle_once_after == 25.0 and rest == []
 
 
 class TestFakeArgsSessionId:
