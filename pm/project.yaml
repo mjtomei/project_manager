@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-31T18:07:25.345765+00:00'
+  updated_at: '2026-10-31T18:35:03.358143+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37593,6 +37593,37 @@ prs:
       wait_for_merge; no PR merge is authorized by this request.'
     created_at: '2026-10-31T18:07:25.345765+00:00'
     last_edited: '2026-10-31T18:07:25.345765+00:00'
+  - id: note-e4c2520
+    text: 'Integration 2026-10-31 (note-7f146c8): merged origin/master eaf3372e (#249)
+      into this branch as merge commit 322a22aa (parents 1763d1e7, eaf3372e), then
+      3883f338 (step-0 partial clear) and 6820db52 (spec). Conflicts were the two
+      recording recipes, which #249 rewrote to a `render_cast` function (VFR encode,
+      final frame held at the GIF duration, recording.mp4.partial.mp4 renamed only
+      on success, -nostdin). Resolution keeps master''s mechanics and this PR''s guards:
+      the `cast=<capture-dir>/recording.cast` line, the capture-directory missing/unwritable
+      checks, the pre-render rm of this run''s mp4/gif/partial, render_fail''s cleanup,
+      and every per-stage failure message; `render_cast` returns non-zero and the
+      recipe call is `render_cast "$cast" || render_fail …`. Step 0 in both recipes
+      (preamble and CLI scaffold) now also clears an interrupted render''s recording.mp4.partial.mp4.
+      Policy clash resolved in favour of this PR''s evidence rule (R8): master''s
+      note said a failed render keeps an older completed mp4, but the render step
+      clears this run''s outputs and the failure path removes gif/partial, so a failed
+      render leaves no recording.mp4; the "Partial output is never published" note
+      was rewritten to match. Recorded as R60 in impl.md; qa.md gained the matching
+      bullet. pm/project.yaml auto-merged and was verified structurally: 571 PR ids,
+      none missing or duplicated, every entry equal to the side that changed it, project/plans
+      equal to master. Evidence: /pm-captures/integration-master-eaf3372e/ (render-live.log,
+      render-fail.log, merge-verify.log, full-suite.log, scripts/). The merged tmux
+      render block ran with real ffmpeg 4.4.2/ffprobe and a stub agg that writes a
+      real GIF: rc 0, mp4 1.20 s / 6 frames (GIF 1.00 s / 5 + the held frame), gif
+      removed; with a previous run''s mp4 seeded and a corrupt gif: rc 1, "cannot
+      probe the gif" + "render produced no mp4", and the previous mp4, gif and partial
+      all removed. Tests: tests/test_qa_artifact_recording_recipes.py 239 passed;
+      test_qa_artifact_web_ui_recording.py + test_qa_loop.py 145 passed; full suite
+      in the evidence dir. No PASS is claimed; this is the integration handoff for
+      a fresh review/QA/sign-off.'
+    created_at: '2026-10-31T18:35:03Z'
+    last_edited: '2026-10-31T18:35:03Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
