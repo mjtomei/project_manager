@@ -14331,7 +14331,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-31T23:32:29.552477+00:00'
+  updated_at: '2026-10-31T23:54:10.951459+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -15267,6 +15267,52 @@ prs:
       plus manifest.md and final-state.txt.'
     created_at: '2026-10-31T23:32:29Z'
     last_edited: '2026-10-31T23:32:29Z'
+  - id: note-2ee074b
+    text: 'QA S27 (at-lock removal guards, head 747ffae3c): PASS, no code change.
+      Seven stories driven end to end in disposable-HOME sandboxes against the git-backed
+      fake-github stand-in, each with its own PM_TMUX_SOCKET and PYTHONPATH=/workspace;
+      the store lock was frozen with flock plus SIGSTOP on the launched process once
+      /proc/<pid>/fd showed project.yaml.lock. (1) close --remove vs start --fresh
+      (removal wins): start exits 1 with exactly "PR <A> was removed while starting
+      — not recording the start. Any prepared workdir is left in place."; stdout keeps
+      the pre-lock "Workdir has uncommitted changes — skipping git pull/checkout."
+      but no is-now-in_progress and no Work directory line, no Traceback/ValueError,
+      no new window; the removal prints Removed registry entry + Kept + the no-longer-tracked
+      note and never Closed #N; show is not-found; list keeps only the neighbour as
+      the active PR; the dirtied workdir and the remote branch survive. (2) close
+      --remove vs review (removal wins): exact "was removed while opening the review
+      — not marked in_review and no review window was opened.", no marked-as-in_review
+      line, no review- window, no Traceback, workdir and branch intact. (3) close
+      --remove vs signoff (removal wins): exact "was removed while opening the sign-off
+      — not marked sign_off and no sign-off window was opened.", empty stdout (no
+      marked as sign_off, no Opened, no Integration check failed), no signoff- window.
+      (4) close --remove vs signoff (launch wins): signoff rc 0 prints marked as sign_off
+      + Integration + Opened sign-off window signoff-#1, that window runs fake-claude
+      --verdict SIGNOFF_MERGE; the resumed removal rc 0 prints Removed/Kept/note,
+      and the window, workdir and remote branch all survive it. (5) plain close vs
+      review: close prints Closed #1 (status: closed) + Kept/Reopen/Cleanup; review
+      exits 1 with exactly "became closed while opening the review — not marked in_review
+      and no review window was opened."; show reports Status: closed with branch/workdir/note;
+      list shows [closed]. (6) TUI command bar: with the lock held, "/ pr signoff
+      <G>" spawns python -m pm_core.wrapper pr signoff <G>; stopped at its lock fd,
+      the removal wins, and the TUI logs exactly "Error: PR <G> was removed while
+      opening the sign-off — not marked sign_off and no sign-off window was opened."
+      (same line as log: Error: in ~/.pm/debug/<tag>.log), no signoff- window, no
+      marked as sign_off line, the tree drops G after the reload, no traceback. tests/test_pr_close.py
+      -k "removed_pr or removed_concurrently": 5 passed. Captures: /pm-captures/scenarios/27/{story1-removal-vs-start,story2-review-vs-remove,story3-signoff-vs-remove,story4-remove-loses-to-signoff,story5-review-vs-close,story6-tui-signoff-vs-remove/{tui-view,driver}}
+      (cast + mp4 + transcript + manifests; tui-view also has final-frame.png, tui-pane-before/final.txt
+      and debug-log.log). Harness notes for the next run: (a) this container has the
+      REAL claude at /usr/local/bin/claude, contrary to the recipe sanity check; excluding
+      /usr/local/bin from PATH makes command -v claude empty, pm pr start then prints
+      the CLAUDE PROMPT block and opens no impl window, while review/signoff still
+      launch the fake through the per-session fake-claude config. (b) For TUI casts,
+      SIGTERM the asciinema process while the TUI is on screen; detaching the attach
+      client first ends the cast on the tmux [detached ...] screen. (c) pm pr list
+      keys a row by display id (#N) once a PR has a GitHub PR, not by the local pr-xxx
+      id. (d) asciinema cat fails without a tty (it opens /dev/tty) - parse the v2
+      JSONL cast instead.'
+    created_at: '2026-10-31T23:54:10Z'
+    last_edited: '2026-10-31T23:54:10Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
