@@ -48690,7 +48690,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-10-31T18:07:25.345765+00:00'
+  updated_at: '2026-10-31T18:35:33.170618+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48935,6 +48935,57 @@ prs:
       by this request.'
     created_at: '2026-10-31T18:07:25.345765+00:00'
     last_edited: '2026-10-31T18:07:25.345765+00:00'
+  - id: note-54eb338
+    text: 'Integration complete (2026-10-31, user-authorized): merged origin/master@eaf3372e
+      (#249, pr-592e4bd) INTO THIS BRANCH as e99193e1, with spec commits fd18db4c/a4b67d27
+      and a registry-order fix 65c1b86a. All fail-closed paths and every earlier review/QA
+      correction are preserved.
+
+
+      Resolutions:
+
+      - qa_loop: adopted master''s `_status_queued` parameter name — both sides had
+      independently added the same queued-scenario status fix (branch''s 868d48e8
+      used `_queued_indices`). Identical behaviour; branch tests updated.
+
+      - A lost container is now recreated under the same name (master''s S78 `_ensure_scenario_container`)
+      and the worker relaunched inside it; only an UNRECREATABLE container raises
+      ContainerLaunchError (cause+remedy, no host relaunch, no invented INPUT_REQUIRED).
+      QA consequence: to exercise the lost-container ERROR path, make recreation impossible
+      too (e.g. remove the scenario clone); a recreatable container now recovers in
+      container mode. R11/R16 and the edge-case table in qa.md say so.
+
+      - Relaunch keeps master''s in-window relaunch (split back beside a live refiner/verifier),
+      `_write_resume_file` on success (S43) and ProviderNotFoundError re-raise (S106).
+      The run''s persisted `use_containers` remains the only mode input (never a fresh
+      runtime probe).
+
+      - qa_loop_ui: kept master''s clone-ownership guard (S43) before this branch''s
+      status-file read that preserves a recovered ERROR''s cause; `_record_qa_note`
+      carries both master''s workdir de-dup and this branch''s ERROR cause append.
+
+      - project.yaml: `store.merge_3way` over the git index stages (master as ours,
+      branch as theirs), then reordered to master''s record order. 576 PRs / 22 plans,
+      unique ids, every record and note from both sides present, `project.active_pr`
+      kept at master''s newer value. Diff vs master is only this branch''s records/notes
+      (519 insertions).
+
+
+      Validation: full pytest 5228 passed, 1 skipped, 0 failed (markdown installed,
+      PM_HOST_HOME unset); tests/test_container_fail_closed.py 24 passed; the QA/container/review/signoff
+      suites 1406 passed. Static audit: no remaining `is_container_mode_enabled()
+      and _runtime_available()` downgrade combo in pm_core. Specs updated: impl.md
+      "Integration with master@eaf3372e" section; qa.md integration note + R11/R16
+      recreation wording.
+
+
+      No new native recording: the preflight/launch code is unchanged by the merge
+      (auto-merged, unit-tested) and the prior pre/post-fix captures remain valid
+      for it. The earlier QA verdicts are historical for pre-integration revisions
+      and must not be reused — the fresh review/QA/sign-off sequence should drive
+      the native entry points against this combined head (e99193e1/65c1b86a).'
+    created_at: '2026-10-31T18:35:33Z'
+    last_edited: '2026-10-31T18:35:33Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
