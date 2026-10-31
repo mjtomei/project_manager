@@ -21,6 +21,7 @@ import click
 
 from pm_core import store, git_ops, prompt_gen
 from pm_core.backend import detect_backend
+from pm_core.providers import PROVIDER_SETTING_HINT, ProviderNotFoundError
 from pm_core.workspace_trust import DEFAULT_PROMPT_GRACE_SECONDS
 
 # Import helpers used directly in this module.  Submodules import from
@@ -624,6 +625,13 @@ COMMANDS
   pm pr note edit <pr-id> <id> <text>  Edit a note's text
   pm pr note list <pr-id>              List notes on a PR
   pm pr note delete <pr-id> <id>       Delete a note from a PR
+  pm pr model show <pr-id>             Per role: model, effort, command and which setting chose them
+  pm pr model set <pr-id> [VALUE]      Set a PR's model/provider [--role, --effort]
+  pm pr model unset <pr-id>            Remove a PR's model/effort settings [--role, --all]
+
+  pm model show                 Effective model/effort per session type, PR overrides, routes
+  pm model set <type> <value>   Set a session type's model [--effort, --project]
+  pm provider list|show|add|edit|remove|default|test   Manage ~/.pm/providers.yaml
 
   pm cluster auto               Discover feature clusters automatically
   pm cluster explore            Interactively explore code clusters with Claude
@@ -732,4 +740,12 @@ def main():
     except FileNotFoundError as e:
         import sys
         click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    except ProviderNotFoundError as e:
+        # A session's selected provider is missing.  Launches never fall
+        # back to another account, so say how to fix it: a traceback
+        # buries this line, and callers that show only the head of stderr
+        # (the review loop) would lose it.
+        import sys
+        click.echo(f"Error: {e}; {PROVIDER_SETTING_HINT}", err=True)
         sys.exit(1)

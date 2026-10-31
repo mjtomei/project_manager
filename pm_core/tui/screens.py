@@ -259,6 +259,7 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]z A[/]  Fresh autostart after feedback (auto-merge)", classes="help-row")
                 yield Label("  [bold]a[/]  Auto-start runs popup", classes="help-row")
                 yield Label("  [bold]V[/]  Review oldest pending spec", classes="help-row")
+                yield Label("  [bold]o[/]  Models: PR/project model, effort, command (⇄ = PR has its own)", classes="help-row")
                 yield Label("  [bold]w[/]  Focus watcher window", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
             if not self._in_plans:
