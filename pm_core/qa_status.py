@@ -23,6 +23,7 @@ import re
 import select
 import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
 
@@ -120,8 +121,26 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
     if error:
         lines.append(f"  {_RED}{_BOLD}ERROR{_RESET}")
         lines.append("")
+        # Wrap to the pane width: an error line longer than the terminal
+        # (a fail-closed container cause + remedy is ~190 columns) wraps
+        # on its own, adding a row per overflow and scrolling the header
+        # — the pane's own "QA Status:" line — off the top of the screen.
+        # Same rule as the table branch below, which reserves width for
+        # the "(waiting)" suffix instead of letting a row wrap.
+        avail = max(cols - 2, 10)
         for err_line in error.split("\n"):
-            lines.append(f"  {_RED}{err_line}{_RESET}")
+            if not err_line.strip():
+                lines.append("")
+                continue
+            # Keep any leading indent (the remedy list's "  - " bullets)
+            # and re-apply it to wrapped continuations.
+            indent = err_line[:len(err_line) - len(err_line.lstrip())]
+            for chunk in textwrap.wrap(err_line.strip(), avail,
+                                       initial_indent=indent,
+                                       subsequent_indent=indent,
+                                       break_long_words=True,
+                                       break_on_hyphens=False):
+                lines.append(f"  {_RED}{chunk}{_RESET}")
         lines.append("")
         lines.append(f"{_DIM}  q: quit{_RESET}")
         padded = [_pad_line(l, cols) for l in lines]

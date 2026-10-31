@@ -2017,7 +2017,8 @@ class TestScenarioRetryLogic:
              patch("pm_core.tmux.new_window_get_pane", return_value="%9") as mock_win, \
              patch("pm_core.tmux.pane_window_id", return_value=None):
             ok = qa_loop._relaunch_scenario_window(
-                sc, state, {}, pr_data, "sess", str(tmp_path))
+                sc, state, {}, pr_data, "sess", str(tmp_path),
+                use_containers=True)
         return ok, sc, state, mock_create, mock_win
 
     def test_relaunch_recreates_a_removed_container(self, tmp_path):
@@ -2043,18 +2044,20 @@ class TestScenarioRetryLogic:
         assert ok
         mock_create.assert_not_called()
 
-    def test_unrecreatable_container_fails_fast(self, tmp_path):
-        """When the container cannot be recreated the relaunch records
-        INPUT_REQUIRED with the reason and launches nothing."""
-        ok, sc, state, _, mock_win = self._container_relaunch(
-            tmp_path, running=False, create=RuntimeError("image gone"))
-        assert not ok
-        mock_win.assert_not_called()
-        assert state.scenario_verdicts[5] == VERDICT_INPUT_REQUIRED
-        reason = state.scenario_verdict_reasons[5]
-        assert "before any verdict" in reason
-        assert "pm-tag-qa-pr-001-l1-s5 is gone" in reason
-        assert "image gone" in reason
+    def test_unrecreatable_container_fails_closed(self, tmp_path):
+        """When the container cannot be recreated the relaunch raises
+        ContainerLaunchError (infrastructure ERROR) and launches nothing:
+        container mode is an execution boundary, so it must not relaunch on
+        the host or record an invented INPUT_REQUIRED verdict."""
+        import pytest as _pytest
+        from pm_core.qa_loop import ContainerLaunchError
+        with _pytest.raises(ContainerLaunchError) as excinfo:
+            self._container_relaunch(
+                tmp_path, running=False, create=RuntimeError("image gone"))
+        msg = str(excinfo.value)
+        assert "pm-tag-qa-pr-001-l1-s5" in msg
+        assert "image gone" in msg
+        assert "pm container disable" in msg
 
     def _container_first_launch(self, tmp_path, running):
         """_launch_scenarios_in_containers for one scenario of a ``pm qa
@@ -2076,8 +2079,12 @@ class TestScenarioRetryLogic:
              patch("pm_core.container.create_qa_container", calls.create), \
              patch("pm_core.qa_loop.create_scenario_workdir",
                    return_value=(tmp_path / "repo", tmp_path / "scratch")):
-            qa_loop._launch_scenarios_in_containers(
-                state, {}, {"id": "pr-001"}, "sess", None, str(tmp_path))
+            # The create failure is a fail-closed launch error now: the
+            # container call order is what this helper observes, and the
+            # raise is the contract under test elsewhere.
+            with pytest.raises(qa_loop.ContainerLaunchError):
+                qa_loop._launch_scenarios_in_containers(
+                    state, {}, {"id": "pr-001"}, "sess", None, str(tmp_path))
         return [c[0] for c in calls.mock_calls], sc
 
     def test_rerun_replaces_the_earlier_runs_container(self, tmp_path):
@@ -2087,16 +2094,24 @@ class TestScenarioRetryLogic:
         before the new one is created, not reused (a reused one died at once,
         window after window)."""
         names, _ = self._container_first_launch(tmp_path, running=True)
-        assert names == ["running", "remove", "create"]
+        # The failed create also releases only its own (half-made) container.
+        assert names == ["running", "remove", "create", "remove"]
 
     def test_first_run_creates_without_removing(self, tmp_path):
         names, _ = self._container_first_launch(tmp_path, running=False)
-        assert names == ["running", "create"]
+        # The failed create releases only its own container (never the
+        # earlier run's or another scenario's).
+        assert names == ["running", "create", "remove"]
 
     def test_failed_recreate_stops_the_retry_ladder(self, tmp_path):
-        """The poll loop takes the relaunch's INPUT_REQUIRED as final: one
-        relaunch attempt, no further retries, and the retry and outcome
-        are surfaced as latest_output for the TUI."""
+        """A scenario that already carries a verdict is not retried.
+
+        The relaunch no longer records a verdict (a lost container now fails
+        the run closed with ``ContainerLaunchError``), so this exercises the
+        poll loop's defensive guard: when a scenario already has a verdict,
+        one relaunch attempt is made, the scenario is dropped from the retry
+        ladder, and the retry and outcome are surfaced as latest_output for
+        the TUI."""
         from pm_core.qa_loop import _poll_tmux_verdicts
 
         scenario = QAScenario(index=5, title="S78 one", focus="t")
@@ -2126,7 +2141,8 @@ class TestScenarioRetryLogic:
         assert state.scenario_verdicts[5] == VERDICT_INPUT_REQUIRED
         assert "Scenario 5 window died — retry 1/10 (backoff 5s)" in outputs
         assert state.latest_output == (
-            "Scenario 5 (S78 one): INPUT_REQUIRED (container gone)")
+            "Scenario 5 (S78 one): INPUT_REQUIRED (relaunch failed; keeping "
+            "its recorded verdict)")
 
     def test_backoff_formula(self):
         """Verify exponential backoff: 5 * 2^retries = 5, 10, 20, 40..."""

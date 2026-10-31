@@ -475,6 +475,16 @@ class PlannerHandoffError(RuntimeError):
     """The planner's committed head cannot be handed to scenario workers."""
 
 
+class ContainerLaunchError(RuntimeError):
+    """A container-eligible QA launch could not run in its container.
+
+    Raised instead of downgrading to host execution.  Container mode is an
+    execution boundary: the run is failed with ``ERROR`` and the original
+    cause, never relaunched on the host and never turned into an invented
+    scenario verdict.
+    """
+
+
 def _git_capture(workdir: str | Path, *args: str,
                  timeout: float = 120) -> subprocess.CompletedProcess:
     """Run git in *workdir* without raising; network ops get a timeout."""
@@ -644,6 +654,18 @@ def qa_outcome_detail(state: QALoopState) -> str:
     parts = [f"{s.title}: {state.scenario_verdicts.get(s.index, '?')}"
              for s in state.scenarios]
     return "; ".join(parts)
+
+
+def qa_error_detail(state: QALoopState) -> str:
+    """The full cause+remedy of a run that failed with ``ERROR``, else ``""``.
+
+    A fail-closed launch (e.g. container mode enabled but its runtime
+    unusable) records the actionable message in ``state._error`` while
+    ``latest_output`` stays a single TUI log line.  CLI entry points print
+    this so the remedy reaches the user too; other early-abort ERRORs (no pm
+    session, missing workdir) carry no ``_error`` and print nothing extra.
+    """
+    return state._error if state.latest_verdict == "ERROR" else ""
 
 
 def _summarize_changes(changes: list[str]) -> str:
@@ -1017,6 +1039,58 @@ def _write_status_file(status_path: Path, pr_id: str,
     tmp_path.rename(status_path)
 
 
+def _fail_run_infrastructure(
+    state: QALoopState,
+    status_path: Path,
+    *,
+    latest_output: str,
+    error: str,
+    scenarios: list[QAScenario] | None = None,
+) -> None:
+    """Publish an infrastructure ERROR for a container-mode launch and stop.
+
+    Container mode is an execution boundary: an unusable runtime, or a
+    container that cannot be created or is lost, fails the run.  Every
+    fail-closed launch path publishes that failure here so they cannot drift
+    apart: ``running``/``held`` cleared, verdict ``ERROR`` (never an invented
+    scenario verdict), a one-line ``latest_output`` for the TUI log, the full
+    cause+remedy in ``_error``, and the status file the dashboard and the next
+    TUI read.
+
+    *scenarios* overrides the status-file scenario list for callers that
+    temporarily swapped ``state.scenarios`` (the initial launch).  The status
+    write is best-effort: the run is already failing, and a display-file
+    error must not crash the driver thread on top of it.
+    """
+    state.running = False
+    state.held = False
+    state.latest_verdict = "ERROR"
+    state.latest_output = latest_output
+    state._error = error
+    try:
+        _write_status_file(
+            status_path, state.pr_id,
+            state.scenarios if scenarios is None else scenarios,
+            state.scenario_verdicts, overall="ERROR",
+            scenario_0=state.scenario_0, error=error,
+            verdict_reasons=state.scenario_verdict_reasons)
+    except Exception:
+        _log.warning("Failed to write ERROR status for %s", state.pr_id,
+                     exc_info=True)
+
+
+def _first_line(text: object, fallback: str) -> str:
+    """The first non-empty line of *text*, for a single-line TUI log entry.
+
+    Takes ``object`` because the callers pass an exception (the
+    ``ContainerLaunchError`` a fail-closed launch raised).
+    """
+    for line in str(text).splitlines():
+        if line.strip():
+            return line.strip()
+    return fallback
+
+
 # ---------------------------------------------------------------------------
 # Resume snapshot (restart survival)
 # ---------------------------------------------------------------------------
@@ -1119,6 +1193,11 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
         "use_containers": bool(use_containers),
         "concurrency_cap": int(concurrency_cap or 0),
         "finalize_verdict": state.finalize_verdict,
+        # Why the run has no scenario coverage (planner produced nothing,
+        # handoff failed, …).  Persisted so a resumed run keeps the cause —
+        # and so the aggregate cannot read an errored run with no scenarios
+        # as a clean PASS after a restart.
+        "error": state._error,
         "scenario_verdicts": {str(k): v for k, v in state.scenario_verdicts.items()},
         "scenario_verdict_reasons": {
             str(k): v for k, v in state.scenario_verdict_reasons.items()
@@ -1823,6 +1902,7 @@ def build_resume_state(resume_data: dict) -> QALoopState:
     # A held flag only makes sense while something is actually waiting.
     state.held = state.held and bool(state.waiting_for_input)
     state.finalize_verdict = resume_data.get("finalize_verdict")
+    state._error = resume_data.get("error") or ""
     state.planner_head = resume_data.get("planner_head")
     state.planner_code_changes = list(
         resume_data.get("planner_code_changes") or [])
@@ -3173,6 +3253,14 @@ def _launch_scenarios_in_containers(
     # Each entry: (scenario, concretize_pane, win_name, cname, transcript, clone_path, instruction_content)
     pending: list[tuple] = []
     pending_lock = threading.Lock()
+    # Container create/setup failures are infrastructure errors, not
+    # scenario verdicts.  So is a scenario window that cannot be created
+    # after its container exists: nothing can run in that container either.
+    # Both are collected here and raised after the prep threads join, so the
+    # caller fails the run instead of letting _poll_tmux_verdicts invent an
+    # INPUT_REQUIRED for the windowless scenario (and never falls back to
+    # the host).
+    launch_failures: list[tuple[int, BaseException]] = []
 
     def _prepare_scenario(scenario: QAScenario) -> None:
         if state.stop_requested:
@@ -3248,9 +3336,21 @@ def _launch_scenarios_in_containers(
                 route_mounts=_route_mounts(pr_data, data, _session_tag),
             )
             scenario.container_name = cname
-        except Exception:
-            _log.error("Failed to create container for scenario %d — aborting scenario",
+        except Exception as exc:
+            # Container mode is enabled and this launch is container-eligible:
+            # there is no host fallback.  Release only this attempt's exact,
+            # never-exec'd allocation (best effort — a dead runtime makes
+            # _run_runtime raise) and surface the failure to the caller.
+            _log.error("Failed to create container for scenario %d — "
+                       "aborting the QA run (no host fallback)",
                        scenario.index, exc_info=True)
+            try:
+                container_mod.remove_container(cname)
+            except Exception:
+                _log.debug("Failed-launch cleanup of %s failed", cname,
+                           exc_info=True)
+            with pending_lock:
+                launch_failures.append((scenario.index, exc))
             return
 
         win_name = _scenario_window_name(pr_data, scenario.index)
@@ -3282,8 +3382,23 @@ def _launch_scenarios_in_containers(
         except Exception:
             concretize_pane = None
         if not concretize_pane:
-            _log.warning("Failed to create window for scenario %d",
+            # The container exists but nothing can run in it (the pm session
+            # is gone, or tmux refused the window).  That is the same
+            # infrastructure failure as a failed create: without a window the
+            # poll loop would record an invented INPUT_REQUIRED verdict and
+            # the container would leak until the next run's orphan cleanup.
+            _log.warning("Failed to create window for scenario %d — "
+                         "aborting the QA run (no host fallback)",
                          scenario.index)
+            try:
+                container_mod.remove_container(cname)
+            except Exception:
+                _log.debug("Failed-launch cleanup of %s failed", cname,
+                           exc_info=True)
+            with pending_lock:
+                launch_failures.append((
+                    scenario.index,
+                    RuntimeError("could not create the scenario window")))
             return
 
         # Set window_name now so the status dashboard can navigate to
@@ -3302,6 +3417,23 @@ def _launch_scenarios_in_containers(
         t.start()
     for t in prep_threads:
         t.join()
+
+    if launch_failures:
+        # Never let a container launch failure become a scenario verdict, and
+        # never launch anything else on the host.  Windows and containers
+        # already created for other scenarios stay alive so the user can
+        # inspect them; only the failed attempt was released above.
+        details = "; ".join(
+            f"scenario {idx}: {exc}" for idx, exc in launch_failures)
+        raise ContainerLaunchError(
+            "Container mode is enabled, but at least one QA scenario could "
+            "not be launched in its container, so the run was stopped "
+            "instead of launching on the host.\n\n"
+            f"Cause: {details}\n\n"
+            + container_mod.container_retry_remedy(
+                "fix the container runtime/image (check 'pm container "
+                "status'), then retry QA")
+        )
 
     # Write status with window names so the dashboard is navigable
     # while concretizers run (before the polling loop starts).
@@ -3553,24 +3685,31 @@ def _ensure_scenario_container(
     state: QALoopState,
     data: dict,
     pr_data: dict,
-) -> bool:
+) -> None:
     """Make sure a dead worker's container is running before its relaunch.
 
-    QA containers are never recreated by the loop itself, so one removed
+    QA containers are not recreated by the loop itself, so one removed
     (``pm container cleanup``) or stopped (a podman restart) under a live
     run made every relaunch ``exec`` into a missing container and die at
     once, through the whole retry ladder (S78).  Recreate it from the
     scenario's host clone and scratch dir under the same name, which
     :func:`container.create_container` does for a stopped one too.
 
-    If that fails, record INPUT_REQUIRED with the reason and return False
-    so the caller stops retrying.
+    Container mode is an execution boundary: if the container cannot be
+    recreated, raise :class:`ContainerLaunchError` so the run ends with an
+    infrastructure ERROR (cause + remedy) instead of relaunching the worker
+    on the host or inventing an INPUT_REQUIRED verdict.
     """
     from pm_core import container as container_mod
 
     cname = scenario.container_name
-    if container_mod.container_is_running(cname):
-        return True
+    try:
+        if container_mod.container_is_running(cname):
+            return
+    except Exception:
+        # Runtime down/unusable: fall through to the create attempt, whose
+        # failure carries the cause.
+        pass
     clone = scenario.worktree_path
     scratch = Path(state.qa_workdir) / f"s-{scenario.index}" / "scratch"
     try:
@@ -3589,14 +3728,17 @@ def _ensure_scenario_container(
     except Exception as exc:
         _log.warning("Scenario %d container %s is gone and could not be "
                      "recreated", scenario.index, cname, exc_info=True)
-        state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-        state.scenario_verdict_reasons[scenario.index] = (
-            f"worker exited before any verdict; its container {cname} is "
-            f"gone and could not be recreated: {exc}")
-        return False
+        raise ContainerLaunchError(
+            f"Container '{cname}' for scenario {scenario.index} is no "
+            "longer running and could not be recreated: "
+            f"{_first_line(exc, 'container recreate failed')}. Container "
+            "mode is enabled, so the worker will not be relaunched on the "
+            "host.\n\n"
+            + container_mod.container_retry_remedy(
+                "fix the container runtime, then retry QA")
+        ) from exc
     _log.warning("Scenario %d container %s was gone — recreated it",
                  scenario.index, cname)
-    return True
 
 
 def _relaunch_scenario_window(
@@ -3606,6 +3748,7 @@ def _relaunch_scenario_window(
     pr_data: dict,
     session: str,
     workdir_path: str,
+    use_containers: bool,
 ) -> bool:
     """Relaunch the worker of a scenario whose worker pane died.
 
@@ -3614,27 +3757,45 @@ def _relaunch_scenario_window(
     new pane of the scenario window, or in a fresh window when that is
     gone too.
 
+    *use_containers* is the run's requested execution mode (persisted in
+    ``qa_resume.json``), not a fresh runtime probe: a container run must
+    never be relaunched on the host because the runtime looks unavailable.
+    A container that is gone is recreated under the same name; when it
+    cannot be recreated, this raises :class:`ContainerLaunchError` so the
+    run fails with an infrastructure error instead of downgrading.
+
     Returns True if the worker was relaunched successfully.
     """
     from pm_core import tmux as tmux_mod
-    from pm_core.container import is_container_mode_enabled, _runtime_available
+    from pm_core import container as container_mod
     _qa_resolution = _resolve_qa_model(pr_data, data, session_type="qa_scenario")
 
     win_name = _scenario_window_name(pr_data, scenario.index)
-    use_containers = is_container_mode_enabled() and _runtime_available()
+
+    if use_containers:
+        if not scenario.container_name:
+            raise ContainerLaunchError(
+                f"Scenario {scenario.index} has no container to relaunch. "
+                "Container mode is enabled, so the worker will not be "
+                "relaunched on the host.\n\n"
+                + container_mod.container_retry_remedy(
+                    "fix the container runtime, then retry QA")
+            )
 
     # New transcript for the relaunched session (old one is stale)
     transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
 
-    if (use_containers and scenario.container_name
-            and not _ensure_scenario_container(scenario, state, data, pr_data)):
-        return False
+    if use_containers:
+        # A container stopped/removed under a live run is recreated under
+        # the same name; failing that, this raises ContainerLaunchError so
+        # the run fails closed instead of relaunching on the host.
+        _ensure_scenario_container(scenario, state, data, pr_data)
 
     try:
         scenario_env: dict[str, str] = {}
         run_cmd, pane_cwd = _build_scenario_run_cmd(
             scenario, state, data, transcript, _qa_resolution,
-            session=None if (use_containers and scenario.container_name) else session,
+            session=None if scenario.container_name else session,
             workdir_path=workdir_path,
             env_out=scenario_env,
         )
@@ -4616,6 +4777,7 @@ def _poll_tmux_verdicts(
                         relaunched = _relaunch_scenario_window(
                             scenario, state, data, pr_data,
                             session, workdir_path,
+                            use_containers=use_containers,
                         )
                     except ProviderNotFoundError:
                         # The run stops here, before this tick's
@@ -4635,11 +4797,17 @@ def _poll_tmux_verdicts(
                         _last_scenario_hook_ts.pop(scenario.index, None)
                         continue
                     if scenario.index in state.scenario_verdicts:
-                        # Its container could not be recreated: the
-                        # verdict says why, and retrying cannot help.
+                        # It already carries a verdict (e.g. an unverified
+                        # PASS whose pane died): keep it and stop retrying,
+                        # because a relaunch cannot produce a new one.  A
+                        # lost container no longer reaches this branch — the
+                        # relaunch recreates it, and when it cannot, raises
+                        # ContainerLaunchError so the run fails closed.
+                        recorded = state.scenario_verdicts[scenario.index]
                         state.latest_output = (
                             f"Scenario {scenario.index} ({scenario.title}): "
-                            f"INPUT_REQUIRED (container gone)")
+                            f"{recorded} (relaunch failed; keeping its "
+                            "recorded verdict)")
                         pending.discard(scenario.index)
                         verdicts_changed = True
                         _notify()
@@ -5423,15 +5591,31 @@ def _run_qa_sync(
 
     # Determine execution mode (container vs tmux) early — needed by both
     # the planning phase (orphan cleanup, Scenario 0) and execution phase.
-    from pm_core.container import is_container_mode_enabled, _runtime_available
+    # The enabled setting is an execution boundary: when container mode is
+    # requested, a missing/failed/timed-out runtime aborts the run instead
+    # of silently selecting the host.  Nothing has been launched yet, so
+    # this is the last point where zero agents (host or container) have run.
+    from pm_core.container import (
+        is_container_mode_enabled, _runtime_status,
+        container_unavailable_message,
+    )
     use_containers = is_container_mode_enabled()
     if use_containers:
-        if _runtime_available():
-            _log.info("Container mode enabled for QA execution")
-        else:
-            _log.warning("Container mode enabled but runtime unavailable "
-                         "— falling back to host execution")
-            use_containers = False
+        _runtime_ok, _runtime_problem = _runtime_status()
+        if not _runtime_ok:
+            _log.error("QA aborted for %s: container mode is enabled but the "
+                       "runtime is unavailable (%s); refusing to launch on "
+                       "the host", state.pr_id, _runtime_problem)
+            _fail_run_infrastructure(
+                state, status_path,
+                latest_output=(
+                    "Container mode is enabled but the container runtime is "
+                    f"unavailable: {_runtime_problem}"),
+                error=container_unavailable_message(_runtime_problem))
+            if on_update:
+                on_update(state)
+            return state
+        _log.info("Container mode enabled for QA execution")
 
     def _notify():
         if on_update:
@@ -5878,20 +6062,40 @@ def _run_qa_sync(
     # Only launch the initial batch — queued scenarios are launched later
     # as running scenarios complete (handled by _poll_tmux_verdicts).
     all_scenarios = state.scenarios
+    # ``state.scenarios`` is narrowed to the launch batch below so the
+    # launch helpers only create windows/containers for that batch.  Pass
+    # the full list (and the queued indices) so the status file written
+    # during launch keeps showing the not-yet-started scenarios as
+    # ``queued`` instead of dropping them until their turn comes.
     state.scenarios = launch_scenarios
-    if use_containers:
-        _launch_scenarios_in_containers(
-            state, data, pr_data, session, repo_root, workdir_path,
-            pm_root=pm_root, _status_scenarios=all_scenarios,
-            _status_queued=queued_indices,
-        )
-    else:
-        _launch_scenarios_in_tmux(
-            state, data, pr_data, session, repo_root, workdir_path,
-            pm_root=pm_root, _status_scenarios=all_scenarios,
-            _status_queued=queued_indices,
-        )
-    state.scenarios = all_scenarios
+    try:
+        if use_containers:
+            _launch_scenarios_in_containers(
+                state, data, pr_data, session, repo_root, workdir_path,
+                pm_root=pm_root, _status_scenarios=all_scenarios,
+                _status_queued=queued_indices,
+            )
+        else:
+            _launch_scenarios_in_tmux(
+                state, data, pr_data, session, repo_root, workdir_path,
+                pm_root=pm_root, _status_scenarios=all_scenarios,
+                _status_queued=queued_indices,
+            )
+    except ContainerLaunchError as exc:
+        # Container mode is an execution boundary: a container that cannot be
+        # created stops the run.  Never fall through to the host, and never
+        # record the infrastructure failure as a scenario verdict.
+        _log.error("QA container launch failed for %s: %s",
+                   state.pr_id, exc)
+        _fail_run_infrastructure(
+            state, status_path,
+            latest_output="Container launch failed: "
+                          + _first_line(exc, "container launch failed"),
+            error=str(exc), scenarios=all_scenarios)
+        _notify()
+        return state
+    finally:
+        state.scenarios = all_scenarios
 
     if state.scenarios:
         state.latest_output = (
@@ -5958,13 +6162,28 @@ def _execute_and_finalize(
 
     while True:
         state.running = True
-        _poll_tmux_verdicts(state, data, pr_data, session, workdir_path,
-                            status_path, notify,
-                            queued_scenarios=queued_scenarios,
-                            concurrency_cap=concurrency_cap,
-                            use_containers=use_containers,
-                            repo_root=repo_root,
-                            pm_root=pm_root)
+        try:
+            _poll_tmux_verdicts(state, data, pr_data, session, workdir_path,
+                                status_path, notify,
+                                queued_scenarios=queued_scenarios,
+                                concurrency_cap=concurrency_cap,
+                                use_containers=use_containers,
+                                repo_root=repo_root,
+                                pm_root=pm_root)
+        except ContainerLaunchError as exc:
+            # A queued/relaunched container-eligible worker could not run in
+            # its container (create failed, or the container was lost).
+            # Fail the run with an infrastructure ERROR instead of retrying
+            # on the host or recording an invented scenario verdict.
+            _log.error("QA container launch failed for %s: %s",
+                       state.pr_id, exc)
+            _fail_run_infrastructure(
+                state, status_path,
+                latest_output="Container launch failed: "
+                              + _first_line(exc, "container launch failed"),
+                error=str(exc))
+            notify()
+            return state
 
         # --- Aggregate verdicts ---
         verdicts = list(state.scenario_verdicts.values())
@@ -6299,6 +6518,34 @@ def _resume_qa_sync(
 
     resume_data = _load_resume_file(state.qa_workdir) or {}
     use_containers = bool(resume_data.get("use_containers", False))
+    if use_containers:
+        # The run was launched in container mode; preserve that requested
+        # mode across the restart.  If the runtime is unusable now, fail
+        # closed rather than letting the resumed queued/relaunch paths
+        # select the host.
+        from pm_core.container import (
+            _runtime_status, container_unavailable_message,
+        )
+        _runtime_ok, _runtime_problem = _runtime_status()
+        if not _runtime_ok:
+            _log.error("QA resume aborted for %s: container mode was "
+                       "requested but the runtime is unavailable (%s)",
+                       state.pr_id, _runtime_problem)
+            # One-line summary for the TUI log; the full cause + remedy
+            # stays in ``_error`` for the status file and the QA note,
+            # matching the fresh-run preflight in ``_run_qa_sync``.  The
+            # status file also lets a TUI restart see a completed ERROR
+            # result and clear the snapshot instead of re-adopting the same
+            # unusable container run forever.
+            _fail_run_infrastructure(
+                state, status_path,
+                latest_output=(
+                    "Container mode is enabled but the container runtime is "
+                    f"unavailable: {_runtime_problem}"),
+                error=container_unavailable_message(_runtime_problem))
+            if on_update:
+                on_update(state)
+            return state
     concurrency_cap = int(resume_data.get("concurrency_cap", 0) or 0)
     queued_idx = set(resume_data.get("queued_indices") or [])
     queued_scenarios = [s for s in state.scenarios if s.index in queued_idx]

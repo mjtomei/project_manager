@@ -160,6 +160,33 @@ def test_load_resume_file_missing(tmp_path):
     assert _load_resume_file(tmp_path) is None
 
 
+def test_resume_preserves_run_error(tmp_path):
+    """Why a run has no scenario coverage survives the restart.
+
+    ``_error`` is what the aggregate turns into INPUT_REQUIRED.  Dropping it
+    on resume let a run the planner produced nothing for (no scenarios, no
+    verdicts, but ``_error`` set) re-aggregate as a clean PASS after a TUI
+    restart — and left a resumed failure with no diagnostics.
+    """
+    state = _make_state(tmp_path)
+    state._error = "Planner produced no parseable scenarios — needs human review"
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+
+    loaded = _load_resume_file(tmp_path)
+    assert loaded["error"] == state._error
+    rebuilt = build_resume_state(loaded)
+    assert rebuilt._error == state._error
+
+
+def test_resume_keeps_host_mode_when_snapshot_has_no_error(tmp_path):
+    """Snapshots written before ``error`` was persisted stay valid."""
+    state = _make_state(tmp_path)
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+    loaded = _load_resume_file(tmp_path)
+    loaded.pop("error")
+    assert build_resume_state(loaded)._error == ""
+
+
 # ---------------------------------------------------------------------------
 # Verdict identity is scoped to PR / run / scenario / attempt
 # ---------------------------------------------------------------------------
@@ -310,6 +337,36 @@ def test_resume_completed_processes_and_clears(tmp_path):
     assert completed_state.latest_verdict == VERDICT_NEEDS_WORK
     assert "pr-001" not in app._qa_loops
     assert "pr-001" in app._resumed_qa_pr_ids
+    assert not _resume_file_path(qa_dir).exists()
+
+
+def test_resume_completed_error_keeps_its_cause(tmp_path):
+    """A fail-closed (infrastructure ERROR) run that completed during
+    downtime carries its cause only in qa_status.json: the snapshot is
+    written before the poll, so a failure raised from inside it (a queued
+    container launch, a relaunch whose container is gone) never reaches the
+    snapshot.  The recovered state must still hold it, or the QA note the
+    TUI records — the next session's handoff — reads "QA ERROR: ..." with
+    no reason."""
+    app = _make_app(tmp_path)
+    qa_dir = _seed_run(tmp_path, overall="ERROR")
+    status_path = qa_dir / "qa_status.json"
+    status = json.loads(status_path.read_text())
+    status["error"] = (
+        "Container mode is enabled, but the container runtime is "
+        "unavailable, so no agent was launched on the host.")
+    status_path.write_text(json.dumps(status))
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_not_called()
+    on_complete.assert_called_once()
+    completed_state = on_complete.call_args[0][1]
+    assert completed_state.latest_verdict == "ERROR"
+    assert "container runtime is unavailable" in completed_state._error
     assert not _resume_file_path(qa_dir).exists()
 
 

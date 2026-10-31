@@ -437,7 +437,22 @@ def qa_run(instruction_id: str, pr_id: str | None):
         qa_loop.clear_resume_file(qa_workdir)
 
     verdict = state.latest_verdict or "UNKNOWN"
+    detail = qa_loop.qa_error_detail(state)
+    if detail:
+        # A fail-closed launch (e.g. container mode enabled but its runtime
+        # unusable) records the cause and the retry remedy in the run's
+        # error; ``on_update`` above only prints the single-line progress
+        # entry, which is not enough to act on.
+        click.echo("", err=True)
+        click.echo(detail, err=True)
     click.echo(f"\nResult: {verdict}")
+    if verdict == "ERROR":
+        # ERROR means the run never produced a result (e.g. a fail-closed
+        # container launch), so report the failure in the exit code too:
+        # a scripted caller must not read "Result: ERROR" as success.  A
+        # scenario verdict (PASS / NEEDS_WORK / INPUT_REQUIRED) is a
+        # completed run and keeps exiting 0.
+        raise SystemExit(1)
 
 
 @qa.command("debug")
@@ -458,7 +473,10 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
     import secrets
     from pm_core import qa_instructions, store
     from pm_core import tmux as tmux_mod
-    from pm_core.container import is_container_mode_enabled, _runtime_available
+    from pm_core.container import (
+        is_container_mode_enabled, container_preflight_error,
+        container_unavailable_message,
+    )
     from pm_core.claude_launcher import build_claude_shell_cmd
     from pm_core.loop_shared import get_pm_session
 
@@ -477,6 +495,17 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
     if not session:
         click.echo("No pm session found. Run inside a pm tmux session.", err=True)
         raise SystemExit(1)
+
+    # Container mode is an execution boundary.  Resolve it before creating
+    # any workdir/clone so an unusable runtime aborts here instead of
+    # silently running the debug instruction on the host.
+    use_containers = is_container_mode_enabled()
+    if use_containers:
+        _runtime_problem = container_preflight_error()
+        if _runtime_problem:
+            click.echo(container_unavailable_message(_runtime_problem),
+                       err=True)
+            raise SystemExit(1)
 
     # Create a workdir keyed to session + instruction (not PR)
     debug_id = secrets.token_hex(4)
@@ -513,8 +542,6 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
     dest_dir.mkdir(parents=True, exist_ok=True)
     import shutil
     shutil.copy2(item["path"], dest_dir / filename)
-
-    use_containers = is_container_mode_enabled() and _runtime_available()
 
     if use_containers:
         from pm_core import container as container_mod
@@ -563,14 +590,39 @@ End with a summary of which steps work and which don't, then one of:
         session_tag = session.removeprefix("pm-") if session else None
         cname = f"{container_mod.CONTAINER_PREFIX}qa-debug-{instruction_id}-{debug_id}"
 
-        container_mod.create_qa_container(
-            name=cname,
-            config=config,
-            workdir=clone_path,
-            scratch_path=scratch_path,
-            allowed_push_branch=base_branch,
-            session_tag=session_tag,
-        )
+        try:
+            container_mod.create_qa_container(
+                name=cname,
+                config=config,
+                workdir=clone_path,
+                scratch_path=scratch_path,
+                allowed_push_branch=base_branch,
+                session_tag=session_tag,
+            )
+        except Exception as exc:
+            # Container mode is an execution boundary: report the
+            # infrastructure failure instead of dropping into the host
+            # branch (or leaking a traceback) below.  Broader than
+            # ContainerError on purpose: a runtime that dies between the
+            # preflight above and this create (e.g. the binary disappearing)
+            # surfaces as OSError, and the user should still get the cause
+            # and the remedy rather than a traceback.  Release only this
+            # attempt's own container (a setup timeout can leave a
+            # half-configured one behind); nothing else is touched.
+            try:
+                container_mod.remove_container(cname)
+            except Exception:
+                pass
+            click.echo(
+                "Container mode is enabled, but the QA debug container "
+                f"could not be created: {exc}\n\n"
+                "No session was launched on the host.\n\n"
+                + container_mod.container_retry_remedy(
+                    "fix the container runtime/image (check 'pm container "
+                    "status'), then retry"),
+                err=True,
+            )
+            raise SystemExit(1)
 
         claude_cmd = build_claude_shell_cmd(
             prompt=prompt,

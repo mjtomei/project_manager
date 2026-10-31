@@ -48607,3 +48607,588 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-574e851
+  plan: bugs
+  title: 'Bug: never fall back to host execution when container mode is enabled'
+  branch: pm/pr-574e851-bug-never-fall-back-to-host-execution-when-contain
+  status: in_progress
+  depends_on: []
+  description: 'When container isolation is enabled, a failed runtime check or container
+    launch must stop that attempt rather than run the agent on the host. The enabled
+    setting is an execution boundary, not a best-effort preference.
+
+
+    Confirmed code paths: run_qa_sync currently sets use_containers=False when _runtime_available()
+    fails; execution-only QA paths in qa_loop.py and cli/qa.py combine is_container_mode_enabled()
+    and _runtime_available(), silently selecting the host path. Missing runtime binaries,
+    nonzero runtime info, and timeouts can therefore launch refiners/workers without
+    the requested isolation.
+
+
+    History: initial container support ba0298ff (PR #120, March 5 2026) did not have
+    this QA preflight fallback. Commit 39656010 added it before #120 merged. March
+    9 commit 16735789 made the shared launcher fail on container creation errors,
+    but left QA''s separate preflight downgrade. This is a focused completion of that
+    fail-closed behavior, not whole-session containerization.
+
+
+    Required behavior:
+
+    - If container mode is enabled for a container-eligible launch, runtime unavailable,
+    image/setup/create/exec failure, or loss of its container must never switch to
+    host execution. Report a clear launch/infrastructure error with the original cause
+    and an actionable retry remedy; do not invent a reviewer/scenario verdict or silently
+    flip the setting.
+
+    - Audit initial QA planning-to-refinement/execution handoff, execution-only pm
+    qa run, queued scenarios, retries and persisted resume, and other container-eligible
+    launchers for equivalent downgrade paths. Preserve the requested mode across retries/resume;
+    reject an unusable required container instead of treating its absence as permission
+    to launch on the host.
+
+    - Explicitly disabled container mode continues to support intended host execution.
+    Keep intentionally host-only roles unchanged; this is not a redesign of all PM
+    roles or the container memory governor.
+
+    - Preserve source, captures, transcripts, unsent drafts and live/retained containers.
+    Failed-launch cleanup may release only the failed attempt''s confirmed unused
+    allocation; do not use broad cleanup.
+
+    - Coordinate with #241''s lifecycle/error handling and #278''s tmux targeting,
+    but require neither as a new dependency. No provider/model changes or automatic
+    PR merges.
+
+
+    Acceptance:
+
+    - With container mode enabled, missing binary, failed/timed-out runtime info,
+    and container create/setup/exec failure produce an explicit failure and ZERO host
+    agent launches, both initially and during retry/resume/queued QA. Assert absence
+    of host execution, not just an error message.
+
+    - Healthy runtime still launches the assigned refiner/worker inside its container.
+    Explicit container-disabled control still runs on the host.
+
+    - Error/retry preserves execution mode, original diagnostics and evidence, and
+    does not become a fabricated INPUT_REQUIRED/PASS/NEEDS_WORK verdict.
+
+    - Exercise relevant native entry points with disposable fixtures. Isolate HOME/PM
+    settings, tmux sockets, registry, captures and runtime endpoints; never disable
+    the real host''s container mode, stop its runtime, kill its tmux session, or mutate
+    shared ~/.pm files to test this bug.
+
+
+    Incident distinction: the October 29 #267 host-refiner tmux leak is not proof
+    of this fallback firing. A separate confirmed test leak occurred October 28 19:29:30
+    UTC: #271''s interactive QA Scenario 0 session ran pm container disable intending
+    to change a scratch project, but wrote the real global setting. This PR must not
+    claim to fix shared-setting isolation; its tests must avoid repeating that mistake.
+    Evidence: /home/matt/.local/state/pm-pr-shepherd/container-disabled-20261028-evidence.json.
+
+    '
+  agent_machine: null
+  gh_pr: https://github.com/mjtomei/project_manager/pull/280
+  gh_pr_number: 280
+  created_at: '2026-10-29T02:00:23.323053+00:00'
+  updated_at: '2026-10-31T19:51:08.623215+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-incident-role-correction-20261029
+    text: 'Incident clarification: the agent that disabled real global container mode
+      was #271 interactive QA Scenario 0 (qa_interactive), not the scenario planner
+      or refiner. It ran on the host and intended a scratch-project setting change.
+      This is separate from the confirmed fallback bug; do not claim this PR fixes
+      all host-role/shared-state isolation. Test only in isolated settings and tmux
+      sockets.'
+    created_at: '2026-10-29T02:04:46.761935+00:00'
+  - id: note-07b1a0f
+    text: 'Impl complete: fail-closed container-mode launches (QA container-eligible
+      launchers only).
+
+      - container.py: _runtime_status() keeps the cause (missing binary / info timeout
+      / nonzero); container_preflight_error() + container_unavailable_message() give
+      cause+remedy.
+
+      - qa_loop._run_qa_sync: preflight no longer sets use_containers=False; aborts
+      ERROR (status file + _error) before any window/agent.
+
+      - qa_loop._launch_scenarios_in_containers: create/setup failure -> ContainerLaunchError
+      -> run ERROR (no invented INPUT_REQUIRED); removes only the failed cname.
+
+      - qa_loop._relaunch_scenario_window(use_containers): refuses a host relaunch
+      when the container is missing/lost.
+
+      - qa_loop._resume_qa_sync: re-validates persisted container mode; aborts ERROR
+      and writes qa_status overall=ERROR.
+
+      - cli/qa.py qa debug: resolves mode before allocating a workdir; exits 1 with
+      remedy.
+
+      Healthy runtime still uses containers; explicitly disabled mode still runs on
+      host. Tests: tests/test_container_fail_closed.py (10 tests). Core run_qa_sync
+      repro was verified to FAIL on pre-fix ee21eea3 (it called _launch_scenarios_in_tmux
+      = host). Evidence: /pm-captures/impl/{pre,post}-fix/{qa-run,qa-debug}/ (cast+mp4+manifest;
+      pre-fix shows HOST LAUNCH, post-fix shows ERROR + no host launch), isolated
+      HOME/tmux/runtime.
+
+      NOT fixed: shared-setting isolation (the 2026-10-28 #271 Scenario-0 pm container
+      disable leak). Do not claim it.'
+    created_at: '2026-10-29T02:36:45Z'
+    last_edited: '2026-10-29T02:36:45Z'
+  - id: note-088814a
+    text: 'PUSH BLOCKED from impl container: /run/pm-push-proxy is empty (host push-proxy
+      daemon gone) and the container has no git credentials; direct GitHub push fails
+      "could not read Username". The fix is committed locally on pm/pr-574e851-bug-never-fall-back-to-host-execution-when-contain
+      (0a10c42c, plus this note commit). Host action: restart the workdir push proxy
+      (relaunch/reuse the container) or push the branch; then run QA.'
+    created_at: '2026-10-29T02:38:33Z'
+    last_edited: '2026-10-29T02:38:33Z'
+  - id: note-e6283f3
+    text: 'Review i2 (f951): the earlier "PUSH BLOCKED" note is stale — the branch
+      is pushed (77e095d6, now 146faddc) and up to date on origin. i2 changes: pm
+      qa debug now catches any create failure (not just ContainerError) so a runtime
+      that dies between preflight and create still gets cause+remedy instead of a
+      traceback; tests added for the non-ContainerError create path, no-resume-snapshot
+      on the preflight abort, container_preflight_error() inert when disabled, and
+      a persisted host run resuming on the host.'
+    created_at: '2026-10-29T03:41:09Z'
+    last_edited: '2026-10-29T03:41:09Z'
+  - id: note-d3d2a9e
+    text: 'Review i4 (f951): `pm qa run` now prints the fail-closed cause+remedy (new
+      `qa_loop.qa_error_detail`); its on_update only printed the one-line latest_output,
+      so the remedy (start the runtime / `pm container disable`) never reached a CLI
+      user. Other early-abort ERRORs carry no `_error` and print nothing extra. Tests
+      added (qa_error_detail gating; CliRunner for `pm qa run`); the create-failure
+      test now asserts ContainerLaunchError specifically. Incidental, filed separately
+      as pr-7abb052: `pm pr auto-sequence` has no branch for the new `overall: "ERROR"`
+      status value, so it reports `running: qa` forever and never surfaces the cause
+      (an explicit ERROR branch + watcher-token docs are needed there, which is why
+      it is not fixed in this PR). Capture note: /pm-captures/impl/post-fix/qa-run/manifest.md
+      records that the i4 remedy block postdates the recording; the fail-closed behaviour
+      and the absence of any host launch are unchanged. (2026-10-29T04:45:00Z)'
+    created_at: '2026-10-29T04:35:43Z'
+    last_edited: '2026-10-29T04:35:43Z'
+  - id: note-59117c9
+    text: 'Review i5 (f951): no code changes. Re-checked the four fail-closed paths
+      (fresh-run preflight, initial container launch, queued/relaunch inside _poll_tmux_verdicts,
+      resume re-validation), the relaunch guard, and the CLI reporting; all match
+      the spec. Full pytest on this workdir: 4492 passed, 13 failed — all environmental/pre-existing
+      (tests/test_markdown_render.py needs the markdown module; test_hook_events.py::test_installer_writes_standalone_receiver
+      fails because PM_HOST_HOME=/home/matt overrides the tmp HOME). tests/test_container_fail_closed.py:
+      19 passed; the QA/container suites: 568 passed.
+
+
+      One integration consequence of the new terminal `overall: "ERROR"` status, filed
+      separately as pr-7b1dd2e (not fixed here — it needs the bounded-retry design
+      the review loop already has via VERDICT_LAUNCH_FAILED + MAX_REVIEW_LAUNCH_RETRY_EPISODES
+      + cooldown, and this PR is scoped to the QA launch boundary): `_auto_start_qa_loops`
+      only holds on QA_HOLD_VERDICTS = ("PASS", "INPUT_REQUIRED"), so a recorded "ERROR"
+      is restartable. With auto-start enabled and the runtime down, the next scheduler
+      pass (startup/breadcrumb, target change, a merge in the plan, a QA NEEDS_WORK)
+      starts QA again; each retry fails the preflight, writes another QA workdir and
+      appends a duplicate QA ERROR note to the git-tracked project.yaml. auto-sequence
+      has the equivalent gap in pr-7abb052.'
+    created_at: '2026-10-29T04:56:50Z'
+    last_edited: '2026-10-29T04:56:50Z'
+  - id: note-d57a317
+    text: 'QA S3 PASS (full TUI path, t on a qa PR). Fail-closed abort verified end
+      to end: runtime down -> ERROR before any window/agent, log carries the cause
+      + "refusing to launch on the host", one QA ERROR note with both remedies, qa_status
+      overall=ERROR scenarios=[], no qa_resume.json, no qa-* window, empty host-launch
+      marker; pm tui restart does not resume it; runtime restored -> same PR runs
+      in container mode (planner + Scenario 0 host-only as designed, refiner and scenario
+      agent via podman exec in ...-s1, no s-1/repo host launch, run ends PASS). Captures:
+      /pm-captures/scenarios/3/{01-fail-closed,02-recovery-container}. Fixture gaps
+      for future S3 runs (not product bugs): (1) the fake planner does not write pm/specs/<pr>/qa.md,
+      so the third triple needs a committed minimal QA spec or the run stops at the
+      spec gate with INPUT_REQUIRED; (2) _next_scenario_offset numbers new scenarios
+      after earlier QA workdirs for the same PR, so a re-run after a prior scenario
+      run yields -s2; remove the old ~/.pm/workdirs/qa/<pr>-* dirs to get the expected
+      -s1. (2026-10-29T06:25:00Z)'
+    created_at: '2026-10-29T06:24:06Z'
+    last_edited: '2026-10-29T06:24:06Z'
+  - id: note-6000dd6
+    text: 'QA S5 incidental fix (868d48e8): with qa-max-scenarios set, the initial
+      container/tmux launch wrote qa_status.json from the narrowed launch batch, so
+      a queued scenario vanished from the status file (and its "queued" marker was
+      clobbered) until its turn came. The launch helpers now receive the full scenario
+      list plus the queued indices and pass them to the launch-time status write;
+      a regression test covers the wiring. Found while driving S5 story 3 (cap 1).
+      Unrelated: `pm container cleanup` removes nothing on podman 3.x and still reports
+      success — already filed as pr-436d18a, not fixed here.'
+    created_at: '2026-10-29T07:38:34Z'
+    last_edited: '2026-10-29T07:38:34Z'
+  - id: note-b9cd1a0
+    text: 'Review i6 (f951): two reporting gaps on the fail-closed path closed, plus
+      a test gap. (1) `pm qa run` now exits 1 when the result is ERROR (no verdict
+      at all, e.g. a fail-closed launch) — it printed "Result: ERROR" but exited 0,
+      so a scripted caller read an infrastructure failure as success; completed verdicts
+      (PASS/NEEDS_WORK/INPUT_REQUIRED) still exit 0. (2) `_record_qa_note` now appends
+      the fail-closed cause+remedy when the verdict is ERROR and the summary does
+      not already carry it: `qa_outcome_detail` only surfaces `state._error` when
+      no scenario ran, so a mid-run failure (queued create failure, or a relaunch
+      whose container is gone, after another scenario already has a verdict) produced
+      a note reading "QA ERROR: S1: PASS" with no reason — the note is the next session''s
+      handoff channel. (3) Test for the host (`_launch_scenarios_in_tmux`) side of
+      the 868d48e8 queued-status fix (it was covered only for the container launcher).
+      Spec updated (impl.md i6; out-of-scope list now names the QA verifier and finalizer
+      as host-only roles). Full pytest: 4498 passed, 13 failed — the same environmental
+      failures as i5 (markdown module, PM_HOST_HOME); tests/test_container_fail_closed.py
+      23 passed, note tests 27 passed. Capture note added to /pm-captures/impl/post-fix/qa-run/manifest.md:
+      the recorded `pm qa run exit=0` predates the exit-code change; the fail-closed
+      behaviour and the absence of any host launch are unchanged. (2026-10-29T08:55:00Z)'
+    created_at: '2026-10-29T08:38:36Z'
+    last_edited: '2026-10-29T08:38:36Z'
+  - id: note-0f0fcab
+    text: 'Review c534 i1: three fail-closed gaps closed. (1) A container-mode scenario
+      whose tmux window cannot be created after its container exists now records a
+      launch failure and raises ContainerLaunchError (run ERROR) instead of leaking
+      that container and becoming an invented INPUT_REQUIRED — same class as the create
+      failure; only that attempt''s own container is released, other scenarios'' live
+      containers/windows are untouched. (2) qa_resume.json persists state._error and
+      build_resume_state restores it: a resumed run keeps its original diagnostics,
+      and an errored no-scenario run can no longer re-aggregate as PASS after a restart.
+      (3) _resume_incomplete_qa restores the error field from qa_status.json when
+      it adopts a run that completed during downtime, so the recovered "QA ERROR"
+      note carries its cause (the snapshot is written before the poll, so a mid-run
+      container failure only ever reached the status file). Tests added: window-failure
+      launch error, resume error round-trip, recovered ERROR cause, healthy `pm qa
+      debug` container control. Full suite 4516 passed, 1 skipped. Spec impl.md updated
+      (c534 i1). Host-mode window-failure -> INPUT_REQUIRED left as-is: it is host
+      mode (no container requested) and the INPUT_REQUIRED is deliberate there.'
+    created_at: '2026-10-29T09:11:52Z'
+    last_edited: '2026-10-29T09:11:52Z'
+  - id: note-bbb6e6b
+    text: 'QA S9 (live container-mode run, concurrent actors): stories 1-4 behave
+      as specified — the killed scenario window relaunches inside the same container,
+      the force-removed container fails the run closed with cause+remedy in the log,
+      the status file and a single QA ERROR note (no invented verdict, no host relaunch),
+      and a TUI restart neither resumes nor re-runs it. One defect found and fixed
+      on this branch (d70a3138): story 2''s status-pane check failed because the qa_status
+      ERROR view lost its own "QA Status: <pr>" header — the ~190-column fail-closed
+      cause line wrapped on the 100-column status pane, adding a row past the pane
+      height and scrolling the title off the top. Error lines are now wrapped to the
+      pane width (indent preserved), with a regression test at 60/80/100/120 columns.
+      Captures: /pm-captures/scenarios/9/{live-run,post-fix-pane} (pre-fix pane capture
+      shows the ERROR block with no header; the post-fix re-run shows header + wrapped
+      block).'
+    created_at: '2026-10-29T10:19:50Z'
+    last_edited: '2026-10-29T10:20:11Z'
+  - id: note-4d9480b
+    text: 'QA S11 PASS (full TUI path, container mode, mid-run runtime outage). Scenario
+      1 (running in ...-s1) finished PASS while the runtime was down; the queued scenario
+      2 launch failed closed -> run ERROR: log "QA finished for pr-1b7c02e: ERROR",
+      qa_status overall=ERROR with cause+remedies (s1 PASS, s2 ""), exactly one "QA
+      ERROR:" note carrying the same cause, no s-<N>/repo host-launch line, s1 container+window
+      intact, no s2 container. Status pane verified at 110/80/60 cols (header on row
+      1, no row wider than the pane, bullets+indent and q: quit readable) — d70a3138
+      holds. pm tui restart: no "Resuming QA", no new host launch/container, status+note
+      unchanged, QA window/status pane survive. Runtime restored + z t: fresh run
+      proceeds, planner/s-0 on host, scenarios in ...-s3/...-s4 via podman exec, run
+      PASS, container mode still enabled. Captures: /pm-captures/scenarios/11/{live-run,recovery-container}.
+      Observations (not defects): the ERROR view replaces the scenario table (qa_status._render
+      returns the error block), so s2 appears only as "" / "?" in the file and note;
+      and when the runtime is down at create time the Cause reads "scenario N: Image
+      build failed: podman: cannot connect..." (image_exists -> auto-build path) —
+      still names the scenario and the runtime failure.'
+    created_at: '2026-10-29T12:38:09Z'
+    last_edited: '2026-10-29T12:38:09Z'
+  - id: note-e744399
+    text: 'QA S13 PASS: pm qa debug container path (preflight, create, exec, cleanup),
+      the explicitly-disabled host control, and a runtime that answers info but fails
+      create. Healthy runtime: exit 0, qa-debug-repro window start command is the
+      trap + podman rm -f + podman exec -it wrapper, pane_current_command=bash, one
+      running pm-qa-debug-repro-<8hex>, podman top shows python3 /opt/pm-src/bin/fake-claude
+      inside it, preamble visible, no host launch; hold expiry (and kill-window) removed
+      the window and the container. Disabled mode: exit 0, bare fake-claude start
+      command, pane_current_command=python3, no container, no container-mode error.
+      Shim (info/image ok, run=125): exit 1, exact cause+remedy block, no traceback,
+      no qa-debug window, no leftover container. Captures: /pm-captures/scenarios/13/{container,host-disabled,fail-closed}.
+      Fixture note for future S13 runs: keep the throwaway project on the same filesystem
+      as ~/.pm/workdirs (/tmp works, /scratch does NOT: git clone --local fails cross-device
+      and pm dies with a raw CalledProcessError traceback — filed as pr-e64ecb6).'
+    created_at: '2026-10-29T13:47:54Z'
+    last_edited: '2026-10-29T13:47:54Z'
+  - id: note-15f3662
+    text: 'User-authorized restart from the main PM session on 2026-10-31 after #249
+      merged as eaf3372e60d1717bd97cc50b5e0b04c6df881fa1. Resume this existing PR
+      in its existing workdir. First integrate current origin/master INTO THIS PR
+      branch, preserving its intended behavior and all earlier review/QA corrections;
+      resolve real code/test conflicts and validate the combined behavior before handing
+      off for a fresh review/QA/sign-off sequence. Do not merge this PR into master
+      or push/reset/delete master or other branches. This is a user-directed implementation
+      return, not a reviewer/sign-off verdict. The read-only integration check found
+      substantive conflicts in: pm/project.yaml, pm_core/qa_loop.py, pm_core/tui/qa_loop_ui.py.
+      The prior SIGNOFF_MERGE is historical evidence for its recorded revisions, not
+      approval of a new integration. Retain all original source, dirty files, stashes,
+      drafts, fixtures and captures. Existing uncommitted content may have been intentionally
+      excluded; inspect its provenance instead of automatically committing it. Preserve
+      every PR record and unrelated local metadata during project.yaml reconciliation.
+      Do not weaken acceptance criteria, choose unresolved user policy questions or
+      reuse stale PASS results. Historical captures have been copied intact to the
+      main session captures; overwritten filename collisions are backed up in the
+      host migration record. Main session is pm-project_manager-c5a1006b; keep old
+      restored sessions idle. Assigned models and explicit work-Opus sign-off override
+      remain unchanged. Autostart will use wait_for_merge; no PR merge is authorized
+      by this request.'
+    created_at: '2026-10-31T18:07:25.345765+00:00'
+    last_edited: '2026-10-31T18:07:25.345765+00:00'
+  - id: note-54eb338
+    text: 'Integration complete (2026-10-31, user-authorized): merged origin/master@eaf3372e
+      (#249, pr-592e4bd) INTO THIS BRANCH as e99193e1, with spec commits fd18db4c/a4b67d27
+      and a registry-order fix 65c1b86a. All fail-closed paths and every earlier review/QA
+      correction are preserved.
+
+
+      Resolutions:
+
+      - qa_loop: adopted master''s `_status_queued` parameter name — both sides had
+      independently added the same queued-scenario status fix (branch''s 868d48e8
+      used `_queued_indices`). Identical behaviour; branch tests updated.
+
+      - A lost container is now recreated under the same name (master''s S78 `_ensure_scenario_container`)
+      and the worker relaunched inside it; only an UNRECREATABLE container raises
+      ContainerLaunchError (cause+remedy, no host relaunch, no invented INPUT_REQUIRED).
+      QA consequence: to exercise the lost-container ERROR path, make recreation impossible
+      too (e.g. remove the scenario clone); a recreatable container now recovers in
+      container mode. R11/R16 and the edge-case table in qa.md say so.
+
+      - Relaunch keeps master''s in-window relaunch (split back beside a live refiner/verifier),
+      `_write_resume_file` on success (S43) and ProviderNotFoundError re-raise (S106).
+      The run''s persisted `use_containers` remains the only mode input (never a fresh
+      runtime probe).
+
+      - qa_loop_ui: kept master''s clone-ownership guard (S43) before this branch''s
+      status-file read that preserves a recovered ERROR''s cause; `_record_qa_note`
+      carries both master''s workdir de-dup and this branch''s ERROR cause append.
+
+      - project.yaml: `store.merge_3way` over the git index stages (master as ours,
+      branch as theirs), then reordered to master''s record order. 576 PRs / 22 plans,
+      unique ids, every record and note from both sides present, `project.active_pr`
+      kept at master''s newer value. Diff vs master is only this branch''s records/notes
+      (519 insertions).
+
+
+      Validation: full pytest 5228 passed, 1 skipped, 0 failed (markdown installed,
+      PM_HOST_HOME unset); tests/test_container_fail_closed.py 24 passed; the QA/container/review/signoff
+      suites 1406 passed. Static audit: no remaining `is_container_mode_enabled()
+      and _runtime_available()` downgrade combo in pm_core. Specs updated: impl.md
+      "Integration with master@eaf3372e" section; qa.md integration note + R11/R16
+      recreation wording.
+
+
+      No new native recording: the preflight/launch code is unchanged by the merge
+      (auto-merged, unit-tested) and the prior pre/post-fix captures remain valid
+      for it. The earlier QA verdicts are historical for pre-integration revisions
+      and must not be reused — the fresh review/QA/sign-off sequence should drive
+      the native entry points against this combined head (e99193e1/65c1b86a).'
+    created_at: '2026-10-31T18:35:33Z'
+    last_edited: '2026-10-31T18:35:33Z'
+  - id: note-5fdb4bd
+    text: 'Review 421e i1: no blocking defects in the integrated fail-closed boundary.
+      Fixed: (1) the poll loop post-relaunch verdict guard no longer claims a lost
+      container recorded an INPUT_REQUIRED (the relaunch now fails closed with ContainerLaunchError);
+      it reports the recorded verdict and that the relaunch failed. (2) Spec impl.md
+      R4 / edge-case table / R5 synced to the integrated container-recreation behaviour
+      (lost container recreated first; resume preflight publishes via _fail_run_infrastructure,
+      not _abort(error=...)). (3) Test gap closed for R7: a two-scenario test proves
+      a failed container launch releases only the failed attempt''s container and
+      keeps the other scenario''s container/window. Full pytest: 5229 passed, 1 skipped.
+      No host-launch path found; the only remaining container-mode gates are fail-closed
+      or display-only. Out of scope and already filed: pr-7abb052 (auto-sequence ERROR
+      status) and pr-7b1dd2e (auto-start relaunches a recorded ERROR).'
+    created_at: '2026-10-31T19:51:08Z'
+    last_edited: '2026-10-31T19:51:08Z'
+  model: provider:deepseek-flash
+  effort: high
+  review_spec: false
+  session_models:
+    signoff: provider:claude-work-xhigh-249
+  session_effort:
+    signoff: high
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-574e851-bug-never-fall-back-to-host-executio-4a74d880
+- id: pr-7abb052
+  plan: bugs
+  title: 'Bug: auto-sequence reports ''running: qa'' forever after a QA infrastructure
+    ERROR and never surfaces the cause'
+  branch: pm/pr-7abb052-bug-auto-sequence-reports-running-qa-forever-after
+  status: pending
+  depends_on: []
+  description: '## Location
+
+
+    `pm_core/cli/pr.py`, the `status == "qa"` branch of `pr_auto_sequence` (~line
+    3860-3935), plus the watcher token docs in `pm_core/prompt_gen.py` (~line 2090).
+
+
+    ## Repro
+
+
+    1. Enable container mode for a project whose container runtime is unusable (missing
+    binary, `info` nonzero, or timeout).
+
+    2. Let a QA run start through the auto-sequence chain (`pm pr auto-sequence` ->
+    `pm pr qa-run-bg`), or via the TUI with auto-start.
+
+    3. `run_qa_sync` now fails closed and writes `overall: ERROR` plus the cause+remedy
+    into the run''s `qa_status.json` (pr-574e851). The detached driver exits.
+
+    4. Run `pm pr auto-sequence <pr-id>` again.
+
+
+    ## Expected
+
+
+    The single-line status reports the infrastructure failure (or at least that QA
+    is stopped), so the operator/watcher can act on it.
+
+
+    ## Actual
+
+
+    `overall == "ERROR"` matches none of the PASS / INPUT_REQUIRED / NEEDS_WORK branches
+    and is not `None`, so it falls through to `click.echo("running: qa")` and returns.
+    Every later tick repeats that line: the PR sits in `qa` forever, no QA is running,
+    the detached driver''s stdout/stderr went to DEVNULL, and nothing in the TUI/console
+    shows the cause. The plan watcher logs ''running: qa'' each tick and never escalates.
+
+
+    ## Notes
+
+
+    `overall: ERROR` is a new status value introduced by pr-574e851 (previously only
+    PASS / NEEDS_WORK / INPUT_REQUIRED were written). A fix should add an explicit
+    `ERROR` branch (report the cause from `qa_status.json`''s `error` field and leave
+    the PR in qa for a deliberate retry) and document the new auto-sequence token
+    in the watcher prompt. Related: pr-ccdec71 (auto-sequence misreports a launch
+    that failed).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T04:30:57.107899+00:00'
+  updated_at: '2026-10-29T04:30:57.107899+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7b1dd2e
+  plan: bugs
+  title: 'Bug: auto-start relaunches a fail-closed QA ERROR on every scheduler pass,
+    appending a duplicate QA note each time'
+  branch: pm/pr-7b1dd2e-bug-auto-start-relaunches-a-fail-closed-qa-error-o
+  status: pending
+  depends_on: []
+  description: "## Location\n\n- `pm_core/tui/auto_start.py`, `_auto_start_qa_loops`\
+    \ (~line 1279): the\n  \"already ended\" gate is `if recorded in QA_HOLD_VERDICTS`,\
+    \ and\n  `QA_HOLD_VERDICTS = (\"PASS\", \"INPUT_REQUIRED\")` (~line 1212).\n-\
+    \ `pm_core/tui/qa_loop_ui.py`, `_on_qa_complete` else branch +\n  `_record_qa_note`\
+    \ (~line 1077).\n\n## Repro\n\n1. Enable container mode, then make the container\
+    \ runtime unavailable\n   (`podman info` fails).\n2. Enable auto-start with a\
+    \ PR at `qa`.\n3. Auto-start starts QA. The fail-closed preflight (pr-574e851)\
+    \ ends the run\n   with `overall: \"ERROR\"`; the PR stays at `qa` and a `QA ERROR:\
+    \ ...` note is\n   recorded.\n4. The completion poll drops the state from `app._qa_loops`.\
+    \ On the next\n   `check_and_start` pass (TUI startup/breadcrumb restore, a target\
+    \ change,\n   any merge in the plan, a QA NEEDS_WORK) `recorded_qa_verdict()`\
+    \ returns\n   `\"ERROR\"`, which is not in `QA_HOLD_VERDICTS`, so `start_qa` runs\
+    \ again.\n5. Each retry fails the same way: another ERROR log line, another\n\
+    \   `~/.pm/workdirs/qa/<pr>-<loop>/` directory, and another duplicate\n   `QA\
+    \ ERROR: ...` note in the git-tracked `project.yaml` (the note text\n   carries\
+    \ the per-run workdir, so ids differ and the note is appended).\n\n`pm pr auto-sequence`\
+    \ does not re-spawn (it stalls instead: pr-7abb052), so\nthis is specific to the\
+    \ TUI auto-start scheduler.\n\n## Expected\n\nA fail-closed launch failure should\
+    \ not be retried unboundedly, and a retry\nshould not append a duplicate note.\n\
+    \nThe review loop already bounds exactly this: `VERDICT_LAUNCH_FAILED` with a\n\
+    `launch_retryable` flag, `MAX_REVIEW_LAUNCH_RETRY_EPISODES` (5) and a\n`retry_ready_at`\
+    \ cooldown in `_retry_rearm_blocked`, after which it logs\n\"manual retry required\"\
+    . QA has no equivalent episode counter or cooldown.\n\n## Fix sketch\n\nGive the\
+    \ QA run the same shape: record a retryable-infrastructure flag and an\nepisode\
+    \ counter (runtime_state, next to the `done` verdict), retry at most N\nepisodes\
+    \ with a cooldown, then leave the PR at `qa` with the ERROR note that\nalready\
+    \ names the remedy (`t` to retry after fixing the runtime).\n\nSimpler alternative\
+    \ (loses automatic recovery): add `\"ERROR\"` to\n`QA_HOLD_VERDICTS` so auto-start\
+    \ leaves a failed launch to the user.\n\nEither way, add a test that a recorded\
+    \ `ERROR` verdict does not start a second\nQA loop on the next scheduler pass.\n\
+    \nRelated: pr-7abb052 (auto-sequence has no `ERROR` branch), pr-e7ee94d\n(duplicate\
+    \ note ids for identical text)."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T04:56:40.625999+00:00'
+  updated_at: '2026-10-29T04:56:40.625999+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-43090e6
+  plan: bugs
+  title: 'Bug: re-running `pm qa run` in the same pm session adds a duplicate qa-status
+    pane to the qa-<pr> window'
+  branch: pm/pr-43090e6-bug-re-running-pm-qa-run-in-the-same-pm-session-ad
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_loop.py `_add_status_pane` (called from `_run_qa_sync`).
+
+
+    Repro: with a pm session running, run `pm qa run <instruction> --pr <pr-id>` twice
+    in the same session (e.g. fix the container image and retry, as QA scenario 4
+    does). The first run creates qa-<pr> with 2 panes (main + status). The second
+    run reuses the window via `_ensure_qa_main_pane` and `_add_status_pane` splits
+    ANOTHER `python3 pm_core/qa_status.py <same status_path> <session>` pane, so the
+    window ends with 4 panes (2 identical status dashboards, both polling the same
+    qa_status.json).
+
+
+    Expected: the second run should reuse (or retire and replace) the existing qa-status
+    pane instead of adding another.
+
+
+    Observed in QA scenario 4 on pr-574e851: after the retry run the window showed
+    panes `sleep` (QA execution), status, status, fake-claude FINALIZE_DONE. Not a
+    correctness failure of the verdict, but the window grows by one pane per `pm qa
+    run`. The TUI/planning path avoids this because `_cleanup_stale_scenario_windows(include_main=True)`
+    kills the main QA window first; the CLI `pm qa run` path (planning_phase=False)
+    never calls it.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T06:47:08.079510+00:00'
+  updated_at: '2026-10-29T06:47:08.079510+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e64ecb6
+  plan: bugs
+  title: 'Bug: QA scenario workdir clone uses git clone --local, so a project repo
+    on a different filesystem than ~/.pm fails with a raw cross-device-link traceback'
+  branch: pm/pr-e64ecb6-bug-qa-scenario-workdir-clone-uses-git-clone-local
+  status: pending
+  depends_on: []
+  description: 'pm_core/qa_loop.create_scenario_workdir runs `git clone --local <repo_root>
+    <qa_workdir>/s-N/repo` (comment: fast hardlinks). git refuses --local across filesystems
+    ("fatal: failed to create link ...: Invalid cross-device link", rc 128), and run_git
+    raises CalledProcessError, so `pm qa debug` (and every QA run) dies with a raw
+    traceback instead of either working or reporting an actionable error.
+
+
+    Repro (2026-10-29, pr-574e851 QA S13): project repo at /scratch/s13-test-<ts>
+    (nvme mount), HOME on the overlay root; `pm qa debug repro --branch master` ->
+    CalledProcessError from qa_loop.py:368 (git clone --local). Same command with
+    the project under /tmp (same fs as ~/.pm/workdirs) works. Plain `git clone` (no
+    --local) succeeds cross-device by copying.
+
+
+    Suggested fix: try --local first and fall back to a plain clone on failure (keeps
+    the hardlink speedup in the common case), and/or surface a clean error. Not fixed
+    in pr-574e851 (out of scope: that PR is the fail-closed container launch boundary).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T13:47:39.297913+00:00'
+  updated_at: '2026-10-29T13:47:39.297913+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
