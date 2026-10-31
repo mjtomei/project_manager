@@ -319,8 +319,8 @@ def ensure_host_bridge(cfg: ProviderConfig) -> Path:
         if route_bridge.unix_connectable(str(sock)):
             return sock
         host, port = router_address(cfg)
-        # Cross-process lock: two QA loops must not race two bridges onto
-        # one socket path.
+        # Cross-process lock: two pm processes must not race two bridges
+        # onto one socket path.
         with open(d / ".lock", "w") as lockf:
             fcntl.flock(lockf, fcntl.LOCK_EX)
             if route_bridge.unix_connectable(str(sock)):

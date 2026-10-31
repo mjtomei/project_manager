@@ -1123,10 +1123,14 @@ class TestPlacement:
 
     def test_placement_does_not_restrict_routing_for_other_roles(
             self, pm_home_dir):
+        """Every role outside the placement constant is still routable: the
+        constant is not a routing allowlist."""
+        from pm_core.model_config import SESSION_TYPES
         _write_providers(pm_home_dir)
-        for st in ("impl", "review", "signoff", "qa_planning",
-                   "qa_verification", "qa_finalize", "qa_interactive",
-                   "merge", "watcher"):
+        others = [st for st in SESSION_TYPES
+                  if st not in router_route.SCENARIO_CONTAINER_TYPES]
+        assert others, "every role would be a scenario-container role"
+        for st in others:
             data = {"project": {"model_config": {"session_models": {
                 st: f"provider:{ROUTE}"}}}}
             res = resolve_model_and_provider(st, project_data=data)
@@ -1135,6 +1139,10 @@ class TestPlacement:
     def test_scenario_setup_checks_only_scenario_container_roles(
             self, monkeypatch):
         from pm_core import qa_loop
+        # Isolate resolution: only the project setting below may decide.
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        monkeypatch.setattr("pm_core.model_config.get_global_setting_value",
+                            lambda *a, **k: None)
         seen = []
         monkeypatch.setattr(router_route, "require_setup",
                             lambda res, **kw: seen.append(res.provider))
@@ -1151,6 +1159,10 @@ class TestPlacement:
         """A route on a host role (qa_planning) must not mount the bridge
         into a scenario container; the scenario roles' routes do."""
         from pm_core import qa_loop
+        # Isolate resolution: only the project setting below may decide.
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        monkeypatch.setattr("pm_core.model_config.get_global_setting_value",
+                            lambda *a, **k: None)
         seen = []
         monkeypatch.setattr(router_route, "container_mounts",
                             lambda res, **kw: seen.append(res.provider) or {})

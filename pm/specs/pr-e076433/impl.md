@@ -210,3 +210,9 @@ container launches, and the no-configuration default (plain Claude).
   legacy tests in `tests/test_model_config.py` (project/global plain-model
   inheritance, provider non-inheritance from both, explicit
   `qa_interactive` model/provider precedence).
+- Review-loop b287 i5: `TestPlacement` now derives "every other role" from
+  `SESSION_TYPES` (so a new role cannot slip past it) and the two
+  resolution-based placement tests isolate `PM_MODEL` and global settings,
+  matching the rest of the suite; the bridge lock comment no longer says
+  "two QA loops" (any two pm processes can race it).  Documentation and
+  test-only; behavior unchanged.  Full suite **5207 passed, 1 skipped**.
