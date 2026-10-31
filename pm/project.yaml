@@ -15156,6 +15156,19 @@ prs:
       + driver + manifest).'
     created_at: '2026-10-31T21:34:11Z'
     last_edited: '2026-10-31T21:34:11Z'
+  - id: note-8eca36d
+    text: 'S20 refiner: autostart-launch scenarios need the throwaway project committed
+      on the base branch: make one initial git commit, then after pm init/pm pr add
+      run `pm push` and merge the printed pm/sync-<ts> branch into master — otherwise
+      the scheduler launch fails with "PR … is not committed on master yet" (pm push
+      with no HEAD fails "ambiguous argument HEAD"). A reopen (pm pr edit --status
+      pending) does NOT trigger a scheduler pass (on_state_loaded only reacts to newly-terminal
+      PRs / dep changes); force one with an idempotent `pm autostart add <target>`
+      (prints "unchanged: …"). A closed prerequisite is omitted from `pm autostart
+      status`/the a-popup entirely (not shown as completed). Set fake-claude `{"_all":
+      {}}` for the session tag so impl/review launches do not call the real model.'
+    created_at: '2026-10-31T20:31:59Z'
+    last_edited: '2026-10-31T20:31:59Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
