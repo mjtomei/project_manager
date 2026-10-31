@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-31T18:07:25.345765+00:00'
+  updated_at: '2026-10-31T18:27:26.807533+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5272,6 +5272,30 @@ prs:
       wait_for_merge; no PR merge is authorized by this request.'
     created_at: '2026-10-31T18:07:25.345765+00:00'
     last_edited: '2026-10-31T18:07:25.345765+00:00'
+  - id: note-b28219c
+    text: 'Master integration 2026-10-31 (user-authorized restart): merged origin/master
+      @ eaf3372e (#249) into this branch (merge base 4a74d880; 544 commits, 113 files).
+      Conflicts: pm/project.yaml (pm store.merge_3way with master as ours and the
+      branch as theirs; store.load + id/notes superset validated), pm_core/tmux.py
+      (kept both sides'' helpers: master''s TmuxCommandError/session_group alongside
+      the branch''s socket-path/ambient-server/find_session_server/use_env=False work),
+      pm_core/cli/helpers.py (master''s -C/PM_PROJECT override and pm_session_name
+      group resolution combined with the branch''s OSError degrade and hosting-server
+      selection on both paths). Also fixed master''s new TestPmSessionOutsidePmTmux
+      stub to accept use_env, since find_session_server probes the default server
+      with use_env=False. Validation on integrated head 21998569: full suite 5325
+      passed / 1 skipped / 0 failed (437 s; scratch pytest<9 + markdown, PATH without
+      the push-proxy git, TMUX/TMUX_PANE/PM_*/PM_HOST_HOME cleared; log /pm-captures/pr-073910f-integration-eaf3372e/full-suite.log);
+      session_start_smoke.py re-run end to end on a disposable socket with TMUX_TMPDIR
+      on a scratch dir (private server, session env, global env, hooks correct; default
+      server untouched); pm session list read-only (''No pm sessions found.'', no
+      socket dir created). No live session, server or shared host configuration was
+      touched. ALL earlier QA PASS results predate this merge and are stale: this
+      PR needs a fresh review/QA/sign-off sequence. Untracked verify-s1-followup.md
+      and verify-s4-followup.md remain in the workdir (prior QA verification prompts)
+      and were not committed.'
+    created_at: '2026-10-31T18:27:26Z'
+    last_edited: '2026-10-31T18:27:26Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
