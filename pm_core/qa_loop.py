@@ -2328,7 +2328,7 @@ def _resolve_qa_model(pr_data: dict, project_data: dict | None = None,
 
 
 # ---------------------------------------------------------------------------
-# Worker routes (pm_core.worker_route)
+# Routes (pm_core.router_route)
 # ---------------------------------------------------------------------------
 
 def _require_scenario_setup(pr_data: dict, data: dict, *,
@@ -2340,9 +2340,9 @@ def _require_scenario_setup(pr_data: dict, data: dict, *,
     Fake-claude sessions are checked too: ``build_claude_shell_cmd``
     resolves the provider (and raises its setup error) before it takes the
     fake branch."""
-    from pm_core import worker_route
-    for st in worker_route.ROUTED_SESSION_TYPES:
-        worker_route.require_setup(
+    from pm_core import router_route
+    for st in router_route.SCENARIO_CONTAINER_TYPES:
+        router_route.require_setup(
             _resolve_qa_model(pr_data, data, session_type=st),
             container=container)
 
@@ -2351,21 +2351,21 @@ def _route_mounts(pr_data: dict, data: dict,
                   session_tag: str | None) -> dict:
     """Bridge mounts a QA container needs for routed refiner/worker
     sessions (empty when neither is routed, or both are faked)."""
-    from pm_core import worker_route
+    from pm_core import router_route
     from pm_core.paths import fake_claude_config_for_type
     mounts: dict = {}
-    for st in worker_route.ROUTED_SESSION_TYPES:
+    for st in router_route.SCENARIO_CONTAINER_TYPES:
         if fake_claude_config_for_type(st, session_tag) is not None:
             continue
-        mounts.update(worker_route.container_mounts(
+        mounts.update(router_route.container_mounts(
             _resolve_qa_model(pr_data, data, session_type=st)))
     return mounts
 
 
 def _describe_route(pr_data: dict, data: dict, session_type: str, *,
                     container: bool) -> str:
-    from pm_core import worker_route
-    return worker_route.describe(
+    from pm_core import router_route
+    return router_route.describe(
         _resolve_qa_model(pr_data, data, session_type=session_type),
         container=container)
 
@@ -2548,9 +2548,9 @@ def _build_concretize_cmd(
         container=bool(container_name),
         env_out=env_out,
     )
-    from pm_core import worker_route
+    from pm_core import router_route
     _log.info("Refiner for scenario %d: %s", scenario.index,
-              worker_route.describe(resolution, container=bool(container_name)))
+              router_route.describe(resolution, container=bool(container_name)))
 
     if container_name:
         from pm_core import container as container_mod
@@ -2644,12 +2644,12 @@ def _resolve_interactive_model(pr_data: dict, data: dict):
     """Model for Scenario 0: ``qa_interactive`` (falls back to ``qa``).
 
     Scenario 0 is the session the user drives / remote-controls, so it
-    never follows ``qa_scenario`` onto a worker route.  Configs from
-    before ``qa_interactive`` that set only ``qa_scenario`` to a plain
-    model keep that model for s0.  A PR's ``session_models`` worker
-    exception is not such a config, so that step reads project/global
-    settings only (``resolve_model_and_provider`` applies it, so
-    ``pm pr model show`` and the TUI show what s0 runs).
+    never follows ``qa_scenario`` onto a route.  Configs from before
+    ``qa_interactive`` that set only ``qa_scenario`` to a plain model keep
+    that model for s0 (see ``model_config._legacy_s0_resolution``).  A
+    PR's ``session_models`` worker exception is not such a config, so that
+    step reads project/global settings only (``resolve_model_and_provider``
+    applies it, so ``pm pr model show`` and the TUI show what s0 runs).
     """
     return _resolve_qa_model(pr_data, data, session_type="qa_interactive")
 
@@ -3531,9 +3531,9 @@ def _build_scenario_run_cmd(
         container=use_containers,
         env_out=env_out,
     )
-    from pm_core import worker_route
+    from pm_core import router_route
     _log.info("Worker for scenario %d: %s", scenario.index,
-              worker_route.describe(qa_resolution, container=use_containers))
+              router_route.describe(qa_resolution, container=use_containers))
 
     if use_containers:
         run_cmd = container_mod.build_exec_cmd(
@@ -6034,8 +6034,8 @@ def _execute_and_finalize(
             # before an overall is published that a later auto-sequence tick
             # would act on (finalize=None).  A restored held run already
             # finalized this result and runs no finalizer.
-            from pm_core import worker_route
-            worker_route.require_setup(
+            from pm_core import router_route
+            router_route.require_setup(
                 _resolve_qa_model(pr_data, data, session_type="qa_finalize"))
 
         # Write final status file with overall verdict
@@ -6355,7 +6355,7 @@ def check_qa_providers(pr_data: dict, project_data: dict) -> None:
     """Raise :class:`~pm_core.providers.ProviderNotFoundError` when the
     provider of a QA session (planner, s0, refiner, worker, verifier,
     finalizer) cannot be looked up, or is a router whose own settings
-    cannot launch it (:func:`pm_core.worker_route.require_setup`).
+    cannot launch it (:func:`pm_core.router_route.require_setup`).
 
     For callers that cannot show ``QA stopped: …`` (the detached
     auto-sequence driver writes nothing a later tick reads), so the error
@@ -6363,17 +6363,17 @@ def check_qa_providers(pr_data: dict, project_data: dict) -> None:
     ``qa-verify-pass`` off no verifier is launched, so its provider is not
     checked (the TUI ``t`` run would complete without it).
     """
-    from pm_core import worker_route
+    from pm_core import router_route
     from pm_core.container import is_container_mode_enabled
     in_container = is_container_mode_enabled()
     types = [t for t in _QA_SESSION_TYPES
              if t != "qa_verification" or _is_verification_enabled()]
     checks = [(_resolve_qa_model(pr_data, project_data, session_type=t),
-               in_container and t in worker_route.ROUTED_SESSION_TYPES)
+               in_container and t in router_route.SCENARIO_CONTAINER_TYPES)
               for t in types]
     checks.append((_resolve_interactive_model(pr_data, project_data), False))
     for res, container in checks:
-        worker_route.require_setup(res, container=container)
+        router_route.require_setup(res, container=container)
 
 
 def record_setup_stop(state: QALoopState, exc: Exception) -> None:

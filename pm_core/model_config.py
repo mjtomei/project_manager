@@ -32,7 +32,15 @@ For external/local model servers, configure a provider via ``pm provider``
             review: opus               # use a model name shortcut
 
 Values prefixed with ``provider:`` are resolved via the provider system
-and return a provider name instead of a model identifier.
+and return a provider name instead of a model identifier.  Any role in
+``SESSION_TYPES`` may be routed; the setting is explicit per role, and a
+role with no model or provider configured runs plain Claude on the CLI
+default.
+
+Scenario 0 (``qa_interactive``) additionally keeps applying a pre-split
+plain-model ``qa_scenario`` setting; see
+:func:`_legacy_s0_resolution` for what that compatibility shim does and
+does not inherit.
 """
 
 from __future__ import annotations
@@ -218,19 +226,16 @@ def resolve_model_and_provider(
             resolution = ModelResolution()
 
     # Scenario 0 (qa_interactive) from before that type existed: a project
-    # or global plain-model ``qa_scenario`` keeps applying to it.  Not a
-    # provider (s0 never follows workers onto a route) and not a PR's
-    # worker exception.  Resolved here so launches and every view agree.
+    # or global plain-model ``qa_scenario`` keeps applying to it.  Resolved
+    # here so launches and every view agree.  Kept for compatibility: see
+    # _legacy_s0_resolution for what it does (and must never) inherit.
     legacy = None
     if (session_type == "qa_interactive"
             and not resolution.model and not resolution.provider):
-        legacy = resolve_model_and_provider("qa_scenario",
-                                            project_data=project_data)
-        if legacy.model and not legacy.provider:
+        legacy = _legacy_s0_resolution(project_data)
+        if legacy is not None:
             resolution.model = legacy.model
             resolution.source = f"{legacy.source} (s0 legacy)"
-        else:
-            legacy = None
 
     # --- Effort resolution ---
     effort, effort_source = None, None
@@ -283,6 +288,33 @@ def resolve_model_and_provider(
         resolution.effort_source = None
 
     return resolution
+
+
+def _legacy_s0_resolution(project_data: dict | None) -> ModelResolution | None:
+    """The pre-``qa_interactive`` ``qa_scenario`` setting Scenario 0 keeps.
+
+    Scenario 0 used to run as ``qa_scenario``, so a project or global
+    plain-model ``qa_scenario`` from before the split must keep deciding
+    the interactive session.  It is consulted only when neither
+    ``qa_interactive`` nor its ``qa`` parent selects anything (the normal
+    chain in :func:`resolve_model_and_provider`).
+
+    This is a compatibility shim, not a route.  It reads project/global
+    settings only -- a PR's ``session_models`` worker exception is not
+    such a config and never moves s0 -- and it inherits only a plain
+    model (and that setting's effort).  A ``qa_scenario`` that selects a
+    provider is the workers' route and is deliberately not inherited: s0
+    never follows workers onto a route, whose bridge, account or effort
+    may not be what the user wants for the session they drive.
+
+    Retiring the shim would silently move s0 to the CLI default for every
+    config that sets only ``qa_scenario``, so it is retained.  Setting
+    ``qa_interactive`` explicitly takes control, and ``pm pr model show``
+    (and the TUI) label an inherited value ``(s0 legacy)``.
+    """
+    legacy = resolve_model_and_provider("qa_scenario",
+                                        project_data=project_data)
+    return legacy if legacy.model and not legacy.provider else None
 
 
 def provider_effort(name: str) -> str | None:

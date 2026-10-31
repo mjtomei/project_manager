@@ -311,6 +311,75 @@ class TestGetPrModelOverride:
             "session_models": {"qa_scenario": "sonnet"}}}}
         assert qa_loop._resolve_interactive_model(pr, legacy).model == "sonnet"
 
+    def test_s0_legacy_inherits_a_plain_project_model_and_effort(
+            self, monkeypatch):
+        """A pre-split plain-model ``qa_scenario`` (and its effort) still
+        decides Scenario 0 when ``qa_interactive``/``qa`` set nothing."""
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        monkeypatch.delenv("PM_EFFORT", raising=False)
+        monkeypatch.setattr("pm_core.model_config.get_global_setting_value",
+                            lambda *a, **k: None)
+        data = {"project": {"model_config": {
+            "session_models": {"qa_scenario": "sonnet"},
+            "session_effort": {"qa_scenario": "low"}}}}
+        res = resolve_model_and_provider("qa_interactive", project_data=data)
+        assert (res.model, res.provider, res.effort) == ("sonnet", None, "low")
+        assert res.source == "project qa_scenario (s0 legacy)"
+        assert res.effort_source == "project qa_scenario"
+
+    def test_s0_legacy_inherits_a_plain_global_model(self, monkeypatch):
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        monkeypatch.setattr(
+            "pm_core.model_config.get_global_setting_value",
+            lambda name: {"model-qa_scenario": "sonnet"}.get(name))
+        res = resolve_model_and_provider("qa_interactive")
+        assert (res.model, res.provider) == ("sonnet", None)
+        assert res.source == "global qa_scenario (s0 legacy)"
+
+    @pytest.mark.parametrize("where", ["project", "global"])
+    def test_s0_legacy_never_inherits_a_provider(self, where, monkeypatch):
+        """A routed ``qa_scenario`` is the workers' route: Scenario 0 must
+        not follow it onto that provider (or its effort) from either the
+        project or the global setting."""
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        monkeypatch.delenv("PM_EFFORT", raising=False)
+        if where == "project":
+            monkeypatch.setattr(
+                "pm_core.model_config.get_global_setting_value",
+                lambda *a, **k: None)
+            data = {"project": {"model_config": {"session_models": {
+                "qa_scenario": "provider:claude-work"}}}}
+            res = resolve_model_and_provider("qa_interactive",
+                                             project_data=data)
+        else:
+            monkeypatch.setattr(
+                "pm_core.model_config.get_global_setting_value",
+                lambda name: ("provider:claude-work"
+                              if name == "model-qa_scenario" else None))
+            res = resolve_model_and_provider("qa_interactive")
+        assert (res.model, res.provider, res.effort) == (None, None, None)
+
+    def test_explicit_qa_interactive_model_wins_over_the_legacy_model(
+            self, monkeypatch):
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        monkeypatch.setattr("pm_core.model_config.get_global_setting_value",
+                            lambda *a, **k: None)
+        data = {"project": {"model_config": {"session_models": {
+            "qa_scenario": "haiku", "qa_interactive": "sonnet"}}}}
+        res = resolve_model_and_provider("qa_interactive", project_data=data)
+        assert (res.model, res.source) == ("sonnet", "project qa_interactive")
+
+    def test_explicit_qa_interactive_provider_wins_over_the_legacy_model(
+            self, monkeypatch):
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        monkeypatch.setattr("pm_core.model_config.get_global_setting_value",
+                            lambda *a, **k: None)
+        data = {"project": {"model_config": {"session_models": {
+            "qa_scenario": "sonnet",
+            "qa_interactive": "provider:claude-work"}}}}
+        res = resolve_model_and_provider("qa_interactive", project_data=data)
+        assert (res.model, res.provider) == (None, "claude-work")
+
     def test_merge_window_resolves_its_pr_exception(self, tmp_path,
                                                     monkeypatch):
         from types import SimpleNamespace
@@ -724,10 +793,10 @@ def test_model_show_lists_routes_that_pr_overrides_select(tmp_path,
     that selects a route gets one line per distinct route, naming the types
     it covers."""
     from click.testing import CliRunner
-    from pm_core import store, worker_route
+    from pm_core import store, router_route
     from pm_core.cli import model as model_cli
     monkeypatch.delenv("PM_MODEL", raising=False)
-    monkeypatch.setattr(worker_route, "describe",
+    monkeypatch.setattr(router_route, "describe",
                         lambda res, **kw: f"route={res.provider}")
     store.save({"project": {"name": "t", "repo": str(tmp_path),
                             "base_branch": "master"},
@@ -737,7 +806,7 @@ def test_model_show_lists_routes_that_pr_overrides_select(tmp_path,
                         {"id": "pr-c", "title": "no override"}]}, tmp_path)
     monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
     out = CliRunner().invoke(model_cli.model, ["show"]).output
-    routes = out.split("Routes:\n", 1)[1].splitlines()
+    routes = out.split("Routes (roles set to a provider):\n", 1)[1].splitlines()
     assert "  pr-a (all types) route=claude-work" in routes
     # signoff and the types that inherit from it (none here) only.
     b = [r for r in routes if r.startswith("  pr-b ")]
@@ -752,10 +821,10 @@ def test_model_show_routes_name_only_the_types_a_pr_override_decides(
     (S54's R: qa_scenario -> haiku) read "pr-r (qa_concretize)
     route=claude-work", as if its override selected the project's route."""
     from click.testing import CliRunner
-    from pm_core import store, worker_route
+    from pm_core import store, router_route
     from pm_core.cli import model as model_cli
     monkeypatch.delenv("PM_MODEL", raising=False)
-    monkeypatch.setattr(worker_route, "describe",
+    monkeypatch.setattr(router_route, "describe",
                         lambda res, **kw: f"route={res.provider}")
     store.save({"project": {"name": "t", "repo": str(tmp_path),
                             "base_branch": "master",
@@ -768,7 +837,7 @@ def test_model_show_routes_name_only_the_types_a_pr_override_decides(
                tmp_path)
     monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
     out = CliRunner().invoke(model_cli.model, ["show"]).output
-    routes = out.split("Routes:\n", 1)[1].splitlines()
+    routes = out.split("Routes (roles set to a provider):\n", 1)[1].splitlines()
     assert any(r.split() == ["qa_concretize", "route=claude-work"]
                for r in routes), routes
     assert not any("pr-r" in r for r in routes), routes
@@ -783,11 +852,11 @@ def test_model_show_pr_routes_never_count_the_project_watcher(tmp_path,
     whose override routes every PR session but one listed "watcher" among
     its types."""
     from click.testing import CliRunner
-    from pm_core import store, worker_route
+    from pm_core import store, router_route
     from pm_core.cli import model as model_cli
     from pm_core.model_config import PR_SESSION_TYPES
     monkeypatch.delenv("PM_MODEL", raising=False)
-    monkeypatch.setattr(worker_route, "describe",
+    monkeypatch.setattr(router_route, "describe",
                         lambda res, **kw: f"route={res.provider}")
     store.save({"project": {"name": "t", "repo": str(tmp_path),
                             "base_branch": "master"},
@@ -796,7 +865,7 @@ def test_model_show_pr_routes_never_count_the_project_watcher(tmp_path,
                          "session_models": {"impl": "opus"}}]}, tmp_path)
     monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
     out = CliRunner().invoke(model_cli.model, ["show"]).output
-    routes = out.split("Routes:\n", 1)[1].splitlines()
+    routes = out.split("Routes (roles set to a provider):\n", 1)[1].splitlines()
     assert "  pr-a (all types) route=claude-work" in routes, routes
     i = [r for r in routes if r.startswith("  pr-i ")]
     others = ", ".join(st for st in PR_SESSION_TYPES if st != "impl")
@@ -811,11 +880,11 @@ def test_model_show_pr_route_line_is_not_split_by_project_effort(
     lines by effort, so neither said "all types".  One line per route; the
     efforts that differ are named on it."""
     from click.testing import CliRunner
-    from pm_core import store, worker_route
+    from pm_core import store, router_route
     from pm_core.cli import model as model_cli
     monkeypatch.delenv("PM_MODEL", raising=False)
     monkeypatch.setattr(
-        worker_route, "describe",
+        router_route, "describe",
         lambda res, **kw: f"route={res.provider} effort={res.effort or '(default)'}")
     store.save({"project": {"name": "t", "repo": str(tmp_path),
                             "base_branch": "master",
@@ -828,7 +897,7 @@ def test_model_show_pr_route_line_is_not_split_by_project_effort(
                tmp_path)
     monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
     out = CliRunner().invoke(model_cli.model, ["show"]).output
-    routes = out.split("Routes:\n", 1)[1].splitlines()
+    routes = out.split("Routes (roles set to a provider):\n", 1)[1].splitlines()
     a = [r for r in routes if r.startswith("  pr-a ")]
     assert a == ["  pr-a (all types) route=claude-work effort=high "
                  "(qa_scenario, qa_concretize), (default) otherwise"], routes
@@ -840,19 +909,19 @@ def test_model_show_pr_route_lines_with_the_real_route_description(
         tmp_path, monkeypatch):
     """Review 6915 i1: the PR Routes tests above stub ``describe``, which
     is how S55's effort split stayed invisible to them.  Here a configured
-    router provider goes through the real ``worker_route.describe``: the
+    router provider goes through the real ``router_route.describe``: the
     production line (every type routed, qa_scenario/qa_concretize high)
     and S56's W shape (a plain-model impl exception, mixed efforts) are
     one line each, the effort summary in the effort field before via=."""
     import yaml
     from click.testing import CliRunner
-    from pm_core import container, model_config, providers, store, worker_route
+    from pm_core import container, model_config, providers, store, router_route
     from pm_core.cli import model as model_cli
     for var in ("PM_MODEL", "PM_EFFORT", "PM_PROVIDER"):
         monkeypatch.delenv(var, raising=False)
     home = tmp_path / "pmhome"
     home.mkdir()
-    for mod in (providers, worker_route):
+    for mod in (providers, router_route):
         monkeypatch.setattr(mod, "pm_home", lambda: home)
     monkeypatch.setattr(model_config, "get_global_setting_value",
                         lambda name: None)
@@ -872,7 +941,7 @@ def test_model_show_pr_route_lines_with_the_real_route_description(
                          "session_models": {"impl": "opus"}}]}, proj)
     monkeypatch.setattr(model_cli, "state_root", lambda: proj)
     out = CliRunner().invoke(model_cli.model, ["show"]).output
-    routes = out.split("Routes:\n", 1)[1].splitlines()
+    routes = out.split("Routes (roles set to a provider):\n", 1)[1].splitlines()
     tail = ("route=claude-work model=work/claude-opus-5-5 effort=high "
             "(qa_scenario, qa_concretize), (default) otherwise via=host")
     assert [r for r in routes if r.startswith("  pr-a ")] == [
@@ -888,13 +957,13 @@ def _real_route_project(tmp_path, monkeypatch, *, containers):
     provider claude-work, project qa_scenario/qa_concretize on it at high
     effort, pr-a routed for every type, pr-c on the project default."""
     import yaml
-    from pm_core import container, model_config, providers, store, worker_route
+    from pm_core import container, model_config, providers, store, router_route
     from pm_core.cli import model as model_cli
     for var in ("PM_MODEL", "PM_EFFORT", "PM_PROVIDER"):
         monkeypatch.delenv(var, raising=False)
     home = tmp_path / "pmhome"
     home.mkdir()
-    for mod in (providers, worker_route):
+    for mod in (providers, router_route):
         monkeypatch.setattr(mod, "pm_home", lambda: home)
     monkeypatch.setattr(model_config, "get_global_setting_value",
                         lambda name: None)
@@ -920,7 +989,7 @@ def _real_route_project(tmp_path, monkeypatch, *, containers):
     from click.testing import CliRunner
     result = CliRunner().invoke(model_cli.model, ["show"])
     assert result.exit_code == 0, result.output
-    return result.output.split("Routes:\n", 1)[1].splitlines()
+    return result.output.split("Routes (roles set to a provider):\n", 1)[1].splitlines()
 
 
 def test_model_show_routes_name_the_container_bridge_in_container_mode(
@@ -932,7 +1001,7 @@ def test_model_show_routes_name_the_container_bridge_in_container_mode(
     container-bridge and host-run types host; a PR routed for every type
     gets one line per path, each type exactly once."""
     from pm_core.model_config import PR_SESSION_TYPES
-    from pm_core.worker_route import CONTAINER_SESSION_TYPES
+    from pm_core.router_route import CONTAINER_SESSION_TYPES
     routes = _real_route_project(tmp_path, monkeypatch, containers=True)
     route = "route=claude-work model=work/claude-opus-5-5"
     assert f"  qa_scenario    {route} effort=high via=container-bridge" \
@@ -970,10 +1039,10 @@ def test_model_show_pr_routes_defer_to_pm_model(tmp_path, monkeypatch):
     so a PR whose override is a plain model read "pr-b (all types)
     route=claude-work"."""
     from click.testing import CliRunner
-    from pm_core import store, worker_route
+    from pm_core import store, router_route
     from pm_core.cli import model as model_cli
     monkeypatch.setenv("PM_MODEL", "provider:claude-work")
-    monkeypatch.setattr(worker_route, "describe",
+    monkeypatch.setattr(router_route, "describe",
                         lambda res, **kw: f"route={res.provider}")
     store.save({"project": {"name": "t", "repo": str(tmp_path),
                             "base_branch": "master"},
@@ -984,7 +1053,7 @@ def test_model_show_pr_routes_defer_to_pm_model(tmp_path, monkeypatch):
     monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
     result = CliRunner().invoke(model_cli.model, ["show"])
     assert result.exit_code == 0, result.output
-    routes = result.output.split("Routes:\n", 1)[1].splitlines()
+    routes = result.output.split("Routes (roles set to a provider):\n", 1)[1].splitlines()
     assert any(r.split() == ["impl", "route=claude-work"] for r in routes)
     assert not any(r.startswith(("  pr-a ", "  pr-b ")) for r in routes), \
         routes
@@ -998,10 +1067,10 @@ def test_model_show_survives_a_non_string_pr_model(tmp_path, monkeypatch,
     (AttributeError), the command a model setting problem is meant to be
     found with.  It now lists no route for it and names the problem."""
     from click.testing import CliRunner
-    from pm_core import store, worker_route
+    from pm_core import store, router_route
     from pm_core.cli import model as model_cli
     monkeypatch.delenv("PM_MODEL", raising=False)
-    monkeypatch.setattr(worker_route, "describe",
+    monkeypatch.setattr(router_route, "describe",
                         lambda res, **kw: f"route={res.provider}")
     store.save({"project": {"name": "t", "repo": str(tmp_path),
                             "base_branch": "master"},
@@ -1010,7 +1079,7 @@ def test_model_show_survives_a_non_string_pr_model(tmp_path, monkeypatch,
     monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
     result = CliRunner().invoke(model_cli.model, ["show"])
     assert result.exit_code == 0, result.output
-    routes = result.output.split("Routes:\n", 1)[1]
+    routes = result.output.split("Routes (roles set to a provider):\n", 1)[1]
     assert "  pr-a (all types) route=claude-work" in routes
     assert "pr-x (" not in routes
     assert "prs[pr-x].model:" in result.output

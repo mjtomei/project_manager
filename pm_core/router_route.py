@@ -2,10 +2,14 @@
 endpoint that holds its own upstream credentials).
 
 A *route* is a ``type: router`` provider in ``~/.pm/providers.yaml`` (see
-pm_core.providers), selected like any model: per session type, e.g. for the
-QA refiner (``qa_concretize``) and workers (``qa_scenario``)
+pm_core.providers).  It is selected like any model, per role: every role
+in ``model_config.SESSION_TYPES`` may be routed, and the setting is
+explicit -- a role with no setting of its own follows its parent role,
+and with nothing configured at all runs plain ``claude`` on the CLI
+default.  For example
 
-    pm model set qa_concretize provider:<name> --project
+    pm model set impl provider:<name> --project
+    pm model set signoff provider:<name> --project
     pm model set qa_scenario provider:<name> --project
 
 or per PR (``pm pr model set <pr> provider:<name> [--role ...]``).  How the
@@ -14,8 +18,9 @@ provider's ``api_base`` and model names to Claude -- never a token.
 
 This module owns everything route-specific outside the launch command:
 
-  * :func:`describe` -- the ``route=... model=... via=...`` line shown in QA
-    logs and status so the selection is visible without credentials;
+  * :func:`describe` -- the ``route=... model=... via=...`` line shown in
+    session logs and status so the selection is visible without
+    credentials;
   * :func:`setup_problem` -- the provider settings a launch cannot work
     without.  :func:`launch_parts` raises :class:`RouteSetupError` for them,
     so the session fails like any other launch of a misconfigured provider
@@ -54,17 +59,21 @@ from pm_core.providers import (ProviderConfig, ProviderEntryError,
                                ProvidersFileUnreadableError, get_provider,
                                launch_env)
 
-_log = configure_logger("pm.worker_route")
+_log = configure_logger("pm.router_route")
 
-# QA session types that run in scenario containers (refiner, worker): a
-# scenario container mounts the bridge for whichever of them is routed.
-ROUTED_SESSION_TYPES = ("qa_concretize", "qa_scenario")
+# The QA session types that run in scenario containers (refiner, worker):
+# a scenario container mounts the bridge for whichever of them is routed.
+# Placement only -- routing eligibility is not limited to these types: any
+# role in the model-config set may select a provider, on the host or
+# through the bridge.
+SCENARIO_CONTAINER_TYPES = ("qa_concretize", "qa_scenario")
 # Session types that run inside a pm container in container mode, so a
 # route reaches them through the container bridge: impl, review and
 # sign-off (wrap_claude_cmd) and the QA refiner/worker (scenario
 # containers).  Every other type (planner, s0, verifier, finalizer, merge)
-# runs on the host.
-CONTAINER_SESSION_TYPES = ("impl", "review", "signoff") + ROUTED_SESSION_TYPES
+# runs on the host.  Placement only: it decides the launch path and the
+# bridge mount, never whether a role may be routed.
+CONTAINER_SESSION_TYPES = ("impl", "review", "signoff") + SCENARIO_CONTAINER_TYPES
 # A PR's own override wins over the project setting, so a remedy that
 # moves a session off the route names it first.
 _PR_OVERRIDE_REMEDY = ("change the PR's model setting if it selects this "

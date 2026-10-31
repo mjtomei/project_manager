@@ -1185,7 +1185,7 @@ def wrap_claude_cmd(
             workdir share one, a container on a different workdir (e.g. a
             QA scenario clone) gets its own.
         provider: The provider *claude_cmd* was built for.  In container
-            mode a router provider (pm_core.worker_route) gets its host
+            mode a router provider (pm_core.router_route) gets its host
             bridge started and its socket dir mounted; a bridge or
             container that cannot be set up raises ContainerError.  Whether
             the router answers is not checked: a router that is down is an
@@ -1208,11 +1208,11 @@ def wrap_claude_cmd(
     # workers.  Never fall back to another account when an explicitly
     # selected route cannot be set up.
     if provider:
-        from pm_core import worker_route
+        from pm_core import router_route
         from pm_core.model_config import ModelResolution
         from pm_core.providers import ProviderNotFoundError
         try:
-            route_mounts = worker_route.container_mounts(
+            route_mounts = router_route.container_mounts(
                 ModelResolution(provider=provider), strict=True)
         except ProviderNotFoundError as exc:
             raise ContainerError(str(exc)) from exc
@@ -1220,7 +1220,7 @@ def wrap_claude_cmd(
         # container created before the route was selected cannot gain the
         # mount: its in-container ensure step would refuse to start Claude.
         if (route_mounts and container_is_running(cname)
-                and worker_route.container_has_route_mount(cname) is False):
+                and router_route.container_has_route_mount(cname) is False):
             raise ContainerError(
                 f"provider '{provider}': container {cname} is running "
                 "without the route socket mount. Remedy: end the "
@@ -1317,8 +1317,8 @@ def create_qa_container(
     Convenience wrapper around create_container with QA-specific mounts:
       - workdir at /workspace (rw) — a standalone clone, not a worktree
       - scratch at /scratch (rw)
-      - *route_mounts* (rw): the worker-route bridge socket directory
-        (pm_core.worker_route.container_mounts) when QA sessions in this
+      - *route_mounts* (rw): the route bridge socket directory
+        (pm_core.router_route.container_mounts) when QA sessions in this
         container use a router provider
 
     The container has no access to the parent repo's git directory.
