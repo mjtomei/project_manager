@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-31T22:56:40.623725+00:00'
+  updated_at: '2026-10-31T23:15:21.481820+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37802,6 +37802,23 @@ prs:
       qa.md updated. The dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-31T22:56:40Z'
     last_edited: '2026-10-31T22:56:40Z'
+  - id: note-f8e2697
+    text: 'Review loop 928f i7: one test gap left by i6 (R66), no recipe change, no
+      pm_core change. Moving the web-UI finalize output to recording.mp4.partial.mp4
+      left two failure cases asserting recording.mp4 -- a name no failure path of
+      that block writes -- so neither branch''s rm of the partial was exercised: deleting
+      the ffmpeg-failure branch''s rm left test_web_ui_failed_transcode_leaves_no_partial_mp4
+      green (the partial survived beside no mp4), and the same for the empty-partial
+      branch and test_web_ui_transcode_that_writes_nothing_leaves_no_mp4. The publish
+      guard (mv ... || { rm; echo "could not publish"; exit 1; }) had no case. Both
+      failure cases now assert the partial is gone, and new test_web_ui_finalize_names_a_publish_that_failed
+      drives a failing mv stub and requires "could not publish", no mp4, no partial,
+      webm kept. Mutation-checked: each removal fails exactly its case. Tests: recipe
+      file 262 passed (was 261); full suite 5338 passed, 1 skipped, 121 deselected,
+      0 failed (445.11 s). Evidence: /pm-captures/review-928f-i7/. impl.md R67 + Files/evidence.
+      The dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-31T23:15:21Z'
+    last_edited: '2026-10-31T23:15:21Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
