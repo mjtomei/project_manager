@@ -916,7 +916,7 @@ command -v ffmpeg >/dev/null || {
 # (or the other way round).
 render_cast() {
     local cast=$1 gif="$1.gif" mp4="${1%.cast}.mp4"
-    local part="$mp4.partial.mp4" vf gw gh n dur
+    local part="$mp4.partial.mp4" vf gw gh n dur probe_ok
     rm -f "$gif" "$part"
     agg --idle-time-limit 2 "$cast" "$gif" || {
         echo "agg failed on the cast — is 'agg' installed?" >&2
@@ -953,7 +953,20 @@ render_cast() {
     n=$(ffprobe -v error -count_packets -select_streams v:0 \
         -show_entries stream=nb_read_packets -of csv=p=0 "$gif")
     dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$gif")
-    [ -n "$n" ] && [ -n "$dur" ] \
+    # A non-empty answer is not a value: ffprobe *opens* a truncated or
+    # corrupt gif and answers "N/A" — with status 0 — for the packet count and
+    # the duration (verified with real ffprobe 4.4.2 on a 200-byte prefix of a
+    # valid gif: both printed "N/A", rc 0, while the dimensions still came from
+    # the intact header). A bare `[ -n "$n" ] && [ -n "$dur" ]` passed that
+    # through, the setpts expression became `if(eq(N\,N/A)\,N/A/TB\,PTS)`, and
+    # the block reported "ffmpeg failed on the gif" — the encoder blamed for an
+    # input nothing could read, exactly the misdiagnosis this check exists to
+    # prevent. A packet count is whole and a duration is decimal, so anything
+    # outside those shapes is not a probed value.
+    probe_ok=1
+    case "$n" in ''|*[!0-9]*) probe_ok= ;; esac
+    case "$dur" in ''|*[!0-9.]*) probe_ok= ;; esac
+    [ -n "$probe_ok" ] \
         || { echo "cannot probe the gif $gif" >&2; return 1; }
     vf="tpad=stop=1:stop_mode=clone,setpts='if(eq(N\,$n)\,$dur/TB\,PTS)',$vf"
     if ! ffmpeg -nostdin -loglevel error -y -i "$gif" -vf "$vf" \

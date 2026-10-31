@@ -1274,8 +1274,19 @@ def _run_render(name, tmp_path, agg_body=None, ffprobe_body=None,
     bindir.mkdir(exist_ok=True)
     _stub_tool(bindir, "agg", agg_body or (
         'for a in "$@"; do last=$a; done\nprintf gif > "$last"\n'))
+    # Model real ffprobe's answers *per query*: the render reads the gif's
+    # dimensions, then its packet count and its duration, and the final-frame
+    # hold is built from the last two. A stub that answered one value for
+    # every query ("h264") is not a shape the tool can produce — the probe
+    # check now requires numbers there (a truncated gif gets "N/A"), so the
+    # stub answers each query the way the real tool does.
     _stub_tool(bindir, "ffprobe", ffprobe_body or (
-        'case "$*" in *width,height*) echo 640,480 ;; *) echo h264 ;; esac\n'))
+        'case "$*" in\n'
+        '  *width,height*) echo 640,480 ;;\n'
+        '  *nb_read_packets*) echo 6 ;;\n'
+        '  *format=duration*) echo 0.60 ;;\n'
+        '  *) echo h264 ;;\n'
+        'esac\n'))
     _stub_tool(bindir, "ffmpeg", ffmpeg_body or (
         'for a in "$@"; do last=$a; done\nprintf mp4 > "$last"\n'))
     if mv_body is not None:
@@ -1584,7 +1595,8 @@ def test_render_names_a_renderer_that_writes_no_gif(name, tmp_path, agg_shape):
 
 
 @pytest.mark.parametrize("name", RECIPES)
-def test_render_names_a_gif_it_cannot_probe(name, tmp_path):
+@pytest.mark.parametrize("probe_shape", ["no-answer", "not-a-number"])
+def test_render_names_a_gif_it_cannot_probe(name, tmp_path, probe_shape):
     """A gif the block cannot read is not an encoder failure.
 
     ``render_cast`` reads the gif's frame count and duration to build the
@@ -1594,8 +1606,29 @@ def test_render_names_a_gif_it_cannot_probe(name, tmp_path):
     sends the worker to the encoder for an input nothing can read. The probe
     check names the file where it fails, and no case exercised it (the
     ``ffprobe`` stub answers every query).
+
+    A non-empty answer is not a value, and that was the other half: real
+    ffprobe *opens* a truncated gif and answers **"N/A"** — with status 0 —
+    for the packet count and the duration (verified in this container with
+    ffprobe 4.4.2 and a 200-byte prefix of a valid gif: both printed "N/A",
+    rc 0, while the dimensions still came from the intact header). The
+    check's original `[ -n "$n" ] && [ -n "$dur" ]` passed that through, the
+    setpts expression became `if(eq(N\\,N/A)\\,N/A/TB\\,PTS)`, and the block
+    printed "ffmpeg failed on the gif" — the exact misdiagnosis it exists to
+    prevent. The default ffmpeg stub accepts any filter, so the pre-fix block
+    even exited **0** on that gif; with real ffmpeg it failed while parsing
+    the expression, not on the input.
     """
-    r, mp4, gif = _run_render(name, tmp_path, ffprobe_body="exit 0\n")
+    if probe_shape == "no-answer":
+        ffprobe_body = "exit 0\n"
+    else:
+        # What real ffprobe answers for a gif it can open but not read.
+        ffprobe_body = (
+            'case "$*" in\n'
+            '  *width,height*) echo 640,480 ;;\n'
+            '  *) echo N/A ;;\n'
+            'esac\n')
+    r, mp4, gif = _run_render(name, tmp_path, ffprobe_body=ffprobe_body)
 
     assert r.returncode != 0, (
         f"{name}: a render whose gif could not be probed was reported as a "
@@ -1757,6 +1790,37 @@ def test_render_keeps_the_vfr_and_nostdin_encode(name):
         assert option in block, (
             f"{name}: the render block no longer carries `{option}`, which "
             "the render notes tell a worker to keep")
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_render_holds_the_final_frame_at_the_gifs_duration(name, tmp_path):
+    """The last screen is held for its GIF delay, not dropped at its start.
+
+    ``render_cast`` clones the final GIF frame (``tpad=stop=1:stop_mode=clone``)
+    and places the clone at the GIF's own duration (the ``setpts`` expression
+    built from the probed packet count and duration). Without it a VFR encode
+    ends when the last frame *starts*, so the final screen — usually the state
+    the scenario exists to show — is not in the video, and the recipe's own
+    "Check the render" note (the mp4 runs the GIF's duration plus one frame
+    tick; its frame count is the GIF's plus one) no longer describes the
+    output a worker is told to verify. Deleting the whole expression left the
+    file green (248 passed), so no case pinned it.
+    """
+    args_file = tmp_path / "ffmpeg-args"
+    r, mp4, gif = _run_render(name, tmp_path, ffmpeg_body=(
+        f'printf "%s\\n" "$@" > "{args_file}"\n'
+        'for a in "$@"; do last=$a; done\nprintf mp4 > "$last"\n'))
+
+    assert r.returncode == 0, r.stderr
+    argv = args_file.read_text().splitlines()
+    vf = argv[argv.index("-vf") + 1]
+    assert "tpad=stop=1:stop_mode=clone" in vf, (
+        f"{name}: the encode does not clone the final frame, so a VFR render "
+        f"ends when the last frame starts and the final screen is missing "
+        f"from the video: {vf}")
+    assert "setpts=" in vf and "eq(N\\,6)" in vf and "0.60/TB" in vf, (
+        f"{name}: the held frame is not placed at the gif's probed duration "
+        f"(the stub answers 6 packets, 0.60 s): {vf}")
 
 
 def _install_block(name):

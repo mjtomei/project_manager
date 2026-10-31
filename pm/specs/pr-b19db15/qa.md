@@ -60,6 +60,14 @@ recording-recipe bugs that any worker following the recipe hits:
   eats the script that follows it; on a terminal a `q` makes ffmpeg exit 0
   with a 0-frame mp4 that `test -s` accepts, after which the step deletes the
   webm — the only copy of the recording.
+- the render blocks' probe check rejects a non-numeric answer (review
+  loop 928f i4, R64): real ffprobe *opens* a truncated gif and answers
+  "N/A" — with status 0 — for the packet count and duration, so the
+  old non-empty check passed it to the final-frame hold expression and
+  the block reported "ffmpeg failed on the gif", blaming the encoder
+  for an input nothing could read (with the block's stub encoder it
+  even exited 0); both values must now be numeric, and the render
+  stops at "cannot probe the gif …" with no mp4 or gif left.
 - the web-UI finalize/driver/teardown guards stop the block with
   `if … exit 1`, because `: "${VAR:?}"` only stops a *scripted* run — in an
   interactive shell the next line still runs (the `rm` aimed at
@@ -493,6 +501,13 @@ that removal and the link, the same block must run the driver. The older
 S14/S18/S20 covered the same recipe ground before the reduction; S15, S16,
 S17 and S19 exercised the dropped helper, the shared prompt guidance and the
 QA-loop helper install, none of which exist in this PR any more.
+S21/S23 also re-check the render block's probe check (review loop 928f
+i4, R64): with an `agg` that writes a truncated gif — one ffprobe
+opens and answers "N/A" (status 0) for the packet count and
+duration — the block must stop at "cannot probe the gif …" and leave
+no mp4 or gif, not report "ffmpeg failed on the gif"; a healthy
+render of a real gif must still hold the final frame (the mp4 runs
+the GIF's duration plus one tick and its frame count plus one).
 
 ## Setup (cross-cutting)
 
@@ -556,6 +571,13 @@ foreground render block,
   on a host without asciinema the documented `| tee …` fallback writes
   `transcript.log` into the capture directory (not the worker's cwd), and the
   manifest names it.
+- a gif ffprobe can open but cannot read (it answers "N/A" with status 0
+  for the packet count and duration — a truncated gif) stops the render at
+  "cannot probe the gif …", with no mp4 and no gif left, instead of
+  reaching ffmpeg and being reported as "ffmpeg failed on the gif"
+  (review loop 928f i4, R64); and a healthy render still holds the final
+  frame — the mp4 runs the GIF's duration plus one tick and its frame
+  count is the GIF's plus one.
 
 ### R2 — The tmux screen-recording recipe records a TUI and renders it (nominal)
 
@@ -607,6 +629,11 @@ session, stop the recorder, and render the cast,
   no earlier run's `manifest.md` either (review loop ebd1 i6, R47), and a host
   with no `ffmpeg` stops with "ffmpeg is not installed — the render step
   needs it" instead of reporting the gif as failed.
+- a gif ffprobe can open but cannot read (it answers "N/A" with status 0
+  for the packet count and duration — a truncated gif) stops the render at
+  "cannot probe the gif …", with no mp4 and no gif left, instead of being
+  reported as "ffmpeg failed on the gif" (review loop 928f i4, R64); a
+  healthy render holds the final frame at the GIF's duration.
 
 ### R3 — Recipe readiness and stop waits are bounded, and stale files are cleared
 
@@ -728,6 +755,14 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   tell that from a legitimate finish, so the capture is re-run rather than
   accepted; and driving from a fresh shell re-derives `$TARGET` first, because
   `pm tui send -s ""` auto-detects and can drive another project's TUI.
+- A gif exists but ffprobe cannot read it → a truncated or corrupt gif
+  *opens*, and ffprobe answers "N/A" with status 0 for the packet count
+  and duration; a non-empty check passes that into the final-frame hold
+  expression, ffmpeg rejects the expression, and the run reports "ffmpeg
+  failed on the gif" — the encoder blamed for an input nothing could
+  read. The probe check requires numeric answers and names the gif
+  ("cannot probe the gif …"), removing the gif and leaving no mp4
+  (review loop 928f i4, R64).
 - A renderer reports success and writes nothing → the render/finalize step
   fails on the empty artifact and removes it, so no output is left behind on a
   failed step for the manifest to list.
