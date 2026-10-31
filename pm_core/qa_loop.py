@@ -297,6 +297,9 @@ class QALoopState:
     superseded: bool = False
     # Scenario 0 (interactive) — tracked separately, never polled for verdicts
     scenario_0: QAScenario | None = None
+    # PR-branch commit the planner read (after the pre-planning sync with
+    # the upstream, see _sync_pr_branch).
+    planning_base: str | None = None
     # PR-branch commit the planner handed off (published before fan-out);
     # every scenario clone must start at exactly this revision.
     planner_head: str | None = None
@@ -494,6 +497,42 @@ def _rev_parse(workdir: str | Path, ref: str) -> str | None:
     return r.stdout.strip() or None
 
 
+def _has_commit(workdir: str | Path, sha: str) -> bool:
+    return _git_capture(workdir, "cat-file", "-e",
+                        f"{sha}^{{commit}}").returncode == 0
+
+
+def _is_ancestor(workdir: str | Path, a: str, b: str) -> bool:
+    return _git_capture(workdir, "merge-base", "--is-ancestor",
+                        a, b).returncode == 0
+
+
+def _fetch_upstream_commit(workdir: str | Path, url: str, branch: str,
+                           sha: str) -> subprocess.CompletedProcess | None:
+    """Make upstream *sha* of *branch* available locally.
+
+    Fetches into FETCH_HEAD only (no local ref moves) when the commit is
+    missing.  Returns the fetch result, or ``None`` if no fetch was needed.
+    """
+    if _has_commit(workdir, sha):
+        return None
+    return _git_capture(workdir, "fetch", "--quiet", "--no-tags", url,
+                        f"refs/heads/{branch}")
+
+
+def _one_line(msg: str | None, default: str = "unknown error.") -> str:
+    """Flatten git output into one sentence ending in a single full stop.
+
+    git's stderr spans lines and normally ends with a full stop ("… and the
+    repository exists."), so embedding it verbatim produced a multi-line hold
+    whose appended remedy read "exists.. Restart QA".  *default* is used when
+    git printed nothing and is already a whole sentence, so the appended
+    remedy reads "unknown error. Restart QA…".
+    """
+    text = " ".join((msg or "").split()).rstrip(".")
+    return f"{text}." if text else default
+
+
 def _remote_branch_sha(workdir: str | Path, url: str, branch: str,
                        timeout: float = 120) -> str | None:
     """Return the sha of *branch* at *url* (``None`` if absent)."""
@@ -548,38 +587,40 @@ def _publish_planner_head(workdir_path: str, branch: str) -> str:
     if remote == head:
         return head
     if remote:
-        # An upstream commit that is an ancestor of head is necessarily in
-        # the local object store; absence means it cannot be an ancestor.
-        known = _git_capture(workdir_path, "cat-file", "-e",
-                             f"{remote}^{{commit}}").returncode == 0
-        if not known:
-            # Someone else pushed and the PR workdir never fetched.  Fetch
-            # the objects (FETCH_HEAD only, no local ref moves) so a
-            # workdir that is merely behind isn't reported as diverged.
-            _git_capture(workdir_path, "fetch", "--quiet", real_url,
-                         f"refs/heads/{branch}")
-            known = _git_capture(workdir_path, "cat-file", "-e",
-                                 f"{remote}^{{commit}}").returncode == 0
-        if not known or _git_capture(
-                workdir_path, "merge-base", "--is-ancestor",
-                remote, head).returncode != 0:
+        # Someone else pushed and the PR workdir never fetched: fetch the
+        # objects so a workdir that is merely behind isn't reported as
+        # diverged.
+        _fetch_upstream_commit(workdir_path, real_url, branch, remote)
+        known = _has_commit(workdir_path, remote)
+        if not known or not _is_ancestor(workdir_path, remote, head):
             # Behind (e.g. an earlier QA worker pushed a fix the PR workdir
             # never pulled) needs only a pull; diverged needs reconciling.
-            behind = known and _git_capture(
-                workdir_path, "merge-base", "--is-ancestor",
-                head, remote).returncode == 0
+            behind = known and _is_ancestor(workdir_path, head, remote)
+            # QA synced the workdir before planning (_sync_pr_branch), so
+            # either the upstream moved while the planner ran (another
+            # writer pushed) or the sync was bypassed — a single-scenario
+            # ``pm qa run`` has no planning phase, so it never syncs.  The
+            # plan was made against another tree: hold, and let the next
+            # full QA run re-sync.  The pull/merge remedy is the one that
+            # also works for the bypassing command, whose restart alone
+            # would reproduce this error.
             if behind:
-                problem, action = "is behind", "Pull the PR branch in the PR workdir"
+                problem, action = ("is behind",
+                                   "Restart QA (it fast-forwards the PR "
+                                   "workdir before planning again), or pull "
+                                   "the PR branch in the workdir")
             else:
                 problem, action = ("diverged from",
-                                   "Reconcile the PR workdir with the "
-                                   "upstream (pull, then push)")
+                                   "Restart QA (it returns the diverged "
+                                   "branch to review to merge both "
+                                   "histories, never force-push), or merge "
+                                   "the upstream into the PR branch in the "
+                                   "workdir")
             raise PlannerHandoffError(
                 f"PR branch {branch} {problem} upstream: planner head "
                 f"{head[:12]} in {workdir_path} does not contain {real_url} "
-                f"{branch} at {remote[:12]}. {action} and restart QA — "
-                f"scenarios were not launched so none tested a different "
-                f"tree.")
+                f"{branch} at {remote[:12]}. {action} — scenarios were not "
+                f"launched so none tested a different tree.")
 
     _log.info("planner handoff: publishing %s %s -> %s (upstream was %s)",
               branch, head[:12], real_url, (remote or "absent")[:12])
@@ -616,18 +657,333 @@ def _planner_code_changes(workdir_path: str, before: str | None,
     """Application-code paths changed between *before* and *after*.
 
     Paths under ``pm/`` (specs, QA instructions, project.yaml) are pm
-    metadata the planner is expected to write; anything else is
-    application code that needs review before sign-off.
+    metadata the planner (or a QA worker's notes) is expected to write;
+    anything else is application code that needs review before sign-off.
+    Also used for upstream commits :func:`_sync_pr_branch` imports.
     """
     if not before or not after or before == after:
         return []
     r = _git_capture(workdir_path, "diff", "--name-only", before, after)
     if r.returncode != 0:
-        _log.warning("planner handoff: could not diff %s..%s: %s",
+        _log.warning("could not diff %s..%s to check for application code: %s",
                      before[:12], after[:12], r.stderr.strip())
         return []
     return sorted(p for p in r.stdout.splitlines()
                   if p and not p.startswith("pm/"))
+
+
+@dataclass
+class BranchSync:
+    """Outcome of reconciling the PR workdir with the upstream PR branch.
+
+    *outcome* is ``unchanged`` (up to date, local ahead, no upstream),
+    ``fast_forwarded`` (behind-only, now at the upstream head),
+    ``diverged`` (needs an agent to merge both histories) or ``hold``
+    (cannot be synchronized safely; *detail* says what to do).
+    """
+    outcome: str
+    local: str | None = None
+    upstream: str | None = None
+    detail: str = ""
+    code_changes: list[str] = field(default_factory=list)
+
+
+def _count_commits(workdir: str, rev_range: str) -> int:
+    r = _git_capture(workdir, "rev-list", "--count", rev_range)
+    try:
+        return int(r.stdout.strip()) if r.returncode == 0 else 0
+    except ValueError:
+        return 0
+
+
+def _workdir_state_hold(workdir_path: str, branch: str,
+                        local: str) -> BranchSync | None:
+    """A hold when the PR workdir cannot be planned in as it stands.
+
+    The planner and every scenario clone read this workdir, so QA must not
+    plan in a tree that is not checked out on the PR branch or that has an
+    unfinished git operation in it.  Checked on every sync, not just when
+    the branch needs a fast-forward: an up-to-date branch with a stale
+    checkout or a half-done merge is exactly as unplannable.
+    """
+    if _git_capture(workdir_path, "rev-parse", "--git-dir").returncode != 0:
+        # Not a git repository: there is no checkout state to judge (and
+        # the branch lookup would have found nothing).  The handoff guard
+        # reports the missing branch.
+        return None
+    where = f"PR workdir {workdir_path} has {branch} at {local[:12]}"
+    # Unfinished operations before the checkout check: a stopped rebase
+    # also detaches HEAD, and "check out the branch" is not its remedy
+    # (git refuses it until the index is resolved) — the operation has to
+    # be finished or aborted.
+    for marker in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD",
+                   "rebase-merge", "rebase-apply"):
+        p = _git_capture(workdir_path, "rev-parse", "--git-path", marker)
+        path = Path(workdir_path, p.stdout.strip())
+        if p.returncode == 0 and p.stdout.strip() and path.exists():
+            return BranchSync("hold", local=local, detail=(
+                f"{where}, but the workdir has an unfinished git operation "
+                f"({marker}). Finish or abort it, then restart QA."))
+    current = _git_capture(workdir_path, "symbolic-ref", "--quiet", "HEAD")
+    checked_out = current.stdout.strip()
+    if checked_out != f"refs/heads/{branch}":
+        return BranchSync("hold", local=local, detail=(
+            f"{where}, but the workdir has "
+            f"{checked_out or 'a detached HEAD'} checked out. "
+            f"Check out {branch} there, then restart QA."))
+    return None
+
+
+def _sync_pr_branch(workdir_path: str, branch: str) -> BranchSync:
+    """Bring the PR workdir up to the upstream PR branch before QA planning.
+
+    QA workers push fixes straight to the upstream; only the finalize pane
+    of a *completed* run pulls them into the PR workdir.  After an
+    interrupted / INPUT_REQUIRED run the workdir is still at an older head,
+    so the planner would read a stale tree that :func:`_publish_planner_head`
+    then refuses to hand off (#234).
+
+    Behind-only fast-forwards (``merge --ff-only``, which keeps dirty files
+    git can carry and refuses otherwise).  Nothing here merges divergent
+    histories, resets or pushes: divergence is reported for an agent to
+    reconcile, and anything unsafe becomes a ``hold`` with the reason.
+    *code_changes* lists application paths a fast-forward imported.
+    """
+    def hold(detail: str, **kw) -> BranchSync:
+        return BranchSync("hold", detail=detail, **kw)
+
+    local = _rev_parse(workdir_path, f"refs/heads/{branch}")
+    if not local:
+        # Nothing to reconcile; the planner handoff refuses a missing branch.
+        _log.warning("QA sync: %s not found in %s", branch, workdir_path)
+        return BranchSync("unchanged")
+
+    # Before any network work (and for local-only repos too): a workdir
+    # that is not on the PR branch, or is mid-merge, cannot be planned in
+    # even if the branch is current — the planner would read a different
+    # tree than the branch the scenario clones are pinned to.
+    state_hold = _workdir_state_hold(workdir_path, branch, local)
+    if state_hold:
+        return state_hold
+
+    from pm_core.push_proxy import resolve_real_origin
+    real_url = resolve_real_origin(workdir_path)
+    if not real_url:
+        return BranchSync("unchanged", local=local)
+
+    try:
+        upstream = _remote_branch_sha(workdir_path, real_url, branch)
+    except PlannerHandoffError as exc:
+        return hold(f"Could not refresh the upstream PR branch: "
+                    f"{_one_line(str(exc))} Restart QA once the remote is "
+                    "reachable.", local=local)
+    # Report both heads on every sync: what the upstream has (e.g. a lost
+    # worker's push, pr-3201ea8) must never be hidden by a no-op sync.
+    _log.info("QA sync: %s in %s at %s; %s has %s", branch, workdir_path,
+              local[:12], real_url,
+              upstream[:12] if upstream else "no branch")
+    if not upstream or upstream == local:
+        return BranchSync("unchanged", local=local, upstream=upstream)
+
+    # FETCH_HEAD only: no local branch moves except the ff below.
+    fetch = _fetch_upstream_commit(workdir_path, real_url, branch, upstream)
+    if fetch is not None and not _has_commit(workdir_path, upstream):
+        if fetch.returncode == 0:
+            # The fetch worked, so the branch moved between the ls-remote
+            # and the fetch: the head we classified is already gone.
+            return hold(
+                f"{branch} moved on {real_url} while QA was synchronizing "
+                f"with it (the fetched head is not {upstream[:12]}). "
+                "Restart QA to synchronize with the new head.",
+                local=local, upstream=upstream)
+        msg = _one_line(fetch.stderr or fetch.stdout)
+        return hold(
+            f"Could not fetch {branch} at {upstream[:12]} from "
+            f"{real_url}: {msg} Restart QA once the remote is reachable.",
+            local=local, upstream=upstream)
+
+    if _is_ancestor(workdir_path, upstream, local):
+        # Local-only commits (e.g. an earlier planner's): the handoff
+        # publishes them fast-forward.
+        return BranchSync("unchanged", local=local, upstream=upstream)
+
+    where = (f"PR workdir {workdir_path} has {branch} at {local[:12]}; "
+             f"{real_url} has {upstream[:12]}")
+    if not _is_ancestor(workdir_path, local, upstream):
+        ahead = _count_commits(workdir_path, f"{upstream}..{local}")
+        behind = _count_commits(workdir_path, f"{local}..{upstream}")
+        detail = (
+            f"{where}: the histories diverged ({ahead} local-only, "
+            f"{behind} upstream-only commit(s)). Merge the upstream into "
+            f"the PR branch keeping both histories (`git pull --no-rebase "
+            f"{real_url} {branch}`, resolve conflicts), push, and review the "
+            "combined code — never force-push or reset.")
+        dirty = _git_capture(workdir_path, "status", "--porcelain",
+                             "--untracked-files=no")
+        if dirty.stdout.strip():
+            files = ", ".join(line[3:] for line in
+                              dirty.stdout.splitlines()[:5])
+            return hold(f"{detail} The workdir also has uncommitted "
+                        f"changes ({files}); commit or stash them first, "
+                        "then restart QA.", local=local, upstream=upstream)
+        return BranchSync("diverged", local=local, upstream=upstream,
+                          detail=detail)
+
+    ff = _git_capture(workdir_path, "merge", "--ff-only", "--quiet", upstream)
+    head = _rev_parse(workdir_path, f"refs/heads/{branch}")
+    if ff.returncode != 0 or head != upstream:
+        msg = _one_line(ff.stderr or ff.stdout)
+        return hold(
+            f"{where} (behind only), but the fast-forward was refused, "
+            f"so nothing was changed: {msg} Commit, stash, move or remove "
+            "the conflicting local files, then restart QA.",
+            local=local, upstream=upstream)
+    _log.info("QA sync: fast-forwarded %s in %s %s -> %s",
+              branch, workdir_path, local[:12], upstream[:12])
+    return BranchSync(
+        "fast_forwarded", local=local, upstream=upstream,
+        detail=(f"Fast-forwarded {branch} in the PR workdir from "
+                f"{local[:12]} to the upstream head {upstream[:12]} "
+                f"({_count_commits(workdir_path, f'{local}..{upstream}')} "
+                "commit(s), e.g. an earlier QA worker's pushes)."),
+        code_changes=_planner_code_changes(workdir_path, local, upstream))
+
+
+def _end_qa_without_scenarios(state: "QALoopState", verdict: str,
+                              error: str, status_path: Path,
+                              notify: Callable[[], None]) -> None:
+    """Finish a QA run that stops before any scenario launches.
+
+    Planned scenarios (a refused handoff) are not listed: none ran.
+
+    ``qa_status.json`` gets the overall verdict: auto-sequence routes on
+    it (NEEDS_WORK -> review, INPUT_REQUIRED -> paused) and otherwise
+    reports a run with no verdict as still running.
+    """
+    state.latest_verdict = verdict
+    state._error = error
+    state.planning_phase = False
+    _write_status_file(status_path, state.pr_id, [],
+                       state.scenario_verdicts, overall=verdict,
+                       scenario_0=state.scenario_0, error=error)
+    notify()
+    state.running = False
+
+
+def _branch_sync_stops_qa(state: "QALoopState", sync: BranchSync,
+                          pm_root: Path | None, status_path: Path,
+                          notify: Callable[[], None]) -> bool:
+    """Act on :func:`_sync_pr_branch`; True when this QA run must stop.
+
+    Imported application code and divergence go back to review (QA
+    NEEDS_WORK, which the TUI and auto-sequence route to ``in_review``)
+    and retire the recorded sign-off: neither the old review nor sign-off
+    covered that code.  A divergence that review already got once and
+    left unreconciled holds instead of looping QA <-> review.
+    """
+    from pm_core import store
+
+    def _set_sync_record(record: dict | None) -> None:
+        if not pm_root:
+            return
+
+        def apply(data):
+            pr = store.get_pr(data, state.pr_id)
+            if pr is None:
+                return
+            if record:
+                pr["qa_branch_sync"] = record
+            else:
+                pr.pop("qa_branch_sync", None)
+        try:
+            store.locked_update(pm_root, apply)
+        except Exception:
+            _log.exception("QA sync: could not update qa_branch_sync for %s",
+                           state.pr_id)
+
+    def _retire_signoff(reason: str) -> None:
+        from pm_core import signoff
+        try:
+            signoff.invalidate_signoff(pm_root, state.pr_id, reason)
+        except Exception:
+            _log.exception("QA sync: could not invalidate sign-off for %s",
+                           state.pr_id)
+
+    prev = None
+    if pm_root:
+        try:
+            prev = (store.get_pr(store.load(pm_root), state.pr_id)
+                    or {}).get("qa_branch_sync")
+        except Exception:
+            _log.warning("QA sync: could not read qa_branch_sync for %s",
+                         state.pr_id, exc_info=True)
+    if prev is not None and not isinstance(prev, dict):
+        # project.yaml is hand-editable (and merge-resolvable): a foreign
+        # value must not crash planning.  Treat it as absent — routing a
+        # divergence rewrites a valid record.
+        _log.warning("QA sync: ignoring malformed qa_branch_sync for %s: %r",
+                     state.pr_id, prev)
+        prev = None
+
+    # Only a reconciled branch retires the record: a hold (unreachable
+    # remote, dirty tree) after a routed divergence must still recognise
+    # the same heads next time instead of routing to review again.
+    if sync.outcome in ("unchanged", "fast_forwarded") and prev and pm_root:
+        _set_sync_record(None)
+
+    if sync.outcome == "unchanged":
+        return False
+    if sync.outcome == "fast_forwarded" and not sync.code_changes:
+        state.latest_output = sync.detail
+        notify()
+        return False
+
+    if sync.outcome == "hold":
+        _log.warning("QA sync hold for %s: %s", state.pr_id, sync.detail)
+        state.latest_output = f"QA held before planning: {sync.detail}"
+        _end_qa_without_scenarios(
+            state, VERDICT_INPUT_REQUIRED,
+            "QA did not start planning: the PR workdir could not be "
+            "synchronized with the upstream PR branch.\n\n" + sync.detail,
+            status_path, notify)
+        return True
+
+    if sync.outcome == "fast_forwarded":
+        shown = _summarize_changes(sync.code_changes)
+        reason = (f"upstream application code {sync.local[:12]}.."
+                  f"{sync.upstream[:12]} ({shown}) was never reviewed")
+        error = (f"{sync.detail} They change application code ({shown}) "
+                 "that no review covered, so QA returns the PR to review "
+                 "before planning; QA runs again after review.")
+    else:  # diverged
+        if prev and prev.get("local") == sync.local \
+                and prev.get("upstream") == sync.upstream:
+            _log.warning("QA sync: %s still diverged after review", state.pr_id)
+            state.latest_output = ("QA held: PR branch still diverged after "
+                                   "review")
+            _end_qa_without_scenarios(
+                state, VERDICT_INPUT_REQUIRED,
+                "QA did not start planning: the PR branch is still "
+                "diverged after it was returned to review for the same "
+                f"heads.\n\n{sync.detail}", status_path, notify)
+            return True
+        from datetime import datetime, timezone
+        _set_sync_record({
+            "local": sync.local, "upstream": sync.upstream,
+            "routed_at": datetime.now(timezone.utc).isoformat()})
+        reason = (f"PR branch diverged ({sync.local[:12]} vs upstream "
+                  f"{sync.upstream[:12]})")
+        error = (f"{sync.detail} QA returns the PR to review before "
+                 "planning; QA runs again after review.")
+
+    _log.warning("QA sync for %s: %s — returning to review",
+                 state.pr_id, reason)
+    if pm_root:
+        _retire_signoff(f"QA sync: {reason}")
+    state.latest_output = f"QA returning to review: {reason}"
+    _end_qa_without_scenarios(state, VERDICT_NEEDS_WORK, error,
+                              status_path, notify)
+    return True
 
 
 def qa_outcome_detail(state: QALoopState) -> str:
@@ -1127,6 +1483,7 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
             str(k): v for k, v in state.scenario_verdict_sources.items()
         },
         "verified_scenarios": sorted(state.verified_scenarios),
+        "planning_base": state.planning_base,
         "waiting_for_input": sorted(state.waiting_for_input),
         "waiting_input_sources": {
             str(k): v for k, v in state.waiting_input_sources.items()
@@ -1823,6 +2180,7 @@ def build_resume_state(resume_data: dict) -> QALoopState:
     # A held flag only makes sense while something is actually waiting.
     state.held = state.held and bool(state.waiting_for_input)
     state.finalize_verdict = resume_data.get("finalize_verdict")
+    state.planning_base = resume_data.get("planning_base")
     state.planner_head = resume_data.get("planner_head")
     state.planner_code_changes = list(
         resume_data.get("planner_code_changes") or [])
@@ -5449,23 +5807,13 @@ def _run_qa_sync(
         state.latest_output = "Planning QA scenarios..."
         _notify()
 
+        # First scenario index the planner would be given.  It does not read
+        # the workdir, and it is recorded before any early exit (a sync hold,
+        # a route to review) so a run that plans no scenarios still orders
+        # against the PR's other runs on TUI resume (qa_loop_ui._run_order).
+        # The planner prompt/command are still built after the branch sync.
         scenario_start = _next_scenario_offset(state.pr_id, state.loop_id) + 1
         state.scenario_start = scenario_start
-        planner_prompt = prompt_gen.generate_qa_planner_prompt(
-            data, state.pr_id, session,
-            scenario_start=scenario_start,
-        )
-        import uuid as _uuid
-        planner_session_id = str(_uuid.uuid4())
-        planner_env: dict[str, str] = {}
-        cmd = build_claude_shell_cmd(
-            prompt=planner_prompt,
-            model=_qa_planning_resolution.model, provider=_qa_planning_resolution.provider, effort=_qa_planning_resolution.effort,
-            cwd=workdir_path,
-            session_id=planner_session_id,
-            session_type="qa_planning",
-            session_tag=state.session_tag,
-            env_out=planner_env)
 
         # If the main QA window already exists, remember which sessions
         # were watching it so we can switch them to the replacement window
@@ -5498,6 +5846,15 @@ def _run_qa_sync(
             state.running = False
             return state
 
+        # Reconcile the PR workdir with the upstream before anything reads
+        # it, after the previous run's scenario windows / containers were
+        # torn down above.  A worker that still pushes (pr-3201ea8) is
+        # caught by the planner handoff guard, not here.
+        if branch and _branch_sync_stops_qa(
+                state, _sync_pr_branch(workdir_path, branch),
+                pm_root, status_path, _notify):
+            return state
+
         # Launch Scenario 0 (interactive) right after stale cleanup so
         # the user can start exploring while the planner runs.
         repo_root_early = (Path(workdir_path)
@@ -5516,7 +5873,31 @@ def _run_qa_sync(
                                    verdict_reasons=state.scenario_verdict_reasons)
 
         if branch:
+            # After the sync: the exact revision the planner reads.
             pre_plan_head = _rev_parse(workdir_path, f"refs/heads/{branch}")
+            state.planning_base = pre_plan_head
+            _log.info("QA planner for %s reads %s at %s", state.pr_id,
+                      branch, (pre_plan_head or "?")[:12])
+
+        # Built after the branch sync so nothing the prompt reads from the
+        # workdir predates it.
+        planner_prompt = prompt_gen.generate_qa_planner_prompt(
+            data, state.pr_id, session,
+            scenario_start=scenario_start,
+        )
+        import uuid as _uuid
+        planner_session_id = str(_uuid.uuid4())
+        # Provider env is transported out of the command string (see
+        # build_claude_shell_cmd) and handed to the tmux pane below.
+        planner_env: dict[str, str] = {}
+        cmd = build_claude_shell_cmd(
+            prompt=planner_prompt,
+            model=_qa_planning_resolution.model, provider=_qa_planning_resolution.provider, effort=_qa_planning_resolution.effort,
+            cwd=workdir_path,
+            session_id=planner_session_id,
+            session_type="qa_planning",
+            session_tag=state.session_tag,
+            env_out=planner_env)
 
         # Create QA window with planner pane (switch=False; we handle
         # session switching explicitly below to preserve focus)
@@ -5775,22 +6156,19 @@ def _run_qa_sync(
     if pr_entry and not _get_qa_spec(pr_entry, "qa") and not state._error:
         _log.warning("QA spec missing for %s after planning — "
                      "planner did not generate spec in Step 0", state.pr_id)
-        state.latest_verdict = VERDICT_INPUT_REQUIRED
         state.latest_output = (
             "QA spec was not generated during planning. "
             "Run `pm pr spec %s qa` to generate it, then restart QA."
             % state.pr_id
         )
-        state._error = (
+        _end_qa_without_scenarios(
+            state, VERDICT_INPUT_REQUIRED,
             "QA spec was not generated during planning.\n\n"
             "The planner session should have generated a spec in Step 0,\n"
             "but no spec file was found.\n\n"
             "To fix:\n"
             f"  pm pr spec {state.pr_id} qa\n\n"
-            "Then restart QA from the TUI."
-        )
-        _notify()
-        state.running = False
+            "Then restart QA from the TUI.", status_path, _notify)
         return state  # Do not launch scenarios without a QA spec
 
     # --- Phase 1.25: Planner handoff ---
@@ -5803,15 +6181,12 @@ def _run_qa_sync(
         except PlannerHandoffError as exc:
             _log.error("QA planner handoff failed for %s: %s",
                        state.pr_id, exc)
-            state.latest_verdict = VERDICT_INPUT_REQUIRED
             state.latest_output = f"Planner handoff failed: {exc}"
-            state._error = (
+            _end_qa_without_scenarios(
+                state, VERDICT_INPUT_REQUIRED,
                 "The planner's committed work could not be handed to the "
                 "scenario workers, so no scenarios were launched.\n\n"
-                f"{exc}"
-            )
-            _notify()
-            state.running = False
+                f"{exc}", status_path, _notify)
             return state
         state.planner_code_changes = _planner_code_changes(
             workdir_path, pre_plan_head, state.planner_head)

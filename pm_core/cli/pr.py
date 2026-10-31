@@ -3898,6 +3898,15 @@ def pr_auto_sequence(pr_id: str):
     pr_id = pr_entry["id"]
     status = pr_entry.get("status", "")
     pm_session = _get_pm_session()
+    if pm_session and not tmux_mod.session_exists(pm_session):
+        # _get_pm_session() falls back to the cwd-derived name even when no
+        # such session was ever created, so it is truthy from a plain shell
+        # with no pm session running.  Every branch below drives panes in
+        # the session, so a name alone must not count as one: the detached
+        # QA driver exits with "No pm session found" and writes no
+        # qa_status.json, which left each tick re-launching a doomed
+        # process and reporting "running: qa (launched)" forever.
+        pm_session = None
     tdir = _auto_seq_transcript_dir(root, pr_id)
     tdir.mkdir(parents=True, exist_ok=True)
 
@@ -4062,6 +4071,14 @@ def pr_auto_sequence(pr_id: str):
         return
 
     if status == "qa":
+        if not pm_session:
+            # Every action below needs the pm session: launching QA (the
+            # detached driver exits with "No pm session found" and writes no
+            # qa_status.json), advancing to sign_off, or launching a review
+            # iteration.  Without this guard each tick re-launched a doomed
+            # driver and reported "running: qa (launched)" forever.
+            click.echo("paused: no pm tmux session")
+            return
         overall, _path = _qa_status_for(pr_id)
         # The status predates sign-off's return (REQA, or rework that must be
         # re-verified): it is the run sign-off already judged, not the re-run.

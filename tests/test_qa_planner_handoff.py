@@ -837,6 +837,12 @@ class TestPlannerHeadPublication:
                 qa_loop._publish_planner_head(str(s["workdir"]), "pm/pr-001")
         msg = str(ei.value)
         assert s["c"][:8] in msg and "diverged" in msg
+        # Restarting QA is the remedy: the pre-planning sync routes the
+        # divergence to review instead of re-planning the stale tree.  The
+        # manual merge is named too because ``pm qa run`` skips planning
+        # (and therefore the sync), so restarting it alone cannot help.
+        assert "it returns the diverged branch to review" in msg
+        assert "or merge the upstream into the PR branch" in msg
         # Never force-pushed over someone else's commit.
         assert _git(s["remote"], "rev-parse", "pm/pr-001") != s["c"]
 
@@ -865,7 +871,10 @@ class TestPlannerHeadPublication:
                 qa_loop._publish_planner_head(str(s["workdir"]), "pm/pr-001")
         msg = str(ei.value)
         assert "is behind upstream" in msg and "diverged" not in msg
-        assert "Pull the PR branch" in msg
+        assert "it fast-forwards the PR workdir" in msg
+        # The manual pull is named for the path that skips the sync
+        # (``pm qa run`` has no planning phase).
+        assert "or pull the PR branch in the workdir" in msg
         # Classifying must not move the workdir's branch.
         assert _git(s["workdir"], "rev-parse", "pm/pr-001") == s["c"]
 

@@ -2886,6 +2886,8 @@ def _reqa_tick(tmp_path, data, *, window=True, status_path=None):
             patch.object(pr_cli.store, "locked_update",
                          side_effect=lambda root, fn, **kw: fn(data)), \
             patch.object(pr_cli, "_get_pm_session", return_value="pm-test"), \
+            patch.object(pr_cli.tmux_mod, "session_exists",
+                         return_value=True), \
             patch.object(pr_cli, "trigger_tui_refresh"), \
             patch.object(pr_cli, "_check_signoff_verdict",
                          return_value="SIGNOFF_REQA"), \
@@ -3005,6 +3007,8 @@ def _review_pass_tick(pr, data):
     with patch.object(pr_cli, "state_root", return_value=Path("/nonexistent")), \
             patch.object(pr_cli.store, "load", return_value=data), \
             patch.object(pr_cli, "_get_pm_session", return_value="pm-test"), \
+            patch.object(pr_cli.tmux_mod, "session_exists",
+                         return_value=True), \
             patch.object(pr_cli, "_auto_seq_transcript_dir",
                          return_value=Path(tempfile.mkdtemp())), \
             patch.object(pr_cli, "_check_review_verdict",

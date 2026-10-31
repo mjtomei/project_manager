@@ -1,0 +1,211 @@
+# pr-62fdd54 — Synchronize the PR branch before QA planning; recover stale handoffs
+
+## Background (code paths)
+
+- `pm_core/qa_loop.py:run_qa_sync` — Phase 1 (planning) launches Scenario 0
+  and the planner in the canonical PR workdir (`pr["workdir"]`), records
+  `pre_plan_head`, polls for the plan, then Phase 1.25 calls
+  `_publish_planner_head(workdir, branch)` which fast-forward-pushes the
+  planner's head and raises `PlannerHandoffError` ("is behind" / "diverged
+  from") when the upstream branch is not an ancestor of the planner head.
+  `state.planner_head` is then pinned for every scenario clone
+  (`create_scenario_workdir(expected_head=...)`, tmux and container launch).
+- `_execute_and_finalize` runs `_run_qa_finalize_pane`, the only step that
+  imports QA-worker pushes into the PR workdir.  Interrupted / INPUT_REQUIRED
+  runs (no scenarios, handoff failure, trust block, stop) skip it, so the
+  PR workdir stays at an older local head while workers' fixes sit on the
+  upstream.  The next QA run plans against that stale tree and
+  `_publish_planner_head` refuses the handoff only *after* a full planning
+  session (observed twice on #234).
+- Routing: the TUI (`tui/qa_loop_ui._on_qa_complete`) and auto-sequence
+  (`cli/pr.py` `status == "qa"`, reads `overall` from the latest
+  `qa_status.json`) route NEEDS_WORK → `in_review` + review loop, and park
+  on INPUT_REQUIRED.  The review prompt (`prompt_gen.generate_review_prompt`)
+  step 1 for remote backends is "Pull the latest changes for `<branch>`…
+  Resolve any merge conflicts" — the native agent reconciliation route.
+- Sign-off evidence is HEAD-bound (`signoff.fresh_recorded_verdict`) and can
+  be explicitly retired with `signoff.invalidate_signoff(root, pr_id, reason)`.
+
+## Requirements
+
+R1. **Refresh before planning.** In `run_qa_sync`'s planning phase, after
+    stale scenario windows / orphaned QA containers are cleaned up (so the
+    previous run's workers are no longer writing) and before Scenario 0 or
+    the planner is launched, a new helper `_sync_pr_branch(workdir, branch)`
+    queries the real upstream (`push_proxy.resolve_real_origin`), fetches
+    the PR branch's objects (FETCH_HEAD only; no local ref moves except
+    the fast-forward below) and classifies local `refs/heads/<branch>` (L)
+    vs upstream (U).  An absent upstream branch is a no-op, and a local-only
+    repo (no real upstream) skips the network work — but the local
+    checkout/unfinished-merge holds below are checked first, so a local-only
+    repo left on the wrong tree still holds (a non-git workdir is left to
+    the planner handoff guard).  The planner prompt and command are built
+    after the sync (they used to be built before stale-window cleanup), so
+    nothing the planner is given predates it.  Because the build moved,
+    it keeps the provider-env transport the build site now owns:
+    `build_claude_shell_cmd(..., env_out=planner_env)` collects the
+    provider env and `tmux_mod.new_window(..., env=planner_env)` hands it
+    to the planner pane — the values are never interpolated into the
+    logged command string.  (Integration with master@89e3c501, which added
+    that transport at the old build site; re-integrated with
+    master@4a74d880, which reworked the surrounding planning loop but kept
+    the transport at the same build site; re-integrated with
+    master@eaf3372e, whose planning-loop changes still keep the build site
+    — the merge kept this PR's post-sync position and carried master's new
+    `state.scenario_start` bookkeeping, computed at the top of the planning
+    phase because it never reads the workdir.)
+
+R2. **Behind-only fast-forwards automatically.** L ancestor of U →
+    `git merge --ff-only U` in the workdir (the branch is checked out).
+    Git's own checks preserve dirty files (it refuses when a local change
+    or untracked file would be overwritten).  A refusal becomes a specific
+    INPUT_REQUIRED hold quoting git's message and the paths, nothing
+    changed; its remedy says to commit, stash, move or remove the
+    conflicting files (git cannot stash untracked ones).  Up-to-date and local-ahead (U ancestor of L, e.g. earlier
+    unpushed planner-only commits) proceed unchanged — the existing
+    publish step pushes local-ahead commits fast-forward.
+
+R3. **Diverged → native review route, never force/reset.** Neither is an
+    ancestor of the other: no merge/reset/push by pm.  The QA run ends
+    before planning with verdict NEEDS_WORK and an `_error` naming both
+    heads, the counts of local-only/upstream-only commits, and the
+    reconciliation instruction (merge the upstream into the PR branch
+    preserving both histories, no force-push/reset; then review).  The
+    existing NEEDS_WORK routing sends the PR to review, whose step 1 pulls
+    and resolves conflicts.  Conflicting and non-conflicting divergence
+    take the same route.  The `_error` is what `_record_qa_note` writes to
+    the PR note the review session reads.
+
+R4. **Imported application code invalidates old review/sign-off.**  When
+    the fast-forward brings in paths outside `pm/` (same classification as
+    `_planner_code_changes`), the run ends before planning with
+    NEEDS_WORK (route to review, then QA again), listing the paths and
+    the L..U range, and `signoff.invalidate_signoff` retires any recorded
+    sign-off verdict.  pm/-only imports (QA notes, specs, instructions)
+    proceed to planning on the refreshed tree.
+
+R5. **Specific actionable holds** (INPUT_REQUIRED, no planning) for:
+    fetch/ls-remote failure; the upstream moving between `ls-remote` and
+    the fetch so the classified head is already gone ("moved on … while QA
+    was synchronizing", not an empty git error); workdir not on the PR
+    branch (HEAD detached or another branch); an unfinished
+    merge/rebase/cherry-pick in the workdir; ff refused (R2); dirty tracked
+    files while diverged; and a divergence
+    (same L and U) that was already routed to review once and not
+    reconciled (prevents an endless QA→review→QA loop when the reviewer
+    does not merge).  The last one is detected via a small record on the
+    PR (`pr["qa_branch_sync"] = {local, upstream, routed_at}`) written when R3
+    routes.  Only an unchanged / fast-forwarded sync clears it; a hold
+    keeps it so the same heads still hold (no re-route) once fixed.  A
+    malformed record (project.yaml is hand-editable and merge-resolvable)
+    is ignored as if absent instead of raising, so routing a divergence
+    rewrites a valid one.
+    The workdir checkout and unfinished-merge holds are local checks: they
+    apply on every sync, including local-only repos and an up-to-date
+    branch (a stale checkout or half-done merge is as unplannable there).
+    The unfinished-operation markers are checked before the checkout: a
+    stopped rebase also detaches HEAD, and "check out the branch" is not
+    its remedy (git refuses it until the index is resolved), so the hold
+    names the rebase and says to finish or abort it.
+
+R6. **Early exits are visible to every driver.** Each sync exit writes
+    `qa_status.json` with `overall` and `error` (auto-sequence reads only
+    `overall`), sets `state.running = False`, `planning_phase = False`,
+    and notifies.  The existing Phase 1.25 handoff-failure exit did not
+    write `overall`, leaving auto-sequence reporting "running: qa" forever
+    — fix it the same way, and the QA-spec gate exit after planning (same
+    "running: qa" symptom).  The sync exits, the handoff failure and the
+    spec gate go through `_end_qa_without_scenarios`; the earlier
+    workspace-trust-blocked exit already wrote `overall` inline and is
+    unchanged.
+
+R7. **Planner/worker revision consistency.** `pre_plan_head` is taken after
+    the sync, so it is the revision the planner reads (recorded as
+    `state.planning_base`, logged and persisted in the resume file), and
+    `_planner_code_changes` stays planner-only.  Master's
+    `state.scenario_start` (persisted for TUI resume ordering) is computed
+    and recorded at the top of the planning phase — it reads only the
+    previous runs' scenario dirs, never the workdir — so a run that exits
+    before planning (a sync hold or route) still orders correctly against
+    the PR's other runs; the planner prompt is still built after the sync.
+    The existing guard in `_publish_planner_head` + `expected_head` stays: if the upstream moves
+    during planning (a lost/active writer, pr-3201ea8) the handoff still
+    refuses and no worker launches.  Its "behind" message changes from
+    "Pull the PR branch … and restart QA" to say restarting QA fast-forwards
+    the workdir before planning; "diverged" says restarting QA routes the
+    divergence to review.  Both also name the manual remedy (pull / merge
+    the upstream into the PR branch in the workdir) because the guard is
+    shared with `pm qa run`, whose single-scenario run has no planning
+    phase and therefore never syncs — restarting that command alone would
+    reproduce the error.
+
+R8. **Gates preserved.** No pm-initiated merge to the base branch, no
+    change to merge policy / wait-for-merge / spec gates; routing uses the
+    existing qa→in_review NEEDS_WORK path only.
+
+R9. **Auto-sequence needs a live session.** Every auto-sequence branch
+    drives panes in the pm session, so its "paused: no pm tmux session"
+    guards must key on a session that exists, not on a name.
+    `_get_pm_session()` falls back to the cwd-derived name whenever tmux is
+    installed, so from a plain shell it returns a session that was never
+    created; a bare `if not pm_session` therefore never fires.  The
+    command now clears `pm_session` when `tmux_mod.session_exists()` says
+    the resolved name is not live — the same check the window-launching
+    paths already make — so the guard works for in_progress, in_review,
+    qa and sign_off alike.  Without it the qa branch launched a detached
+    driver that exited with "No pm session found" and wrote no
+    `qa_status.json`, so each tick re-launched it and reported
+    "running: qa (launched)" forever.  Tests that patch `_get_pm_session`
+    to a fake name must also make `tmux_mod.session_exists` true (the
+    fixture pattern `tests/test_pr_auto_sequence.py` uses); master's new
+    `tests/test_worker_route.py` auto-sequence helpers were updated that
+    way, and they must not patch `subprocess.Popen` while leaving
+    `session_exists` real, because the probe shells out to tmux.
+
+## Implicit requirements
+
+- The sync must not run on QA resume (`resume_qa_sync`): scenarios are
+  already pinned and running.
+- The sync only runs when there's a planning phase (`state.planning_phase
+  and not state.scenarios`) and `branch` is set.
+- Network ops use `_git_capture` timeouts; failures never raise out of
+  `run_qa_sync`.
+- The sync's read of the PR's `qa_branch_sync` record is a `store.load`
+  that can raise while project.yaml is briefly unloadable (a pull, a
+  checkout); it is caught and treated as "no record", so planning is not
+  disturbed (master's `tests/test_qa_load_failures.py` load-order map has
+  a `SYNC` slot for it, and the unloadable-at-SYNC case is covered).
+- The ff is done with the branch checked out in the workdir, so `HEAD`,
+  index and worktree move together (no `update-ref` behind the worktree).
+
+## Ambiguities (resolved)
+
+1. *Diverged but merge would be clean — should pm merge itself?*  No: the
+   task says only behind-only fast-forwards automatically; divergence gets
+   an agent route.  Review's own pull step does the merge.
+2. *What counts as "not covered by the prior review"?*  There is no
+   durable reviewed-sha record; the PR workdir head is what review last
+   saw (review runs and commits there).  Any non-`pm/` path in `git diff
+   L U` counts — conservative: a master merge pushed from elsewhere also
+   sends the PR back to review.
+3. *Dirty workdir + behind:* ff with git's safety (preserves non-overlapping
+   edits); overlapping → hold.  Dirty + diverged → hold (an agent merge in
+   a dirty tree is unsafe).
+4. *Imported code: plan anyway and force NEEDS_WORK at the end, or stop
+   before planning?*  Stop before planning — review may change the code,
+   so a plan/worker run against it would be wasted and is not evidence.
+
+## Edge cases
+
+- Upstream changes between sync and handoff → existing PlannerHandoffError
+  hold (R7); next QA run re-syncs, so planning never repeats against a
+  known-stale tree.
+- Workers killed by stale-window cleanup may have unpushed work — that
+  is pr-3201ea8 (ownership); the sync only sees what reached the upstream
+  and must not hide it (it reports L/U shas in logs).
+- Upstream branch deleted/absent → proceed; publish pushes it.
+- Local backend (`resolve_real_origin` → None) → no network work; the
+  checkout/unfinished-merge holds still apply.
+- Upstream branch moved between `ls-remote` and the fetch → hold (the
+  classified head is gone); restarting QA synchronizes with the new head.
+- `pm/`-only upstream commits (e.g. old workers' `qa:` notes) → ff and plan.
