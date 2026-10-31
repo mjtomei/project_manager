@@ -1102,3 +1102,77 @@ behavioural adaptation are below.
   ``TestFreshStart::test_a_failed_launch_is_not_reported_as_waiting_for_the_turn``
   and ``test_a_raising_launch_is_not_reported_as_waiting_for_the_turn``
   (both fail with the old wording).
+
+## Master integration 2 (2026-10-31)
+
+Merged `origin/master` (`eaf3372e`, PR #249 — QA execution routed through
+Claude mixed workers) into this branch on user authorization.  The branch was
+one integration behind (`4a74d880`); the merge commit is `9657aab5`.
+
+Only two files conflicted, both additively:
+
+* **`pm/project.yaml`** — this branch's `pr-22ea6a2` record (41 notes,
+  `model`/`session_models` including the `claude-work-xhigh-249` sign-off
+  override) was kept, and master's newly added PR records were kept after it.
+  Nothing else in the registry was touched; YAML parses and the PR count is
+  571.
+* **`tests/test_review_loop_terminal_state.py`** — both sides appended a test
+  block at the end; both are kept (this PR's superseded-loop
+  transcript-finalization tests, master's log-line-markup test).
+
+Everything else auto-merged.  The merge was then verified by reading the
+combined code at every place the fresh flow meets master's new work:
+
+* **`review_loop_ui._poll_impl_idle`** keeps master's S79 guard
+  (`os.path.lexists` + `pane_runs_transcript` → trust-watch instead of
+  register) *and* this PR's fresh-attempt recovery inside the
+  `register()` `ValueError` branch (native transcript from the pane command,
+  then the trust-watch fallback).  The fresh handoff branch, its
+  `reconcile_idle_status` call and the rate-limited
+  `handoff_attempt_due()` launch are unchanged.
+* **`auto_start.recorded_qa_verdict`** keeps master's open-return fence
+  (`_predates_open_return`) plus this PR's fresh-request timestamp fence and
+  the `SUPERSEDED` "not a verdict" fence.
+* **`review_loop_ui._auto_review_idle_prs`** is untouched by master and still
+  consumes the fresh marker when the review starts.
+* **`signoff.py`** — master added the return-launch claim machinery
+  (`claim_return_launch`, `_claim_fresh`, `_launch_claimable`,
+  `return_launch_claimed`, a wider `clear_return_awaiting`).  The reset's
+  return closure is still sufficient: setting `awaiting=None` +
+  `resolved_at` makes `_launch_claimable` false, so no hop can relaunch the
+  implementation with `--fresh`.  `fresh_recorded_verdict`'s timestamp guard
+  is intact.
+* **`pane_idle.py`** keeps both master's second-turn detection (a
+  `user_prompt` clears idle; a `Stop` newer than an observed `idle_prompt`
+  is a new turn) and this PR's re-arm on every `idle_prompt`.
+* **`autostart_state._derive`** places the fresh wait reasons before
+  master's `win_live`/idle branches, so the status row still says "waiting
+  for the current implementation turn" (or the permission-prompt / window
+  missing / turn-complete reasons).
+* **`app._deferred_startup`** keeps master's guarded `consume_breadcrumb`
+  and this PR's guarded `resume_pending` before the command-queue dispatch.
+* **`verdict_transcript.py`** — master did not touch it in this delta; the
+  net diff against master is this PR's `latest_turn_state` tail reader and
+  the `"\n"`-only JSONL split.
+
+Behaviour is unchanged from the previous integration; no policy vocabulary
+changed this time (`wait_for_merge` / `auto_merge`, `--stop-before-merge` the
+deprecated alias).
+
+**Tests** (this container, `pytest<9` from a scratchpad `pip --target`):
+full suite 5331 passed, 1 skipped, 12 failed — all 12 in
+`tests/test_markdown_render.py` with `ModuleNotFoundError: No module named
+'markdown'` (the container lacks the runtime dependency); after installing
+`markdown>=3.5` into the same target the file is 13/13 green, so the effective
+result is 5344 passed / 1 skipped / 0 failed.  Targeted suites for this
+feature and its neighbours (`test_autostart_fresh`, `test_verdict_transcript`,
+`test_pane_idle`, `test_review_loop_terminal_state`, `test_tui_pidfile`,
+`test_auto_start_qa`, `test_autostart_multi_target`,
+`test_autostart_transcript_finalize`, `test_review_loop`, `test_signoff`,
+`test_signoff_integration`, `test_tui_signoff_handoff`,
+`test_tui_sync_parse_error`, `test_return_driver_handoff`,
+`test_review_qa_handoff_unloadable`): 799 passed.
+
+This is an implementation return, not a review/QA verdict: the earlier QA
+findings and the two scenario-authoring conflicts recorded in the PR notes
+still stand for the fresh review/QA pass.
