@@ -175,3 +175,40 @@ def test_qa_add_instruction_creates_in_instructions_dir(tmp_path):
     assert result.exit_code == 0
     assert (tmp_path / "qa" / "instructions" / "my-test.md").exists()
     assert not (tmp_path / "qa" / "artifacts" / "my-test.md").exists()
+
+
+def test_qa_run_names_this_run_and_leaves_no_resume_snapshot(tmp_path,
+                                                             monkeypatch):
+    """S111: the fixed ``cli-<pr>`` workdir kept the first run's start
+    record, naming a long-dead process, so auto-start started full QA over
+    a later live run; and the resume snapshot left behind made the TUI
+    recover the one instruction's verdict as the PR's QA result."""
+    import json, os
+    from pm_core import qa_loop, store
+    from pm_core.cli.qa import qa_run
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(qa_loop, "get_pm_session", lambda: "pm-own")
+    pm_root = tmp_path / "pm"
+    _seed(pm_root)
+    store.save({"project": {"name": "t", "repo": "/r", "base_branch": "m"},
+                "prs": [{"id": "pr-001", "title": "T", "branch": "b",
+                         "status": "qa"}]}, pm_root)
+    wd = qa_loop.create_qa_workdir("pr-001", "cli-pr-001")
+    (wd / "qa_run.json").write_text(json.dumps(
+        {"pr_id": "pr-001", "loop_id": "cli-pr-001", "session_tag": "own",
+         "started_at": 1.0, "owner_pid": 1, "owner_start": "1"}))
+    seen = {}
+
+    def _run(state, *a, **kw):
+        qa_loop.write_run_record(state)
+        seen["owner"] = qa_loop.read_run_record(wd)["owner_pid"]
+        qa_loop._resume_file_path(wd).write_text("{}")
+        state.latest_verdict = "PASS"
+        return state
+    with patch("pm_core.cli.qa.state_root", return_value=pm_root), \
+         patch.object(qa_loop, "run_qa_sync", side_effect=_run):
+        result = CliRunner().invoke(qa_run, ["login", "--pr", "pr-001"])
+    assert result.exit_code == 0, result.output
+    assert "Result: PASS" in result.output
+    assert seen["owner"] == os.getpid()
+    assert not qa_loop._resume_file_path(wd).exists()

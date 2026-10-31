@@ -82,3 +82,23 @@ def test_empty_verdict_writes_done_state(tmp_path, monkeypatch):
 
     entry = runtime_state.get_action_state("pr-stop1", "review-loop")
     assert entry["state"] == "done"
+
+
+def test_error_line_shows_the_remedy_as_text_not_markup():
+    """Review 0f64 i1: the review loop's ERROR line put the failed launch's
+    stderr (RQ40: the route remedy) into log-line markup unescaped, like
+    S53's TUI keys.  An expired sign-in remedy naming
+    "/tmp/s53/creds[work]/..." lost "[work]" on the line and in L, and a
+    "[/...]" made the line refuse the whole message."""
+    from types import SimpleNamespace
+    from rich.text import Text
+    from pm_core.tui import review_loop_ui
+    logs = []
+    app = SimpleNamespace(log_message=lambda msg, **kw: logs.append(msg))
+    for reason in ("so /tmp/s53/creds[work]/work-creds.json holds a valid "
+                   "session", "see [/tmp] for details"):
+        state = SimpleNamespace(
+            pr_id="pr-x", latest_verdict="ERROR", iteration=1,
+            latest_output=f"Review window launch failed (rc=1): {reason}")
+        review_loop_ui._announce_loop_done(app, state)
+        assert reason in Text.from_markup(logs[-1]).plain

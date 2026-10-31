@@ -1254,8 +1254,11 @@ def _get_session_name_for_cwd() -> str:
 def _get_current_pm_session() -> str | None:
     """Return the base pm session name when running inside one.
 
-    Reads the actual session from $TMUX_PANE and strips any grouped-session
-    ~N suffix.  Returns None if not inside tmux or not in a pm- session.
+    Reads the actual session from $TMUX_PANE and resolves it to its pm
+    session: a grouped ``~N`` view or a user's own view of any name
+    (tmux names that view for every pane and popup of the group while its
+    client is the most recently active one, S118/S124).  Returns None if
+    not inside tmux or not in a pm- session.
     """
     if not tmux_mod.in_tmux():
         return None
@@ -1267,9 +1270,10 @@ def _get_current_pm_session() -> str | None:
         # session" rather than a crash out of `pm session mobile` /
         # `--print-connect`, like every other probe in this module.
         return None
-    # Shared definition of "grouped session base" (see
-    # ``pane_registry.base_session_name``), like the other call sites.
-    name = pane_registry.base_session_name(name)
+    # Resolve a grouped ``~N`` view — including a user's own view grouped
+    # under another name (S118/S121/S124) — to its pm session, using the
+    # shared definition rather than a local ``~`` strip.
+    name = pane_registry.pm_session_name(name)
     if name.startswith("pm-"):
         return name
     return None
@@ -1284,12 +1288,24 @@ def _get_pm_session() -> str | None:
     server and conclude that a live session is gone.  Inside a pm session
     the ambient ``PM_TMUX_SOCKET``/``$TMUX`` is already correct, so the
     extra lookup is skipped there.
+
+    Outside a pm session that is the session of the project this command
+    works on: the ``-C``/``PM_PROJECT`` project when given (a PR workdir is
+    its own git clone, so its cwd names a session nobody runs), else the
+    project of the cwd.
     """
     if not tmux_mod.has_tmux():
         return None
     current = _get_current_pm_session()
     if current:
         return current
+    if _project_override:
+        from pm_core.paths import get_session_tag
+        tag = get_session_tag(start_path=_project_override)
+        if tag:
+            session = f"pm-{tag}"
+            _select_session_socket(session)
+            return session
     session = _get_session_name_for_cwd()
     _select_session_socket(session)
     return session
