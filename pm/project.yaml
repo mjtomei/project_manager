@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-31T22:16:38.669850+00:00'
+  updated_at: '2026-10-31T23:20:45.926805+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5485,6 +5485,34 @@ prs:
       no tmux server.'
     created_at: '2026-10-31T22:16:38Z'
     last_edited: '2026-10-31T22:16:38Z'
+  - id: note-0e5037f
+    text: 'Review loop 703c i7 (no requirement changes; full suite 5336 passed / 1
+      skipped). Verification pass over the integrated head; one test gap in the rollout
+      path (R6.1 / acceptance 4). (1) The legacy attach path had no end-to-end coverage:
+      every existing test asserted a piece of it (_resolve_session_socket returns
+      (None, True) and exports the default server socket, --print-connect prints the
+      legacy form, pm session kill targets the default server), but nothing ran _session_start
+      against a pre-isolation session, so the two user-visible guarantees were never
+      asserted together: no private server/socket is created, and the legacy session
+      plus the grouped session it attaches to stay on the default server (nothing
+      killed or migrated), while the process addresses that server *explicitly* (PM_TMUX_SOCKET
+      = the default socket, not whatever  names). New TestSessionStartAttachesToLegacySession::test_attaches_to_the_legacy_session_without_creating_a_private_one
+      builds a real pre-isolation session on a disposable default socket with its
+      TUI pane registered (so the heal path does not fire), runs _session_start, and
+      asserts the rollout note, the exported default socket, the pm-iso-legacy~1 attach
+      target on the default server, the absence of the private socket, and that neither
+      the session environment nor the server global environment received a PM_TMUX_SOCKET.
+      Verified to fail with the legacy branch disabled: it created a private session
+      instead of attaching. Validation: full suite 5336 passed / 1 skipped / 0 failed
+      (scratch pytest<9 + markdown, PATH without the push-proxy git, TMUX/TMUX_PANE/PM_*/PM_HOST_HOME
+      cleared; log at /pm-captures/review-703c-i7/full-suite-final.log); pm/specs/pr-073910f/session_start_smoke.py
+      re-run end to end on a disposable socket with TMUX_TMPDIR on a scratch dir (private
+      server created, PM_TMUX_SOCKET in the session env, the global env and the hooks,
+      default server untouched); pm session list re-checked read-only in this container
+      ("No pm sessions found.", no socket dir created). No live session, server or
+      shared host configuration was touched; the new test binds only disposable sockets.'
+    created_at: '2026-10-31T23:20:45Z'
+    last_edited: '2026-10-31T23:20:45Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
