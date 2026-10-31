@@ -42125,7 +42125,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-10-29T13:47:54.499362+00:00'
+  updated_at: '2026-10-31T18:07:25.345765+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42346,6 +42346,30 @@ prs:
       and pm dies with a raw CalledProcessError traceback — filed as pr-e64ecb6).'
     created_at: '2026-10-29T13:47:54Z'
     last_edited: '2026-10-29T13:47:54Z'
+  - id: note-15f3662
+    text: 'User-authorized restart from the main PM session on 2026-10-31 after #249
+      merged as eaf3372e60d1717bd97cc50b5e0b04c6df881fa1. Resume this existing PR
+      in its existing workdir. First integrate current origin/master INTO THIS PR
+      branch, preserving its intended behavior and all earlier review/QA corrections;
+      resolve real code/test conflicts and validate the combined behavior before handing
+      off for a fresh review/QA/sign-off sequence. Do not merge this PR into master
+      or push/reset/delete master or other branches. This is a user-directed implementation
+      return, not a reviewer/sign-off verdict. The read-only integration check found
+      substantive conflicts in: pm/project.yaml, pm_core/qa_loop.py, pm_core/tui/qa_loop_ui.py.
+      The prior SIGNOFF_MERGE is historical evidence for its recorded revisions, not
+      approval of a new integration. Retain all original source, dirty files, stashes,
+      drafts, fixtures and captures. Existing uncommitted content may have been intentionally
+      excluded; inspect its provenance instead of automatically committing it. Preserve
+      every PR record and unrelated local metadata during project.yaml reconciliation.
+      Do not weaken acceptance criteria, choose unresolved user policy questions or
+      reuse stale PASS results. Historical captures have been copied intact to the
+      main session captures; overwritten filename collisions are backed up in the
+      host migration record. Main session is pm-project_manager-c5a1006b; keep old
+      restored sessions idle. Assigned models and explicit work-Opus sign-off override
+      remain unchanged. Autostart will use wait_for_merge; no PR merge is authorized
+      by this request.'
+    created_at: '2026-10-31T18:07:25.345765+00:00'
+    last_edited: '2026-10-31T18:07:25.345765+00:00'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

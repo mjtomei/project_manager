@@ -65,6 +65,13 @@ This spec is written against the user-visible surfaces: `pm qa run`,
   0); `qa_debug` resolves container mode and fails closed **before**
   creating a workdir/clone, and converts any `create_qa_container` failure
   into a message + exit 1 (only its own container released).
+- `pm_core/qa_status.py` `_render` — the QA status dashboard's ERROR block
+  wraps each cause/remedy line to the pane width (indent preserved) instead
+  of letting a ~190-column fail-closed line wrap on its own and scroll the
+  pane's own `QA Status: <pr>` header off the top (fix d70a3138, found by
+  QA scenario 9). An ERROR status renders the header, the wrapped block and
+  the `q: quit` hint only — the scenario table is not drawn while `error`
+  is set.
 
 Intentionally **not** changed (do not assert as bugs): QA Scenario 0, the QA
 planner, the QA verifier and finalizer, and the authoring helpers (`pm qa
@@ -74,15 +81,29 @@ reaches planning, the planner (and Scenario 0) legitimately run on the host —
 container-eligible refiner/worker/scenario agent**, and, for the fresh-run
 preflight abort, zero launches of anything at all.
 
-## Status of the earlier QA run (2026-10-29)
+## Status of the earlier QA runs (2026-10-29)
 
 The first QA run drove scenarios 1–7 and covered R1–R14: six PASS, one
 NEEDS_WORK (a queued scenario vanished from `qa_status.json` — fixed in
 `868d48e8`). After that run, i4/i6 (`pm qa run` prints the cause and exits 1
 on `ERROR`; the QA note carries a mid-run cause), `868d48e8` (queued rows
 persist) and c534 i1 (window-create failure fails closed; resume keeps the
-error; a recovered `ERROR` keeps its cause) landed. New scenarios cover
-those changes; the locked scenarios 1–7 are not re-emitted.
+error; a recovered `ERROR` keeps its cause) landed.
+
+The second QA run drove scenarios 8–10: R15 PASS, R11/R16 NEEDS_WORK, and
+the scripted-entry-point exit codes PASS. Scenario 9's only failure was the
+QA status pane: the ~190-column fail-closed cause line wrapped on its own in
+the ~100-column status pane, adding rows and scrolling the `QA Status: <pr>`
+header off the top. Fixed in `d70a3138` (wrap the error block to the pane
+width, indent preserved, regression test at 60/80/100/120 columns). The
+run's other checks (relaunch inside the same container; lost container fails
+closed with cause in the log, status file and a single QA ERROR note; TUI
+restart does not resume or re-run) passed.
+
+The locked scenarios 1–10 are not re-emitted. New scenarios cover the
+pane-wrap fix, the runtime-cause variants not yet driven end to end (timeout,
+unexecutable runtime), the healthy `pm qa debug` control, and the adjacent
+shared-launcher (review) fail-closed behaviour.
 
 ## Requirements (Given / When / Then)
 
@@ -253,6 +274,24 @@ those changes; the locked scenarios 1–7 are not re-emitted.
 - **Then** the recovered run still carries the cause, is not re-adopted or
   re-run, and no host agent starts.
 
+### R17 — The QA status pane keeps its header and wraps the fail-closed ERROR
+- **Given** a container-mode TUI QA run that ended `ERROR` while its QA
+  window and status pane are open (a mid-run container failure, so the pane
+  exists),
+- **When** the user looks at the QA status pane,
+- **Then**
+  - the pane still shows its `QA Status: <pr>` header at the top,
+  - the `ERROR` block's long cause and remedy lines are wrapped inside the
+    pane width — no line spills past the right edge and no line's natural
+    wrap pushes the header off the top,
+  - the full cause and both retry remedies (fix the runtime / `pm container
+    disable`) are readable, with the remedy bullets' indent preserved,
+  - the `q: quit` hint is visible,
+- **Given** the same pane,
+- **When** the user narrows it (a few widths, e.g. ~100, ~80, ~60 columns),
+- **Then** the header stays visible and every error line still fits the
+  pane width at each size.
+
 ## Setup (cross-cutting)
 
 - Install pm from the PR checkout (`pip install -e .`, or `./install.sh
@@ -297,6 +336,9 @@ those changes; the locked scenarios 1–7 are not re-emitted.
 | Capped run launches its first batch | Status pane/`qa_status.json` keep every planned scenario; the rest show `queued` |
 | Container exists but its window cannot be created | Run ERROR; only that container released; no INPUT_REQUIRED |
 | Container lost after another scenario already has a verdict | Note and status carry the cause+remedy, not a bare per-scenario summary |
+| Fail-closed ERROR block longer than the status pane | Wrapped within the pane width; `QA Status: <pr>` header stays visible |
+| Scenario workdir *clone* fails in container mode | Deliberately INPUT_REQUIRED (nothing was allocated, no host launch); not a launch ERROR |
+| A review/signoff refiner launch while the runtime is down | Fails with a container-creation error and `pm container disable` guidance; no host refiner |
 | TUI restarts after a mid-run ERROR | Recovered ERROR keeps its cause; not re-run; no host launch |
 | `pm qa run` ends ERROR | Cause+remedy printed, `Result: ERROR`, exit code nonzero |
 | `pm qa run` completes with a verdict | Exit code 0 (PASS / NEEDS_WORK / INPUT_REQUIRED) |
@@ -348,5 +390,15 @@ infrastructure failures.
   known, separately-filed gaps (pr-7b1dd2e, pr-7abb052). They are out of
   scope here: a scenario must not report them as regressions of this PR, but
   may note them.
+- **A container-mode scenario whose workdir clone fails** (before any
+  container is created) is deliberately recorded `INPUT_REQUIRED`, not a
+  launch ERROR: nothing was allocated, so there is no container to leak and
+  no host launch to refuse (impl.md i6). Only failures *after* a container
+  is allocated (create/setup, or the window for an existing container) are
+  launch ERRORs. Do not assert ERROR for a clone failure.
+- **The QA status pane in an ERROR state shows the header + error block +
+  `q: quit`, not the scenario table** (`_render` returns after the error
+  branch). Per-scenario verdicts are asserted from `qa_status.json`, not
+  from the pane.
 
 No **[UNRESOLVED]** ambiguities.
