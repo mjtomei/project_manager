@@ -2135,6 +2135,58 @@ def test_web_ui_finalize_transcodes_when_capdir_is_set(tmp_path):
         "the finalize step keeps the webm although the mp4 exists")
 
 
+def test_web_ui_finalize_never_consumes_the_script_on_stdin(tmp_path):
+    """The finalize ffmpeg must not read the worker's stdin.
+
+    Recipe blocks are run by feeding them to bash on stdin — this module's
+    execution cases do, and a worker scripting a capture or an automated
+    agent executing one does the same (`bash < block`), the shape the
+    recording recipes' render note describes for a batch loop (QA S46, where
+    ffmpeg ate characters of the loop's next input). An ffmpeg allowed to
+    read stdin consumes the bytes that follow it, so bash then executes a
+    mangled line: verified with the recipe's own block and ffmpeg 4.4.2 fed
+    on stdin, ffmpeg ate the first two bytes of the next line (`#T` of the
+    comment block) and bash answered "bash: line 83: he: command not found"
+    (the one-byte stub below leaves `The` and answers "The: command not
+    found"); a longer encode or a batch loop loses more. On a terminal the
+    same read is a false success: `q` makes ffmpeg exit 0 after writing a
+    container with no frames (262 bytes, verified), which the step's `test -s`
+    accepts, and the step then deletes the webm — the only copy of the
+    recording.
+
+    The recording recipes' `render_cast` passes `-nostdin` for exactly this
+    reason (`test_render_keeps_the_vfr_and_nostdin_encode`); the finalize step
+    was the one render call without it. The stub models real ffmpeg's stdin
+    behaviour — it reads (and so consumes) one byte unless `-nostdin` is
+    given — and the block is fed on stdin, as a scripted worker feeds it.
+    """
+    block = _web_ui_finalize_block()
+
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    (capdir / "recording.webm").write_bytes(b"webm")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    _stub_tool(bindir, "ffmpeg", (
+        'nostdin=0\n'
+        'for a in "$@"; do [ "$a" = "-nostdin" ] && nostdin=1; last=$a; done\n'
+        'if [ "$nostdin" = 0 ]; then head -c 1 >/dev/null 2>&1 || true; fi\n'
+        'printf mp4 > "$last"\n'))
+    env = dict(os.environ, CAPDIR=str(capdir),
+               PATH=f"{bindir}:{os.environ['PATH']}")
+    r = subprocess.run(["bash"], input=block, env=env,
+                       capture_output=True, text=True)
+
+    assert "command not found" not in r.stderr, (
+        "the finalize step's ffmpeg read the script after it, so bash ran a "
+        "mangled line: " + r.stderr)
+    assert r.returncode == 0, r.stderr
+    assert (capdir / "recording.mp4").read_bytes() == b"mp4", (
+        "the finalize step did not produce its mp4")
+    assert not (capdir / "recording.webm").exists(), (
+        "the finalize step kept the webm although the mp4 exists")
+
+
 @pytest.mark.parametrize("webm_shape", ["absent", "empty"],
                          ids=["no-file", "0-byte-file"])
 def test_web_ui_finalize_says_when_there_is_no_webm(tmp_path, webm_shape):

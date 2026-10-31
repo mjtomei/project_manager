@@ -55,6 +55,11 @@ recording-recipe bugs that any worker following the recipe hits:
   after a successful encode. The guards above are unchanged and still run
   before the renderer; a failed render still exits non-zero and leaves no
   `recording.mp4`, gif or partial behind (R60 in impl.md).
+- the web-UI finalize step's `ffmpeg` passes `-nostdin` (R63): the block is
+  run with itself on stdin whenever a worker scripts it, and ffmpeg otherwise
+  eats the script that follows it; on a terminal a `q` makes ffmpeg exit 0
+  with a 0-frame mp4 that `test -s` accepts, after which the step deletes the
+  webm — the only copy of the recording.
 - the web-UI finalize/driver/teardown guards stop the block with
   `if … exit 1`, because `: "${VAR:?}"` only stops a *scripted* run — in an
   interactive shell the next line still runs (the `rm` aimed at
@@ -666,6 +671,13 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
 - a transcode whose `ffmpeg` reports success but writes an empty mp4 fails
   with "ffmpeg wrote nothing", leaves no mp4 behind, and keeps the webm so
   the step can be retried;
+- the finalize step's `ffmpeg` carries `-nostdin`: fed the block on stdin
+  (`bash < block`, how a scripted worker or an automated agent runs it),
+  ffmpeg no longer consumes the script after it (pre-fix, real ffmpeg 4.4.2
+  ate the start of the next comment line and bash answered "he: command not
+  found"), and a `q` typed during the transcode no longer quits it with
+  status 0 after writing a 262-byte, 0-frame mp4 that `test -s` accepts and
+  then loses the webm — the only copy of the recording (R63 in impl.md);
 - a host with no `ffmpeg` on `PATH` stops the finalize step with "ffmpeg is
   not installed — the finalize step needs it" before any transcode, instead
   of reporting the driver's webm as a failed encode;
@@ -719,6 +731,12 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
 - A renderer reports success and writes nothing → the render/finalize step
   fails on the empty artifact and removes it, so no output is left behind on a
   failed step for the manifest to list.
+- The finalize block is fed to bash on stdin (a scripted worker, an automated
+  agent), or the worker presses `q` during the transcode → ffmpeg must not
+  read that stdin: without `-nostdin` it eats the script after it, or exits 0
+  after writing a 262-byte, 0-frame mp4 that `test -s` accepts and the step
+  then deletes the webm (the only copy of the recording). The finalize step
+  passes `-nostdin` for exactly this reason.
 - The web-UI server accepts the connection but never answers → the per-attempt
   curl bound keeps the deadline meaningful.
 - Something already answers on the web-UI port (a previous run's server, or

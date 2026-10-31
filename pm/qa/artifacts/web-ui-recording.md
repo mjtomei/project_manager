@@ -560,7 +560,22 @@ command -v ffmpeg >/dev/null || {
 # transcode leaves a *partial* mp4 behind (verified: a killed ffmpeg leaves a
 # non-empty output), which the `test -s` below accepts — the same
 # header-only-cast problem as the recording step, one artifact over.
-ffmpeg -y -i "$CAPDIR/recording.webm" -c:v libx264 -profile:v high \
+# `-nostdin` is load-bearing, not style. ffmpeg reads the worker's stdin
+# unless told not to, and this block runs with the *block itself* on stdin
+# whenever a worker scripts a capture or an automated agent executes it
+# (`bash < block`) — the same shape the recording recipes' render note
+# describes for a batch loop, where ffmpeg ate characters of the loop's next
+# input (QA S46). Verified with the recipe's own block and ffmpeg 4.4.2 fed on
+# stdin: ffmpeg consumed the first bytes of the line after it (the start of
+# the comment below), and bash ran the remainder as a command ("bash: line N:
+# he: command not found"); a long encode or a batch loop loses more of what
+# follows. On a terminal the same read is a false success: pressing `q` makes
+# ffmpeg exit 0 after writing a container with no frames (262 bytes, verified),
+# which the `test -s` below accepts — so the step reports success and then
+# deletes the webm, the only copy of the recording.
+# The recording recipes' `render_cast` passes `-nostdin` for exactly this
+# reason; this was the one render call without it.
+ffmpeg -nostdin -y -i "$CAPDIR/recording.webm" -c:v libx264 -profile:v high \
     -pix_fmt yuv420p -crf 18 -movflags +faststart \
     "$CAPDIR/recording.mp4" || {
     rm -f "$CAPDIR/recording.mp4"
@@ -698,7 +713,7 @@ fencing deep:
     ## Commands
 
         CAPDIR=... APP_URL=... node driver.mjs
-        ffmpeg -i recording.webm ... recording.mp4   # H.264 finalize
+        ffmpeg -nostdin -i recording.webm ... recording.mp4   # H.264 finalize
         curl -N "$SSE_URL" > sse.log   # protocol layer
 
     ## What this demonstrates
