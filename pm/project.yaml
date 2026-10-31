@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-31T22:25:43.686439+00:00'
+  updated_at: '2026-10-31T22:56:40.623725+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37779,6 +37779,29 @@ prs:
       The dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-31T22:25:28Z'
     last_edited: '2026-10-31T22:25:43Z'
+  - id: note-973e860
+    text: 'Review loop 928f i6: two leftovers in the kept recipe scope, both the PR
+      own class, both reproduced in this container; no pm_core change. (1) Both recording
+      recipes render blocks guarded ffmpeg but not ffprobe, which runs earlier (dimensions,
+      packet count, duration; the final-frame hold is built from them). With ffmpeg
+      on PATH and no ffprobe the block printed "ffprobe: command not found" three
+      times and reported "cannot probe the gif" -- the gif blamed for a tool that
+      is not installed, the misdiagnosis the encoder guard exists to prevent. Both
+      now stop with "ffprobe is not installed -- install it (e.g. apt-get install
+      ffmpeg, which provides both)". (2) The web-UI finalize wrote straight to recording.mp4;
+      a finalize killed mid-encode (worker timeout, session end, container stop) runs
+      no cleanup, so a non-empty partial sat under the name the manifest presents
+      (verified: SIGKILLing the block shell left a 7-byte recording.mp4). It now writes
+      recording.mp4.partial.mp4 and renames only after a complete encode, as render_cast
+      already did; the partial is named in the produced-files list and manifest example,
+      and step 1/step 2 clear it. Tests: tests/test_qa_artifact_recording_recipes.py
+      261 passed (was 258); mutation check (2 prober cases; 3 web-UI cases against
+      HEAD); real ffmpeg 4.4.2 probe renders a 1.0 s VP8 webm to a valid 1.0 s H.264
+      mp4, no partial, no webm. Full suite 5337 passed, 1 skipped, 121 deselected,
+      0 failed (445.09 s). Evidence: /pm-captures/review-928f-i6/. impl.md R66 and
+      qa.md updated. The dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-31T22:56:40Z'
+    last_edited: '2026-10-31T22:56:40Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
