@@ -188,12 +188,33 @@ _json_opt = click.option("--json", "as_json", is_flag=True,
 
 def _print_changes(payload: dict) -> None:
     for c in payload.get("changes") or []:
+        action = c.get("action")
+        if action == "fresh_reset":
+            click.echo(f"fresh: {c.get('pr_id')} "
+                       f"({c.get('from_status')} → in_progress)")
+            continue
+        if action == "already_waiting":
+            # The turn itself may already be complete (the handoff can be
+            # gated on spec/return state), so name what is being waited for,
+            # not a turn state this line cannot see.
+            click.echo(f"already waiting: {c.get('pr_id')} "
+                       f"(waiting for its implementation turn)")
+            continue
         pol = c.get("policy")
         pol_s = f" ({pol.replace('_', '-')})" if pol else ""
         prev = c.get("previous_policy")
         if prev:
             pol_s = f" ({pol.replace('_', '-')}; was {prev.replace('_', '-')})"
-        click.echo(f"{c.get('action')}: {c.get('pr_id')}{pol_s}")
+        click.echo(f"{action}: {c.get('pr_id')}{pol_s}")
+    # A successful reply may carry the owner's log line (e.g. ``fresh``'s
+    # "waiting for the current implementation turn").  A failed one already
+    # prints its message via ``_finish``'s ``Error (...)`` line; echoing it
+    # here too would duplicate the text.
+    if payload.get("ok") and payload.get("message"):
+        click.echo(payload["message"])
+    for f in payload.get("failed") or []:
+        click.echo(f"failed: {f.get('pr_id')} ({f.get('error')}): "
+                   f"{f.get('message')}", err=True)
     if payload.get("released"):
         click.echo("released merge hold: " + ", ".join(payload["released"]))
     st = payload.get("status") or {}
@@ -233,17 +254,43 @@ def autostart():
     --wait-for-merge and never creates a separate target-only hold.
 
     \b
+    Fresh autostart (`pm autostart fresh`, TUI `z a` / `z O` / `z A`) is the
+    explicit workflow reset for a reviewed PR you sent back to implementation
+    after feedback: it keeps the live session, retires the old review/QA/sign-off
+    state, and waits for the current implementation turn before one fresh
+    review.  Plain `add` never rewinds.
+
+    \b
     Examples:
       pm autostart add pr-abc123 pr-def456
       pm autostart add 229 --auto-merge
       pm autostart add pr-final --wait-for-merge   # whole chain, manual merges
+      pm autostart fresh pr-abc123                 # back to impl after feedback
       pm autostart remove pr-abc123
       pm autostart list --json
       pm autostart status --json
 
-    TUI: press `a` for the live runs popup; command bar accepts the same
-    verbs (`autostart add X`, `autostart status`, ...).
+    TUI: press `a` for the live runs popup, `z a` for fresh autostart
+    (`z O` / `z A` force the merge policy); the command bar accepts the same
+    verbs (`autostart add X`, `autostart fresh X`, `autostart status`, ...).
     """
+
+
+def _chosen_policy(wait: bool, auto: bool, stop: bool) -> str | None:
+    """The single merge policy the CLI flags select (None = no flag given).
+
+    ``--stop-before-merge`` is the deprecated alias for ``--wait-for-merge``,
+    so the two are one choice; two *distinct* policies are a contradiction
+    that rejects the whole command before anything is sent to the owner.
+    Shared by ``add`` and ``fresh`` so their flag handling cannot drift.
+    """
+    chosen = [p for p, on in ((POLICY_WAIT, wait or stop),
+                              (POLICY_AUTO, auto)) if on]
+    if len(chosen) > 1:
+        flags = ", ".join(POLICY_FLAGS[p] for p in chosen)
+        raise _Fail(EXIT_INVALID, "conflicting_flags",
+                    f"conflicting merge policies: {flags}")
+    return chosen[0] if chosen else None
 
 
 @autostart.command("add")
@@ -278,16 +325,58 @@ def autostart_add(pr_ids, wait, auto, stop, session, timeout, as_json):
     unblocked — no further autostart command needed.
     """
     try:
-        chosen = [p for p, on in ((POLICY_WAIT, wait or stop),
-                                  (POLICY_AUTO, auto)) if on]
-        if len(chosen) > 1:
-            flags = ", ".join(POLICY_FLAGS[p] for p in chosen)
-            raise _Fail(EXIT_INVALID, "conflicting_flags",
-                        f"conflicting merge policies: {flags}")
+        chosen = _chosen_policy(wait, auto, stop)
         ids = _validate(pr_ids, for_add=True)
         args = ["add", *ids]
         if chosen:
-            args.append(POLICY_FLAGS[chosen[0]])
+            args.append(POLICY_FLAGS[chosen])
+        payload = _request(session, args, timeout)
+    except _Fail as f:
+        _emit_fail(f, as_json)
+    _finish(payload, as_json, _print_changes)
+
+
+@autostart.command("fresh")
+@click.argument("pr_ids", nargs=-1)
+@click.option("--wait-for-merge", "wait", is_flag=True,
+              help="Hold the target and all its transitive prerequisites "
+                   "for a manual merge (g / pm pr merge). Default for new "
+                   "targets")
+@click.option("--auto-merge", "auto", is_flag=True,
+              help="Merge automatically when ready (sign-off gate still applies)")
+@click.option("--stop-before-merge", "stop", is_flag=True,
+              help="Deprecated alias for --wait-for-merge")
+@_session_opt
+@_timeout_opt
+@_json_opt
+def autostart_fresh(pr_ids, wait, auto, stop, session, timeout, as_json):
+    """Return reviewed PR_IDS to implementation after feedback (z a / z O / z A).
+
+    Use this when a PR already reached review/QA/sign-off, you stopped the
+    loop, resumed its *existing* implementation pane with feedback, and want
+    auto-start to take the changed PR through a fresh review, QA and
+    sign-off again.
+
+    The PR is atomically returned to `in_progress`; obsolete review-loop, QA
+    and sign-off ownership is retired (historical evidence is kept), and the
+    existing implementation session is adopted — never killed or relaunched.
+    Auto-start then waits for the current implementation turn to finish before
+    starting exactly one fresh review.
+
+    Without a policy flag an existing target keeps its own merge policy and a
+    new target defaults to --wait-for-merge.  --stop-before-merge is a
+    deprecated alias for --wait-for-merge.
+
+    Plain `pm autostart add` stays a continuation from the current phase; it
+    never rewinds a PR.  Repeating `fresh` while an attempt is already waiting
+    is a no-op.
+    """
+    try:
+        chosen = _chosen_policy(wait, auto, stop)
+        ids = _validate(pr_ids, for_add=True)
+        args = ["fresh", *ids]
+        if chosen:
+            args.append(POLICY_FLAGS[chosen])
         payload = _request(session, args, timeout)
     except _Fail as f:
         _emit_fail(f, as_json)

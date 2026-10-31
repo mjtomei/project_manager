@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ import pytest
 from pm_core.verdict_transcript import (
     extract_verdict_from_transcript,
     extract_verdict_reason_from_transcript,
+    latest_turn_state,
 )
 
 
@@ -74,6 +76,14 @@ def _tool_use_line(name: str, tool_input: dict) -> str:
             "content": [{"type": "tool_use", "id": "toolu_1", "name": name,
                         "input": tool_input}],
         },
+    })
+
+
+def _local_command_line(text: str) -> str:
+    # Claude Code writes slash-command output as a plain-string user record.
+    return json.dumps({
+        "type": "user",
+        "message": {"role": "user", "content": text},
     })
 
 
@@ -238,6 +248,45 @@ def test_dangling_symlink_falls_back_to_session_id_glob(
     assert extract_verdict_from_transcript(symlink, VERDICTS) == "PASS"
 
 
+def test_unreadable_transcript_falls_back_to_session_id_glob(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The pre-existing reader tried the path and, on any read error, fell
+    # back to the session-id glob.  A path that *exists* but cannot be read
+    # (another user's file, a restrictive mode) must keep that behaviour:
+    # returning it would read as an empty transcript and a verdict present
+    # in a readable copy elsewhere would never be seen.
+    sid = "abcdef01-2345-6789-abcd-ef0123456789"
+    fake_home = tmp_path / "home"
+    projects = fake_home / ".claude" / "projects"
+    actual_dir = projects / "-where-claude-actually-wrote"
+    actual_dir.mkdir(parents=True)
+    readable = actual_dir / f"{sid}.jsonl"
+    readable.write_text("\n".join([
+        _user_line("q"),
+        _assistant_line("Verdict on its own line:\nPASS\n"),
+    ]) + "\n")
+
+    # The symlink target exists (so ``is_file()`` is True) but is reported
+    # unreadable, and its content is a *different* verdict — so the
+    # assertion can tell the two paths apart.
+    unreadable = tmp_path / f"{sid}.jsonl"
+    unreadable.write_text("\n".join([
+        _user_line("q"),
+        _assistant_line("NEEDS_WORK\n"),
+    ]) + "\n")
+    symlink = tmp_path / "iter-1.jsonl"
+    symlink.symlink_to(unreadable)
+
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+    real_access = os.access
+    monkeypatch.setattr(
+        "pm_core.verdict_transcript.os.access",
+        lambda p, mode: False if Path(p) == symlink else real_access(p, mode))
+
+    assert extract_verdict_from_transcript(symlink, VERDICTS) == "PASS"
+
+
 def test_longer_verdict_not_masked_by_shorter_prefix(tmp_path: Path) -> None:
     # If the extractor naively scans PASS first it would match only PASS
     # when the real verdict is a longer PASS_* variant.  Longest-first
@@ -297,6 +346,354 @@ def test_reason_missing_file() -> None:
 
 
 # ---------------------------------------------------------------------------
+# latest_turn_state — the fresh-autostart implementation handoff signal
+# ---------------------------------------------------------------------------
+
+def _assistant_tool_line() -> str:
+    return json.dumps({
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "editing"},
+                        {"type": "tool_use", "id": "t1", "name": "Edit",
+                         "input": {}}],
+            "stop_reason": "tool_use",
+        },
+    })
+
+
+def _meta_line(kind: str) -> str:
+    return json.dumps({"type": kind, "message": {}})
+
+
+def _streamed_block_line(block: dict) -> str:
+    # Claude Code writes a message's content blocks as separate records while
+    # it streams and only fills ``stop_reason`` in once the message is
+    # complete (so these records carry ``stop_reason: null``).
+    return json.dumps({
+        "type": "assistant",
+        "apiBlockIndex": 0,
+        "message": {"role": "assistant", "content": [block],
+                    "stop_reason": None},
+    })
+
+
+def test_turn_state_missing_paths() -> None:
+    assert latest_turn_state(None) == "unknown"
+    assert latest_turn_state("/nonexistent/none.jsonl") == "unknown"
+
+
+def test_turn_state_empty_file(tmp_path: Path) -> None:
+    p = tmp_path / "empty.jsonl"
+    p.write_text("")
+    assert latest_turn_state(p) == "unknown"
+
+
+def test_turn_state_complete_after_meta_records(tmp_path: Path) -> None:
+    # Real transcripts append system/meta records after the final assistant
+    # message; they are not turn boundaries.
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _assistant_line("done"),
+        _meta_line("system"),
+        _meta_line("last-prompt"),
+    ])
+    assert latest_turn_state(p) == "complete"
+
+
+def test_turn_state_ignores_local_command_records(tmp_path: Path) -> None:
+    # A slash command (e.g. /model) left after the final assistant message is
+    # a user-typed record but not a submitted prompt: it must not read as a
+    # pending turn (which would stall the fresh-autostart handoff forever).
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _assistant_line("done"),
+        _local_command_line("<command-name>/model</command-name>"),
+        _local_command_line("<local-command-stdout>Set model</local-command-stdout>"),
+    ])
+    assert latest_turn_state(p) == "complete"
+
+
+def test_turn_state_ignores_task_notification_records(tmp_path: Path) -> None:
+    # A background-task completion is injected as a user record after the
+    # turn ended; it is not a prompt and must not look like pending work.
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _assistant_line("done"),
+        _local_command_line("<task-notification>\n<task-id>x</task-id>\n"
+                            "</task-notification>"),
+    ])
+    assert latest_turn_state(p) == "complete"
+
+
+def test_turn_state_ignores_meta_user_records(tmp_path: Path) -> None:
+    meta = json.dumps({
+        "type": "user", "isMeta": True,
+        "message": {"role": "user", "content": "injected context"},
+    })
+    p = _write(tmp_path, [_user_line("do it"), _assistant_line("done"), meta])
+    assert latest_turn_state(p) == "complete"
+
+
+def test_turn_state_ignores_compaction_summary_records(tmp_path: Path) -> None:
+    # Running out of context writes the compaction summary as a plain-string
+    # user record (``isCompactSummary``/``isVisibleInTranscriptOnly``).  It is
+    # transcript-only context, not a submitted prompt: a session that ended
+    # right after compacting must still read "complete", otherwise the fresh
+    # handoff waits forever (every such tail record in real transcripts is
+    # preceded by a completed ``end_turn`` assistant answer).
+    summary = json.dumps({
+        "type": "user",
+        "isCompactSummary": True,
+        "isVisibleInTranscriptOnly": True,
+        "message": {
+            "role": "user",
+            "content": "This session is being continued from a previous "
+                       "conversation that ran out of context. The summary "
+                       "below covers the earlier portion of the conversation.",
+        },
+    })
+    p = _write(tmp_path, [_user_line("do it"), _assistant_line("done"),
+                          summary])
+    assert latest_turn_state(p) == "complete"
+
+
+def test_turn_state_compaction_summary_over_a_pending_prompt(tmp_path: Path) -> None:
+    # Compaction happens on the user's prompt, before the agent answers: the
+    # summary is skipped and the still-unanswered prompt keeps the turn
+    # "in_progress" (a false "complete" would start a review over in-flight
+    # work).
+    summary = json.dumps({
+        "type": "user",
+        "isCompactSummary": True,
+        "message": {"role": "user", "content": "This session is being "
+                                                "continued from a previous "
+                                                "conversation..."},
+    })
+    p = _write(tmp_path, [_assistant_line("done"), _user_line("fix it"),
+                          summary])
+    assert latest_turn_state(p) == "in_progress"
+
+
+def test_turn_state_ignores_bang_shell_records(tmp_path: Path) -> None:
+    # ``!`` shell commands are recorded as non-meta user records (input, then
+    # stdout/stderr).  The agent owes no reply, so a ``!ls`` left at the end of
+    # the transcript must not read as a pending turn (which would stall the
+    # fresh-autostart handoff until the user sends a real prompt).
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _assistant_line("done"),
+        _local_command_line("<bash-input>git status</bash-input>"),
+        _local_command_line("<bash-stdout>clean</bash-stdout>"
+                            "<bash-stderr></bash-stderr>"),
+    ])
+    assert latest_turn_state(p) == "complete"
+
+
+def test_turn_state_tool_use_block_is_in_progress(tmp_path: Path) -> None:
+    p = _write(tmp_path, [_user_line("do it"), _assistant_tool_line()])
+    assert latest_turn_state(p) == "in_progress"
+
+
+def test_turn_state_streamed_thinking_block_is_in_progress(tmp_path: Path) -> None:
+    # A long thinking block is written as its own ``stop_reason: null`` record
+    # before the answer text; while it is the newest record the turn is still
+    # running.  Reading it as "complete" would start the fresh-autostart
+    # review over in-flight work (the thinking window lasts tens of seconds,
+    # so the 5 s poll would often land inside it).
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _streamed_block_line({"type": "thinking", "thinking": "hmm"}),
+    ])
+    assert latest_turn_state(p) == "in_progress"
+
+
+def test_turn_state_streamed_text_block_is_complete(tmp_path: Path) -> None:
+    # The answer text is the last thing a turn writes; a ``stop_reason: null``
+    # text record ends it (this is how every finished pm transcript tails).
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _streamed_block_line({"type": "text", "text": "done"}),
+    ])
+    assert latest_turn_state(p) == "complete"
+
+
+def test_turn_state_tool_use_stop_reason_without_block(tmp_path: Path) -> None:
+    rec = json.loads(_assistant_line("calling"))
+    rec["message"]["stop_reason"] = "tool_use"
+    p = _write(tmp_path, [_user_line("do it"), json.dumps(rec)])
+    assert latest_turn_state(p) == "in_progress"
+
+
+def test_turn_state_pending_user_record_is_in_progress(tmp_path: Path) -> None:
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _assistant_line("done"),
+        _user_line("one more thing"),
+    ])
+    assert latest_turn_state(p) == "in_progress"
+
+
+def test_turn_state_large_final_record_is_found(tmp_path: Path) -> None:
+    # A final assistant record larger than the first tail window must not
+    # read as "unknown" (which would stall the handoff forever).
+    big = "x" * (600 * 1024)
+    p = _write(tmp_path, [_user_line("go"), _assistant_line(big)])
+    assert latest_turn_state(p) == "complete"
+
+
+def _interrupt_line(ts: str, text: str = "[Request interrupted by user]") -> str:
+    # Esc during a turn is recorded as a user record whose content is a *list*
+    # of text blocks (so the non-prompt prefix check misses it), with the
+    # abort's timestamp.
+    return json.dumps({
+        "type": "user",
+        "timestamp": ts,
+        "message": {"role": "user", "content": [{"type": "text",
+                                                 "text": text}]},
+    })
+
+
+_EPOCH = "2026-10-27T12:00:00+00:00"
+_EPOCH_TS = 1793102400.0  # datetime.fromisoformat(_EPOCH).timestamp()
+
+
+def test_turn_state_interrupt_after_the_request_is_in_progress(
+        tmp_path: Path) -> None:
+    # The user aborted the feedback turn *after* asking for the fresh review;
+    # they may be about to retype, so a review must not start over the aborted
+    # work.
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _assistant_line("done"),
+        _interrupt_line("2026-10-27T12:00:30+00:00"),
+    ])
+    assert latest_turn_state(p, _EPOCH_TS) == "in_progress"
+
+
+def test_turn_state_interrupt_before_the_request_is_complete(
+        tmp_path: Path) -> None:
+    # The turn was already aborted when the user asked for the fresh review
+    # and they have not typed since: the turn is over.  Left as in_progress,
+    # the handoff would stall forever with the pane sitting at the prompt.
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _assistant_line("partial"),
+        _interrupt_line("2026-10-27T11:59:00+00:00"),
+    ])
+    assert latest_turn_state(p, _EPOCH_TS) == "complete"
+
+
+def test_turn_state_interrupt_for_tool_use_before_the_request_is_complete(
+        tmp_path: Path) -> None:
+    # Aborted during a tool call: the newest assistant record is a tool_use
+    # (which would otherwise read in_progress).  The abort marker is newer and
+    # predates the request, so the turn is over.
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _assistant_tool_line(),
+        _interrupt_line("2026-10-27T11:59:00+00:00",
+                        "[Request interrupted by user for tool use]"),
+    ])
+    assert latest_turn_state(p, _EPOCH_TS) == "complete"
+
+
+def test_turn_state_interrupt_without_a_fence_is_in_progress(
+        tmp_path: Path) -> None:
+    # No request time to fence against: wait (a false "complete" would start a
+    # review over aborted work; a false "in_progress" is recoverable).  A
+    # zero/unparseable fence is not a fence either.
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _assistant_line("partial"),
+        _interrupt_line("2026-10-27T11:59:00+00:00"),
+    ])
+    assert latest_turn_state(p) == "in_progress"
+    assert latest_turn_state(p, 0.0) == "in_progress"
+
+
+def test_turn_state_interrupt_with_an_unreadable_timestamp_is_in_progress(
+        tmp_path: Path) -> None:
+    # A marker whose own timestamp is missing/unparseable cannot be shown to
+    # predate the request, so it must not end the turn: the same asymmetry as
+    # a missing fence (a false "complete" starts the review over aborted work;
+    # a false "in_progress" ends as soon as the user sends another turn).
+    for label, extra in (("missing", {}),
+                         ("unparseable", {"timestamp": "not-a-timestamp"})):
+        rec = {"type": "user",
+               "message": {"role": "user",
+                           "content": [{"type": "text",
+                                        "text": "[Request interrupted by "
+                                                "user]"}]},
+               **extra}
+        p = _write(tmp_path, [_user_line("do it"),
+                              _assistant_line("partial"),
+                              json.dumps(rec)])
+        assert latest_turn_state(p, _EPOCH_TS) == "in_progress", label
+
+
+# JSON leaves Unicode line separators (U+2028 / U+2029 / U+0085) unescaped
+# inside a string, and real transcripts contain them.  The JSONL reader must
+# split on "\n" only: ``str.splitlines`` would fragment such a record into
+# pieces that fail ``json.loads``, so the newest turn would be read from an
+# older record.
+#
+# The separators are spelled as ``\u2028`` escapes, not pasted
+# literally: an invisible character in source is easy to lose in an
+# edit, and the test would then pass without exercising the split.
+_U2028 = "\u2028"
+
+
+def _raw_separator_line(rec: dict) -> str:
+    return json.dumps(rec, ensure_ascii=False)
+
+
+def test_turn_state_complete_when_the_answer_has_a_unicode_separator(
+        tmp_path: Path) -> None:
+    p = tmp_path / "t.jsonl"
+    p.write_text(
+        _user_line("do it") + "\n"
+        + _raw_separator_line({
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text",
+                             "text": f"done{_U2028}next paragraph"}],
+            },
+        }) + "\n")
+    assert latest_turn_state(p) == "complete"
+
+
+def test_turn_state_in_progress_when_a_prompt_has_a_unicode_separator(
+        tmp_path: Path) -> None:
+    # The dangerous direction: a fragmented prompt would be skipped and the
+    # older (complete) answer would read as the handoff.
+    p = tmp_path / "t.jsonl"
+    p.write_text(
+        _user_line("do it") + "\n"
+        + _assistant_line("done") + "\n"
+        + _raw_separator_line({
+            "type": "user",
+            "message": {"role": "user",
+                        "content": f"pasted{_U2028}text, now change it"},
+        }) + "\n")
+    assert latest_turn_state(p) == "in_progress"
+
+
+def test_verdict_survives_a_unicode_separator_in_the_record(
+        tmp_path: Path) -> None:
+    p = tmp_path / "t.jsonl"
+    p.write_text(
+        _user_line("do it") + "\n"
+        + _raw_separator_line({
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text",
+                             "text": f"some{_U2028}notes\nPASS"}],
+            },
+        }) + "\n")
+    assert extract_verdict_from_transcript(p, VERDICTS) == "PASS"
 # pr-8efa789 — verdicts survive non-task wakeup turns
 # ---------------------------------------------------------------------------
 

@@ -84,6 +84,30 @@ class TestPolling:
         assert tracker.became_idle("k") is True
         assert tracker.became_idle("k") is False
 
+    def test_second_turn_rearms_became_idle(self, tracker, transcript, monkeypatch):
+        # A user can resume work in the same pane without any hook firing at
+        # turn start (e.g. implementation feedback after a review).  The
+        # previous turn's idle flag must not swallow the new turn's
+        # became_idle() notification.
+        tracker.register("k", "%0", str(transcript))
+        monkeypatch.setattr("pm_core.pane_idle.tmux_mod.pane_exists",
+                            lambda p: True)
+        sequence = [
+            {"event_type": "idle_prompt", "timestamp": 1.0, "session_id": "s"},
+            {"event_type": "idle_prompt", "timestamp": 2.0, "session_id": "s"},
+        ]
+
+        def read_event(sid):
+            return sequence.pop(0) if sequence else None
+
+        monkeypatch.setattr("pm_core.hook_events.read_event", read_event)
+        tracker.poll("k")
+        assert tracker.became_idle("k") is True
+        assert tracker.became_idle("k") is False
+        # The second turn's idle_prompt is a new event: notify again.
+        tracker.poll("k")
+        assert tracker.became_idle("k") is True
+
     def test_permission_prompt_marks_waiting_for_input(self, tracker, transcript, monkeypatch):
         tracker.register("k", "%0", str(transcript))
         monkeypatch.setattr("pm_core.pane_idle.tmux_mod.pane_exists",

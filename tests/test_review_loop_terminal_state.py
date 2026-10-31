@@ -84,6 +84,65 @@ def test_empty_verdict_writes_done_state(tmp_path, monkeypatch):
     assert entry["state"] == "done"
 
 
+# ---------------------------------------------------------------------------
+# Transcript finalization vs. a superseding loop
+# ---------------------------------------------------------------------------
+
+def _loop_with_transcript(tmp_path, pr_id, loop_id):
+    """A loop state whose run dir holds its own iteration symlink."""
+    native = tmp_path / f"{pr_id}-native.jsonl"
+    native.write_text("{}\n")
+    link = tmp_path / f"review-{pr_id}-i1.jsonl"
+    link.symlink_to(native)
+    state = ReviewLoopState(pr_id=pr_id)
+    state.loop_id = loop_id
+    state.iteration = 1
+    state.latest_verdict = "PASS"
+    state._transcript_dir = str(tmp_path)
+    return state, link
+
+
+def test_superseded_loop_does_not_finalize_the_successors_transcript(
+        tmp_path, monkeypatch):
+    """A late completion must not freeze the *new* loop's live transcript.
+
+    The successor shares the run dir and reuses ``review-<pr>-i<n>.jsonl``,
+    so finalizing here would replace the new loop's symlink with a snapshot
+    its verdict poller would never see updated.
+    """
+    monkeypatch.setattr(runtime_state, "_runtime_dir", lambda: tmp_path)
+    state, link = _loop_with_transcript(tmp_path, "pr-sup", "old")
+    runtime_state.set_action_state("pr-sup", "review-loop", "running",
+                                   loop_id="new")
+    finalized = []
+    monkeypatch.setattr("pm_core.claude_launcher.finalize_transcript",
+                        lambda p: finalized.append(p))
+
+    _on_complete_from_thread(MagicMock(), state)
+
+    assert finalized == []
+    assert link.is_symlink()
+    # The successor's runtime entry is untouched.
+    assert runtime_state.get_action_state(
+        "pr-sup", "review-loop")["loop_id"] == "new"
+
+
+def test_active_loop_still_finalizes_its_transcripts(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_state, "_runtime_dir", lambda: tmp_path)
+    state, link = _loop_with_transcript(tmp_path, "pr-act", "mine")
+    runtime_state.set_action_state("pr-act", "review-loop", "running",
+                                   loop_id="mine")
+    finalized = []
+    monkeypatch.setattr("pm_core.claude_launcher.finalize_transcript",
+                        lambda p: finalized.append(p))
+
+    _on_complete_from_thread(MagicMock(), state)
+
+    assert finalized == [link]
+    assert runtime_state.get_action_state(
+        "pr-act", "review-loop")["state"] == "done"
+
+
 def test_error_line_shows_the_remedy_as_text_not_markup():
     """Review 0f64 i1: the review loop's ERROR line put the failed launch's
     stderr (RQ40: the route remedy) into log-line markup unescaped, like

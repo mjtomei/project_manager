@@ -179,12 +179,15 @@ class HelpScreen(ModalScreen):
         Binding("up", "scroll_up", "Scroll up", show=False),
     ]
 
+    # Wide enough for the longest row ("z a  Fresh autostart after feedback
+    # (keep merge policy)", 57 cols) plus padding, border and scrollbar;
+    # narrower clipped the policy suffix.  Still fits an 80-col terminal.
     CSS = """
     HelpScreen {
         align: center middle;
     }
     #help-container {
-        width: 50;
+        width: 66;
         height: auto;
         max-height: 80%;
         background: $surface;
@@ -251,6 +254,9 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]M[/]  Move to plan", classes="help-row")
                 yield Label("  [bold]O[/]  Auto-start target (wait for merge)", classes="help-row")
                 yield Label("  [bold]A[/]  Toggle auto-merge target", classes="help-row")
+                yield Label("  [bold]z a[/]  Fresh autostart after feedback (keep merge policy)", classes="help-row")
+                yield Label("  [bold]z O[/]  Fresh autostart after feedback (wait for merge)", classes="help-row")
+                yield Label("  [bold]z A[/]  Fresh autostart after feedback (auto-merge)", classes="help-row")
                 yield Label("  [bold]a[/]  Auto-start runs popup", classes="help-row")
                 yield Label("  [bold]V[/]  Review oldest pending spec", classes="help-row")
                 yield Label("  [bold]o[/]  Models: PR/project model, effort, command (⇄ = PR has its own)", classes="help-row")

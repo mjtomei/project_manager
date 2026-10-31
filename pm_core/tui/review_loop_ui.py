@@ -62,6 +62,36 @@ def _get_selected_pr(app) -> tuple[str | None, dict | None]:
     return pr_id, pr
 
 
+def park_and_kill_review_window(session: str | None, pr: dict | None) -> bool:
+    """Park the attached session and kill the PR's review window, if open.
+
+    Shared by the ``z d`` / ``zz d`` supersede paths and the explicit fresh
+    autostart reset (``autostart_fresh``): a running iteration blocks in
+    ``_poll_for_verdict`` (which does not check ``stop_requested``) until its
+    pane is gone, so the window must be killed to make the loop exit.
+
+    Best-effort: failures are logged, never raised.  Returns True when a
+    window was found and killed.
+    """
+    if not session or not pr:
+        return False
+    from pm_core import tmux as tmux_mod
+    from pm_core import home_window
+    from pm_core.cli.helpers import _pr_display_id
+    win_name = f"review-{_pr_display_id(pr)}"
+    try:
+        win = tmux_mod.find_window_by_name(session, win_name)
+        if not win:
+            return False
+        home_window.park_if_on(session, win["id"])
+        tmux_mod.kill_window(session, win_name)
+        return True
+    except Exception:
+        _log.debug("review_loop_ui: kill of review window %s failed",
+                   win_name, exc_info=True)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # z d  — kill running loop and open a fresh review
 # ---------------------------------------------------------------------------
@@ -92,20 +122,7 @@ def stop_loop_or_fresh_review(app) -> None:
         # _poll_for_verdict (which doesn't check stop_requested)
         # detects pane-gone, raises PaneKilledError, and the loop
         # exits at once instead of running to completion.
-        from pm_core import tmux as tmux_mod
-        from pm_core.cli.helpers import _pr_display_id
-        if pr and app._session_name:
-            win_name = f"review-{_pr_display_id(pr)}"
-            try:
-                from pm_core import home_window
-                win = tmux_mod.find_window_by_name(app._session_name, win_name)
-                if win:
-                    home_window.park_if_on(app._session_name, win["id"])
-                tmux_mod.kill_window(app._session_name, win_name)
-            except Exception:
-                _log.debug(
-                    "review_loop_ui: kill of review window for z d failed"
-                    " for %s", pr_id, exc_info=True)
+        park_and_kill_review_window(app._session_name, pr)
         _log.info("review_loop_ui: z d killed running loop for %s", pr_id)
         app.log_message(
             f"[bold]Stopped review loop[/] for {pr_id} — opening fresh review")
@@ -154,20 +171,7 @@ def start_or_stop_loop(app) -> None:
         # doesn't check stop_requested) until the pane is gone.
         # Killing the review window makes that poll return None →
         # PaneKilledError → the loop exits.
-        from pm_core import tmux as tmux_mod
-        from pm_core.cli.helpers import _pr_display_id
-        if pr and app._session_name:
-            win_name = f"review-{_pr_display_id(pr)}"
-            try:
-                from pm_core import home_window
-                win = tmux_mod.find_window_by_name(app._session_name, win_name)
-                if win:
-                    home_window.park_if_on(app._session_name, win["id"])
-                tmux_mod.kill_window(app._session_name, win_name)
-            except Exception:
-                _log.debug("review_loop_ui: kill of review window for"
-                           " supersede failed for %s", pr_id,
-                           exc_info=True)
+        park_and_kill_review_window(app._session_name, pr)
         _log.info("review_loop_ui: superseding running loop for %s "
                   "with a fresh one", pr_id)
 
@@ -340,10 +344,25 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
     _log.info("review_loop_ui: loop complete for %s — verdict=%s iterations=%d",
               state.pr_id, state.latest_verdict, state.iteration)
 
+    from pm_core import runtime_state as _rs
+    if not _is_active_loop(state):
+        # We were superseded by a fresh loop; don't overwrite its 'running'
+        # entry with our terminal (often KILLED) verdict.  Do not finalize
+        # the transcripts either: the successor shares this run dir and
+        # reuses the ``review-<pr>-i<n>.jsonl`` names, so finalizing now
+        # could freeze the *new* loop's live transcript (replacing its
+        # symlink with a snapshot the verdict poller would never see
+        # updated).  The successor's own completion finalizes the whole
+        # run dir; the old JSONLs are untouched in the meantime.
+        _log.debug("review_loop_ui: skipping completion mirror for "
+                   "superseded loop_id=%s verdict=%s",
+                   state.loop_id, state.latest_verdict)
+        # Still give up our own cross-driver launch lease (a no-op when the
+        # superseding loop already owns it).
+        _release_lease(state)
+        return
+
     # Finalize review transcript symlinks for this loop's iterations.
-    # Done before the supersede check because the transcripts are this
-    # loop's own work — they need finalizing whether or not we still
-    # own the runtime_state entry.
     tdir = getattr(state, '_transcript_dir', None)
     if tdir:
         from pathlib import Path
@@ -355,13 +374,14 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
                         and p.name.startswith(f"review-{state.pr_id}-")):
                     finalize_transcript(p)
 
-    from pm_core import runtime_state as _rs
     # Release this loop's cross-driver launch lease (only if we still hold
     # it; a superseding loop owns its own).
     _release_lease(state)
+    # Re-checked because the loop can be superseded *during* the finalize
+    # above; the guard at the top of this function covers the common case.
+    # Don't overwrite the successor's 'running' entry with our terminal
+    # (often KILLED) verdict.
     if not _is_active_loop(state):
-        # We were superseded by a fresh loop; don't overwrite its
-        # 'running' entry with our terminal (often KILLED) verdict.
         _log.debug("review_loop_ui: skipping completion mirror for "
                    "superseded loop_id=%s verdict=%s",
                    state.loop_id, state.latest_verdict)
@@ -1312,6 +1332,8 @@ def _poll_impl_idle(app) -> None:
     """
     from pm_core.cli.helpers import _pr_display_id
     from pm_core.tui import auto_start as _auto_start
+    from pm_core.autostart_state import fresh_awaiting
+    from pm_core.tui import autostart_fresh
 
     session = app._session_name
     if not session:
@@ -1364,12 +1386,49 @@ def _poll_impl_idle(app) -> None:
             except ValueError:
                 # Symlink not yet created — try again next tick.  It never
                 # will be for a pane an earlier TUI launched: still watch
-                # that one for the trust dialog.
-                _watch_untracked_trust(app, pane_id, pr.get("workdir"),
-                                       untracked_seen)
-                continue
+                # that one for the trust dialog.  A fresh-autostart attempt
+                # must survive a TUI restart though, so recover that pane's
+                # native transcript from its start command instead.
+                registered = False
+                if fresh_awaiting(pr):
+                    try:
+                        from pm_core.claude_launcher import pane_transcript_path
+                        native = pane_transcript_path(
+                            pane_id, pr.get("workdir"))
+                        if native:
+                            tracker.register(pr_id, pane_id, str(native))
+                            registered = True
+                    except ValueError:
+                        registered = False
+                    except Exception:
+                        _log.debug("impl_idle: native transcript lookup "
+                                   "failed for %s", pr_id, exc_info=True)
+                if not registered:
+                    _watch_untracked_trust(app, pane_id, pr.get("workdir"),
+                                           untracked_seen)
+                    continue
 
         tracker.poll(pr_id)
+
+        # Explicit fresh autostart (z a / z O / z A / `pm autostart fresh`):
+        # the PR was returned to implementation after feedback and waits for
+        # the *current* turn to finish.  Use the dedicated handoff check rather
+        # than the generic one-shot became_idle(), which cannot distinguish a
+        # stale idle flag from the user's resumed turn (and must not be
+        # advanced by an old hook event).
+        if status == "in_progress" and fresh_awaiting(pr):
+            # A restarted TUI re-registers the pane and reads the *previous*
+            # turn's idle_prompt as its newest hook event, so the tracker can
+            # claim "idle" while the user's feedback turn is still running.
+            # Align the status row with the transcript (the handoff signal).
+            autostart_fresh.reconcile_idle_status(app, pr, tracker)
+            # The check itself runs every tick (it is cheap and idempotent),
+            # but a launch that fails to move the status must not be retried
+            # on every tick — see ``handoff_attempt_due``.
+            if (autostart_fresh.handoff_ready(app, pr, tracker)
+                    and autostart_fresh.handoff_attempt_due(app, pr_id)):
+                newly_idle.append((pr_id, pr))
+            continue
 
         # Detect newly-idle in_progress PRs for auto-review
         if status == "in_progress" and tracker.became_idle(pr_id):
@@ -1592,6 +1651,13 @@ def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict]]) -> None:
             return
         updated_pr = store.get_pr(app._data, pr_id)
         if updated_pr and updated_pr.get("status") == "in_review":
+            # A fresh-autostart attempt has now reached its handoff: mark it
+            # consumed so the status row stops saying "waiting" and a later
+            # in_progress bounce is not mistaken for this attempt.
+            from pm_core.autostart_state import fresh_awaiting
+            if fresh_awaiting(updated_pr):
+                from pm_core.tui import autostart_fresh
+                autostart_fresh.consume_handoff(app, pr_id)
             # Start a review loop (same as _auto_start_review_loops)
             loop = app._review_loops.get(pr_id)
             if not loop:

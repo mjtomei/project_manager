@@ -86,6 +86,25 @@ def _record_log_message(app, msg: str, suppressed: bool) -> None:
     _log.info("log: %s%s", plain, " (hidden by sticky message)" if suppressed else "")
 
 
+# Keys whose action consumes the ``z`` prefix — the "kill existing before
+# next" modifier (``z s``/``S`` start, ``z d`` review, ``z e``/``v`` plan
+# panes, ``z n``/``L``/``m``/``H``/``c`` views, ``z t`` QA, ``z a``/``z O``/
+# ``z A`` auto-start).  Any other key press cancels a pending ``z`` so a
+# stale prefix cannot turn a later plain ``a``/``A``/``O`` into its
+# destructive fresh-autostart variant (or silently re-interpret another
+# action).  The set must stay in sync with the ``_consume_z()`` callers.
+_Z_PREFIX_KEYS = frozenset({
+    "s", "S", "d", "e", "v", "n", "L", "m", "H", "c", "t", "a", "A", "O",
+})
+
+# A pending ``z`` only applies to the next chord key.  Navigation keys are
+# swallowed by the focused widget (the tech tree) before ``on_key`` sees
+# them, so the set above cannot cancel the prefix for ``z`` + j/k/arrows.
+# Expire it after a short window (the same 2 s the ``w``/``y`` prefixes use)
+# so a forgotten prefix cannot arm a later destructive key.
+_Z_PREFIX_TIMEOUT = 2.0
+
+
 def current_session_name() -> str | None:
     """This process's canonical pm tmux session name (``~N`` stripped).
 
@@ -272,6 +291,18 @@ class ProjectManagerApp(App):
         # its own keys — App-level prefix keys (y/w/z) must not swallow them.
         if len(self.screen_stack) > 1:
             return
+        # A pending ``z`` prefix only applies to the *next* key when that key
+        # is one of the z-actions.  Without this, pressing ``z`` then a
+        # non-z key leaves the count armed, so a later plain ``A`` would run
+        # the destructive fresh autostart on the newly selected PR.  (Keys
+        # the focused widget swallows — j/k/arrows — never reach here; the
+        # chord-window timer covers those.)
+        key = event.character or event.key
+        if (self._z_count and key != "z"
+                and key not in _Z_PREFIX_KEYS):
+            self._z_count = 0
+            self._stop_z_timer()
+            self._clear_prefix_hint()
         # Buffer keystrokes between / press and command bar gaining focus
         if self._command_pending:
             if event.key == "escape":
@@ -347,15 +378,24 @@ class ProjectManagerApp(App):
                 # zzz → cancel (toggle off).  Only z and zz are valid prefixes;
                 # a third z resets.
                 self._z_count = 0
+                self._stop_z_timer()
                 self._clear_prefix_hint()
             else:
                 self._z_count += 1
+                hint = ""
+                if self._z_count == 1:
+                    hint = (" [dim](d=review t=qa a=fresh "
+                            "O=fresh-wait A=fresh-auto)[/]")
                 self._prefix_hint_seq = self.log_message(
-                    f"[bold]{'z' * self._z_count} …[/]")
+                    f"[bold]{'z' * self._z_count} …[/]{hint}")
+                self._stop_z_timer()
+                self._z_cancel_timer = self.set_timer(
+                    _Z_PREFIX_TIMEOUT, self._cancel_z_mode)
             event.prevent_default()
             event.stop()
         elif event.key == "escape" and (self._z_count > 0 or self._w_mode or self._y_mode):
             self._z_count = 0
+            self._stop_z_timer()
             if self._w_mode:
                 self._w_mode = False
                 if self._w_cancel_timer:
@@ -440,6 +480,7 @@ class ProjectManagerApp(App):
         self._log_shown_seq: int = 0  # arrival number of the one on the line
         # z modifier key state (vim-style prefix, supports z/zz)
         self._z_count: int = 0
+        self._z_cancel_timer: Timer | None = None
         # Review loop state: dict of pr_id -> ReviewLoopState (supports multiple)
         self._review_loops: dict = {}
         self._review_loop_timer: Timer | None = None
@@ -506,7 +547,20 @@ class ProjectManagerApp(App):
         """
         count = self._z_count
         self._z_count = 0
+        self._stop_z_timer()
         return count
+
+    def _stop_z_timer(self) -> None:
+        """Cancel the z prefix's chord-window timer, if one is armed."""
+        if self._z_cancel_timer:
+            self._z_cancel_timer.stop()
+            self._z_cancel_timer = None
+
+    def _cancel_z_mode(self) -> None:
+        """Auto-cancel a pending z prefix after its chord window."""
+        if self._z_count:
+            self._z_count = 0
+            self._clear_prefix_hint()
 
     # --- Frame capture forwarder (called from ~15 sites) ---
 
@@ -692,6 +746,19 @@ class ProjectManagerApp(App):
         except Exception:
             _log.exception("consume_breadcrumb failed; continuing without "
                            "restored state")
+        # An explicit fresh autostart (z a / z O / z A) is a user request that must
+        # survive a plain TUI restart: re-add its target from the PR marker.
+        # ``resume_pending`` logs each resumed PR itself (through
+        # ``add_targets``'s confirmation); an extra aggregate line here would
+        # only duplicate it.  Guarded like the restore above: like every other
+        # startup chore, it must not abort the queue dispatch below (that would
+        # leave every externally queued command deferred forever).
+        from pm_core.tui import autostart_fresh
+        try:
+            autostart_fresh.resume_pending(self)
+        except Exception:
+            _log.exception("resume_pending failed; continuing without "
+                           "resuming fresh-autostart attempts")
         # Now dispatch external commands, including any that arrived while
         # the previous process was exec'ing (signal lost) or before the
         # breadcrumb restore above (which would have overwritten them).
@@ -1301,9 +1368,47 @@ class ProjectManagerApp(App):
     def action_show_connect(self) -> None:
         pane_ops.show_connect(self)
 
-    def action_toggle_auto_start(self) -> None:
-        from pm_core.tui.auto_start import toggle
+    def _fresh_autostart_from_key(self, policy: str | None, source: str,
+                                  no_selection: str) -> None:
+        """Run the ``z a``/``z O``/``z A`` fresh-autostart on the selection.
+
+        *policy* is None for ``z a`` (preserve an existing target's policy,
+        default a new target to wait-for-merge, the manual merge gate);
+        ``z O``/``z A`` pass an explicit policy.  Errors are logged, never
+        raised into the key handler.
+        """
+        from pm_core.tui import autostart_fresh
         tree = self.query_one("#tech-tree", TechTree)
+        pr_id = tree.selected_pr_id
+        if not pr_id:
+            self.log_message(no_selection)
+            return
+        try:
+            result = autostart_fresh.fresh_start(
+                self, [pr_id], policy=policy, source=source)
+        except Exception as e:  # never let a key handler traceback
+            _log.exception("%s fresh autostart failed for %s", source, pr_id)
+            self.log_message(f"Auto-start fresh failed: {e}", force=True)
+            return
+        if not result.get("ok"):
+            self.log_message(
+                f"Auto-start: {result.get('message')}", force=True)
+
+    def action_toggle_auto_start(self) -> None:
+        # ``A`` toggles an auto-merge target (continuation from the current
+        # phase); ``z A`` is the explicit fresh-autostart variant: a
+        # later-stage PR returns to implementation after feedback, keeps its
+        # live session, and waits for the current implementation turn before
+        # one fresh review.
+        z = self._consume_z()
+        if z:
+            from pm_core.autostart_state import POLICY_AUTO
+            self._fresh_autostart_from_key(
+                POLICY_AUTO, "key:zA",
+                "No PR selected (z A = fresh autostart, auto-merge)")
+            return
+        tree = self.query_one("#tech-tree", TechTree)
+        from pm_core.tui.auto_start import toggle
         self.run_worker(toggle(self, selected_pr_id=tree.selected_pr_id))
 
     def _auto_start_label(self) -> str:
@@ -1317,16 +1422,40 @@ class ProjectManagerApp(App):
         return f"×{n}" if n > 1 else ""
 
     def action_show_auto_runs(self) -> None:
-        from pm_core.tui import auto_start as _auto_start
-        _auto_start.open_runs_popup(self)
+        # ``a`` opens the live runs popup.  ``z a`` is the explicit fresh
+        # autostart: a later-stage PR returns to implementation after
+        # feedback, keeps its live session, and waits for the current
+        # implementation turn before one fresh review.  ``z a`` is the
+        # policy-preserving variant — an existing target keeps its own
+        # policy (``wait_for_merge`` included) and a new target defaults to
+        # wait-for-merge (the manual merge gate) — while ``z O``/``z A``
+        # force wait-for-merge / auto-merge.
+        z = self._consume_z()
+        if not z:
+            from pm_core.tui import auto_start as _auto_start
+            _auto_start.open_runs_popup(self)
+            return
+        self._fresh_autostart_from_key(
+            None, "key:za",
+            "No PR selected (z a = fresh autostart after feedback)")
 
     def action_auto_sequence_pr(self) -> None:
-        from pm_core.tui.auto_start import auto_sequence_for_pr
+        # ``O`` arms a wait-for-merge auto-sequence target (continuation
+        # from the current phase); ``z O`` is the explicit fresh-autostart
+        # variant with the same manual-merge policy.
+        z = self._consume_z()
+        if z:
+            from pm_core.autostart_state import POLICY_WAIT
+            self._fresh_autostart_from_key(
+                POLICY_WAIT, "key:zO",
+                "No PR selected (z O = fresh autostart, wait for merge)")
+            return
         tree = self.query_one("#tech-tree", TechTree)
         pr_id = tree.selected_pr_id
         if not pr_id:
             self.log_message("No PR selected")
             return
+        from pm_core.tui.auto_start import auto_sequence_for_pr
         self.run_worker(auto_sequence_for_pr(self, pr_id))
 
     def _clear_prefix_hint(self) -> None:

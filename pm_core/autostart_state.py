@@ -41,6 +41,21 @@ POLICY_AUTO = "auto_merge"
 POLICY_WAIT = "wait_for_merge"
 WAIT_KEY = "wait_for_merge"
 POLICIES = (POLICY_AUTO, POLICY_WAIT)
+
+# PR-level marker for the explicit "fresh autostart" action (z a / z O /
+# z A / ``pm autostart fresh``): a later-stage PR was returned to
+# implementation after human feedback and waits for the current
+# implementation turn before one fresh review starts.
+# See ``pm_core.tui.autostart_fresh``.
+FRESH_KEY = "fresh_autostart"
+
+# Verdict the fresh reset writes to the discarded attempt's ``runtime_state``
+# records.  It means "this run was superseded, not a result": readers must
+# treat it as no verdict (``auto_start.recorded_qa_verdict``).  Lives here so
+# the writer (``autostart_fresh``) and the reader (``auto_start``) share one
+# constant.  The review-loop record also carries a fresh ``loop_id``, which
+# is what makes ``review_loop_ui._is_active_loop`` reject late callbacks.
+SUPERSEDED = "SUPERSEDED"
 # The command-line flag selecting each policy (CLI + command bar).
 POLICY_FLAGS = {POLICY_AUTO: "--auto-merge",
                 POLICY_WAIT: "--wait-for-merge"}
@@ -172,6 +187,44 @@ def held_by_text(h: dict | None) -> str:
     if not h or not h.get("targets"):
         return ""
     return "wait-for-merge ← " + ", ".join(h["targets"])
+
+
+# ---------------------------------------------------------------------------
+# Fresh-autostart marker (explicit return to implementation after feedback)
+# ---------------------------------------------------------------------------
+
+def fresh_marker(pr: dict | None) -> dict:
+    """The PR's ``fresh_autostart`` marker, or {} when absent/malformed."""
+    m = (pr or {}).get(FRESH_KEY)
+    return m if isinstance(m, dict) else {}
+
+
+def fresh_awaiting(pr: dict | None) -> bool:
+    """True while a fresh attempt waits for its implementation handoff."""
+    return bool(fresh_marker(pr).get("awaiting_handoff"))
+
+
+def fresh_requested_at(pr: dict | None) -> str | None:
+    """ISO timestamp of the current fresh attempt (None when no marker)."""
+    return fresh_marker(pr).get("requested_at") or None
+
+
+def fresh_requested_epoch(pr: dict | None) -> float | None:
+    """Epoch seconds of the current fresh attempt, or None when unusable.
+
+    One shared conversion for the "did this predate the fresh request?"
+    fences: the QA/sign-off evidence guards compare a record's timestamp
+    against it, and the handoff's interrupt fence passes it to
+    :func:`pm_core.verdict_transcript.latest_turn_state`.
+    """
+    since = fresh_requested_at(pr)
+    if not since:
+        return None
+    from pm_core.signoff import parse_ts
+    try:
+        return parse_ts(since).timestamp()
+    except (TypeError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -464,6 +517,23 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
     if status == "in_progress":
         if pr.get("spec_pending"):
             return phase, "waiting", "spec generation awaiting input"
+        # Explicit fresh autostart (z a / z O / z A / `pm autostart fresh`):
+        # the PR was returned to implementation after feedback and waits for
+        # the current implementation turn before one fresh review starts.
+        if fresh_awaiting(pr):
+            idle = (inp.get("impl_idle") or {}).get(pr_id)
+            if not win_live("implementation"):
+                return (phase, "waiting",
+                        "fresh autostart: implementation window missing; "
+                        "relaunching")
+            if idle == "waiting":
+                return (phase, "waiting", "fresh autostart: permission "
+                        "prompt in implementation window")
+            if idle == "idle":
+                return (phase, "waiting", "fresh autostart: implementation "
+                        "turn complete; starting fresh review")
+            return (phase, "waiting", "fresh autostart: waiting for the "
+                    "current implementation turn after feedback")
         if pr_id in (inp.get("launching") or set()):
             return phase, "running", "launching implementation"
         if not win_live("implementation"):

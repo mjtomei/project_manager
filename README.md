@@ -319,10 +319,22 @@ target and every unmerged transitive prerequisite wait for you to merge them.
 `A` / `--auto-merge` is the separate opt-in that merges automatically once the
 sign-off gate passes. With `skip_qa`, sign-off follows the review PASS.
 
+If a PR already reached review/QA/sign-off but you stopped it and resumed its
+**existing** implementation session with feedback, `z a` — or `pm autostart
+fresh <pr>` — explicitly returns it to implementation: the live session is
+kept (never killed or duplicated), the old review/QA/sign-off state is
+retired, and auto-start waits for the current implementation turn to finish
+before starting exactly one fresh review. `z a` keeps an existing target's
+merge policy (including `--wait-for-merge`) and defaults a new target to
+wait-for-merge (the manual merge gate); `z O` / `z A` force wait-for-merge /
+auto-merge. Plain `a` still opens the runs popup, and plain `O`/`A` stay a
+continuation from the current phase and never rewind a PR.
+
 ```bash
 pm autostart add pr-abc123 pr-def456   # add targets (default: wait for merge)
 pm autostart add 42 --auto-merge       # merge automatically (sign-off gate still applies)
 pm autostart add pr-final --wait-for-merge  # explicit; same as the default
+pm autostart fresh pr-abc123           # reviewed PR back to impl after feedback
 pm autostart remove pr-abc123          # stop scheduling it; running windows are kept
 pm autostart status --json             # what every target and dependency is doing
 ```

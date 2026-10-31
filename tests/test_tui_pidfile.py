@@ -1780,6 +1780,51 @@ class TestDeferredStartupArmsQueue:
         assert app._cmd_queue_ready is True
         assert drained == [True]
 
+    def test_pending_fresh_attempts_are_resumed(self, monkeypatch):
+        # A fresh-autostart attempt is a user request that must survive a
+        # plain TUI restart; ``_deferred_startup`` is the only place that
+        # re-arms its target from the PR marker.
+        drained = []
+        app = self._app(drained)
+        resumed = []
+
+        async def ok(_app):
+            pass
+
+        monkeypatch.setattr("pm_core.tui.auto_start.consume_breadcrumb", ok)
+        monkeypatch.setattr("pm_core.tui.sync.startup_github_sync",
+                            lambda app: None)
+        monkeypatch.setattr("pm_core.tui.autostart_fresh.resume_pending",
+                            lambda a: resumed.append(a) or [])
+
+        asyncio.run(app._deferred_startup())
+
+        assert resumed == [app]
+        assert app._cmd_queue_ready is True
+        assert drained == [True]
+
+    def test_a_failing_resume_does_not_disable_the_queue(self, monkeypatch):
+        # Same contract as the restore above: a failing resume must leave the
+        # TUI on defaults, not with every externally queued command deferred.
+        drained = []
+        app = self._app(drained)
+
+        async def ok(_app):
+            pass
+
+        def boom(_app):
+            raise RuntimeError("resume failed")
+
+        monkeypatch.setattr("pm_core.tui.auto_start.consume_breadcrumb", ok)
+        monkeypatch.setattr("pm_core.tui.sync.startup_github_sync",
+                            lambda app: None)
+        monkeypatch.setattr("pm_core.tui.autostart_fresh.resume_pending", boom)
+
+        asyncio.run(app._deferred_startup())
+
+        assert app._cmd_queue_ready is True
+        assert drained == [True]
+
 
 class TestSignalDelivery:
     """``_signal_tui`` prefers a pidfd so a recycled PID can't be hit."""

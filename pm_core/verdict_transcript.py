@@ -56,7 +56,18 @@ _USER_RE = re.compile(r'"type"\s*:\s*"user"')
 
 
 def _read_transcript_text(transcript_path: str | Path | None) -> str:
-    """Read a Claude transcript, tolerating slug-mismatched symlinks.
+    """Read a whole Claude transcript (see :func:`_resolve_transcript_file`)."""
+    path = _resolve_transcript_file(transcript_path)
+    if path is None:
+        return ""
+    try:
+        return path.read_text(errors="replace")
+    except OSError:
+        return ""
+
+
+def _resolve_transcript_file(transcript_path: str | Path | None) -> Path | None:
+    """The readable JSONL for *transcript_path*, tolerating broken symlinks.
 
     Band-aid for pr-488b748: when ``build_claude_shell_cmd`` creates the
     transcript symlink it derives the target's parent dir from the cwd
@@ -67,15 +78,25 @@ def _read_transcript_text(transcript_path: str | Path | None) -> str:
     target never appears. The session_id is unique, though, so we can
     recover the real path by scanning ``~/.claude/projects/*/`` for the
     matching ``<session_id>.jsonl``.
+
+    Returns None when nothing readable resolves.  Callers that need the
+    whole file go through :func:`_read_transcript_text`; the fresh-autostart
+    handoff reads only the tail of what this returns.
     """
     if not transcript_path:
-        return ""
+        return None
     p = Path(transcript_path)
     try:
-        return p.read_text(errors="replace")
-    except (OSError, FileNotFoundError):
+        # A *readable* file (including a symlink to one).  Anything else —
+        # a directory, a dangling symlink, or a file this process may not
+        # read — falls through to the session-id glob, which is what the
+        # previous "read it, else search" behaviour did (an EACCES on the
+        # symlink target reached the glob too, so the verdict was still
+        # found when a readable copy existed elsewhere).
+        if p.is_file() and os.access(p, os.R_OK):
+            return p
+    except OSError:
         pass
-    # Symlink target missing — fall back to a session-id glob.
     sid: str | None = None
     try:
         if p.is_symlink():
@@ -85,21 +106,235 @@ def _read_transcript_text(transcript_path: str | Path | None) -> str:
     if not sid:
         sid = p.stem
     if not (len(sid) == 36 and sid.count("-") == 4):
-        return ""
+        return None
     projects_dir = Path.home() / ".claude" / "projects"
     try:
         matches = list(projects_dir.glob(f"*/{sid}.jsonl"))
     except OSError:
-        return ""
+        return None
     if not matches:
-        return ""
+        return None
     # Pick the most recently modified — handles edge cases where stale
     # files with the same sid linger from a prior run.
-    real = max(matches, key=lambda m: m.stat().st_mtime)
     try:
-        return real.read_text(errors="replace")
+        return max(matches, key=lambda m: m.stat().st_mtime)
+    except OSError:
+        return matches[0]
+
+
+# The latest turn lives at the end of the transcript; reading a bounded tail
+# keeps the scheduler's per-tick check cheap on multi-megabyte sessions.
+# The window grows only when the smallest one cannot see a turn boundary —
+# a single record (e.g. a Write tool_use carrying a large file) can exceed
+# it, and dropping that partial line would otherwise hide the newest turn.
+_TURN_TAIL_WINDOWS = (262144, 2 * 1024 * 1024, 8 * 1024 * 1024)
+_TURN_TAIL_BYTES = _TURN_TAIL_WINDOWS[0]
+
+
+def _read_transcript_tail(path: Path, max_bytes: int = _TURN_TAIL_BYTES) -> str:
+    try:
+        size = path.stat().st_size
+        with open(path, "rb") as f:
+            if size > max_bytes:
+                f.seek(size - max_bytes)
+                data = f.read()
+                nl = data.find(b"\n")
+                if nl >= 0:
+                    data = data[nl + 1:]
+            else:
+                data = f.read()
+        return data.decode("utf-8", "replace")
     except OSError:
         return ""
+
+
+def latest_turn_state(transcript_path: str | Path | None,
+                      interrupted_before: float | None = None) -> str:
+    """Whether the transcript's newest turn is finished.
+
+    Returns ``"complete"`` when the newest record is an assistant message
+    that is not waiting on a tool (no ``tool_use`` block, no
+    ``stop_reason == "tool_use"``) and, when its ``stop_reason`` is still
+    unset (a record written mid-stream), carries the answer ``text``.
+    Returns ``"in_progress"`` when a newer user record (a submitted prompt or
+    a ``tool_result``) means the agent still owes a response, or when the
+    newest assistant record is a partial one with no answer yet (a streamed
+    thinking block), and ``"unknown"`` when the transcript is missing, empty
+    or unparseable.  Injected/transcript-only user records (slash-command
+    output, ``!`` shell commands, task notifications, compaction summaries)
+    are not prompts and are skipped — see
+    :func:`_is_non_prompt_user_record`.
+
+    An ``[Request interrupted by user]`` marker ends a turn (the CLI writes it
+    exactly when it aborts generation, and the agent owes no reply), but only
+    when it carries a readable timestamp that predates *interrupted_before*
+    (epoch seconds — the fresh-autostart request time).  A marker written
+    *after* the request may be followed by a retyped prompt, so it keeps the
+    turn ``"in_progress"``; with no fence (or no readable marker timestamp,
+    which cannot be shown to predate the request) the conservative
+    ``"in_progress"`` is returned too.  This matters because the marker is a
+    *list*-content user record, so it is not covered by
+    :func:`_is_non_prompt_user_record`, and an interrupt left as the tail
+    would otherwise stall the handoff forever.
+
+    Used by the explicit fresh-autostart handoff: a completed turn is the
+    signal that the user's implementation feedback turn is over.
+    """
+    path = _resolve_transcript_file(transcript_path)
+    if path is None:
+        return "unknown"
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return "unknown"
+    # Grow the window until a turn boundary is visible.  A tail that starts
+    # mid-record loses its first (partial) line, so a newest turn larger
+    # than the window would otherwise read as "unknown" forever.
+    for window in _TURN_TAIL_WINDOWS:
+        state = _turn_state_from_tail(_read_transcript_tail(path, window),
+                                      interrupted_before)
+        if state != "unknown" or window >= size:
+            return state
+    return "unknown"
+
+
+# Claude Code records slash commands, ``!`` shell commands, injected context
+# and background-task notifications as ``type: "user"`` entries.  They are not
+# a submitted prompt (the agent owes no reply), so they must not read as a
+# pending turn — otherwise a ``/model``, a ``!ls`` or a task notification left
+# at the end of the transcript would stall the handoff forever.
+_NON_PROMPT_USER_PREFIXES = ("<local-command-", "<command-name>",
+                             "<command-args>", "<command-message>",
+                             "<task-notification>", "<bash-input>",
+                             "<bash-stdout>", "<bash-stderr>")
+
+# Esc during a turn makes Claude Code write the aborted turn as a user record
+# (``[Request interrupted by user]`` / ``[Request interrupted by user for tool
+# use]``) whose content is a *list* of text blocks — so the prefix check above
+# misses it.  It is not a prompt: the agent owes no reply.
+_INTERRUPT_PREFIX = "[Request interrupted by user"
+
+
+def _is_interrupt_record(rec: dict) -> bool:
+    """Whether a user record is Claude Code's turn-aborted marker."""
+    return _record_text(rec).lstrip().startswith(_INTERRUPT_PREFIX)
+
+
+def _record_epoch(rec: dict) -> float:
+    """The record's ``timestamp`` as epoch seconds (0.0 when unusable)."""
+    from pm_core.signoff import parse_ts
+    try:
+        return parse_ts(rec.get("timestamp")).timestamp()
+    except (TypeError, ValueError, AttributeError):
+        return 0.0
+
+
+def _is_non_prompt_user_record(rec: dict) -> bool:
+    """Whether a ``type: "user"`` record is injected/meta, not a prompt."""
+    # A compaction summary ("This session is being continued from a previous
+    # conversation...") is written as a plain-string user record after the
+    # session ran out of context.  It is transcript-only context, not a
+    # submitted prompt; treating it as one reads "in_progress" forever for a
+    # session that ended right after compacting (real transcripts: every such
+    # tail record is preceded by a completed ``end_turn`` assistant answer).
+    # ``isVisibleInTranscriptOnly`` accompanies it in real records but is the
+    # broader flag, so only the precise ``isCompactSummary`` is trusted here —
+    # a false "in_progress" is recoverable, a false "complete" is not.
+    if rec.get("isMeta") or rec.get("isCompactSummary"):
+        return True
+    msg = rec.get("message")
+    content = msg.get("content") if isinstance(msg, dict) else None
+    return isinstance(content, str) and content.lstrip().startswith(
+        _NON_PROMPT_USER_PREFIXES)
+
+
+def _turn_state_from_tail(text: str,
+                          interrupted_before: float | None = None) -> str:
+    """Classify the newest user/assistant record in *text* (see above)."""
+    if not text.strip():
+        return "unknown"
+    # Split on "\n" only: ``str.splitlines`` also splits on Unicode line
+    # boundaries (U+2028, U+2029, U+0085) that JSON leaves *unescaped* inside
+    # a string — real transcripts contain them.  Such a record would be
+    # fragmented into pieces that fail ``json.loads`` and skipped, so the
+    # newest turn would be read from an older record: a handoff that never
+    # advances when the final answer carries one, or an early "complete" over
+    # a prompt that was just submitted.
+    for line in reversed(text.split("\n")):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(rec, dict):
+            continue
+        typ = rec.get("type")
+        if typ == "user":
+            if _is_interrupt_record(rec):
+                # The CLI writes this marker when it aborts the turn, so the
+                # turn is over — but only if the abort happened before the
+                # caller's fence (the fresh-autostart request).  A marker
+                # written after it may be followed by a retyped prompt, so
+                # wait rather than start a review over aborted work.  A
+                # missing fence (0.0 from an unparseable ``requested_at``) is
+                # not a fence, and neither is an unreadable record timestamp
+                # (0.0 — it cannot be shown to predate the request): stay
+                # conservative in both cases.  A false "complete" would start
+                # the review over aborted work; a false "in_progress" is
+                # recoverable (the user's next turn ends it).
+                epoch = _record_epoch(rec)
+                if (interrupted_before and 0.0 < epoch <= interrupted_before):
+                    return "complete"
+                return "in_progress"
+            if _is_non_prompt_user_record(rec):
+                continue
+            return "in_progress"
+        if typ == "assistant":
+            msg = rec.get("message") or {}
+            content = msg.get("content") if isinstance(msg, dict) else None
+            if isinstance(content, list) and any(
+                    isinstance(block, dict)
+                    and block.get("type") == "tool_use"
+                    for block in content):
+                return "in_progress"
+            if isinstance(msg, dict) and msg.get("stop_reason") == "tool_use":
+                return "in_progress"
+            if isinstance(msg, dict) and msg.get("stop_reason") is None:
+                # Claude Code streams a message's content blocks as separate
+                # records and only fills ``stop_reason`` in once the message
+                # is complete.  A trailing record with no answer text is
+                # therefore a turn still in progress — the thinking block of
+                # a turn whose answer (or tool call) has not been written
+                # yet.  Reading that as "complete" would start the
+                # fresh-autostart review over in-flight work.
+                #
+                # A ``text`` record, by contrast, ends the turn: measured
+                # over every transcript under ``~/.claude/projects``, the
+                # answer text is almost always the last thing a turn writes,
+                # and a null ``stop_reason`` on the *final* record is the
+                # common shape (a finished or killed session often never gets
+                # the closing flush — thousands of real transcripts end
+                # this way).  Requiring a set ``stop_reason`` would therefore
+                # stall the handoff on the majority of real sessions.  The
+                # cost is a rare mid-message text flush reading as complete
+                # for that moment (6 of ~8.4k records; the next block followed
+                # within ~1.5 s, or the record was an API-error retry of an
+                # already-finished answer).  The poll runs every second, so
+                # the exposure is small and the alternative failure (a
+                # handoff that never advances) is worse.
+                has_text = (
+                    isinstance(content, str)
+                    or (isinstance(content, list) and any(
+                        isinstance(block, dict)
+                        and block.get("type") == "text"
+                        for block in content)))
+                if not has_text:
+                    return "in_progress"
+            return "complete"
+        # Other record kinds (system/meta) are not turn boundaries.
+    return "unknown"
 
 
 @dataclass(frozen=True)
@@ -347,7 +582,7 @@ def find_verdict_turn(
     if not patterns:
         return None
 
-    lines = text.splitlines()
+    lines = text.split("\n")
     # Text blocks of assistant records in the current (newest-first)
     # segment.  Reset when the scan crosses a non-task *wakeup* record;
     # tool results belong to the same turn and keep it.
@@ -487,7 +722,7 @@ def read_latest_assistant_text(transcript_path: str | Path | None) -> str:
     # record and the end of file, bypassing meta records).
     turn_lines: list[str] = []
     in_turn = False
-    for line in reversed(text.splitlines()):
+    for line in reversed(text.split("\n")):
         is_assistant = bool(_ASSISTANT_RE.search(line))
         is_user = bool(_USER_RE.search(line))
         if not in_turn:

@@ -45429,7 +45429,7 @@ prs:
   plan: null
   title: Resume autostart after user feedback in an existing implementation session
   branch: pm/pr-22ea6a2-resume-autostart-after-user-feedback-in-an-existin
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'After a PR has reached review, a user may stop the review loop, give
     feedback in the existing implementation session, then ask autostart to take the
@@ -45475,16 +45475,840 @@ prs:
     review/QA evidence merely to unblock the flow.
 
 
-    This PR is filed for follow-up, not authorized for autostart by this request.'
+    User explicitly authorized starting this PR with DeepSeek on Oct26 evening (Oct27
+    UTC).
+
+
+    User clarification, Oct26 evening: use an explicit "fresh autostart" action, shortcut
+    z a, as the signal that a later-stage PR is returning to implementation after
+    human feedback. Current a opens the runs popup and z a has no reset behavior;
+    do not describe the proposed shortcut as already available.
+
+
+    User story: Given a PR in review/QA/sign-off with a retained implementation session
+    where the user has resumed work, when the user explicitly invokes fresh autostart
+    from implementation, then atomically return it to in_progress, supersede obsolete
+    review/QA/sign-off ownership and completion events, adopt the existing implementation
+    session without restarting it, and wait for the current implementation handoff
+    before starting one fresh review and the required QA/sign-off. Preserve source,
+    context, unsent drafts, historical evidence, model assignments, and manual merge
+    gates. Ordinary autostart add/re-arm must remain a continuation from the current
+    phase, so routine retry does not unexpectedly rewind a PR.
+
+
+    Resetting only the status field is insufficient: stopped review-loop objects and
+    prior idle/PASS events must not block or prematurely advance the new handoff.
+    Cover busy and already-completed current turns, repeated fresh-autostart requests,
+    controller restart, and active downstream ownership. This is a workflow reset,
+    not a fresh implementation client. The user''s current #253 hold remains in force;
+    this PR does not itself release or reset #253.
+
+
+    Implement the explicitly requested z a fresh-autostart action plus its CLI equivalent.
+    Plain a continues to open the runs popup. Preserve the existing implementation
+    agent and its current work; do not implement this as pr start --fresh. Starting
+    this feature PR is separate from exercising it on #253.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
-  updated_at: '2026-10-25T21:27:23.093198+00:00'
+  updated_at: '2026-10-31T18:20:46.267867+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-950f3c0
+    text: 'review-loop b810 i1: fixed wait-status accuracy (stale idle flag cleared
+      at reset only when the pane is idle; permission prompts keep their reason),
+      SUPERSEDED QA sentinel now treated as no verdict, consume_handoff only written
+      for real fresh attempts, latest_turn_state grows its tail window (oversized
+      final assistant record no longer reads unknown), repeated fresh records the
+      newly requested policy on the same attempt, no duplicate signoff_history, partial
+      reset failures printed by the CLI. Added latest_turn_state + poll-routing tests.
+      Known limitations documented in pm/specs/pr-22ea6a2/impl.md: (1) removing the
+      target while waiting is undone by a TUI restart (resume_pending re-adds it);
+      (2) an out-of-process QA driver launched before the reset that finishes after
+      it could still record a post-reset PASS (needs a per-run id in the QA runtime
+      record).'
+    created_at: '2026-10-27T05:46:58Z'
+    last_edited: '2026-10-27T05:46:58Z'
+  - id: note-22a53c1
+    text: 'review-loop b2e1 i1: no functional changes to the fresh flow. Fixed the
+      CLI reply printer echoing the owner message on failure (duplicate error text
+      on stderr+stdout) by gating on ok; added pm autostart fresh to the README verb
+      list; added tests for z O/z A key wiring + plain-A continuation + no-selection,
+      the missing-implementation-window status reason, fresh leaving unrelated targets/policies
+      untouched, and the failed-reply single-error CLI contract. 50 fresh tests pass;
+      442 related tests pass. Pre-existing env-only failures (git push/pull, markdown
+      dep) unchanged vs master.'
+    created_at: '2026-10-27T06:19:26Z'
+    last_edited: '2026-10-27T06:19:26Z'
+  - id: note-fe3b5ed
+    text: 'review-loop 367f i1: z-prefix safety fix — the i2 cancellation set omitted
+      keys whose handlers consume z (S start-with-companion, e/v plan panes, n/L/m/H/c
+      views), so `z e`/`z v`/`z c` silently lost their "kill existing before next"
+      behaviour (App.on_key runs before the binding action). The set now matches the
+      _consume_z() callers; the prefix also expires after the same 2 s chord window
+      the w/y prefixes use, because j/k/arrows are swallowed by the tech tree before
+      App.on_key so the set alone could never cancel them. Added regression tests
+      for the key set, the non-z keys (i/Y/g/p), the expiry, and multi-PR all-or-nothing
+      validation. 58 fresh tests pass; full suite unchanged vs master (43 failed/17
+      errors are the known git-push env failures present on master).'
+    created_at: '2026-10-27T07:37:24Z'
+    last_edited: '2026-10-27T07:37:24Z'
+  - id: note-4565b0f
+    text: 'review-loop 367f i2: no functional changes to the fresh flow. Added direct
+      tests for the two fences that had none: the sign-off timestamp guard in fresh_recorded_verdict
+      (a pre-requested_at record is ignored even when a racing write never set invalidated)
+      and the review-loop SUPERSEDED sentinel fresh loop_id that makes late old-thread
+      callbacks bow out. Pinned the partial-reset-failure contract (validation reads
+      the TUI in-memory rows, reset re-reads disk under the lock: the other PRs still
+      reset and the failure lands in failed for the CLI failed: lines) and resume_pending
+      fallback to stop_before_merge for an unknown marker policy. Dropped the duplicate
+      aggregate "resumed fresh attempt" log line in _deferred_startup (resume_pending
+      logs each PR through add_targets confirmation). Clarified spec R2 (pane adoption
+      is the existing lazy registration in _poll_impl_idle, not a separate fresh_start
+      step). 63 fresh tests pass; full suite failure set identical to master (73 known
+      git-push/pull + markdown env failures). (2026-10-27T08:02:11Z)'
+    created_at: '2026-10-27T08:02:16Z'
+    last_edited: '2026-10-27T08:02:16Z'
+  - id: note-1e113b8
+    text: 'review-loop 367f i3: implemented the explicitly requested lowercase `z
+      a` fresh autostart (commit 8c87f4af). `a` now consumes the z prefix: plain `a`
+      still opens the runs popup; `z a` = fresh_start(policy=None, source="key:za");
+      `z O`/`z A` remain the explicit stop-before-merge / auto-merge variants. Policy
+      mapping: `z a` preserves an existing target policy (including wait_for_merge
+      and its dependency-wide hold, coordinated with sibling #261) and defaults a
+      new target to stop_before_merge; live-session adoption, historical evidence,
+      model assignments and manual merge gates unchanged. Updated _Z_PREFIX_KEYS +
+      prefix hint, help screen, README, CLI/module docstrings and the spec (interface,
+      R1, edge cases, files, i5 notes). Added tests: z a key wiring, plain a popup,
+      z a no-selection, "a" in the prefix key set, and the policy mapping (new target
+      stop; existing wait_for_merge/auto_merge preserved). 69 fresh tests pass; full
+      suite 3865 passed with only the 13 known env-only failures (markdown dep + hook
+      installer), identical to master. (2026-10-27T09:05:00Z)'
+    created_at: '2026-10-27T08:52:03Z'
+    last_edited: '2026-10-27T08:52:03Z'
+  - id: note-post-oom-resume-20261027
+    text: 'USER RESTART 2026-10-27 after OOM host restart/explicit cleanup: resume
+      this PR''s native flow with DeepSeek Flash1017/high for implementation/review/QA/helpers
+      and work Opus5.5/high signoff. Manual wait_for_merge, spec review OFF. Current
+      source e7aabdfa includes original review367f i5 fixes and tests; preserve dirty
+      project metadata and original evidence. Old i6 failed before the host restart;
+      no old reviewer/container is live and no old recovery request should be replayed.
+      Fresh reviewer must independently inspect existing implementation/spec and run
+      appropriate validation; use native QA/signoff when ready. Do not start unrelated
+      PRs or merge the PR.'
+    created_at: '2026-10-27T14:37:30.566168+00:00'
+    last_edited: '2026-10-27T14:37:30.566168+00:00'
+  - id: note-05a6afb
+    text: 'review-loop 2aac i1 (commit 548df728): no changes to the fresh flow itself.
+      (1) latest_turn_state now skips Claude Code `!` shell-command user records (<bash-input>/<bash-stdout>/<bash-stderr>,
+      verified against real transcripts) — a trailing `!git status` previously read
+      as in_progress and stalled the handoff. (2) _on_complete_from_thread finalizes
+      review transcripts only while the loop still owns its runtime_state entry: a
+      superseded loop can finish up to its 15 s verdict timeout after the reset, by
+      which time the successor has created review-<pr>-i1.jsonl in the same run dir,
+      and finalizing it froze the new loop transcript (fresh review hang). (3) partial
+      reset failures are named in the TUI log line. (4) the three z-chord handlers
+      now share _fresh_autostart_from_key. Full suite 3876 passed; 13 known env-only
+      failures unchanged vs master.'
+    created_at: '2026-10-27T15:02:45Z'
+    last_edited: '2026-10-27T15:02:45Z'
+  - id: note-d5b5963
+    text: 'review-loop 2aac i2: no functional changes to the fresh flow. Deduplicated
+      the review-window teardown: the z d path, the zz d supersede path and autostart_fresh
+      each carried their own find-window → park → kill copy; they now share park_and_kill_review_window()
+      in review_loop_ui (same park-by-id / kill-by-name behavior, only when the window
+      is found, failures logged at debug). Dropped an unused FakeApp local in test_resume_skips_advanced_prs
+      (pyflakes). Reviewed but deliberately left alone: the partial add_targets-failure
+      path after a successful reset (only reachable if the PR vanishes between validation
+      and add; resume_pending recovers on restart) and the fresh-marker policy not
+      tracking a later plain A/O policy change until the next fresh request. Full
+      suite 3889 passed, 1 skipped; 131 fresh tests pass. (2026-10-27T15:35:00Z)'
+    created_at: '2026-10-27T15:25:19Z'
+    last_edited: '2026-10-27T15:25:19Z'
+  - id: note-57b71d1
+    text: 'review-loop 2aac i3: fixed latest_turn_state misreading a streamed thinking
+      block as a completed turn. Claude Code writes content blocks as separate records
+      with stop_reason:null while streaming, so a long thinking block sits at the
+      transcript tail for 4-42 s; the 5 s handoff poll could start the fresh review
+      over in-flight work. A stop_reason:null assistant record with no text now reads
+      in_progress; the answer text record still ends the turn (verified against all
+      ~/.claude/projects transcripts: 9/9 null-thinking records are followed by another
+      assistant record, 7252/7252 text records by user/EOF). Added two direct tests;
+      i2/i3 spec notes. Full suite 3891 passed, 1 skipped. (2026-10-27T16:05:00Z)'
+    created_at: '2026-10-27T16:01:29Z'
+    last_edited: '2026-10-27T16:01:29Z'
+  - id: note-6f747f3
+    text: 'review-loop 2aac i5 (commit a71b1744): no changes to the fresh flow itself.
+      Fixed the one remaining robustness gap in the handoff poll: _poll_impl_idle
+      runs the (cheap, idempotent) handoff check every 1 s tick, but the launch it
+      triggers (_auto_review_idle_prs -> `pr review --no-window`) leaves the PR in
+      in_progress when it fails (store lock timeout, corrupt YAML, subprocess error)
+      while the transcript still reads "complete", so the next tick re-ran the whole
+      thing — a subprocess plus two log lines every second, forever, on the TUI thread.
+      autostart_fresh.handoff_attempt_due() now allows one launch per PR per _HANDOFF_RETRY_SECONDS
+      (15 s), recorded on the app (_fresh_handoff_attempts) so a restarted TUI retries
+      immediately; it is evaluated after handoff_ready (short-circuit), so a waiting
+      PR never burns its window and the first launch after the turn completes is immediate,
+      and fresh_start''s explicit immediate handoff is unaffected. Added a poll-routing
+      test (two ticks inside the window -> one launch, after the window -> a second)
+      + spec note. 78 fresh tests / 462 related tests pass; full suite 3822 passed
+      with the identical 55 failed/17 errors env-only set (git push/pull proxy, markdown
+      dep, hook installer) present before the change.'
+    created_at: '2026-10-27T18:35:45Z'
+    last_edited: '2026-10-27T18:35:45Z'
+  - id: note-7b99693
+    text: 'review-loop 2aac i10 (commit f139c30b): no functional change to the fresh
+      flow. (1) reset_pr now reads the attempt counter defensively — a hand-edited/corrupt
+      fresh_autostart.attempt raised ValueError out of the locked update and escaped
+      fresh_start as an owner-side "internal" error with no detail; it now falls back
+      to attempt 1. (2) fresh_start guards each PR reset: an unexpected exception
+      used to abort the loop after earlier PRs in the same call were already reset
+      on disk (their changes dropped from the reply, their old loop/QA/sign-off state
+      unretired, their target never added); it is now a per-PR failed entry while
+      the remaining PRs still reset (the i4 partial-failure contract). Added tests
+      for both. Spec: corrected the i5 note''s stale "1 s tick / every second" poll
+      cadence in place, completed the files list (pm tui keys, pm command list, README),
+      added the i10 notes. Full suite 3901 passed, 1 skipped.'
+    created_at: '2026-10-27T22:00:16Z'
+    last_edited: '2026-10-27T22:00:16Z'
+  - id: note-cad083a
+    text: 'review-loop 4e99 i1: two hardening fixes, no change to the fresh flow design.
+      (1) fresh_start now polls the implementation pane before its immediate handoff
+      check, like _poll_impl_idle: a pane that died since the last ~5 s poll left
+      is_gone False and its (possibly finalized) transcript complete, so the reset
+      could start the review over the old code instead of waiting for the scheduler
+      relaunch. (2) retire_in_memory unregisters a popped QA loop scenario tracker
+      keys (poll_qa_state is the only other unregister path and never sees the popped
+      loop); done before the SUPERSEDED sentinel because _runtime_mirror_clear would
+      wipe it. Tests: TestFreshStart::test_dead_pane_does_not_hand_off_immediately,
+      TestRetirement::test_qa_scenario_tracker_keys_are_dropped (both verified to
+      fail without their fix). 87 fresh tests pass; 538 related tests pass. Full suite:
+      55 failed/17 errors, identical counts to master (git proxy, markdown dep).'
+    created_at: '2026-10-27T23:23:01Z'
+    last_edited: '2026-10-27T23:23:01Z'
+  - id: note-b27b893
+    text: 'review-loop 4e4d i1: no functional change to the fresh flow. Fixed the
+      R6 wait status after a TUI restart: a restarted TUI re-registers the impl pane
+      and reads the previous turn''s idle_prompt as its newest hook event, so the
+      tracker reported idle while the user''s feedback turn was still running and
+      the row said "fresh autostart: implementation turn complete; starting fresh
+      review" for the whole wait (retire_in_memory only resets a pane that was already
+      tracked at reset time). New autostart_fresh.reconcile_idle_status clears the
+      stale flag when the transcript (the authoritative handoff signal) says in_progress;
+      called from _poll_impl_idle''s fresh branch and after fresh_start''s pre-handoff
+      poll. A gone pane is left alone (mark_active would clear gone) and a live permission
+      prompt is never idle. Added TestIdleStatusReconcile (4 cases) and a poll-routing
+      test that fails without the call site. 92 fresh tests / 452 related tests pass;
+      full suite 3904 passed, 1 skipped with the markdown dep installed (12 markdown
+      env-only failures without it, unchanged vs master).'
+    created_at: '2026-10-27T23:57:34Z'
+    last_edited: '2026-10-27T23:57:34Z'
+  - id: note-0d9cfde
+    text: 'review 2649 i1 incidental: pm_core/verdict_transcript.py JSONL scanners
+      used str.splitlines(), which splits on U+2028/U+2029/U+0085 that JSON leaves
+      unescaped inside strings (7 of 15,764 local transcripts contain one). Such a
+      record fragmented into unparseable pieces and was skipped, so the newest turn/verdict
+      was read from an older record. latest_turn_state + extract_verdict_from_transcript
+      + read_latest_assistant_text now split on "\n" only; the assistant-content scanner
+      keeps splitlines. Covered by 3 new tests in tests/test_verdict_transcript.py.'
+    created_at: '2026-10-28T02:28:37Z'
+    last_edited: '2026-10-28T02:28:37Z'
+  - id: note-9f49032
+    text: 'review-loop 4a2b i1: no functional change to the fresh flow. retire_in_memory
+      now shares _retire_runtime_action() for the review-loop/QA SUPERSEDED runtime_state
+      sentinels (the review-loop loop_id fence is kept); SUPERSEDED is defined once
+      in autostart_state and used by both the writer (autostart_fresh) and the reader
+      (auto_start.recorded_qa_verdict); the not_later_stage rejection message derives
+      its stage list from _LATER_STAGES. Full suite 3924 passed, 1 skipped, 0 failures
+      (223 s).'
+    created_at: '2026-10-28T03:11:56Z'
+    last_edited: '2026-10-28T03:11:56Z'
+  - id: note-64cdbe3
+    text: 'QA S6 (2026-10-28, 2nd pass, HEAD 42a7471d): two scenario Thens do not
+      match the product; neither is a defect in this PR. (1) Story 1: `pm autostart
+      list` with no running TUI exits 2 with `owner_unavailable` instead of printing
+      `Auto-start: off` / `No auto-start targets.` — list is owner-mediated; `_request`/`autostart_list`
+      are identical to base 450a6362, and offline listing would need the persisted
+      target/resume state. (2) Story 5: Alpha`s row never shows `fresh autostart:
+      implementation window missing; relaunching` "immediately after the command"
+      — the fresh reset and the `pm pr start --background` that recreates the pane
+      are the same scheduler pass (same second in the TUI log); six status queries
+      fired with the reply all already show `waiting for the current implementation
+      turn after feedback`. The reason string is correct: it appeared on Alpha`s row
+      when the pane was closed (`missing-window/recording-c.cast`) and resolved on
+      the next scheduler pass (`-d.cast`), and on Epsilon`s row for ~5 s while its
+      spec block delayed the relaunch. Everything else in scenario 6 passed (stage-specific
+      rejections, all-or-nothing multi-PR, merge-in-flight refusal, spec_pending block,
+      repeat-fresh no-op with attempt=1, exactly one review window per PR). Captures:
+      /pm-captures/scenarios/6/. Verdict INPUT_REQUIRED pending a decision on whether
+      to amend the two Thens or change the product.'
+    created_at: '2026-10-28T06:48:18Z'
+    last_edited: '2026-10-28T06:48:18Z'
+  - id: note-86379f5
+    text: 'QA S4 (z-prefix safety) PASS. Capture mechanics for the next run: (1) the
+      `z t` story leaves the PR in `qa` status, so the later stories that assume `in_review`
+      need `pm pr edit <pr> --status in_review` + `r` to restore the Given; (2) after
+      a review loop ends KILLED, plain `A` will not restart it (app._review_loops
+      keeps the completed loop) — use `zz` then `d`; (3) "Stopped review loop for
+      <pr> — opening fresh review" is logged but immediately replaced on the TUI log
+      line by the review spinner (no hold), so it is only visible in `pm log show`,
+      not in a TUI capture — the fresh review window + "Review loop done … ☠ KILLED"
+      are the on-screen evidence. Captures: /pm-captures/scenarios/4/01-z-prefix-safety
+      (all six stories) and 02-zzz-cancel (zzz with human-paced presses).'
+    created_at: '2026-10-28T06:54:28Z'
+    last_edited: '2026-10-28T06:54:28Z'
+  - id: note-b5c9275
+    text: 'QA scenario 3 (TUI fresh chords / key surfaces), commit bc7247d0: the in-TUI
+      help screen (?) clipped the three new rows — at any pane width the fixed 50-column
+      #help-container cut them to "z a … (kee", "z O … (sto", "z A … (aut", hiding
+      the merge-policy suffix the scenario checks. Widened #help-container to 66 columns
+      (longest row 57 + padding/border/scrollbar; still fits 80 cols). Everything
+      else in the scenario passed on the fake backend: plain a popup + Escape leaves
+      PR in_review/auto-start off; z a on a non-target resets to in_progress, adds
+      a stop-before-merge target, keeps the impl window/pane ids identical and starts
+      no review; z a on an existing wait-for-merge target keeps the policy and the
+      PR2 dependency hold, z O releases it, z A switches to auto-merge with the PR
+      staying in_progress; plain A/O only add/re-arm a target without resetting; with
+      the pending filter (no selection) all three chords log their "No PR selected
+      (…)" line and change nothing. Captures: /pm-captures/scenarios/3/pre-fix (clipped)
+      and post-fix (full flow).'
+    created_at: '2026-10-28T06:58:06Z'
+    last_edited: '2026-10-28T06:58:06Z'
+  - id: note-a409a8e
+    text: 'QA scenario 2 refinement: fake-claude sign-off writes no report.html (it
+      emits only the verdict) — verify preserved evidence via the QA note in project.yaml,
+      the captures dir (pm qa captures-path) and native Claude JSONL transcripts;
+      the run-dir signoff-<pr>.jsonl/.head are driver-side and are retired. Setup
+      prerequisites: commit pm/project.yaml and pm/specs/<pr>/qa.md on master before
+      pm pr start, and commit a real change in the workdir on the PR branch (a PR
+      with no commit of its own is in_base, so SIGNOFF_MERGE is coerced to SIGNOFF_BLOCKED).'
+    created_at: '2026-10-28T06:12:40Z'
+    last_edited: '2026-10-28T06:12:40Z'
+  - id: note-af7db78
+    text: 'QA scenario 2 (fresh autostart downstream flow) PASS. Environment note
+      for future QA runs in this container: launch the pm session with PATH=/usr/bin:$PATH
+      (real git ahead of ~/.local/bin/git). The push-proxy git wrapper hijacks `git
+      fetch <local path>`, so the sign-off integration check fails (base= empty) and
+      the fake SIGNOFF_MERGE is coerced to SIGNOFF_BLOCKED before the flow can park
+      at the merge gate. Also: the fixture workdir must contain a real commit on the
+      PR branch, otherwise the PR is in_base and the fake SIGNOFF_MERGE is blocked
+      for that reason instead.'
+    created_at: '2026-10-28T06:55:01Z'
+    last_edited: '2026-10-28T06:55:01Z'
+  - id: note-8fab064
+    text: 'QA scenario 14 (key surfaces / runs popup / status text after the help-width
+      fix) PASS, all 4 stories. Verified at runtime on the fake backend (project pm-test-1793177166,
+      PR pr-95325c4): (1) help screen at 80x24 and 200x50 shows the three fresh rows
+      complete with their merge-policy suffixes, popup measures 66 columns (fix bc7247d0
+      holds); plain a/O/A still labelled runs popup / add-target / toggle-auto-merge.
+      (2) `pm tui keys` documents the three fresh chords + policy semantics and lists
+      `fresh` among the autostart command-bar verbs; README names `pm autostart fresh
+      pr-abc123` and states the z a policy rule and the plain-key continuation rule.
+      (3) after `pm autostart fresh --wait-for-merge`, the runs popup, `pm autostart
+      status` and `pm autostart list` agree on PR, wait-for-merge policy, phase (WAITING
+      implementation), reason and run id; Escape changes nothing. (4) `z a` on the
+      selected in-review PR flips the node to `◎ in_progress` with the target marker,
+      logs both the reset line and the waiting line, and the popup reason agrees with
+      the log; pm pr show = in_progress, no review window, one impl window. Captures:
+      /pm-captures/scenarios/14/ (01-help-80cols, 02-help-200cols, 03-tui-keys-readme,
+      04-runs-popup, 05-za-chord). Mechanics note: story 4 Given was reached through
+      the product handoff (append an assistant reply to the impl transcript so the
+      poll starts one fresh review, then append a new user feedback prompt), so the
+      pre-state is genuine rather than hand-set; the PR was already a wait-for-merge
+      target, so z a preserved that policy. (2026-10-28)'
+    created_at: '2026-10-28T08:59:20Z'
+    last_edited: '2026-10-28T08:59:20Z'
+  - id: note-00313a4
+    text: 'QA S9 (handoff turn detection vs real transcript shapes) PASS — all six
+      stories verified on the live TUI + CLI, no defects, no code change. Verified
+      tails: (1) unanswered user prompt → CLI prints the three lines in order and
+      the row reads "waiting/implementation — fresh autostart: waiting for the current
+      implementation turn after feedback" (also in the `a` runs popup); (2) streamed
+      thinking block (apiBlockIndex 0, stop_reason null, no text) → 15/15 status samples
+      over 31 s still waiting, never "turn complete", 0 review windows; (3) `!` shell
+      records (<bash-input>/<bash-stdout>/<bash-stderr>) → 8/8 waiting, and a following
+      plain user prompt also stays waiting, so the handoff only fires on the answer
+      record; (4) interrupt marker backdated 10 s before the request → CLI says "implementation
+      turn complete, fresh review started" and exactly one review #1 opens; (5) interrupt
+      marker timestamped AFTER fresh_autostart.requested_at (09:04:55.641Z vs 09:04:37Z)
+      → 8/8 waiting, no review, then the subsequent turn completes and starts review
+      #1; (6) literal U+2028/U+2029 in the two newest records (json.dumps ensure_ascii=False)
+      → 10/10 waiting (no fallback to the older completed answer), and a U+2028 answer
+      record starts exactly one review #1. In every case: exactly one review window,
+      iteration 1, no second window/iteration over the following 30 s; `pm log show`
+      shows exactly one relauncher line per story. Captures: /pm-captures/scenarios/9/{tui,cli,cli-status}/.
+      Fixture mechanic for future runs: re-establish the Given per story with `pm
+      tui send zd` (stops the running loop, leaves in_review + a stopped loop object
+      + a review window), `pm autostart remove <pr>`, then restore the 2-record baseline
+      transcript; the fresh flow parks/kills the stale review window itself. Camera-lock
+      the tmux recorder to window 0 or the review-window select yanks the cast off
+      the tech tree. (2026-10-28T09:15:00Z)'
+    created_at: '2026-10-28T09:13:10Z'
+    last_edited: '2026-10-28T09:13:10Z'
+  - id: note-fde818d
+    text: 'scenario 13 refiner: verifying autostart fresh surfaces'
+    created_at: '2026-10-28T08:34:04Z'
+    last_edited: '2026-10-28T08:34:04Z'
+  - id: note-fb810f3
+    text: 'Scenario 13 (unrelated targets / multi-PR fresh / simultaneous actors)
+      refined and empirically verified on this branch. Fixture facts: export PYTHONPATH=/workspace
+      in every shell AND run ''tmux set-environment -g PYTHONPATH /workspace'' after
+      ''pm session'' — otherwise CLI/TUI in the test dir load /opt/pm-src master,
+      which has no ''autostart fresh''. Write the fake-claude config with the tmux
+      server HOME. ''pm pr start'' requires the PR committed on the base branch; starting
+      impl for an in_review PR leaves the status in_review. The fresh handoff reads
+      the impl transcript, so model the in-flight feedback turn by appending a user
+      JSONL record, and the completed turn with an assistant record (stop_reason end_turn).
+      Verified: multi-PR ''fresh'' keeps an existing target''s auto-merge and defaults
+      a new one to stop-before-merge; a wait-for-merge target holds its PREREQUISITES
+      (C is W''s dependency, shown as ''[wait-for-merge <- W]'' in ''pm autostart
+      status'', not in ''list''); two simultaneous fresh requests (CLI+CLI and CLI+''z
+      a'') give one reset + one ''already waiting'' with attempt incremented once;
+      a repeat with --auto-merge keeps attempt/requested_at and only moves the recorded
+      policy, and a plain ''pm tui restart'' re-adds the fresh-waiting PR with that
+      policy (source resume). Plain non-fresh targets are dropped by a plain restart.'
+    created_at: '2026-10-28T08:50:25Z'
+    last_edited: '2026-10-28T08:50:25Z'
+  - id: note-7c6b629
+    text: 'QA scenario 13 (unrelated targets / multi-PR fresh / simultaneous actors):
+      PASS on HEAD 26cf1c85, no code change. Four stories, each in a fresh fixture
+      with fake-claude (review delay 300s): (1) A fresh + unrelated wait-for-merge
+      target W (W depends on C): A review #1 exactly once, attempt 1 / stop_before_merge;
+      W stayed review #1 with its own window; C stayed held (held_by [W], policy wait_for_merge,
+      running/implementation). (2) pm autostart fresh A B printed one line per PR;
+      A kept auto_merge, B became stop_before_merge, unrelated target T was byte-identical
+      in list --json and status --json (no fresh marker) before/after, one target
+      + one run row per PR; both got exactly one review #1. (3) Two simultaneous CLI
+      fresh requests released on a shared ns deadline: one fresh, one "already waiting",
+      attempt 0->1, single requested_at, one row each; CLI racing `pm tui send za`
+      with P selected: CLI won, TUI log showed "Auto-start: <P> already waiting for
+      its implementation turn", attempt 0->1, one review. (4) Repeat fresh with --auto-merge
+      / --stop-before-merge / --auto-merge: each "already waiting", attempt 1 and
+      requested_at fixed, only fresh_autostart.policy moved (visible in list, status
+      --json targets[].policy and the a runs popup); after pm tui restart W was re-added
+      policy auto_merge source resume with the same single waiting attempt, and the
+      completed turn started exactly one review with attempt still 1. Fixture notes:
+      a PR needs a live impl pane (a workdir) before auto-start can start its review;
+      T had to be re-added once after its pane existed to trigger a scheduler pass;
+      C had to be started manually with --transcript so a user record could keep it
+      in implementation. Captures: /pm-captures/scenarios/13/{01-dependency-isolation,02-multipr-local,03a-concurrent-cli,03b-concurrent-cli-chord,04-policy-repeat-restart}
+      (cast+mp4+transcript+manifests).'
+    created_at: '2026-10-28T09:17:02Z'
+    last_edited: '2026-10-28T09:17:02Z'
+  - id: note-01e1eff
+    text: 'QA S10 refinement (2026-10-28): stories 1-4 refined against the code, story
+      5 reshaped. (1) Story 5 ("unsent draft at the implementation prompt") is not
+      drivable with fake-claude: the fake returns/exits on the first stdin byte (select
+      on stdin in _hold_open), so no draft can sit at its prompt. The Then is now
+      "same single impl window, same pane id, same --session-id across the restart"
+      — the observable evidence that the session is untouched — with a note that the
+      draft text itself is unobservable in this environment. (2) The missing-window
+      explanation is on the `pm autostart status` row (same row as the `a` popup),
+      NOT the TUI log, and is only visible between closing the window and the next
+      scheduler pass (check_and_start is sync/loop-callback driven, not a timer) —
+      trigger the pass with an idempotent `pm autostart add <pr>` (prints `unchanged:
+      <pr> (stop-before-merge)`). (3) The restart log line is exactly `Auto-start:
+      resumed fresh attempt for <pr> (waiting for its implementation handoff)` and
+      does not name the policy; read the restored policy from `pm autostart list`
+      (use `pm autostart fresh --auto-merge` in story 3 so the restored policy is
+      distinguishable from the default). (4) Fixture mechanic for a feedback turn
+      in flight: start impl with `pm pr start --transcript <dir>/impl-<pr>.jsonl`,
+      then append a `type:user` record to that symlink (in_progress) and a later `type:assistant`
+      text record to finish it; the fake keeps re-emitting idle_prompt every 2 s,
+      which is exactly the stale-idle condition reconcile_idle_status must correct.
+      (5) Start the review loop with `pm tui send zzd`, then stop it by killing `review-<pr>`
+      (a running loop cannot be stopped with `z d`, which kills it and opens a fresh
+      review window). Build the fixture in a fresh throwaway project per story.'
+    created_at: '2026-10-28T08:55:57Z'
+    last_edited: '2026-10-28T08:55:57Z'
+  - id: note-c776722
+    text: 'QA scenario 10 (wait-status accuracy / lost panes / TUI restart recovery)
+      PASS, all 5 stories. Handoff for future runs: (1) "stop the TUI entirely" cannot
+      be done with `tmux kill-pane` on the `pm _tui` pane — the global after-kill-pane
+      hook runs `pm _pane-closed` and pane_layout deliberately respawns the TUI ("TUI
+      pane was killed, respawning"; pre-existing on master at 450a6362), so `pm autostart
+      status` keeps answering with a new run= id. Terminate the pane process instead
+      (`kill -TERM $(tmux list-panes -t "$SESSION:0" -F "#{pane_pid}")`) — that leaves
+      the implementation window alive and gives the intended `owner_unavailable` (rc=2)
+      with the turn able to finish while no TUI runs. (2) `pane_start_command` is
+      quoted (`"pm _tui"`), so the scenario awk matcher needs gsub(/"/,"") to find
+      the TUI pane. (3) `pm autostart status` prints one extra `run=` id per TUI (re)start,
+      so a changed run id is the cheapest proof the TUI restarted/resumed. Captures:
+      /pm-captures/scenarios/10/{01-restart-wait,02-missing-window,03-turn-finishes-no-tui,04-target-removed,05-pane-identity}.'
+    created_at: '2026-10-28T09:20:48Z'
+    last_edited: '2026-10-28T09:20:48Z'
+  - id: note-016f727
+    text: 'QA scenario 11 (failed review launch — retry pacing and single review):
+      PASS, all three stories. Evidence in /pm-captures/scenarios/11/ (01-story1-logs-only,
+      03-story1-tui [video], 04-story2-cli [video], 05-story3-two-prs). Observed:
+      attempts fail with the store lock held and retry every 15-21 s (18 s typical)
+      instead of once per poll tick; zero review-/qa-/signoff- windows while failing;
+      PR stays in_progress and the row stays waiting/implementation with the reason
+      changing to "implementation turn complete; starting fresh review" at turn end;
+      on release exactly one review-<pr> window and one "Review loop started" per
+      PR, then PASS -> QA; two waiting PRs each keep attempt:1 / awaiting_handoff:False
+      and get exactly one reset + one review launch, no "already waiting:" lines.
+      Two Then-wording variances, neither a defect: (1) the lock-timeout TUI line
+      reads "log: Error: Error: Could not acquire lock on ... within 2.0s" (the TUI
+      Error: prefix plus the CLI message, which already starts with Error:) rather
+      than "log: Error: pm_core.store.StoreLockTimeout: ..."; (2) the loop-start line
+      is "Review loop started for pr-<id> loop=<id>" rather than "Auto-start: review
+      loop for <pr>". Also: a naive grep -c "^qa-" reads 2 once QA starts because
+      a single QA stage opens qa-<pr>-s0 (Scenario 0, qa_loop) plus qa-<pr> in the
+      same second — not a duplicate stage launch; review never exceeded 1. QA-harness
+      note for future runs: the TUI recorder client must attach to a grouped session
+      named <pm-session>~N (an arbitrary group name makes pane-based session resolution
+      return it and the review loop dies with RuntimeError "Not in a pm tmux session"),
+      and pm re-selects the attached grouped session on every window it opens (tmux.new_window_get_pane
+      -> current_or_base_session), so send the recorder "C-b 0" to return it to the
+      TUI after each switch.'
+    created_at: '2026-10-28T09:32:03Z'
+    last_edited: '2026-10-28T09:32:03Z'
+  - id: note-fa5353e
+    text: 'QA scenario 12 (superseding QA/sign-off, late old verdicts) — stories 1,
+      3, 4 pass; stories 2 and 5 each have one Then conflict. Both stories have the
+      implementation turn already complete at the fresh, yet the Then requires fresh_autostart.awaiting_handoff:
+      true. Spec R3 ("If the turn is complete at reset time, advance immediately")
+      makes fresh_start consume the marker synchronously: the CLI prints "implementation
+      turn complete, fresh review started" and project.yaml shows awaiting_handoff:
+      false with handoff_at/review_started_at set (evidence: /pm-captures/scenarios/12/story2/08-yaml-post.txt
+      and story5/07-yaml-after-fresh2.txt). The two Thens are mutually exclusive (a
+      review that starts immediately cannot still be awaiting a handoff), so this
+      reads as a scenario-authoring conflict rather than a product defect: retirement
+      of the old QA/review/sign-off, evidence preservation, no duplicate superseded_history
+      entry, attempt increment, and exactly-one-fresh-review all held. Needs a decision:
+      amend the Then for the already-complete case, or change the product to defer
+      the immediate handoff. Captures: /pm-captures/scenarios/12/.'
+    created_at: '2026-10-28T09:42:29Z'
+    last_edited: '2026-10-28T09:42:29Z'
+  - id: note-user-restart-all-20261029
+    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart
+      this PR in implementation and merge latest origin/master INTO this existing
+      PR branch before any new review/QA. User explicitly released old review/QA holds
+      for this restart; preserve all earlier questions, answers, verdicts and evidence
+      and re-evaluate after integration rather than invent answers or waive acceptance.
+      Preserve dirty source, planner/spec edits, local registry/routing, stashes,
+      untracked files and all evidence. The interrupted work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
+      inspect its per-PR backup and original transcripts as needed. Safely reconcile
+      interrupted changes and current master, test, commit and push only this PR branch.
+      Never force-push/reset master or merge the PR into master. Report integrated
+      master SHA and tests; only then hand off to native review/QA. Keep assigned
+      primary/helper model and explicit work Opus5.5/xhigh signoff override. No new
+      dependencies or unrelated work are authorized.
+
+      Test isolation is mandatory: #267 S10 refiner killed the REAL pm-project_manager-5b29c418
+      session after mistaking a test PR launch for ownership of that session. S9/S12
+      inherited ambient tmux context and recreated test TUIs under that real name;
+      S12 changed global tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use
+      an explicit dedicated test tmux socket and isolated state/config, verify fixture
+      ownership; never mutate the user''s real session or shared host configuration
+      as test cleanup. Preserve the failed-run evidence. #278 is the existing per-session
+      tmux-isolation fix. Do not relaunch old QA fixture workers.'
+    created_at: '2026-10-29T01:33:53.678599+00:00'
+    last_edited: '2026-10-29T01:33:53.678599+00:00'
+  - id: note-c87e352
+    text: 'MASTER INTEGRATION COMPLETE 2026-10-29 (merge commit 3caf3407, integrated
+      master 4a74d880; branch was 362 commits behind from base 450a6362). Dirty registry
+      notes, qa.md additions and the signoff model override were preserved in a checkpoint
+      commit (fa027dd3) before merging. Seven files conflicted and were resolved by
+      hand: autostart_state.py (kept master single-manual-policy model + FRESH_KEY/SUPERSEDED),
+      verdict_transcript.py (kept master VerdictHit/find_verdict_turn rewrite, re-applied
+      latest_turn_state tail reader and the U+2028 split fix to the JSONL scanners),
+      review_loop_ui.py (both supersede guards; the early one now also releases the
+      launch lease), app.py (z-prefix machinery + master session helpers), auto_start.py
+      (docstrings/USAGE), and both test files (both appended blocks kept; fresh policy
+      assertions moved to POLICY_WAIT; CLI round-trip tests now patch submit_tui_command).
+      BEHAVIOURAL ADAPTATION: master removed stop_before_merge as a policy, so a fresh
+      request new-target default is now wait_for_merge (same manual merge gate, now
+      with the dependency-wide hold), and z O / --stop-before-merge map to wait_for_merge;
+      z A / --auto-merge unchanged; README, pm tui keys, help screen and fresh --help
+      updated. TESTS: full suite 4609 passed, 1 skipped, 4 failed - the four are test_push_proxy
+      TestWorkdirKeyedProxies cases that pass 61/61 when run alone on this branch
+      and are flaky on pristine master too (shared /tmp push-proxy sockets), not caused
+      by the merge. Targeted fresh/verdict/pane/review/signoff suites: 472 passed.
+      Not merged, not force-pushed; master untouched. Spec updated with a Master integration
+      section. Handing off to native review next.'
+    created_at: '2026-10-29T02:00:52Z'
+    last_edited: '2026-10-29T02:00:52Z'
+  - id: note-1dbfd2d
+    text: 'review-loop d9f2 i3: no change to the fresh flow''s design. (1) fresh_start''s
+      log confirmation is assembled per group: a mixed `pm autostart fresh A B` (A
+      reset, B already waiting) no longer claims B was "returned to implementation"
+      (test verified to fail with the old wording). (2) _deferred_startup now guards
+      the resume_pending call like consume_breadcrumb — an unexpected raise would
+      leave _cmd_queue_ready False forever, deferring every externally queued command;
+      pinned by two tests in tests/test_tui_pidfile.py (the guard test verified to
+      fail without the guard). (3) Test gaps closed: TestFreshStart._app now builds
+      its in-memory rows from disk so _validate''s all-or-nothing pass is actually
+      exercised; added a no_workdir refusal, a wrong-status-PR-alongside-a-valid-one
+      all-or-nothing test (both verified to fail without their guards), the merge
+      INPUT_REQUIRED refusal branch, the marker''s preserved policy for an auto-merge
+      target, R4''s sign-off driver bookkeeping clear, an observable QA tracker-key/sentinel
+      ordering, and the z-prefix timer wiring (delay + real callback). (4) Spec resync:
+      R3 states the transcript-first handoff order the code implements and that a
+      stale hook event cannot override an in_progress transcript; R2 matches the real
+      registration order (run-dir symlink first, native-transcript fallback); the
+      stale stop_before_merge in the i4 note is corrected; d9f2 i2/i3 notes added;
+      tests/test_tui_pidfile.py added to the files list. Full suite: 4621 passed,
+      1 skipped, 1 failed — only test_hook_events::test_installer_writes_standalone_receiver,
+      the known env-only hook-installer failure (not touched by this PR).'
+    created_at: '2026-10-29T03:47:48Z'
+    last_edited: '2026-10-29T03:47:48Z'
+  - id: note-58dfed3
+    text: 'review-loop d9f2 i4: no change to the fresh flow''s design. (1) handoff_ready
+      now also requires pr["status"] == "in_progress": the marker is consumed when
+      the review starts, but a consume whose locked write failed leaves it armed,
+      and a later bounce to in_progress (e.g. a sign-off return whose relaunch has
+      not run yet) could hand off a second review over the old turn; the guard test
+      was verified to fail without the fix and the test module''s _marker_pr gained
+      the status a real fresh-waiting PR has. (2) retire_in_memory now releases a
+      running old review loop''s cross-driver launch lease (exactly as the z d / zz
+      d supersede paths do): the successor review this attempt''s handoff starts claims
+      the lease *before* discovery, so a lease still held by the stopping old loop
+      made it sit in _wait_for_claim (up to REVIEW_LAUNCH_CLAIM_WAIT, 15 s) and, if
+      the old thread were slower, stand down as "superseded" (non-retryable), leaving
+      the fresh attempt in in_review with no review. (3) _resolve_transcript_file
+      now also requires os.access(p, R_OK): the i2 refactor onto the resolver dropped
+      the old "read it, else session-id glob" fallback for a transcript path that
+      exists but cannot be read (EACCES), so the verdict reader saw an empty transcript;
+      new test verified to fail without the fix. (4) pm autostart add/fresh now share
+      cli/autostart._chosen_policy() (the 7-line flag block was copied verbatim and
+      fresh''s conflict branch had no test) + two CLI tests, which also cover qa.md
+      R6 item 26. (5) autostart_fresh''s duplicate _review_window_name helper dropped
+      (the log line names the PR id). (6) Test gaps closed: the two error branches
+      of the TUI key path (_fresh_autostart_from_key) had no coverage — a raising
+      fresh_start must be logged, never traceback into Textual, and a refusal must
+      reach the log line with its message. Non-blocking observation: z a runs fresh_start
+      synchronously on the UI thread, and when the implementation turn is already
+      complete that includes the inline `pr review --no-window` subprocess (the same
+      work the 5 s poll already does); relevant if the open TUI-latency work (#6412997)
+      ever makes key handlers async. Spec updated with the i4 notes.'
+    created_at: '2026-10-29T04:26:27Z'
+    last_edited: '2026-10-29T04:26:27Z'
+  - id: note-718a2ed
+    text: 'QA S15 fixture prerequisite (fresh-autostart handoff with fake-claude):
+      start the implementation pane from the TUI (s key) or let auto-start launch
+      it. That path passes --transcript, which gives fake-claude a --session-id and
+      makes it write the native JSONL transcript the fresh handoff reads (symlink:
+      <pm-root>/transcripts/<run-dir>/impl-<pr>.jsonl). A bare CLI ''pm pr start <pr>''
+      passes no transcript, so the fake writes no JSONL and the handoff can never
+      resolve a turn (it waits forever). To simulate a mid-turn feedback reply, append
+      a type:user record to that JSONL and later append the assistant reply; the poll
+      tick re-checks the transcript tail every tick.'
+    created_at: '2026-10-29T05:33:55Z'
+    last_edited: '2026-10-29T05:33:55Z'
+  - id: note-f254614
+    text: 'Refined QA scenario 16 (fresh reset vs held QA / obsolete downstream state)
+      — two corrections for the next run. (1) The drafted SIGNOFF_IMPL story is not
+      drivable from the user surface: an open signoff_return awaiting impl implies
+      status in_progress, and pm autostart fresh / z a rejects an in_progress PR without
+      a fresh marker (not_later_stage: already in implementation; use autostart add),
+      so the reset that closes the return cannot be reached. reset_pr''s return-closure
+      is pinned by tests/test_autostart_fresh.py::TestReset::test_rewinds_and_supersedes_old_evidence
+      and has no deterministic user flow. (2) The fresh reset does not kill the old
+      qa-<pr> tmux window (retire_in_memory kills only the review window): the held
+      run is stopped and superseded, its dashboard drops INPUT_REQUIRED (waiting)
+      within ~5 s, and the stale QA window is retired when the new attempt''s QA run
+      starts. Do not file the surviving QA window as a bug.'
+    created_at: '2026-10-29T05:42:47Z'
+    last_edited: '2026-10-29T05:42:47Z'
+  - id: note-7f008ec
+    text: 'QA S15 (fresh autostart under the merged wait-for-merge model) PASS, all
+      4 stories, no code change. Captures: /pm-captures/scenarios/15/{01-fresh-wait-for-merge,02-repeat-policy-preservation,03-cli-conflict-and-alias,04-help-surfaces}.
+      Verified at runtime on the fake backend: z a on an in_review PR with the feedback
+      turn in flight logs the fresh-run line then "waiting for the current implementation
+      turn", leaves B in_progress with target wait-for-merge and the dependency row
+      "[wait-for-merge ← B]" (JSON held_by [B], effective_policy wait_for_merge) while
+      A stays in_review with its killed loop; finishing the turn opens exactly one
+      review window; PASS → QA → sign-off parks at the manual merge gate ("signed
+      off (fresh SIGNOFF_MERGE) … waiting for manual merge (held by B) — press g"),
+      no merge-* window. z A / z O repeats are no-ops on attempt/requested_at (only
+      policy moves; popup shows [auto-merge] then [wait-for-merge]; the hold on A
+      disappears and returns). CLI: --stop-before-merge + --auto-merge exits 1 with
+      conflicting_flags and changes nothing (same updated_at), the alias alone prints
+      "fresh: <C> (in_review → in_progress)" + waiting and lists wait-for-merge. Help
+      popup renders 66 cols with all six rows; tui keys, both --help texts and the
+      README carry the new wording. FIXTURE PREREQUISITES for the next run: (1) the
+      impl pane must be started from the TUI (s) so fake-claude gets --transcript
+      and writes the JSONL the handoff reads (a bare CLI pm pr start writes none);
+      (2) fake-claude never writes pm/specs/<pr>/qa.md, so QA ends INPUT_REQUIRED
+      "QA spec missing after planning" — commit a qa.md in the PR workdir and re-run
+      with z t; (3) set review verdicts to {"PASS":100} before finishing the turn
+      to reach sign-off; (4) to re-create a fresh-waiting Given from a sign_off PR,
+      append an in-flight user record first, then z a (otherwise the completed tail
+      hands off immediately).'
+    created_at: '2026-10-29T06:03:18Z'
+    last_edited: '2026-10-29T06:03:18Z'
+  - id: note-c21e9b8
+    text: 'QA S16 (2026-10-29, HEAD f556c61e, fake-claude backend): 3 of 4 stories
+      pass; the 4th is the SIGNOFF_IMPL story already flagged in note-f254614 and
+      is still not drivable. (1) Held INPUT_REQUIRED QA + pm autostart fresh: reset
+      from qa (fresh: pr-939cab6 (qa → in_progress)), row becomes "fresh autostart:
+      waiting for the current implementation turn after feedback", marker attempt
+      1 armed, the old run superseded and its qa_resume.json cleared; the stale qa-*
+      windows are retired by the new attempt QA planning sweep (06:11:12), not at
+      reset — matches note-f254614, not filed as a bug. After the handoff a new QA
+      run starts its own Scenario 0 (new run dir pr-939cab6-abd8a34184c26ff3) instead
+      of resuming the held run. (2) TUI restart while waiting: the Re-adopting held
+      QA run count is unchanged, the attempt is resumed ("resumed fresh attempt …
+      waiting for its implementation handoff"), and exactly one review starts after
+      the turn. (3) SIGNOFF_MERGE at the merge gate: reset from sign_off, approval
+      archived once in signoff_history (fresh-autostart) and invalidated, QA note/captures/native
+      JSONL kept (only the driver-side signoff symlink/.head retired), then new review
+      → new QA PASS → new sign-off → parked ready-to-merge, never merged. (4) SIGNOFF_IMPL
+      return: awaiting=impl lives 162 ms before the scheduler pr start --fresh clears
+      it; pm autostart fresh on the resulting in_progress PR is refused not_later_stage
+      (exit 1), so the reset that closes the return has no user flow. Captures: /pm-captures/scenarios/16/{01,02,03,04}.
+      No code change.'
+    created_at: '2026-10-29T06:27:56Z'
+    last_edited: '2026-10-29T06:27:56Z'
+  - id: note-fdf4926
+    text: 'QA S17 (wait-status accuracy: permission prompt / missing-or-unreadable
+      per-run transcript / blocked review launch) PASS, all 3 stories plus the optional
+      dangling-link variant, no code change. Verified on HEAD 251e3d8a with fake-claude
+      in an isolated fixture: HOME=/scratch/qa17-home and PM_TMUX_SOCKET=<private
+      socket> (no shared ~/.pm, no default tmux server touched); PYTHONPATH=/workspace
+      in every shell and `tmux set-environment` inherited it into panes. (1) Permission
+      prompt: with a user record as the transcript tail and a permission_prompt hook,
+      the row and the `a` popup both read "fresh autostart: permission prompt in implementation
+      window" for 10/10 samples over 20 s (never "implementation turn complete; starting
+      fresh review"), no review window, impl pane %2 with the same --session-id; assistant_turn+idle_prompt
+      started exactly one review in ~6 s. (2) TUI restart: after `pm tui restart`
+      the new run dir was empty while the session JSONL survived; the row read "waiting
+      for the current implementation turn after feedback" 10/10 over 20 s despite
+      the stale idle_prompt hook, handoff fired once, awaiting_handoff=false with
+      handoff_at set, no duplicate review after 45 s. (3) Store lock: `EDITOR="bash
+      -c ''sleep 60''" pm edit` held the lock; the row read "implementation turn complete;
+      starting fresh review", awaiting_handoff stayed true with handoff_at None, no
+      review window, and auto_review: impl idle retries were 18 s apart (not per 5
+      s tick); on release the next retry started exactly one review. Optional variant:
+      a per-run link pointing at ~/.claude/projects/-nonexistent/<sid>.jsonl still
+      resolved the wait from the session transcript and handed off exactly once. Fixture
+      traps for future runs: `ls pm/transcripts/autostart-*/impl-<pr>.jsonl` matches
+      BOTH the old and the new run dir once the TUI has restarted (readlink then fails
+      and the fixture appends to nothing) — resolve the current run from `pm autostart
+      status --json` run_id, or pick the first link whose target exists; `tmux capture-pane`
+      on a pane whose foreground is a non-shell process returns blank, use `capture-pane
+      -p -S -400` to read history; asciinema rec refuses to overwrite an existing
+      cast (use --overwrite when re-recording a capture dir). Captures: /pm-captures/scenarios/17/{01-permission-prompt,02-restart-missing-link,03-store-lock-pending,04-dangling-link}.'
+    created_at: '2026-10-29T06:54:06Z'
+    last_edited: '2026-10-29T06:54:06Z'
+  - id: note-04f1564
+    text: 'QA scenario 18 (launch-lease release / late old-loop results) — 2 of 3
+      stories pass, 1 scenario-authoring conflict. (1) Story 1 (feedback turn in flight)
+      PASS end-to-end: reset line + waiting line, review window closed, old loop KILLED
+      14 s later, no review while waiting, one successor iteration 1 after the turn
+      finished (polling +3 s), PASS → QA. (2) Story 2 PASS at the intended timing
+      (press `z a` ~2.5 s after iteration 1''s review window appears, i.e. once the
+      old loop is polling its own pane %7): successor iteration 1 at +0 s, polling
+      pane %9 at +3 s (prompt, never ~15 s, never a stand-down), and the old loop''s
+      `pane killed on iteration 1` / `loop complete … verdict=KILLED iterations=1`
+      land at +15 s — after the successor''s iteration 1 — with the successor still
+      reaching PASS → QA; no second window, no LAUNCH_FAILED, no NEEDS_WORK. NOTE
+      for future runs: pressing the chord ~0.007 s after the window appears (inside
+      the old loop''s 2 s post-launch window wait) is tighter than the Then describes
+      and takes a different path — the old loop re-resolves the review window by name,
+      polls the successor''s pane %9, and completes verdict=PASS itself; the runtime
+      loop_id sentinel fences it (one set_action_state done, one auto_qa transition),
+      so no state impact, but the KILLED lines never appear. Captures /pm-captures/scenarios/18/{story1,story2,story2b}.
+      (3) Story 3 Then conflict, not a product defect: its Given is "impl turn already
+      complete", so the first `z a` hands off synchronously and the PR is back in
+      `in_review` when the second `z a` lands 1.1 s later — two resets, `fresh_autostart.attempt:
+      2`. impl.md requirement 3 says "A fresh request while the PR is in a later stage
+      (in_review/qa/sign_off) starts a new attempt", so the Then''s "one reset, one
+      attempt, second request reports already waiting" is unreachable from that Given.
+      Control run with the turn actually in flight (s3b): one reset, second request
+      logs "Auto-start fresh: <pr>: already waiting for its implementation turn",
+      attempt 1 with requested_at unchanged, exactly one successor review, PASS →
+      QA. The rest of story 3 held in both runs: one review window at the end, no
+      duplicate/standing-down/LAUNCH_FAILED, and the impl pane untouched (window @4,
+      pane %5, pid 4960 identical; same impl-pr-<pr>.jsonl; no new impl launch; typed
+      draft still in scrollback). Needs a human decision: amend story 3''s Given/Then,
+      or defer the immediate handoff in the product. Captures /pm-captures/scenarios/18/story3
+      (plus pm-debug-3b.log).'
+    created_at: '2026-10-29T07:10:24Z'
+    last_edited: '2026-10-29T07:10:24Z'
+  - id: note-caa6a42
+    text: 'QA S19 (mixed/repeated/restarted fresh requests + CLI hygiene) PASS, all
+      4 stories, no code change. Captures: /pm-captures/scenarios/19/{01-cli-mixed-and-hygiene,02-tui-status-log,03-restart-resume}.
+      Mechanics for future runs: (1) `pm autostart remove <pr>` does NOT clear that
+      PR''s fresh_autostart marker; a TUI restart resumes the marker only while the
+      PR is in_progress (story-3 shape: remove the target, then `pm pr review <pr>`
+      to park it in_review, and the restart resumes only the other PR). (2) `pm pr
+      review <pr>` reuses an existing review-<pr> window ("Switched to existing review
+      window") and leaves it open after a later fresh reset; it never started a review
+      loop here, so `pm log grep "Review loop started"` stays empty. (3) The repeat
+      path re-runs `pm pr start --background` to re-ensure the impl window on every
+      "already waiting" request; state stays byte-identical. (4) TUI evidence: the
+      `a` runs popup and the `L` log pane agree with `pm autostart status`; the log
+      pane tails, so trigger a fresh repeat to bring recent Auto-start lines into
+      view. (5) Isolated run on a private socket (HOME=/tmp/pm-s19-home, PM_TMUX_SOCKET=/tmp/pm-s19-tmux.sock,
+      PYTHONPATH=/workspace, PATH=/usr/bin first at `pm session`) — no host session
+      touched.'
+    created_at: '2026-10-29T07:32:29Z'
+    last_edited: '2026-10-29T07:32:29Z'
+  - id: note-48df0ec
+    text: 'User-authorized restart from the main PM session on 2026-10-31 after #249
+      merged as eaf3372e60d1717bd97cc50b5e0b04c6df881fa1. Resume this existing PR
+      in its existing workdir. First integrate current origin/master INTO THIS PR
+      branch, preserving its intended behavior and all earlier review/QA corrections;
+      resolve real code/test conflicts and validate the combined behavior before handing
+      off for a fresh review/QA/sign-off sequence. Do not merge this PR into master
+      or push/reset/delete master or other branches. This is a user-directed implementation
+      return, not a reviewer/sign-off verdict. GitHub reports the PR conflicts with
+      current master; reconcile that before resuming the prior review/QA work. Retain
+      all original source, dirty files, stashes, drafts, fixtures and captures. Existing
+      uncommitted content may have been intentionally excluded; inspect its provenance
+      instead of automatically committing it. Preserve every PR record and unrelated
+      local metadata during project.yaml reconciliation. Do not weaken acceptance
+      criteria, choose unresolved user policy questions or reuse stale PASS results.
+      Historical captures have been copied intact to the main session captures; overwritten
+      filename collisions are backed up in the host migration record. Main session
+      is pm-project_manager-c5a1006b; keep old restored sessions idle. Assigned models
+      and explicit work-Opus sign-off override remain unchanged. Autostart will use
+      wait_for_merge; no PR merge is authorized by this request.'
+    created_at: '2026-10-31T18:07:25.345765+00:00'
+    last_edited: '2026-10-31T18:07:25.345765+00:00'
+  - id: note-5055e05
+    text: 'MASTER INTEGRATION 2 COMPLETE 2026-10-31 (user-authorized implementation
+      return). origin/master eaf3372e (#249, QA workers via Claude mixed workers)
+      merged INTO this branch: merge commit 9657aab5, spec commit 3d0b1f7c, both pushed.
+      Branch was one integration behind (4a74d880). Two additive conflicts resolved
+      by hand: pm/project.yaml (kept this PR record''s 41 notes + model/session_models
+      incl. the claude-work-xhigh-249 sign-off override, then master new PR records;
+      571 PRs, YAML valid) and tests/test_review_loop_terminal_state.py (both appended
+      blocks kept). Code auto-merged and was verified at every fresh-flow/master intersection:
+      _poll_impl_idle keeps master S79 trust-watch guard + the fresh native-transcript
+      recovery; recorded_qa_verdict keeps master open-return fence + fresh timestamp
+      + SUPERSEDED fences; _auto_review_idle_prs still consumes the handoff marker;
+      signoff new return-launch claim machinery is compatible (reset sets awaiting=None+resolved_at
+      so no --fresh relaunch); pane_idle keeps both master user_prompt/Stop second-turn
+      detection and this PR idle_prompt re-arm; _derive keeps the fresh wait reasons;
+      _deferred_startup keeps both guards. TESTS: full suite 5331 passed, 1 skipped,
+      12 failed - all 12 in tests/test_markdown_render.py for a missing  package in
+      this container; with markdown>=3.5 installed the file is 13/13 green, effective
+      5344 passed / 1 skipped / 0 failed. Targeted fresh/verdict/pane/review/signoff
+      suites: 799 passed. No merge to master, nothing force-pushed, master untouched.
+      Earlier QA findings and the two scenario-authoring conflicts in the notes still
+      stand for the fresh review/QA pass. Handing off to native review/QA now.'
+    created_at: '2026-10-31T18:20:46Z'
+    last_edited: '2026-10-31T18:20:46Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    merge: provider:deepseek-flash
+    signoff: provider:claude-work-xhigh-249
 - id: pr-7f74c77
   plan: bugs
   title: 'Bug: TUI scheduler pass''s sign-off step waits the full 2 s project.yaml
