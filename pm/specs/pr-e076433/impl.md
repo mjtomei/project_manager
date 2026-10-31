@@ -198,6 +198,10 @@ container launches, and the no-configuration default (plain Claude).
 - Review-loop b287 i3 re-verified after documentation-only edits: targeted
   three files **386 passed**; full suite **5207 passed, 1 skipped**.
   Evidence: `/pm-captures/review-b287-i3/`.
+- Review-loop b287 i4 corrected the ``model_config`` docstring's routing
+  sentence (it omitted the parent-role fallback): documentation only.
+  `tests/test_model_config.py` + `tests/test_router_route.py` —
+  **343 passed**.
 - `grep -rnE 'worker_route|ROUTED_SESSION_TYPES'` — only historical records
   (`pm/project.yaml` notes, `pm/specs/pr-592e4bd/*`, and this spec's
   pre-change description); no code or test.

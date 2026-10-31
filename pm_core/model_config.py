@@ -34,8 +34,8 @@ For external/local model servers, configure a provider via ``pm provider``
 Values prefixed with ``provider:`` are resolved via the provider system
 and return a provider name instead of a model identifier.  Any role in
 ``SESSION_TYPES`` may be routed; the setting is explicit per role, and a
-role with no model or provider configured runs plain Claude on the CLI
-default.
+role with no setting of its own follows its parent role (with nothing
+configured at all it runs plain Claude on the CLI default).
 
 Scenario 0 (``qa_interactive``) additionally keeps applying a pre-split
 plain-model ``qa_scenario`` setting; see
