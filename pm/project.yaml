@@ -37898,7 +37898,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-31T18:07:25.345765+00:00'
+  updated_at: '2026-10-31T18:38:41.834837+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38482,6 +38482,27 @@ prs:
       wait_for_merge; no PR merge is authorized by this request.'
     created_at: '2026-10-31T18:07:25.345765+00:00'
     last_edited: '2026-10-31T18:07:25.345765+00:00'
+  - id: note-7e522db
+    text: 'Master integration (2026-10-31, user-authorized restart): merged origin/master
+      eaf3372e (#249) INTO this branch as c491774f (no force-push; master untouched).
+      Conflicts resolved in pm/project.yaml (kept this PR''s records/notes + the cross-PR
+      note on pr-22ea6a2 + every master PR record in master order), pm_core/claude_launcher.py
+      (kept the ownership-checked archive-writing finalize_transcript AND master''s
+      new pane_runs_transcript) and pm_core/tui/auto_start.py (combined this PR''s
+      structural owner sweep with master''s S31 live-read scan; step-window liveness
+      is now pane-based, not window-name-based; the disable sweep follows master and
+      freezes a live sign-off transcript, the watcher-completion sweep keeps it live
+      via include_signoff=True). Master''s S79 review-window adoption now creates
+      the loop-scoped iteration link instead of the shared legacy name; S82/S133''s
+      in-flight-launch wait resolves through resolve_iteration_transcript. Two master
+      tests adapted to the merged semantics (S79 adoption link name; live-owner unit
+      tests now pin _live_read_transcripts). Tests: full suite 5240 passed / 1 skipped
+      (7m04s, markdown installed); post-fix repro /pm-captures/impl/post-fix/transcript-archive/repro.py
+      --expect fixed still reports all three symptoms fixed. Earlier review/QA evidence
+      preserved; no acceptance criteria weakened. Ready for a fresh native review,
+      then QA re-evaluation.'
+    created_at: '2026-10-31T18:38:41Z'
+    last_edited: '2026-10-31T18:38:41Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
