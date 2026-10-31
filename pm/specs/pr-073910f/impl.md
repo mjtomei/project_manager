@@ -1727,3 +1727,40 @@ global env and the hooks, default server untouched); `pm session list`
 re-checked read-only in this container.  No live session, server or shared
 host configuration was touched; the new test is unit-level and binds no
 tmux server.
+
+## Review iteration (2026-10-31, review-loop 703c i7)
+
+Verification pass over the integrated head; no requirement changes.  One
+test gap in the rollout path (R6.1 / acceptance 4):
+
+1. **The legacy attach path had no end-to-end coverage.**  Every existing
+   test asserted a piece of it — `_resolve_session_socket` returns
+   `(None, True)` and exports the default server's socket, `pm session
+   --print-connect` prints the legacy form, `pm session kill` targets the
+   default server — but nothing ran `_session_start` itself against a
+   pre-isolation session.  The two user-visible guarantees of R6.1 were
+   therefore never asserted together: no private server/socket is created,
+   and the legacy session plus the grouped session it attaches to stay on
+   the default server (nothing is killed or migrated), while the process
+   addresses that server *explicitly* (`PM_TMUX_SOCKET` = the default
+   socket, not whatever `$TMUX` names).  New
+   `TestSessionStartAttachesToLegacySession::test_attaches_to_the_legacy_session_without_creating_a_private_one`
+   builds a real pre-isolation session on a disposable default socket with
+   its TUI pane registered (so the "TUI missing" heal path does not fire),
+   runs `_session_start`, and asserts the rollout note, the exported default
+   socket, the `pm-iso-legacy~1` attach target on the default server, the
+   absence of the private socket, and that neither the session environment
+   nor the server's global environment received a `PM_TMUX_SOCKET`.
+   Verified to fail with the legacy branch disabled: it created a private
+   session instead of attaching.
+
+Nothing else surfaced.  The socket derivation and default-server addressing
+(R4.3), discovery scoping (7af7 i1–i3, 3cc7 i1, 703c i1/i4/i6), the precise
+detach (R5, 703c i3), the kill/unlink rules (R3.2, R8), the socket-directory
+and ownership checks (d1c0 i10/i12, 703c i2) and the shared-session
+share-mode handling (d1c0 i7) all match the spec, and every new helper has
+direct coverage.
+
+Validation on the integrated head: full suite re-run after the edit (see the
+PR note for this iteration); no live session, server or shared host
+configuration was touched, and the new test binds only disposable sockets.

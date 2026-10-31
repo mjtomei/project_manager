@@ -2462,6 +2462,107 @@ class TestSessionStartCreatesPrivateServer:
 
 
 @pytest.mark.skipif(not tmux.has_tmux(), reason="tmux not installed")
+class TestSessionStartAttachesToLegacySession:
+    """R6.1 / acceptance 4: a pre-isolation session is attached, not migrated.
+
+    ``TestResolveSessionSocket`` covers the legacy *decision*; nothing ran
+    ``_session_start`` itself against a legacy session, so the two halves
+    that matter to the user — "no private session is created" and "the
+    legacy session and its grouped sessions are neither killed nor moved" —
+    were only asserted piecemeal.
+    """
+
+    def test_attaches_to_the_legacy_session_without_creating_a_private_one(
+            self, short_sock_dir, tmp_path, monkeypatch, capsys):
+        from pm_core.cli import session as session_mod
+        from pm_core import hook_install, pane_registry
+
+        # Isolated HOME so the pane registry and pane_layout state land in
+        # tmp_path, never in the real ~/.pm.
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        # Track the variables _session_start writes directly (or pops) so
+        # monkeypatch restores them after the test, and keep them out of the
+        # disposable server's inherited environment so the global-env
+        # assertions below mean what they say.
+        for var in ("PM_TMUX_SOCKET", "PM_SHARE_MODE", "TMUX", "TMUX_PANE",
+                    "PM_IN_TMUX_SESSION", "PM_PROJECT"):
+            monkeypatch.delenv(var, raising=False)
+        # A disposable socket directory and a disposable "default server":
+        # the real one is never addressed.
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", short_sock_dir)
+        default_sock = short_sock_dir / "default"
+        monkeypatch.setattr(paths, "default_socket_path",
+                            lambda: default_sock)
+        monkeypatch.setattr(hook_install, "ensure_hooks_installed",
+                            lambda: None)
+        monkeypatch.setattr(session_mod, "state_root",
+                            MagicMock(side_effect=FileNotFoundError()))
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: "pm-iso-legacy")
+        # The rebalance helper spawns a detached process, and attach needs a
+        # client tty; neither is what this test is about.
+        monkeypatch.setattr(session_mod, "_schedule_rebalance",
+                            lambda name: None)
+        attached: list[tuple[str, str | None]] = []
+        monkeypatch.setattr(
+            tmux, "attach",
+            lambda name, socket_path=None: attached.append(
+                (name, socket_path)))
+
+        private_sock = short_sock_dir / "pm-iso-legacy"
+        try:
+            # The pre-isolation session lives on the disposable default
+            # server, with its TUI pane registered so the "TUI missing"
+            # heal path does not fire (it would respawn a pane instead of
+            # exercising the attach).
+            _make_server(default_sock, session="pm-iso-legacy")
+            window_id = _tmux_out(default_sock, "display-message", "-p", "-t",
+                                  "pm-iso-legacy", "#{window_id}").strip()
+            tui_pane = _tmux_out(default_sock, "list-panes", "-t",
+                                 "pm-iso-legacy:0", "-F",
+                                 "#{pane_id}").strip()
+            pane_registry.register_pane("pm-iso-legacy", window_id, tui_pane,
+                                        "tui", "pm _tui")
+
+            session_mod._session_start()
+
+            out = capsys.readouterr().out
+            # The rollout note explains the state and the migration route.
+            assert "started before per-session tmux servers" in out
+            assert "pm session kill" in out
+
+            # The process addresses the default server *explicitly*: with no
+            # ``-S`` the tmux binary follows ``$TMUX``, and from inside
+            # another pm pane that names that session's private server — the
+            # legacy session would look missing and be duplicated on the
+            # wrong server (R6.1).
+            assert os.environ["PM_TMUX_SOCKET"] == str(default_sock)
+
+            # The client attaches to a grouped session of the legacy
+            # session, created on the default server.
+            assert attached == [("pm-iso-legacy~1", None)]
+            sessions = _tmux_out(default_sock, "list-sessions", "-F",
+                                 "#{session_name}").split()
+            assert "pm-iso-legacy" in sessions
+            assert "pm-iso-legacy~1" in sessions
+
+            # Nothing was migrated: no private socket, no private server,
+            # and neither the session nor the server environment was given
+            # a PM_TMUX_SOCKET (``socket_path`` is None for a legacy
+            # session, so nothing is propagated into it).
+            assert not private_sock.exists()
+            assert _tmux(default_sock, "show-environment", "-t",
+                         "pm-iso-legacy", "PM_TMUX_SOCKET").returncode != 0
+            assert _tmux(default_sock, "show-environment", "-g",
+                         "PM_TMUX_SOCKET").returncode != 0
+        finally:
+            _tmux(default_sock, "kill-server")
+            Path(default_sock).unlink(missing_ok=True)
+
+
+@pytest.mark.skipif(not tmux.has_tmux(), reason="tmux not installed")
 class TestServerIsolationIntegration:
     def test_detach_and_cleanup_in_one_server_leaves_other_intact(
             self, short_sock_dir, monkeypatch):
