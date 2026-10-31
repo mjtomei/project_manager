@@ -36414,7 +36414,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/246
   gh_pr_number: 246
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-31T18:07:25.345765+00:00'
+  updated_at: '2026-10-31T18:48:48.663776+00:00'
   started_at: '2026-10-22T17:20:55.835790+00:00'
   reviewed_at: '2026-10-22T17:35:36.285012+00:00'
   merged_at: null
@@ -36926,6 +36926,55 @@ prs:
       Autostart will use wait_for_merge; no PR merge is authorized by this request.'
     created_at: '2026-10-31T18:07:25.345765+00:00'
     last_edited: '2026-10-31T18:07:25.345765+00:00'
+  - id: note-4150bad
+    text: 'impl re-integration 2026-10-31 (per restart authorization note-0dc3c33):
+      merged origin/master@eaf3372e60d1717bd97cc50b5e0b04c6df881fa1 (the #249 merge)
+      into this branch. Merge commit 0d07a673; follow-ups 0bda9633 (scenario_start)
+      and b6a9a6ed (test fixtures). master is now an ancestor of HEAD; nothing was
+      force-pushed or reset; master and other branches untouched.
+
+
+      Conflicts and resolutions:
+
+      (1) pm_core/qa_loop.py — master keeps the planner prompt/command build at the
+      top of the planning phase; this PR moved it below the pre-planning _sync_pr_branch
+      call and carries the provider-env transport (env_out=planner_env -> tmux new_window(env=planner_env)).
+      Kept the post-sync build site. Master''s new QALoopState.scenario_start (persisted
+      so the TUI resume scan can order a PR''s runs) is now computed at the top of
+      the planning phase: it reads only previous runs'' scenario dirs, never the workdir,
+      so a run that exits before planning (a sync hold, or a route to review) still
+      records it; the prompt itself is still built after the sync. New regression
+      test: a route-to-review run records scenario_start.
+
+      (2) pm/project.yaml — structured 3-way merge over the index stages (pm_core.store.merge_3way,
+      master as ours / branch as theirs): master''s newer state for every entry the
+      branch did not touch; this PR''s record, its 30 notes (including note-0dc3c33)
+      and the PRs it filed (pr-70dae74, pr-33b65cd, notes on pr-ae66f59) preserved;
+      branch-local active_pr kept. 573 PR entries, every id from both sides present
+      exactly once; entries differing from master are only those four.
+
+
+      Test-fixture integration (no product change): master''s new tests/test_worker_route.py
+      patches _get_pm_session but not tmux_mod.session_exists while also mocking subprocess.Popen,
+      so the R9 live-session probe crashed ("not enough values to unpack"); both auto-sequence
+      helpers now model a live session, the same pattern tests/test_pr_auto_sequence.py
+      uses. master''s tests/test_qa_load_failures.py enumerates the planning run''s
+      store.load calls; this PR''s sync adds one (the qa_branch_sync read), so the
+      index map gains a SYNC slot and the unloadable-project.yaml case now covers
+      that point too.
+
+
+      Tests at b6a9a6ed: full suite 5237 passed, 1 skipped, 0 failed (python3 -m pytest
+      tests/ -q, PM_HOST_HOME unset, PATH=/usr/bin:/bin, markdown on PYTHONPATH).
+      Targeted: test_worker_route 235, test_qa_load_failures 22, test_qa_branch_sync
+      35, and the qa_loop/qa_resume/handoff/auto-sequence/signoff/auto-start set 762
+      passed. Spec pm/specs/pr-62fdd54/impl.md refreshed (R1, R7, R9, implicit requirements).
+
+
+      The prior SIGNOFF_MERGE remains historical evidence for its recorded revisions,
+      not approval of this integration. Ready for a fresh review/QA/sign-off sequence.'
+    created_at: '2026-10-31T18:48:48Z'
+    last_edited: '2026-10-31T18:48:48Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high
