@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-31T21:49:42.145132+00:00'
+  updated_at: '2026-10-31T22:25:43.686439+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37743,6 +37743,42 @@ prs:
       qa.md updated. The dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-31T21:49:42Z'
     last_edited: '2026-10-31T21:49:42Z'
+  - id: note-a15ad14
+    text: 'Review loop 928f i5: three leftovers in the kept recipe scope, all the
+      PR''s own class (a step that cannot do its job must say so where it fails, and
+      a handle that matches the wrong thing), all reproduced in this container; no
+      pm_core/ change. (1) The web-UI Layer 2 protocol block had no curl guard: with
+      no curl on PATH both redirects still open, the shell''s own "curl: command not
+      found" lands in each log, neither request runs, and the block exits 0 (verified)
+      — a run with no protocol capture that reads as success, the state its CAPDIR
+      and directory guards exist for, one tool over. Step 1 already treats a missing
+      curl as a hard failure (port pre-check rc 127), and the driver/finalize blocks
+      guard node/ffmpeg the same way; the block now stops before the first redirect
+      naming the tool. (2) The render block accepted a relative <capture-dir>. Every
+      capture step refuses one (R27/R34/R56) because each paste resolves it against
+      its own shell, and the tmux step-0 prose says the rule covers "every test -s
+      below"; the render block, pasted on its own, never carried it. Verified with
+      the recipes'' own blocks: <capture-dir>=relcap pasted from a directory holding
+      a previous run''s relcap[/<short-name>]/recording.cast exits 0 and publishes
+      that stale cast as this run''s recording.mp4 (and pasted where the relative
+      path is absent it reports "the recording wrote nothing" for a recording that
+      wrote one). Both recipes now refuse it before the directory check and the pre-render
+      rm; the ~/ spelling still renders (verified rc 0). (3) The tmux manifest template
+      omitted the shared `recipe:` field that pm_core/docs/qa_library.md documents
+      and the CLI and web-UI templates carry; added, with a test over all three templates.
+      Tests: tests/test_qa_artifact_recording_recipes.py 258 passed (was 252); new
+      test_web_ui_layer2_block_names_a_missing_curl, test_render_refuses_a_relative_capture_dir
+      (both recipes), test_manifest_example_names_the_recipe (three recipes). Mutation
+      check: each fix reverted in place fails exactly its cases (4 failed, 2 passed
+      pre-fix — the two manifest cases whose templates already had the field; 6 passed
+      restored). Full suite env -u PM_HOST_HOME PATH=/usr/bin:/bin pytest tests/ -q
+      --deselect tests/test_merge_publish.py --deselect tests/test_signoff_integration.py
+      -> 5334 passed, 1 skipped, 121 deselected, 0 failed (442.58 s). Evidence: /pm-captures/review-928f-i5/
+      (probe-layer2-no-curl.log, probe-render-relative.log, probe-tilde.log, mutation-check.log,
+      suite.log, README.md, scripts/). impl.md R65 + Files/evidence, qa.md updated.
+      The dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-31T22:25:28Z'
+    last_edited: '2026-10-31T22:25:43Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
