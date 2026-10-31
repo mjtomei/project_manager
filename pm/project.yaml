@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-31T23:15:21.481820+00:00'
+  updated_at: '2026-10-31T23:46:12.537291+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37819,6 +37819,29 @@ prs:
       The dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-31T23:15:21Z'
     last_edited: '2026-10-31T23:15:21Z'
+  - id: note-a669277
+    text: 'Review loop 928f i8: one test gap in the kept recipe scope, no recipe change,
+      no pm_core/ change. Every capture-directory guard accepts a ~/… <capture-dir>
+      (step 0, step 2, both render blocks, the CLI preamble and scaffold) and each
+      refusal message says so, but only step 0 / the CLI preamble had an acceptance
+      case (R54). The guards added later (CLI scaffold R34, step 2 R56, render blocks
+      R57/R65) were exercised only with absolute paths: narrowing any of the four
+      patterns to /* left the file green (262 passed) while the block refused a documented-valid
+      path. Fix (test-only): _run_block/_run_render expand a leading ~ against the
+      case HOME for the stub paths and the helper file operations (a stub gets paths
+      through variables, where a tilde does not expand), and the stub pipe-pane expands
+      the transcript path; new test_step_two_accepts_a_tilde_capture_dir (rc 0, canonical
+      claim, transcript under $HOME), test_cli_scaffold_accepts_a_tilde_capture_dir
+      (rc 0, cast under $HOME) and test_render_accepts_a_tilde_capture_dir (both recipes,
+      mp4 under $HOME). Mutation-checked: each narrowed pattern fails exactly its
+      case; restored, 8 tilde cases pass. Verified live on real tmux 3.2a/asciinema
+      2.1.0 with ~/cap (rc 0, cast, status 0, transcript with the driven keys) and
+      both render blocks with ~/cap (rc 0, mp4 under $HOME). Tests: file 266 passed
+      (was 262); full suite -> 5342 passed, 1 skipped, 121 deselected, 0 failed (448.33
+      s). Evidence: /pm-captures/review-928f-i8/. impl.md R68. The dropped helper/prompt/verifier
+      work stays dropped.'
+    created_at: '2026-10-31T23:46:12Z'
+    last_edited: '2026-10-31T23:46:12Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
