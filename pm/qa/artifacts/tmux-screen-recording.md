@@ -105,8 +105,9 @@ writes a new one would leave a manifest describing the *previous* run — and
 naming a cast and a video that step 0 has just deleted. A manifest that
 disagrees with the directory is worse evidence than none, and every other
 file the flow writes is already cleared here.
-The render outputs go with them: the render step clears `recording.mp4` and
-the intermediate `recording.cast.gif` before it runs, but a capture that
+The render outputs go with them: the render step clears `recording.mp4`, the
+intermediate `recording.cast.gif` and an interrupted render's
+`recording.mp4.partial.mp4` before it runs, but a capture that
 *fails* here exits before that step ever runs, so the previous run's video
 would otherwise sit in the capture directory as this run's — the same
 stale-evidence bug as a leftover cast, one step earlier. (The web-UI recipe
@@ -184,6 +185,7 @@ mkdir -p <capture-dir> || {
 tmux kill-session -t "=pm-recorder" 2>/dev/null || true
 rm -f <capture-dir>/recording.cast <capture-dir>/transcript.log \
       <capture-dir>/recording.mp4 <capture-dir>/recording.cast.gif \
+      <capture-dir>/recording.mp4.partial.mp4 \
       <capture-dir>/recorder.status <capture-dir>/recorder-stderr.log \
       <capture-dir>/recorder-pane.log <capture-dir>/manifest.md
 # The mp4 and the intermediate gif are here, not only in the render step: a
