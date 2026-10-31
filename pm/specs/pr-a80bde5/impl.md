@@ -429,3 +429,31 @@ R7. **Agreement.**  Because the CLI, the TUI runs view and the tech-tree marker 
   `pm/project.yaml` was again resolved with `store.merge_3way`.
   `test_follow_up_wait_refreshes_the_launch_lease` was rewritten to drive the
   PR's waiter (it patched `_wait_for_follow_up_shared`, which the PR deletes).
+- Master overlap #3 (user-authorized restart, **resolved at integration**):
+  master advanced from 4a74d880 to eaf3372e (#249, route QA execution workers
+  through Claude).  Conflicts were limited to `pm/project.yaml` and
+  `pm_core/tui/auto_start.py`; `review_loop.py`, `autostart_state.py` and
+  `review_loop_ui.py` auto-merged and were reviewed hunk by hunk:
+  - `_finalize_all_transcripts` (auto_start.py): master generalized the
+    PR's incidental QA-17 fix into `_live_read_transcripts` (live idle-tracker
+    entries, a running review loop's current iteration transcript, and lazily
+    tracked impl/merge/review panes).  Master's version is kept, and the PR's
+    name-prefix rule is retained as a fallback so any `review-<pr>-` symlink of
+    a *running* loop is never frozen even when `_transcript_dir` is unknown.
+    `tests/test_autostart_disable_transcripts.py` (QA-17 regressions) passes
+    unchanged against it.
+  - `review_loop.py`: master's `last_attempt_failed` / `_wait_for_launching_window`
+    / extended launch timeout (S133/S82/S81) coexist with this PR's
+    `result["transcript"]` threading; `_adopt_in_flight_review` gained
+    master's in-flight-window wait *before* the discovery, and the verdict
+    paths still record the transcript the verdict came from.
+  - `review_loop_ui.py`: master's `_announce_loop_done` / pending-QA-handoff
+    rework replaced the inline announcement block; this PR's
+    `_start_loop` resuming-before-running flag (review 5228 i1) and
+    `_on_complete_from_thread` finalize path are intact.
+  - `pm/project.yaml` was resolved with `store.merge_3way`: 573 PRs, no
+    duplicates, every master entry untouched by this branch byte-identical,
+    and this PR's 58 notes (including the 2026-10-31 authorization note)
+    preserved.
+  Validation at the merge: full suite 5258 passed, 1 skipped, 0 failed;
+  targeted wait-state suites 98 + 536 passed.

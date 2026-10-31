@@ -1254,25 +1254,37 @@ def _get_session_name_for_cwd() -> str:
 def _get_current_pm_session() -> str | None:
     """Return the base pm session name when running inside one.
 
-    Reads the actual session from $TMUX_PANE and strips any grouped-session
-    ~N suffix.  Returns None if not inside tmux or not in a pm- session.
+    Reads the actual session from $TMUX_PANE and resolves it to its pm
+    session: a grouped ``~N`` view or a user's own view of any name
+    (tmux names that view for every pane and popup of the group while its
+    client is the most recently active one, S118/S124).  Returns None if
+    not inside tmux or not in a pm- session.
     """
     if not tmux_mod.in_tmux():
         return None
-    name = tmux_mod.get_session_name()
-    # Strip grouped session suffix
-    if "~" in name:
-        name = name.rsplit("~", 1)[0]
-    if name.startswith("pm-"):
-        return name
-    return None
+    name = pane_registry.pm_session_name(tmux_mod.get_session_name())
+    return name if name.startswith("pm-") else None
 
 
 def _get_pm_session() -> str | None:
-    """Get the pm tmux session name if running inside one."""
+    """Get the pm tmux session name if running inside one.
+
+    Outside a pm session that is the session of the project this command
+    works on: the ``-C``/``PM_PROJECT`` project when given (a PR workdir is
+    its own git clone, so its cwd names a session nobody runs), else the
+    project of the cwd.
+    """
     if not tmux_mod.has_tmux():
         return None
-    return _get_current_pm_session() or _get_session_name_for_cwd()
+    current = _get_current_pm_session()
+    if current:
+        return current
+    if _project_override:
+        from pm_core.paths import get_session_tag
+        tag = get_session_tag(start_path=_project_override)
+        if tag:
+            return f"pm-{tag}"
+    return _get_session_name_for_cwd()
 
 
 def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
