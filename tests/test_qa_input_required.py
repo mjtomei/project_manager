@@ -467,6 +467,7 @@ class TestPollWaitingInLiveLoop:
         # Adopted as a held run: collecting the follow-up must clear the
         # hold so the reopened result gets its own finalize.
         state.held = True
+        published = []
 
         with patch("pm_core.qa_loop.time.sleep"), \
              patch("pm_core.qa_loop.time.monotonic", return_value=100), \
@@ -476,12 +477,17 @@ class TestPollWaitingInLiveLoop:
              patch("pm_core.qa_loop._current_pr_head", return_value=None):
             qa_loop._poll_tmux_verdicts(
                 state, {}, {}, "sess", "/tmp/work",
-                tmp_path / "status.json", lambda *a: None)
+                tmp_path / "status.json",
+                lambda *a: published.append(state.latest_output))
 
         assert state.waiting_for_input == set()
         assert state.scenario_verdicts == {1: VERDICT_PASS}
         assert state.scenario_verdict_sources[1]["turn_id"] == "turn-pass"
         assert state.held is False
+        # The follow-up landed while nothing watched the held run (S132): it
+        # is reported as resumed, like the hold loop's reopen, once.
+        assert published.count("QA resumed after INPUT_REQUIRED — "
+                               "collecting the follow-up verdict") == 1
 
     def test_follow_up_pass_is_independently_verified(self, tmp_path):
         """R6: a follow-up PASS is not trusted because the worker said PASS.

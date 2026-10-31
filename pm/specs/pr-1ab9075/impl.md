@@ -61,6 +61,15 @@ launchers take an explicit `scenarios` list instead of the
   block verdict collection, retries, verification or stop for its
   duration.  Covered by `test_queued_launch_runs_off_the_poll_thread`.
 
+  A `ProviderNotFoundError` raised by a background launch step is not a
+  transient launch failure: `_start_op` hands it to the poll thread through
+  the shared `setup_errors` list, which writes the dashboard and re-raises
+  (the same stop path as a verifier setup error and as the initial batch,
+  which runs on the poll thread).  Without that, a provider that broke
+  mid-run would burn the retry ladder instead of stopping the run, and the
+  S106 dashboard guarantee (settled verdicts survive the stop) would be
+  lost.
+
 R3. **Per-scenario verdict grace.**  Replace the global `grace_start` with a
 per-scenario `grace_until`, set at loop start for pre-launched scenarios and
 whenever that scenario's worker pane is (re)created.  One scenario's relaunch
@@ -173,10 +182,17 @@ INPUT_REQUIRED.  Each relaunch re-points the
 transcript symlink to a new session; the previous session id is recorded in
 the retry record (`sessions`) so the earlier native transcript can still be
 found.  Completed verdicts are never touched by retry logic.  A relaunch
-first kills any leftover window with the scenario's name (a lingering
-concretizer pane can keep the old window alive), so a relaunch never leaves
-two same-named windows for name-based pane lookup / dashboard navigation to
-choose between.
+reuses the scenario's surviving window when one exists (its refiner and
+verifier panes must live on — a re-evaluation follow-up is typed into the
+verifier pane, see the S15 QA note), and collapses duplicate same-named
+windows to a single one, so a relaunch never leaves two same-named windows
+for name-based pane lookup / dashboard navigation to choose between.  In
+container mode a relaunch first recreates the scenario's container when it
+is no longer running (master S78: a container removed by `pm container
+cleanup` or stopped by a podman restart under a live run would otherwise
+make every retry `exec` into a missing container); if it cannot be
+recreated the scenario is settled INPUT_REQUIRED with that reason instead of
+spending the retry ladder.
 
 R9a. **Never resurrect a deliberately cleared verdict.**  The dead-pane
 collection (a worker that emitted its verdict and then died before the poll

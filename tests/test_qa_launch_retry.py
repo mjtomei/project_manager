@@ -266,10 +266,11 @@ def test_relaunch_after_stop_creates_no_window():
     new_window.assert_not_called()
 
 
-def test_relaunch_kills_stale_same_named_window(tmp_path):
-    """A dead worker can leave its window behind (lingering concretizer
-    pane); the relaunch must not add a second window with the same name, or
-    name-based pane lookup and dashboard navigation become ambiguous."""
+def test_relaunch_collapses_duplicate_same_named_windows(tmp_path):
+    """A controller that died mid-launch can leave two windows with the
+    scenario's name.  The relaunch keeps one (its verifier pane must live
+    on) and kills the duplicate, so name-based pane lookup and dashboard
+    navigation stay unambiguous and no third window is added."""
     sc = QAScenario(index=1, title="t", focus="f", window_name="qa-pr-x-s1")
     state = QALoopState(pr_id="pr-x")
     state.qa_workdir = str(tmp_path)
@@ -281,15 +282,18 @@ def test_relaunch_kills_stale_same_named_window(tmp_path):
          patch("pm_core.home_window.park_if_on"), \
          patch("pm_core.tmux.kill_window",
                side_effect=lambda s, w: killed.append(w)), \
-         patch("pm_core.tmux.new_window_get_pane", return_value="%9"), \
+         patch("pm_core.tmux.get_pane_indices", return_value=[("@1", 0)]), \
+         patch("pm_core.tmux.split_pane_at", return_value="%10"), \
+         patch("pm_core.tmux.new_window_get_pane") as new_window, \
          patch("pm_core.tmux.pane_window_id", return_value=None), \
          patch("pm_core.qa_loop._resolve_qa_model"), \
          patch("pm_core.qa_loop._build_scenario_run_cmd",
                return_value=("cmd", "/w")):
         assert _relaunch_scenario_window(
             sc, state, {}, {"id": "pr-x"}, "sess", "/w") is True
-    assert killed == ["@1", "@3"]
-    assert sc.pane_id == "%9"
+    assert killed == ["@3"]
+    new_window.assert_not_called()
+    assert sc.pane_id == "%10"
 
 
 def test_launcher_skips_worker_split_after_stop(tmp_path):
@@ -305,6 +309,7 @@ def test_launcher_skips_worker_split_after_stop(tmp_path):
         return None, None
 
     with patch("pm_core.qa_loop._resolve_qa_model"), \
+         patch("pm_core.qa_loop._require_scenario_setup"), \
          patch("pm_core.qa_loop.create_scenario_workdir",
                return_value=(tmp_path / "repo", tmp_path / "scratch")), \
          patch("pm_core.qa_loop._build_concretize_cmd", return_value="cmd"), \
@@ -820,6 +825,7 @@ def test_create_retry_reinstalls_scenario_instruction(tmp_path):
         return "concretize-cmd"
 
     with patch("pm_core.qa_loop._resolve_qa_model"), \
+         patch("pm_core.qa_loop._require_scenario_setup"), \
          patch("pm_core.qa_loop.create_scenario_workdir",
                return_value=(tmp_path / "repo", tmp_path / "scratch")), \
          patch("pm_core.qa_loop._build_concretize_cmd",
@@ -1027,6 +1033,7 @@ def test_container_create_failure_records_classified_cause(tmp_path):
     exc = subprocess.CalledProcessError(125, ["podman", "run"],
                                         output="", stderr=PID_STDERR)
     with patch("pm_core.qa_loop._resolve_qa_model"), \
+         patch("pm_core.qa_loop._require_scenario_setup"), \
          patch("pm_core.qa_loop.create_scenario_workdir",
                return_value=(tmp_path / "repo", tmp_path / "scratch")), \
          patch("pm_core.container.load_container_config"), \
