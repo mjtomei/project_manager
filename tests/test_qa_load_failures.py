@@ -25,8 +25,11 @@ FAILURES = {
         2, "No such file or directory", "/x/pm/project.yaml"),
 }
 
-# store.load calls of a planning run in the harness, in order.
-START, START2, GUARD_PRE, GUARD_POST, GUARD_MID, SPEC_GATE = range(6)
+# store.load calls of a planning run in the harness, in order.  SYNC is this
+# PR's pre-planning branch sync, which reads the PR's ``qa_branch_sync``
+# record (and skips on an unloadable project.yaml) between the two window
+# guards.
+START, START2, GUARD_PRE, SYNC, GUARD_POST, GUARD_MID, SPEC_GATE = range(7)
 
 
 def _data(tmp_path):
@@ -67,7 +70,7 @@ def _consumed_plan_and_reached_spec_gate(state):
 
 
 @pytest.mark.parametrize("kind", sorted(FAILURES))
-@pytest.mark.parametrize("guard", [GUARD_PRE, GUARD_POST, GUARD_MID])
+@pytest.mark.parametrize("guard", [GUARD_PRE, SYNC, GUARD_POST, GUARD_MID])
 def test_merge_guard_skips_a_round_while_project_yaml_cannot_load(
         tmp_path, monkeypatch, kind, guard):
     state, calls = _plan(tmp_path, monkeypatch, {guard: 1}, kind)

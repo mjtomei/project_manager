@@ -155,7 +155,12 @@ R9. **Auto-sequence needs a live session.** Every auto-sequence branch
     qa and sign_off alike.  Without it the qa branch launched a detached
     driver that exited with "No pm session found" and wrote no
     `qa_status.json`, so each tick re-launched it and reported
-    "running: qa (launched)" forever.
+    "running: qa (launched)" forever.  Tests that patch `_get_pm_session`
+    to a fake name must also make `tmux_mod.session_exists` true (the
+    fixture pattern `tests/test_pr_auto_sequence.py` uses); master's new
+    `tests/test_worker_route.py` auto-sequence helpers were updated that
+    way, and they must not patch `subprocess.Popen` while leaving
+    `session_exists` real, because the probe shells out to tmux.
 
 ## Implicit requirements
 
@@ -165,6 +170,11 @@ R9. **Auto-sequence needs a live session.** Every auto-sequence branch
   and not state.scenarios`) and `branch` is set.
 - Network ops use `_git_capture` timeouts; failures never raise out of
   `run_qa_sync`.
+- The sync's read of the PR's `qa_branch_sync` record is a `store.load`
+  that can raise while project.yaml is briefly unloadable (a pull, a
+  checkout); it is caught and treated as "no record", so planning is not
+  disturbed (master's `tests/test_qa_load_failures.py` load-order map has
+  a `SYNC` slot for it, and the unloadable-at-SYNC case is covered).
 - The ff is done with the branch checked out in the workdir, so `HEAD`,
   index and worktree move together (no `update-ref` behind the worktree).
 
