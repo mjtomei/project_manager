@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-31T23:20:45.926805+00:00'
+  updated_at: '2026-10-31T23:44:29.860312+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5513,6 +5513,30 @@ prs:
       shared host configuration was touched; the new test binds only disposable sockets.'
     created_at: '2026-10-31T23:20:45Z'
     last_edited: '2026-10-31T23:20:45Z'
+  - id: note-72f43d6
+    text: 'Review loop 703c i8 (no requirement changes; full suite 5341 passed / 1
+      skipped, +5 tests). One shared-session consistency fix: a plain `pm session`
+      that adopts an already-shared ambient session clears PM_SHARE_MODE (via _set_share_mode_env(False,
+      None)), so `_register_tmux_bindings` and the two grouped-session `window-size=smallest`
+      gates — which keyed off the process variable — did not fire, and the grouped
+      session such a reattach creates kept tmux''s default `window-size=latest` (smallest
+      connected client sees a clipped layout). New `session._session_is_shared(session_name)`
+      returns true when either the process variable is set or the session environment
+      records PM_SHARE_MODE (the mode is recorded at creation); all three gates use
+      it. The private-socket ownership check keeps using the flag, so the d1c0 i8
+      residual is unchanged. Tests: `TestSessionIsShared` (explicit flag short-circuits
+      the query; session env read by name; private not shared) plus the wiring (`_register_tmux_bindings`
+      applies window-size=smallest to base + grouped from the session env; private
+      untouched), verified to fail with the bindings gate reverted. Validation: full
+      suite 5341 passed / 1 skipped / 0 failed (scratch pytest<9 + markdown, PATH
+      without the push-proxy git, TMUX/TMUX_PANE/PM_*/PM_HOST_HOME cleared; log at
+      /pm-captures/review-703c-i8/full-suite-final.log); pm/specs/pr-073910f/session_start_smoke.py
+      re-run end to end on a disposable socket with TMUX_TMPDIR on a scratch dir (private
+      server created, PM_TMUX_SOCKET in the session env, the global env and the hooks,
+      default server untouched). Nothing else surfaced across R1–R8. No live session,
+      server or shared host configuration was touched; the new tests are unit-level.'
+    created_at: '2026-10-31T23:44:29Z'
+    last_edited: '2026-10-31T23:44:29Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
