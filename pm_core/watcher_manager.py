@@ -112,12 +112,24 @@ class WatcherManager:
             return watcher.state if watcher else None
 
     def find_by_type(self, watcher_type: str) -> BaseWatcher | None:
-        """Find the first watcher with the given type."""
+        """Find a watcher with the given type, preferring a running one.
+
+        Finished watchers stay registered so the TUI can show their final
+        verdict, which means a stopped instance of the same type is often
+        still in the registry. Returning it would make callers that ask
+        "is this watcher running?" (and the ws start/stop toggle) act on
+        the stale entry instead of the live one.
+        """
         with self._lock:
+            stopped: BaseWatcher | None = None
             for watcher in self._watchers.values():
-                if watcher.WATCHER_TYPE == watcher_type:
+                if watcher.WATCHER_TYPE != watcher_type:
+                    continue
+                if watcher.state.running:
                     return watcher
-            return None
+                if stopped is None:
+                    stopped = watcher
+            return stopped
 
     def find_state_by_type(self, watcher_type: str) -> WatcherState | None:
         """Find the first watcher state with the given type."""

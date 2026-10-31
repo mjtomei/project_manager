@@ -295,6 +295,23 @@ class TestWatcherManager:
         assert found is w
         assert mgr.find_by_type("nonexistent") is None
 
+    def test_find_by_type_prefers_running_over_stale_stopped(self):
+        """A finished watcher stays registered; find_by_type must not shadow
+        the live one, or the ws toggle starts a duplicate instead of
+        stopping the running watcher."""
+        from pm_core.watcher_manager import WatcherManager
+        mgr = WatcherManager()
+        stale = self._make_watcher("auto-start")
+        live = self._make_watcher("auto-start")
+        mgr.register(stale)
+        mgr.register(live)
+        stale.state.running = False
+        live.state.running = True
+        assert mgr.find_by_type("auto-start") is live
+        # Both stopped: still return a watcher (the first registered).
+        live.state.running = False
+        assert mgr.find_by_type("auto-start") is stale
+
     def test_unregister(self):
         from pm_core.watcher_manager import WatcherManager
         mgr = WatcherManager()
