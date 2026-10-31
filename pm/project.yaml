@@ -46960,7 +46960,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-31T18:07:25.345765+00:00'
+  updated_at: '2026-10-31T18:39:33.198634+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -47773,6 +47773,75 @@ prs:
       wait_for_merge; no PR merge is authorized by this request.'
     created_at: '2026-10-31T18:07:25.345765+00:00'
     last_edited: '2026-10-31T18:07:25.345765+00:00'
+  - id: note-f52bb13
+    text: 'Master integration 2026-10-31 (user-authorized implementation restart)
+      is complete and pushed. Merge commit 40c2ebc8 merges origin/master eaf3372e60d1717bd97cc50b5e0b04c6df881fa1
+      (which carries #249/pr-592e4bd) into this branch; read-only `pm pr signoff integrate
+      pr-f0f4129` reports "up to date with master@eaf3372e" (head 40c2ebc8, candidate
+      tree 42c040ba). No history was rewritten, nothing force-pushed, master untouched,
+      PR not merged.
+
+
+      Conflicts resolved (15 hunks / 9 files), both feature sets kept:
+
+      - pm_core/cli/pr.py: pr_start clears both the sign-off return (master session_opened=True,
+      since the echo can fail with EPIPE after a TUI restart) and base_return, then
+      re-points the transcript links; the CLI pane-identity guard (S79, pane_runs_transcript)
+      moved into the shared _impl_idle_tracker so both _check_impl_idle and the base-return
+      _impl_idle_since reject a link naming another driver session; _launch_review_iteration
+      keeps the exit-3 -> "base_conflict:" status line and master fresh=... or open_return(...);
+      pr_qa_run_bg keeps the pre-transition base-return refusal.
+
+      - pm_core/review_loop.py: _LAUNCH_TIMEOUT stays 360 s (above the gate 300 s
+      relaunch) and keeps master _IN_FLIGHT_SYMLINK_GRACE.
+
+      - pm_core/tui/review_loop_ui.py: _announce_loop_done (master extraction of the
+      completion message) renders _done_iteration_count, so a fresh loop seeded from
+      a long-lived PR transcripts still reports the iterations it performed; the restart
+      fallback to a shared impl-<pr>.jsonl link runs before master pane_runs_transcript
+      check, so a restarted TUI tracks the live session and still rejects another
+      driver pane.
+
+      - pm_core/tui/qa_loop_ui.py: start_qa/start_or_stop_qa_loop keep the base-return
+      refusal on top of master _enter_qa_status(app, pr_id, pr, caller, lock_timeout=...)
+      contract. start_qa refusal returns None, not False: False is the project.yaml
+      load/lock contract the review->QA hand-off retries every tick with a lock-busy
+      message.
+
+      - pm_core/qa_loop.py: the QA gate post-fetch re-read now goes through _load_project_waiting
+      (RQ37) like every other load in _run_qa_sync, so a project.yaml that became
+      unloadable under the fetch ends the run quietly on a stop request instead of
+      raising out of the QA thread. That re-read is one more store.load in a planning
+      run; tests/test_qa_load_failures.py names it GATE_POST in its load-index mapping.
+
+      - pm_core/tui/pr_view.py: keep master escape() on command stderr/exception text
+      and this PR force=force_errors for a base-conflict refusal (so it is not swallowed
+      by a sticky message).
+
+      - tests: kept both sides (base-gate tests + master launch-retry/terminal-state
+      tests); PaneIdleTracker.idle_since now reports None for a Stop-started new turn
+      (master S35 semantics), and the settle-window test/docstring follow it.
+
+
+      pm/project.yaml auto-merged (no resolver conflict): 572 unique records (all
+      571 from master plus pr-f0f4129), every note from this branch present, no entry
+      or field lost; the only entry differing from master is pr-9ee4d64 (this branch
+      own cross-PR note). Existing dirty files, stashes, fixtures, drafts, captures,
+      model routing and the sign-off setting are untouched.
+
+
+      Full suite after the final edits: 5321 passed, 1 skipped, 0 failed (markdown
+      installed in the session scratchpad; PM_HOST_HOME unset; PATH=/usr/bin:/bin
+      so the push-proxy git wrapper stays out of the real-git tests). Spec pm/specs/pr-f0f4129/impl.md
+      gained R16 documenting these reconciliation decisions.
+
+
+      Handoff: this implementation container cannot reach the host TUI, so the fresh
+      review/QA/sign-off sequence starts from the base pm dir: press `d` on #274 or
+      run `pm pr review pr-f0f4129` there. Do not reuse the pre-merge review/QA results;
+      this head is a new integrated candidate.'
+    created_at: '2026-10-31T18:39:33Z'
+    last_edited: '2026-10-31T18:39:33Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
