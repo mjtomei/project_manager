@@ -48690,7 +48690,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-10-31T22:04:21.275764+00:00'
+  updated_at: '2026-10-31T22:59:11.669037+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -49059,6 +49059,31 @@ prs:
       agg-aarch64-unknown-linux-gnu v1.9.0 to a scratch bin for the mp4 render.'
     created_at: '2026-10-31T22:04:21Z'
     last_edited: '2026-10-31T22:04:21Z'
+  - id: note-f573b10
+    text: 'QA S17 PASS (TUI QA lifecycle, 6 stories, isolated scratch HOME + private
+      tmux + runtime wrapper). Verified end to end: (1) runtime down at t -> ERROR
+      before any window/agent, cause+remedies in TUI log, one QA ERROR note, qa_status
+      overall=ERROR scenarios=[], no qa-* window, empty host marker, no container;
+      (2) pm tui restart does not resume/re-run it (no "Resuming QA", note count unchanged);
+      (3) missing image -> "Container launch failed: ..." ERROR, planner+s0 host windows
+      only, no s1 window, scenario verdict "" and no INPUT_REQUIRED, failed attempt
+      container removed; (4) restart of an in-flight container-mode run re-validates
+      the runtime and fails closed (marker unchanged, no new window/container, mode
+      stays enabled); (5) a run started with container mode disabled keeps host mode
+      across a restart even after the setting is re-enabled and the runtime broken
+      -> host agent launches, no container, PASS; (6) a prE qa_status.json overwritten
+      with [] did not abort the resume scan: both prE (container) and prF (host) resumed,
+      prE rewrote its status to an object and its worker stayed in-container (no s1/repo
+      host marker line), both PASS, prF had no container. tests/test_container_fail_closed.py
+      27 passed; tests/test_qa_resume.py 93 passed. Captures: /pm-captures/scenarios/17/01..06.
+      FIXTURE NOTE for future S17 runs: qa_resume.json is only written after the concretization
+      phase (before the poll loop), so a 600s qa_concretize delay leaves NO snapshot
+      to resume; to make a run interrupted-able use a short refiner delay (~10s) and
+      a long qa_scenario delay (~600s) (stories 4 and 6 were driven that way). Also:
+      the qa_status.py status pane of a run whose status file is non-object exits,
+      leaving that window with one pane (observed, scan unaffected).'
+    created_at: '2026-10-31T22:59:11Z'
+    last_edited: '2026-10-31T22:59:11Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
