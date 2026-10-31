@@ -864,12 +864,16 @@ def ensure_socket_dir() -> None:
         SHARED_SOCKET_DIR.chmod(0o1777)
     except OSError:
         # Another user may own the shared dir, which is fine only when it
-        # already has the mode we need.  Without the sticky bit any user
-        # could unlink another user's socket (the uid check in
-        # `pm session` cannot defend against that: it runs once, before
-        # tmux binds), so refuse rather than proceed on a directory that
-        # is world-writable but not sticky.
-        if not (SHARED_SOCKET_DIR.stat().st_mode & stat.S_ISVTX):
+        # already has the mode we need: 1777, i.e. world-writable *and*
+        # sticky.  Without the sticky bit any user could unlink another
+        # user's socket (the uid check in `pm session` cannot defend
+        # against that: it runs once, before tmux binds); without
+        # world-write we cannot create our socket at all, and proceeding
+        # would surface as an opaque "couldn't create socket" out of tmux
+        # instead of the actionable message `pm session` prints for this
+        # refusal.  Refuse rather than proceed on either.
+        mode = SHARED_SOCKET_DIR.stat().st_mode
+        if not (mode & stat.S_ISVTX and mode & stat.S_IWOTH):
             raise
 
 

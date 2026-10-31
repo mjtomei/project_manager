@@ -1489,3 +1489,42 @@ Validation on the integrated head: full suite re-run after the edit (see
 the PR note for this iteration); no live session, server or shared host
 configuration was touched, and the new test is unit-level (it binds no
 tmux server).
+
+## Review iteration (2026-10-31, review-loop 703c i2)
+
+Verification pass over the integrated head; no requirement changes.  One
+gap in the fail-closed socket-directory guard (d1c0 i12) — the only
+finding this iteration:
+
+1. **`ensure_socket_dir()` accepted a sticky directory it cannot write
+   to.**  The d1c0 i12 hardening re-checked the mode after a failed
+   `chmod`, but only for the *sticky* bit, while its own comment says the
+   directory "is fine only when it already has the mode we need" (1777).
+   A root-owned `1755 /tmp/pm-sessions` — sticky, but not world-writable —
+   therefore passed the guard, and the failure surfaced much later as an
+   opaque "couldn't create socket" from tmux instead of the actionable
+   message `pm session` prints for this refusal.  The re-check now
+   requires `S_ISVTX` **and** `S_IWOTH`, matching the contract: without
+   the sticky bit another user can unlink our socket, and without
+   world-write we cannot create one.  Test:
+   `test_refuses_a_sticky_dir_it_cannot_write` (verified to fail without
+   the world-write test).  The existing 1777-and-0777 cases are
+   unchanged.
+
+Nothing else surfaced.  The i1 grouped-view resolution in
+`_find_tui_pane()`, the socket derivation and default-server addressing
+(R4.3), the discovery scoping (7af7 i1–i3, 3cc7 i1), the precise detach
+(R5), the rollout path (R6) and the socket-directory/ownership checks
+(d1c0 i10/i12) all match the spec, and every new helper has direct
+coverage.
+
+Re-checked and left alone (unchanged from i1's documented call):
+`pm_core/cli/guide.py::_in_pm_tmux_session()` keeps its raw ``pm-``
+prefix test.  It only decides whether `pm guide` execs in place or
+launches a new pane; it never selects a server or a pane, so a user's
+own grouped view there costs a spare pane, not cross-session damage.
+
+Validation on the integrated head: full suite re-run after the edit (see
+the PR note for this iteration); no live session, server or shared host
+configuration was touched, and the new test is unit-level (it binds no
+tmux server).

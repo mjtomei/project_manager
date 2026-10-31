@@ -80,6 +80,28 @@ class TestSessionSocketPath:
 
         paths.ensure_socket_dir()  # must not raise
 
+    def test_refuses_a_sticky_dir_it_cannot_write(self, tmp_path,
+                                                  monkeypatch):
+        """A sticky dir we cannot create sockets in is not usable either.
+
+        Another user's 1755 ``/tmp/pm-sessions`` passes the sticky-bit
+        test but tmux then fails to bind with an opaque error.  The
+        guard's contract is "it already has the mode we need" (1777), so
+        refuse here and let `pm session` report the actionable message.
+        """
+        fake = tmp_path / "pm-sessions"
+        fake.mkdir()
+        fake.chmod(0o1755)
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", fake)
+
+        def _denied(self, mode):
+            raise PermissionError("not the owner")
+
+        monkeypatch.setattr(Path, "chmod", _denied)
+
+        with pytest.raises(PermissionError):
+            paths.ensure_socket_dir()
+
     def test_refuses_a_non_sticky_dir_it_cannot_fix(self, tmp_path,
                                                     monkeypatch):
         """A world-writable dir without the sticky bit is not safe to use.
