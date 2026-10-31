@@ -34738,7 +34738,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:35:03.724695+00:00'
-  updated_at: '2026-10-29T07:09:21.704304+00:00'
+  updated_at: '2026-10-31T18:07:25.345765+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -35092,6 +35092,29 @@ prs:
       instead of starting a new run (by design; `z t` is the fresh-start path). (2026-10-29T07:10:00Z)'
     created_at: '2026-10-29T07:09:21Z'
     last_edited: '2026-10-29T07:09:21Z'
+  - id: note-7e53d62
+    text: 'User-authorized restart from the main PM session on 2026-10-31 after #249
+      merged as eaf3372e60d1717bd97cc50b5e0b04c6df881fa1. Resume this existing PR
+      in its existing workdir. First integrate current origin/master INTO THIS PR
+      branch, preserving its intended behavior and all earlier review/QA corrections;
+      resolve real code/test conflicts and validate the combined behavior before handing
+      off for a fresh review/QA/sign-off sequence. Do not merge this PR into master
+      or push/reset/delete master or other branches. This is a user-directed implementation
+      return, not a reviewer/sign-off verdict. The read-only integration check found
+      substantive conflicts in: pm_core/qa_loop.py, tests/conftest.py. The prior SIGNOFF_MERGE
+      is historical evidence for its recorded revisions, not approval of a new integration.
+      Retain all original source, dirty files, stashes, drafts, fixtures and captures.
+      Existing uncommitted content may have been intentionally excluded; inspect its
+      provenance instead of automatically committing it. Preserve every PR record
+      and unrelated local metadata during project.yaml reconciliation. Do not weaken
+      acceptance criteria, choose unresolved user policy questions or reuse stale
+      PASS results. Historical captures have been copied intact to the main session
+      captures; overwritten filename collisions are backed up in the host migration
+      record. Main session is pm-project_manager-c5a1006b; keep old restored sessions
+      idle. Assigned models and explicit work-Opus sign-off override remain unchanged.
+      Autostart will use wait_for_merge; no PR merge is authorized by this request.'
+    created_at: '2026-10-31T18:07:25.345765+00:00'
+    last_edited: '2026-10-31T18:07:25.345765+00:00'
   model: provider:deepseek-flash
   effort: high
   session_models:
