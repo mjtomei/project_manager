@@ -849,6 +849,23 @@ Don't substitute a different renderer: the mp4 is the required artifact.
 
 ```
 cast=<capture-dir>/recording.cast
+# The capture directory has to be absolute here too, not only in the capture
+# steps. This block is pasted on its own ("once the cast exists"), so a
+# relative <capture-dir> resolves against *this* shell's directory: a stale
+# cast left in the worker's cwd renders as this run's video, and a cast that
+# exists only in the real capture directory is reported as "the recording
+# wrote nothing" — a path that matches the wrong directory, the same class as
+# the relative paths step 0 and step 2 refuse. Verified: the block with
+# <capture-dir>=relcap, pasted from a directory holding a previous run's
+# relcap/recording.cast, exits 0 and publishes relcap/recording.mp4.
+case "<capture-dir>" in
+    /* | "~"/*) ;;
+    *)  echo "<capture-dir> must be an absolute path (or start with ~/) —" \
+            "this block is pasted on its own, so a relative path resolves" \
+            "against this shell's directory and can render another run's" \
+            "cast" >&2
+        exit 1 ;;
+esac
 # The cast's directory has to be there and writable before anything is
 # removed or rendered. A missing one turns the cast check below into "the
 # recording wrote nothing" for a path that is not there; an existing
@@ -1066,6 +1083,7 @@ Notes:
 pr: <pr-id>
 workdir: <absolute path>
 captured_at: <ISO date>
+recipe: pm/qa/artifacts/tmux-screen-recording.md
 ---
 
 ## Commands

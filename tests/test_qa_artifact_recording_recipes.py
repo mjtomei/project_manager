@@ -276,6 +276,22 @@ class TestRecipes:
         ids = {item["id"] for item in list_artifacts(PM_ROOT)}
         assert Path(name).stem in ids
 
+    @pytest.mark.parametrize("name", RECIPES + ["web-ui-recording.md"])
+    def test_manifest_example_names_the_recipe(self, name):
+        """Every recipe's manifest template carries the shared `recipe:` field.
+
+        ``pm_core/docs/qa_library.md`` documents the manifest convention with
+        ``recipe: pm/qa/artifacts/<recipe-filename>.md``, and the CLI and
+        web-UI templates carry it — the tmux template did not, so a worker
+        copying that example writes a manifest that does not say which recipe
+        produced the capture. The field is how a reviewer (or a later agent)
+        knows which flow to follow when replaying the evidence.
+        """
+        section = _recipe_text(name).split("## Manifest format", 1)[1]
+        assert f"recipe: pm/qa/artifacts/{name}" in section, (
+            f"{name}: the manifest template omits the recipe field the shared "
+            "convention (pm_core/docs/qa_library.md) documents")
+
     @pytest.mark.parametrize("name", RECIPES)
     def test_recipe_lists_its_diagnostic_files(self, name):
         """The flow writes diagnostics the produced-files list never names.
@@ -1371,6 +1387,67 @@ def test_render_names_a_missing_capture_dir(name, tmp_path):
         + r.stderr)
     assert not mp4.parent.exists(), (
         f"{name}: the refused render created the capture directory")
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_render_refuses_a_relative_capture_dir(name, tmp_path):
+    """The render block is pasted on its own, so its path is a handle too.
+
+    Every capture step refuses a relative ``<capture-dir>`` because each paste
+    resolves it against its own shell, and the tmux step-0 prose says the rule
+    covers "every ``test -s`` below" — but the render block, which is pasted
+    after the capture (and on its own, "once the cast exists"), never carried
+    the guard. Verified with the recipes' own blocks: with
+    ``<capture-dir>=relcap`` pasted from a directory holding a previous run's
+    ``relcap[/<short-name>]/recording.cast``, the block exits **0** and
+    publishes that stale cast as this run's ``recording.mp4``; pasted from a
+    directory where the relative path does not exist, it reports "the
+    recording wrote nothing" for a recording that wrote one, one directory
+    over. The block has to refuse the path where the capture steps do, before
+    it removes or renders anything.
+    """
+    bash = shutil.which("bash")
+    assert bash, "bash is required"
+    block = _render_block(name)
+    cast_rel = re.search(r"^cast=(\S+)$", block, re.M).group(1)
+    block = (block.replace("<capture-dir>", "relcap")
+                  .replace("<short-name>", "run"))
+    # The stale cast sits where the relative path resolves: against the
+    # directory the block is pasted from.
+    work = tmp_path / "work"
+    work.mkdir()
+    cast = Path(cast_rel.replace("<capture-dir>", "relcap")
+                       .replace("<short-name>", "run"))
+    stale = work / cast
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.write_text('{"version": 2}\n')
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    _stub_tool(bindir, "agg", (
+        'for a in "$@"; do last=$a; done\nprintf gif > "$last"\n'))
+    _stub_tool(bindir, "ffprobe", (
+        'case "$*" in\n'
+        '  *width,height*) echo 640,480 ;;\n'
+        '  *nb_read_packets*) echo 6 ;;\n'
+        '  *format=duration*) echo 0.60 ;;\n'
+        '  *) echo h264 ;;\n'
+        'esac\n'))
+    _stub_tool(bindir, "ffmpeg", (
+        'for a in "$@"; do last=$a; done\nprintf mp4 > "$last"\n'))
+    env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}")
+
+    r = subprocess.run([bash], input=block, env=env, cwd=str(work),
+                       capture_output=True, text=True, timeout=60)
+
+    assert r.returncode != 0, (
+        f"{name}: the render block accepted a relative capture directory and "
+        "rendered whatever cast was in the pasting shell's directory")
+    assert "must be an absolute path" in r.stderr, (
+        f"{name}: the relative capture directory is not named: " + r.stderr)
+    assert not stale.with_suffix(".mp4").exists(), (
+        f"{name}: the refused render published the stale cast's video")
+    assert not stale.with_name(stale.name + ".gif").exists(), (
+        f"{name}: the refused render ran the renderer")
 
 
 @pytest.mark.parametrize("name", RECIPES)
@@ -3773,6 +3850,55 @@ def test_web_ui_layer2_block_refuses_a_capture_dir_it_cannot_write(
     assert "cannot be written" in r.stderr, r.stderr
     assert not called.exists(), (
         "the protocol block ran curl with nowhere to write its logs")
+
+
+def test_web_ui_layer2_block_names_a_missing_curl(tmp_path):
+    """The protocol block's only tool is curl, and a missing one is silent.
+
+    Both redirects still open: the shell's own "curl: command not found" lands
+    in each log, neither request runs, and the block's last command (``kill …
+    || true``) succeeds — verified with no curl on PATH: the block exits **0**
+    with ``http.log`` and ``sse.log`` holding only that error text. That is
+    the "a run with no protocol capture reads as success" state the CAPDIR and
+    directory guards above exist for, one tool over. Step 1 already treats a
+    missing curl as a hard failure (its port pre-check answers 127 and names
+    it), but every block in this recipe is pasted into a fresh shell, so this
+    one has to say it where it fails — the same rule as the ``node`` and
+    ``ffmpeg`` guards in the driver and finalize steps.
+
+    The PATH holds no curl at all (the block's tools are builtins), so the
+    case cannot pass on a host that happens to have one.
+    """
+    bash = shutil.which("bash")
+    assert bash, "bash is required"
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    # The block needs nothing but shell builtins once the guard fires; the
+    # symlinks keep the *pre-fix* block able to run to its exit-0 end (it
+    # reaches `sleep 2` and the SSE reader), which is what makes this a
+    # before/after case rather than a missing-tool text match.
+    for tool in ("sleep", "cat"):
+        for d in ("/bin", "/usr/bin"):
+            if (Path(d) / tool).exists():
+                os.symlink(str(Path(d) / tool), bindir / tool)
+                break
+    env = {"CAPDIR": str(capdir), "APP_URL": "http://localhost:1",
+           "PATH": str(bindir)}
+
+    r = subprocess.run([bash], input=_web_ui_layer2_block(), env=env,
+                       capture_output=True, text=True, timeout=60)
+
+    assert r.returncode != 0, (
+        "the protocol block ran with no curl on PATH and reported success, "
+        "so a run with no protocol capture reads as a finished one")
+    assert "curl" in r.stderr, (
+        "the protocol block did not name the tool it cannot run: " + r.stderr)
+    assert not (capdir / "http.log").exists(), (
+        "the block wrote an http.log holding only curl's absence")
+    assert not (capdir / "sse.log").exists(), (
+        "the block wrote an sse.log holding only curl's absence")
 
 
 def test_web_ui_layer2_route_snapshots_are_bounded():

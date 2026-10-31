@@ -954,6 +954,25 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   directory was refused as a collision that does not exist. A raw
   `tmux pipe-pane` that does not go through step 2 still bypasses the claim —
   record it as a limitation, not a pass.
+- The Layer 2 protocol block runs on a host without `curl` (or with a `PATH`
+  that does not resolve it) → it must stop naming the missing tool and write
+  neither log. The pre-fix block exits 0 with `http.log` and `sse.log`
+  holding only the shell's "curl: command not found", so a run with no
+  protocol capture reads as success (review loop 928f i5, R65). Step 1's
+  port pre-check already refuses a missing curl (exit 127); this block is
+  pasted on its own and now does the same.
+- The render block is pasted with a *relative* `<capture-dir>` → it must stop
+  with "must be an absolute path (or start with ~/)" before it removes or
+  renders anything. Pasted from a directory holding a previous run's
+  `<capture-dir>/[<short-name>/]recording.cast`, the pre-fix block exits 0
+  and publishes that stale cast as this run's `recording.mp4`; pasted where
+  the relative path is not there, it reports "the recording wrote nothing"
+  for a recording that wrote one (R65). The `~/` spelling still renders.
+- A worker copies a recipe's manifest template → the manifest carries
+  `recipe: pm/qa/artifacts/<recipe-filename>.md` as
+  `pm_core/docs/qa_library.md` documents. The tmux template omitted it until
+  R65 (the CLI and web-UI templates already had it); this is a document
+  check, not a scenario surface.
 
 ## Pass / Fail criteria
 

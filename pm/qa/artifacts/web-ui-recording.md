@@ -638,6 +638,22 @@ fi
         "written neither; check the path and its permissions" >&2
     exit 1
 }
+# The block's only tool is curl. Without it the two redirects still "work":
+# the shell's own "curl: command not found" lands in each log, neither
+# request runs, and the block exits 0 — a run with no protocol capture at all
+# that reads as success, the same state the CAPDIR and directory guards above
+# exist for, one tool over (verified: with no curl on PATH the block exits 0
+# and http.log and sse.log hold only that error text). Step 1 already treats
+# a missing curl as a hard failure — its port pre-check answers 127 and says
+# so — but every block here is pasted into a fresh shell, so this one has to
+# say it where it fails. The other tool guards in this recipe (`node`,
+# `ffmpeg`) exist for the same reason.
+command -v curl >/dev/null || {
+    echo "curl is not installed — the protocol layer's route snapshots and" \
+        "SSE reader are curl calls; install it (e.g. 'apt-get install curl')" \
+        "and re-run this step" >&2
+    exit 1
+}
 # http.log — snapshot each route you care about. -sS keeps it quiet but
 # shows errors; -w records the status line per route. Each request is
 # bounded, like the step-1 readiness poll: a route that accepts the

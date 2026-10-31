@@ -515,6 +515,23 @@ Don't substitute a different renderer: the mp4 is the required artifact.
 
 ```
 cast=<capture-dir>/<short-name>/recording.cast
+# The capture directory has to be absolute here too, not only in the capture
+# steps. This block is pasted on its own ("once the cast exists"), so a
+# relative <capture-dir> resolves against *this* shell's directory: a stale
+# cast left in the worker's cwd renders as this run's video, and a cast that
+# exists only in the real capture directory is reported as "the recording
+# wrote nothing" — a path that matches the wrong directory, the same class as
+# the relative paths the preamble and the scaffold refuse. Verified: the block
+# with <capture-dir>=relcap, pasted from a directory holding a previous run's
+# relcap/run/recording.cast, exits 0 and publishes relcap/run/recording.mp4.
+case "<capture-dir>" in
+    /* | "~"/*) ;;
+    *)  echo "<capture-dir> must be an absolute path (or start with ~/) —" \
+            "this block is pasted on its own, so a relative path resolves" \
+            "against this shell's directory and can render another run's" \
+            "cast" >&2
+        exit 1 ;;
+esac
 # The cast's directory has to be there and writable before anything is
 # removed or rendered. A missing one turns the cast check below into "the
 # recording wrote nothing" for a path that is not there; an existing
