@@ -7,8 +7,17 @@ is the source of truth; this module mirrors transitions to per-PR JSON
 files so external readers (popup picker, status spinner after a queued
 ``tui:`` command, etc.) can observe them.
 
-Storage layout: ``~/.pm/runtime/{pr_id}.json`` — one file per PR keeps
-writes localized and avoids whole-file lock contention.
+Storage layout: ``~/.pm/runtime/{pm-session}/{pr_id}.json`` — one file per
+PR keeps writes localized and avoids whole-file lock contention.  The
+directory is per pm session: two clones of one project share ``~/.pm`` and
+their PR ids, but each clone's actions are its own (S93: clone B's QA run of
+a PR overwrote clone A's INPUT_REQUIRED record, so A's auto-start relaunched
+QA, then handed the PR to sign-off on B's PASS, and A's picker showed B's
+run).  A process outside any pm session uses ``~/.pm/runtime/{pr_id}.json``.
+A session directory starts with the finished (``done``/``failed``) entries
+of the records an older pm wrote at that shared path, copied once when the
+directory is created, so a QA hold verdict (e.g. INPUT_REQUIRED) recorded
+before the upgrade still keeps auto-start from relaunching that PR's QA.
 
 Schema (v1)::
 
@@ -65,6 +74,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -79,10 +89,82 @@ VALID_STATES = {
 }
 
 
+_UNSET = object()
+_session_scope: object = _UNSET
+
+
+def _scope() -> str | None:
+    """This process's pm session (``pm-<tag>``), resolved once, or None.
+
+    Inside tmux that is the session of this pane (or of the popup's
+    client); outside it, the session of the clone in the cwd.
+    """
+    global _session_scope
+    if _session_scope is _UNSET:
+        sess = None
+        try:
+            from pm_core.cli.helpers import _get_pm_session
+            sess = _get_pm_session()
+        except Exception:
+            _log.debug("runtime_state: session lookup failed", exc_info=True)
+        _session_scope = sess or None
+    return _session_scope  # type: ignore[return-value]
+
+
 def _runtime_dir() -> Path:
     d = pm_home() / "runtime"
+    sess = _scope()
+    if sess:
+        shared, d = d, d / sess
+        if not d.is_dir():
+            _seed_session_dir(shared, d)
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+_TERMINAL_STATES = ("done", "failed")
+
+
+def _seed_session_dir(shared: Path, d: Path) -> None:
+    """Create session directory *d* holding the finished entries of the
+    records at the *shared* path (written by a pm older than the
+    per-session layout).
+
+    Without them an upgrade forgot every recorded QA hold verdict, and
+    auto-start relaunched QA on PRs waiting for a human.  In-flight entries
+    are not carried: they belong to processes of the older pm, and a TUI
+    mount sweep of the new directory would never clear them.  The copy is
+    built aside and renamed into place, so it happens once per session and
+    a concurrent reader never sees it half-written.
+    """
+    try:
+        legacy = [p for p in shared.iterdir()
+                  if p.is_file() and p.suffix == ".json"]
+    except OSError:
+        return
+    tmp = shared / f".{d.name}.{os.getpid()}.seed"
+    try:
+        tmp.mkdir(parents=True, exist_ok=True)
+        for path in legacy:
+            data = _read_locked(path)
+            actions = data.get("actions") if isinstance(data, dict) else None
+            if not isinstance(actions, dict):
+                continue
+            kept = {a: {k: v for k, v in e.items() if k != "suppress_switch"}
+                    for a, e in actions.items()
+                    if isinstance(e, dict)
+                    and e.get("state") in _TERMINAL_STATES}
+            if kept:
+                (tmp / path.name).write_text(json.dumps(
+                    {"pr_id": data.get("pr_id") or path.stem,
+                     "actions": kept}, indent=2, sort_keys=True))
+        tmp.rename(d)
+    except OSError as e:
+        # Another process of this session created it first (or the copy
+        # failed): the caller creates/uses the directory as it is.
+        _log.debug("runtime_state: seeding %s skipped: %s", d, e)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def runtime_path(pr_id: str) -> Path:
@@ -349,7 +431,9 @@ def clear_action(pr_id: str, action: str) -> None:
     set_action_state(pr_id, action, None)
 
 
-def sweep_stale_states(reason: str = "tui-restart") -> int:
+def sweep_stale_states(reason: str = "tui-restart",
+                       pr_ids: set[str] | None = None,
+                       keep=None) -> int:
     """Reset any in-flight action states across all PRs.
 
     Called by the TUI on mount: a fresh TUI process can't own panes or
@@ -359,6 +443,12 @@ def sweep_stale_states(reason: str = "tui-restart") -> int:
     correspond to anything live.  We delete such entries entirely.
     Terminal states (``done`` / ``failed``) are left untouched so
     post-mortem info — e.g. last review-loop verdict — survives restart.
+
+    *pr_ids* limits the sweep to those PRs (the TUI's own project), since
+    the runtime dir is shared by every project under ``~/.pm``.
+
+    *keep(pr_id, action)* returning True leaves that entry as it is: it
+    belongs to a live process other than the old TUI.
 
     Returns the number of action entries that were cleared.
     """
@@ -384,7 +474,11 @@ def sweep_stale_states(reason: str = "tui-restart") -> int:
         if not targets:
             continue
         pr_id = data.get("pr_id") or path.stem
+        if pr_ids is not None and pr_id not in pr_ids:
+            continue
         for action in targets:
+            if keep is not None and keep(pr_id, action):
+                continue
             try:
                 clear_action(pr_id, action)
                 swept += 1
@@ -459,8 +553,15 @@ def derive_action_status(pr_id: str, action: str) -> dict:
     flips to [idle] when *all* scenarios have gone idle.  Terminal
     entries (``state=done`` with a ``verdict``) are returned as-is so
     the [done VERDICT] badge survives picker invocations.
+
+    A live ``pm qa run`` of the PR shows as running: it leaves the entry
+    to full runs, so the entry still holds the last full run's verdict.
     """
     entry = dict(get_action_state(pr_id, action))
+    if action == "qa":
+        from pm_core.qa_loop import instruction_run_live
+        if instruction_run_live(pr_id):
+            return {**entry, "state": "running"}
     if not entry:
         return {}
     if action == "qa":

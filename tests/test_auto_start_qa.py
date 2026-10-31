@@ -270,6 +270,216 @@ class TestAutoStartQASkipRunning:
         mock_start.assert_called_once_with(app, "pr-001")
 
 
+    def test_skips_run_driven_by_another_live_process(self, tmp_path,
+                                                       monkeypatch):
+        """A live ``pm pr qa-run-bg`` driver of this session (its start
+        record names it) is not started over: a TUI loop would kill its
+        windows as stale and QA the PR twice (RQ47 b)."""
+        import json, subprocess
+        from pm_core import qa_loop
+        from pm_core.tui.auto_start import _auto_start_qa_loops
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr(qa_loop, "get_pm_session", lambda: "pm-own")
+        app = _make_app(tmp_path, auto_start=True)
+        qa_wd = tmp_path / ".pm" / "workdirs" / "qa" / "pr-001-abc"
+        qa_wd.mkdir(parents=True)
+        driver = subprocess.Popen(["sleep", "30"])
+        try:
+            rec = {"pr_id": "pr-001", "loop_id": "abc", "session_tag": "own",
+                   "started_at": 1.0, "owner_pid": driver.pid,
+                   "owner_start": qa_loop._proc_start_time(driver.pid)}
+            (qa_wd / "qa_run.json").write_text(json.dumps(rec))
+            with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+                _auto_start_qa_loops(app)
+            mock_start.assert_not_called()
+        finally:
+            driver.kill()
+            driver.wait()
+        # Once the driver is gone its record no longer holds the PR back.
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _auto_start_qa_loops(app)
+        mock_start.assert_called_once_with(app, "pr-001")
+
+    def test_own_or_ownerless_run_record_does_not_block(self, tmp_path,
+                                                        monkeypatch):
+        """This process's own runs (a TUI restart execs in place) and records
+        written before they named an owner do not count as another driver."""
+        import json, os
+        from pm_core import qa_loop
+        from pm_core.tui.auto_start import _auto_start_qa_loops
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr(qa_loop, "get_pm_session", lambda: "pm-own")
+        app = _make_app(tmp_path, auto_start=True)
+        qa_root = tmp_path / ".pm" / "workdirs" / "qa"
+        for name, extra in (("pr-001-a", {"owner_pid": os.getpid()}),
+                            ("pr-001-b", {})):
+            (qa_root / name).mkdir(parents=True)
+            (qa_root / name / "qa_run.json").write_text(json.dumps(
+                {"pr_id": "pr-001", "session_tag": "own", "started_at": 1.0,
+                 **extra}))
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _auto_start_qa_loops(app)
+        mock_start.assert_called_once_with(app, "pr-001")
+
+
+class TestRunDrivenElsewhereRecheck:
+    """S111: auto-start and the review -> QA hand-off leave a run another
+    live process drives (a ``pm qa run`` the user started, a qa-run-bg
+    driver) alone, and look again once it may be over: an instruction run
+    ends without a PR verdict, so full QA is still due then."""
+
+    @pytest.fixture
+    def driver(self, tmp_path, monkeypatch):
+        import json, subprocess
+        from pm_core import qa_loop
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr(qa_loop, "get_pm_session", lambda: "pm-own")
+        qa_wd = tmp_path / ".pm" / "workdirs" / "qa" / "pr-001-cli-pr-001"
+        qa_wd.mkdir(parents=True)
+        proc = subprocess.Popen(["sleep", "30"])
+        (qa_wd / "qa_run.json").write_text(json.dumps(
+            {"pr_id": "pr-001", "loop_id": "cli-pr-001", "session_tag": "own",
+             "started_at": 1.0, "owner_pid": proc.pid,
+             "owner_start": qa_loop._proc_start_time(proc.pid)}))
+        yield proc
+        proc.kill()
+        proc.wait()
+
+    def _app(self, tmp_path, status):
+        prs = [{"id": "pr-001", "title": "T", "branch": "b",
+                "status": status, "workdir": str(tmp_path / "wd"),
+                "notes": []}]
+        app = _make_app(tmp_path, prs=prs, auto_start=True, target="pr-001")
+        app._driver_recheck = False
+        return app
+
+    def test_auto_start_pass_rechecks_while_the_run_lives(self, tmp_path,
+                                                          driver):
+        from pm_core.tui import auto_start
+        app = self._app(tmp_path, "qa")
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            auto_start._auto_start_qa_loops(app)
+            auto_start._auto_start_qa_loops(app)
+        mock_start.assert_not_called()
+        # One pending re-check, however many passes skipped the PR.
+        app.set_timer.assert_called_once()
+        delay, fire = app.set_timer.call_args.args
+        assert delay == auto_start.DRIVER_RECHECK_SECONDS
+        with patch.object(auto_start, "check_and_start", MagicMock()) as cas:
+            fire()
+        app.run_worker.assert_called_once_with(cas.return_value)
+        assert app._driver_recheck is False
+        # The run is over: the next pass starts full QA.
+        driver.kill()
+        driver.wait()
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            auto_start._auto_start_qa_loops(app)
+        mock_start.assert_called_once_with(app, "pr-001")
+
+    def test_review_pass_hand_off_leaves_the_run_alone(self, tmp_path,
+                                                        driver):
+        from pm_core.tui.review_loop_ui import _maybe_start_qa
+        from pm_core import runtime_state
+        app = self._app(tmp_path, "in_review")
+        # An earlier QA run's PASS, from before this review and the run.
+        runtime_state.set_action_state("pr-001", "qa", "done", verdict="PASS")
+        self._driver_started_now(tmp_path)
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            assert _maybe_start_qa(app, "pr-001")[0] == "driven"
+        mock_start.assert_not_called()
+        # It must not read as this review's QA result (sign-off catch-up).
+        assert runtime_state.get_action_state("pr-001", "qa") == {}
+        assert store.get_pr(store.load(app._root), "pr-001")["status"] == "qa"
+
+    @staticmethod
+    def _driver_started_now(tmp_path):
+        """Date the driver's start record after anything written so far."""
+        import json, time
+        path = (tmp_path / ".pm" / "workdirs" / "qa" / "pr-001-cli-pr-001"
+                / "qa_run.json")
+        rec = json.loads(path.read_text())
+        rec["started_at"] = time.time() + 1
+        path.write_text(json.dumps(rec))
+
+    def _hand_off(self, app):
+        from pm_core.tui.review_loop_ui import (
+            _pending_auto_qa, _start_qa_after_review)
+        _start_qa_after_review(app, "pr-001")
+        return _pending_auto_qa(app)
+
+    def test_hand_off_keeps_a_live_drivers_running_entry(self, tmp_path,
+                                                         driver):
+        from pm_core import runtime_state
+        app = self._app(tmp_path, "in_review")
+        panes = {"s1": {"pane_id": "%1", "session_id": "x"}}
+        runtime_state.set_action_state("pr-001", "qa", "running",
+                                       panes=panes)
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            pending = self._hand_off(app)
+        mock_start.assert_not_called()
+        assert pending["pr-001"][0] == "driven"
+        rec = runtime_state.get_action_state("pr-001", "qa")
+        assert rec["state"] == "running" and rec["panes"] == panes
+
+    def test_zz_t_hand_off_starts_qa_once_the_cli_run_ends(self, tmp_path,
+                                                           driver):
+        """Auto-start off: only the pending hand-off can start full QA
+        after a ``pm qa run`` (no PR verdict) ends."""
+        app = self._app(tmp_path, "in_review")
+        app._auto_start = False
+        app._self_driving_qa = {"pr-001": {"required_passes": 1}}
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            pending = self._hand_off(app)
+            self._hand_off(app)  # a poll tick while the run lives
+            mock_start.assert_not_called()
+            assert pending["pr-001"][0] == "driven"
+            driver.kill()
+            driver.wait()
+            self._hand_off(app)
+        mock_start.assert_called_once()
+        assert "pr-001" not in pending
+
+    def test_hand_off_takes_the_drivers_verdict_as_its_qa(self, tmp_path,
+                                                          driver):
+        from pm_core import runtime_state
+        app = self._app(tmp_path, "in_review")
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            pending = self._hand_off(app)
+            assert pending["pr-001"][0] == "driven"
+            # The qa-run-bg driver finishes and records its verdict.
+            runtime_state.set_action_state("pr-001", "qa", "done",
+                                           verdict="PASS")
+            driver.kill()
+            driver.wait()
+            self._hand_off(app)
+        mock_start.assert_not_called()
+        assert "pr-001" not in pending
+        assert runtime_state.get_action_state("pr-001", "qa")["verdict"] \
+            == "PASS"
+
+    def test_hand_off_keeps_the_verdict_a_live_driver_just_recorded(
+            self, tmp_path, driver):
+        """qa-run-bg records its verdict and then exits: a poll tick in that
+        gap keeps the verdict, so the hand-off does not QA the PR again."""
+        from pm_core import runtime_state
+        app = self._app(tmp_path, "in_review")
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            pending = self._hand_off(app)
+            runtime_state.set_action_state("pr-001", "qa", "done",
+                                           verdict="PASS")
+            self._hand_off(app)  # the driver has not exited yet
+            assert pending["pr-001"][0] == "driven"
+            assert runtime_state.get_action_state(
+                "pr-001", "qa")["verdict"] == "PASS"
+            driver.kill()
+            driver.wait()
+            self._hand_off(app)
+        mock_start.assert_not_called()
+        assert "pr-001" not in pending
+
+
 # ---------------------------------------------------------------------------
 # Race guard: poll_qa_state vs auto-start
 # ---------------------------------------------------------------------------
@@ -373,7 +583,8 @@ class TestMaybeStartQA:
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
             _maybe_start_qa(app, "pr-001")
 
-        mock_start.assert_called_once_with(app, "pr-001")
+        mock_start.assert_called_once_with(
+            app, "pr-001", lock_timeout=0.0)  # store.NO_WAIT: retried per tick (RQ38)
 
     def test_no_transition_when_auto_start_disabled(self, tmp_path):
         """Without auto-start (and no self-driving), no transition occurs."""
@@ -431,7 +642,8 @@ class TestMaybeStartQA:
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
             _maybe_start_qa(app, "pr-001")
 
-        mock_start.assert_called_once_with(app, "pr-001")
+        mock_start.assert_called_once_with(
+            app, "pr-001", lock_timeout=0.0)  # store.NO_WAIT: retried per tick (RQ38)
         data = store.load(app._root)
         pr = store.get_pr(data, "pr-001")
         assert pr["status"] == "qa"

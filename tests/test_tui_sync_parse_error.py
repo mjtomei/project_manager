@@ -8,6 +8,7 @@ import pytest
 
 from pm_core import store
 from pm_core.tui.sync import background_sync
+from pm_core.tui.sync import guide as sync_guide
 
 
 class TestStoreLoadParseError:
@@ -21,10 +22,21 @@ class TestStoreLoadParseError:
             store.load(tmp_path)
 
 
-class TestBackgroundSyncParseError:
-    """background_sync catches ProjectYamlParseError and leaves app unchanged."""
+_UNLOADABLE = [
+    store.ProjectYamlParseError("corrupt"),
+    # A clean merge whose plans do not validate (S44): the background
+    # sync timer re-raised it and the TUI exited.
+    store.PlanValidationError("corrupt: Plan plan-child references "
+                              "non-existent parent 'plan-base'"),
+]
 
-    def test_corrupt_yaml_skips_sync(self):
+
+class TestBackgroundSyncParseError:
+    """background_sync skips an unloadable project.yaml and leaves app unchanged."""
+
+    @pytest.mark.parametrize("error", _UNLOADABLE,
+                             ids=lambda e: type(e).__name__)
+    def test_corrupt_yaml_skips_sync(self, error):
         app = types.SimpleNamespace(
             _root="/original/root",
             _data={"original": True},
@@ -40,7 +52,7 @@ class TestBackgroundSyncParseError:
         ), patch.object(
             store,
             "load",
-            side_effect=store.ProjectYamlParseError("corrupt"),
+            side_effect=error,
         ), patch(
             "pm_core.tui.frame_capture.load_capture_config",
         ), patch("pm_core.tui.sync._log") as mock_log:
@@ -78,9 +90,11 @@ class TestKillMergedPrWindows:
 
 
 class TestLoadStateParseError:
-    """app._load_state catches ProjectYamlParseError and keeps previous state."""
+    """app._load_state keeps previous state on an unloadable project.yaml."""
 
-    def test_corrupt_yaml_keeps_previous_data(self):
+    @pytest.mark.parametrize("error", _UNLOADABLE,
+                             ids=lambda e: type(e).__name__)
+    def test_corrupt_yaml_keeps_previous_data(self, error):
         """_load_state should log a warning and keep app._data unchanged on corrupt YAML."""
         from pm_core.tui.app import ProjectManagerApp
 
@@ -93,7 +107,7 @@ class TestLoadStateParseError:
         ), patch.object(
             store,
             "load",
-            side_effect=store.ProjectYamlParseError("corrupt"),
+            side_effect=error,
         ), patch("pm_core.tui.app._log") as mock_log:
             app = types.SimpleNamespace(
                 _root="/some/root",
@@ -112,3 +126,72 @@ class TestLoadStateParseError:
         # Warning was logged
         mock_log.warning.assert_called_once()
         assert "corrupt" in str(mock_log.warning.call_args[0][1])
+
+
+class TestMissingProjectFileKeepsRoot:
+    """A checkout or rebase briefly unlinks project.yaml (S44).
+
+    While the project's pm dir still exists, neither the background sync
+    nor a state reload may drop the root: the QA resume scan stops adopting
+    orphaned runs while ``app._root`` is None.
+    """
+
+    def test_background_sync_skips_while_pm_dir_exists(self, tmp_path):
+        app = types.SimpleNamespace(
+            _root=tmp_path, _data={"prs": [{"id": "pr-001"}]},
+            _current_guide_step=None)
+        with patch.object(store, "find_project_root",
+                          side_effect=FileNotFoundError("No project.yaml found")), \
+             patch("pm_core.tui.frame_capture.load_capture_config"), \
+             patch("pm_core.tui.sync._log") as mock_log:
+            asyncio.run(background_sync(app))
+        assert app._root == tmp_path
+        assert app._data == {"prs": [{"id": "pr-001"}]}
+        assert "Skipping sync" in mock_log.warning.call_args[0][0]
+
+    def test_background_sync_skip_names_the_missing_file(self, tmp_path):
+        """The cwd lookup's "cd into your repo" advice does not fit a TUI
+        whose project file is briefly gone: name the missing path (S45)."""
+        app = types.SimpleNamespace(
+            _root=tmp_path, _data={"prs": [{"id": "pr-001"}]},
+            _current_guide_step=None)
+        with patch.object(store, "find_project_root",
+                          side_effect=FileNotFoundError(
+                              "No project.yaml found. Either cd into your repo, "
+                              "use 'pm -C /path/to/pm-dir', or set PM_PROJECT")), \
+             patch("pm_core.tui.frame_capture.load_capture_config"), \
+             patch("pm_core.tui.sync._log") as mock_log:
+            asyncio.run(background_sync(app))
+        reason = str(mock_log.warning.call_args[0][1])
+        assert reason == ("[Errno 2] No such file or directory: "
+                          f"'{tmp_path / 'project.yaml'}'")
+
+    def test_background_sync_without_a_root_still_resets(self, tmp_path):
+        app = types.SimpleNamespace(
+            _root=tmp_path / "gone", _data={"prs": [{"id": "pr-001"}]},
+            _current_guide_step="no_project")
+        with patch.object(store, "find_project_root",
+                          side_effect=FileNotFoundError("No project.yaml found")), \
+             patch("pm_core.tui.frame_capture.load_capture_config"), \
+             patch.object(sync_guide, "detect_state",
+                          return_value=("no_project", None)):
+            asyncio.run(background_sync(app))
+        assert app._root is None
+        assert app._data == {}
+
+    def test_load_state_keeps_previous_data_while_pm_dir_exists(self, tmp_path):
+        from pm_core.tui.app import ProjectManagerApp
+
+        previous = {"project": {"name": "test"}, "prs": [{"id": "pr-001"}]}
+        app = types.SimpleNamespace(
+            _root=tmp_path, _data=dict(previous),
+            _plans_visible=False, _qa_visible=False,
+            _update_display=MagicMock(), _show_normal_view=MagicMock())
+        with patch.object(store, "load",
+                          side_effect=FileNotFoundError(
+                              f"[Errno 2] No such file or directory: "
+                              f"'{tmp_path}/project.yaml'")):
+            ProjectManagerApp._load_state(app)
+        assert app._root == tmp_path
+        assert app._data == previous
+        app._show_normal_view.assert_called_once()

@@ -703,6 +703,8 @@ def _run_picker(tmp_path, monkeypatch, prs, windows, window_name, script,
     fzf = _FakeFzf(script, on_launch)
     run_cmd = MagicMock()
     with patch.object(sess.pane_registry, "registry_path", return_value=reg), \
+         patch.object(sess.pane_registry, "pm_session_name",
+                      side_effect=sess.pane_registry.base_session_name), \
          patch.object(sess, "_resolve_root_from_session", return_value=tmp_path), \
          patch.object(sess.store, "load",
                       side_effect=load_project or (
