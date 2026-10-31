@@ -14331,7 +14331,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-31T22:18:39.500088+00:00'
+  updated_at: '2026-10-31T22:33:03.593534+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -15196,6 +15196,32 @@ prs:
       window.'
     created_at: '2026-10-31T22:18:39Z'
     last_edited: '2026-10-31T22:18:39Z'
+  - id: note-9859736
+    text: 'QA S23 (at-lock sign-off guard, head 4e740d098): PASS 4/4, no code change.
+      Story 1 — project.yaml.lock held by another process; pm pr close queued at t+0.05
+      s and pm pr signoff at t+0.90 s, 7 rounds: two close-wins rounds printed signoff
+      rc 1 with exactly "PR <A> became closed while opening the sign-off — not marked
+      sign_off and no sign-off window was opened." and empty stdout (no marked as
+      sign_off / Integration: / Opened sign-off window / Switched to existing), close
+      rc 0 with Closed/Kept/Reopen/Cleanup + the dependent warning on stderr, no signoff-<A>
+      window, record closed with the close''s closed_at, signed_off_at byte-identical
+      to pre-round, 20 ms sampler qa->closed with no sign_off, qa-local.txt sha256
+      unchanged. The signoff-wins rounds were exercised too (qa->sign_off->closed,
+      window left alive). Story 2 — lone signoff then close: rc 0 marked+Integration+Opened,
+      show Status: sign_off, signed_off_at set/no closed_at; the close then closed
+      it retaining signed_off_at/note/branch/workdir with the signoff window still
+      alive and sha unchanged; concurrent signoff->close at 0.3 s gave both rc 0 and
+      sampler qa->sign_off->closed. Story 3 — TUI "i" pressed at t+0.55 s behind the
+      held lock: debug log + status bar record the same Error line, no "Auto-start:
+      <A> -> sign-off", no window; A dropped from the default view, f x7 reaches filter:
+      closed with A as closed, cursor on B (pm pr list * on B), pm pr show keeps note/workdir,
+      f x1 returns to the default filter. Story 4 — pm pr signoff on a closed PR exits
+      1 with exactly the reopen sentence, no window, status/closed_at byte-identical.
+      tests/test_pr_close.py 63 passed incl. test_signoff_does_not_launch_against_a_concurrently_closed_pr.
+      Captures: /pm-captures/scenarios/23/{story1-close-wins,story2-lone-signoff,story3-tui-i-vs-close,story4-closed-refusal}
+      (cast+mp4+transcript+driver+manifest).'
+    created_at: '2026-10-31T22:33:03Z'
+    last_edited: '2026-10-31T22:33:03Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
