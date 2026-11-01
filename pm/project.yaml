@@ -14331,7 +14331,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-11-01T01:33:54.423925+00:00'
+  updated_at: '2026-11-01T01:58:29.896075+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -15374,6 +15374,32 @@ prs:
       and /post-fix.'
     created_at: '2026-11-01T01:33:54Z'
     last_edited: '2026-11-01T01:33:54Z'
+  - id: note-7c4c8d7
+    text: 'Review 3dcb i1: (1) `pm pr close --remove` now honours the at-lock merged
+      guard. The merged check sat inside the non-remove branch of pr_close apply,
+      so a merge landing between the pre-lock load and the store lock was refused
+      by a plain close but silently DELETED by --remove — destroying merge evidence
+      the user never saw (merged_at/signoff/integrity) and re-blocking the dependents
+      the merge had just satisfied. The guard now runs before either branch, keyed
+      on the pre-lock status (prior_status merged and old_status != merged); the --remove
+      refusal says "PR <id> became merged while removing — the registry entry was
+      NOT removed. Re-run ... to delete the merged record (branch and workdir are
+      kept)." exit 1, leaving the record/branch/workdir/active_pr intact (A5 still
+      lets a re-run delete a known-merged record). New test test_remove_does_not_delete_a_concurrently_merged_record
+      fails on the previous head (exit 0, entry gone). (2) Spec/doc sync: impl.md
+      item 52 documents the tech_tree hide-closed empty-state fix (QA S32, previously
+      absent from the spec), item 53 the new guard, item 45 now names _launch_blocked_at_lock
+      (it still said _terminal_status_at_lock), section 4 gains the merge-lands-between-load-and-update
+      edge case, section 5 lists tech_tree.py and test_tech_tree_widgets.py; qa.md
+      R16 gains the --remove-vs-merge case; pm/plans/refactor-migration-map.md drops
+      the stale "branch cleanup" premise from pr close in both places, the same class
+      as the plan-a35369f note. (3) Committed a previously-uncommitted project.yaml
+      record: pr-65cbb15 (in-place mutators print success after a concurrent pm pr
+      close --remove deletes the record) — filed by the S25 session, still pending,
+      out of this PR scope. Full suite on the final tree: 5282 passed, 1 skipped,
+      0 failed (421 s, /pm-captures/review-3dcb-i1/full-suite.log).'
+    created_at: '2026-11-01T01:58:29Z'
+    last_edited: '2026-11-01T01:58:29Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
@@ -49778,6 +49804,38 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-29T11:24:39.224612+00:00'
   updated_at: '2026-10-29T11:24:39.224612+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-65cbb15
+  plan: bugs
+  title: 'Bug: in-place mutators print success after a concurrent pm pr close --remove
+    deleted the record'
+  branch: pm/pr-65cbb15-bug-in-place-mutators-print-success-after-a-concur
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/pr.py — pr_note_add (apply: `if not pr: return`,
+    then `Added note …`), pr_note_edit/delete, pr_edit flag path (`Updated …`), and
+    any other in-place mutator whose apply no-ops on a missing entry.
+
+
+    Repro: hold pm/project.yaml.lock, start `pm pr note add <id> "x"` (it loads the
+    record and blocks on the lock), run `pm pr close <id> --remove` in another process,
+    release. The note is not written but the command still prints `Added note <note-id>
+    to <id>` and exits 0, so the user believes the note landed on a record that no
+    longer exists. The same phantom-success shape was fixed for launches (start/review/signoff)
+    in d7dbed6f3 by reporting `removed`; in-place mutators still fall through to their
+    success line.
+
+
+    Expected: report that the record was removed instead of claiming the note/edit
+    landed (or fail honestly), like the launch guards.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-31T23:17:14.726953+00:00'
+  updated_at: '2026-10-31T23:17:14.726953+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

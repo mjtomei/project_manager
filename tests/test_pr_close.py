@@ -769,6 +769,43 @@ def test_close_does_not_overwrite_a_concurrent_merge(tmp_path):
     assert "closed_at" not in entry
 
 
+def test_remove_does_not_delete_a_concurrently_merged_record(tmp_path):
+    """`pm pr close --remove` deletes the record the user saw.  A merge that
+    lands between that load and the store lock is newer than the request, so
+    deleting the entry would erase merge evidence (and re-block the dependents
+    the merge just satisfied) for a merge the user never saw: refuse once,
+    like the plain close, and let a re-run act on the now-known merged record
+    (A5)."""
+    project = _make_project(tmp_path, status="qa")
+    real_locked_update = store.locked_update
+
+    def racing_update(root, fn, **kwargs):
+        # `pm pr merge` (or a sync) finalizes the PR after this command loaded
+        # its snapshot but before it takes the lock.
+        data = store.load(root)
+        entry = store.get_pr(data, "pr-001")
+        entry["status"] = "merged"
+        entry["merged_at"] = "2026-09-01T00:00:00+00:00"
+        store.save(data, root)
+        return real_locked_update(root, fn, **kwargs)
+
+    with _fake_gh() as backend:
+        backend.add_pr(head="pm/pr-001")
+        with mock.patch.object(pr_mod.store, "locked_update", racing_update):
+            result = _run_close(project["pm_dir"], "pr-001", "--remove")
+
+    assert result.exit_code != 0
+    assert "became merged while removing" in result.output
+    assert "Removed registry entry" not in result.output
+    # The merged record (and everything close never destroys) survives.
+    entry = _load_entry(project["pm_dir"])
+    assert entry is not None
+    assert entry["status"] == "merged"
+    assert entry["merged_at"] == "2026-09-01T00:00:00+00:00"
+    assert project["workdir"].is_dir()
+    assert store.load(project["pm_dir"])["project"]["active_pr"] == "pr-001"
+
+
 def test_close_noops_when_entry_removed_concurrently(tmp_path):
     """A concurrent `--remove` between load and lock must not raise or
     resurrect the entry."""

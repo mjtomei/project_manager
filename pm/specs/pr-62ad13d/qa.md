@@ -1,20 +1,65 @@
 # pr-62ad13d — QA spec: `pm pr close` is a non-destructive lifecycle action
 
 Implementation spec: `pm/specs/pr-62ad13d/impl.md`.
-Regression suite: `tests/test_pr_close.py` (62 tests) plus
+Regression suite: `tests/test_pr_close.py` (66 tests) plus
 `tests/test_fake_github.py`, `tests/test_cli_helpers.py`,
 `tests/test_store_validation.py`, `tests/test_watcher_loop.py`.
 
-Spec last synced against head `292c738d` (2026-10-29), after the
-review iterations that added the QA/sign-off reopen guards, the watcher
-prompt's `closed` lifecycle line, the `--remove` dependent wording, and the
-`closed_at` centralisation in `_record_status_timestamp`.
+Spec last synced against head `d7dbed6f3` (2026-10-31), after the QA run that
+found the sign-off/close race and the removed-record launch race, and the two
+implementation fixes that closed them (`f12b46258`, `d7dbed6f3`).
+
+Review-loop `3dcb i1` (2026-11-01) added R16's `--remove` vs concurrent-merge
+case: `pr_close`'s at-lock merged guard now also covers `--remove`, so a record
+that merged while the removal was in flight is refused rather than deleted
+(`test_remove_does_not_delete_a_concurrently_merged_record`).
+
+History: the user-authorized integration merged `origin/master` `eaf3372e`
+(PR #249, QA execution workers routed through Claude mixed workers) into this
+branch as `7f3fe839`. The integration kept master's `qa_loop._live_pr_status()`
+helper (survives an unparseable `project.yaml`) and drove its three late guards
+from `TERMINAL_PR_STATES`; `autostart_state.py` and `cli/pr.py` conflicts were
+import unions.
+
+The 2026-10-31 QA run then found one real defect in the new at-lock guard
+family: `pm pr signoff` decided the `qa -> sign_off` claim and the window
+launch from its pre-lock snapshot, so a concurrent `pm pr close` that won the
+store lock still produced `PR <id> marked as sign_off.`, opened a
+`signoff-<id>` window against the closed record and exited 0. `f12b46258` makes
+the transition and the launch decision one `locked_update`
+(`helpers._terminal_status_at_lock` on the freshly loaded entry); a terminal
+result now exits 1 with
+`PR <id> became <status> while opening the sign-off — not marked sign_off and no sign-off window was opened.`
+The fix is covered by
+`tests/test_pr_close.py::test_signoff_does_not_launch_against_a_concurrently_closed_pr`
+(fails on the previous head).
+
+The same QA run then found the removed-record half of that guard family
+(S25): `pm pr close --remove` deleting the entry between a launch's pre-lock
+snapshot and its apply was read by the start/review/sign-off at-lock guards as
+"nothing to update", so the launch still printed its success line and opened
+its window (`pm pr review`: `PR <id> marked as in_review.` + `review-<id>`,
+exit 0; `pm pr signoff`: opened `signoff-<id>`, exit 0; `pm pr start`:
+`is now in_progress` and then a `ValueError` traceback from `prompt_gen`).
+`d7dbed6f3` routes all three through the shared
+`helpers._launch_blocked_at_lock()`, which reports `"removed"` for a missing
+entry, and each exits 1 with a removal-specific sentence before printing a
+success line or opening a window. Covered by
+`test_review_does_not_launch_against_a_removed_pr`,
+`test_signoff_does_not_launch_against_a_removed_pr` and
+`test_start_does_not_claim_a_start_on_a_removed_pr` (all three fail on the
+previous head). **No PASS from the previous QA run carries forward to this
+head; both fixed races must be re-verified at runtime.**
 
 Change under test: `pm_core/cli/pr.py:pr_close()` (with
 `pm_core/cli/helpers.py:_record_status_timestamp`,
-`_terminal_status_at_lock`, `pm_core/pr_utils.py:TERMINAL_PR_STATES`,
-`pm_core/pr_sync.py`, `pm_core/tui/sync.py`, `pm_core/cli/pr.py:pr_cleanup`,
-`pm_core/fake_github.py`).
+`_terminal_status_at_lock`, `_launch_blocked_at_lock`,
+`LAUNCH_REMOVED_AT_LOCK`, `_closed_reopen_hint`,
+`pm_core/pr_utils.py:TERMINAL_PR_STATES`, `pm_core/pr_sync.py`,
+`pm_core/tui/sync.py`, `pm_core/qa_loop.py` terminal guards and
+`_live_pr_status()`, `pm_core/review_loop.py` `_pr_is_terminal`,
+`pm_core/autostart_state.py:TERMINAL_STATUSES`, `pm_core/cli/pr.py:pr_cleanup`,
+`pm_core/home_window/pr_list.py`, `pm_core/fake_github.py`).
 
 The original bug: `pm pr close` deleted the registry entry, ran
 `gh pr close --delete-branch`, and `shutil.rmtree`'d the workdir — even with
@@ -175,6 +220,11 @@ GIVEN a hand-edited `project.yaml` entry with no `id`,
 WHEN the user runs `pm pr cleanup --all` or `--prune`,
 THEN the malformed entry is skipped (no traceback, and `--all` does not fail
 after deleting a workdir) and the valid entries are still cleaned.
+GIVEN a project whose PRs (terminal or not) have workdirs,
+WHEN the user runs `pm pr cleanup --all --force`,
+THEN it removes the workdirs and clears the `workdir` references but **never**
+deletes a registry entry — only `pm pr close --remove` removes an entry
+(observed in the 2026-10-29 concurrency run; a closed entry survives `--all`).
 
 ### R14 — A GitHub failure never triggers a destructive local fallback
 GIVEN a GitHub-backed PR where the `gh` close call fails (scripted failure,
@@ -199,15 +249,42 @@ QA records this if observed but does not fail this PR for it.
 GIVEN one project and two or more actors (separate processes/containers)
 operating at once,
 WHEN two closes race, or a close races `pm pr close --remove`, or a close
-races `pm pr sync-github` (GitHub OPEN), a close races `pm pr start` or
-`pm pr review`, a close races a reopen (`pm pr edit --status pending`), or a
-close races the explicit `pm pr cleanup` / `pm pr cleanup --all`,
+races `pm pr sync-github` (GitHub OPEN), a close races `pm pr start`,
+`pm pr review` or `pm pr signoff`, a close races a reopen
+(`pm pr edit --status pending`), or a close races the explicit
+`pm pr cleanup` / `pm pr cleanup --all`,
 THEN every invocation ends without a traceback, the final registry state is
 one of the legal outcomes (closed with history intact, or removed once — never
 a half-written entry, and never `pending` while still carrying `closed_at`),
 a closed record is never resurrected to an active status or re-pointed as
-active, and the workdir is never deleted by a close (only by the explicit
-cleanup that ran alongside it).
+active, the workdir is never deleted by a close (only by the explicit
+cleanup that ran alongside it), and a launch command that loses the race
+**reports the terminal result instead of claiming its transition and opens no
+window** (the `became <status> while opening the …` contract shared by
+start/review/sign-off).
+GIVEN a `pm pr close --remove` and a merge (`pm pr merge`, or a sync that
+discovers the merge) racing for the same record,
+WHEN the merge wins the store lock,
+THEN the removal exits 1 with `PR <id> became merged while removing — the
+registry entry was NOT removed. Re-run 'pm pr close <id> --remove' to delete
+the merged record (branch and workdir are kept).`, never prints `Removed
+registry entry`, and leaves the record `merged` with its merge evidence,
+branch, workdir and `active_pr` intact — a merge newer than the user's request
+is never deleted silently (re-running the removal then deletes the now-known
+merged record).
+GIVEN a `pm pr close --remove` and a launch command (`pm pr start`,
+`pm pr review`, `pm pr signoff`) racing for the same record,
+WHEN the removal wins the store lock,
+THEN the launch exits 1 with a removal-specific sentence — `PR <id> was
+removed while starting — not recording the start. Any prepared workdir is
+left in place.` / `… was removed while opening the review — not marked
+in_review and no review window was opened.` / `… was removed while opening
+the sign-off — not marked sign_off and no sign-off window was opened.` — never
+prints its success line (`is now in_progress` / `marked as in_review` /
+`marked as sign_off`), opens no window, raises no traceback (the pre-fix
+`pm pr start` crashed in `prompt_gen` with `ValueError`), and does not leave
+`active_pr` pointing at the removed id; the final registry has no entry,
+while the workdir and branch are untouched.
 GIVEN another process holds the `project.yaml` store lock longer than the
 close's 2-second timeout,
 WHEN the user closes a PR,
@@ -317,6 +394,40 @@ sync overwrite, destructive fallback, locking).
   wording for merged records, `closed_at` centralised in
   `_record_status_timestamp`, `pm pr cleanup --all`/`--prune` tolerating
   malformed entries). Prior evidence is not a pass for the current head.
+- **Current head after integration** (2026-10-31, `f78417017`): the branch
+  merged `origin/master` `eaf3372e` (PR #249, QA execution workers routed
+  through Claude mixed workers). The close contract is unchanged, but the
+  QA-loop code around the terminal guards was substantially rewritten on
+  master, so a fresh QA run must re-prove the original bug and re-exercise
+  the loops (review/QA) against a closed PR. The user also authorized a
+  restart in implementation and a fresh review/QA/sign-off sequence; no
+  earlier PASS (including the 2026-10-29 QA PASS on heads before the merge)
+  carries forward.
+- **Previous QA run on the integrated head** (2026-10-31, scenarios 1-22):
+  all scenarios passed except S22 (concurrent close against review, sign-off,
+  QA, sync, `--remove`, held lock), which found the sign-off launch race
+  described at the top of this spec and reported NEEDS_WORK. `f12b46258`
+  fixed it; the next run re-verifies that race (both orderings, CLI and TUI
+  command bar) and the nominal sign-off transitions the refactor touched.
+- **Second QA run on the integrated head** (2026-10-31, scenarios 23-26):
+  S23 (at-lock sign-off guard, both orderings) and S24 (sign-off nominal
+  transitions) PASS; S25 (close `--remove` racing a launch) NEEDS_WORK —
+  it found the phantom-success/removed-record defect described at the top of
+  this spec; S26 (original bug re-proven) PASS. `d7dbed6f3` fixed S25.
+- **Removed-record launch race** — resolved (2026-10-31, `d7dbed6f3`): a
+  launch that finds its record gone inside `locked_update` exits 1 and names
+  the removal; it never prints `is now in_progress` / `marked as in_review` /
+  `marked as sign_off`, never opens a window, and never leaves `active_pr`
+  pointing at the removed id. The exact sentences are
+  `PR <id> was removed while starting — not recording the start. Any
+  prepared workdir is left in place.`,
+  `PR <id> was removed while opening the review — not marked in_review and
+  no review window was opened.` and
+  `PR <id> was removed while opening the sign-off — not marked sign_off and
+  no sign-off window was opened.` R16 states this as a requirement; a run
+  that sees the old phantom success is a regression, not an accepted
+  behaviour. The remove side is unchanged: `--remove` still prints
+  `Removed registry entry …` / `Kept:` and leaves the workdir and branch.
 - No **[UNRESOLVED]** ambiguities: the user clarification of 2026-10-28
   (retain YAML entry, remote branch, local workdir; no automatic cleanup)
   settles the open questions this spec would otherwise raise.

@@ -420,8 +420,10 @@ workdirs are touched.
     `_record_status_timestamp(pr, "in_progress")`), attached a workdir and
     re-pointed `active_pr` at the terminal record (violating A2), and
     `review` rewrote `closed` → `in_review` outright.  Both applies now call
-    the shared `helpers._terminal_status_at_lock` on the freshly loaded entry
-    and no-op when it reports a terminal status; the command then exits 1 with
+    the shared `helpers._launch_blocked_at_lock` on the freshly loaded entry
+    (it delegates the terminal half to `_terminal_status_at_lock` and adds the
+    removed-record case, item 51) and no-op when it reports a blocked launch;
+    the command then exits 1 with
     a message naming the status (for `start`, noting the prepared workdir is
     left in place) and never launches a review window.  Covered by
     `test_start_does_not_record_a_start_on_a_concurrently_closed_pr` and
@@ -529,6 +531,41 @@ workdirs are touched.
     `Kept:`/`Note:` lines while the launch exits 1 with the message above,
     opens no window, and leaves the workdir/branch untouched.
 
+52. The TUI's empty state covers a project whose PRs are all hidden by the
+    default toggles (QA S32).  `pm pr close` retains `closed` records, so
+    "every PR is closed" is now an ordinary project state rather than one the
+    registry can never reach — and `hide_closed` defaults to True, so
+    `tech_tree._empty_message` returned `None`, `_rebuild` mounted no
+    children, and Textual painted the widget's own repr (`TechTree#tech-tree`)
+    in the grid until a filter changed.  The function now has a final branch
+    (`No PRs to show. Press F to cycle filter.`) for "nothing visible, no
+    status filter, no hidden plans"; `F` cycles the status filter, which is the
+    only way to reveal a closed PR (`pr-a3b86b7` tracks giving `closed` its own
+    show/hide toggle like `merged`'s).  Covered by
+    `tests/test_tech_tree_widgets.py::test_hide_closed_empty_state_renders`
+    (fails on the previous head — the grid is blank).  Reproduced and fixed in
+    QA S32 against a one-closed-PR sandbox
+    (`/pm-captures/scenarios/32/{pre-fix,post-fix}/`).
+
+53. `--remove` honours the concurrent-merge guard too (review 3dcb i1).  The
+    at-lock merged check sat inside the *non-remove* branch of `pr_close`'s
+    `apply`, so a merge landing between the pre-lock load and the store lock
+    was rewritten to `closed` by a plain close (refused, item A5) but silently
+    **deleted** by `pm pr close --remove`: the merge evidence the user never
+    saw (`merged_at`, sign-off, merge integrity) was destroyed and the
+    dependents the merge had just satisfied were re-blocked with the record
+    gone.  `--remove` authorizes deleting a record the user *saw* as merged
+    (A5), not one that merged while the command was in flight, so the guard is
+    now checked once before either branch and keys on the pre-lock status
+    (`prior_status == "merged" and old_status != "merged"`).  The `--remove`
+    refusal says the entry was NOT removed and names the re-run
+    (`PR <id> became merged while removing — the registry entry was NOT
+    removed. Re-run 'pm pr close <id> --remove' to delete the merged record
+    (branch and workdir are kept).`, exit 1); a plain close keeps the existing
+    `merged_refusal` text.  Covered by
+    `test_remove_does_not_delete_a_concurrently_merged_record` (fails on the
+    previous head — exit 0, the merged entry is gone).
+
 The pre-existing `tests/test_pr_enhancements.py:746`
 (`TestGitHubCloseResilience`) asserted the *old* destructive outcome (workdir
 removed, entry removed); it was rewritten to assert retention
@@ -545,7 +582,9 @@ removed, entry removed); it was rewritten to assert retention
   (item 51). The merged guard is
   re-checked inside `apply` too: a merge landing between the pre-lock load and
   the lock must not be rewritten to `closed` (the pre-lock refusal message is
-  reused and the command exits 1).  The same rule applies in the other
+  reused and the command exits 1) — and it guards `--remove` as well, so a
+  record that merged while the command was in flight is not deleted either
+  (item 53).  The same rule applies in the other
   direction: a *launch* whose pre-lock guard saw an active status must re-check
   terminal status inside its own `apply`, or a `pm pr close` landing during its
   long pre-lock work is overwritten (review e89f i4,
@@ -632,6 +671,11 @@ No **[UNRESOLVED]** ambiguities.
   a "removed concurrently; nothing to close/remove" message (covered by
   `test_close_noops_when_entry_removed_concurrently` and
   `test_remove_noops_when_entry_removed_concurrently`).
+- **Merge lands between load and update** (plain close *and* `--remove`): the
+  command exits 1 without touching the record — a plain close refuses as
+  always, `--remove` reports that the entry was NOT removed and names the
+  re-run (item 53).  Deleting it would destroy merge evidence the user never
+  saw.
 - **`gh` unavailable / unauthenticated**: `SystemExit` swallowed as today →
   warning, status still `closed`, nothing deleted.
 - **GitHub says the PR is already closed/merged**: fake/real `gh` may exit
@@ -700,6 +744,10 @@ No **[UNRESOLVED]** ambiguities.
   a watcher session does not read a retired PR as one to merge (review 8820
   i2, R11 item 41), and the auto-cleanup addendum's `pm pr cleanup` line
   names merged *or closed* workdirs (review a81e i1, R11 item 48).
+- `pm_core/tui/tech_tree.py` — `_empty_message` gains the "all PRs hidden by
+  the default toggles" branch, so a project whose PRs are all retained
+  `closed` records draws a hint instead of the widget's repr (QA S32, R11
+  item 52).
 - `pm/qa/regression/command-dedup.md`, `pm/qa/regression/multi-window-registry.md`
   — cleanup steps use `--remove`.
 - `tests/test_pr_close.py` (new), `tests/test_pr_enhancements.py`
@@ -708,7 +756,8 @@ No **[UNRESOLVED]** ambiguities.
   `--delete-branch` emulation), `tests/test_store_validation.py`
   (`closed_at` lifecycle backfill, review e89f i2),
   `tests/test_cli_helpers.py` (`TestRecordStatusTimestampClosedAt` — the
-  helper's `closed_at` contract, review e89f i1), and
+  helper's `closed_at` contract, review e89f i1),
+  `tests/test_tech_tree_widgets.py` (the hide-closed empty state, QA S32), and
   `tests/test_watcher_loop.py` (the watcher prompt's `closed` lifecycle line,
   review a81e i1).
 
@@ -765,3 +814,10 @@ close, honours `--keep-github`, makes `--remove` registry-only, and refuses
 every lifecycle command with the reopen command (auto-sequence reports
 `closed`, exit 0). Evidence:
 `/pm-captures/integration-20261031/`.
+
+Three defects the post-integration QA runs found were fixed on top of that
+head, each with a failing-then-passing test (items 50, 51 and 52):
+`f12b46258` (sign-off decides its transition and launch from the fresh
+in-lock status), `d7dbed6f3` (start/review/sign-off report a record removed
+under the lock instead of claiming success), and `601105902` (the TUI's
+hide-closed empty state).  Nothing in the close contract changed.

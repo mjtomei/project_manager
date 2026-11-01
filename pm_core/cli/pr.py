@@ -3835,22 +3835,25 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
             # Removed concurrently — nothing left to close or remove.
             missing_at_lock = True
             return
+        prior_status = pr.get("status") or "pending"
+        if prior_status == "merged" and old_status != "merged":
+            # A merge landed between our load and the lock.  Rewriting it into
+            # `closed` would erase merge history, and `--remove` would delete
+            # that history outright — neither is what the user saw when they
+            # ran the command, so refuse once and let a re-run act on the
+            # now-known merged record (a plain close still refuses; --remove
+            # deletes it, A5).
+            merged_concurrently = True
+            return
         if remove:
             data["prs"] = [p for p in (data.get("prs") or [])
                            if p.get("id") != pr_id]
         else:
-            if (pr.get("status") or "pending") == "merged":
-                # A merge landed between our load and the lock: apply the same
-                # rule as the pre-lock guard instead of rewriting a merge
-                # record into `closed`.
-                merged_concurrently = True
-                return
             # Repeat close is idempotent: updated_at still moves, but the
             # original closure time is history and is not rewritten.  An entry
             # closed before closed_at existed keeps none — stamping "now"
             # would invent a closure time that never happened.  The helper
             # owns that rule (it sees the previous status).
-            prior_status = pr.get("status") or "pending"
             pr["status"] = "closed"
             _record_status_timestamp(pr, "closed", previous_status=prior_status)
         if data.get("project", {}).get("active_pr") == pr_id:
@@ -3864,7 +3867,16 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
     updated = store.locked_update(root, apply)
 
     if merged_concurrently:
-        click.echo(merged_refusal, err=True)
+        if remove:
+            # The user asked to drop a record they believed was not merged;
+            # the merge is newer than their request, so nothing was deleted.
+            click.echo(
+                f"PR {display_id} became merged while removing — the registry "
+                f"entry was NOT removed. Re-run 'pm pr close {pr_id} "
+                f"--remove' to delete the merged record (branch and workdir "
+                f"are kept).", err=True)
+        else:
+            click.echo(merged_refusal, err=True)
         raise SystemExit(1)
 
     if missing_at_lock:
