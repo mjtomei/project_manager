@@ -504,6 +504,19 @@ class TestGenerateWatcherPrompt:
         prompt = generate_watcher_prompt(data)
         assert "pm tui view" not in prompt
 
+    def test_describes_closed_as_terminal_history(self):
+        """`pm pr close` retains a closed record, so the lifecycle list must
+        describe it as terminal history — never as a PR to merge to unblock
+        its dependents (pr-62ad13d; spec R11 item 41)."""
+        from pm_core.prompt_gen import generate_watcher_prompt
+        data = self._make_data()
+        prompt = generate_watcher_prompt(data)
+        assert "`closed` -- Retired without merging" in prompt
+        assert "keeps the record as history" in prompt
+        assert "never satisfies a dependency" in prompt
+        assert "pm pr edit <id> --status pending" in prompt
+        assert "Do not merge it to unblock them." in prompt
+
 
 # --- CLI routing tests ---
 
