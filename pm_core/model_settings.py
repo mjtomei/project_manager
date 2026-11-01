@@ -140,23 +140,27 @@ def format_rows(rows: list[RoleRow]) -> list[str]:
         # environment/provider overrides it", so name neither: the notes
         # say which.
         lines.append("* effort not confirmed by pm (see the notes below)")
-    seen_notes: set[str] = set()
+    seen_notes: set[tuple[str, str]] = set()
     for r in rows:
         if r.problem:
             lines.append(f"! {r.role}: {r.problem}")
         for note in r.effort_notes:
             # One note per distinct finding: a route-wide fact repeats for
-            # every role it decides.
-            if note in seen_notes:
+            # every role it decides.  The route is part of the key: the
+            # wording does not name it, so the same level on a different
+            # route is a different finding and must still be printed.
+            key = (r.route, note)
+            if key in seen_notes:
                 continue
-            seen_notes.add(note)
+            seen_notes.add(key)
             lines.append(f"! {r.role}: {note}")
     return lines
 
 
 def effort_warning(project_data: dict | None, session_type: str,
                    pr: dict | None = None) -> str | None:
-    """A warning when the selected route declares the role's effort unsupported.
+    """A warning when the selected route declares the role's effort
+    unsupported.
 
     Configuration-only (``use_env=False``): the caller's environment is not
     what the command just wrote.  The setting is still valid (the metadata

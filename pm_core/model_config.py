@@ -12,6 +12,14 @@ Effort level resolution:
     >  the selected provider's effort  >  project.yaml session_effort
     >  global ~/.pm/settings  >  (no default — use CLI setting)
 
+The ambient ``CLAUDE_CODE_EFFORT_LEVEL`` overrides ``--effort`` inside the
+Claude CLI, so it is resolved too: when a pm setting selects a level, that
+level wins and the launch unsets the variable; with no pm selection, the
+ambient level is the session's effort (``ModelResolution.effort_status``
+says which case applies).  ``CLAUDE_CODE_EFFORT_LEVEL`` set by the selected
+provider's own ``env:`` block is the user's explicit configuration: the
+launch keeps it, and the resolution reports it.
+
 A PR's ``session_models`` / ``session_effort`` entries apply to one role
 (with the same parent-role fallback as the project blocks); its ``model``
 / ``effort`` to every role.  ``pm pr model`` and the TUI's model popup

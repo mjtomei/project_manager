@@ -389,7 +389,8 @@ def provider_detail_lines(p, *, status: bool = False) -> list[str]:
         # (kept in the file for provenance, never sent to --effort).
         usable = list(accepted_efforts_of(p) or ())
         ignored = [e for e in p.supported_efforts if e not in EFFORT_LEVELS]
-        lines.append(f"  accepted Claude levels: {', '.join(usable) or '(none)'}")
+        accepted = ", ".join(usable) or "(none)"
+        lines.append(f"  accepted Claude levels: {accepted}")
         if ignored:
             lines.append(f"  non-Claude levels kept for provenance: "
                          f"{', '.join(ignored)}")
@@ -411,9 +412,10 @@ def provider_detail_lines(p, *, status: bool = False) -> list[str]:
         # "auto"/"unset" (and a blank, which is still an exported
         # assignment) explicitly means "no override".
         kind, _level = classify_effort_env(assigned)
-        effect = {"no_override": "(no override; --effort applies)",
-                  "unknown": "(not a Claude effort level pm knows)"}.get(
-                      kind, "(overrides --effort for this provider's sessions)")
+        effect = {
+            "no_override": "(no override; --effort applies)",
+            "unknown": "(not a Claude effort level pm knows)",
+        }.get(kind, "(overrides --effort for this provider's sessions)")
         lines.append(f"  effort env: {AMBIENT_EFFORT_ENV}={assigned} {effect}")
     if p.type == "router":
         lines.extend(f"  {line}" for line in _router_detail_lines(p))

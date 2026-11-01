@@ -921,6 +921,20 @@ class TestProviderEffortMetadata:
         assert "non-Claude levels kept for provenance: none" in r.output
         assert "supported_efforts source: catalog" in r.output
 
+    def test_show_prints_a_future_date_without_a_negative_age(
+            self, pm_home_dir):
+        """A future ``checked_at`` (a typo, or a clock that moved back) has
+        no meaningful age: print the date alone, never "(-3 days old)"."""
+        from datetime import date, timedelta
+        future = (date.today() + timedelta(days=3)).isoformat()
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts=["high"],
+            supported_efforts_checked_at=future)})
+        r = _cli("provider", "show", ROUTE)
+        assert r.exit_code == 0, r.output
+        assert f"supported_efforts checked: {future}" in r.output
+        assert "days old" not in r.output
+
     def test_list_names_supported_efforts(self, pm_home_dir):
         _providers(pm_home_dir, **{ROUTE: _router(
             supported_efforts=["low", "high"])})
@@ -998,6 +1012,38 @@ class TestEffortDisplay:
         assert any(l.startswith("* effort not confirmed by pm")
                    for l in lines)
 
+    def test_the_same_note_on_two_routes_is_printed_for_each(
+            self, pm_home_dir):
+        """The note wording does not name the route, so the dedup must be
+        keyed by route: the same level on two routes is two findings."""
+        _providers(pm_home_dir,
+                   **{ROUTE: _router(supported_efforts=["low"]),
+                      "rt2": _router(supported_efforts=["low"])})
+        data = _project(session_models={"impl": f"provider:{ROUTE}",
+                                        "review": "provider:rt2"},
+                        session_effort={"impl": "max", "review": "max"})
+        rows = model_settings.role_rows(data, None)
+        lines = model_settings.format_rows(rows)
+        assert any(l.startswith("impl ") and "max *" in l for l in lines)
+        assert any(l.startswith("review ") and "max *" in l for l in lines)
+        notes = [l for l in lines
+                 if "is not in the selected route's supported_efforts" in l]
+        assert len(notes) == 2, notes
+
+    def test_one_note_for_two_roles_on_the_same_route(self, pm_home_dir):
+        """A route-wide fact repeats for every role it decides, so it is
+        printed once, not once per role."""
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts=["low"])})
+        data = _project(session_models={"impl": f"provider:{ROUTE}",
+                                        "review": f"provider:{ROUTE}"},
+                        session_effort={"impl": "max", "review": "max"})
+        lines = model_settings.format_rows(
+            model_settings.role_rows(data, None))
+        notes = [l for l in lines
+                 if "is not in the selected route's supported_efforts" in l]
+        assert len(notes) == 1, notes
+
     def test_unverified_is_noted_without_the_inline_mark(self, pm_home_dir):
         _providers(pm_home_dir, **{ROUTE: _router()})
         data = _project(session_models={"impl": f"provider:{ROUTE}"},
@@ -1060,6 +1106,27 @@ class TestEffortDisplay:
         # say the same sentence, so it is printed once, not twice.
         assert r.output.count(
             "not in the selected route's supported_efforts") == 1
+
+    def test_model_show_prints_a_note_for_each_route(
+            self, project_root, pm_home_dir, monkeypatch):
+        """The note wording does not name the route, so two roles on two
+        routes with the same level are two findings, not one."""
+        import pm_core.cli.model as model_cli
+        monkeypatch.setattr(model_cli, "state_root", lambda: project_root)
+        _providers(pm_home_dir,
+                   **{ROUTE: _router(supported_efforts=["low"]),
+                      "rt2": _router(supported_efforts=["low"])})
+        data = store.load(project_root)
+        data["project"]["model_config"] = {
+            "session_models": {"impl": f"provider:{ROUTE}",
+                               "review": "provider:rt2"},
+            "session_effort": {"impl": "max", "review": "max"}}
+        store.save(data, project_root)
+        r = _cli("model", "show")
+        assert r.exit_code == 0, r.output
+        notes = [l for l in r.output.splitlines()
+                 if l.strip().startswith("! ")]
+        assert len(notes) == 2, notes
 
     def test_mixed_effort_route_summary_is_not_marked(
             self, project_root, pm_home_dir, monkeypatch):

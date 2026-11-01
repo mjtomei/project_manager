@@ -49,6 +49,11 @@ def model_show():
         click.echo(f"  {'type':15s}  {'model':40s} {'effort':8s}")
         click.echo(f"  {'─'*15}  {'─'*40} {'─'*8}")
         effort_notes: list[str] = []
+        # Printed notes are deduped per (route, note): the wording does not
+        # name the route, so two roles on different routes with the same
+        # level are two findings, while a route-wide fact repeats for every
+        # role it decides.
+        seen_role_notes: set[tuple[str | None, str]] = set()
         marked = False
         for st in SESSION_TYPES:
             res = resolve_model_and_provider(st, project_data=data)
@@ -63,9 +68,13 @@ def model_show():
             marked = marked or res.effort_status in MARKED_EFFORT_STATUSES
             click.echo(f"  {st:15s}  {model_str:40s} {effort_str:8s}")
             for note in res.effort_notes:
-                if note in seen_notes:
-                    continue
+                # ``seen_notes`` stays flat: it also suppresses the same
+                # finding in the problems section below.
                 seen_notes.add(note)
+                key = (res.provider, note)
+                if key in seen_role_notes:
+                    continue
+                seen_role_notes.add(key)
                 effort_notes.append(f"  ! {st}: {note}")
         click.echo()
         if effort_notes:

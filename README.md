@@ -178,8 +178,11 @@ Effort follows the same order, with the selected provider's own `effort`
 between the PR's setting and the project's.
 
 The effort levels are the ones the Claude Code CLI accepts: `low`, `medium`,
-`high`, `xhigh` and `max`.  Leaving a role unset passes no `--effort` at all
-(the CLI default), which is distinct from any level.  `CLAUDE_CODE_EFFORT_LEVEL`
+`high`, `xhigh` and `max` (verified against Claude Code 2.1.316; pm does not
+probe the installed version, so an older CLI rejects a level it does not
+know and the session fails as it would on any other bad `--effort`).
+Leaving a role unset passes no `--effort` at all (the CLI default), which is
+distinct from any level.  `CLAUDE_CODE_EFFORT_LEVEL`
 in the launching environment overrides `--effort` inside Claude Code: pm
 unsets it when it has its own selection (so the reported level is the one
 that runs) and shows the conflict; with no pm setting, the ambient value is
