@@ -151,6 +151,28 @@ async def test_filter_empty_state_renders():
 
 
 @async_test
+async def test_hide_closed_empty_state_renders():
+    # A retained closed PR (``pm pr close`` keeps the registry entry) is hidden
+    # by the default ``hide closed`` toggle, so a project whose work is all
+    # closed has an empty grid.  It must draw an empty-state message: without
+    # one the tree mounts no children and Textual paints the widget's repr
+    # ("TechTree#tech-tree") instead of a hint.
+    app = _TreeApp([_pr("pr-a", status="closed")])
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        tree = app.query_one("#tech-tree", TechTree)
+        assert tree._status_filter is None
+        assert tree._empty_message(), (
+            "hide-closed hiding every PR must still produce a message")
+        statics = list(tree.query(Static))
+        assert statics, "hide-closed empty state should mount a message Static"
+        msg = statics[0]
+        assert "Press F to cycle filter" in msg.render().plain
+        assert msg.region.width > 0 and msg.region.height > 0, (
+            f"empty-state message collapsed to {tuple(msg.region)}")
+
+
+@async_test
 async def test_one_edge_canvas_per_band():
     prs = [
         _pr("pr-a", plan="plan-001"),

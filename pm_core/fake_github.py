@@ -196,6 +196,26 @@ class FakeGitHubRepo:
             self._git("commit", "-m", f"work on {name}")
             self._git("checkout", base)
 
+    def delete_branch(self, name: str) -> bool:
+        """Delete branch ``name`` in the backing repo.
+
+        This is what ``gh pr close --delete-branch`` does to the remote, so
+        emulating it keeps branch-retention regressions visible: a test that
+        asserts the branch still exists after a close is only meaningful when
+        the flag would really have removed it.  The default branch and the
+        branch currently checked out (the backing repo is a single worktree)
+        are never deleted.  Returns True when the branch was removed.
+        """
+        with self._lock:
+            if name == self.default_branch or not self.branch_exists(name):
+                return False
+            current = self._git("rev-parse", "--abbrev-ref", "HEAD",
+                                check=False).stdout.strip()
+            if current == name:
+                return False
+            self._git("branch", "-D", name)
+            return True
+
     def merge_branch(self, head: str,
                      base: Optional[str] = None) -> tuple[bool, str]:
         """Merge ``head`` into ``base``.
@@ -659,6 +679,12 @@ class FakeGitHubBackend:
             return _completed(["pr", "close"], 1, "", NOT_FOUND_STDERR)
         if pr.state != "MERGED":
             pr.state = "CLOSED"
+        if opts.get("--delete-branch") and self.git_repo is not None:
+            # `gh pr close --delete-branch` really removes the head branch on
+            # the remote; emulate it so a caller that passes the flag cannot
+            # leave the branch intact in a test (pr-62ad13d relies on this to
+            # make "the branch still exists after close" a real assertion).
+            self.git_repo.delete_branch(pr.head)
         return _completed(["pr", "close"], 0,
                           f"X Closed pull request #{pr.number}\n", "")
 

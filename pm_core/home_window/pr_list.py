@@ -20,6 +20,7 @@ from pathlib import Path
 
 from pm_core import tmux as tmux_mod
 from pm_core.paths import pm_home
+from pm_core.pr_utils import TERMINAL_PR_STATES
 
 
 WINDOW_NAME = "pm-home"
@@ -153,7 +154,7 @@ def _render_content(width: int, height: int) -> str:
                          width)
 
     prs = data.get("prs") or []
-    prs = [p for p in prs if p.get("status") not in ("closed", "merged")]
+    prs = [p for p in prs if p.get("status") not in TERMINAL_PR_STATES]
     # ``str(...)``: a hand-edited ``updated_at``/``created_at`` that YAML
     # parses as a non-string (an unquoted date is a ``datetime.date``) cannot
     # be compared with another PR's string — that raised TypeError out of the

@@ -23,6 +23,7 @@ from pm_core.qa_loop import (
     instruction_run_loop_id,
     planner_code_changes_suffix,
     input_wait_changes_suffix,
+    qa_error_detail,
     qa_outcome_detail,
 )
 from pm_core.loop_shared import get_pm_session
@@ -1157,9 +1158,11 @@ def _resume_incomplete_qa(app) -> None:
     def _overall(qa_dir):
         try:
             sdata = json.loads((qa_dir / "qa_status.json").read_text())
-            return sdata.get("overall", "")
         except (json.JSONDecodeError, OSError):
             return ""
+        # A corrupt/hand-edited file can hold any valid JSON; a non-dict
+        # would raise AttributeError on .get() and abort the whole scan.
+        return sdata.get("overall", "") if isinstance(sdata, dict) else ""
 
     def _run_order(rdata):
         idx = [s["index"] for s in rdata.get("scenarios") or []
@@ -1327,6 +1330,28 @@ def _resume_incomplete_qa(app) -> None:
                             or {}).get("started_at"))):
             continue
 
+        # Is the run already complete (daemon wrote overall, TUI died
+        # before processing)?  *overall* comes from the display status file
+        # read while ordering the snapshots.  Re-read it only to keep the
+        # daemon's published cause so a recovered "QA ERROR" carries it into
+        # the QA note: the snapshot is written before the poll, so a failure
+        # raised from inside it never reaches the snapshot.  A failed or
+        # corrupt re-read keeps the *overall* already known, so a transient
+        # read error cannot turn a completed run into one that is resumed
+        # (and re-aggregated, losing the ERROR cause).
+        status_error = ""
+        try:
+            sdata = json.loads((resume_file.parent / "qa_status.json").read_text())
+        except (json.JSONDecodeError, OSError):
+            sdata = None
+        # The file is written as a dict by _write_status_file, but a
+        # hand-edited/corrupt one can hold any valid JSON: a non-dict would
+        # raise AttributeError on .get() and abort the whole scan for every
+        # other PR's snapshot.  Same guard as the ended-run scan above.
+        if isinstance(sdata, dict):
+            overall = sdata.get("overall", "") or overall
+            status_error = sdata.get("error", "") or ""
+
         # The ownership check above read the snapshot earlier; another TUI
         # may have adopted the run since.  Claim it atomically (S41).
         claimed = qa_loop.claim_resume_file(resume_file.parent,
@@ -1393,6 +1418,13 @@ def _resume_incomplete_qa(app) -> None:
             # attempt dropped) must not be noted/transitioned a second time.
             state.running = False
             state.latest_verdict = overall
+            # Keep the failure diagnostics the daemon published.  The
+            # snapshot is written before the poll, so a failure raised from
+            # inside it (e.g. a container-mode launch that could not create
+            # or lost its container) only survives in qa_status.json.  The
+            # QA note is the handoff channel for the next session, so a
+            # recovered "QA ERROR" must carry its cause there too.
+            state._error = status_error or state._error
             _log.info("Recovered completed QA from disk: %s → %s (processed=%s)",
                       pr_id, overall, state.completion_processed)
             if not state.completion_processed:
@@ -1697,6 +1729,16 @@ def _record_qa_note(app, state: QALoopState,
     try:
         from datetime import datetime, timezone
         note_text = f"QA {state.latest_verdict}: " + qa_outcome_detail(state)
+        # A run that failed on infrastructure (e.g. a container-mode launch
+        # that could not create its container) records the cause+remedy in
+        # the run's error.  ``qa_outcome_detail`` only surfaces that error
+        # when no scenario ran, so a failure mid-run (a queued scenario or a
+        # relaunch after another scenario already has a verdict) would
+        # otherwise leave a note that says "QA ERROR: S1: PASS" with no
+        # reason — the next session could not tell why QA failed.
+        error_detail = " ".join(qa_error_detail(state).split())
+        if error_detail and error_detail not in note_text:
+            note_text += " — " + error_detail
         # Tell the next review session why QA bounced an all-PASS run.
         note_text += planner_code_changes_suffix(state)
         # ... or why a follow-up PASS after an INPUT_REQUIRED wait still

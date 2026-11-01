@@ -9,6 +9,10 @@ Provides ``pm watcher`` as a command group with subcommands:
 
 Internal mode (``pm watcher --iteration N``) creates a single tmux
 window for the given iteration (called by the watcher loop engine).
+
+A watcher started outside the TUI has no auto-start targets, so the
+auto-start watcher is observation-only: it reports issues instead of
+fixing them.  Targets are owned by the running TUI (``pm autostart add``).
 """
 
 import secrets
@@ -146,7 +150,8 @@ def watcher_start(watcher_type: str, wait: int | None):
 
     \b
     Available types:
-      auto-start             Monitor auto-start sessions for issues (default)
+      auto-start             Monitor auto-start sessions for issues (default;
+                             observation-only when started from the CLI)
       bug-fix-impl           Drive the bug-fix flow (auto-merge on PASS)
       discovery              Schedule regression tests and reconcile filings
       improvement-fix-impl   Drive plan=ux PRs through auto-sequence (gated at QA PASS)

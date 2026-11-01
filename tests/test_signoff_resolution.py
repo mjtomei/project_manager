@@ -2982,9 +2982,10 @@ def test_a_malformed_signoff_record_does_not_break_the_status_snapshot():
             {"id": PR, "status": "sign_off", "signoff": 5,
              "depends_on": []}]}
         _auto_start = True
-        _auto_start_all = True
         _auto_start_run_id = None
-        _auto_start_targets: dict = {}
+        # Fail-closed autostart (pr-049649a): scope is the explicit target
+        # closure, so the PR under test must be a target.
+        _auto_start_targets = {PR: {}}
         _session_name = None
         _review_loops: dict = {}
         _qa_loops: dict = {}
@@ -3013,9 +3014,10 @@ def test_a_malformed_verdict_is_not_published_as_a_decision():
              "signoff": {"verdict": {"SIGNOFF_MERGE": True},
                          "sha": "a" * 40}}]}
         _auto_start = True
-        _auto_start_all = True
         _auto_start_run_id = None
-        _auto_start_targets: dict = {}
+        # Fail-closed autostart (pr-049649a): scope is the explicit target
+        # closure, so the PR under test must be a target.
+        _auto_start_targets = {PR: {}}
         _session_name = None
         _review_loops: dict = {}
         _qa_loops: dict = {}

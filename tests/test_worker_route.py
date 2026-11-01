@@ -1461,7 +1461,7 @@ class TestPollLoopNoRouteGating:
         state.scenarios = [sc]
         relaunches = []
 
-        def relaunch(scenario, *a):
+        def relaunch(scenario, *a, **kw):
             relaunches.append(scenario.index)
             scenario.pane_id = "%9"
             return True
@@ -2010,7 +2010,7 @@ class TestPollLoopNoRouteGating:
         ticks = {"n": 0}
         t0 = time.time() + 1e4
 
-        def relaunch(scenario, *a):
+        def relaunch(scenario, *a, **kw):
             relaunches.append(scenario.index)
             scenario.pane_id, scenario.session_id = "%9", "sid-2"
             return True
@@ -2084,7 +2084,7 @@ class TestPollLoopNoRouteGating:
                        return_value=False), \
                  patch("pm_core.pane_layout.register_and_rebalance"):
                 assert qa_loop._relaunch_scenario_window(
-                    sc, state, {}, pr_data, "sess", d)
+                    sc, state, {}, pr_data, "sess", d, use_containers=False)
                 first = sc.pane_id
                 rows = [r.split() for r in windows() if r.startswith(win + " ")]
                 assert first not in (refiner, worker)
@@ -2093,7 +2093,7 @@ class TestPollLoopNoRouteGating:
                 # The whole window gone: a fresh window, one of that name.
                 tm("kill-window", "-t", rows[0][1])
                 assert qa_loop._relaunch_scenario_window(
-                    sc, state, {}, pr_data, "sess", d)
+                    sc, state, {}, pr_data, "sess", d, use_containers=False)
                 rows = [r.split() for r in windows() if r.startswith(win + " ")]
                 assert [r[2] for r in rows] == [sc.pane_id]
         finally:
