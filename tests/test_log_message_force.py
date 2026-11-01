@@ -686,7 +686,7 @@ def test_starting_message_waits_for_queued_confirmations_flush(tmp_path):
                           "branch": "b", "depends_on": []}]}
     app._root = tmp_path
     for attr, val in (("_auto_start", False), ("_auto_start_targets", {}),
-                      ("_auto_start_all", False), ("_auto_start_run_id", None),
+                      ("_auto_start_run_id", None),
                       ("_auto_start_launching", set()),
                       ("_stop_before_merge", set()), ("_review_loops", {}),
                       ("_qa_loops", {}), ("_self_driving_qa", {}),
@@ -737,7 +737,7 @@ def test_starting_message_survives_a_start_that_fails_within_the_hold(tmp_path):
                           "branch": "b", "depends_on": []}]}
     app._root = tmp_path
     for attr, val in (("_auto_start", False), ("_auto_start_targets", {}),
-                      ("_auto_start_all", False), ("_auto_start_run_id", None),
+                      ("_auto_start_run_id", None),
                       ("_auto_start_launching", set()),
                       ("_stop_before_merge", set()), ("_review_loops", {}),
                       ("_qa_loops", {}), ("_self_driving_qa", {}),
