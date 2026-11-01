@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-01T22:29:39.248630+00:00'
+  updated_at: '2026-11-01T22:52:37.305391+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48151,6 +48151,24 @@ prs:
       held live.'
     created_at: '2026-11-01T22:29:39Z'
     last_edited: '2026-11-01T22:29:39Z'
+  - id: note-93c81be
+    text: 'QA S62 (R18 close/reopen around a resolved candidate) PASS at 65311d21a
+      — no code change. All three triples held live on throwaway local-backend projects.
+      Harness facts for the next run: (1) `pm pr list --open-only` does not exist
+      — the flag is `--open`; the scenario text is stale, the QA spec R18 only requires
+      "`pm pr list` shows it closed". (2) This build emits no `Starting QA for <pr>`
+      log line; the equivalent evidence is `set_action_state ... action=qa ... to=running`,
+      `QA planning phase for <pr>`, `Killing stale QA window <run>` + `<run>-s1` (retirement,
+      not duplication) and `Renumbering N scenario(s) to start at M` in `pm log show`.
+      (3) The fake-claude `qa_scenario.verdicts` list is consumed per run, so a `[{"PASS",delay:45},{"PASS",delay:0}]`
+      config gives the owed re-run no delay — budget the wait accordingly. (4) `pm
+      pr auto-sequence` while the PR is `closed` prints exactly `closed` and opens
+      nothing; the second tick while a run is live prints `running: qa` and opens
+      no second set. (5) The TUI-restart-while-closed variant was not exercised (the
+      TUI was killed for the whole closed window so its reconciler could not run);
+      the CLI tick drives the same launch-claim path. Captures: /pm-captures/scenarios/62/{close-reopen-resolved-candidate,owed-reqa-close-reopen}/.'
+    created_at: '2026-11-01T22:52:37Z'
+    last_edited: '2026-11-01T22:52:37Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
