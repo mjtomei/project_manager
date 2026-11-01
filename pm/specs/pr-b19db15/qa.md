@@ -1343,6 +1343,21 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   recorder, and step 5 in `detachfail` mode over a clean status: each followed
   by a step-5 paste exited 0 before the fix and exits 1 with "an earlier step
   rejected this capture" after it (review loop 928f i39, R105).
+- A recorder that exits before it drew → a later step-5 paste must **not**
+  accept the state it leaves. Asciinema records the failed attach's error into
+  the cast and exits 0 (verified live on tmux 3.2a + asciinema 2.1.0: a
+  168-byte cast holding "can't find session: pm-test", `recorder.status` 0,
+  the transcript step 2 wrote), so step 5's cast/status/transcript checks pass
+  on a capture that recorded nothing but an error — and when the target
+  session ended with the attach, the both-gone branch is the one that reads
+  it, where a session-option mark dies with the session. Step 3's "recorder
+  exited before it drew" branches now write both marks (the session option
+  and `recorder.rejected` in the capture directory) before they release the
+  claim, step 5 reads either in both branches, and step 2 clears both when a
+  re-record attaches its pipe. Verified live: the same step-5 block exits 0
+  on that state without the mark and 1 with "an earlier step rejected this
+  capture" after it; the stub `failedattachboth` mode reproduces it (review
+  loop 928f i40, R106).
 
 ## Pass / Fail criteria
 

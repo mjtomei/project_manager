@@ -439,6 +439,28 @@ class TestRecipes:
                 f"{name}: the produced-files list never names {fname}, which "
                 "the capture flow writes into the capture directory")
 
+    def test_tmux_recipe_lists_its_rejection_mark(self):
+        """The mark a failed step leaves is a produced file the list must name.
+
+        Step 3's failed start and step 5's refusals write
+        ``recorder.rejected`` into the capture directory, and step 5 reads it
+        in both branches (a session-option mark dies with the target session,
+        which is exactly what a failed attach can take with it). A worker
+        reading only the produced-files list would not know the file exists,
+        and the manifest's ``## Files`` section would disagree with the
+        directory.
+        """
+        text = _recipe_text("tmux-screen-recording.md")
+        produced = text.split(
+            "## What this recipe produces", 1)[1].split("## Capture", 1)[0]
+        assert "recorder.rejected" in produced, (
+            "the produced-files list never names recorder.rejected, which a "
+            "step that rejects a capture writes into the capture directory")
+        manifest = text.split("## Manifest format", 1)[1]
+        assert "recorder.rejected" in manifest, (
+            "the manifest's ## Files example never names recorder.rejected, "
+            "so the file a failed capture keeps goes undocumented")
+
     @pytest.mark.parametrize("name", RECIPES)
     def test_produced_files_list_names_the_render_partials(self, name):
         """A killed render leaves two files the produced-files list never named.
@@ -796,6 +818,7 @@ class TestRecipes:
         cleared = set(block[clear:start].replace("\\", " ").split())
         for name in ("recording.cast", "recorder.status",
                      "recorder-stderr.log", "recorder-pane.log",
+                     "recorder.rejected",
                      "recording.mp4", "recording.cast.gif",
                      "recording.mp4.partial.mp4", "manifest.md"):
             # Exact names, not substrings: `recording.mp4` must not be
@@ -5672,8 +5695,25 @@ case "$sub" in
         # wait's pane save cannot land (see `capture-pane`).
         norec|nopane) : ;;
         dies)  pane_exit "$s" ;;
-        failedattach)
+        failedattach|failedattachboth)
+            # Real asciinema records the failed attach's error into the cast
+            # and exits 0 (verified on tmux 3.2a + asciinema 2.1.0: a 168-byte
+            # cast holding "can't find session: pm-test", `recorder.status` 0,
+            # a 0-byte stderr log). That is the state a failed start leaves, and
+            # step 5's cast/status/transcript checks accept it — so the stub has
+            # to write it, or the false pass cannot be reproduced.
             printf "can't find session: pm-test\n" > "$STATE/pane"
+            printf '{"version": 2}\n' > "$STUB_CAST"
+            [ -n "$STUB_STATUS_FILE" ] && printf '0\n' > "$STUB_STATUS_FILE"
+            # `failedattachboth`: the target session ends as the attach fails
+            # (the race step 3's exact-session assert cannot cover), taking its
+            # claim and pipe with it. That is the state where a session-option
+            # rejection mark dies too, so only `recorder.rejected` in the
+            # capture directory can keep step 5 from accepting the error cast.
+            if [ "$STUB_MODE" = failedattachboth ]; then
+                rm -f "$STATE/pm-test" "$STATE/claim.pm-test" \
+                      "$STATE/pipe.pm-test"
+            fi
             ( sleep 0.02; pane_exit "$s" ) & ;;
         *)
             # `detachnocast`/`detachnostatus`: the recorder draws and the
@@ -8033,6 +8073,46 @@ class TestCaptureFlowExecution:
             "a failed attach's error text was accepted as a drawn TUI")
         assert "recorder exited before it drew" in r.stderr, r.stderr
 
+    def test_a_failed_start_does_not_let_a_repaste_accept_the_capture(
+            self, tmp_path):
+        """A recorder that never attached leaves a cast step 5 must not accept.
+
+        A failed start is the PR's own class in its clearest form: asciinema
+        records the attach's error into the cast and exits 0 (verified live on
+        tmux 3.2a + asciinema 2.1.0: a 168-byte cast holding "can't find
+        session: pm-test", ``recorder.status`` 0, the transcript step 2 wrote),
+        so the stop step's cast/status/transcript checks all pass on a capture
+        that recorded nothing but an error. Step 3 fails the run and releases
+        the claim, and the state it leaves is exactly what step 5's both-gone
+        branch accepts — the target session is what can have ended with the
+        attach, and a session-option mark dies with it — so the rejection is
+        also written to ``recorder.rejected`` in the capture directory, which
+        step 5 reads in either branch. Pre-fix the second paste exits 0 on the
+        error cast (verified live and with this stub state).
+        """
+        cap = tmp_path / "cap"
+        r, _ = _run_block(
+            _step_three_block(), "failedattachboth", tmp_path, target=True,
+            state_files={"claim.pm-test": str(cap),
+                         "pipe.pm-test": "1",
+                         "pane": "TUI drawn\n"},
+            files={"transcript.log": "pane output\n"})
+        assert r.returncode != 0, r.stderr
+        assert "recorder exited before it drew" in r.stderr, r.stderr
+        assert not (tmp_path / "state" / "claim.pm-test").exists(), (
+            "the failed start left its capture-directory claim behind (R25)")
+        assert (cap / "recorder.rejected").exists(), (
+            "the failed start did not mark the capture, so the state it leaves "
+            "reads as a finished recording")
+
+        r2, _ = _run_block(
+            _stop_block("tmux-screen-recording.md"), "ok", tmp_path,
+            target=True, capture=cap, reuse=True)
+        assert r2.returncode != 0, (
+            "a step 5 pasted after a failed start accepted the error cast it "
+            "left as a finished recording: " + r2.stderr)
+        assert "rejected this capture" in r2.stderr, r2.stderr
+
     def test_tmux_recorder_dying_mid_scenario_fails(self, tmp_path):
         """A truncated cast must not be reported as a finished recording."""
         r, cast = _run_capture_block(
@@ -8151,7 +8231,7 @@ class TestCaptureFlowExecution:
 
         The one state the in-progress refusal cannot tell apart is a step 5
         killed after its checks, where the recording is complete. The message
-        names the clear for that case; after it a second paste accepts the
+        names the clears for that case; after them a second paste accepts the
         cast, so a complete recording is not discarded by the check that
         exists to protect it.
         """
@@ -8168,7 +8248,11 @@ class TestCaptureFlowExecution:
         assert (tmp_path / "state" / "rejected.pm-test").exists(), (
             "the refusal did not mark the capture as rejected, so there is no "
             "mark to clear")
+        assert (cap / "recorder.rejected").exists(), (
+            "the refusal did not write the capture-directory mark the message "
+            "names")
         (tmp_path / "state" / "rejected.pm-test").unlink()
+        (cap / "recorder.rejected").unlink()
         r2, _ = _run_block(
             _stop_block("tmux-screen-recording.md"), "ok", tmp_path,
             target=True, capture=cap, reuse=True)
@@ -8180,18 +8264,25 @@ class TestCaptureFlowExecution:
     def test_step_two_clears_a_previous_rejection(self, tmp_path):
         """A re-record is not refused by the attempt it replaces.
 
-        Step 5 marks a capture it rejects on the session, and step 2 takes the
-        claim for the new attempt — so the mark has to go with it. Left
-        behind, the re-record's own step 5 would refuse it for a capture that
-        no longer exists, the stale-state shape the claim's release rules out.
+        Step 5 marks a capture it rejects on the session and in the capture
+        directory, and step 2 takes the claim for the new attempt — so both
+        marks have to go with it. Left behind, the re-record's own step 5
+        would refuse it for a capture that no longer exists, the stale-state
+        shape the claim's release rules out.
         """
+        cap = tmp_path / "cap"
         r, _cast = _run_block(
             _step_two_block(), "ok", tmp_path, target=True,
-            state_files={"rejected.pm-test": "1\n"})
+            state_files={"rejected.pm-test": "1\n"},
+            files={"recorder.rejected": ""})
         assert r.returncode == 0, r.stderr
         assert not (tmp_path / "state" / "rejected.pm-test").exists(), (
             "step 2 took the claim but left the previous attempt's rejection "
             "mark, so this capture's step 5 refuses it")
+        assert not (cap / "recorder.rejected").exists(), (
+            "step 2 took the claim but left the previous attempt's "
+            "capture-directory rejection mark, so this capture's step 5 "
+            "refuses it")
 
     def test_a_rejection_survives_a_re_record_that_cannot_start(self,
                                                                 tmp_path):
@@ -8207,7 +8298,7 @@ class TestCaptureFlowExecution:
         exactly the re-paste state it accepts — and exited 0 on the truncated
         cast the first paste rejected (verified in this container with the
         stub harness: step 2 in ``pipefail`` mode, then step 5, rc 0 with no
-        message). The mark now goes once the pipe is attached, so a re-record
+        message). The marks now go once the pipe is attached, so a re-record
         that never starts cannot erase the refusal.
         """
         cap = tmp_path / "cap"
@@ -8216,7 +8307,8 @@ class TestCaptureFlowExecution:
             state_files={"rejected.pm-test": "1\n"},
             files={"recording.cast": '{"version": 2}\n',
                    "transcript.log": "pane output\n",
-                   "recorder.status": "0\n"})
+                   "recorder.status": "0\n",
+                   "recorder.rejected": ""})
         assert r.returncode != 0, r.stderr
         assert "could not stream" in r.stderr, r.stderr
         assert not (tmp_path / "state" / "claim.pm-test").exists(), (
@@ -8225,6 +8317,10 @@ class TestCaptureFlowExecution:
             "a re-record that never started cleared the previous paste's "
             "rejection mark, so the state it leaves reads as a finished "
             "recording")
+        assert (cap / "recorder.rejected").exists(), (
+            "a re-record that never started cleared the previous paste's "
+            "capture-directory rejection mark, so the state it leaves reads "
+            "as a finished recording")
 
         r2, _ = _run_block(
             _stop_block("tmux-screen-recording.md"), "ok", tmp_path,
