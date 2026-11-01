@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T04:56:36.820967+00:00'
+  updated_at: '2026-11-01T05:26:13.368300+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5890,6 +5890,49 @@ prs:
       was touched.'
     created_at: '2026-11-01T04:56:36Z'
     last_edited: '2026-11-01T04:56:36Z'
+  - id: note-d98319c
+    text: 'Review loop 2caf i4 (commit 8e2fe2ee9; no requirement changes; full suite
+      5367 passed / 1 skipped, log /pm-captures/review-2caf-i4/full-suite-final.log).
+      Verification pass over the head after the i3 coverage work. Two defects, one
+      rule: a user''s own view of a pm session is not a session of its own (S118/S121/S124)
+      — the detach path (2caf i2) and the in-tmux discovery branch (703c i1) already
+      resolved views through the session group, but two paths still used the view''s
+      name. (1) _find_live_tui_pane() rejected a live recorded TUI pane reported under
+      a view''s name: list-panes -a lists a shared pane once per session in its group,
+      so _live_panes_and_tuis()''s pane_id->session_name map keeps whichever name
+      tmux emits last (verified: the lexicographically greatest name wins). With a
+      view named e.g. "zview" (after the pm base "pm-x") the recorded pane %0 looked
+      like zview''s, base_session_name("zview") != "pm-x", and the recorded-pane check
+      fell through; the live "pm _tui" fallback compares names too, so a TUI whose
+      pane_start_command does not contain "_tui" (the documented hand-started TUI)
+      was reported as "No TUI pane found" while running. Reproduced on a real disposable
+      server (pm-x + zview, pane registered): (None, "pm-x") before, ("%0", "pm-x")
+      after. New helpers._pm_session_of() resolves a tmux session name through pane_registry.pm_session_name()
+      (the group), degrading to the plain base name when tmux cannot be queried; both
+      comparisons in _find_live_tui_pane() use it. (2) _find_tui_pane()''s last-resort
+      scan had the same comparison, so a live "pm _tui" pane reported only under the
+      view''s name was not found when the base was killed elsewhere (the case R3.2
+      keeps prefix matching for); it now uses _pm_session_of() too. (3) pm session
+      list showed a phantom session for a pm-named view: list_pm_sessions() grouped
+      by name.split("~")[0], so a view named "pm-laptop" grouped with pm-x was listed
+      as a second session on the same socket (verified live on a disposable server),
+      violating R3''s "one row per session". It now reads #{session_group} as well
+      and skips a session whose group is a different base and whose name is not group~N
+      — a view, whatever it is called; the view''s clients stay uncounted, as R3 says.
+      Tests: four new tests (TestFindLiveTuiPane::test_live_pane_reported_under_the_users_view_is_returned
+      and ::test_fallback_finds_a_live_tui_reported_under_the_users_view, TestFindTuiPaneAcrossServers::test_last_resort_resolves_a_pane_reported_under_a_view,
+      TestListPmSessions::test_skips_a_users_view_of_a_pm_session), all verified to
+      fail with the pre-fix code; the existing TestListPmSessions fixtures gained
+      the #{session_group} column. impl.md R3.3/R3.4 and a new i4 section (incl. a
+      residual: a view that survives its base is still not plain-shell-discoverable;
+      reachable from inside the view and by direct attach); qa.md R3/R7 updated and
+      the pane-registry path corrected to ~/.pm/pane-registry/<session>.json. Validation:
+      targeted suites 382 passed; full suite 5367 passed / 1 skipped (409 s); pm/specs/pr-073910f/session_start_smoke.py
+      re-ran clean on a disposable socket (private server, session env, global env,
+      hooks; default server untouched). No live session, server or shared host configuration
+      was touched — every fixture used a disposable socket.'
+    created_at: '2026-11-01T05:26:13Z'
+    last_edited: '2026-11-01T05:26:13Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
