@@ -48690,7 +48690,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-10-31T23:47:08.693773+00:00'
+  updated_at: '2026-11-01T00:04:30.419836+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -49107,6 +49107,25 @@ prs:
       Verdict: INPUT_REQUIRED for that one clause.'
     created_at: '2026-10-31T23:47:08Z'
     last_edited: '2026-10-31T23:47:08Z'
+  - id: note-236c097
+    text: 'S21 refiner note (verified on d61d461f): the review/sign-off launcher produces
+      the fail-closed container-creation error with ''pm container disable'' guidance
+      only when the configured runtime binary is on PATH but cannot answer. Break
+      it with a stand-in podman first on PATH that exits nonzero (or CONTAINERS_CONF=/nonexistent.conf);
+      then ''pm pr review --fresh'' and ''pm pr signoff'' print "Failed to create
+      container ''<session>-review-<pr>''/''-signoff-<pr>''. Is podman running? Disable
+      container mode with ''pm container disable'' to run without containers." on
+      stderr and exit 1, with no review/signoff window and an empty host-launch marker.
+      With the runtime binary MISSING (e.g. ''pm container set runtime docker'' where
+      docker is not installed), remove_container() raises before the ContainerError
+      guard and the command dies with Click''s raw "Error: [Errno 2] No such file
+      or directory: ''docker''" - no disable guidance. Healthy control: review window
+      start command is ''podman exec -it pm-<tag>-review-<pr> ...'', ''podman top
+      <cname> args'' lists ''python3 /opt/pm-src/bin/fake-claude'', and the host-launch
+      marker stays empty. pm-dev image build (pm container build-base from the project
+      dir with nested_podman: true) takes ~3.5 min.'
+    created_at: '2026-11-01T00:04:30Z'
+    last_edited: '2026-11-01T00:04:30Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
@@ -49294,6 +49313,41 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-29T13:47:39.297913+00:00'
   updated_at: '2026-10-29T13:47:39.297913+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-849a3e6
+  plan: bugs
+  title: 'Bug: container-mode review/sign-off with a missing runtime binary dies with
+    a raw FileNotFoundError instead of the cause+remedy error'
+  branch: pm/pr-849a3e6-bug-container-mode-review-sign-off-with-a-missing-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/container.py remove_container() (called from pm_core/cli/pr.py:_launch_review_window
+    and pm_core/signoff.py:launch_signoff_window before wrap_claude_cmd).
+
+
+    Repro: container mode enabled with a runtime binary that is not installed, e.g.
+    ''pm container set runtime docker'' on a host without docker, then from inside
+    the pm tmux session ''pm pr review <in_review-pr> --fresh'' or ''pm pr signoff
+    <qa-pr> --fresh''. Both exit 1 (still fail closed, no host agent) but print only
+    Click''s raw ''Error: [Errno 2] No such file or directory: ''docker''''; the ''Failed
+    to create container ... Is docker running? Disable container mode with ''pm container
+    disable'''' text never appears because remove_container() raises before wrap_claude_cmd()''s
+    create-failure guard.
+
+
+    Suggested fix: make remove_container() tolerate a missing runtime binary (catch
+    OSError/FileNotFoundError around _run_runtime and the inspect wait, log and return),
+    letting create_container() fail into the existing ContainerError path so the cause+remedy
+    message is shown. Observed 2026-11-01 on 475375c7 during QA S21 (pr-574e851);
+    see /pm-captures/scenarios/21/summary.md.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-01T00:19:36.758828+00:00'
+  updated_at: '2026-11-01T00:19:36.758828+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
