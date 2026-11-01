@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T11:14:55.807613+00:00'
+  updated_at: '2026-11-01T11:43:28.321059+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38327,6 +38327,39 @@ prs:
       The dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-11-01T11:14:55Z'
     last_edited: '2026-11-01T11:14:55Z'
+  - id: note-678d7e1
+    text: 'Review loop 928f i26: two test gaps in the kept recipe scope, both the
+      `test -s` -> `test -e` class R46/R80 closed for the stage inputs; no recipe
+      or pm_core change. (1) The tmux recipe''s step-5 transcript check is `test -s`
+      because `tmux pipe-pane` opens transcript.log as soon as its command starts:
+      an idle pane leaves a 0-byte file, not no file (verified on real tmux 3.2a:
+      pipe-pane rc 0, 0-byte transcript, -e true / -s false). The only execution case
+      modelled the *missing* file (stub mode `notranscript` writes nothing at all),
+      so mutating the check to `-e` failed only the text assertion in test_tmux_transcript_is_required_and_checked
+      -- the spelling, not the behaviour -- and the shipped block exits 0 on an empty
+      transcript (stub harness: rc 0, empty stderr), reporting a capture whose manifest
+      lists a transcript this run never produced. (2) The web-UI finalize''s "already
+      finalized" branch treats "an mp4 with no webm and no partial" as this step''s
+      own output and checks `[ -s "$CAPDIR/recording.mp4" ]`; an empty file is not
+      a published video (the step''s own `[ -s partial ]` check keeps an empty encode
+      off that name). Mutating it to `-e` left the whole file green (333 passed),
+      and the block then exits 0 with "this capture is already finalized ... nothing
+      to transcode" for a 0-byte mp4 (verified with the recipe''s own block), presenting
+      it as the run''s recording. Tests: test_tmux_empty_transcript_is_not_a_transcript
+      runs the whole tmux capture block in the new stub mode `emptytranscript` (pipe
+      attached and the file opened, nothing written; the case also asserts the file
+      exists so it cannot pass on the missing-file branch) and requires a non-zero
+      exit with "transcript.log is empty"; test_web_ui_finalize_does_not_treat_an_empty_mp4_as_published
+      runs the finalize block with a 0-byte recording.mp4 and requires a non-zero
+      exit, no "already finalized", "there is no webm to transcode", no ffmpeg call
+      and no mp4 left. Mutation check: each `-s` -> `-e` fails exactly its case (the
+      transcript one also fails the text assertion). Recipe file 335 passed (was 333);
+      full suite 5532 passed, 1 skipped, 0 failed (459.82 s; markdown in a scratch
+      --target). Evidence: /pm-captures/review-928f-i26/ (probe-empty-transcript.log,
+      mutation-check.log, recipe-file.log, suite.log, README.md, scripts/). impl.md
+      R88 + Files table. The dropped helper/prompt/verifier work stays dropped. (2026-11-01T11:44:00Z)'
+    created_at: '2026-11-01T11:43:28Z'
+    last_edited: '2026-11-01T11:43:28Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
