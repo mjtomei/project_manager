@@ -111,7 +111,14 @@ class ConnectScreen(ModalScreen):
         align: center middle;
     }
     #connect-container {
-        width: 70;
+        /* Grow to fit the command: the socket-addressed form is longer
+           than the old `tmux attach -t <session>` and would be clipped by
+           a fixed width.  Never shrink below the historical 70 cells, and
+           cap at the screen so an unusually long socket path wraps
+           instead of running off the edge. */
+        width: auto;
+        min-width: 70;
+        max-width: 100%;
         height: auto;
         background: $surface;
         border: solid $primary;
@@ -127,6 +134,13 @@ class ConnectScreen(ModalScreen):
         padding: 1 2;
         background: $surface-darken-1;
         text-style: bold;
+        /* Intrinsic width, but never wider than the container: a command
+           longer than the modal wraps instead of being clipped by the
+           border, while short commands leave the modal at its 70-cell
+           minimum. */
+        width: auto;
+        max-width: 100%;
+        text-wrap: wrap;
     }
     .connect-hint {
         height: 1;

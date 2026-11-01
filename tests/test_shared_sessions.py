@@ -617,6 +617,82 @@ class TestConnectScreen:
         assert s1._command != s2._command
 
 
+def _render_connect_modal(command: str, width: int):
+    """Render ``ConnectScreen`` at ``width`` columns.
+
+    Returns ``(container content width, command label width, rendered command
+    lines)``.  The modal is a real Textual screen driven headlessly, so this
+    exercises the CSS that decides whether the command fits or wraps.
+    """
+    import asyncio
+
+    from textual.app import App
+    from textual.widgets import Label
+
+    from pm_core.tui.screens import ConnectScreen
+
+    class _App(App):
+        def on_mount(self) -> None:
+            self.push_screen(ConnectScreen(command))
+
+    async def run():
+        app = _App()
+        async with app.run_test(size=(width, 24)) as pilot:
+            await pilot.pause()
+            container = app.screen.query_one("#connect-container")
+            label = app.screen.query_one("#connect-command", Label)
+            lines = [label.render_line(i).text for i in range(label.size.height)]
+            return container.size.width, label.size.width, lines
+
+    return asyncio.run(run())
+
+
+class TestConnectScreenLayout:
+    """The popup must show the whole command, not clip it at the border.
+
+    The socket-addressed form (``tmux -S /tmp/pm-sessions/pm-<tag> attach``) is
+    longer than the old ``tmux attach -t <session>``; with the fixed 70-cell
+    modal it was cut off two characters from the end for an ordinary session
+    name, so the popup did not show the command it told the user to run.
+    """
+
+    CMD = "tmux -S /tmp/pm-sessions/pm-qa12-a-1793500549-56403dbe attach"
+
+    @staticmethod
+    def _squashed(text: str) -> str:
+        # Wrapping breaks at (or drops) the single separating spaces; compare
+        # the characters themselves.
+        return text.replace(" ", "")
+
+    def _assert_fully_visible(self, container_width, label_width, lines):
+        """The label's whole box fits inside the container — nothing clips.
+
+        ``#connect-command`` carries ``padding: 1 2``, which sits outside its
+        content box; when content + padding is wider than the container the
+        compositor cuts the tail off the command.
+        """
+        assert lines, "the modal rendered no command line"
+        assert label_width + 4 <= container_width, (label_width, container_width, lines)
+        assert self._squashed("".join(lines)) == self._squashed(self.CMD)
+
+    def test_shows_the_whole_socket_addressed_command(self):
+        container, label, lines = _render_connect_modal(self.CMD, 80)
+        assert len(lines) == 1, lines
+        self._assert_fully_visible(container, label, lines)
+
+    def test_wraps_instead_of_clipping_on_a_narrow_terminal(self):
+        container, label, lines = _render_connect_modal(self.CMD, 60)
+        assert len(lines) > 1, lines
+        self._assert_fully_visible(container, label, lines)
+
+    def test_short_command_keeps_the_historical_width(self):
+        # 70 cells outside the border (2) and the container padding (4).
+        container, label, lines = _render_connect_modal("tmux -S /tmp/x attach", 120)
+        assert container == 64
+        assert label <= container
+        assert lines == ["tmux -S /tmp/x attach"]
+
+
 # ---------------------------------------------------------------------------
 # tmux: grant_server_access
 # ---------------------------------------------------------------------------
