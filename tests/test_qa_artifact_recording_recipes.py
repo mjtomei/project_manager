@@ -68,6 +68,16 @@ hits, regardless of how it waits for a background job:
   renamed onto the final name, and a rename that leaves no published mp4 is
   a failure instead of a render of nothing (in the web-UI finalize it would
   otherwise run its last ``rm`` and destroy the only copy of the webm);
+- the mp4 is the artifact the recipes promise because it plays everywhere:
+  the encode forces ``libx264``/``yuv420p`` with ``+faststart`` — without the
+  pixel format libx264 picks 4:4:4 for a GIF's pal8 input and the block's own
+  ``-profile:v high`` refuses it, so the render fails reporting "ffmpeg
+  failed on the gif" for an option the block itself dropped — and the 2x
+  nearest-neighbor upscale is bounded by the iOS level-5.1 budget
+  (4096x2304): a larger pane is rendered at native size instead of doubled
+  past the limit iPhone/iPad hardware decoders silently refuse. Both were
+  unproven: dropping the pixel format, ``+faststart``, the size guard or the
+  upscale each left the whole file green;
 - the render steps name their renderer prerequisite: ``agg`` may be missing
   (the image used for QA on 2026-10-27 did not have it, although the bundled
   Dockerfile now installs it), and the render fails loudly, so the recipe
@@ -2060,6 +2070,103 @@ def test_render_holds_the_final_frame_at_the_gifs_duration(name, tmp_path):
         f"(the stub answers 6 packets, 0.60 s): {vf}")
 
 
+def _render_ffmpeg_argv(name, tmp_path, ffprobe_body=None):
+    """Run a recipe's render block, returning the encode's ``ffmpeg`` argv.
+
+    ``_run_render`` stubs ``ffmpeg`` with a body that writes the mp4, so a
+    case that inspects the command needs the stub to record its argv first.
+    The block's own success is asserted, because the options under test are
+    what make the real encode work at all.
+    """
+    args_file = tmp_path / "ffmpeg-args"
+    r, mp4, gif = _run_render(name, tmp_path, ffprobe_body=ffprobe_body,
+                              ffmpeg_body=(
+                                  f'printf "%s\\n" "$@" > "{args_file}"\n'
+                                  'for a in "$@"; do last=$a; done\n'
+                                  'printf mp4 > "$last"\n'))
+    assert r.returncode == 0, r.stderr
+    return args_file.read_text().splitlines()
+
+
+@pytest.mark.parametrize("name", RECIPES)
+@pytest.mark.parametrize("dims,upscaled", [
+    ((640, 480), True),
+    ((2048, 1152), True),
+    ((3000, 2000), False),
+], ids=["small", "at-the-ios-budget", "past-the-ios-budget"])
+def test_render_chooses_its_scale_filter_by_the_gifs_size(name, tmp_path, dims,
+                                                          upscaled):
+    """The 2x upscale is bounded by the iOS hardware-decode budget.
+
+    The render notes say the nearest-neighbor doubling is what keeps colored
+    terminal text crisp at native size (4:2:0 chroma subsampling would blur
+    it), but only while the result stays inside 4096x2304 (H.264 level 5.1):
+    "an unconditional 2x on a large pane produces a video past level 5.1
+    (e.g. 4276x2284), which desktop browsers play but iPhone/iPad hardware
+    decoders silently refuse." Neither half had a case, and both breaks are
+    silent: deleting the size guard left the whole file green (269 passed),
+    as did replacing the upscale with a plain ``scale=iw:ih``. Verified with
+    real ffmpeg 4.4.2 on a 2100x1200 gif: the guard's fallback encodes
+    2100x1200, while the unconditional 2x writes a 4200x2400 stream labelled
+    level 5.1 — the unplayable-on-iOS artifact the guard exists to prevent.
+    The at-the-budget case pins the comparison as inclusive: exactly
+    2048x1152 doubles to 4096x2304, which is still decodable.
+    """
+    w, h = dims
+    argv = _render_ffmpeg_argv(name, tmp_path, ffprobe_body=(
+        'case "$*" in\n'
+        f'  *width,height*) echo {w},{h} ;;\n'
+        '  *nb_read_packets*) echo 6 ;;\n'
+        '  *format=duration*) echo 0.60 ;;\n'
+        '  *) echo h264 ;;\n'
+        'esac\n'))
+    vf = argv[argv.index("-vf") + 1]
+
+    if upscaled:
+        assert "scale=iw*2:ih*2:flags=neighbor" in vf, (
+            f"{name}: a {w}x{h} gif is not doubled, so the video's terminal "
+            f"text is blurred by 4:2:0 chroma subsampling: {vf}")
+    else:
+        assert "scale=trunc(iw/2)*2:trunc(ih/2)*2" in vf, (
+            f"{name}: a {w}x{h} gif is not rendered at its native size, so "
+            f"the doubled video is past the iOS decode budget: {vf}")
+        assert "iw*2" not in vf, (
+            f"{name}: a {w}x{h} gif is still doubled to {w * 2}x{h * 2}, past "
+            f"the 4096x2304 level-5.1 budget iPhone/iPad refuse: {vf}")
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_render_encodes_h264_that_plays_everywhere(name, tmp_path):
+    """The encode's compatibility options are load-bearing, not style.
+
+    The mp4 is the required artifact because "H.264 + yuv420p is the only
+    combination that decodes everywhere, including iOS Safari", and
+    ``-movflags +faststart`` puts the moov atom up front so playback starts
+    before the download. No case pinned any of the three options: dropping
+    ``-pix_fmt yuv420p``, ``-movflags +faststart`` or the ``libx264`` codec
+    each left the whole file green (269 passed, verified). The pixel format
+    is the sharp one — libx264 picks 4:4:4 for a GIF's pal8 input, and the
+    block's own ``-profile:v high`` then refuses it: verified with the
+    recipe's block and real ffmpeg 4.4.2, the render printed "high profile
+    doesn't support 4:4:4" and the block reported "ffmpeg failed on the
+    gif", blaming the input for an option the block itself dropped. The stub
+    encoder cannot see any of that, so the argv is what the case has to read.
+    """
+    argv = _render_ffmpeg_argv(name, tmp_path)
+
+    def value(flag):
+        assert flag in argv, (
+            f"{name}: the encode no longer passes {flag}, so the mp4 is not "
+            f"the artifact the recipe promises: {argv}")
+        return argv[argv.index(flag) + 1]
+
+    assert value("-c:v") == "libx264", argv
+    assert value("-pix_fmt") == "yuv420p", (
+        f"{name}: the encode no longer forces yuv420p; libx264 picks 4:4:4 "
+        f"for the gif and the high profile refuses it: {argv}")
+    assert value("-movflags") == "+faststart", argv
+
+
 def _install_block(name):
     """The fenced block that installs ``agg`` in the render section."""
     section = _recipe_text(name).split("## Render to video", 1)[1]
@@ -2486,6 +2593,49 @@ def test_web_ui_finalize_never_consumes_the_script_on_stdin(tmp_path):
         "the finalize step did not produce its mp4")
     assert not (capdir / "recording.webm").exists(), (
         "the finalize step kept the webm although the mp4 exists")
+
+
+def test_web_ui_finalize_encodes_h264_that_plays_everywhere(tmp_path):
+    """The finalize's compatibility options have no case either.
+
+    The recipe's whole reason for transcoding is that Playwright records VP8
+    webm, which "does not decode on iOS", so the step promises "H.264 mp4 so
+    it plays everywhere including iOS Safari" — that is ``libx264`` with
+    ``yuv420p`` and ``-movflags +faststart``. Dropping ``-pix_fmt yuv420p``
+    or ``-movflags +faststart`` from this block left the whole file green
+    (269 passed, verified), and the execution cases above cannot see it: the
+    stub encoder accepts whatever it is handed. The argv is the handle.
+    """
+    block = _web_ui_finalize_block()
+
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    (capdir / "recording.webm").write_bytes(b"webm")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    args_file = tmp_path / "ffmpeg-args"
+    _stub_tool(bindir, "ffmpeg", (
+        f'printf "%s\\n" "$@" > "{args_file}"\n'
+        'for a in "$@"; do last=$a; done\nprintf mp4 > "$last"\n'))
+    env = dict(os.environ, CAPDIR=str(capdir),
+               PATH=f"{bindir}:{os.environ['PATH']}")
+    r = subprocess.run(["bash"], input=block, env=env,
+                       capture_output=True, text=True)
+
+    assert r.returncode == 0, r.stderr
+    argv = args_file.read_text().splitlines()
+
+    def value(flag):
+        assert flag in argv, (
+            f"the finalize step no longer passes {flag}, so the mp4 is not "
+            f"the artifact the recipe promises: {argv}")
+        return argv[argv.index(flag) + 1]
+
+    assert value("-c:v") == "libx264", argv
+    assert value("-pix_fmt") == "yuv420p", (
+        f"the finalize step no longer forces yuv420p, the pixel format the "
+        f"recipe says iOS Safari requires: {argv}")
+    assert value("-movflags") == "+faststart", argv
 
 
 @pytest.mark.parametrize("webm_shape", ["absent", "empty"],
