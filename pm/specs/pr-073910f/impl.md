@@ -169,8 +169,13 @@ sessions today).
    the default server unused; those legacy sessions are not found — the
    same as before this change.)
 4. Fix `pm_core/qa_status.py::_find_attached_session()` / `_switch_to_window()`
-   to build tmux argv with `tmux_mod._tmux_cmd(...)` instead of bare `tmux`,
-   so QA panes on a private server switch the right client.
+   to address the session's own server instead of a bare `tmux`, so QA panes
+   on a private server switch the right client.  The module runs as a
+   standalone script (`python3 …/qa_status.py`) and deliberately does not
+   import `pm_core`, so the argv comes from its local `_tmux_argv()` helper
+   (`PM_TMUX_SOCKET`, else a `$TMUX` value under `/tmp/pm-sessions/`) rather
+   than `tmux_mod._tmux_cmd()`; the socket-directory literal is duplicated
+   there by design (review-loop d1c0 i2).
 5. Do not rely on `display-popup` propagating `PM_TMUX_SOCKET` (existing QA
    note pr-2d0588a); the `$TMUX` resolver in (1) is the contract.
 
@@ -2096,3 +2101,74 @@ through the group (above), and a direct `tmux -S <socket> attach` still
 reaches it; only the plain-shell auto-discovery of a view-only server is
 absent, and it previously worked only by listing the view under a
 non-session name.  Not a supported R3/R7 shape (a view is not a session).
+
+## Review iteration (2026-11-01, review-loop 2caf i5)
+
+Verification pass over the head after the i4 fixes; no requirement
+changes.  One user-visible defect and one listing defect, both from
+parsing tmux format output with a separator that can appear in a session
+name:
+
+1. **`pm tui view` / `send` / `restart` and `pm qa regression` reported
+   "No TUI pane found" for a session whose repo directory name contains a
+   space.**  `_live_panes_and_tuis()` queried
+   `"#{pane_id} #{session_name} #{pane_start_command}"` and split on
+   whitespace, so a session name like `pm-my repo-abc` was read as its
+   first word.  Since the d1c0 i4 change the recorded pane is accepted
+   only when the session tmux reports for it is the session being
+   resolved (`_pm_session_of(live_panes[pane_id]) == base`), so the
+   truncated name made a live registered pane look like another session's
+   — every pane-driving command failed while the TUI was running.
+   (Before that change the check was a bare pane-id set membership, so
+   this is a regression introduced by the PR's cross-server guard, not a
+   pre-existing behaviour.)  The query now uses `:` as the field
+   separator — tmux rewrites `:` and `.` in session names to `_`, so a
+   session name can never contain it, while spaces and `|` are legal —
+   and the start command stays last (`maxsplit=2`) so its own separators
+   are preserved.
+2. **`pm session list` silently dropped a session whose name contains
+   `|`.**  The new `list_pm_sessions()` query used
+   `"#{session_name}|#{session_group}|#{session_attached}"`; the group is
+   the base session's own name, so `rsplit("|", 2)` still split the name
+   at its own `|` and the row was discarded (the comment claimed the
+   `rsplit` handled a `|` in the name — it only did when the group had
+   none, which cannot happen for a grouped session).  Same fix:
+   `:`-separated fields.  `sessions_in_group()`'s group query had the
+   same `|` limitation (a view whose name contains `|` was not a detach
+   candidate); it now uses `:` too.
+
+Tests: `TestFindLiveTuiPane::test_live_tui_in_a_session_whose_name_contains_a_space`
+(verified to fail with the space-separated query: it returned
+`(None, "pm-my repo-abc")` for a live `%0`),
+`TestListPmSessions::test_lists_a_session_whose_name_contains_a_pipe`
+(verified to return no rows with the old format), and
+`TestSessionsInGroup::test_includes_a_view_whose_name_contains_the_old_separator`.
+The existing `_panes()`/`list-sessions` fixtures were updated to the
+`:`-separated format.  Both defects were also reproduced and re-verified
+end to end against disposable real-tmux servers (a session named
+`pm-my repo-abc` and one named `pm-my|repo-abc`): the pre-fix tree
+returned `(None, "pm-my repo-abc")` from `_find_live_tui_pane` while the
+fixed tree returns `("%0", "pm-my repo-abc")`, and
+`list_pm_sessions()` reports both sessions.
+
+Also corrected in this document: R4.4 said `qa_status` builds its argv
+with `tmux_mod._tmux_cmd()`; it uses its own `_tmux_argv()` (the module
+must not import `pm_core`), which is what the d1c0 i2 residual already
+documented.
+
+Residual (non-blocking, pre-existing and outside this change):
+`tmux.attached_group_active_windows()` uses the same `|` format with the
+session name last; a base session name containing `|` shifts its group
+field, so the popup picker's collaborator display loses those rows.
+`tmux.switch_sessions_to_window()` parses
+`"#{session_name} #{client_tty}"` with the name first, so the same
+space-name truncation applies to its client map.  Both functions predate
+this PR (their formats are asserted by their own tests); only the
+new/changed parsers are covered by the fix above.
+
+Validation: targeted suites (`test_cli_helpers`, `test_session_socket_isolation`,
+`test_tmux`, `test_shared_sessions`, `test_cli_qa`) 385 passed; full suite
+re-run after the edits (see the PR note); no live session, server or
+shared host configuration was touched — every fixture used a disposable
+socket and the real-tmux repros used disposable sockets and a temporary
+HOME.

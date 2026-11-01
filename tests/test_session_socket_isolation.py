@@ -830,7 +830,7 @@ class TestDetachCurrentClient:
             if "list-sessions" in cmd:
                 if any("#{session_group}" in a for a in cmd):
                     return MagicMock(returncode=0,
-                                     stdout="pm-x|pm-x\nmyview|pm-x\n")
+                                     stdout="pm-x:pm-x\nmyview:pm-x\n")
                 return MagicMock(returncode=0, stdout="pm-x\n")
             if "list-clients" in cmd:
                 return MagicMock(returncode=0,
@@ -863,7 +863,7 @@ class TestDetachCurrentClient:
                 if any("#{session_group}" in a for a in cmd):
                     return MagicMock(
                         returncode=0,
-                        stdout="pm-x|pm-x\npm-x~1|pm-x\nmyview|pm-x\n")
+                        stdout="pm-x:pm-x\npm-x~1:pm-x\nmyview:pm-x\n")
                 return MagicMock(returncode=0, stdout="pm-x\npm-x~1\n")
             if "list-clients" in cmd:
                 # The view's client views the TUI window (@1); the ~1
@@ -905,17 +905,34 @@ class TestSessionsInGroup:
             if any("#{session_group}" in a for a in cmd):
                 return MagicMock(
                     returncode=0,
-                    stdout="pm-x|pm-x\npm-x~1|pm-x\nmyview|pm-x\nother|\n")
+                    stdout="pm-x:pm-x\npm-x~1:pm-x\nmyview:pm-x\nother:\n")
             return MagicMock(returncode=0, stdout="pm-x\npm-x~1\n")
 
         mock_run.side_effect = fake_run
         assert tmux.sessions_in_group("pm-x") == ["myview", "pm-x", "pm-x~1"]
 
     @patch("pm_core.tmux.subprocess.run")
+    def test_includes_a_view_whose_name_contains_the_old_separator(
+            self, mock_run):
+        """Fields are ``:``-separated, so a ``|`` in a view's name is data.
+
+        With the old ``|`` separator a view named ``my|view`` was split at
+        its own ``|`` and its client was not a candidate for the quit key.
+        """
+        def fake_run(cmd, **kwargs):
+            if any("#{session_group}" in a for a in cmd):
+                return MagicMock(returncode=0,
+                                 stdout="pm-x:pm-x\nmy|view:pm-x\n")
+            return MagicMock(returncode=0, stdout="pm-x\n")
+
+        mock_run.side_effect = fake_run
+        assert tmux.sessions_in_group("pm-x") == ["my|view", "pm-x"]
+
+    @patch("pm_core.tmux.subprocess.run")
     def test_ungrouped_session_is_alone(self, mock_run):
         def fake_run(cmd, **kwargs):
             if any("#{session_group}" in a for a in cmd):
-                return MagicMock(returncode=0, stdout="pm-x|\n")
+                return MagicMock(returncode=0, stdout="pm-x:\n")
             return MagicMock(returncode=0, stdout="pm-x\n")
 
         mock_run.side_effect = fake_run
@@ -957,11 +974,11 @@ class TestListPmSessions:
         def fake_run(cmd, **kwargs):
             if str(sock) in cmd:
                 return MagicMock(returncode=0, stdout=(
-                    "pm-repo-abc|pm-repo-abc|0\n"
-                    "pm-repo-abc~1|pm-repo-abc|2\n"
+                    "pm-repo-abc:pm-repo-abc:0\n"
+                    "pm-repo-abc~1:pm-repo-abc:2\n"
                 ))
             if str(paths.default_socket_path()) in cmd:
-                return MagicMock(returncode=0, stdout="pm-legacy-1||1\n")
+                return MagicMock(returncode=0, stdout="pm-legacy-1::1\n")
             return MagicMock(returncode=1, stdout="")
 
         mock_run.side_effect = fake_run
@@ -996,9 +1013,9 @@ class TestListPmSessions:
         def fake_run(cmd, **kwargs):
             if str(sock) in cmd:
                 return MagicMock(returncode=0, stdout=(
-                    "pm-laptop|pm-repo-abc|1\n"
-                    "pm-repo-abc|pm-repo-abc|0\n"
-                    "pm-repo-abc~1|pm-repo-abc|2\n"
+                    "pm-laptop:pm-repo-abc:1\n"
+                    "pm-repo-abc:pm-repo-abc:0\n"
+                    "pm-repo-abc~1:pm-repo-abc:2\n"
                 ))
             return MagicMock(returncode=1, stdout="")
 
@@ -1008,6 +1025,39 @@ class TestListPmSessions:
 
         assert [r["name"] for r in rows] == ["pm-repo-abc"]
         assert rows[0]["attached"] == 2  # base + ~1; the view's client not counted
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_lists_a_session_whose_name_contains_a_pipe(self, mock_run,
+                                                        tmp_path):
+        """A repo directory name may contain ``|``, so a session name may.
+
+        The old ``|``-separated query split the name at its own ``|``; the
+        group field holds the same name, so ``rsplit`` did not save it and
+        the live session was silently dropped from the listing.
+        """
+        sock_dir = tmp_path / "pm-sessions"
+        sock_dir.mkdir()
+        sock = sock_dir / "pm-my|repo-abc"
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            s.bind(str(sock))
+        finally:
+            s.close()
+
+        def fake_run(cmd, **kwargs):
+            if str(sock) in cmd:
+                return MagicMock(returncode=0, stdout=(
+                    "pm-my|repo-abc:pm-my|repo-abc:0\n"
+                    "pm-my|repo-abc~1:pm-my|repo-abc:2\n"
+                ))
+            return MagicMock(returncode=1, stdout="")
+
+        mock_run.side_effect = fake_run
+        with patch.object(paths, "SHARED_SOCKET_DIR", sock_dir):
+            rows = tmux.list_pm_sessions()
+
+        assert [r["name"] for r in rows] == ["pm-my|repo-abc"]
+        assert rows[0]["attached"] == 2
 
     @patch("pm_core.tmux.subprocess.run")
     def test_skips_dead_socket(self, mock_run, tmp_path):
@@ -1040,7 +1090,7 @@ class TestListPmSessions:
         def fake_run(cmd, **kwargs):
             if str(sock_dir / "pm-evil") in cmd:
                 return MagicMock(returncode=0,
-                                 stdout="pm-evil-session||1\n")
+                                 stdout="pm-evil-session::1\n")
             return MagicMock(returncode=1, stdout="")
 
         mock_run.side_effect = fake_run
@@ -1064,7 +1114,7 @@ class TestListPmSessions:
             if "-S" in cmd:
                 sock = Path(cmd[cmd.index("-S") + 1])
                 return MagicMock(returncode=0,
-                                 stdout=f"{sock.name}||0\n")
+                                 stdout=f"{sock.name}::0\n")
             return MagicMock(returncode=1, stdout="")
 
         mock_run.side_effect = fake_run
@@ -1418,7 +1468,7 @@ class TestFindTuiPaneAcrossServers:
             helpers.subprocess, "run",
             lambda *a, **kw: MagicMock(
                 returncode=0,
-                stdout="%7 pm-target~1 pm _tui\n%8 pm-other bash\n"))
+                stdout="%7:pm-target~1:pm _tui\n%8:pm-other:bash\n"))
 
         assert helpers._find_tui_pane() == ("%7", "pm-target")
         assert os.environ["PM_TMUX_SOCKET"] == "/tmp/s"
@@ -1448,7 +1498,7 @@ class TestFindTuiPaneAcrossServers:
         monkeypatch.setattr(
             helpers.subprocess, "run",
             lambda *a, **kw: MagicMock(
-                returncode=0, stdout="%7 pm-a~1 pm _tui\n"))
+                returncode=0, stdout="%7:pm-a~1:pm _tui\n"))
 
         assert helpers._find_tui_pane() == ("%7", "pm-a")
         assert os.environ["PM_TMUX_SOCKET"] == "/tmp/pm-sessions/pm-a"
@@ -1477,7 +1527,7 @@ class TestFindTuiPaneAcrossServers:
         monkeypatch.setattr(
             helpers.subprocess, "run",
             lambda *a, **kw: MagicMock(
-                returncode=0, stdout="%7 zview pm _tui\n"))
+                returncode=0, stdout="%7:zview:pm _tui\n"))
 
         assert helpers._find_tui_pane() == ("%7", "pm-a")
 
@@ -1517,7 +1567,7 @@ class TestFindTuiPaneAcrossServers:
         monkeypatch.setattr(
             helpers.subprocess, "run",
             lambda *a, **kw: MagicMock(
-                returncode=0, stdout="%4 pm-b~2 pm _tui\n"))
+                returncode=0, stdout="%4:pm-b~2:pm _tui\n"))
 
         assert helpers._find_tui_pane() == ("%4", "pm-b")
         assert os.environ["PM_TMUX_SOCKET"] == "/tmp/pm-sessions/pm-b"
@@ -1559,8 +1609,8 @@ class TestFindTuiPaneAcrossServers:
         def fake_run(cmd, **kwargs):
             if cmd[1] == "/tmp/a":
                 return MagicMock(returncode=0,
-                                 stdout='%2 pm-a~1 "pm _tui"\n')
-            return MagicMock(returncode=0, stdout='%1 pm-b "pm _tui"\n')
+                                 stdout='%2:pm-a~1:"pm _tui"\n')
+            return MagicMock(returncode=0, stdout='%1:pm-b:"pm _tui"\n')
 
         monkeypatch.setattr(helpers.subprocess, "run", fake_run)
 
@@ -1645,7 +1695,7 @@ class TestFindTuiPaneAcrossServers:
         monkeypatch.setattr(
             helpers.subprocess, "run",
             lambda *a, **kw: MagicMock(
-                returncode=0, stdout='%2 pm-b "pm _tui"\n'))
+                returncode=0, stdout='%2:pm-b:"pm _tui"\n'))
 
         assert helpers._find_tui_pane() == (None, None)
 
@@ -1682,8 +1732,8 @@ class TestFindTuiPaneAcrossServers:
         monkeypatch.setattr(
             helpers.subprocess, "run",
             lambda *a, **kw: MagicMock(
-                returncode=0, stdout='%1 pm-theirs "pm _tui"\n'
-                                     '%2 pm-mine "pm _tui"\n'))
+                returncode=0, stdout='%1:pm-theirs:"pm _tui"\n'
+                                     '%2:pm-mine:"pm _tui"\n'))
 
         assert helpers._find_tui_pane() == ("%2", "pm-mine")
         assert os.environ["PM_TMUX_SOCKET"] == "/tmp/mine"

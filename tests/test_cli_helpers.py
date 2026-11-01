@@ -452,7 +452,7 @@ class TestFindLiveTuiPane:
             {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
         with patch("pm_core.cli.helpers.pane_registry.load_registry",
                    return_value=data), \
-             self._panes("%3 pm-test bash\n"):
+             self._panes("%3:pm-test:bash\n"):
             assert _find_live_tui_pane("pm-test") == (None, "pm-test")
 
     def test_live_tui_entry_is_returned(self):
@@ -462,8 +462,30 @@ class TestFindLiveTuiPane:
             {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
         with patch("pm_core.cli.helpers.pane_registry.load_registry",
                    return_value=data), \
-             self._panes('%6 pm-test "pm _tui"\n'):
+             self._panes('%6:pm-test:"pm _tui"\n'):
             assert _find_live_tui_pane("pm-test") == ("%6", "pm-test")
+
+    def test_live_tui_in_a_session_whose_name_contains_a_space(self):
+        """A repo directory name may contain a space, so a session name may.
+
+        The pane query used to be space-separated, so the session name was
+        read as its first word and the live recorded pane looked like
+        another session's: ``pm tui view`` / ``send`` / ``restart`` and
+        ``pm qa regression`` all reported "No TUI pane found" for a running
+        TUI.  ``:`` is used instead because tmux forbids it in session
+        names.
+        """
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        data = self._registry(
+            {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             patch("pm_core.tmux.find_session_server",
+                   return_value=(None, False)), \
+             self._panes('%6:pm-my repo-abc:"pm _tui"\n'):
+            assert _find_live_tui_pane("pm-my repo-abc") == (
+                "%6", "pm-my repo-abc")
 
     def test_dead_entry_falls_back_to_a_live_tui_in_same_session(self):
         from pm_core.cli.helpers import _find_live_tui_pane
@@ -472,9 +494,9 @@ class TestFindLiveTuiPane:
             {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
         with patch("pm_core.cli.helpers.pane_registry.load_registry",
                    return_value=data), \
-             self._panes("%3 pm-test bash\n"
-                         '%8 pm-test "pm _tui"\n'
-                         '%9 pm-other "pm _tui"\n'):
+             self._panes("%3:pm-test:bash\n"
+                         '%8:pm-test:"pm _tui"\n'
+                         '%9:pm-other:"pm _tui"\n'):
             assert _find_live_tui_pane("pm-test") == ("%8", "pm-test")
 
     def test_never_falls_back_to_another_session(self):
@@ -484,7 +506,7 @@ class TestFindLiveTuiPane:
             {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
         with patch("pm_core.cli.helpers.pane_registry.load_registry",
                    return_value=data), \
-             self._panes('%9 pm-other "pm _tui"\n'):
+             self._panes('%9:pm-other:"pm _tui"\n'):
             assert _find_live_tui_pane("pm-test") == (None, "pm-test")
 
     def test_pane_id_reused_on_another_server_is_not_returned(self):
@@ -503,7 +525,7 @@ class TestFindLiveTuiPane:
                    return_value=data), \
              patch("pm_core.tmux.find_session_server",
                    return_value=(None, False)), \
-             self._panes("%6 pm-other bash\n"):
+             self._panes("%6:pm-other:bash\n"):
             assert _find_live_tui_pane("pm-gone") == (None, "pm-gone")
 
     def test_live_pane_in_a_grouped_session_still_counts(self):
@@ -516,7 +538,7 @@ class TestFindLiveTuiPane:
                    return_value=data), \
              patch("pm_core.tmux.find_session_server",
                    return_value=(None, False)), \
-             self._panes('%6 pm-test~1 "pm _tui"\n'):
+             self._panes('%6:pm-test~1:"pm _tui"\n'):
             assert _find_live_tui_pane("pm-test") == ("%6", "pm-test")
 
     def test_live_pane_reported_under_the_users_view_is_returned(self):
@@ -539,7 +561,7 @@ class TestFindLiveTuiPane:
                    return_value=(None, False)), \
              patch("pm_core.tmux.session_group",
                    side_effect=lambda name: "pm-test" if name == "zview" else ""), \
-             self._panes("%6 zview bash\n"):
+             self._panes("%6:zview:bash\n"):
             assert _find_live_tui_pane("pm-test") == ("%6", "pm-test")
 
     def test_fallback_finds_a_live_tui_reported_under_the_users_view(self):
@@ -554,7 +576,7 @@ class TestFindLiveTuiPane:
                    return_value=(None, False)), \
              patch("pm_core.tmux.session_group",
                    side_effect=lambda name: "pm-test" if name == "zview" else ""), \
-             self._panes('%8 zview "pm _tui"\n'):
+             self._panes('%8:zview:"pm _tui"\n'):
             assert _find_live_tui_pane("pm-test") == ("%8", "pm-test")
 
     def test_tmux_unavailable_degrades_to_no_live_tui(self):
@@ -591,8 +613,8 @@ class TestFindLiveTuiPane:
         empty = {"session": "pm-test", "windows": {}, "generation": "1"}
         with patch("pm_core.cli.helpers.pane_registry.load_registry",
                    return_value=empty), \
-             self._panes('%3 pm-test bash\n'
-                         '%8 pm-test "pm _tui"\n'):
+             self._panes('%3:pm-test:bash\n'
+                         '%8:pm-test:"pm _tui"\n'):
             assert _find_live_tui_pane("pm-test") == ("%8", "pm-test")
 
     def test_explicit_session_without_a_live_tui_still_reports_the_session(
@@ -603,7 +625,7 @@ class TestFindLiveTuiPane:
         empty = {"session": "pm-test", "windows": {}, "generation": "1"}
         with patch("pm_core.cli.helpers.pane_registry.load_registry",
                    return_value=empty), \
-             self._panes("%3 pm-test bash\n"):
+             self._panes("%3:pm-test:bash\n"):
             assert _find_live_tui_pane("pm-test") == (None, "pm-test")
 
 

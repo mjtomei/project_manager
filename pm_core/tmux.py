@@ -927,9 +927,12 @@ def sessions_in_group(base: str, socket_path: str | None = None) -> list[str]:
     try:
         members.update(
             list_grouped_sessions(base, socket_path=socket_path))
+        # ``:`` separates the fields: tmux forbids it in session names
+        # (rewriting it to ``_``), while a session name — derived from the
+        # repo directory name — may contain ``|`` or spaces.
         result = _run(
             _tmux_cmd("list-sessions", "-F",
-                      "#{session_name}|#{session_group}",
+                      "#{session_name}:#{session_group}",
                       socket_path=socket_path),
             text=True,
         )
@@ -938,7 +941,7 @@ def sessions_in_group(base: str, socket_path: str | None = None) -> list[str]:
         return sorted(members)
     if result.returncode == 0:
         for line in result.stdout.splitlines():
-            name, sep, group = line.partition("|")
+            name, sep, group = line.partition(":")
             if sep and group == base:
                 members.add(name)
     return sorted(members)
@@ -1397,10 +1400,14 @@ def list_pm_sessions() -> list[dict]:
         # Address the default server explicitly: tmux would otherwise
         # follow $TMUX and list the private server this process runs on.
         cmd_socket = socket_path or str(default_socket_path())
+        # ``:`` separates the fields: tmux forbids it in session names
+        # (rewriting it to ``_``), while a session name — derived from the
+        # repo directory name — may contain ``|`` or spaces.  (A ``|``
+        # separator silently dropped such a session from the listing.)
         try:
             result = _run(
                 _tmux_cmd("list-sessions", "-F",
-                          "#{session_name}|#{session_group}|#{session_attached}",
+                          "#{session_name}:#{session_group}:#{session_attached}",
                           socket_path=cmd_socket),
                 text=True,
             )
@@ -1418,9 +1425,7 @@ def list_pm_sessions() -> list[dict]:
             return
         groups: dict[str, int] = {}
         for line in result.stdout.splitlines():
-            # rsplit so a session name containing ``|`` is still parsed; the
-            # group is another session's name, so it shares the limitation.
-            parts = line.rsplit("|", 2)
+            parts = line.split(":", 2)
             if len(parts) != 3:
                 continue
             name, group, attached = parts

@@ -1629,12 +1629,18 @@ def _live_panes_and_tuis() -> tuple[dict[str, str], list[tuple[str, str]]]:
 
     The session name is tmux's raw answer (which may be a view's name —
     compare through ``_pm_session_of``, never with a bare ``~`` strip).
+
+    Fields are separated by ``:``, which tmux forbids in session names (it
+    rewrites ``:`` and ``.`` to ``_``), while a session name — derived from
+    the repo directory name — may contain spaces or ``|``.  The start
+    command comes last, so any separators it contains are preserved by
+    ``maxsplit=2``.
     """
     try:
         result = subprocess.run(
             tmux_mod._tmux_cmd(
                 "list-panes", "-a",
-                "-F", "#{pane_id} #{session_name} #{pane_start_command}"),
+                "-F", "#{pane_id}:#{session_name}:#{pane_start_command}"),
             capture_output=True, text=True,
         )
     except Exception:
@@ -1645,13 +1651,13 @@ def _live_panes_and_tuis() -> tuple[dict[str, str], list[tuple[str, str]]]:
     panes: dict[str, str] = {}
     tuis: list[tuple[str, str]] = []
     for line in result.stdout.splitlines():
-        parts = line.split(None, 2)
-        if not parts:
+        parts = line.split(":", 2)
+        if len(parts) < 2:
             continue
-        if len(parts) >= 2:
-            panes[parts[0]] = parts[1]
-        if len(parts) >= 3 and "_tui" in parts[2]:
-            tuis.append((parts[0], parts[1]))
+        pane_id, session = parts[0], parts[1]
+        panes[pane_id] = session
+        if len(parts) == 3 and "_tui" in parts[2]:
+            tuis.append((pane_id, session))
     return panes, tuis
 
 
