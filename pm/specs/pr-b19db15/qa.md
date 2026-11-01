@@ -35,15 +35,19 @@ recording-recipe bugs that any worker following the recipe hits:
   escaped `bash -c` command form that actually survives its quoting). The
   render sections name `agg` as a prerequisite and carry its install line,
   guarded on a check that the `agg` on `PATH` runs (`agg --version`), so it
-  never replaces a working binary and does replace a truncated one;
+  never replaces a working binary and does replace a truncated one; the
+  render block checks that same handle itself (`command -v agg`, then
+  `agg --version`), so a missing or non-running renderer is named where it
+  fails and a renderer that runs is not blamed for a cast it cannot read
+  (review loop 928f i15, R76);
   they also check the renderers' own exit statuses (a failed `agg`/`ffmpeg`
   leaves a partial mp4 that `test -s` accepts), say "there is no cast to
   render" when the recording wrote nothing, and the tmux recipe reports a
   failed transcript pipe and checks `transcript.log`; both render blocks also
   refuse a capture directory that is missing or cannot be written before they
   remove or render anything, so an unwritable directory is not reported as
-  "agg failed on the cast — is 'agg' installed?" (a remedy that runs and
-  changes nothing) and a path that is not there is not reported as a
+  a renderer failure (whose remedy runs and changes nothing) and a path that
+  is not there is not reported as a
   recording that wrote nothing (R57); "cannot be written" covers both
   permission shapes — a directory with no write bit and one with the write
   bit and no *search* bit, which `[ -w ]` alone cannot see — and a render
@@ -129,8 +133,9 @@ recording-recipe bugs that any worker following the recipe hits:
   block stops when the binary it just downloaded still does not resolve
   (`~/.local/bin` not on `PATH`) or still does not run, naming the export or
   the binary to remove, instead of exiting 0 and
-  leaving the render to ask "is 'agg' installed?" — which sends the worker
-  back to the block that already ran, in a loop; and the web-UI start block
+  leaving the render to report a renderer it could not use — which sends the
+  worker back to the block that already ran, in a loop; and the web-UI start
+  block
   resolves its captures root through a checked `pm qa captures-path` and
   refuses a failed or empty answer, because the bare substitution turned it
   into `/scenarios/1/web-ui` at the filesystem root, which `mkdir -p` creates
@@ -910,10 +915,10 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   be written (a mistyped path, or one that became unwritable after the
   recording) → the block stops with "capture directory … does not exist — …"
   or "capture directory … cannot be written — …" before it removes or renders
-  anything, instead of reporting the unwritable directory as "agg failed on
-  the cast — is 'agg' installed?" (whose remedy runs and changes nothing) or
-  the missing path as "there is no cast to render (the recording wrote
-  nothing)" (review loop ebd1 i16, R57).
+  anything, instead of reporting the unwritable directory as a renderer
+  failure (whose remedy runs and changes nothing) or the missing path as
+  "there is no cast to render (the recording wrote nothing)" (review loop
+  ebd1 i16, R57).
 - The recorder session cannot be created at all (`tmux new-session` fails:
   server gone or refusing, a duplicate session from a concurrent run, a bad
   option) → the run stops with "could not start the recorder session — see
@@ -987,6 +992,16 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   it renders anything, not report "cannot probe the gif" for a gif that is
   fine (R66). The usual `ffmpeg` packages provide both; this is the trimmed
   or hand-built encoder.
+- The render block runs where `agg` is missing, or where the `agg` on `PATH`
+  resolves and does not run → the block names the renderer where it fails
+  ("agg is not installed — run the install block above", "the agg on PATH …
+  does not run — run the install block above (it replaces it)") instead of
+  asking "is 'agg' installed?" from a cast failure; and a renderer that is
+  installed and runs and still fails names the cast and points at agg's own
+  error, because the old question's remedy (the install block) exits 0 for a
+  working renderer — verified with agg 1.9.0 and a non-asciicast cast: the
+  install block did nothing and the second render repeated the message
+  (review loop 928f i15, R76).
 - The web-UI finalize is killed while its transcode runs (worker timeout,
   session end, container stop) → the capture directory holds
   `recording.mp4.partial.mp4` and **no** `recording.mp4`; the partial is not

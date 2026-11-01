@@ -1309,7 +1309,13 @@ def test_failed_render_leaves_no_video(name, tmp_path):
     bindir = tmp_path / "bin"
     bindir.mkdir()
     for tool in ("agg", "ffprobe", "ffmpeg"):
-        _stub_tool(bindir, tool)
+        # The render block checks each tool where it is used: `agg --version`
+        # (the renderer guard) and `command -v` for the encoder/prober. The
+        # stubs answer those the way the real tools do, so the block reaches
+        # the render and fails there.
+        body = ("case \"$*\" in *--version*) exit 0 ;; esac\nexit 1\n"
+                if tool == "agg" else "exit 1\n")
+        _stub_tool(bindir, tool, body)
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}")
     r = subprocess.run(["bash"], input=block, env=env,
                        capture_output=True, text=True)
@@ -1364,6 +1370,10 @@ def _run_render(name, tmp_path, agg_body=None, ffprobe_body=None,
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
     _stub_tool(bindir, "agg", agg_body or (
+        # The render block's renderer guard runs `agg --version` first, so the
+        # stub has to answer it the way a working agg does; only the render
+        # call writes the gif.
+        'case "$*" in *--version*) exit 0 ;; esac\n'
         'for a in "$@"; do last=$a; done\nprintf gif > "$last"\n'))
     # Model real ffprobe's answers *per query*: the render reads the gif's
     # dimensions, then its packet count and its duration, and the final-frame
@@ -1630,16 +1640,18 @@ def test_render_publishes_through_a_partial_name(name, tmp_path):
 def _run_render_without(name, tmp_path, missing="ffmpeg"):
     """Run a recipe's render block on a PATH that holds no ``missing`` tool.
 
-    A host may well have a real ``ffmpeg``/``ffprobe`` on ``PATH``, so the
-    bindir carries the block's other tools (stubbed ``agg`` and the tool that
-    is present, symlinked coreutils) and nothing else — the missing one has to
-    be genuinely absent. The capture directory is seeded with a *previous*
-    run's ``recording.mp4``, ``recording.cast.gif`` and interrupted
-    ``recording.mp4.partial.mp4``, because a stop at either tool guard is a
-    render failure that does not go through ``render_fail``: only the block's
-    own pre-render ``rm`` keeps that path from leaving the earlier run's video
-    behind (verified live: with the ``rm`` removed the block exits 1 with the
-    same message and all three files survive).
+    A host may well have a real ``ffmpeg``/``ffprobe``/``agg`` on ``PATH``, so
+    the bindir carries the block's other tools (a stubbed ``agg`` that answers
+    the renderer guard, and the tool that is present, symlinked coreutils) and
+    nothing else — the missing one has to be genuinely absent (``missing`` is
+    ``ffmpeg``, ``ffprobe`` or ``agg``). The capture directory is seeded with
+    a *previous* run's ``recording.mp4``, ``recording.cast.gif`` and
+    interrupted ``recording.mp4.partial.mp4``, because a stop at any of the
+    three tool guards is a render failure that does not go through
+    ``render_fail``: only the block's own pre-render ``rm`` keeps that path
+    from leaving the earlier run's video behind (verified live: with the
+    ``rm`` removed the block exits 1 with the same message and all three
+    files survive).
     """
     bash = shutil.which("bash")
     block = _render_block(name)
@@ -1658,7 +1670,11 @@ def _run_render_without(name, tmp_path, missing="ffmpeg"):
     bindir = tmp_path / "bin"
     bindir.mkdir()
     _stub_tool(bindir, "agg", (
+        # The render block's renderer guard runs `agg --version` first.
+        'case "$*" in *--version*) exit 0 ;; esac\n'
         'for a in "$@"; do last=$a; done\nprintf gif > "$last"\n'))
+    if missing == "agg":
+        (bindir / "agg").unlink()
     if missing != "ffprobe":
         _stub_tool(bindir, "ffprobe", (
             'case "$*" in *width,height*) echo 640,480 ;;\n'
@@ -1770,6 +1786,99 @@ def test_render_names_a_missing_prober(name, tmp_path):
 
 
 @pytest.mark.parametrize("name", RECIPES)
+def test_render_names_a_missing_renderer(name, tmp_path):
+    """A missing ``agg`` is not a cast agg could not read.
+
+    The block checked the encoder and the prober but never the renderer: a
+    host with no ``agg`` reached ``render_cast``, the shell answered "agg:
+    command not found", and the block reported "agg failed on the cast — is
+    'agg' installed?" — the right question, but asked *after* the pre-render
+    ``rm`` and with no check to back it. The install block is a separate
+    paste, so the render block is the last place the absence can be named
+    where it happens (verified with the recipes' own blocks and no ``agg`` on
+    ``PATH``: the pre-fix block exits 1 with the cast question).
+    """
+    r, mp4, gif = _run_render_without(name, tmp_path, missing="agg")
+    partial = Path(str(mp4) + ".partial.mp4")
+
+    assert r.returncode != 0, r.stderr
+    assert "agg is not installed" in r.stderr, (
+        f"{name}: a missing renderer is not named: " + r.stderr)
+    assert "is 'agg' installed" not in r.stderr, (
+        f"{name}: a missing renderer is reported as a cast agg could not "
+        "read: " + r.stderr)
+    assert not mp4.exists(), (
+        f"{name}: a render that could not run left the previous run's "
+        "recording.mp4 behind, so the capture looks successful with a stale "
+        "video")
+    assert not gif.exists(), (
+        f"{name}: the render left the previous run's gif behind")
+    assert not partial.exists(), (
+        f"{name}: a render that could not run left an interrupted render's "
+        f"{partial.name} behind")
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_render_names_a_renderer_that_does_not_run(name, tmp_path):
+    """A truncated ``agg`` resolves, so the render must check that it runs.
+
+    ``command -v agg`` answers a truncated or wrong-architecture binary, so
+    a resolvability guard would pass and the invocation would fail to
+    execute — reported by the block as a cast agg could not read. The
+    install block's own handle is ``agg --version`` (a working agg answers 0,
+    a broken one fails to execute), and the render block has to ask the same
+    question before it renders: this case seeds an ``agg`` that exits 1 for
+    every call, the shape a truncated binary has (verified with the
+    recipes' own blocks: the pre-fix block reported the cast question).
+    """
+    r, mp4, gif = _run_render(name, tmp_path, agg_body="exit 1\n")
+    partial = Path(str(mp4) + ".partial.mp4")
+
+    assert r.returncode != 0, r.stderr
+    assert "the agg on PATH" in r.stderr and "does not run" in r.stderr, (
+        f"{name}: a renderer that resolves and cannot execute is not named: "
+        + r.stderr)
+    assert "is 'agg' installed" not in r.stderr, (
+        f"{name}: a renderer that cannot execute is reported as a cast it "
+        "could not read: " + r.stderr)
+    assert not mp4.exists() and not gif.exists() and not partial.exists(), (
+        f"{name}: a renderer that cannot run left an output behind")
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_render_names_a_cast_the_renderer_cannot_read(name, tmp_path):
+    """A renderer that runs and fails names the cast, not the installation.
+
+    With ``agg`` installed and running (the guard passes), a render failure
+    is the input's: a cast agg cannot parse, a full disk. The block's old
+    message asked "is 'agg' installed?", whose remedy is the install block —
+    which does nothing for a renderer that works, so the worker re-runs the
+    install, then the render, and sees the same question: a remedy that
+    cannot work, in a loop (verified in this container with agg 1.9.0 and a
+    non-asciicast cast: the install block exits 0 without touching anything
+    and the second render repeats the message).
+    """
+    r, mp4, gif = _run_render(name, tmp_path, agg_body=(
+        'case "$*" in *--version*) exit 0 ;; esac\nexit 1\n'))
+    cast = mp4.with_suffix(".cast")
+    partial = Path(str(mp4) + ".partial.mp4")
+
+    assert r.returncode != 0, r.stderr
+    assert "agg failed on the cast" in r.stderr, r.stderr
+    assert str(cast) in r.stderr, (
+        f"{name}: the failure does not name the cast agg could not read: "
+        + r.stderr)
+    assert "is 'agg' installed" not in r.stderr, (
+        f"{name}: a renderer that runs is still reported as an installation "
+        "question, whose remedy exits 0 for a working renderer: " + r.stderr)
+    assert "render produced no mp4" in r.stderr, (
+        f"{name}: the render failure does not end in the block's own "
+        "sentence: " + r.stderr)
+    assert not mp4.exists() and not gif.exists() and not partial.exists(), (
+        f"{name}: a failed render left an output behind")
+
+
+@pytest.mark.parametrize("name", RECIPES)
 @pytest.mark.parametrize("agg_shape", ["absent", "empty"],
                          ids=["no-file", "0-byte-file"])
 def test_render_names_a_renderer_that_writes_no_gif(name, tmp_path, agg_shape):
@@ -1809,6 +1918,9 @@ def test_render_names_a_renderer_that_writes_no_gif(name, tmp_path, agg_shape):
         'processing input" >&2; exit 1; }\n'
         'printf mp4 > "$out"\n')
     agg_body = ("exit 0\n" if agg_shape == "absent" else
+                # Answer the renderer guard's `--version` first, as a real
+                # agg does; the render call is what writes the empty gif.
+                'case "$*" in *--version*) exit 0 ;; esac\n'
                 'for a in "$@"; do last=$a; done\n: > "$last"\nexit 0\n')
     r, mp4, gif = _run_render(name, tmp_path, agg_body=agg_body,
                               ffmpeg_body=ffmpeg_body)

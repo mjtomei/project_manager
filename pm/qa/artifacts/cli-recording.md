@@ -453,15 +453,17 @@ Dockerfile now installs it), and the block below fails instead of leaving a
 missing or stale video — so install `agg` first when `agg --version` fails
 (`~/.local/bin` is on `PATH` in the image; the install creates it if
 it is missing, since `curl -o` cannot; the asset is per architecture, verified
-with agg 1.9.0). The block is guarded on that check: a working `agg` answers
-it, so pasting the block on an image that already has `agg`
-does nothing — while a *truncated* binary, which `command -v agg` cannot see,
-is replaced instead of leaving the render's "is 'agg' installed?" pointing at
-a remedy that would do nothing. It stops when the binary it just installed
-still does not resolve (`~/.local/bin` not on `PATH`) or still does not run,
-instead of exiting 0 and leaving the render to ask the same question, which
-sends the worker back to the same block. The render block
-also checks that `ffmpeg` and `ffprobe` exist, because a missing encoder or
+with agg 1.9.0). The install block is guarded on that check: a working `agg`
+answers it, so pasting the block on an image that already has `agg` does
+nothing — while a *truncated* binary, which `command -v agg` cannot see, is
+replaced instead of leaving a renderer that cannot run. It stops when the
+binary it just installed still does not resolve (`~/.local/bin` not on
+`PATH`) or still does not run, instead of exiting 0 and leaving the render to
+fail again, which sends the worker back to the same block. The render block
+checks all three tools where they are used: `agg` (resolvable, and it runs —
+the same `agg --version` handle the install block uses), `ffmpeg` and
+`ffprobe`. A missing or non-running renderer is named there, and a renderer
+that runs is not blamed for a cast it cannot read; a missing encoder or
 prober otherwise reads as a bad gif:
 
 ```
@@ -473,9 +475,10 @@ prober otherwise reads as a bad gif:
 # working one (verified: a dropped transfer replaced a working agg with a
 # 500-byte file). A *truncated* agg is the other half of that story, and the
 # reason the guard is not `command -v agg`: it still resolves, so a
-# resolvability guard skips the install, and the render's "agg failed on the
-# cast — is 'agg' installed?" sends the worker back here, where nothing
-# happens — a remedy that cannot work, in a loop. `agg --version` is the
+# resolvability guard skips the install, and the render block's own
+# `command -v agg` guard passes too — it then reports that agg does not run,
+# which is this block's job, so the worker comes back here and nothing
+# happens: a remedy that cannot work, in a loop. `agg --version` is the
 # handle: a working agg answers 0 (verified with agg 1.9.0), while a
 # truncated or wrong-architecture binary fails to execute.
 if ! agg --version >/dev/null 2>&1; then
@@ -485,11 +488,11 @@ if ! agg --version >/dev/null 2>&1; then
     # do), and both pass the guard above, so with `curl -o ~/.local/bin/agg`
     # one worker's download holds the shared path open for writing while the
     # other runs it — the render, or this block's own post-install check,
-    # then fails with "Text file busy", reported as "agg failed on the cast —
-    # is 'agg' installed?" / "the agg on PATH (...) does not run": the wrong
-    # cause, with a remedy that removes the binary the other worker just
-    # finished installing (verified: seven concurrent runs, sha256 == the
-    # release, one valid mp4 and one loud wrong-cause failure). A rename
+    # then fails with "Text file busy", reported as "the agg on PATH (...)
+    # does not run": the wrong cause, with a remedy that removes the binary
+    # the other worker just finished installing (verified: seven concurrent
+    # runs, sha256 == the release, one valid mp4 and one loud wrong-cause
+    # failure). A rename
     # inside one directory is atomic, so a reader sees either the previous
     # binary or the complete new one, never a download in progress; the
     # per-process temp name keeps two installers from truncating each other's
@@ -528,9 +531,9 @@ if ! agg --version >/dev/null 2>&1; then
     }
     # The install's job is to make `agg` resolvable, not to leave a file on
     # disk. `~/.local/bin` is on PATH in the image, but where it is not, this
-    # block would exit 0 with an `agg` nothing can run: the render then fails
-    # with "agg failed on the cast — is 'agg' installed?", the worker pastes
-    # this block again, it downloads again and exits 0 — a remedy that cannot
+    # block would exit 0 with an `agg` nothing can run: the render block's
+    # `command -v agg` guard then fails and names this block, the worker
+    # pastes it again, it downloads again and exits 0 — a remedy that cannot
     # work, in a loop. Say so, and name the fix.
     command -v agg >/dev/null || {
         echo "installed ~/.local/bin/agg but 'agg' still does not resolve —" \
@@ -540,7 +543,7 @@ if ! agg --version >/dev/null 2>&1; then
     }
     # ... and to leave one that *runs*. A download that arrived truncated, or
     # for another architecture, resolves and still fails to execute: the block
-    # would exit 0 with the render's "is 'agg' installed?" unchanged, the same
+    # would exit 0 with the render's "does not run" unchanged, the same
     # loop one shape further in. Name the binary to remove — it is not
     # necessarily the one just written, because `~/.local/bin` may sit after
     # another agg on PATH — and stop instead of reporting a successful install.
@@ -578,15 +581,14 @@ esac
 # removed or rendered. A missing one turns the cast check below into "the
 # recording wrote nothing" for a path that is not there; an existing
 # directory that cannot be written makes the `rm` fail silently and `agg` fail
-# to write its gif, which the block reports as "agg failed on the cast — is
-# 'agg' installed?" — a remedy that cannot work, because the renderer is
-# installed and the directory is the problem. Verified live in this container
-# with agg 1.9.0 and ffmpeg 4.4.2 and a mode-500 capture directory holding a
-# cast: rc 1 with that message, the earlier run's `recording.mp4` surviving
-# the failed `rm`, and the install block that message points at exiting 0
-# without changing anything. Both checks run before the `rm`, so a
-# refused block leaves the earlier run's outputs alone — the same rule the
-# capture step's own directory guards follow.
+# to write its gif, which the block reports as a cast agg cannot read — a
+# remedy that cannot work, because the renderer is installed and the directory
+# is the problem. Verified live in this container with agg 1.9.0 and ffmpeg
+# 4.4.2 and a mode-500 capture directory holding a cast: rc 1 with that
+# message and the earlier run's `recording.mp4` surviving the failed `rm`.
+# Both checks run before the `rm`, so a refused block leaves the earlier run's
+# outputs alone — the same rule the capture step's own directory guards
+# follow.
 cast_dir=${cast%/*}
 [ -d "$cast_dir" ] || {
     echo "capture directory $cast_dir does not exist — create it and run the" \
@@ -648,6 +650,31 @@ command -v ffprobe >/dev/null || {
         "and re-run this step" >&2
     exit 1
 }
+# ... and the renderer itself, on the same two handles the install block uses.
+# Without these, *every* agg failure is reported by the invocation below as
+# "agg failed on the cast — is 'agg' installed?", a question whose remedy (the
+# install block) does nothing when agg is installed and runs: a render that
+# failed for another reason — a cast agg cannot read, a full disk — sends the
+# worker back to a block that exits 0, and re-running the render says the same
+# thing (verified in this container: an unreadable cast with agg 1.9.0
+# installed gives that message, the install block exits 0 without touching
+# anything, and the second render repeats it). Name a missing or non-running
+# renderer here, where it is missing, so the invocation's failure below means
+# what it says.
+command -v agg >/dev/null || {
+    echo "agg is not installed — run the install block above and re-run this" \
+        "step" >&2
+    exit 1
+}
+# `agg --version` is the install block's own handle: a working agg answers 0
+# (verified with agg 1.9.0), while a truncated or wrong-architecture binary —
+# which `command -v` answers too — fails to execute. Checked before the cast
+# is rendered, so a broken renderer costs no encode.
+agg --version >/dev/null 2>&1 || {
+    echo "the agg on PATH ($(command -v agg)) does not run — run the install" \
+        "block above (it replaces it) and re-run this step" >&2
+    exit 1
+}
 # render_cast <cast>: <cast> -> sibling recording.mp4 (variable frame rate).
 # Returns non-zero, and publishes no new recording.mp4, if any step fails.
 # The encode writes recording.mp4.partial.mp4 and renames it to
@@ -661,7 +688,14 @@ render_cast() {
     local part="$mp4.partial.mp4" vf gw gh n dur probe_ok
     rm -f "$gif" "$part"
     agg --idle-time-limit 2 "$cast" "$gif" || {
-        echo "agg failed on the cast — is 'agg' installed?" >&2
+        # agg is installed and runs (the guards above), so its failure is not
+        # an installation problem: read its own error (printed above) and
+        # name the cast, which is the input it could not read — the question
+        # "is 'agg' installed?" sent the worker to the install block, which
+        # exits 0 for a renderer that works, in a loop.
+        echo "agg failed on the cast $cast — agg is installed and runs, so" \
+            "read agg's own error above; a cast it cannot read must be" \
+            "re-recorded" >&2
         return 1
     }
     # The gif is the *next* stage's input, so check it exists before handing it
