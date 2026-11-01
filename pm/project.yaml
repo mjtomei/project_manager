@@ -52602,3 +52602,150 @@ prs:
   review_spec: true
   model: provider:claude-work-xhigh-249
   effort: high
+- id: pr-b491378
+  plan: plan-regression
+  title: Periodic whole-PR architecture and spec review after failed QA rounds
+  branch: pm/pr-b491378-periodic-whole-pr-architecture-and-spec-review-aft
+  status: pending
+  depends_on: []
+  description: 'Combine the whole-PR architecture review and implementation-spec re-evaluation
+    proposed as items 4 and 6 in followups-pr-592e4bd.md. Repeated local review/QA fixes can
+    be useful while obscuring a shared architectural cause or an unsuitable specification.
+    Add a periodic step back over the whole PR, preserving the productive fix-and-review loop.
+
+
+    Trigger and configuration:
+
+    - Default to a checkpoint after two completed aggregate QA runs ending NEEDS_WORK since
+    the last completed architecture/spec checkpoint, before starting the next implementation/review
+    cycle. Make the number of failed QA rounds configurable through normal project configuration;
+    the implementation spec must show the setting, its effective value, validation and any
+    override/disable semantics for human review.
+
+    - Count whole completed QA runs, not individual scenario results, review iterations, infrastructure
+    retries, incomplete runs, INPUT_REQUIRED waits or sign-off approval waits. A useful fix
+    still counts as a failed QA round; do not reclassify it to avoid the checkpoint.
+
+    - Persist run identity, counted outcomes and checkpoint completion so reloads, watcher/TUI
+    restart and duplicate handoffs neither lose the count nor launch duplicate checkpoints.
+    Reset the interval only after the checkpoint completes. Interrupted/failed checkpoints
+    resume with their evidence; they do not silently permit advancement. Support an earlier
+    explicit request when the owner or an agent has a grounded reason.
+
+
+    Architecture and spec review:
+
+    - Review the original goal, complete current diff and implementation spec, accumulated
+    review/QA findings, affected interfaces, accepted user decisions and the owning plan.
+    Look beyond the last local patch: duplicated mechanisms, accumulating special cases, repeated
+    symptoms with a common cause, unnecessary complexity, and simpler designs that still meet
+    the actual need.
+
+    - Question the spec itself. Identify ambiguous, outdated, over-constrained or internally
+    conflicting requirements and distinguish them from genuine implementation bugs and necessary
+    safety/acceptance constraints. An existing spec is evidence of intent, not proof that
+    every design choice remains good.
+
+    - Produce a short, evidence-linked assessment: keep the current approach, make concrete
+    current-PR corrections, propose a spec clarification/change, or propose scoped follow-up
+    work. Record what was considered, the reason, expected quality/verification benefit and
+    tradeoffs, and any human question. A justified no-change outcome is valid; no rewrite,
+    refactor or proposal quota.
+
+    - Use existing implementation/review/QA handoffs and plan/PR notes. Reuse shared durable
+    operations compatible with plan-delivery''s agent-driven flow, rather than adding a separate
+    phase engine. Use existing PR filing and deduplication for proposed follow-ups; filing
+    does not authorize starting them.
+
+    - Keep the conservative PR-breakup check distinct: whole-PR design/spec review can conclude
+    that the PR should stay together. It may refer a justified decomposition to pr-4db3696
+    / #165 under existing authority. Size or loop count never forces a split. Preserve useful
+    incidental fixes by default.
+
+
+    Unchanged correctness and authority:
+
+    - Preserve NEEDS_WORK semantics. Finding and fixing a bug still requires another review
+    round; do not add PASS_WITH_FOLLOWUPS, waive findings, weaken QA assertions or skip re-review
+    to reduce loop counts. The checkpoint improves the next round rather than replacing review,
+    QA or sign-off.
+
+    - Recommendations cannot silently rewrite approved scope/specs, override explicit user
+    decisions, change merge policy or clear holds. Present proposed requirement changes for
+    the applicable human approval; retain provenance and unresolved questions. Keep source,
+    dirty files, drafts, fixtures and prior evidence; new evidence must cover the actual changed
+    revisions.
+
+
+    Mandatory implementation spec and full-prompt review:
+
+    Set review_spec: true. In the implementation session, prepare the spec and ALL complete
+    proposed architecture/spec checkpoint prompts plus affected composed handoff/review prompts,
+    with representative rendered context, a before/after diff, example assessments and the
+    configurable trigger behavior. Pause at implementation spec review for the user''s explicit
+    review and approval of the full prompts before proceeding beyond the gate or entering
+    the review loop. Do not self-approve, treat silence as approval or show only changed sentences.
+    Registration does not start this PR.
+
+
+    Validation:
+
+    Show that the default first failed QA round does not trigger the checkpoint, the second
+    triggers exactly once, and another two completed failures trigger it again after checkpoint
+    completion. Exercise another configured threshold, invalid configuration, per-scenario
+    failures, infrastructure retries/INPUT_REQUIRED, restart/duplicate handoffs and interrupted
+    checkpoint recovery. Use representative accumulated evidence for a shared architectural
+    cause, a misleading spec assumption, and productive local fixes that justify no redesign.
+    Confirm proposed scope changes retain human gates, completed code fixes still receive
+    NEEDS_WORK and another review, and no automatic split, acceptance waiver or evidence loss
+    occurs.
+
+
+    Delivery requirement:
+
+    Register this under plan-regression and require it in plan-delivery D3''s acceptance/handoff
+    and D9''s autonomous qualification, at the same importance as conservative PR breakup.
+    D3 must depend on this existing PR when its registry entry is allocated; D9 inherits that
+    edge and qualifies the behavior and quality/overhead. It is a required code-quality safeguard,
+    not optional later polish. Preserve pr-5f4f595''s separate final sign-off review of accumulated
+    proposals and bugs; neither feature replaces the other.
+
+
+    Registration only: pending; do not start implementation, add an autostart target or resume
+    timed checks. #249 is already merged and excluded from breakup or renewed work.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-31T17:52:58.314477+00:00'
+  updated_at: '2026-11-01T20:16:24.561553+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-ea1b20f
+    text: 'User authorized starting this periodic architecture/spec checkpoint PR on work
+      Opus5.5/xhigh on 2026-11-01, all roles/helpers/sign-off, with mandatory implementation
+      spec/full-prompt review. Prepare ONLY the grounded implementation spec and complete
+      proposed checkpoint prompts, affected composed handoff/review prompts, representative
+      rendered contexts, before/after prompt differences, example assessments and configurable
+      trigger behavior. Link all artifacts from impl.md and stop for explicit owner approval
+      before product implementation, review or QA. Never self-approve. Preserve the default
+      of two completed aggregate QA NEEDS_WORK rounds, configurable; individual scenario failures,
+      infrastructure retries and INPUT_REQUIRED do not count as completed failed QA runs.
+      A bug fixed in a round still requires another review. Do not weaken checks or introduce
+      PASS_WITH_FOLLOWUPS. This is required plan-delivery D3/D9 code-quality work alongside
+      conservative PR breakup, using existing durable handoffs and notes. No new watcher or
+      separate phase engine is incidental scope. Keep breakup and sign-off proposal review
+      distinct. #249 is merged and must never be reopened. The owner agreed to spec/prompt
+      preparation now while lifecycle integration is deferred until #241/pr-1139060, #247/pr-1ab9075
+      and #274/pr-f0f4129 are merged and integrated. Examine their relevant interfaces as
+      evidence where available, record assumptions and coordination needs, but do not implement
+      or activate lifecycle hooks early. Starting this session does not enable automatic merges,
+      start other PRs, change the existing hourly schedule or approve any spec. Preserve manual
+      merge gates. Historical filing-only/no-start text describes earlier registration; this
+      note is the new explicit authorization for the spec session.'
+    created_at: '2026-11-01T20:16:24.561553+00:00'
+    last_edited: '2026-11-01T20:16:24.561553+00:00'
+  review_spec: true
+  model: provider:claude-work-xhigh-249
+  effort: high
