@@ -19,9 +19,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from pm_core.model_config import (
-    EFFORT_LEVELS, PR_SESSION_TYPES, SESSION_TYPES, _is_model_value,
-    config_block, project_model_config, resolve_model_and_provider,
-    unsupported_effort_problem,
+    EFFORT_LEVELS, MARKED_EFFORT_STATUSES, PR_SESSION_TYPES, SESSION_TYPES,
+    _is_model_value, config_block, project_model_config,
+    resolve_model_and_provider, unsupported_effort_problem,
 )
 
 # PR-level keys: the all-role value and the per-role mapping.
@@ -103,21 +103,18 @@ def role_rows(data: dict, pr: dict | None = None, *,
     return rows
 
 
-# Statuses whose effort pm cannot confirm (the route declares it
-# unsupported, or the environment/provider overrides it); the display marks
-# them so a bare level never reads as confirmed.  ``unverified`` (no
-# capability metadata) is reported in the notes instead of the column, so
-# route tables stay readable.
-_UNVERIFIED_EFFORT_STATUSES = ("unsupported", "overridden")
+def effort_mark(text: str, status: str) -> str:
+    """*text* marked with how far pm could confirm the level *status* names."""
+    if status in MARKED_EFFORT_STATUSES:
+        return f"{text} *"
+    if status == "not_applicable":
+        return f"{text} (n/a)"
+    return text
 
 
 def effort_cell(row: RoleRow) -> str:
     """The effort column for *row*, marked when pm cannot confirm it."""
-    if row.effort_status in _UNVERIFIED_EFFORT_STATUSES:
-        return f"{row.effort} *"
-    if row.effort_status == "not_applicable":
-        return f"{row.effort} (n/a)"
-    return row.effort
+    return effort_mark(row.effort, row.effort_status)
 
 
 def format_rows(rows: list[RoleRow]) -> list[str]:
@@ -134,7 +131,7 @@ def format_rows(rows: list[RoleRow]) -> list[str]:
     for row in table:
         lines.append("  ".join(row[i].ljust(widths[i]) for i in range(4))
                      + "  " + row[4])
-    if any(r.effort_status in _UNVERIFIED_EFFORT_STATUSES for r in rows):
+    if any(r.effort_status in MARKED_EFFORT_STATUSES for r in rows):
         # ``*`` covers both "the route declares it unsupported" and "the
         # environment/provider overrides it", so name neither: the notes
         # say which.

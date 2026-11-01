@@ -114,6 +114,12 @@ _NO_EFFORT_MODELS = {
 # never presented as fresh.
 EFFORT_METADATA_STALE_DAYS = 30
 
+# ``ModelResolution.effort_status`` values the displays mark (``*`` in the
+# effort column, ``(overridden)`` on a route line) so a level pm could not
+# confirm never reads as verified.  ``unverified`` is deliberately not
+# marked: it is named in the effort notes so route tables stay readable.
+MARKED_EFFORT_STATUSES = ("unsupported", "overridden")
+
 DEFAULT_SESSION_EFFORT: dict[str, str] = {
     # Empty — use Claude CLI defaults unless explicitly configured via
     # project.yaml, global settings, or PM_EFFORT env var.
@@ -151,6 +157,9 @@ class ModelResolution:
     # "PR", "provider x", "project qa_scenario", "global qa", ...  None
     # when nothing did (the CLI default).
     source: str | None = None
+    # The setting that chose the effort, or the ambient variable's name.
+    # Kept for a suppressed (not applicable) level too, where it names the
+    # setting that asked for the level shown as "xhigh (n/a)".
     effort_source: str | None = None
     effort_requested: str | None = None
     effort_status: str = "none"
@@ -354,7 +363,10 @@ def resolve_model_and_provider(
             notes.append(
                 f"{AMBIENT_EFFORT_ENV}={ambient_level} remains in the "
                 "environment; pm passes no --effort for this model")
-        effort, effort_source = None, None
+        # Keep ``effort_source``: the table shows the requested level as
+        # "xhigh (n/a)", and "decided by: effort: project impl" is what
+        # asked for it.  Nothing is passed to --effort (effort is None).
+        effort = None
         resolution.effort_status = "not_applicable"
     elif ambient_source and assigned_level in (None, effort):
         notes.append(
@@ -371,7 +383,13 @@ def resolve_model_and_provider(
             "applies")
 
     resolution.effort = effort
-    resolution.effort_source = effort_source if effort else None
+    # ``effort_source`` stays set for a suppressed (not applicable) level:
+    # it names the setting that asked for the level the table shows as
+    # "xhigh (n/a)".  With nothing selected at all there is no source.
+    resolution.effort_source = (effort_source
+                                if effort
+                                or resolution.effort_status == "not_applicable"
+                                else None)
     resolution.effort_notes = notes
     if resolution.effort_status != "not_applicable":
         _apply_effort_verification(resolution, effort)
@@ -452,8 +470,12 @@ def _provider_config(provider_name: str | None):
     return _provider_config_or_error(provider_name)[0]
 
 
-def _accepted_from(cfg) -> tuple[str, ...] | None:
-    """``accepted_efforts`` for an already-loaded ProviderConfig."""
+def accepted_efforts_of(cfg) -> tuple[str, ...] | None:
+    """The Claude levels *cfg* declares, for an already-loaded config.
+
+    See :func:`accepted_efforts`; display code that already holds a
+    ``ProviderConfig`` uses this so it does not re-read providers.yaml.
+    """
     if cfg is None:
         return None
     declared = getattr(cfg, "supported_efforts", None)
@@ -471,11 +493,14 @@ def accepted_efforts(provider_name: str | None) -> tuple[str, ...] | None:
     ``EFFORT_LEVELS`` in the declaration (e.g. OpenRouter's ``none``) are
     dropped: they are not Claude levels and are never passed to --effort.
     """
-    return _accepted_from(_provider_config(provider_name))
+    return accepted_efforts_of(_provider_config(provider_name))
 
 
-def _effort_env_from(cfg) -> str | None:
-    """``provider_effort_env`` for an already-loaded ProviderConfig."""
+def effort_env_of(cfg) -> str | None:
+    """The effort variable *cfg* assigns, for an already-loaded config.
+
+    See :func:`provider_effort_env`.
+    """
     if cfg is None:
         return None
     if AMBIENT_EFFORT_ENV in cfg.env:
@@ -494,11 +519,14 @@ def provider_effort_env(provider_name: str | None) -> str | None:
     is the provider's explicit configuration: the launcher keeps it (it is
     never unset) and Claude Code applies it instead of ``--effort``.
     """
-    return _effort_env_from(_provider_config(provider_name))
+    return effort_env_of(_provider_config(provider_name))
 
 
-def _metadata_age_from(cfg) -> int | None:
-    """``effort_metadata_age_days`` for an already-loaded ProviderConfig."""
+def metadata_age_of(cfg) -> int | None:
+    """Age in days of *cfg*'s metadata date, for an already-loaded config.
+
+    See :func:`effort_metadata_age_days`.
+    """
     if cfg is None:
         return None
     raw = getattr(cfg, "supported_efforts_checked_at", "") or ""
@@ -514,7 +542,7 @@ def _metadata_age_from(cfg) -> int | None:
 
 def effort_metadata_age_days(provider_name: str | None) -> int | None:
     """Age in days of a provider's ``supported_efforts_checked_at``, or None."""
-    return _metadata_age_from(_provider_config(provider_name))
+    return metadata_age_of(_provider_config(provider_name))
 
 
 def unsupported_effort_problem(resolution: ModelResolution) -> str | None:
@@ -531,29 +559,43 @@ def unsupported_effort_problem(resolution: ModelResolution) -> str | None:
 
 
 def _note_provider_effort_env(resolution: ModelResolution,
-                              effort: str | None, cfg=None) -> None:
+                              effort: str | None, cfg=None,
+                              accepted: tuple[str, ...] | None = None) -> None:
     """Note a provider env block that assigns the ambient effort variable.
 
     The launcher keeps a provider's explicit assignment (it is the user's
     own configuration) instead of unsetting it, so Claude Code applies
     that value rather than ``--effort``.  The display must not report pm's
-    level as the one that runs.
+    level as the one that runs.  *accepted* (the route's declared levels)
+    lets the note say when the assigned level is not among them.
     """
-    assigned = _effort_env_from(cfg)
+    assigned = effort_env_of(cfg)
     if assigned is None:
         return
     level, _raw = normalize_ambient_effort(assigned)
     if level is None:
-        resolution.effort_notes.append(
-            f"provider {resolution.provider!r} sets {AMBIENT_EFFORT_ENV}="
-            f"{assigned!r}, which is not a Claude effort level pm knows")
+        if assigned.strip().lower() in ("auto", "unset"):
+            # "auto"/"unset" is a valid Claude value meaning "no override":
+            # the provider assigns it explicitly, so --effort still applies.
+            resolution.effort_notes.append(
+                f"provider {resolution.provider!r} sets "
+                f"{AMBIENT_EFFORT_ENV}={assigned!r} (no override); "
+                + (f"--effort {effort} applies" if effort
+                   else "the CLI default applies"))
+        else:
+            resolution.effort_notes.append(
+                f"provider {resolution.provider!r} sets {AMBIENT_EFFORT_ENV}="
+                f"{assigned!r}, which is not a Claude effort level pm knows")
         return
     if level == effort:
         return
-    resolution.effort_notes.append(
-        f"provider {resolution.provider!r} sets {AMBIENT_EFFORT_ENV}={level}; "
-        "Claude Code applies it instead of "
-        + (f"--effort {effort}" if effort else "the CLI default"))
+    note = (f"provider {resolution.provider!r} sets {AMBIENT_EFFORT_ENV}="
+            f"{level}; Claude Code applies it instead of "
+            + (f"--effort {effort}" if effort else "the CLI default"))
+    if accepted is not None and level not in accepted:
+        note += (f"; the route does not declare {level!r} in "
+                 "supported_efforts")
+    resolution.effort_notes.append(note)
     resolution.effort_status = "overridden"
 
 
@@ -564,17 +606,16 @@ def _apply_effort_verification(resolution: ModelResolution,
     cfg, cfg_error = _provider_config_or_error(resolution.provider)
     if not effort:
         resolution.effort_status = "none"
-        if resolution.provider:
-            accepted = _accepted_from(cfg)
-            resolution.supported_efforts = accepted
-            if accepted is not None:
-                notes.append(
-                    f"route accepts effort levels {list(accepted)}; none is "
-                    "configured")
-        _note_provider_effort_env(resolution, effort, cfg)
+        accepted = accepted_efforts_of(cfg)
+        resolution.supported_efforts = accepted
+        if resolution.provider and accepted is not None:
+            notes.append(
+                f"route accepts effort levels {list(accepted)}; none is "
+                "configured")
+        _note_provider_effort_env(resolution, effort, cfg, accepted)
         return
 
-    accepted = _accepted_from(cfg)
+    accepted = accepted_efforts_of(cfg)
     resolution.supported_efforts = accepted
     if accepted is None:
         if resolution.provider:
@@ -598,12 +639,12 @@ def _apply_effort_verification(resolution: ModelResolution,
         problem = unsupported_effort_problem(resolution)
         if problem:
             notes.append(problem)
-    age = _metadata_age_from(cfg)
+    age = metadata_age_of(cfg)
     if age is not None and age > EFFORT_METADATA_STALE_DAYS:
         notes.append(
             f"supported_efforts metadata is {age} days old; refresh it "
             "(pm provider edit <name> --supported-efforts ...)")
-    _note_provider_effort_env(resolution, effort, cfg)
+    _note_provider_effort_env(resolution, effort, cfg, accepted)
 
 
 def provider_effort(name: str) -> str | None:
@@ -645,7 +686,7 @@ def _route_effort_warnings(project_data: dict | None, roles_levels,
     ``ModelResolution.effort_status``).
     """
     out = []
-    for st, _level in roles_levels:
+    for st, _ in roles_levels:
         res = resolve_model_and_provider(st, project_data=project_data,
                                          pr_entry=pr_entry, use_env=False)
         problem = unsupported_effort_problem(res)

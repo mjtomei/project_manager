@@ -1016,7 +1016,8 @@ def build_claude_shell_cmd(
                 "session", provider or "<default>", AMBIENT_EFFORT_ENV,
                 effort)
         else:
-            unset = (*unset, AMBIENT_EFFORT_ENV)
+            # A provider's unset_env may already list it; emit it once.
+            unset = tuple(dict.fromkeys((*unset, AMBIENT_EFFORT_ENV)))
     if provider_env:
         if env_out is not None:
             env_out.update(provider_env)

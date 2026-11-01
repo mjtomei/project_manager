@@ -243,8 +243,9 @@ def describe(resolution, *, container: bool = False) -> str:
     # ``unverified`` (the route declares no capability metadata) stays out
     # of this inline marker to keep route lines readable; it is reported in
     # the effort notes of ``pm model show`` / ``pm pr model show``.
+    from pm_core.model_config import MARKED_EFFORT_STATUSES
     status = getattr(resolution, "effort_status", "none")
-    if status in ("unsupported", "overridden"):
+    if status in MARKED_EFFORT_STATUSES:
         effort = f"{effort} ({status})"
     try:
         cfg = router_for(resolution)

@@ -317,7 +317,15 @@ does not fetch a catalog in this PR.
   would be a false statement about the file).
 - `pm model show` and `pm pr model show` agree on the effort column: a
   suppressed level is shown as the requested one (`xhigh (n/a)`), not as
-  `(default)`.
+  `(default)`.  `effort_source` is kept alongside it, so the role table's
+  "decided by" names the setting that asked for the level
+  (`effort: project impl`) instead of `(CLI default)`.
+- A provider that assigns `CLAUDE_CODE_EFFORT_LEVEL=auto` (or `unset`): the
+  launcher keeps the provider's value, which means "no override" to Claude
+  Code, so `--effort` applies; the note says so rather than calling `auto`
+  an unknown level.
+- A provider whose `unset_env` already lists `CLAUDE_CODE_EFFORT_LEVEL`
+  while pm sets an effort: the command unsets it once, not twice.
 
 ## Implementation plan (files)
 

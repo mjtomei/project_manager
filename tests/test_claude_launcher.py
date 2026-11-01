@@ -586,6 +586,19 @@ class TestEffortLaunch:
         assert "-u CLAUDE_CODE_EFFORT_LEVEL" not in cmd
         assert env["CLAUDE_CODE_EFFORT_LEVEL"] == "max"
 
+    def test_shell_cmd_unsets_the_level_once(self, monkeypatch):
+        """A provider that already unsets the variable must not make the
+        command unset it twice."""
+        from pm_core import providers
+        monkeypatch.setattr(
+            providers, "load_providers",
+            lambda: {"providers": {"p": {
+                "type": "claude",
+                "unset_env": ["CLAUDE_CODE_EFFORT_LEVEL"]}}})
+        cmd = build_claude_shell_cmd(prompt="x", provider="p", effort="high",
+                                     env_out={})
+        assert cmd.count("-u CLAUDE_CODE_EFFORT_LEVEL") == 1
+
     def test_drop_ambient_effort(self):
         from pm_core.claude_launcher import _drop_ambient_effort
         env = {"CLAUDE_CODE_EFFORT_LEVEL": "xhigh", "A": "1"}

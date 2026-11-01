@@ -186,7 +186,9 @@ that runs) and shows the conflict; with no pm setting, the ambient value is
 reported as the source.  A provider that sets `CLAUDE_CODE_EFFORT_LEVEL` in
 its own `env:` block is your explicit configuration, so pm leaves it in place
 and reports the conflict instead of dropping it.  A model pm knows does not
-take effort (Haiku) suppresses it entirely.
+take effort (Haiku) suppresses it entirely, and the role table shows the
+level that was asked for as `xhigh (n/a)` beside the setting that asked for
+it.
 
 The choice is explicit and per role: any of those roles may be routed to
 a provider. A role with no setting of its own falls back to its parent

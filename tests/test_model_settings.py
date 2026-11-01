@@ -701,6 +701,35 @@ class TestEffortCapability:
         assert any("sets CLAUDE_CODE_EFFORT_LEVEL=xhigh" in n
                    for n in res.effort_notes)
 
+    def test_provider_env_auto_is_no_override_not_an_unknown_level(
+            self, pm_home_dir):
+        """"auto" is a valid Claude value meaning "no override": the note
+        must not call it an unknown level."""
+        _providers(pm_home_dir, **{ROUTE: _router(
+            env={"CLAUDE_CODE_EFFORT_LEVEL": "auto"})})
+        data = _project(session_effort={"impl": "high"})
+        res = resolve_model_and_provider(
+            "impl", pr_model=f"provider:{ROUTE}", project_data=data)
+        assert (res.effort, res.effort_status) == ("high", "unverified")
+        assert any("(no override); --effort high applies" in n
+                   for n in res.effort_notes)
+        assert not any("not a Claude effort level" in n
+                       for n in res.effort_notes)
+
+    def test_provider_env_assignment_outside_the_route_list_is_named(
+            self, pm_home_dir):
+        """The level the provider's env forces is checked against the
+        route's declared list too, not reported as if it were supported.
+        """
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts=["low"],
+            env={"CLAUDE_CODE_EFFORT_LEVEL": "max"})})
+        data = _project(session_effort={"impl": "low"})
+        res = resolve_model_and_provider(
+            "impl", pr_model=f"provider:{ROUTE}", project_data=data)
+        assert res.effort_status == "overridden"
+        assert any("does not declare 'max'" in n for n in res.effort_notes)
+
     def test_provider_env_assignment_with_no_pm_effort_is_noted(
             self, pm_home_dir):
         _providers(pm_home_dir, **{ROUTE: _router(
@@ -801,6 +830,23 @@ class TestProviderEffortMetadata:
         assert "effort env: CLAUDE_CODE_EFFORT_LEVEL=xhigh" in r.output
         assert "overrides --effort" in r.output
 
+    def test_show_does_not_call_auto_an_override(self, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router(
+            env={"CLAUDE_CODE_EFFORT_LEVEL": "auto"})})
+        r = _cli("provider", "show", ROUTE)
+        assert r.exit_code == 0, r.output
+        assert ("effort env: CLAUDE_CODE_EFFORT_LEVEL=auto "
+                "(no override; --effort applies)") in r.output
+
+    @pytest.mark.parametrize("efforts", ["high", [1], ["high", 2], [""]])
+    def test_bad_supported_efforts_is_an_invalid_entry(self, pm_home_dir,
+                                                       efforts):
+        """A hand-edited list that is not a list of names fails the entry,
+        so a launch reports it instead of guessing around it."""
+        _providers(pm_home_dir, **{ROUTE: _router(supported_efforts=efforts)})
+        from pm_core.providers import invalid_provider_entries
+        assert ROUTE in invalid_provider_entries()
+
     def test_bad_checked_at_is_an_invalid_entry(self, pm_home_dir):
         _providers(pm_home_dir, **{ROUTE: _router(
             supported_efforts_checked_at="yesterday")})
@@ -872,6 +918,24 @@ class TestEffortDisplay:
         assert "xhigh (n/a)" in r.output
         assert "does not support the --effort flag" in r.output
 
+    def test_model_show_marks_an_unsupported_level(self, project_root,
+                                                   pm_home_dir, monkeypatch):
+        """The CLI column uses the same marker as the role table."""
+        import pm_core.cli.model as model_cli
+        monkeypatch.setattr(model_cli, "state_root", lambda: project_root)
+        _providers(pm_home_dir, **{ROUTE: _router(supported_efforts=["low"])})
+        data = store.load(project_root)
+        data["project"]["model_config"] = {
+            "session_models": {"impl": f"provider:{ROUTE}"},
+            "session_effort": {"impl": "max"}}
+        store.save(data, project_root)
+        r = _cli("model", "show")
+        assert r.exit_code == 0, r.output
+        impl = next(l for l in r.output.splitlines()
+                    if l.strip().startswith("impl "))
+        assert "max *" in impl
+        assert "not in the selected route's supported_efforts" in r.output
+
     def test_describe_marks_unsupported(self, pm_home_dir):
         from pm_core.router_route import describe
         from pm_core.model_config import ModelResolution
@@ -900,6 +964,19 @@ class TestEffortRoundTrip:
         monkeypatch.setenv("PM_EFFORT", "xhigh")
         res = resolve_model_and_provider("impl")
         assert (res.effort, res.effort_source) == ("xhigh", "PM_EFFORT")
+
+    def test_model_set_project_round_trips_max(self, project_root,
+                                               pm_home_dir, monkeypatch):
+        import pm_core.cli.model as model_cli
+        monkeypatch.setattr(model_cli, "state_root", lambda: project_root)
+        r = _cli("model", "set", "impl", "opus", "--effort", "max",
+                 "--project")
+        assert r.exit_code == 0, r.output
+        data = store.load(project_root)
+        assert data["project"]["model_config"]["session_effort"]["impl"] \
+            == "max"
+        assert resolve_model_and_provider("impl", project_data=data).effort \
+            == "max"
 
     def test_model_set_global_round_trips_xhigh(self, project_root,
                                                 pm_home_dir, monkeypatch):
@@ -935,6 +1012,18 @@ class TestNotApplicableEffort:
         assert impl.effort_status == "not_applicable"
         assert model_settings.effort_cell(impl) == "xhigh (n/a)"
         assert any("suppressed" in n for n in impl.effort_notes)
+
+    def test_suppressed_level_keeps_the_source_that_asked_for_it(
+            self, pm_home_dir):
+        """"xhigh (n/a)" beside "effort: project impl", never "CLI
+        default": the requested level did come from a setting."""
+        data = _project(session_models={"impl": "haiku"},
+                        session_effort={"impl": "xhigh"})
+        impl = next(r for r in model_settings.role_rows(data, None)
+                    if r.role == "impl")
+        assert impl.effort_source == "project impl"
+        lines = model_settings.format_rows([impl])
+        assert any("effort: project impl" in line for line in lines)
 
 
 class TestSetTimeEffortWarnings:

@@ -23,6 +23,7 @@ def model_show():
     """Show effective model for each session type."""
     from pm_core import model_settings, store
     from pm_core.model_config import (
+        MARKED_EFFORT_STATUSES,
         SESSION_TYPES,
         config_block,
         project_model_config,
@@ -46,6 +47,7 @@ def model_show():
         click.echo(f"  {'─'*15}  {'─'*40} {'─'*8}")
         effort_notes: list[str] = []
         seen_notes: set[str] = set()
+        marked = False
         for st in SESSION_TYPES:
             res = resolve_model_and_provider(st, project_data=data)
             if res.provider:
@@ -54,11 +56,9 @@ def model_show():
                 model_str = res.model
             else:
                 model_str = "(default)"
-            effort_str = model_settings.effort_text(res)
-            if res.effort_status in ("unsupported", "overridden"):
-                effort_str += " *"
-            elif res.effort_status == "not_applicable":
-                effort_str += " (n/a)"
+            effort_str = model_settings.effort_mark(
+                model_settings.effort_text(res), res.effort_status)
+            marked = marked or res.effort_status in MARKED_EFFORT_STATUSES
             click.echo(f"  {st:15s}  {model_str:40s} {effort_str:8s}")
             for note in res.effort_notes:
                 if note in seen_notes:
@@ -67,8 +67,12 @@ def model_show():
                 effort_notes.append(f"  ! {st}: {note}")
         click.echo()
         if effort_notes:
-            click.echo("Effort notes (* = not confirmed by pm; see the "
-                       "notes):")
+            # Explain ``*`` only when a row actually carries it; a note can
+            # exist without one (e.g. an unverified route, an ambient
+            # override on a plain model).
+            click.echo("Effort notes"
+                       + (" (* = not confirmed by pm)" if marked else "")
+                       + ":")
             for line in effort_notes:
                 click.echo(line)
             click.echo()

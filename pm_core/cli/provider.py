@@ -139,7 +139,7 @@ _FIELD_OPTIONS = [
                       "own effort setting wins)"),
     click.option("--supported-efforts", default=None,
                  help="Comma-separated effort levels this provider's model/"
-                      "route accepts (low,medium,high,xhigh,max); used to "
+                      f"route accepts ({','.join(EFFORT_LEVELS)}); used to "
                       "verify effort settings (never sent to --effort)"),
     click.option("--supported-efforts-source", default=None,
                  help="Where the supported-efforts list came from"),
@@ -380,9 +380,14 @@ def provider_detail_lines(p, *, status: bool = False) -> list[str]:
                          ("probe_models", ", ".join(p.probe_models))):
         if value:
             lines.append(f"  {label}: {value}")
+    from pm_core.model_config import (
+        AMBIENT_EFFORT_ENV, accepted_efforts_of, effort_env_of,
+        metadata_age_of, normalize_ambient_effort,
+    )
     if p.supported_efforts is not None:
-        from pm_core.model_config import EFFORT_LEVELS
-        usable = [e for e in EFFORT_LEVELS if e in p.supported_efforts]
+        # The declared list minus anything outside the Claude vocabulary
+        # (kept in the file for provenance, never sent to --effort).
+        usable = list(accepted_efforts_of(p) or ())
         ignored = [e for e in p.supported_efforts if e not in EFFORT_LEVELS]
         lines.append(f"  accepted Claude levels: {', '.join(usable) or '(none)'}")
         if ignored:
@@ -392,18 +397,22 @@ def provider_detail_lines(p, *, status: bool = False) -> list[str]:
             lines.append(f"  supported_efforts source: "
                          f"{p.supported_efforts_source}")
         if p.supported_efforts_checked_at:
-            from pm_core.model_config import effort_metadata_age_days
-            age = effort_metadata_age_days(p.name)
+            age = metadata_age_of(p)
             suffix = ("" if age is None
                       else f" ({age} day{'s' if age != 1 else ''} old)")
             lines.append(f"  supported_efforts checked: "
                          f"{p.supported_efforts_checked_at}{suffix}")
-    from pm_core.model_config import (AMBIENT_EFFORT_ENV,
-                                      provider_effort_env)
-    assigned = provider_effort_env(p.name)
+    assigned = effort_env_of(p)
     if assigned:
-        lines.append(f"  effort env: {AMBIENT_EFFORT_ENV}={assigned} "
-                     "(overrides --effort for this provider's sessions)")
+        # Say what the assignment does: a level overrides --effort, while
+        # "auto"/"unset" explicitly means "no override".
+        if assigned.strip().lower() in ("auto", "unset"):
+            effect = "(no override; --effort applies)"
+        elif normalize_ambient_effort(assigned)[0] is None:
+            effect = "(not a Claude effort level pm knows)"
+        else:
+            effect = "(overrides --effort for this provider's sessions)"
+        lines.append(f"  effort env: {AMBIENT_EFFORT_ENV}={assigned} {effect}")
     if p.type == "router":
         lines.extend(f"  {line}" for line in _router_detail_lines(p))
     assign, unset = launch_env(p, p.env_vars(), p.model_flag(), environ={})
