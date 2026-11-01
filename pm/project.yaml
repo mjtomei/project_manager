@@ -45908,7 +45908,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/267
   gh_pr_number: 267
   created_at: '2026-10-27T19:03:40.643246+00:00'
-  updated_at: '2026-10-31T23:21:41.358593+00:00'
+  updated_at: '2026-11-01T02:48:55.776365+00:00'
   started_at: '2026-10-27T19:04:56.616056+00:00'
   reviewed_at: null
   merged_at: null
@@ -46218,6 +46218,30 @@ prs:
       inheriting the saved target list. Captures: /pm-captures/scenarios/25/.'
     created_at: '2026-10-31T23:21:41Z'
     last_edited: '2026-10-31T23:21:41Z'
+  - id: note-00ac0f0
+    text: 'QA S26 (watcher toggle + live scope) PASS on head 5d03a452. Isolated fixture
+      (dedicated HOME=/tmp/pm-qa-s26-home + PM_TMUX_SOCKET, no inherited TMUX; real
+      session/shared ~/.pm untouched). Observed: (1) first `w s` started the watcher
+      (prompt pm_prompt_ab461ca0); second `w s` logged "stopping (finishing current
+      iteration)" + "stopped: OK READY (1 iteration)" with one unchanged watcher window
+      and no KILLED — the stale-stopped-instance bug did not recur; third `w s` started
+      a new watcher (new prompt path) with exactly one running entry behind the stopped
+      one. (2) With T1 only, iteration-1 prompt = targets **pr-df6af09**, managed
+      pr-83c83d6, pr-df6af09, U absent; `pm autostart add T2` while running made iteration
+      2 = targets **pr-df6af09**, **pr-658c51f** and its launch line carried both
+      --auto-start-target flags. (3) Concurrent remove T1 / add T3 both rc 0 with
+      order-dependent replies; final state exactly T2+T3 (text "Auto-start: targets
+      (2 target(s))", T1 only as a └ dependency under T2); iteration 3 = targets **pr-658c51f**,
+      **pr-95fac70** with both launch flags. (4) `pm autostart clear` printed removed
+      T2/T3 + "auto-start off; targets: (none)"; log shows "Auto-start: OFF" and "stopped:
+      OK READY (3 iterations)"; no iteration 4, no new launching-window line, watcher
+      pane %9/pid 3167 unchanged over 165 s; status mode=off/targets=[]/runs=[]/ok=true.
+      Note: the Managed PRs line is rendered in PR-id order, not insertion order (sets
+      match). Captures: /pm-captures/scenarios/26/watcher-toggle-scope/ (recording.mp4/cast,
+      transcript, per-iteration prompt blocks, launch lines, concurrent remove/add
+      rc+out).'
+    created_at: '2026-11-01T02:48:55Z'
+    last_edited: '2026-11-01T02:48:55Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
