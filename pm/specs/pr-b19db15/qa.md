@@ -700,6 +700,13 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   the finalize step then fails with "there is no webm to transcode — the
   driver wrote no video" instead of blaming ffmpeg, and leaves no mp4 (a
   stale one from an earlier run is removed);
+- a driver that was *killed* before it renamed its video leaves Playwright's
+  auto-named `page@<hash>.webm` and no `recording.webm`, and the finalize step
+  then fails naming that partial and the killed rename ("the driver was
+  killed before it renamed its video onto recording.webm"), not "the driver
+  wrote no video; … check the driver's recordVideo option" — the driver
+  recorded, so re-recording (step 2) is the remedy, and the partial is
+  mentioned in the manifest rather than transcoded (R78 in impl.md);
 - a transcode whose `ffmpeg` reports success but writes an empty mp4 fails
   with "ffmpeg wrote nothing", leaves no mp4 behind, and keeps the webm so
   the step can be retried;

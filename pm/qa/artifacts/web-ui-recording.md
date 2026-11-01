@@ -555,11 +555,39 @@ fi
 # resume into it.
 rm -f "$CAPDIR/recording.mp4" "$CAPDIR/recording.mp4.partial.mp4"
 # No webm means there is nothing to transcode, and that is *not* an ffmpeg
-# problem: the driver block checks the driver's exit status, but a driver that
-# exits 0 without recording (`recordVideo` dropped while adapting it, or a
-# `video` that came back null) writes no video at all, and the failure below
-# would otherwise blame the encoder — the same misdiagnosis as reporting a
-# missing cast as an `agg` problem in the recording recipes. Say which it is.
+# problem. Two states produce it, and the capture directory tells them apart.
+# A driver that exits 0 without recording (`recordVideo` dropped while
+# adapting it, or a `video` that came back null) writes no video at all. A
+# driver that was *killed* before it renamed its video — a supervisor, an OOM
+# kill, or the worker's own session torn down while it ran — leaves
+# Playwright's auto-named `page@<hash>.webm` instead: a valid, playable
+# partial that the produced-files list names and that this step must never
+# transcode. Reporting that state as "the driver wrote no video; check
+# recordVideo" sends the worker to a driver option that was never the
+# problem, and a torn-down session is exactly the case where no step-2
+# failure message reached them (verified in this container: with only
+# `page@<hash>.webm` in the capture directory the block printed "the driver
+# wrote no video; … check the driver's recordVideo option"). Name the partial
+# where it is and say to re-record; the step still refuses to publish it.
+if [ ! -e "$CAPDIR/recording.webm" ]; then
+    partial=
+    for f in "$CAPDIR"/page@*.webm; do
+        [ -e "$f" ] || continue
+        partial=$f
+        break
+    done
+    if [ -n "$partial" ]; then
+        echo "there is no webm to transcode — the driver was killed before" \
+            "it renamed its video onto recording.webm; this attempt holds" \
+            "only Playwright's partial $partial, which is not this run's" \
+            "video. Re-run step 2 to record it again" >&2
+        exit 1
+    fi
+fi
+# The other shapes — no video at all, or an empty one (the check is `test -s`,
+# so a 0-byte webm is not an input either) — are the driver's own failure, and
+# the failure below would otherwise blame the encoder: the same misdiagnosis
+# as reporting a missing cast as an `agg` problem in the recording recipes.
 [ -s "$CAPDIR/recording.webm" ] || {
     echo "there is no webm to transcode — the driver wrote no video; re-run" \
         "step 2 and check the driver's recordVideo option" >&2

@@ -3309,6 +3309,66 @@ R77. **Two guarantees the kept web-UI recipe carries had no case (review loop
    `/pm-captures/review-928f-i16/` (`probe.log`, `mutation-check.log`,
    `recipe-file.log`, `suite.log`, `README.md`, `scripts/`).
 
+R78. **A killed driver's partial was misdiagnosed, and the batch entry point's
+   own cleanup had no case (review loop 928f i17).** One recipe fix plus one
+   test-only gap, both the PR's own class. No `pm_core/` change.
+
+   (A) *The web-UI finalize step could not tell two no-webm states apart.*
+   Playwright names its video `page@<hash>.webm` and `driver.mjs` renames it
+   onto `recording.webm` only after a complete walk-through, so a driver
+   killed before that rename (a supervisor, an OOM kill, or the worker's
+   session torn down while it ran) leaves the partial and no
+   `recording.webm`. The finalize step's no-webm branch reported that state as
+   "the driver wrote no video; re-run step 2 and check the driver's
+   recordVideo option" — a cause the capture directory contradicts (its own
+   produced-files list names the partial as "a valid, playable *partial*
+   recording"), and a remedy aimed at a driver option that was never the
+   problem. It is also the state a worker reaches without any step-2 message:
+   a torn-down session never runs the driver block's failure path, so the
+   worker resumes at step 3. Verified in this container with the recipe's own
+   finalize block, extracted verbatim: with only `page@b87f….webm` in the
+   capture directory the shipped block printed exactly that message (rc 1, no
+   ffmpeg call, the previous run's mp4 removed, the partial kept). The step
+   now looks for `page@*.webm` when `recording.webm` is *absent* and names the
+   partial and the killed rename; the "wrote no video" message stays for a
+   missing or 0-byte webm with no partial. `test_web_ui_finalize_names_a_killed_drivers_partial`
+   pins the message, the partial's survival (the manifest lists it) and that
+   ffmpeg never runs. Mutation check: disabling the new branch fails exactly
+   that case (whole file: **1 failed, 302 passed**).
+
+   (B) *`render_cast`'s own pre-rm had no case, and it is the documented batch
+   entry point's only cleanup.* The Notes show a batch loop calling
+   `render_cast "$c"` for each cast; in that form the block's top-level
+   pre-render `rm` never runs, so the function's own `rm -f "$gif" "$part"`
+   is what clears a previous render's intermediate. A render killed while
+   `ffmpeg` ran reaches no cleanup, so its `recording.mp4.partial.mp4`
+   survives; a later call for that cast then finds it, and if the encoder
+   reports success and writes nothing — the state `[ -s "$part" ]` exists for
+   — the stale partial satisfies the check and is renamed onto
+   `recording.mp4`. Verified in this container with the recipe's own function
+   and a stub encoder that exits 0 without writing: with the pre-rm the batch
+   call exits **1** with "ffmpeg wrote no mp4" and publishes nothing; with it
+   dropped the call exits **0** and publishes the previous render's bytes
+   (`STALE-PARTIAL-FROM-PREVIOUS-RENDER`) as this run's video. Every existing
+   case runs the whole block, whose own `rm` masks this one, so deleting the
+   function's `rm` left the file green (**300 passed**, verified by the
+   mutation sweep). `_run_render` gained `direct` (call the function the way
+   the batch loop does: no block-level `rm`, no `render_fail` wrapper) and
+   `seed` (previous outputs in the cast's directory), and
+   `test_render_cast_alone_does_not_publish_a_stale_partial` (both recipes)
+   requires rc ≠ 0, the "ffmpeg wrote no mp4" message and no published mp4.
+   Mutation check: dropping the pre-rm in either recipe fails exactly that
+   recipe's case (whole file: **1 failed, 302 passed** each).
+
+   Tests: recipe file **303 passed** (was 300). Full suite
+   (`env -u PM_HOST_HOME PYTHONPATH=/workspace PATH=/usr/bin:/bin pytest
+   tests/ -q --deselect tests/test_merge_publish.py --deselect
+   tests/test_signoff_integration.py`) **5379 passed, 1 skipped, 121 deselected, 0 failed**
+   (432.52 s, final run). Evidence:
+   `/pm-captures/review-928f-i17/` (`probe-before.log`,
+   `probe-after.log`, `mutation-check.log`, `recipe-file.log`, `suite.log`,
+   `README.md`, `scripts/`).
+
 ## Non-goals
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
 - **No new helper, prompt block, verifier text, or QA-loop change.** Those
@@ -3863,6 +3923,49 @@ R77. **Two guarantees the kept web-UI recipe carries had no case (review loop
    `tpad`/`setpts` expression deleted and passes unmodified.
 
 ## Evidence notes
+
+- Review loop 928f i17 (R78) found one leftover in the kept web-UI recipe
+  scope and one unpinned guarantee in the render scope, both the PR's own
+  class; one recipe fix, one test-only. (A) The finalize step's no-webm
+  branch reported a *killed* driver's state as "the driver wrote no video;
+  re-run step 2 and check the driver's recordVideo option". A driver killed
+  before it renames Playwright's auto-named `page@<hash>.webm` onto
+  `recording.webm` (a supervisor, an OOM kill, or the worker's session torn
+  down while it ran) leaves the partial and no `recording.webm`, and a
+  torn-down session never runs the driver block's failure path — so the
+  worker resumes at step 3 with no step-2 message, and the produced-files
+  list's own description of the partial ("a valid, playable *partial*
+  recording") contradicts the message. Verified in this container with the
+  recipe's own finalize block, extracted verbatim: with only
+  `page@b87f….webm` in the capture directory the shipped block printed
+  exactly that message (rc 1, no ffmpeg call, the previous run's mp4 removed,
+  the partial kept). The step now looks for `page@*.webm` when
+  `recording.webm` is absent, names the partial and the killed rename, and
+  keeps the "wrote no video" message for a missing or 0-byte webm with no
+  partial. `test_web_ui_finalize_names_a_killed_drivers_partial` pins the
+  message, the partial's survival and that ffmpeg never runs. (B)
+  `render_cast`'s own `rm -f "$gif" "$part"` is the documented batch loop's
+  *only* cleanup (the block's top-level pre-render `rm` never runs in that
+  form), and no case ran the function directly: deleting it left the file
+  green (**300 passed**, the mutation sweep). With a previous render's
+  `recording.mp4.partial.mp4` in place and an encoder that reports success
+  and writes nothing (the state `[ -s "$part" ]` exists for), the stale
+  partial satisfies the check and is renamed onto `recording.mp4`. Verified
+  in this container with the recipe's own function: shipped, the batch call
+  exits **1** with "ffmpeg wrote no mp4" and publishes nothing; with the
+  pre-rm dropped it exits **0** and publishes the previous render's bytes
+  (`STALE-PARTIAL-FROM-PREVIOUS-RENDER`). `_run_render` gained `direct` (call
+  the function the way the batch loop does) and `seed` (previous outputs in
+  the cast's directory), and
+  `test_render_cast_alone_does_not_publish_a_stale_partial` (both recipes)
+  requires rc ≠ 0, the message and no published mp4. Mutation checks: each
+  mutation fails exactly its new case (whole file: **1 failed, 302 passed**
+  each). Tests: recipe file **303 passed** (was 300); full suite ->
+  **5379 passed, 1 skipped, 121 deselected, 0 failed**
+   (432.52 s, final run). Evidence: `/pm-captures/review-928f-i17/`
+  (`probe-before.log`, `probe-after.log`, `mutation-check.log`,
+  `recipe-file.log`, `suite.log`, `README.md`, `scripts/`). No `pm_core/`
+  change; the dropped helper/prompt/verifier work stays dropped.
 
 - Review loop 928f i16 (R77) found two guarantees the kept web-UI recipe
   carries with no case, by mutating them in this container; test-only, no

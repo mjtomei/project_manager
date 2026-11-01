@@ -1340,7 +1340,7 @@ def test_failed_render_leaves_no_video(name, tmp_path):
 def _run_render(name, tmp_path, agg_body=None, ffprobe_body=None,
                 ffmpeg_body=None, with_cast=True, cast_body=None,
                 capture=None, capdir_mode=None, create_capture_dir=True,
-                mv_body=None, home=None):
+                mv_body=None, home=None, direct=False, seed=None):
     """Run a recipe's render block against stubbed ``agg``/``ffprobe``/``ffmpeg``.
 
     Returns ``(proc, mp4_path, gif_path)``. The stubs are the real stage
@@ -1359,6 +1359,13 @@ def _run_render(name, tmp_path, agg_body=None, ffprobe_body=None,
     ``~/…`` capture path is expanded against for this helper's own file
     operations (the block text keeps the tilde spelling, which the block's
     shell expands).
+
+    ``direct=True`` runs the block's own ``render_cast`` the way the Notes'
+    batch loop does — the function is called on its own, so the block's
+    top-level pre-render ``rm`` and its ``render_fail`` wrapper never run and
+    the function's exit status is the script's. ``seed`` writes extra files
+    (name -> bytes) into the cast's directory before the run, for a case that
+    needs a previous render's outputs in place.
     """
     capture = tmp_path if capture is None else capture
     block = _render_block(name)
@@ -1367,11 +1374,28 @@ def _run_render(name, tmp_path, agg_body=None, ffprobe_body=None,
                   .replace("<short-name>", "run"))
     cast = _expand_tilde(Path(cast_rel.replace("<capture-dir>", str(capture))
                                      .replace("<short-name>", "run")), home)
+    if direct:
+        # The documented batch entry point: ``render_cast "$c"`` per cast.
+        # Drop the block's own pre-render ``rm`` (a batch caller never runs
+        # it) and its ``render_fail`` wrapper, and leave the function call as
+        # the last command so its status is the script's.
+        lines = [ln for ln in block.splitlines()
+                 if not ln.startswith('rm -f "${cast%.cast}.mp4"')]
+        for i, ln in enumerate(lines):
+            if ln.startswith('render_cast "$cast" || render_fail'):
+                lines[i] = 'render_cast "$cast"'
+                del lines[i + 1]
+                break
+        else:
+            raise AssertionError(f"{name}: no render_cast call found")
+        block = "\n".join(lines) + "\n"
     if create_capture_dir:
         cast.parent.mkdir(parents=True, exist_ok=True)
         if with_cast:
             cast.write_text(cast_body if cast_body is not None
                             else '{"version": 2}\n')
+        for fname, data in (seed or {}).items():
+            (cast.parent / fname).write_bytes(data)
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
     _stub_tool(bindir, "agg", agg_body or (
@@ -2139,6 +2163,44 @@ def test_render_names_a_publish_that_left_no_mp4(name, tmp_path):
         f"{name}: the failed publish left the partial behind, so a later "
         "attempt resumes into it")
     assert not gif.exists()
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_render_cast_alone_does_not_publish_a_stale_partial(name, tmp_path):
+    """The batch entry point carries its own cleanup, and it had no case.
+
+    The Notes document calling ``render_cast`` directly in a loop (``mapfile
+    -t casts < <(find ...); for c in "${casts[@]}"; do render_cast "$c";
+    done``), and in that form the block's top-level pre-render ``rm`` never
+    runs: the function's own ``rm -f "$gif" "$part"`` is the only thing that
+    clears a previous render's intermediate. A render killed while ``ffmpeg``
+    ran reaches no cleanup, so its ``recording.mp4.partial.mp4`` survives; a
+    later call for that cast then finds it, and if the encoder reports
+    success and writes nothing — the state ``[ -s "$part" ]`` exists for —
+    the stale partial satisfies the check and is renamed onto
+    ``recording.mp4``. Verified in this container with the recipe's own
+    function: the batch call exits **0** and publishes the previous render's
+    bytes as this run's video when the pre-rm is dropped, and exits 1 with
+    "ffmpeg wrote no mp4" and publishes nothing with it in place.
+
+    Every other case runs the whole block, whose own ``rm`` masks this one, so
+    deleting the function's ``rm`` left the file green (300 passed).
+    """
+    r, mp4, _gif = _run_render(
+        name, tmp_path, direct=True,
+        seed={"recording.cast.gif": b"a previous render's gif",
+              "recording.mp4.partial.mp4":
+                  b"a previous render's partial video"},
+        ffmpeg_body='exit 0\n')      # reports success, writes nothing
+
+    assert r.returncode != 0, (
+        f"{name}: a batch render with a previous render's partial in place "
+        "and an encoder that wrote nothing was reported as a successful "
+        "render")
+    assert "ffmpeg wrote no mp4" in r.stderr, r.stderr
+    assert not mp4.exists(), (
+        f"{name}: the previous render's partial was published as this run's "
+        "video")
 
 
 @pytest.mark.parametrize("name", RECIPES)
@@ -2987,6 +3049,62 @@ def test_web_ui_finalize_says_when_there_is_no_webm(tmp_path, webm_shape):
     assert not (capdir / "recording.mp4").exists(), (
         "the no-webm failure left the previous run's mp4 as this run's "
         "recording")
+
+
+def test_web_ui_finalize_names_a_killed_drivers_partial(tmp_path):
+    """A killed driver's auto-named partial is not "the driver wrote no video".
+
+    Playwright names its video ``page@<hash>.webm`` and the driver renames it
+    onto ``recording.webm`` only after a complete walk-through, so a driver
+    killed before that rename (a supervisor, an OOM kill, or the worker's
+    session torn down while it ran) leaves the partial and no
+    ``recording.webm``. The finalize step's no-webm branch reported that state
+    as "the driver wrote no video; re-run step 2 and check the driver's
+    recordVideo option" — a cause the capture directory contradicts, and a
+    remedy aimed at a driver option that was never the problem (the driver
+    recorded; it was killed). It is also the state a worker reaches without
+    any step-2 message: a torn-down session never runs the driver block's own
+    failure path, so the worker resumes at step 3.
+
+    Verified in this container with the recipe's own block: with only
+    ``page@b87f….webm`` in the capture directory the shipped step printed
+    "there is no webm to transcode — the driver wrote no video; re-run step 2
+    and check the driver's recordVideo option". The step names the partial
+    where it is, and still refuses to publish it.
+    """
+    block = _web_ui_finalize_block()
+
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    partial = capdir / "page@0123456789abcdef.webm"
+    partial.write_bytes(b"a killed driver's partial recording")
+    (capdir / "recording.mp4").write_bytes(b"an earlier run's video")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    called = tmp_path / "ffmpeg-called"
+    _stub_tool(bindir, "ffmpeg", f'touch "{called}"\n')
+    env = dict(os.environ, CAPDIR=str(capdir),
+               PATH=f"{bindir}:{os.environ['PATH']}")
+    r = subprocess.run(["bash"], input=block, env=env,
+                       capture_output=True, text=True)
+
+    assert r.returncode != 0, "a capture with no recording.webm passed"
+    assert "page@0123456789abcdef.webm" in r.stderr, (
+        "the failure does not name the partial the driver left: " + r.stderr)
+    assert "killed before it" in r.stderr, (
+        "the failure does not say the driver was killed before the rename: "
+        + r.stderr)
+    assert "recordVideo" not in r.stderr, (
+        "the failure sends the worker to the driver's recordVideo option for "
+        "a driver that recorded and was killed: " + r.stderr)
+    assert not called.exists(), (
+        "the finalize step ran ffmpeg with no recording.webm to read")
+    assert not (capdir / "recording.mp4").exists(), (
+        "the no-webm failure left the previous run's mp4 as this run's "
+        "recording")
+    assert partial.exists(), (
+        "the finalize step removed the killed driver's partial, which the "
+        "produced-files list tells the worker to mention")
 
 
 def test_web_ui_finalize_names_a_missing_encoder(tmp_path):

@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T04:36:57.384335+00:00'
+  updated_at: '2026-11-01T05:12:45.920134+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38051,6 +38051,27 @@ prs:
       The dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-11-01T04:36:57Z'
     last_edited: '2026-11-01T04:36:57Z'
+  - id: note-fcd5167
+    text: 'Review loop 928f i17: two findings in the kept recipe scope (one recipe
+      fix, one test-only); no pm_core change. (1) The web-UI finalize step no longer
+      misdiagnoses a killed driver''s auto-named page@<hash>.webm as "the driver wrote
+      no video; ... check the driver''s recordVideo option" — a driver killed before
+      the rename leaves the partial and no recording.webm, and a torn-down session
+      never runs step 2''s failure path, so the worker resumes at step 3; with only
+      the partial present the step now names it and the killed rename and says to
+      re-record (verified live with the recipe''s own block; before/after in /pm-captures/review-928f-i17/probe-before.log
+      and probe-after.log); new test test_web_ui_finalize_names_a_killed_drivers_partial.
+      (2) render_cast''s own pre-rm — the documented batch loop''s only cleanup, since
+      the block''s top-level rm never runs in that form — had no case: with it dropped,
+      a batch call holding a previous render''s recording.mp4.partial.mp4 and an encoder
+      that exits 0 without writing publishes the stale partial as recording.mp4 (rc
+      0, verified live); _run_render gained direct/seed and test_render_cast_alone_does_not_publish_a_stale_partial
+      covers both recipes. Mutation checks fail exactly the new cases (1 failed, 302
+      passed each); recipe file 303 passed (was 300); full suite 5379 passed, 1 skipped,
+      121 deselected, 0 failed (432.52 s). Evidence: /pm-captures/review-928f-i17/.
+      impl.md R78. The dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-11-01T05:12:45Z'
+    last_edited: '2026-11-01T05:12:45Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
