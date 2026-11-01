@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T22:22:22.045503+00:00'
+  updated_at: '2026-11-01T23:08:54.807334+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6808,6 +6808,54 @@ prs:
       script re-ran clean on a disposable socket.'
     created_at: '2026-11-01T22:22:21Z'
     last_edited: '2026-11-01T22:22:21Z'
+  - id: note-42a2a4e
+    text: 'Review loop b48f i15 (no requirement changes; full suite 5484 passed /
+      1 skipped, 415.6 s, log /pm-captures/review-b48f-i15/full-suite-final.log; an
+      earlier run in that directory used a scratch PYTHONPATH without the markdown
+      module and its 12 test_markdown_render failures are that environment trap, kept
+      as full-suite-markdown-missing.log). Verification pass over the head after the
+      b48f i14 fix; three gaps of the "a name is not a group / a server is not a session"
+      class. (1) The pane-switch if-shell gate stripped the grouped suffix at the
+      first "~" and left the name and registry path unquoted, so a session whose tag
+      contains "~" (a repo directory may: x~foo runs pm-x~foo-<hash>), one whose name
+      contains a space (the unquoted value splits the test command: the old condition
+      exits 2, "unexpected operator", even when the file exists) and every user''s
+      own view of a pm session (S118/S121/S124) never matched their registry file:
+      pm''s mobile-aware prefix+arrow switch was silently replaced by the plain select-pane
+      fallback. The condition now derives the base through tmux''s session group (a
+      grouped base~N and a view report #{session_group} = base; a lone session reports
+      an empty group and uses #{session_name}) and shell-quotes both values; a name
+      containing a single quote still fails the condition, which keeps the safe fallback.
+      Tests: TestPaneSwitchBindingGate runs the captured condition with /bin/sh for
+      a lone base, grouped session, user view, space name, ~ tag, grouped ~ tag, a
+      registry path containing a space, a non-pm session and another pm session''s
+      registry; the pre-fix head fails the shape test at the view and, verified directly,
+      the space and ~ cases, plus the space-path test. (2) The "attached session"
+      exemption in _owned_only_for_target keyed on the session NAME, not the server:
+      inside a legacy pre-isolation session (default server, not the deterministic
+      private socket) pm session kill/mobile/--print-connect probed, killed or advertised
+      a socket another user planted at that name. New _attached_to_session_socket
+      requires the process to be inside the target session AND the ambient socket
+      to be its deterministic socket; a legacy session falls through to the default
+      server and a planted socket is neither probed nor advertised. Tests: test_kill_inside_a_legacy_session_requires_ownership
+      and test_print_connect_inside_a_legacy_session_requires_ownership (fail pre-fix);
+      test_kill_from_inside_the_session_does_not_require_ownership now models the
+      attached socket. (3) QA resume drove a run launched from another clone''s session
+      in the wrong session: _live_other_session asks the current server, which post-isolation
+      never sees the other session, so _resume_session fell back to this TUI''s own
+      session and polled windows that are not there (ending that run with a bogus
+      result) while the original panes kept running. New qa_loop.run_session_live_elsewhere
+      distinguishes "gone (its windows went with it)" from "alive on another server";
+      qa_loop_ui._resume_incomplete_qa leaves the snapshot to the clone hosting the
+      run in the latter case (a completed run is still processed, a run whose session
+      is gone is still resumed here, and a same-server legacy session keeps the previous
+      adoption). Tests: TestCrossServerRunSession (unit cases plus the TUI scan; the
+      pre-fix scan resumes the foreign run). Every fix-asserting test was verified
+      to fail on a worktree of the pre-fix head d13e71dba. The preserved session_start_smoke.py
+      re-ran clean on a disposable socket. No live session, server or shared host
+      configuration was touched.'
+    created_at: '2026-11-01T23:08:54Z'
+    last_edited: '2026-11-01T23:08:54Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
