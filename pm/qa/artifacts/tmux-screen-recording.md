@@ -72,11 +72,13 @@ transcript somewhere these steps never look (step 0 refuses one rather than
 failing later as an empty transcript, and every step pasted on its own —
 2, 3, 4 and 5 — refuses it too, because each resolves the path against its
 own shell or the session's directory). A leftover `pm-recorder`
-session is refused by step 3 before it starts anything ("a recorder is
-already running on this server — end it with step 5 …"), and a duplicate that
+session is refused by step 3 while its pane is still running ("a recorder is
+already running on this server — end it with step 5 …"); one whose pane has
+already returned — `remain-on-exit on` keeps the session after its only pane's
+command exits — is cleared there instead, like step 0's. A duplicate that
 appears in the gap before `new-session` stops the run at "could not start the
-recorder session" — either way the run stops there instead of passing
-the readiness wait on the *previous* run's attach client. The clear names the
+recorder session". The run stops there, instead of passing the readiness wait
+on the *previous* run's attach client. The clear names the
 session exactly (`=pm-recorder`): a bare name is prefix-matched when no
 session has the whole name, and pm's own sessions are `pm-<repo>-<hash>`, so
 a repo whose name starts with `recorder` would otherwise lose its pm session
@@ -580,7 +582,13 @@ tmux has-session -t "=$TARGET" 2>/dev/null || {
 # A restart must not inherit the attempt it replaces. This step is pasted on
 # its own to restart a recorder, and the attempt being replaced left its cast,
 # its status and its failure logs in the capture directory — step 0 clears
-# them only for a fresh run. Without this clear the restart cannot even start:
+# them only for a fresh run. The render outputs and the manifest go with them:
+# the video was rendered from the cast this clear deletes, so a restart that
+# fails before the render step would otherwise leave the previous attempt's
+# mp4 (or its interrupted partial) as the only video in the directory, and a
+# manifest naming a cast and a video that are gone — the stale-evidence state
+# step 0's own clear exists for, one paste over. Without this clear the
+# restart cannot even start:
 # `asciinema rec` refuses an existing cast ("asciinema: … already exists,
 # aborting" on 2.1.0), and the readiness wait below reports that as "recorder
 # exited before it drew — see the cast and …/recorder-stderr.log", pointing at
@@ -594,8 +602,22 @@ tmux has-session -t "=$TARGET" 2>/dev/null || {
 # attempt, step 3 alone started a new recorder with the old `0` still on disk;
 # killing that recorder left the `0`, and step 5 exited 0 on the cast it had
 # written so far). Only a step with no live recorder may clear this: a
-# recorder that is still up owns the cast it is writing, so refuse it first
-# and name the step that ends it instead of deleting its evidence.
+# recorder whose pane is still running owns the cast it is writing, so refuse
+# it first and name the step that ends it instead of deleting its evidence.
+#    A recorder whose pane has *returned* is not running: with
+#    `set -g remain-on-exit on` the session outlives it, so `has-session`
+#    alone read a finished or abandoned recorder as a live one — the restart
+#    stopped at "a recorder is already running" and named a kill-session
+#    remedy for a pane that had already exited (verified on tmux 3.2a: the
+#    session survives its pane and `#{pane_dead}` is 1). `#{pane_dead}` is the
+#    handle (1 once the pane's command has returned, 0 while it runs, read
+#    through the same exact `=…:0.0` target every other handle here uses); an
+#    empty answer — the session went away between this call and the
+#    `has-session` above — is read as live and refused, because acting on a
+#    recorder this step cannot see is the worse failure. The dead leftover is
+#    then cleared like step 0's, because `new-session` fails with "duplicate
+#    session" while it exists; it writes nothing, so there is no evidence to
+#    preserve.
 #    The transcript is deliberately not cleared here. It belongs to step 2's
 #    pipe, and the guard above refuses a restart without one, so a pipe is
 #    attached at this point: removing the file would leave that `cat` writing
@@ -606,10 +628,15 @@ tmux has-session -t "=$TARGET" 2>/dev/null || {
 #    attempt's output; the cast, which this step clears, is the per-attempt
 #    evidence.
 if tmux has-session -t "=pm-recorder" 2>/dev/null; then
-    echo "a recorder is already running on this server — end it with step 5" \
-        "before starting another; if it is a leftover from an abandoned run," \
-        "'tmux kill-session -t =pm-recorder' clears it" >&2
-    exit 1
+    if [ "$(tmux display-message -p -t "=pm-recorder:0.0" '#{pane_dead}' 2>/dev/null)" != 1 ]; then
+        echo "a recorder is already running on this server — end it with step 5" \
+            "before starting another; if it is a leftover from an abandoned run," \
+            "'tmux kill-session -t =pm-recorder' clears it" >&2
+        exit 1
+    fi
+    # The pane has returned: nothing is writing the cast, so clear the dead
+    # session (best-effort — it may go away in the gap) and restart.
+    tmux kill-session -t "=pm-recorder" 2>/dev/null || true
 fi
 # ... and it has to still be a *restart*, not a fresh start: step 2's
 # transcript pipe has to be attached. Every failure path in this flow stops
@@ -637,7 +664,9 @@ if [ "$(tmux display-message -p -t "=$TARGET:0.0" '#{pane_pipe}' 2>/dev/null)" !
     exit 1
 fi
 rm -f <capture-dir>/recording.cast <capture-dir>/recorder.status \
-      <capture-dir>/recorder-stderr.log <capture-dir>/recorder-pane.log
+      <capture-dir>/recorder-stderr.log <capture-dir>/recorder-pane.log \
+      <capture-dir>/recording.mp4 <capture-dir>/recording.cast.gif \
+      <capture-dir>/recording.mp4.partial.mp4 <capture-dir>/manifest.md
 tmux new-session -d -s pm-recorder -x 200 -y 50 \
     "asciinema rec --quiet <capture-dir>/recording.cast \
         -c 'tmux attach -t =$TARGET' 2> <capture-dir>/recorder-stderr.log; \

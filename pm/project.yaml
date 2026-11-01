@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T15:14:07.702036+00:00'
+  updated_at: '2026-11-01T15:52:51.114553+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38555,6 +38555,43 @@ prs:
       work stays dropped. (2026-11-01T15:16:00Z)'
     created_at: '2026-11-01T15:14:07Z'
     last_edited: '2026-11-01T15:14:07Z'
+  - id: note-4891400
+    text: 'Review loop 928f i32: two leftovers in the kept tmux-recipe scope, both
+      the PR own class, both on the paste-alone step 3; recipe + tests + specs, no
+      pm_core change. (1) R96, the known residual R92 recorded: step 3 refused any
+      existing pm-recorder session as "a recorder is already running on this server".
+      A session is not a recorder: with set -g remain-on-exit on (this project own
+      QA notes prescribe it for a shared pane) tmux keeps the session after its only
+      pane command returns (verified on tmux 3.2a: has-session 0, pane_dead 1; a live
+      pane answers 0), so a leftover from a finished or abandoned run was refused
+      and the worker was sent to a kill-session remedy for a pane that had already
+      exited. Step 3 now reads the pane through the same exact =pm-recorder:0.0 target
+      every other handle uses: pane_dead 0 still refuses, 1 clears the dead session
+      like step 0 and starts the restart, and an empty answer (the session went away
+      between the two calls) is read as live and refused. (2) R97: step 3 clears the
+      cast it replaces but not the artifacts rendered from it (recording.mp4, recording.cast.gif,
+      recording.mp4.partial.mp4, manifest.md), so a restart that fails before the
+      render step left the previous attempt video as the only video in the directory,
+      beside a manifest naming a cast and a video the restart deleted -- the stale-evidence
+      state step 0 own clear exists for, one paste over. The restart rm now names
+      all four; the transcript is still deliberately kept. The step-0 prose, step
+      3 comment, impl.md (R2, R89, R96, R97, Files) and qa.md (R3, notes) say which
+      leftovers are refused, which are cleared, and why the render outputs go. Tests:
+      new test_step_three_clears_a_leftover_recorder_whose_pane_has_returned (stub
+      harness, dead.pm-recorder + STUB_REMAIN) fails against the pre-fix guard with
+      that refusal; test_step_three_clears_the_previous_attempt_before_it_starts now
+      pins all eight names as exact tokens (so recording.mp4 is not satisfied by the
+      partial) and test_step_three_restart_clears_the_previous_attempt seeds the render
+      outputs and manifest and requires them gone (both fail against the pre-fix rm).
+      Mutation checks: each mutation fails exactly its cases. Live probe on tmux 3.2a
+      (private TMUX_TMPDIR, remain-on-exit on): dead-pane leftover cleared, guard
+      proceeds rc 0; live recorder refused rc 1, session untouched. Recipe file 351
+      passed (was 350); full suite 5548 passed, 1 skipped, 0 failed (482.83 s). Evidence:
+      /pm-captures/review-928f-i32/ (probe-step3-dead-pane.log, probe-step3-leftovers.log,
+      mutation-check.log, recipe-file.log, suite.log, README.md, scripts/). The dropped
+      helper/prompt/verifier work stays dropped.'
+    created_at: '2026-11-01T15:52:51Z'
+    last_edited: '2026-11-01T15:52:51Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

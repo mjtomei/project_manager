@@ -177,7 +177,10 @@ recording-recipe bugs that any worker following the recipe hits:
   missing status file still fails. Both recipes' step-0 prose also no longer
   claims a leftover recorder session would pass the readiness wait — the tmux
   recipe's step 3 refuses a live recorder, and a duplicate that appears in
-  the gap is stopped by the start check, before that.
+  the gap is stopped by the start check, before that. That refusal reads the
+  recorder's *pane*: a leftover session whose pane has already returned
+  (`remain-on-exit on` keeps it) is cleared like step 0's rather than refused
+  as a live recorder (R96).
 - a missing input is not a failed job (review loop 7c9c i4): the web-UI
   driver block refuses a missing `driver.mjs` — or an empty one, which is a
   valid ES module that `node` runs successfully (review loop ebd1 i10, below)
@@ -681,9 +684,11 @@ render output (`recording.mp4`/`recording.cast.gif`) left by an earlier run,
 **When** the capture step starts, **Then** the stale files and session are
 cleared first, so the recorder does not abort on it ("asciinema: <path>
 already exists, aborting" on asciinema 2.1.0, the version in the QA image)
-and a leftover recorder session stops the run at the start step (the tmux
-recipe's live-recorder refusal, or "could not start the recorder session" for
-a duplicate that appears in the gap), so the run never reaches the readiness
+and a leftover recorder session whose *pane* is still running stops the run
+at the start step (the tmux recipe's live-recorder refusal, or "could not
+start the recorder session" for a duplicate that appears in the gap) — while
+one whose pane has already returned is cleared there, like step 0's (R96) —
+so the run never reaches the readiness
 wait with the previous run's recorder in place, the new cast is this run's,
 the transcript holds only this run, a capture that fails before the render
 step still leaves no earlier run's video in the capture directory, and the
@@ -1225,6 +1230,28 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   the whole bound — a start timeout for a recorder that started and exited
   (verified live on tmux 3.2a: pre-fix rc 1 after the bound, post-fix rc 0 in
   7 ms on the same state; review loop 928f i31, R94).
+- The tmux recipe's step-3 restart runs on a `remain-on-exit on` host with a
+  leftover recorder session whose pane has already returned → the step must
+  clear that dead session and start the restart, not stop at "a recorder is
+  already running on this server" and name a kill-session remedy for a pane
+  that has already exited. `has-session` alone cannot tell the two apart on
+  that host; the pane's own state (`#{pane_dead}` is 1 once its command has
+  returned) can, and the leftover writes nothing, so there is no evidence to
+  preserve. A recorder whose pane is still running is still refused, with
+  its cast and status untouched (verified on tmux 3.2a: pre-fix the dead-pane
+  leftover was refused with that message; post-fix the session is cleared and
+  the restart starts; review loop 928f i32, R96).
+- The tmux recipe's step-3 restart runs over a capture directory left by a
+  completed attempt (cast, `recording.mp4`, `recording.cast.gif`, an
+  interrupted render's `recording.mp4.partial.mp4`, `manifest.md`) → the step
+  must clear the render outputs and the manifest with the cast, because the
+  video was rendered from the cast it deletes and a restart that fails before
+  the render step would otherwise leave the previous attempt's video as the
+  only video in the directory, beside a manifest naming files that are gone.
+  Without the clear, a failed restart's directory is the stale-evidence state
+  step 0's own clear exists for, one paste over (verified with the stub
+  harness: pre-fix all four survived the restart; post-fix none do and the
+  restart still starts; review loop 928f i32, R97).
 
 ## Pass / Fail criteria
 

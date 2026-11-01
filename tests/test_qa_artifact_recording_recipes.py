@@ -713,7 +713,8 @@ class TestRecipes:
         run's recorder is still there, so a leftover has to be cleared (the
         CLI scaffold's ``kill-session``) or refused (the tmux recipe's step
         3, which stops at "a recorder is already running on this server …"
-        and names step 5); a duplicate that appears in the gap before
+        and names step 5 while the recorder's *pane* is still running); a
+        duplicate that appears in the gap before
         ``new-session`` is reported as "could not start the recorder
         session", and either way a re-run ends before recording anything.
         (Before that check the run carried on, but not into a false pass: the
@@ -748,10 +749,11 @@ class TestRecipes:
         Step 3 is pasted on its own to restart a recorder, and the attempt
         being replaced left its cast, its status and its stderr log in the
         capture directory (step 0 clears them only for a fresh run). The
-        order matters: a recorder that is still up owns the cast it is
-        writing, so the step refuses it first, and only then clears the
+        order matters: a recorder whose *pane* is still running owns the cast
+        it is writing, so the step refuses it first, and only then clears the
         replaced attempt's files — before `new-session`, because
-        `asciinema rec` refuses an existing cast.
+        `asciinema rec` refuses an existing cast. A leftover whose pane has
+        returned is cleared instead of refused (R96).
         """
         block = _step_three_block()
         start = block.index("tmux new-session -d -s pm-recorder")
@@ -763,9 +765,14 @@ class TestRecipes:
             "refuse a restart without step 2's transcript pipe before it "
             "clears anything, and clear the replaced attempt before it "
             "starts a new one")
+        cleared = set(block[clear:start].replace("\\", " ").split())
         for name in ("recording.cast", "recorder.status",
-                     "recorder-stderr.log", "recorder-pane.log"):
-            assert name in block[clear:start], (
+                     "recorder-stderr.log", "recorder-pane.log",
+                     "recording.mp4", "recording.cast.gif",
+                     "recording.mp4.partial.mp4", "manifest.md"):
+            # Exact names, not substrings: `recording.mp4` must not be
+            # satisfied by `recording.mp4.partial.mp4`.
+            assert f"<capture-dir>/{name}" in cleared, (
                 f"step 3 does not clear {name} before it starts a recorder, "
                 "so the restart inherits the attempt it replaces")
 
@@ -8170,7 +8177,12 @@ class TestCaptureFlowExecution:
         ``recorder.status`` ``0`` survived the restart: killing the restarted
         recorder mid-scenario left the ``0``, and step 5 exited 0 on the cast
         it had written so far. Both files belong to the attempt being
-        replaced, so the start clears them.
+        replaced, so the start clears them. The render outputs and the
+        manifest go too (R97): the video was rendered from the cast this clear
+        deletes, so a restart that fails before the render step would leave
+        the previous attempt's mp4 (or its interrupted partial) as the only
+        video in the directory, with a manifest naming files that are gone —
+        the stale state step 0's own clear exists for, one paste over.
         """
         cap = tmp_path / "cap"
         r, cast = _run_block(
@@ -8178,7 +8190,11 @@ class TestCaptureFlowExecution:
             state_files={"pipe.pm-test": ""},
             files={"recording.cast": "previous attempt cast\n",
                    "recorder.status": "0\n",
-                   "recorder-stderr.log": "previous failure\n"})
+                   "recorder-stderr.log": "previous failure\n",
+                   "recording.mp4": "previous video\n",
+                   "recording.cast.gif": "previous gif\n",
+                   "recording.mp4.partial.mp4": "previous partial\n",
+                   "manifest.md": "previous manifest\n"})
 
         assert r.returncode != 0, r.stderr
         assert "recorder exited before it drew" in r.stderr, r.stderr
@@ -8191,6 +8207,12 @@ class TestCaptureFlowExecution:
         assert not (cap / "recorder-stderr.log").exists(), (
             "the restart kept the previous attempt's recorder-stderr.log, "
             "which the readiness failure names as this attempt's evidence")
+        for name in ("recording.mp4", "recording.cast.gif",
+                     "recording.mp4.partial.mp4", "manifest.md"):
+            assert not (cap / name).exists(), (
+                f"the restart kept the previous attempt's {name}, which the "
+                "manifest would present as this attempt's evidence although "
+                "the cast it came from was cleared")
 
     def test_a_restarted_recorder_killed_before_its_status_is_not_a_finish(
             self, tmp_path):
@@ -8261,6 +8283,42 @@ class TestCaptureFlowExecution:
         assert "new-session" not in calls.read_text(), (
             "a step that refused a live recorder still started a session: "
             + calls.read_text())
+
+    def test_step_three_clears_a_leftover_recorder_whose_pane_has_returned(
+            self, tmp_path):
+        """A dead pane is not a running recorder (R96).
+
+        With `set -g remain-on-exit on` — this project's own QA notes
+        prescribe it for a shared pane — the recorder's session outlives its
+        pane, so `has-session` alone read a leftover from a finished or
+        abandoned run as a live recorder: the restart stopped at "a recorder
+        is already running on this server" and named a kill-session remedy for
+        a pane whose command had already returned (verified on tmux 3.2a: the
+        session survives its pane and `#{pane_dead}` is 1). The pane's own
+        state tells the two apart, and a dead leftover writes nothing, so the
+        step clears it like step 0's — `new-session` fails with "duplicate
+        session" while it exists — and starts the restart.
+        """
+        calls = tmp_path / "tmux-calls"
+        r, _ = _run_block(
+            _step_three_block(), "ok", tmp_path, target=True,
+            sessions=("pm-recorder",),
+            state_files={"dead.pm-recorder": "", "pipe.pm-test": ""},
+            files={"recording.cast": "abandoned attempt cast\n",
+                   "recorder.status": "0\n"},
+            env_extra={"STUB_TMUX_LOG": str(calls), "STUB_REMAIN": "1"})
+
+        assert r.returncode == 0, (
+            "step 3 refused a leftover recorder whose pane had returned: "
+            + r.stderr)
+        assert "already running" not in r.stderr, r.stderr
+        log = calls.read_text()
+        assert "kill-session -t =pm-recorder" in log, (
+            "step 3 did not clear the dead leftover session, so new-session "
+            "would fail with a duplicate session: " + log)
+        assert "new-session" in log, (
+            "step 3 cleared the dead leftover but never started a recorder: "
+            + log)
 
     def test_step_three_refuses_a_restart_without_the_transcript_pipe(
             self, tmp_path):
