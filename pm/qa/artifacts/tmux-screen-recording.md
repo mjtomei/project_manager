@@ -597,10 +597,11 @@ tmux has-session -t "=$TARGET" 2>/dev/null || {
 # recorder that is still up owns the cast it is writing, so refuse it first
 # and name the step that ends it instead of deleting its evidence.
 #    The transcript is deliberately not cleared here. It belongs to step 2's
-#    pipe, which is still attached: removing the file leaves that `cat`
-#    writing to an unlinked inode (verified on tmux 3.2a: after `rm` the path
-#    stays absent while the pane keeps printing, so the output is lost), and
-#    step 5 would report "transcript.log is empty" for a pipe that works. A
+#    pipe, and the guard above refuses a restart without one, so a pipe is
+#    attached at this point: removing the file would leave that `cat` writing
+#    to an unlinked inode (verified on tmux 3.2a: after `rm` the path stays
+#    absent while the pane keeps printing, so the output is lost), and step 5
+#    would report "transcript.log is empty" for a pipe that works. A
 #    restarted attempt's transcript therefore also holds the replaced
 #    attempt's output; the cast, which this step clears, is the per-attempt
 #    evidence.
@@ -608,6 +609,31 @@ if tmux has-session -t "=pm-recorder" 2>/dev/null; then
     echo "a recorder is already running on this server — end it with step 5" \
         "before starting another; if it is a leftover from an abandoned run," \
         "'tmux kill-session -t =pm-recorder' clears it" >&2
+    exit 1
+fi
+# ... and it has to still be a *restart*, not a fresh start: step 2's
+# transcript pipe has to be attached. Every failure path in this flow stops
+# it (only the guards that refuse before acting — the capture-directory ones
+# and the live-recorder refusal above — leave it in place), so a restart
+# pasted after a failure would start a recorder with no pipe: the transcript
+# would stop growing at the failure and step 5's `test -s` would pass on the
+# replaced attempt's bytes — the same stale evidence as a leftover cast, in
+# the check that exists to catch a capture with no transcript at all (verified
+# in this container with the stub harness: step 2, the failure paths'
+# `tmux pipe-pane` stop, then this step and step 5 exited 0 on the transcript
+# step 2 had written, unchanged).
+# `#{pane_pipe}` is the handle — 1 while a pipe is attached and 0 when none
+# is (verified on tmux 3.2a), read through the same exact `=…:0.0` pane
+# target every other handle here uses. Refuse it before the clear below, and
+# name the step that re-attaches: step 2 re-takes the claim the failure
+# released and appends to the same transcript, so the restarted attempt's
+# output lands in the file step 5 checks.
+if [ "$(tmux display-message -p -t "=$TARGET:0.0" '#{pane_pipe}' 2>/dev/null)" != 1 ]; then
+    echo "no transcript pipe is attached to $TARGET:0.0 — step 2 attaches it" \
+        "and every failure path stops it, so run step 2 first (it re-takes" \
+        "the capture-directory claim and re-attaches the pipe); without it" \
+        "step 5's transcript check would pass on an earlier attempt's bytes" \
+        "or fail for a capture that has none" >&2
     exit 1
 fi
 rm -f <capture-dir>/recording.cast <capture-dir>/recorder.status \

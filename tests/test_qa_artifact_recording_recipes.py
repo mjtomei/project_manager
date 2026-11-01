@@ -56,6 +56,14 @@ hits, regardless of how it waits for a background job:
   claiming the worker's cwd (``cd ""`` stays put, so normalizing an empty
   answer made every other session look like it recorded into the directory the
   step was pasted from);
+- a restart is not a fresh start: step 3 requires the transcript pipe step 2
+  attached, because every failure path in the flow stops it — a restart
+  pasted after a failure otherwise starts a recorder with no pipe, the
+  transcript stops growing at the failure, and step 5's ``test -s`` passes on
+  the replaced attempt's bytes (the stale-evidence shape the rest of this
+  file is about). ``#{pane_pipe}`` is the handle, and the refusal names step
+  2, which re-takes the claim the failure released and appends to the same
+  transcript;
 - the render steps delete this run's outputs before rendering, so a failed
   ``agg``/``ffmpeg``/transcode ends with no video instead of the previous
   run's mp4 (which the manifest would present as this run's evidence); the
@@ -735,10 +743,13 @@ class TestRecipes:
         block = _step_three_block()
         start = block.index("tmux new-session -d -s pm-recorder")
         refuse = block.index('if tmux has-session -t "=pm-recorder"')
+        pipe = block.index("pane_pipe")
         clear = block.index("rm -f <capture-dir>/recording.cast")
-        assert refuse < clear < start, (
+        assert refuse < pipe < clear < start, (
             "step 3 must refuse a live recorder before it clears anything, "
-            "and clear the replaced attempt before it starts a new one")
+            "refuse a restart without step 2's transcript pipe before it "
+            "clears anything, and clear the replaced attempt before it "
+            "starts a new one")
         for name in ("recording.cast", "recorder.status",
                      "recorder-stderr.log", "recorder-pane.log"):
             assert name in block[clear:start], (
@@ -5333,7 +5344,7 @@ resolve() {
     for f in "$STATE"/*; do
         [ -e "$f" ] || continue
         b=${f##*/}
-        case "$b" in pane|sends|pipeclaim|claim.*) continue ;; esac
+        case "$b" in pane|sends|pipeclaim|claim.*|pipe.*) continue ;; esac
         case "$b" in "$t"*) echo "$b"; return 0 ;; esac
     done
     return 1
@@ -5350,9 +5361,11 @@ case "$sub" in
   kill-session)
       s=$(val -t "$@")
       r=$(resolve "$s") || exit 0
-      rm -f "$STATE/$r" "$STATE/claim.$r"; exit 0 ;;
+      # A session ending takes its pipe with it.
+      rm -f "$STATE/$r" "$STATE/claim.$r" "$STATE/pipe.$r"; exit 0 ;;
   kill-server)  rm -f "$STATE/rec" "$STATE/pm-recorder" "$STATE/claim.rec" \
-                     "$STATE/claim.pm-recorder"; exit 0 ;;
+                     "$STATE/claim.pm-recorder" "$STATE/pipe.rec" \
+                     "$STATE/pipe.pm-recorder"; exit 0 ;;
   pipe-pane)
       s=$(val -t "$@")
       r=$(resolve "${s%%:*}")
@@ -5370,6 +5383,14 @@ case "$sub" in
           echo "can't find pane: $s" >&2; exit 1
       fi
       for a in "$@"; do cmd=$a; done
+      # Track the pane's pipe for `display-message #{pane_pipe}`: the attach
+      # carries its command (`cat >> …/transcript.log`), a stop does not
+      # (`pipe-pane -t S`). A failed attach (above) leaves no pipe behind, and
+      # the recipe's step 3 refuses a restart without one.
+      case "$cmd" in
+        *">>"*) touch "$STATE/pipe.$r" ;;
+        *)      rm -f "$STATE/pipe.$r" ;;
+      esac
       if [ "$STUB_MODE" != notranscript ]; then
           case "$cmd" in
             *">>"*) out=${cmd#*>> }; out=${out%% *}
@@ -5406,6 +5427,20 @@ case "$sub" in
           echo "can't find session: $s" >&2; exit 1
       fi
       cat "$STATE/pane" 2>/dev/null; exit 0 ;;
+  display-message)
+      # `#{pane_pipe}` is the recipe's handle for "step 2's transcript pipe is
+      # attached" (verified on tmux 3.2a: 1 while a pipe is attached, 0 when
+      # none is). The target carries a pane spec, which real tmux resolves
+      # against the session part — same as `pipe-pane` above.
+      s=$(val -t "$@")
+      r=$(resolve "${s%%:*}")
+      [ -z "$r" ] && { echo "can't find session: $s" >&2; exit 1; }
+      case "$*" in
+        *pane_pipe*)
+            [ -f "$STATE/pipe.$r" ] && { echo 1; exit 0; }
+            echo 0; exit 0 ;;
+      esac
+      exit 0 ;;
   # Session user options: the capture-dir claim step 2 writes and step 5
   # clears. Modelled on the real server (verified: `set-option -t S
   # @pm_capture_dir V`, `show-options -t S -v @pm_capture_dir`, and
@@ -5471,7 +5506,7 @@ case "$sub" in
       for f in "$STATE"/*; do
           [ -e "$f" ] || continue
           b=${f##*/}
-          case "$b" in pane|sends|pipeclaim|claim.*) continue ;; esac
+          case "$b" in pane|sends|pipeclaim|claim.*|pipe.*) continue ;; esac
           echo "$b"
       done
       exit 0 ;;
@@ -7835,6 +7870,7 @@ class TestCaptureFlowExecution:
         calls.unlink(missing_ok=True)
         r, _cast = _run_block(
             _step_three_block(), "ok", derived, target=True,
+            state_files={"pipe.pm-test": ""},
             env_extra={"STUB_TMUX_LOG": str(calls)})
         assert r.returncode == 0, r.stderr
         assert "=pm-test" in calls.read_text(), (
@@ -7893,6 +7929,7 @@ class TestCaptureFlowExecution:
         cap = tmp_path / "cap"
         r, cast = _run_block(
             _step_three_block(), "dies", tmp_path, target=True,
+            state_files={"pipe.pm-test": ""},
             files={"recording.cast": "previous attempt cast\n",
                    "recorder.status": "0\n",
                    "recorder-stderr.log": "previous failure\n"})
@@ -7926,6 +7963,7 @@ class TestCaptureFlowExecution:
         cap = tmp_path / "cap"
         r, cast = _run_block(
             _step_three_block(), "dies", tmp_path, target=True,
+            state_files={"pipe.pm-test": ""},
             files={"recording.cast": "previous attempt cast\n",
                    "recorder.status": "0\n"})
         assert r.returncode != 0, r.stderr
@@ -7977,6 +8015,98 @@ class TestCaptureFlowExecution:
         assert "new-session" not in calls.read_text(), (
             "a step that refused a live recorder still started a session: "
             + calls.read_text())
+
+    def test_step_three_refuses_a_restart_without_the_transcript_pipe(
+            self, tmp_path):
+        """A restart is not a fresh start: step 2's pipe has to be there.
+
+        Every failure path in the flow stops the transcript pipe, and step 5
+        requires a non-empty transcript. A step-3 restart pasted after a
+        failure therefore started a recorder with no pipe: the transcript
+        stopped growing at the failure, and step 5's ``test -s`` passed on the
+        replaced attempt's bytes — a completed recording reported against a
+        transcript that does not cover it, the same stale-evidence shape as a
+        leftover cast. ``#{pane_pipe}`` is the handle (1 while a pipe is
+        attached, 0 otherwise, verified on tmux 3.2a), and the refusal names
+        step 2, which re-takes the claim the failure released and appends to
+        the same transcript.
+        """
+        cap = tmp_path / "cap"
+        calls = tmp_path / "tmux-calls"
+        r, cast = _run_block(
+            _step_three_block(), "ok", tmp_path, target=True,
+            files={"recording.cast": "previous attempt cast\n",
+                   "recorder.status": "0\n"},
+            env_extra={"STUB_TMUX_LOG": str(calls)})
+
+        assert r.returncode != 0, (
+            "step 3 started a recorder with no transcript pipe attached, so "
+            "step 5 would pass on the replaced attempt's transcript")
+        assert "no transcript pipe" in r.stderr, r.stderr
+        assert "step 2" in r.stderr, (
+            "the refusal does not name the step that re-attaches the pipe: "
+            + r.stderr)
+        assert "new-session" not in calls.read_text(), (
+            "a step refused for a missing transcript pipe still started a "
+            "recorder: " + calls.read_text())
+        assert cast.read_text() == "previous attempt cast\n", (
+            "the refused restart cleared the replaced attempt's cast")
+
+    def test_a_restart_after_a_failure_cannot_pass_on_the_stale_transcript(
+            self, tmp_path):
+        """The pipe a failure stops is the one step 5's check depends on.
+
+        Step 2 attaches the transcript pipe; every failure path in the flow
+        stops it with ``tmux pipe-pane -t "=…:0.0"``. A step-3 restart pasted
+        after that failure used to start a recorder with no pipe, so the
+        transcript stopped at the failure and step 5's ``test -s`` passed on
+        the bytes step 2 had written (verified with this harness before the
+        guard: step 2, the failure paths' pipe stop, step 3 and step 5 exited
+        0 on the unchanged transcript). The restart now refuses and names
+        step 2.
+        """
+        scaffold = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+        step2 = scaffold[scaffold.index("# 2."):scaffold.index("# 3.")]
+        step3 = scaffold[scaffold.index("# 3."):scaffold.index("# 4.")]
+        stop_pipe = 'tmux pipe-pane -t "=pm-test:0.0" 2>/dev/null || true\n'
+        r, _cast = _run_block(step2 + stop_pipe + step3, "ok", tmp_path,
+                              target=True)
+
+        assert r.returncode != 0, (
+            "a restart after a failure started a recorder with no transcript "
+            "pipe, so step 5 would pass on the replaced attempt's bytes")
+        assert "no transcript pipe" in r.stderr, r.stderr
+
+    def test_reattaching_the_pipe_lets_the_restart_start(self, tmp_path):
+        """The refusal names a remedy that works: step 2, then step 3.
+
+        Every failure path stops the pipe and releases the claim, so step 2
+        re-takes the claim and re-attaches the pipe (no ``-o``, so the
+        stopped one is replaced, and ``>>`` so the transcript keeps the
+        replaced attempt's output). Step 3 then sees ``#{pane_pipe}`` = 1 and
+        starts the recorder — the restarted attempt's output lands in the
+        file step 5 checks.
+        """
+        scaffold = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+        step2 = scaffold[scaffold.index("# 2."):scaffold.index("# 3.")]
+        step3 = scaffold[scaffold.index("# 3."):scaffold.index("# 4.")]
+        failure_cleanup = (
+            'tmux pipe-pane -t "=pm-test:0.0" 2>/dev/null || true\n'
+            'tmux set-option -u -t "=pm-test:0.0" @pm_capture_dir '
+            '2>/dev/null || true\n')
+        calls = tmp_path / "tmux-calls"
+        r, _cast = _run_block(step2 + failure_cleanup + step2 + step3, "ok",
+                              tmp_path, target=True,
+                              env_extra={"STUB_TMUX_LOG": str(calls)})
+
+        assert r.returncode == 0, (
+            "the restart the refusal points at (step 2, then step 3) did not "
+            "start: " + r.stderr)
+        assert "new-session" in calls.read_text(), calls.read_text()
+        assert (tmp_path / "cap" / "transcript.log").read_text() == (
+            "pane output\npane output\n"), (
+            "step 2 did not append to the same transcript, so the restarted "
+            "attempt's output would not land in the file step 5 checks")
 
     @pytest.mark.parametrize("name", RECIPES)
     def test_recorder_session_that_never_starts_is_reported(self, name,

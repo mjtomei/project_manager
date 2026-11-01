@@ -1188,6 +1188,17 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   running …" naming step 5, and leave that recorder's cast and status
   untouched — a live recorder owns the evidence it is writing (review loop
   928f i27, R89).
+- The tmux recipe's step 3 is pasted on its own to *restart* a recorder after
+  a failure (every failure path stops step 2's transcript pipe) → the step
+  must refuse with "no transcript pipe is attached …" naming step 2, not
+  start a recorder that cannot write a transcript. Without the refusal the
+  transcript stops growing at the failure and step 5's non-empty check passes
+  on the replaced attempt's bytes (verified with the stub harness: step 2,
+  the failure paths' `pipe-pane` stop, step 3 and step 5 exited 0 on the
+  unchanged transcript). Re-running step 2 re-takes the claim the failure
+  released and appends to the same transcript; after that step 3 starts and
+  step 5 passes on a transcript that covers the restarted attempt (review
+  loop 928f i29, R91).
 
 ## Pass / Fail criteria
 

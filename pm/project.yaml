@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T12:57:11.667356+00:00'
+  updated_at: '2026-11-01T13:38:19.337692+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38443,6 +38443,45 @@ prs:
       qa.md. The dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-11-01T12:57:11Z'
     last_edited: '2026-11-01T12:57:11Z'
+  - id: note-aead2b4
+    text: 'Review loop 928f i29: one leftover in the kept tmux-recipe scope, the PR''s
+      own class (a completion check that cannot tell a growing transcript from a stopped
+      one). Step 3 is pasted on its own to restart a recorder, and every failure path
+      in the flow stops step 2''s transcript pipe (step 3''s own start/readiness failures,
+      step 4''s failed send, all of step 5''s failures). A restart pasted after a
+      failure therefore started a recorder with no pipe: the transcript stopped growing
+      at the failure, and step 5''s `test -s` — the check that exists to catch a capture
+      with no transcript — passed on the replaced attempt''s bytes, exiting 0 with
+      a cast for the restarted attempt and a transcript that does not cover it. R90
+      (i28) had asserted the pipe "is still attached" without a guard that makes it
+      so. Step 3 now reads `#{pane_pipe}` through the same exact `=…:0.0` pane target
+      every other handle uses and refuses a restart when it is not 1, naming step
+      2: re-running step 2 re-takes the claim the failure released and appends to
+      the same transcript, so the restarted attempt''s output lands in the file step
+      5 checks. The guard sits after the live-recorder refusal and before the replaced
+      attempt''s clear, so a refused restart leaves that evidence alone. Verified
+      in this container with the stub tmux/pm harness before the guard: step 2, the
+      failure paths'' pipe-pane stop, then step 3 and step 5 exited 0 on the transcript
+      step 2 had written, unchanged. The real handle was verified on tmux 3.2a: fresh
+      pane 0, attached `cat >>` pipe 1, stopped 0, missing session empty (a pipe whose
+      command exited reports 1 until the pane next writes, then 0). Tests: test_step_three_refuses_a_restart_without_the_transcript_pipe
+      (rc non-zero, "no transcript pipe" + "step 2", no new-session call, the replaced
+      attempt''s cast untouched), test_a_restart_after_a_failure_cannot_pass_on_the_stale_transcript
+      (the step-2 -> pipe-stop -> step-3 shape, which exits 0 without the guard),
+      and test_reattaching_the_pipe_lets_the_restart_start (the remedy: the failure''s
+      pipe stop + claim release, then step 2 again appends to the same transcript
+      and step 3 starts); test_step_three_clears_the_previous_attempt_before_it_starts
+      now pins the order refuse -> pipe -> clear -> start. The harness models the
+      pipe: pipe-pane sets/clears it, a session''s end takes it, display-message #{pane_pipe}
+      answers it. Mutation check: removing the guard fails the three cases that pin
+      it (the order case and the two refusal cases); the remedy case passes either
+      way. Recipe file 342 passed (was 339); full suite 5539 passed, 1 skipped, 0
+      failed (483.95 s; markdown in a scratch --target). Evidence: /pm-captures/review-928f-i29/
+      (probe-restart-transcript.log, probe-pane-pipe.log, mutation-check.log, recipe-file.log,
+      suite.log, README.md, scripts/). impl.md R91 + Files table, qa.md. The dropped
+      helper/prompt/verifier work stays dropped.'
+    created_at: '2026-11-01T13:38:19Z'
+    last_edited: '2026-11-01T13:38:19Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
