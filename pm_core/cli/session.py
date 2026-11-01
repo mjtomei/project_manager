@@ -373,8 +373,7 @@ def _resolve_session_socket(session_name: str,
     the subprocesses it spawns) address the default server explicitly.
     Nothing is migrated, detached, or killed automatically.
     """
-    from pm_core.paths import (
-        SHARED_SOCKET_DIR, ensure_socket_dir, session_socket_path)
+    from pm_core.paths import SHARED_SOCKET_DIR, ensure_socket_dir
 
     try:
         ensure_socket_dir()
@@ -388,7 +387,7 @@ def _resolve_session_socket(session_name: str,
             "It must be owned by you, or have the sticky bit set (1777) so "
             "no other user can remove your sockets.", err=True)
         raise SystemExit(1)
-    socket_path = str(session_socket_path(session_name.removeprefix("pm-")))
+    socket_path = tmux_mod.session_socket_for(session_name)
     # Private servers live in a world-writable directory; refuse to connect
     # to a socket another user planted at our path.  Shared sessions are
     # owned by the sharing user by design, so this check is private-only.
@@ -781,7 +780,6 @@ def session(ctx, share_global, share_group, start_dir, print_connect, disconnect
         # Every session lives on its own server; print that socket's attach
         # command.  Legacy sessions still on the default server get the
         # default server's explicit socket plus `-t <session>`.
-        from pm_core.paths import session_socket_path
         if start_dir:
             from pm_core.paths import get_session_tag
             tag = get_session_tag(start_path=Path(start_dir))
@@ -798,16 +796,21 @@ def session(ctx, share_global, share_group, start_dir, print_connect, disconnect
             # inside a private session prints the shared session.
             session_name = _resolve_start_session_name(
                 bool(share_global or share_group))
-        sp = str(session_socket_path(session_name.removeprefix("pm-")))
+        sp = tmux_mod.session_socket_for(session_name)
         hosting_socket, on_private = tmux_mod.find_session_server(session_name)
+        # Quote the socket path and the session name: the output is meant to
+        # be pasted into a shell, and a tag derived from a repo directory
+        # name may contain a space.  shlex.quote leaves ordinary values bare,
+        # so the printed command is unchanged for them.
         if hosting_socket is not None and not on_private:
             # Legacy session on the default server.  Name the socket *and*
             # the session: a bare `tmux attach` follows $TMUX (the wrong
             # server when pasted into another pm pane), and one default
             # server can host several legacy pm sessions.
-            click.echo(f"tmux -S {hosting_socket} attach -t {session_name}")
+            click.echo(f"tmux -S {shlex.quote(hosting_socket)} attach "
+                       f"-t {shlex.quote(session_name)}")
         else:
-            click.echo(f"tmux -S {sp} attach")
+            click.echo(f"tmux -S {shlex.quote(sp)} attach")
         return
     _session_start(share_global=share_global, share_group=share_group,
                    start_dir=start_dir, disconnect_others=disconnect_others)
@@ -873,9 +876,8 @@ def session_kill(start_dir):
     else:
         session_name = _resolve_target_session()
 
-    from pm_core.paths import session_socket_path
     session_tag = session_name.removeprefix("pm-")
-    socket_path = str(session_socket_path(session_tag))
+    socket_path = tmux_mod.session_socket_for(session_name)
 
     # The hosting server: the session's own socket, or the default server
     # for a legacy pre-isolation session (addressed by its explicit path,

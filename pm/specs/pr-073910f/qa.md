@@ -17,8 +17,13 @@ The user-visible consequences are:
 
 The implementation also tightens a second class of hazard in the same
 code: the socket directory is world-writable, so sockets owned by another
-user, symlinks planted at a session's socket path, and a non-sticky
-world-writable directory must fail closed rather than be used.
+user, symlinks planted at a session's socket path, a non-sticky
+world-writable directory, and a sticky directory that is not
+world-writable must fail closed rather than be used. Discovery with no
+session context of its own never auto-selects *another user's* server.
+A user's own tmux view grouped under a pm session — under any name, even
+one that looks like a different pm session — resolves to the pm session
+it is grouped with for discovery, driving and detaching.
 
 ## Shared resources touched by this change
 
@@ -125,6 +130,12 @@ pane unless stated otherwise.
 - **GIVEN** the same, **WHEN** one client presses the TUI quit key,
   **THEN** only that client detaches; the other client stays attached and
   the TUI keeps running.
+- **GIVEN** the session is also open through the user's own tmux view
+  grouped with it under an arbitrary name (e.g. `myview`, or `pm-laptop`
+  which is not the session), **WHEN** any client of that pm session
+  presses the quit key, **THEN** exactly one client of *that* pm session
+  detaches; the view's name never narrows the candidate set to a single
+  client, and no other pm session's client is touched.
 
 ### R6 — Quitting a TUI never detaches anyone else
 
@@ -167,6 +178,17 @@ pane unless stated otherwise.
 - **GIVEN** a regression test exists and its session's TUI pane is gone,
   **WHEN** the user runs `pm qa regression <id>`, **THEN** it refuses with
   a "no TUI pane found" style message and launches nothing.
+- **GIVEN** a user's own tmux view of session A, grouped with A under an
+  arbitrary name (not `pm-A~N`, e.g. `myview`, or `pm-laptop` while a
+  different session named `pm-laptop` also runs), **WHEN** the user runs
+  `pm tui view` / `pm tui send` with no `--session` from inside that view,
+  **THEN** it drives A's TUI and never the other session's.
+- **GIVEN** another user's live server socket under `/tmp/pm-sessions`
+  (world-accessible `--global`/`--group` socket) while this user has no pm
+  session of their own, **WHEN** they run `pm tui view` / `pm tui send`
+  with no `--session` from a plain shell, **THEN** it reports no TUI found
+  rather than driving the other user's TUI; naming that session
+  explicitly with `--session` still reaches it.
 
 ### R8 — Killing a session tears down only that session
 
@@ -211,6 +233,13 @@ pane unless stated otherwise.
 - **GIVEN** a shared session and a private session are both running,
   **WHEN** the user lists sessions, **THEN** exactly the shared row
   carries the shared marker.
+- **GIVEN** a shared session whose owner detached, **WHEN** the owner
+  reattaches with a plain `pm session` (no `--global`/`--group` flag) from
+  the project directory, **THEN** the reattach creates/uses a grouped
+  session whose window sizing is the shared `smallest` (base and grouped
+  both), so the smallest connected client still sees the full layout —
+  the share mode recorded by the session, not the missing process flag,
+  decides this.
 
 ### R10 — Existing (legacy) sessions are preserved, not migrated
 
@@ -257,6 +286,16 @@ pane unless stated otherwise.
   **WHEN** the user runs `pm session`,
   **THEN** it refuses with a message naming the directory and the fix
   (owned by the user, or 1777) and creates no server.
+- **GIVEN** `/tmp/pm-sessions` is sticky but *not* world-writable (e.g. a
+  root-owned `1755` directory),
+  **WHEN** the user runs `pm session`,
+  **THEN** it refuses with the same actionable message (owned by the user,
+  or 1777) and creates no server, rather than surfacing an opaque
+  "couldn't create socket" from tmux.
+- **GIVEN** a regular file or a symlink planted at a session's socket
+  path, **WHEN** the user runs `pm session list`, **THEN** the entry is
+  skipped (not reported as one of the user's sessions) and nothing is
+  followed or crashed on.
 - **GIVEN** the directory is 1777 and owned by another user,
   **WHEN** the user runs `pm session`,
   **THEN** it proceeds normally.
@@ -308,9 +347,15 @@ All framed as Given/When/Then above or below; the plan's scenarios cover
 them.
 
 - `/tmp/pm-sessions` does not exist yet (first ever pm session).
-- `/tmp/pm-sessions` exists but is not sticky, or is owned by another user.
+- `/tmp/pm-sessions` exists but is not sticky, or is sticky but not
+  world-writable, or is owned by another user.
 - A socket file at the session's path is a symlink, a regular file, or
   owned by another uid.
+- Another user's live (shared) server under `/tmp/pm-sessions` while this
+  user has no pm session — discovery must not auto-select it.
+- A user's own tmux view grouped with a pm session under an arbitrary
+  name, including a name that collides with another pm session.
+- A shared session reattached with a plain `pm session` (no share flag).
 - A stale socket file left by a killed server, with no server behind it.
 - A live server whose base session was killed but whose grouped session
   still has a client.
@@ -374,3 +419,17 @@ Resolved by judgement (no **[UNRESOLVED]** items):
 5. **Testing multi-user permission checks in a single-uid container** —
    use a second account (or nested container) where possible; otherwise
    observe the socket mode/ownership and record the gap in the report.
+6. **What "the current session" means when a pane is viewed through a
+   user's own grouped view** — resolved through tmux's session *group*:
+   a view named anything (even `pm-laptop`, colliding with another pm
+   session) identifies the pm session it is grouped with. The test asserts
+   discovery/driving/detaching target the pm session, not the view's name.
+7. **How another user's shared session is reached from outside it** —
+   only explicitly (`--session pm-<tag>`, or from inside it). A plain
+   discovery with no session context never auto-selects another user's
+   server; that is fail-safe, not a missing feature. A joining user's own
+   private session remains the default for plain `pm session`.
+8. **Sticky but non-world-writable socket directory** — treated as a
+   refusal (the user cannot create a socket there), not as "owned by
+   another user is fine"; R12's 1777-owned-by-another-user case is the
+   only cross-owner case that proceeds.

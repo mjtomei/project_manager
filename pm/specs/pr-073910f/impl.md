@@ -179,8 +179,12 @@ New `tmux_mod.detach_current_client()`:
    whose session's active window equals the TUI pane's window.
 3. Detach the most recently active candidate by TTY
    (`detach-client -t <tty>`). Ties are resolved by `client_created`.
-4. If no candidate matches, fall back to `detach-client -s <session>` for the
-   first attached session in the group; if none, do nothing.
+4. If no candidate matches (no client's session is viewing the TUI's
+   window), fall back to the group's most recently active client — base +
+   `base~N` — and detach that single TTY.  Never `detach-client -s
+   <session>`: it detaches *every* client attached to the session, so one
+   Ctrl-Q dropped all of them (QA scenario 10, fixed 2026-11-01).  If the
+   group has no client either, do nothing.
 5. Return whether a client was detached; `quit_app()` still calls `app.exit()`
    when not in tmux.
 
@@ -1811,4 +1815,85 @@ helper has direct coverage.
 
 Validation on the integrated head: full suite re-run after the edit (see the
 PR note for this iteration); no live session, server or shared host
+configuration was touched.
+
+## QA-driven fixes (2026-11-01)
+
+Two user-visible defects were found by QA scenarios after the last review
+iteration and fixed in `qa:` commits; no requirement changes.
+
+1. **One Ctrl-Q detached every client of the session** (QA scenario 10
+   re-run, commit `64249843d`).  R5's precise branch only considers
+   clients whose session's active window is the TUI window; when none
+   does (the base session's current window is a shell or review window)
+   the old fallback ran `detach-client -s <session>`, which drops *all*
+   clients attached to that session.  With two clients on the base
+   session, one press left both at a prompt.  The fallback now picks the
+   group's most recently active single TTY (`detach-client -t`), exactly
+   like the precise branch, and R5 step 4 above records it.  Tests:
+   `test_falls_back_to_one_group_client` (asserts `-t /dev/pts/1`, not
+   `-s`) and `test_two_clients_on_the_base_lose_only_one`.
+2. **The TUI connect popup clipped the socket-addressed command** (QA
+   scenario 12, commit `57dfdca02`).  `ConnectScreen`'s
+   `#connect-container` was a fixed 70 cells wide, so `tmux -S
+   /tmp/pm-sessions/pm-<tag> attach` lost its last characters at the
+   border — the popup did not show the command it tells the user to run
+   (the legacy `-t <session>` form clips more).  The container now sizes
+   to its content (`width: auto; min-width: 70; max-width: 100%`) and the
+   command label wraps, so a short command keeps the historical width, an
+   ordinary socket-addressed command is shown in full, and a path longer
+   than the terminal wraps.  Tests: `TestConnectScreenLayout` renders the
+   modal headlessly at 80 and 60 columns and asserts the command's box
+   fits inside the container and the text is complete.
+
+Also recorded: the `qa.md` scenario spec now states the requirements
+these QA runs exercised (grouped-view resolution for discovery, driving
+and detaching; another user's server never auto-selected; sticky but
+non-world-writable socket directory refused; regular files/symlinks
+planted at a socket path skipped by `pm session list`; a plain reattach
+to a shared session keeps `window-size=smallest` from the recorded share
+mode).
+
+## Review iteration (2026-11-01, review-loop 2caf i1)
+
+Verification pass over the head after the two QA-driven fixes; no
+requirement changes.  One small consolidation and the spec/doc updates
+above:
+
+1. **`session_socket_path(session_name.removeprefix("pm-"))` was copied
+   in three places** (`_resolve_session_socket`, `pm session
+   --print-connect`, `session kill`) and a fourth variant lived inline in
+   `tmux._find_session_server`.  New `tmux.session_socket_for(session_name)`
+   (strips a grouped `~N` suffix, derives the tag, hashes a long path) is
+   the single definition; all four use it, matching the i3 principle that
+   "which server hosts this session" has one implementation.  Tests:
+   `TestSessionSocketFor` (tag derivation, grouped-suffix normalisation,
+   long-name hash).
+2. **`impl.md` R5 step 4 was stale** — it still described the
+   `detach-client -s` fallback replaced by the QA fix.  Corrected, and the
+   QA-driven fixes recorded in their own section.
+3. **The printed connect command was not shell-quoted.**  A session tag is
+   derived from the repo directory name, which may contain a space, so
+   `pm session --print-connect` (and the TUI `C` screen, which shows the
+   same command to copy) printed `tmux -S /tmp/pm-sessions/pm-my repo-…`
+   — pasting it split the path.  Both surfaces now `shlex.quote` the
+   socket path and the session name; ordinary paths are unchanged
+   (`shlex.quote` leaves them bare), so every existing exact-output
+   assertion still holds.  Tests:
+   `TestPrintConnect::test_command_is_shell_quoted` and
+   `TestShowConnect::test_command_is_shell_quoted`.
+4. Incidental, pre-existing and out of scope: `pm session` run from a
+   shell pane inside any tmux session dies with an unhandled
+   `TmuxCommandError` ("sessions should be nested with care") instead of
+   a clear message.  Filed as **pr-e848481**.
+
+Nothing else surfaced: the socket derivation and default-server
+addressing (R4.3), discovery scoping (7af7 i1–i3, 3cc7 i1, 703c
+i1/i4/i6), the precise detach (R5, 703c i3 + the QA fix), the kill/unlink
+rules (R3.2, R8), the socket-directory and ownership checks (d1c0
+i10/i12, 703c i2) and the shared-session share-mode handling (d1c0 i7,
+703c i8) all match the spec, and every new helper has direct coverage.
+
+Validation on the integrated head: full suite re-run after the edit (see
+the PR note for this iteration); no live session, server or shared host
 configuration was touched.

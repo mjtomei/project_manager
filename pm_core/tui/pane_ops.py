@@ -750,7 +750,7 @@ def show_connect(app) -> None:
         hosting, on_private = tmux_mod.find_session_server(session)
         if hosting is not None:
             socket_path = hosting
-            target = "" if on_private else f" -t {session}"
+            target = "" if on_private else f" -t {shlex.quote(session)}"
     elif socket_path and session:
         # The rollout path exports the *default* server's socket for a
         # legacy session, so the branch above never runs for one.  Name the
@@ -758,11 +758,14 @@ def show_connect(app) -> None:
         # server without `-t` picks whichever legacy session tmux considers
         # current.
         if socket_path == str(default_socket_path()):
-            target = f" -t {session}"
+            target = f" -t {shlex.quote(session)}"
     if socket_path:
-        command = f"tmux -S {socket_path} attach{target}"
+        # Quoted: the command is meant to be pasted into a shell, and a
+        # session tag derived from a repo directory name may contain a
+        # space.  Normal paths are unchanged (shlex.quote leaves them bare).
+        command = f"tmux -S {shlex.quote(socket_path)} attach{target}"
     elif session:
-        command = f"tmux attach -t {session}"
+        command = f"tmux attach -t {shlex.quote(session)}"
     else:
         app.log_message("Not in a pm session")
         app.clear_log_message_later(2)

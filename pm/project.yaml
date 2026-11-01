@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T03:09:32.429625+00:00'
+  updated_at: '2026-11-01T03:42:00.326004+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5792,6 +5792,36 @@ prs:
       it). Captures: /pm-captures/scenarios/13/story{1..6}-*/.'
     created_at: '2026-11-01T03:09:32Z'
     last_edited: '2026-11-01T03:09:32Z'
+  - id: note-a22bcc3
+    text: 'Review loop 2caf i1 (no requirement changes; full suite 5350 passed / 1
+      skipped, 423.7s). Verification pass over the head after the two QA-driven fixes
+      (single-client detach 64249843d, connect-modal sizing 57dfdca02). (1) session_socket_path(session_name.removeprefix("pm-"))
+      was copied in three places and a fourth variant lived inline in tmux._find_session_server;
+      new tmux.session_socket_for(session_name) is the single definition (strips a
+      grouped ~N, derives the tag, hashes long paths) and all four call sites use
+      it — the one-implementation principle the i3 iteration applied to "which server
+      hosts this session". Tests: TestSessionSocketFor. (2) The printed connect command
+      was not shell-quoted: a session tag comes from the repo directory name, which
+      may contain a space, so `pm session --print-connect` and the TUI C screen printed
+      `tmux -S /tmp/pm-sessions/pm-my repo-…`, which splits when pasted. Both surfaces
+      now shlex.quote the socket path and the session name (ordinary paths unchanged,
+      so every existing exact-output assertion holds); tests TestPrintConnect/TestShowConnect::test_command_is_shell_quoted.
+      (3) impl.md R5 step 4 still described the detach-client -s fallback the QA fix
+      replaced; corrected, and the two QA-driven fixes recorded in a new "QA-driven
+      fixes (2026-11-01)" section. (4) Carried the pending qa.md update left uncommitted
+      by the QA session (grouped-view resolution, cross-user discovery, sticky-but-not-writable
+      dir refusal, planted-file skipping, shared reattach sizing) — it matches the
+      implemented and tested behaviour. (5) Incidental, pre-existing and out of scope:
+      `pm session` from a shell pane inside any tmux session dies with an unhandled
+      TmuxCommandError ("sessions should be nested with care") — filed as pr-e848481,
+      not fixed here. Validation: full suite 5350 passed / 1 skipped (log /pm-captures/review-2caf-i1/full-suite-final.log);
+      pm/specs/pr-073910f/session_start_smoke.py re-run on a disposable socket (private
+      server created; PM_TMUX_SOCKET in the session env, the global env and the hooks;
+      default server untouched; no leftovers); `pm session list` read-only in this
+      container ("No pm sessions found.", no socket dir created). No live session,
+      server or shared host configuration was touched.'
+    created_at: '2026-11-01T03:42:00Z'
+    last_edited: '2026-11-01T03:42:00Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
@@ -50126,6 +50156,44 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-29T11:24:39.224612+00:00'
   updated_at: '2026-10-29T11:24:39.224612+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e848481
+  plan: bugs
+  title: 'Bug: pm session run inside any tmux pane dies with a "sessions should be
+    nested with care" traceback'
+  branch: pm/pr-e848481-bug-pm-session-run-inside-any-tmux-pane-dies-with-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/session.py::_session_start (attach path) ->
+    pm_core/tmux.py::attach (check=True); pm_core/cli/__init__.py::main catches only
+    StoreLockTimeout/ProjectYamlParseError/FileNotFoundError/ProviderNotFoundError.
+
+
+    Repro: from a shell pane inside any tmux session (pm or plain), run `pm session`.
+    After the session exists, _session_start calls tmux attach-session; tmux refuses
+    nested attach with "sessions should be nested with care, unset $TMUX to force".
+    attach() uses check=True, so the CalledProcessError escapes as an unhandled traceback
+    and rc 1 instead of a clear message.
+
+
+    Observed (QA scenario 10 re-run, pr-073910f, 2026-11-01): flag-less `pm session`
+    from a shell pane inside the shared session adopts that session (correct), then
+    dies with the tmux stderr and a Python traceback.
+
+
+    Expected: either switch-client / reuse the grouped session when the target is
+    on the same server (that is what the user almost certainly wants), or print an
+    actionable one-line message naming the socket command and exit 1. Never a traceback.
+    Pre-existing (master behaves the same for the nested case), not introduced by
+    pr-073910f.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-01T03:32:43.543097+00:00'
+  updated_at: '2026-11-01T03:32:43.543097+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

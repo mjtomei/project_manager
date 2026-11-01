@@ -125,6 +125,34 @@ class TestSessionSocketPath:
 
 
 # ---------------------------------------------------------------------------
+# tmux: session name -> socket path
+# ---------------------------------------------------------------------------
+
+class TestSessionSocketFor:
+    """One definition of "the socket of this session" (tmux.session_socket_for).
+
+    The three call sites that derive a session's socket from its name
+    (`_resolve_session_socket`, `--print-connect`, `session kill`) and
+    `find_session_server`'s private probe all use it, so they cannot drift
+    apart the way the "which server hosts this session" lookups once did.
+    """
+
+    def test_derives_from_the_session_tag(self):
+        assert (tmux.session_socket_for("pm-repo-abcd1234")
+                == str(paths.session_socket_path("repo-abcd1234")))
+
+    def test_strips_a_grouped_suffix(self):
+        """A grouped view resolves to the base session's server."""
+        assert (tmux.session_socket_for("pm-repo-abcd1234~3")
+                == tmux.session_socket_for("pm-repo-abcd1234"))
+
+    def test_long_names_use_the_hashed_path(self):
+        sock = tmux.session_socket_for("pm-" + "x" * 200)
+        assert len(sock) <= 100
+        assert sock.startswith(str(paths.SHARED_SOCKET_DIR / "pm-"))
+
+
+# ---------------------------------------------------------------------------
 # tmux: ambient socket resolution
 # ---------------------------------------------------------------------------
 
@@ -2283,6 +2311,29 @@ class TestPrintConnect:
         assert result.exit_code == 1
         assert "--dir requires --global or --group" in result.output
 
+    def test_command_is_shell_quoted(self, monkeypatch, tmp_path):
+        """The printed command must paste cleanly for a repo name with a space.
+
+        A session tag is derived from the repo directory name, which may
+        contain a space; unquoted, the pasted ``tmux -S …`` would split the
+        path.  Ordinary paths are unchanged (shlex.quote leaves them bare).
+        """
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+
+        sock = "/tmp/pm-sessions/pm-my repo-abc12345"
+        monkeypatch.setattr(session_mod, "_resolve_start_session_name",
+                            lambda shared=False: "pm-my repo-abc12345")
+        monkeypatch.setattr(session_mod.tmux_mod, "session_socket_for",
+                            lambda name: sock)
+        monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
+                            lambda name: (sock, True))
+
+        result = CliRunner().invoke(session_mod.session, ["--print-connect"])
+
+        assert result.exit_code == 0, result.output
+        assert result.output.strip() == f"tmux -S '{sock}' attach"
+
 
 # ---------------------------------------------------------------------------
 # CLI: `pm session list`
@@ -2400,6 +2451,22 @@ class TestShowConnect:
         pane_ops.show_connect(app)
 
         app.push_screen.assert_not_called()
+
+    def test_command_is_shell_quoted(self, monkeypatch):
+        """The modal shows a command that pastes cleanly (repo names may
+        contain a space); ordinary paths stay unquoted."""
+        from pm_core.tui import pane_ops
+
+        monkeypatch.setenv("PM_TMUX_SOCKET",
+                           "/tmp/pm-sessions/pm-my repo-abc12345")
+        app = MagicMock()
+        app._session_name = "pm-my repo-abc12345"
+
+        pane_ops.show_connect(app)
+
+        screen = app.push_screen.call_args[0][0]
+        assert screen._command == (
+            "tmux -S '/tmp/pm-sessions/pm-my repo-abc12345' attach")
 
 
 # ---------------------------------------------------------------------------

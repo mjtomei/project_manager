@@ -255,19 +255,34 @@ def find_exact_session_server(session_name: str) -> tuple[str | None, bool]:
     return _find_session_server(session_name, exact=True)
 
 
-def _find_session_server(session_name: str, *, exact: bool) -> tuple[str | None, bool]:
-    from pm_core.paths import default_socket_path, session_socket_path
+def session_socket_for(session_name: str) -> str:
+    """Return the deterministic private socket path for a pm session *name*.
+
+    Single definition of "the socket of this session": callers hold a
+    session name (``pm-<tag>``, possibly with a grouped ``~N`` suffix) and
+    the socket is derived from its tag, exactly as ``pm session`` derives
+    it when creating the server.  Only meaningful for pm session names;
+    callers check the ``pm-`` prefix first.
+    """
+    from pm_core.paths import session_socket_path
 
     # Same rule as pane_registry.base_session_name; kept inline because
     # tmux.py is the lower-level module and should not depend on the
     # registry.
+    base = session_name.split("~", 1)[0]
+    return str(session_socket_path(base.removeprefix("pm-")))
+
+
+def _find_session_server(session_name: str, *, exact: bool) -> tuple[str | None, bool]:
+    from pm_core.paths import default_socket_path
+
     base = session_name.split("~", 1)[0]
     # ``=name`` is tmux's exact-match target syntax; a bare name is a
     # prefix match.
     target = f"={session_name}" if exact else base
     try:
         if base.startswith("pm-"):
-            sock = str(session_socket_path(base.removeprefix("pm-")))
+            sock = session_socket_for(base)
             if session_exists(target, socket_path=sock):
                 return sock, True
         if session_exists(target, use_env=False):
@@ -1193,7 +1208,11 @@ def detach_current_client(socket_path: str | None = None) -> bool:
     1. Find the current pane's window from ``$TMUX_PANE``.
     2. Keep clients attached to the base/grouped sessions whose active
        window is that window.
-    3. Detach the most recently active one by TTY.
+    3. Detach the most recently active one by TTY.  When no client views
+       that window (the session's current window is a shell/review
+       window), fall back to the group's most recently active client —
+       still one TTY: ``detach-client -s <session>`` would drop every
+       client attached to the session.
 
     Returns True when a client was detached.  Never issues a bare
     ``detach-client``.  Returns False (rather than raising) when tmux
