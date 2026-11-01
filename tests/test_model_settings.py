@@ -781,3 +781,36 @@ class TestEffortRoundTrip:
         r = _cli("pr", "model", "show", "pr-001")
         assert r.exit_code == 0, r.output
         assert "xhigh" in r.output
+
+
+class TestNotApplicableEffort:
+    def test_haiku_shows_requested_level_as_n_a(self, pm_home_dir):
+        data = _project(session_models={"impl": "haiku"},
+                        session_effort={"impl": "xhigh"})
+        rows = model_settings.role_rows(data, None)
+        impl = next(r for r in rows if r.role == "impl")
+        assert impl.effort_status == "not_applicable"
+        assert model_settings.effort_cell(impl) == "xhigh (n/a)"
+        assert any("suppressed" in n for n in impl.effort_notes)
+
+
+class TestSetTimeEffortWarnings:
+    def test_pr_model_set_warns_on_unsupported_route_level(
+            self, project_root, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts=["low"])})
+        r = _cli("pr", "model", "set", "pr-001", f"provider:{ROUTE}",
+                 "--effort", "max")
+        assert r.exit_code == 0, r.output
+        assert "Warning" in r.output and "supported_efforts" in r.output
+
+    def test_model_set_warns_on_unsupported_route_level(
+            self, project_root, pm_home_dir, monkeypatch):
+        import pm_core.cli.model as model_cli
+        monkeypatch.setattr(model_cli, "state_root", lambda: project_root)
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts=["low"])})
+        r = _cli("model", "set", "impl", f"provider:{ROUTE}",
+                 "--effort", "max", "--project")
+        assert r.exit_code == 0, r.output
+        assert "Warning" in r.output and "supported_efforts" in r.output

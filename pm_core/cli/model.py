@@ -226,6 +226,17 @@ def model_set(session_type: str, model_value: str, effort: str, use_project: boo
         set_global_setting_value(f"effort-{session_type}", effort)
         click.echo(f"Set global model for '{session_type}' to '{model_value}' (effort: {effort})")
 
+    # A level the selected route declares unsupported is still written (the
+    # metadata is dated), but the success line must not be the only feedback.
+    from pm_core import model_settings
+    data = None
+    if use_project:
+        from pm_core import store
+        data = store.load(state_root())
+    warn = model_settings.effort_warning(data, session_type)
+    if warn:
+        click.echo(f"Warning: {warn}", err=True)
+
 
 @model.command("unset")
 @click.argument("session_type", type=click.Choice(_SESSION_TYPES))

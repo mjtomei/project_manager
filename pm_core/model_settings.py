@@ -78,7 +78,11 @@ def role_rows(data: dict, pr: dict | None = None, *,
                     command = "claude (container route bridge)"
         rows.append(RoleRow(
             role=st, value=value, model=model or "(default)",
-            effort=res.effort or "(default)", command=command, route=route,
+            effort=(res.effort
+                    or (res.effort_requested
+                        if res.effort_status == "not_applicable" else None)
+                    or "(default)"),
+            command=command, route=route,
             source=res.source or "(CLI default)",
             effort_source=res.effort_source or "(CLI default)",
             problem=problem,
@@ -131,6 +135,23 @@ def format_rows(rows: list[RoleRow]) -> list[str]:
             seen_notes.add(note)
             lines.append(f"! {r.role}: {note}")
     return lines
+
+
+def effort_warning(project_data: dict | None, session_type: str,
+                   pr: dict | None = None) -> str | None:
+    """A warning when the selected route declares the role's effort unsupported.
+
+    Configuration-only (``use_env=False``): the caller's environment is not
+    what the command just wrote.  The setting is still valid (the metadata
+    is dated), so this is a warning, not a refusal.
+    """
+    res = resolve_model_and_provider(session_type, project_data=project_data,
+                                     pr_entry=pr, use_env=False)
+    if res.effort and res.effort_status == "unsupported":
+        return (f"effort {res.effort!r} is not in the selected route's "
+                f"supported_efforts {list(res.supported_efforts or ())}; "
+                "the router may reject or ignore it")
+    return None
 
 
 def check_model_value(value: str) -> str | None:
