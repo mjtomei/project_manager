@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T16:39:02.861904+00:00'
+  updated_at: '2026-11-01T17:24:47.060924+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6576,6 +6576,28 @@ prs:
       host configuration was touched.'
     created_at: '2026-11-01T16:39:02Z'
     last_edited: '2026-11-01T16:39:02Z'
+  - id: note-2d5c49d
+    text: 'Review loop b48f i8 (no requirement changes; full suite 5424 passed / 1
+      skipped, 423 s, log /pm-captures/review-b48f-i8/full-suite-final.log). One factual
+      correction and one test gap. (1) The dangling-symlink rationale in R7.3 and
+      the b48f i7 / d1c0 i10 notes was wrong: verified on tmux 3.2a that a tmux client
+      follows a link when it *connects* — `tmux -S <link> new-session` created the
+      session on the linked live server, which is the real hazard the both-modes refusal
+      closes — while the start path never binds at the link''s target: tmux unlinks
+      the entry and binds at the socket path, or fails under the sticky bit (a root-owned
+      dangling link gave "error connecting … Permission denied"). Wording corrected
+      with correction notes on the two earlier passages; the refusal itself is unchanged
+      and still required. (2) paths.shared_socket_dir_is_usable()''s refusal branch
+      (the read-path counterpart of ensure_socket_dir''s directory refusal) had no
+      test: added TestSharedSocketDirIsUsable (missing = normal first-run state, real
+      directory, symlink to a directory, regular file) and TestFindSessionServer::test_symlinked_socket_dir_is_not_probed,
+      which plants a *real* socket inside the link''s target so only the directory
+      guard can stop the probe; verified non-vacuous (forcing the helper to True makes
+      the private path get probed). Targeted suites 439 passed; pm/specs/pr-073910f/session_start_smoke.py
+      re-ran clean on a disposable socket. No live session, server or shared host
+      configuration was touched.'
+    created_at: '2026-11-01T17:24:46Z'
+    last_edited: '2026-11-01T17:24:46Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
