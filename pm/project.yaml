@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T00:36:29.380119+00:00'
+  updated_at: '2026-11-01T01:30:26.649059+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37882,6 +37882,33 @@ prs:
       work stays dropped.'
     created_at: '2026-11-01T00:36:29Z'
     last_edited: '2026-11-01T00:36:29Z'
+  - id: note-65681e1
+    text: 'Review loop 928f i11: one test gap in the kept render scope, no recipe
+      or pm_core change. The encode''s compatibility options and the upscale''s size
+      guard had no case: dropping `-pix_fmt yuv420p`, `-movflags +faststart`, the
+      size guard (`[ "$((gw * 2))" -le 4096 ] && [ "$((gh * 2))" -le 2304 ]`) or the
+      upscale branch each left the whole file green (269 passed, both recording recipes),
+      because the stub encoder accepts whatever it is handed. The pixel format is
+      not merely a compatibility regression: verified with the recipe''s own block,
+      real ffprobe/ffmpeg 4.4.2 and a real 64x48 gif, without it libx264 picks 4:4:4
+      for the GIF''s pal8 input, the block''s own `-profile:v high` refuses it ("high
+      profile doesn''t support 4:4:4"), and the block reports "ffmpeg failed on the
+      gif" -- the input blamed for an option the block itself dropped (the R61/R64
+      misdiagnosis class). The size guard''s break is silent instead: on a 2100x1200
+      gif the guard''s fallback encodes 2100x1200 while the unconditional 2x writes
+      a 4200x2400 stream labelled level 5.1, the artifact the note says iPhone/iPad
+      hardware decoders refuse. Fix (test-only): `_render_ffmpeg_argv` runs a recipe''s
+      render block with a logging stub encoder; `test_render_encodes_h264_that_plays_everywhere`
+      (both recipes) requires libx264/yuv420p/+faststart; `test_render_chooses_its_scale_filter_by_the_gifs_size`
+      (both recipes, 640x480/2048x1152/3000x2000) requires the nearest-neighbor 2x
+      at and below the budget (-le inclusive: -lt fails the at-the-budget case) and
+      the even-dimension native fallback past it; `test_web_ui_finalize_encodes_h264_that_plays_everywhere`
+      covers the finalize block''s trio. Six mutations each fail exactly their intended
+      case(s). Tests: recipe file 278 passed (was 269); full suite 5354 passed, 1
+      skipped, 121 deselected, 0 failed (442.83 s). Evidence: /pm-captures/review-928f-i11/.
+      impl.md R71. The dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-11-01T01:30:26Z'
+    last_edited: '2026-11-01T01:30:26Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
