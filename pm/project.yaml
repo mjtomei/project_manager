@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-6de8207
+  active_pr: pr-073910f
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T10:31:32.731363+00:00'
+  updated_at: '2026-11-01T10:40:52.531481+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6215,6 +6215,48 @@ prs:
       focus.'
     created_at: '2026-11-01T10:31:32Z'
     last_edited: '2026-11-01T10:31:32Z'
+  - id: note-261e655
+    text: 'QA S14 (2026-11-01) PASS 6/6 stories, no source changes. Verified on the
+      current head with disposable sockets + a throwaway HOME: (S1) plain `pm session`
+      from a shell pane in a --global session prints "Attaching to session …~2", never
+      "Creating tmux session", creates ~2 on the same server with window-size smallest
+      (base and ~2), refuses the nested attach ("sessions should be nested with care"
+      in TmuxCommandError), `pm session list` shows one row with (shared) and CLIENTS=2,
+      window 0 is 120x39 while the 200x50 client stays 200x50. (S2) plain `pm session
+      kill` from the shared shell pane kills the group+server (socket file left stale,
+      no "Killed session" line because the issuing pane is SIGHUPed), `pm session
+      list` drops the row, a later `pm session --global` rebinds the same path, control
+      project B untouched. (S3) plain `pm session mobile` reports Session: $SHARED,
+      Mobile active: False, Force flag: False, Window width: 120 (threshold: 110),
+      no "No session found", B untouched and no $B.mobile. (S4) `mobile --force` prints
+      force-enabled, the next status shows Mobile active: True / Force flag: True
+      and $HOME/.pm/pane-registry/$SHARED.mobile exists; B untouched. (S5) with a
+      private twin for the same project, plain `pm session kill` kills the hosting
+      shared session and the twin keeps its sessions, 100x30 client and TUI; `pm session
+      list` shows the twin row only. (S6) killing the TUI pane from a shell pane in
+      the session respawns it via after-kill-pane in a new window at index 0 running
+      pm _tui, window-size smallest, 120x39, clients switched to it at their own sizes,
+      other window unchanged, log has "handle_any_pane_closed: TUI pane was killed,
+      respawning" + "_respawn_tui: window @0 gone, creating new window", no Traceback.
+      Harness gotchas for the next run (none a product bug): (1) running pm session
+      under asciinema inside a pane gives the pane a fresh pty, which defeats tmux
+      nested-attach detection (server_client_check_nested compares the client tty
+      with pane ttys) - type the command directly into the pane; (2) the socket is
+      /tmp/pm-sessions/$SHARED (session_socket_path prepends pm- to the tag), not
+      ${SHARED#pm-}; (3) a recorder client attached to the BASE session makes the
+      base count as attached, so current_or_base_session() resolves to the base: `pm
+      session mobile` then reports the recorder window width and the hook respawn
+      select-window lands on the base, leaving the story clients on another window
+      - attach recorders to $SHARED~1 instead; (4) tmux 3.2a does not set window_zoomed_flag
+      for single-pane windows, so mobile --force zoom is a no-op in the standard fixture
+      (rebalance logs "only 1 pane, nothing to layout"). One incidental defect filed
+      as pr-a5be49f: a kill-pane issued from a client whose cwd is a different pm
+      project makes the after-kill-pane respawn mount that cwd project (observed a
+      /workspace TUI in a proj-f session, SystemExit on gh sync, window vanished);
+      quitting the TUI or killing from a pane inside the session is correct. Captures:
+      /pm-captures/scenarios/14/{s1..s6} (cast+mp4+manifest).'
+    created_at: '2026-11-01T10:40:52Z'
+    last_edited: '2026-11-01T10:40:52Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
@@ -50607,6 +50649,38 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-01T03:32:43.543097+00:00'
   updated_at: '2026-11-01T03:32:43.543097+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a5be49f
+  plan: bugs
+  title: 'Bug: after-kill-pane respawn mounts the wrong pm project when kill-pane
+    is issued from a client whose cwd is another pm project'
+  branch: pm/pr-a5be49f-bug-after-kill-pane-respawn-mounts-the-wrong-pm-pr
+  status: pending
+  depends_on: []
+  description: 'Observed in QA S14 (pr-073910f), reproducible on a disposable socket.
+    The global hook is `after-kill-pane[0] run-shell "pm _pane-closed"` with no arguments.
+    pm _pane-closed resolves the session correctly from PM_TMUX_SOCKET/TMUX (log:
+    "reconcile: window @0 gone but session pm-proj-f-06ec74e3 alive"), respawns the
+    TUI with `pm _tui` (log: "_respawn_tui: window @0 gone, creating new window"),
+    but the new pane inherits the tmux run-shell cwd. Repro: start a shared session
+    for project A, then from a shell whose cwd is a different pm project (e.g. the
+    pm repo clone) run `tmux -S /tmp/pm-sessions/pm-A-xxxx kill-pane -t pm-A-xxxx:0.0`.
+    The respawned TUI mounts the cwd project instead of A (log file named after the
+    cwd project, "TUI mount: cwd=/workspace", "found project root: /workspace/pm")
+    and, when that project needs GitHub and gh is unavailable, exits with SystemExit(1)
+    so the window disappears and the session is left without a TUI. Quitting the TUI
+    itself, or killing the pane from a pane inside the session (cwd = project dir),
+    respawns correctly. Suggest resolving the project root from the session persisted
+    pm_root (~/.pm/sessions/<tag>/pm_root, which is already written correctly) instead
+    of cwd.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-01T10:40:29.289642+00:00'
+  updated_at: '2026-11-01T10:40:29.289642+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
