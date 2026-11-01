@@ -39201,7 +39201,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-11-01T20:58:47.853273+00:00'
+  updated_at: '2026-11-01T21:16:21.601114+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39929,6 +39929,35 @@ prs:
       passed / 1 skipped; 889 related; post-fix repro still fixed.'
     created_at: '2026-11-01T20:58:47Z'
     last_edited: '2026-11-01T20:58:47Z'
+  - id: note-d253f7d
+    text: 'Review-loop e757 i5 (2026-11-01): doc-only, no behaviour change — five
+      spec passages still described the pre-e757-i4 sweep rule (the drift class behind
+      the S10 confusion and S16-story-3 INPUT_REQUIRED). (a) qa.md R7 self-contradicted
+      ("three impl / three signoff entries ... with the canonical names still links");
+      under e757 i4 a two-return run ends with TWO entries per step (every superseded
+      attempt, archived when the next attempt reused its path) plus the canonical
+      link naming the third (live) attempt — corrected, and tests/test_transcript_archive.py::test_two_sign_off_returns_keep_both_original_sessions
+      now asserts that exact entry set so it cannot drift again. (b) impl.md d468-i3
+      bullet stated the old sweep behaviour (disable freezing every canonical, three
+      entries, no canonical link) as current fact — annotated as superseded by e757
+      i4 with the current count. (c) qa.md Ambiguity 2 framed a canonical link after
+      a disable as a consequence of an open step window (the deleted liveness rule)
+      — rewritten as the rule it now is: a bulk sweep never freezes a canonical, whatever
+      the pane/window state. (d) impl.md Ambiguities #1 "every session an immutable
+      archive entry" → only a superseded session until its path is reused. (e) impl.md
+      Known limitations gains the abandoned-loop case: a loop-scoped iteration link
+      whose loop never reached completion (TUI crash, kill -9) is never frozen — its
+      name is never reused, so archive-on-replace never runs for it and only the loops
+      own completion finalizes it; the content stays in the native JSONL until pruning,
+      and freezing it in a bulk sweep would be the "the loop must be dead" liveness
+      guess e757 i4 removed. Code review found no defects: archive-on-replace, loop-scoped
+      names, ownership-checked finalize and the e757-i4 no-freeze-canonical rule are
+      consistent across every caller. Verified: 34/34 archive tests; 385 focused tests;
+      full suite 5476 passed / 1 skipped (6m59s, markdown installed — without it the
+      12 test_markdown_render tests fail with ModuleNotFoundError, env-only); post-fix
+      repro still reports all three symptoms fixed. Commit 987bc877d.'
+    created_at: '2026-11-01T21:16:21Z'
+    last_edited: '2026-11-01T21:16:21Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
