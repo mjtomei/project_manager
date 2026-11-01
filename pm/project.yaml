@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T08:46:54.657171+00:00'
+  updated_at: '2026-11-01T09:31:25.302919+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6128,6 +6128,46 @@ prs:
       and a temporary HOME.'
     created_at: '2026-11-01T08:46:54Z'
     last_edited: '2026-11-01T08:46:54Z'
+  - id: note-95832da
+    text: 'Review loop 2caf i11 (no requirement changes; full suite 5389 passed /
+      1 skipped, 419 s, log /pm-captures/review-2caf-i11/full-suite-final.log). Verification
+      pass over the head after the 2caf i10 fixes; two shared-session gaps left by
+      the 703c i8 fix plus the test-hygiene class that surfaced while verifying them.
+      (1) set_shared_window_size() still set the per-window window-size=smallest only
+      when PM_SHARE_MODE was in the process environment - the per-window half of the
+      gate 703c i8 closed for _register_tmux_bindings(). That variable is absent exactly
+      in the paths that respawn a shared session TUI: a global after-kill-pane hook
+      run-shell sees only the server global environment (verified on tmux 3.2a), and
+      a plain pm session that adopted a shared ambient session clears it. A window
+      recreated there kept window-size=latest (which overrides the session smallest),
+      so the smallest client saw a clipped layout. New tmux.session_is_shared() (process
+      variable, else the session own environment) is the single definition; set_shared_window_size()
+      uses it and forwards socket_path, and cli/session._session_is_shared() delegates
+      to it. Tests: TestSetSharedWindowSize (4 cases; the session-environment and
+      socket cases fail against the pre-fix module). (2) pm session kill/mobile could
+      not find a shared session from a shell pane in its grouped session: _ambient_session_for_share_mode()
+      treated no --global/--group requested as private wanted. A grouped session does
+      not inherit the base session environment (verified), so the pane has no PM_SHARE_MODE
+      and the command reported No session found for the session hosting it. With no
+      mode requested the ambient session is now the target whatever mode it was created
+      with (the rule a plain pm session already follows); a requested mode still rejects
+      a mismatched ambient. Tests: TestResolveTargetSession::test_no_flag_targets_a_shared_ambient_session
+      (fails pre-fix) and ::test_a_requested_share_mode_still_rejects_a_mismatched_ambient;
+      qa.md R9 gained the two matching bullets. (3) The suite could still leak PM_TMUX_SOCKET:
+      tests/test_review_launch_retry.py::test_old_window_then_container_failure_retries_the_same_command
+      stubs process-wide subprocess.run, so every session_exists probe succeeds and
+      _select_session_socket exports the cwd-derived socket; nothing restored it,
+      and the new test_tmux.py command assertion failed only in a full run (same class
+      as the 2caf i10 module-local fix). A new autouse _restore_environment in tests/conftest.py
+      snapshots and restores os.environ around every test; the module-local copy in
+      test_session_socket_isolation.py is removed. Residual recorded in impl.md: a
+      grouped session inherits no session environment at all, so tag-keyed files from
+      a ~N pane still use the private tag. Validation: full suite 5389 passed / 1
+      skipped; session_start_smoke.py clean on a disposable socket; pm session list
+      read-only. No live session, server or shared host configuration was touched
+      - every fixture used a disposable socket and a temporary HOME.'
+    created_at: '2026-11-01T09:31:25Z'
+    last_edited: '2026-11-01T09:31:25Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
