@@ -613,6 +613,13 @@ Review the code changes in this PR for quality, correctness, and architectural f
 _QA_SCENARIOS_PATH = "`$CAP/scenarios/<n>/verdict.md`"
 _QA_SCENARIOS_READER = f"{_QA_SCENARIOS_PATH} for all verdicts"
 
+# Fallback when the PR's newest qa_status.json cannot be used: missing,
+# unreadable, or valid JSON that is not an object (a hand-edited/corrupt
+# file).  Same wording for every cause so the sign-off session always gets
+# the same instruction.
+_QA_STATUS_UNREADABLE = (
+    "\n_qa_status.json unreadable — read the captures dir directly._\n")
+
 
 def _qa_scenarios_pointer() -> str:
     """Where a session reads the QA verdicts an abbreviated listing left out.
@@ -664,8 +671,13 @@ def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
     try:
         data = json.loads(latest.read_text())
     except (OSError, ValueError):
-        return ("\n_qa_status.json unreadable — read the captures dir directly._\n",
-                "")
+        return (_QA_STATUS_UNREADABLE, "")
+    # The file is written as an object by ``qa_loop._write_status_file``, but
+    # a hand-edited/corrupt one can hold any valid JSON; a non-object would
+    # raise AttributeError on ``.get()`` and abort the whole sign-off prompt.
+    # Same fallback as an unreadable file.
+    if not isinstance(data, dict):
+        return (_QA_STATUS_UNREADABLE, "")
     head_lines = [f"Overall QA verdict: **{data.get('overall') or '?'}**"]
     if data.get("error"):
         # Normalise whitespace but keep every character.  The error is
@@ -1316,7 +1328,7 @@ def _auto_cleanup_addendum() -> str:
 Auto-cleanup is enabled. After finishing your main work:
 - Check for old or dead tmux panes that are no longer needed
 - Suggest the user press `b` in the TUI to rebalance panes after closing panes
-- Remind them they can run `pm pr cleanup <pr-id>` to remove merged PR workdirs
+- Remind them they can run `pm pr cleanup <pr-id>` to remove merged or closed PR workdirs
 """
 
 
@@ -1543,6 +1555,10 @@ mechanics will help you distinguish normal operation from genuine problems.
 - `qa` -- QA testing is running. QA scenarios execute in parallel; if they find
   issues and commit fixes, the PR returns to `in_review` for another review cycle.
 - `merged` -- PR merged to `{base_branch}`. Auto-start then checks for newly-unblocked dependents.
+- `closed` -- Retired without merging (`pm pr close` keeps the record as history).
+  Terminal like `merged`, but it never satisfies a dependency: its dependents stay
+  blocked until the PR is reopened (`pm pr edit <id> --status pending`) or dropped
+  from their `depends_on`. Do not merge it to unblock them.
 
 **How transitions work:**
 - **pending -> in_progress**: Auto-start detects all deps are merged and launches

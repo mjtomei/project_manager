@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 
-from pm_core.pr_utils import usable_prs
+from pm_core.pr_utils import TERMINAL_PR_STATES, usable_prs
 
 SCHEMA = "pm.autostart.status/1"
 
@@ -70,7 +70,10 @@ _STATUS_PHASE = {
     "closed": "done",
 }
 
-TERMINAL_STATUSES = ("merged", "closed")
+# Statuses that end a PR's lifecycle.  One definition (pr_utils) shared with
+# the sync/close guards, so "terminal" cannot drift between them; the name is
+# kept here because the scheduler, CLI and popups import it from this module.
+TERMINAL_STATUSES = TERMINAL_PR_STATES
 
 # ``pm_home()`` subdirectory where the TUI writes ``pm autostart`` replies
 # (``<reply_id>.json``) and the CLI polls for them.

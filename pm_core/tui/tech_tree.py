@@ -1044,6 +1044,14 @@ class TechTree(Widget):
             return f"All PRs hidden ({hidden_count} plan(s)). Press x to show all."
         if not visible and self._status_filter:
             return f"No {self._status_filter} PRs. Press F to cycle filter."
+        if not visible:
+            # Every PR is hidden by the default hide-closed / hide-merged
+            # toggles with no status filter.  A closed PR now keeps its
+            # registry entry, so this is the ordinary state of a project whose
+            # work is all closed; without a message the tree mounts no
+            # children and Textual paints the widget's repr ("TechTree#…")
+            # in the grid.
+            return "No PRs to show. Press F to cycle filter."
         return None
 
     def _rebuild(self) -> None:
