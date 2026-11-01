@@ -12,7 +12,7 @@ Supports multiple provider types:
     answers and, in container mode, bridges it into containers.  Signing in
     and refreshing the router's credentials happen outside pm, as for
     plain claude.  See
-    pm_core/worker_route.py.
+    pm_core/router_route.py.
 
 Configuration is stored in ~/.pm/providers.yaml:
 
@@ -174,7 +174,7 @@ def _configured_router_urls() -> set[str]:
     fields are broken (list_providers leaves it out) still names its
     address.
     """
-    from pm_core import worker_route
+    from pm_core import router_route
     urls = set()
     for name, entry in _provider_entries().items():
         if not isinstance(entry, dict) or entry.get("type") != "router":
@@ -184,7 +184,7 @@ def _configured_router_urls() -> set[str]:
             continue
         urls.add(base)
         try:
-            urls.add(worker_route.container_base_url(
+            urls.add(router_route.container_base_url(
                 ProviderConfig(name=str(name), type="router", api_base=base)))
         except ValueError:
             pass
@@ -274,7 +274,7 @@ class ProviderConfig:
         own credentials.  Uses ANTHROPIC_BASE_URL only.  The router-only
         fields (launcher, remedy, classifier_model, unset_env,
         probe_models) are consumed by
-        pm_core.worker_route and claude_launcher.
+        pm_core.router_route and claude_launcher.
 
     Every type may set ``effort`` (the default effort of the sessions it
     runs; a PR's own effort setting wins, see model_config) and ``env``

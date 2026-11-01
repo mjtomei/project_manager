@@ -924,7 +924,7 @@ def build_claude_shell_cmd(
             the file can be written.  The command will still reference the
             file via ``cwd`` (the path claude sees at runtime).
         container: The command runs inside a pm container.  Only matters
-            for ``router`` providers (pm_core.worker_route): the command
+            for ``router`` providers (pm_core.router_route): the command
             then starts the in-container bridge forwarder first and never
             starts claude if it fails; on the host a router provider's
             ``launcher`` replaces the ``claude`` executable.
@@ -966,10 +966,10 @@ def build_claude_shell_cmd(
     # Explicit model param overrides provider's model_flag
     effective_model = model or provider_cfg.model_flag()
 
-    # Router providers (pm_core.worker_route): command-scoped, never global.
+    # Router providers (pm_core.router_route): command-scoped, never global.
     if provider_cfg.type == "router":
-        from pm_core import worker_route
-        route_prefix, provider_env, exe = worker_route.launch_parts(
+        from pm_core import router_route
+        route_prefix, provider_env, exe = router_route.launch_parts(
             provider_cfg, container=container)
     else:
         route_prefix, provider_env, exe = "", provider_cfg.env_vars(), "claude"
