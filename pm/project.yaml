@@ -14331,7 +14331,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-11-01T01:58:29.896075+00:00'
+  updated_at: '2026-11-01T02:16:36.124275+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -15400,6 +15400,27 @@ prs:
       0 failed (421 s, /pm-captures/review-3dcb-i1/full-suite.log).'
     created_at: '2026-11-01T01:58:29Z'
     last_edited: '2026-11-01T01:58:29Z'
+  - id: note-7c8682a
+    text: 'Review 3dcb i2 (no change to the close contract itself): the at-lock refusal
+      sentence now has one definition. `pm pr start`, `pm pr review` and `pm pr signoff`
+      each repeated `PR <id> {was removed|became <status>} while <doing> — <consequence>`
+      (echo + SystemExit(1)) with only two clauses differing — the drift class `_closed_reopen_hint`
+      (e086 i1) and `_launch_blocked_at_lock` (S25) were introduced for. New `helpers._report_launch_blocked(pr_id,
+      blocked, *, doing, consequence)` derives the state half from `_launch_blocked_at_lock`
+      and raises; the three call sites pass only their own clauses, and `pr.py` no
+      longer imports the `LAUNCH_REMOVED_AT_LOCK` sentinel. Messages are byte-identical,
+      so the S25/S27 runtime evidence and the three end-to-end launch tests still
+      apply verbatim; new `tests/test_cli_helpers.py::TestReportLaunchBlocked` pins
+      both branches (removed vs terminal). Test hygiene: the four inline `store.locked_update`
+      closures in tests/test_pr_close.py (close-vs-merge, remove-vs-merge, close/remove-vs-concurrent-removal)
+      now use the existing `_racing_close`/`_racing_remove` helpers (moved up to the
+      helper section) plus a new `_racing_merge`, instead of re-declaring the same
+      stand-in four times. Spec sync: impl.md item 54 + §5 (adds `_report_launch_blocked`,
+      `TestReportLaunchBlocked`, and the refactor-migration-map.md note i1 committed
+      but never listed); qa.md test count 66->67, helper list, and an i2 paragraph.
+      Full suite on the final tree: 5284 passed, 1 skipped, 0 failed (423 s, /pm-captures/review-3dcb-i2/full-suite.log).'
+    created_at: '2026-11-01T02:16:36Z'
+    last_edited: '2026-11-01T02:16:36Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
