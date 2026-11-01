@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-31T23:44:29.860312+00:00'
+  updated_at: '2026-11-01T01:23:01.404279+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5537,6 +5537,21 @@ prs:
       server or shared host configuration was touched; the new tests are unit-level.'
     created_at: '2026-10-31T23:44:29Z'
     last_edited: '2026-10-31T23:44:29Z'
+  - id: note-5140bd6
+    text: 'QA S8 (concurrency, 2026-11-01) PASS 6/6 stories on head 7d149a3a1, no
+      source changes. Re-verified the QA-S6 fixes on the merged head: two simultaneous
+      `pm session` starts converge (one base + one ~1 with 2 clients, 0-byte stderr;
+      two rounds); `pm session kill` refuses a ~1-only session (`No session ... found.`
+      rc 1, live socket and client kept); a stale socket is skipped by list, removed
+      by kill, and replaced by a fresh server on the next start. 40 list runs during
+      3 kill/restart cycles: all rc 0, empty stderr, B row byte-identical, A never
+      duplicated (it is correctly absent while being killed). Captures: /pm-captures/scenarios/8/{story1-paired-starts,story1-checks,story2-concurrent-churn,story3-kill-attached,story4-grouped-only-kill,story5-stale-socket,story6-cleanup}.
+      Harness: attach clients must live on the DEFAULT tmux server (a scaffold-socket
+      pane attaching to a private socket fails with "sessions should be nested with
+      care"); agg is absent from the container, fetch agg-aarch64-unknown-linux-gnu
+      v1.5.0 to render casts.'
+    created_at: '2026-11-01T01:23:01Z'
+    last_edited: '2026-11-01T01:23:01Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
