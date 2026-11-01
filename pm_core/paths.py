@@ -852,6 +852,32 @@ def shared_socket_path(session_tag: str) -> Path:
     return session_socket_path(session_tag)
 
 
+def shared_socket_dir_is_usable() -> bool:
+    """True when ``SHARED_SOCKET_DIR`` is absent or a real directory.
+
+    The read-path counterpart of :func:`ensure_socket_dir`'s refusals: a
+    caller that only *resolves* a socket (discovery, ``pm tui view``,
+    ``pm session kill``) must not follow a symbolic link — or any other
+    non-directory — planted at the well-known path.  ``/tmp`` is
+    world-writable, so another local user can create ``/tmp/pm-sessions``
+    as a link to a directory they own and run a server there under a pm
+    session's own deterministic socket name; probing through the link
+    would then adopt their session, TUI pane included.
+
+    A missing directory is the normal first-run state (nothing has been
+    created yet), so it counts as usable.  An entry that cannot be
+    ``lstat``-ed counts as *not* usable: fail closed rather than connect
+    on a guess.
+    """
+    try:
+        entry = SHARED_SOCKET_DIR.lstat()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return stat.S_ISDIR(entry.st_mode)
+
+
 def ensure_socket_dir() -> None:
     """Create /tmp/pm-sessions/ with sticky world-writable permissions.
 

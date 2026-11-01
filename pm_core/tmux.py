@@ -228,8 +228,10 @@ def find_session_server(session_name: str) -> tuple[str | None, bool]:
 
     Returns ``(None, False)`` when the session is running on neither
     server, or when tmux cannot be run at all (callers degrade to "no
-    session" instead of crashing).  ``session_name`` may carry a
-    grouped-session ``~N`` suffix.
+    session" instead of crashing).  The private socket is never probed
+    when the shared socket directory is not a real directory (a symlink
+    or a planted file): see ``paths.shared_socket_dir_is_usable``.
+    ``session_name`` may carry a grouped-session ``~N`` suffix.
 
     Resolution uses tmux's default *prefix* matching, so a base name also
     finds a surviving grouped session ``pm-x~1``.  That is what TUI
@@ -274,14 +276,23 @@ def session_socket_for(session_name: str) -> str:
 
 
 def _find_session_server(session_name: str, *, exact: bool) -> tuple[str | None, bool]:
-    from pm_core.paths import default_socket_path
+    from pm_core.paths import (default_socket_path,
+                               shared_socket_dir_is_usable)
 
     base = session_name.split("~", 1)[0]
     # ``=name`` is tmux's exact-match target syntax; a bare name is a
     # prefix match.
     target = f"={session_name}" if exact else base
     try:
-        if base.startswith("pm-"):
+        # A symbolic link (or other non-directory) at the well-known socket
+        # path was planted by someone else: probing through it would adopt
+        # their server — under *our* deterministic socket name if they
+        # chose it — and hand its TUI pane to `pm tui view`/`pm tui send`.
+        # `pm session` refuses the same state on the create path
+        # (``ensure_socket_dir``); discovery fails closed the same way and
+        # still falls through to the default server, where a legacy
+        # pre-isolation session legitimately lives.
+        if base.startswith("pm-") and shared_socket_dir_is_usable():
             sock = session_socket_for(base)
             if session_exists(target, socket_path=sock):
                 return sock, True

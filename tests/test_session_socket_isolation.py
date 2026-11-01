@@ -517,6 +517,38 @@ class TestFindSessionServer:
         sock, private = tmux.find_exact_session_server("pm-repo-abc")
         assert (sock, private) == (str(tmp_path / "pm-repo-abc"), True)
 
+    def test_does_not_probe_a_symlinked_socket_dir(self, monkeypatch,
+                                                   tmp_path):
+        """Discovery must not follow a planted ``/tmp/pm-sessions`` symlink.
+
+        ``/tmp`` is world-writable, so another local user can create the
+        well-known path as a link to a directory they own and run a server
+        there under a pm session's *own* deterministic socket name.  The
+        create path refuses the link (``ensure_socket_dir``); resolving a
+        socket must too, or `pm tui view` adopts the planted TUI.
+        """
+        target = tmp_path / "attacker"
+        target.mkdir()
+        (target / "pm-repo-abc").write_text("")  # planted socket file
+        link = tmp_path / "pm-sessions"
+        link.symlink_to(target)
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", link)
+
+        probes: list[str | None] = []
+
+        def exists(name, socket_path=None, use_env=True):
+            probes.append(socket_path)
+            # A server answers at the planted path; the default server is
+            # empty.
+            return socket_path is not None
+
+        monkeypatch.setattr(tmux, "session_exists", exists)
+
+        assert tmux.find_session_server("pm-repo-abc") == (None, False)
+        # Only the default-server probe ran: the private socket inside the
+        # linked directory was never contacted.
+        assert probes == [None]
+
     def test_non_pm_name_only_checks_default(self, monkeypatch, tmp_path):
         """A plain tmux session must never be mapped to a pm socket."""
         seen: list[str | None] = []
@@ -1421,6 +1453,57 @@ class TestFindTuiPaneAcrossServers:
         pane_id, session = helpers._find_tui_pane()
         assert (pane_id, session) == ("%42", "pm-target")
         assert os.environ["PM_TMUX_SOCKET"] == "/tmp/s"
+
+    def test_does_not_resolve_through_a_symlinked_socket_dir(
+            self, monkeypatch, tmp_path):
+        """`pm tui view` must not drive a TUI served through a planted link.
+
+        Regression for QA scenario 17: with ``/tmp/pm-sessions`` a symlink
+        and a server planted at the victim project's *own* deterministic
+        socket name, the cwd branch of ``_find_tui_pane`` selected that
+        server (``_select_session_socket`` -> ``find_session_server``)
+        before ``list_pm_sessions``' lstat guard applied, and returned the
+        planted pane.
+        """
+        from pm_core.cli import helpers
+        from pm_core import pane_registry
+
+        target = tmp_path / "attacker"
+        target.mkdir()
+        planted = target / "pm-victim"
+        planted.write_text("")
+        link = tmp_path / "pm-sessions"
+        link.symlink_to(target)
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", link)
+
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: False)
+        monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-victim")
+
+        def exists(name, socket_path=None, use_env=True):
+            # Mimic tmux: with no explicit -S it follows PM_TMUX_SOCKET.
+            if socket_path is None and use_env:
+                socket_path = os.environ.get("PM_TMUX_SOCKET")
+            if not socket_path:
+                return False
+            # The planted server answers whether it is addressed through
+            # the link or by the target's own path.
+            return (os.path.realpath(socket_path)
+                    == os.path.realpath(str(planted)))
+
+        monkeypatch.setattr(helpers.tmux_mod, "session_exists", exists)
+        # The enumeration skips the linked directory (2caf i10).
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions", lambda: [])
+        # The planted server has a live `pm _tui` pane; it must never be
+        # reached, because no server in the linked directory is scanned.
+        monkeypatch.setattr(helpers, "_live_panes_and_tuis",
+                            lambda: ({}, [("%0", "pm-victim")]))
+        monkeypatch.setattr(helpers, "_registry_tui_pane", lambda s: None)
+        monkeypatch.setattr(pane_registry, "pm_session_name", lambda n: n)
+
+        assert helpers._find_tui_pane() == (None, None)
+        assert os.environ.get("PM_TMUX_SOCKET") != str(planted)
 
     def test_no_tmux_degrades_to_no_session(self, monkeypatch):
         """Discovery must not crash when tmux cannot be run.
