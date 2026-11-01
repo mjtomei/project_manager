@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T22:13:16.285378+00:00'
+  updated_at: '2026-11-01T22:43:17.809717+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38811,6 +38811,35 @@ prs:
       work stays dropped.'
     created_at: '2026-11-01T22:13:16Z'
     last_edited: '2026-11-01T22:13:16Z'
+  - id: note-0536598
+    text: 'Review loop 928f i41: one leftover in the kept CLI-recipe scope, the PR
+      own class (a block that is about to refuse acted on a live capture evidence,
+      destroying the remedy its own refusal names); no pm_core change. R107: cli-recording.md
+      capture preamble - the block a worker following the recipe top-down pastes before
+      any form - cleared the capture directory before the scaffold live-recorder guard,
+      which runs only in the scaffold block, a later paste. A re-paste while a recorder
+      was still running (the worker own earlier attempt, or another run on the host-shared
+      scaffold socket) deleted that capture recording.cast, recorder.status and transcript.log;
+      the scaffold then refused with "run step 4 for your own earlier attempt", and
+      step 4 answered "asciinema wrote no cast" for the files the preamble had removed.
+      Verified with the stub harness (preamble rc 0 with the three files gone, then
+      the scaffold refuses) and live on tmux 3.2a + asciinema 2.1.0 with a private
+      TMUX_TMPDIR (pre-fix rc 0, files gone, recorder up; fixed rc 1, files intact).
+      The tmux recipe step 0 already refuses before its clear. Fix: the preamble carries
+      the scaffold live-recorder guard, after its directory checks (a block about
+      to refuse its own path still makes no tmux call) and before the clear - a live
+      pane (#{pane_dead} != 1, an empty answer read as live) is refused with the scaffold
+      message plus what this block did not clear, and a dead-pane leftover is cleared
+      as step 0 is. The prose says both blocks carry the guard. Tests: test_cli_preamble_refuses_a_live_recorder_not_cleared
+      and test_cli_preamble_clears_a_dead_recorder_leftover; both fail against the
+      pre-fix preamble (mutation-checked). Recipe file 384 passed (was 382); related
+      suites 199 passed; full suite 5581 passed, 1 skipped, 0 failed (499.42 s, once
+      on the final tree). Evidence: /pm-captures/review-928f-i41/ (probe-live.log,
+      mutation-check.log, recipe-file.log, related-suites.log, suite.log, README.md,
+      scripts/). impl.md R107, qa.md. The dropped helper/prompt/verifier work stays
+      dropped.'
+    created_at: '2026-11-01T22:43:17Z'
+    last_edited: '2026-11-01T22:43:17Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
