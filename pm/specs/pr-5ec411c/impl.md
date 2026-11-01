@@ -274,6 +274,8 @@ does not fetch a catalog in this PR.
 - A route with no `supported_efforts`: `unverified` for every effort.
 - A route declaring `supported_efforts: [none, high]`: `none` is dropped
   from the intersection; `high` is `ok`.
+- A route declaring `supported_efforts: []` accepts none of the Claude
+  levels: every configured level is `unsupported` (not "unverified").
 - Haiku + `effort: xhigh`: `not_applicable`, `effort=None`, nothing passed.
 - `PM_EFFORT=xhigh` and `CLAUDE_CODE_EFFORT_LEVEL=high`: PM wins, launches
   `--effort xhigh`, unsets the ambient var, note records the conflict.
