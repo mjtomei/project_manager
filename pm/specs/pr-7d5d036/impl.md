@@ -88,7 +88,9 @@ Change:
   `PM_CAPTURES_PR=regression`, so the in-container path is
   `/pm-captures/<test-id>/<run-id>/`. The assembled prompt is saved there as
   `prompt.md` (mirrors `_write_scenario_capture_file(..., "prompt.md")`).
-  Never committed to Git.
+  The per-run directory and `prompt.md` are written only once the session
+  command is built (container created), immediately before exec, so a run
+  that never launched leaves no evidence of one. Never committed to Git.
 - `pm qa launch regression:<id>` and the TUI regression launch run
   `pm -C <root> qa regression <id> --file-prs` in their pane/window (the TUI
   already launches `pm qa debug --foreground <id>` the same way), so all three
@@ -145,7 +147,11 @@ library audit. Nothing is ported.
 - I6: The pane launchers should fail visibly before spawning a pane for the
   common failures (unknown id / empty library / container runtime unusable):
   `pm qa launch` exits 1 with the message (the discovery session sees it); the
-  TUI logs it. Shared helper `regression_launch_problem()`.
+  TUI logs it. Shared helper `regression_launch_problem()`. An id must be one
+  of the listed library stems (a path such as `../instructions/<x>` is an
+  unknown id). The TUI runs the check in a worker thread
+  (`asyncio.to_thread` under `app.run_worker`): with container mode enabled
+  it runs `<runtime> info` (up to 10 s), which must not block the event loop.
 - I7: Prompt-size: test bodies are inlined whole (existing behavior); the
   launcher's file-backed bootstrap covers oversized prompts.
 
@@ -185,7 +191,9 @@ No [UNRESOLVED] items.
 - E3: Container mode enabled + runtime down: no workdir, clone or container is
   created (preflight first), exit 1. Pane launchers report it before spawning.
 - E4: `create_qa_container` raising any exception: remove only that container,
-  exit 1, nothing launched on the host.
+  exit 1, nothing launched on the host. A clone or session-build failure
+  likewise removes this run's own just-created QA workdir; no captures dir is
+  created.
 - E5: `pm qa regression` invoked from the TUI command bar has `PM_PROJECT` set;
   the host-mode session env scrubs it. In container mode only the provider env
   names are passed to `exec -e`.

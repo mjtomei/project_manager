@@ -9,7 +9,9 @@ a pane, so all three surfaces share one launcher.  An empty library is
 reported as such, never run.
 """
 
+import asyncio
 import subprocess
+import threading
 from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
@@ -119,6 +121,10 @@ def _run_regression(project, args, *, container_enabled: bool,
 def _qa_workdirs(home: Path) -> list[Path]:
     d = home / ".pm" / "workdirs" / "qa"
     return sorted(d.iterdir()) if d.is_dir() else []
+
+
+def _run_captures(home: Path) -> list[Path]:
+    return sorted((home / ".pm" / "sessions").rglob("prompt.md"))
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +254,10 @@ def test_container_create_failure_launches_nothing(project, home):
     spies.remove.assert_called_once_with(create.call_args.kwargs["name"])
     spies.build.assert_not_called()
     spies.execvpe.assert_not_called()
+    # A run that never launched leaves no evidence of one: no captures dir
+    # with a prompt, and this run's own workdir/clone is gone.
+    assert _run_captures(home) == []
+    assert _qa_workdirs(home) == []
 
 
 def test_empty_library_is_reported_not_run(project, home):
@@ -274,6 +284,8 @@ def test_missing_branch_is_a_clean_error(project, home):
     assert result.exit_code == 1
     assert "Could not clone 'nope'" in result.output
     spies.execvpe.assert_not_called()
+    assert _qa_workdirs(home) == []
+    assert _run_captures(home) == []
 
 
 # ---------------------------------------------------------------------------
@@ -341,10 +353,17 @@ def test_qa_launch_reports_unusable_runtime_before_spawning(project):
     split.assert_not_called()
 
 
+def _tui_app(project):
+    """A stand-in TUI app whose ``run_worker`` runs the coroutine to the
+    end, the way Textual's worker would on the event loop."""
+    return SimpleNamespace(
+        _root=project.root, log_message=MagicMock(), _session_name="pm-live",
+        run_worker=MagicMock(side_effect=lambda coro, **kw: asyncio.run(coro)))
+
+
 def test_tui_regression_item_runs_the_shared_command(project):
     from pm_core.tui import pane_ops
-    app = SimpleNamespace(_root=project.root, log_message=MagicMock(),
-                          _session_name="pm-live")
+    app = _tui_app(project)
     with patch.object(pane_ops, "launch_pane") as launch, \
             patch.object(container_mod, "is_container_mode_enabled",
                          return_value=False):
@@ -354,11 +373,30 @@ def test_tui_regression_item_runs_the_shared_command(project):
         target_window="w")
 
 
+def test_tui_regression_check_runs_off_the_event_loop(project):
+    """The pre-launch check can run ``<runtime> info`` (up to 10 s): it
+    must not run on the TUI's event-loop thread."""
+    from pm_core.tui import pane_ops
+    app = _tui_app(project)
+    seen = []
+
+    def problem(root, test_id):
+        seen.append(threading.current_thread())
+        return None
+
+    with patch.object(pane_ops, "launch_pane") as launch, \
+            patch("pm_core.regression_prompts.regression_launch_problem",
+                  problem):
+        pane_ops.launch_qa_item(app, "regression:demo")
+    assert app.run_worker.call_count == 1
+    assert seen and seen[0] is not threading.main_thread()
+    launch.assert_called_once()
+
+
 def test_tui_regression_item_with_empty_library_logs(project):
     from pm_core.tui import pane_ops
     (project.root / "qa" / "regression" / "demo.md").unlink()
-    app = SimpleNamespace(_root=project.root, log_message=MagicMock(),
-                          _session_name="pm-live")
+    app = _tui_app(project)
     with patch.object(pane_ops, "launch_pane") as launch:
         pane_ops.launch_qa_item(app, "regression:init-empty")
     launch.assert_not_called()

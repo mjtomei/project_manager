@@ -175,10 +175,13 @@ def regression_launch_problem(pm_root: Path, test_id: str) -> str | None:
     from pm_core.container import (container_preflight_error,
                                    container_unavailable_message)
 
-    if qa_instructions.get_instruction(pm_root, test_id,
-                                       category="regression") is None:
-        if not qa_instructions.list_regression_tests(pm_root):
-            return empty_library_message()
+    # Match against the listed library rather than probing for a file:
+    # an id is a file stem in pm/qa/regression/, so a path such as
+    # ``../instructions/<x>`` must not resolve to some other category's file.
+    tests = qa_instructions.list_regression_tests(pm_root)
+    if not tests:
+        return empty_library_message()
+    if test_id not in {t["id"] for t in tests}:
         return (f"Unknown regression test: {test_id}. "
                 "Run 'pm qa list' to see available tests.")
     problem = container_preflight_error()

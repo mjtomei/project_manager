@@ -132,6 +132,17 @@ def test_launch_problem_reports_an_unknown_id(tmp_path):
     assert problem.startswith("Unknown regression test: nope")
 
 
+def test_launch_problem_rejects_ids_outside_the_library(tmp_path):
+    """An id is a file stem in pm/qa/regression/: a relative path must not
+    reach another category's file."""
+    root = _library(tmp_path, "auth-flow")
+    (root / "qa" / "instructions").mkdir()
+    (root / "qa" / "instructions" / "setup.md").write_text(
+        "---\ntitle: setup\n---\nbody\n")
+    problem = regression_launch_problem(root, "../instructions/setup")
+    assert problem.startswith("Unknown regression test")
+
+
 def test_launch_problem_reports_an_unusable_container_runtime(tmp_path):
     root = _library(tmp_path, "auth-flow")
     with patch.object(container_mod, "is_container_mode_enabled",

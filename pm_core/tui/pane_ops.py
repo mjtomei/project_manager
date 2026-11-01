@@ -512,6 +512,30 @@ def launch_watcher_review(app) -> None:
     launch_pane(app, cmd, "watcher-review", fresh=fresh, env=env)
 
 
+async def _launch_regression_item(app, qa_id: str,
+                                  target_window: str | None) -> None:
+    """Run regression test *qa_id* in a pane, unless it cannot launch.
+
+    Same launcher as the CLI and ``pm qa launch``: ``pm qa regression`` runs
+    the test in an isolated QA workdir (a QA container when container mode
+    is enabled) against a disposable test project, never this TUI's session.
+    What would stop it is logged here instead of flashing by in a pane that
+    exits at once.  The check runs off the event loop: with container mode
+    enabled it asks the runtime (``<runtime> info``, up to 10 s).
+    """
+    import asyncio
+    from pm_core.regression_prompts import (regression_launch_cmd,
+                                            regression_launch_problem)
+    problem = await asyncio.to_thread(regression_launch_problem,
+                                      app._root, qa_id)
+    if problem:
+        app.log_message(problem.splitlines()[0])
+        _log.warning("regression launch refused: %s", problem)
+        return
+    launch_pane(app, regression_launch_cmd(app._root, qa_id),
+                "qa-item", target_window=target_window)
+
+
 def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
     """Launch Claude with a QA instruction prompt, or run a regression test.
 
@@ -538,20 +562,8 @@ def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
     category, qa_id = parts
 
     if category == "regression":
-        # Same launcher as the CLI and `pm qa launch`: `pm qa regression`
-        # runs the test in an isolated QA workdir (a QA container when
-        # container mode is enabled) against a disposable test project, never
-        # this TUI's session.  What would stop it is logged here instead of
-        # flashing by in a pane that exits at once.
-        from pm_core.regression_prompts import (regression_launch_cmd,
-                                                regression_launch_problem)
-        problem = regression_launch_problem(app._root, qa_id)
-        if problem:
-            app.log_message(problem.splitlines()[0])
-            _log.warning("regression launch refused: %s", problem)
-            return
-        launch_pane(app, regression_launch_cmd(app._root, qa_id),
-                    "qa-item", target_window=target_window)
+        app.run_worker(_launch_regression_item(app, qa_id, target_window),
+                       exclusive=False)
         return
 
     item = qa_instructions.get_instruction(app._root, qa_id, category=category)

@@ -356,6 +356,7 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
     this same command in a pane.  Use `pm qa list` to see available tests.
     """
     import secrets
+    import shutil
     import time
     from pm_core import qa_instructions, qa_loop, store
     from pm_core import container as container_mod
@@ -409,6 +410,8 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
             branch=base_branch,
         )
     except Exception as exc:
+        # Nothing ran: drop this run's own, just-created workdir.
+        shutil.rmtree(qa_workdir, ignore_errors=True)
         detail = (getattr(exc, "stderr", "") or "").strip()
         click.echo(f"Could not clone '{base_branch}' for the regression run: "
                    f"{exc}" + (f"\n{detail}" if detail else ""), err=True)
@@ -421,8 +424,9 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
     target = (f"`{base_branch}` (commit `{sha[:12]}`)" if sha
               else f"`{base_branch}`")
 
+    # Created once the session is ready to start (below), so a run that
+    # never launched leaves nothing in the evidence store.
     run_captures = captures_base / test_id / run_id
-    run_captures.mkdir(parents=True, exist_ok=True)
     if use_containers:
         wd_in = container_mod._CONTAINER_WORKDIR
         scratch_in = container_mod._CONTAINER_SCRATCH
@@ -450,7 +454,6 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
         file_findings=file_prs,
         registry=registry_in if file_prs else None,
     )
-    (run_captures / "prompt.md").write_text(prompt)
 
     env: dict[str, str] = {}
     cname = None
@@ -508,7 +511,12 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
         else:
             click.echo(f"Could not build the regression session: {exc}",
                        err=True)
+        shutil.rmtree(qa_workdir, ignore_errors=True)
         raise SystemExit(1)
+
+    # In container mode this lands inside the captures/regression/ mount.
+    run_captures.mkdir(parents=True, exist_ok=True)
+    (run_captures / "prompt.md").write_text(prompt)
 
     click.echo(f"Running regression: {title}")
     click.echo(f"  Target:   {target.replace('`', '')} (clone {clone_path})")
