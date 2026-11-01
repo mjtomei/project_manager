@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-01T20:44:21.890632+00:00'
+  updated_at: '2026-11-01T20:57:37.190323+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48084,6 +48084,34 @@ prs:
       Captures: /pm-captures/scenarios/57/.'
     created_at: '2026-11-01T20:44:21Z'
     last_edited: '2026-11-01T20:44:21Z'
+  - id: note-07c4b65
+    text: 'QA S59 (R15 at 8020d636) PASS — no code change; all 7 triples held live
+      across 14 throwaway fake-github projects. Verified: (1) sync of an unreviewed-commit
+      merge prints ✅ + WARNING (tip/approved head/merge sha), records merge_integrity
+      + exactly one note, repeat sync says "No new merges detected" ("No status changes"
+      for sync-github); (2) --propagation-only recovery prints the 4 expected lines,
+      and with a divergent local master it fails with "Pull failed"/exit 1 (warning+note
+      applied, PR not merged), then finalizes after a hand merge with the note still
+      exactly one; (3) a clean merge finalizes with no warning/record/note via sync
+      and via recovery; (4) no signoff record and a legacy HEAD-only approval made
+      with pm edit both finalize silently with no record/note; (5) unverifiable fetch
+      (workdir origin /nonexistent/remote.git) prints "could not verify" and writes
+      no record/note; (6) with every workdir gone, sync checks from the project repo
+      (unreviewed merge → mismatch recorded; clean merge → only ✅); (7) an unmerged
+      PR makes --propagation-only refuse with the exact message, exit 1, nothing finalized;
+      (8) hand-edited signoff (scalar "garbage", sha: 5, candidate_tree: 5 plus a
+      scalar note and a list-id note) never tracebacks, finalizes merged, and pm pr
+      merge refuses readably; tree5 records "approved ?" and one Merge integrity note
+      while the malformed notes render as "?: …" / "[…]: …". Harness facts for the
+      next run: (a) the pm session 0.1 pane is the guide Claude pane (trust prompt)
+      — do not drive it; add a bash window with tmux new-window; (b) keep /usr/bin
+      ahead of ~/.local/bin so real git wins, but keep ~/.local/bin for fake-claude;
+      (c) fixture scripts live in /home/pm/pm-s59-scripts/ (build_fixture.sh, finish_setup.sh,
+      teammate.sh, qa_editor.sh, rec.sh, render.sh); (d) never send a heredoc through
+      tmux send-keys — it wedges the shell at the continuation prompt; write the script
+      to a file and run that.'
+    created_at: '2026-11-01T20:57:37Z'
+    last_edited: '2026-11-01T20:57:37Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
