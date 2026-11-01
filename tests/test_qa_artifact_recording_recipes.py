@@ -37,7 +37,9 @@ hits, regardless of how it waits for a background job:
   the computed session rather than any ``pm-`` session (which would also
   match this recipe's own ``pm-recorder``), and the web-UI step refuses a
   port something already answers on (that server would satisfy the poll and
-  the driver would record the wrong app);
+  the driver would record the wrong app) — *any* HTTP answer counts, a 404 at
+  ``/`` included, so that pre-check is plain ``curl``: with ``-f`` a live app
+  that 404s is reported as a failed check, a cause its port cannot have;
 - two runs on one tmux server must not read each other's evidence: the
   transcript pipe is per-pane and a later one replaces it, so the tmux recipe
   claims the capture directory in a session option — before attaching the
@@ -154,7 +156,10 @@ hits, regardless of how it waits for a background job:
   pre-check bounds each attempt because curl has no default deadline for a
   server that accepted the connection and never answers, so without its
   ``--max-time`` the "exit 28" branch is unreachable and the step blocks
-  instead (the unbounded wait this PR removes everywhere else); and a retry's
+  instead (the unbounded wait this PR removes everywhere else), and the
+  protocol layer's route snapshots carry ``-w``'s status line, the only
+  record of what each route answered — a 500, or ``[HTTP 000]`` for a route
+  that timed out — which no case exercised; and a retry's
   cleanup takes the manifest with the outputs it presents, so a driver retried
   after an earlier attempt was finalized cannot fail and leave a manifest
   naming the video the cleanup deleted.
@@ -4091,6 +4096,15 @@ n=$((n + 1)); echo "$n" > "$STUB_CURL_COUNT"
 [ -n "${STUB_CURL_LOG:-}" ] && printf '%s\n' "$*" >> "$STUB_CURL_LOG"
 case "$STUB_MODE" in
   inuse) exit 0 ;;
+  # `inuse404`: a previous run's app still holds the port and answers 404 at
+  # "/" (an app whose UI lives at a subpath). *Any* HTTP answer means the port
+  # is taken, which is why the pre-check uses plain `curl`: with `-f` this
+  # call exits 22 instead, and the block reports "could not check … exit 22"
+  # — a cause the port cannot have, for a server that plainly answered (the
+  # shape R23 fixed for the readiness poll, one call earlier).
+  inuse404)
+      case " $* " in *" -f "*|*" -sf "*|*" -fs "*) exit 22 ;; esac
+      exit 0 ;;
   never) exit 7 ;;
   # `hung`: something accepts the connection and never answers, so curl exits
   # 28 (its own timeout) on every call — the port pre-check's "not free" case
@@ -4194,6 +4208,38 @@ class TestWebUiStartExecution:
             "just deleted server.pid (so the teardown has no pid to read) "
             "and the answering server may not be this capture's, so the "
             "message has to name the manual pid hunt: " + r.stderr)
+        assert not launched.exists(), (
+            "the recipe started the app on a port another server holds")
+
+    def test_a_port_that_answers_404_is_refused_as_taken(self, tmp_path):
+        """Any HTTP answer means the port is taken, including a 404 at ``/``.
+
+        The pre-check is plain ``curl`` on purpose (its own comment says so):
+        an app whose UI lives at a subpath answers 404 at ``/`` and is
+        perfectly alive, and the readiness poll below accepts exactly that
+        shape (R23). With ``-f`` the pre-check exits 22 for it and the block
+        takes its *other* failure branch — "could not check … (exit 22; …
+        something may be listening without answering, the URL may be wrong,
+        or curl may not be installed)" — a cause this port cannot have,
+        because it answered. Verified live with real curl and a server that
+        answers 404 at ``/``: plain curl exits 0, ``curl -f`` exits 22. The
+        block still refuses either way, so the mutation left the whole file
+        green (298 passed, verified); the refusal's *reason* is what is
+        pinned here.
+        """
+        r, launched = _run_web_ui_start("inuse404", tmp_path)
+        assert r.returncode != 0, (
+            "a port held by a server that answers 404 at / was accepted as "
+            "this run's app")
+        assert "already answers" in r.stderr, (
+            "the refusal does not name the cause: the port answered, so "
+            "something is already there: " + r.stderr)
+        assert "could not check" not in r.stderr, (
+            "a port that answered 404 is reported as a failed check, whose "
+            "remedies (wrong URL, missing curl, a listener that never "
+            "answers) cannot apply: " + r.stderr)
+        assert "ss -ltnp" in r.stderr, (
+            "the refusal names no way to find the listener: " + r.stderr)
         assert not launched.exists(), (
             "the recipe started the app on a port another server holds")
 
@@ -4719,6 +4765,58 @@ def test_web_ui_layer2_route_snapshots_are_bounded():
     assert "--max-time" in sse, (
         "the SSE reader is unbounded, so a failed kill leaves it running: "
         + sse)
+
+
+def test_web_ui_layer2_route_snapshots_record_the_status(tmp_path):
+    """Each route's snapshot has to carry curl's status code.
+
+    The block's own prose says ``-w`` "records the status line per route", and
+    that "a timed-out route is recorded in the log as curl's own error with
+    status 000 — that is the evidence for that route". Both claims depend on
+    the ``-w`` format argument, and no case exercised it: dropping the line
+    left the whole file green (**298 passed**, verified) while ``http.log``
+    then holds the route bodies with no status at all — a reviewer cannot
+    tell a 200 from a 500, and a route that timed out leaves only curl's
+    error line, not the ``[HTTP 000]`` marker the prose promises. Verified
+    live with real curl 7.81 against a socket that accepts and never answers:
+    with ``-w`` the route writes ``[HTTP 000]`` beside "Operation timed
+    out", without it only the error.
+
+    The block is *run* with a logging stub ``curl``, so the case sees the
+    argv each route request is given rather than the recipe's text — the
+    same shape as the port pre-check's bound case.
+    """
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    log = tmp_path / "curl-argv"
+    _stub_tool(bindir, "curl",
+               f'printf "%s\\n" "$*" >> "{log}"\necho "HTTP 200"\n')
+    env = dict(os.environ, CAPDIR=str(capdir), APP_URL="http://localhost:1",
+               PATH=f"{bindir}:{os.environ['PATH']}")
+
+    r = subprocess.run(["bash"], input=_web_ui_layer2_block(), env=env,
+                       capture_output=True, text=True, timeout=60)
+
+    assert r.returncode == 0, r.stderr
+    block = _web_ui_layer2_block()
+    routes = re.findall(r'"(/[^"]*)"',
+                        block.split("for route in", 1)[1].split("; do", 1)[0])
+    assert routes, "the protocol block snapshots no routes"
+    calls = log.read_text().splitlines()
+    for route in routes:
+        url = f"http://localhost:1{route}"
+        call = next((ln for ln in calls if ln.rstrip().endswith(url)), None)
+        assert call, (
+            f"the protocol block never snapshotted {route}: "
+            + log.read_text())
+        assert "-w" in call and "%{http_code}" in call, (
+            f"the {route} snapshot does not record the status line, so "
+            "http.log cannot show what the route answered: " + call)
+        assert "[HTTP " in call, (
+            f"the {route} snapshot's status line has no [HTTP NNN] marker, so "
+            "http.log cannot show what the route answered: " + call)
 
 
 def test_web_ui_layer2_stops_the_sse_reader_it_started(tmp_path):

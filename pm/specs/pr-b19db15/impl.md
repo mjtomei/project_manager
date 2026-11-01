@@ -3264,6 +3264,51 @@ R76. **The render block never checked the renderer it runs (review loop 928f
    `mutation-check.log`, `recipe-file.log`, `suite.log`, `README.md`). No
    `pm_core/` change; the dropped helper/prompt/verifier work stays dropped.
 
+R77. **Two guarantees the kept web-UI recipe carries had no case (review loop
+   928f i16).** Test-only; no recipe or `pm_core/` change. Both were found by
+   mutating the recipe in place and running the whole recipe test file.
+
+   (A) *The port pre-check's "any HTTP answer means taken".* Step 1's
+   pre-check is plain `curl` on purpose — its own comment says "any HTTP
+   answer, including a 404, means the port is taken" — and the readiness poll
+   below accepts an app that 404s at `/` (R23). Every "port taken" case in
+   the suite answered 200, so adding `-f` to the pre-check left the whole
+   file green (**298 passed**, verified) while a live app whose UI lives at a
+   subpath is then refused with "could not check … (exit 22; … something may
+   be listening without answering, the URL may be wrong, or curl may not be
+   installed)" — a cause that port cannot have, because it answered. Verified
+   live in this container with real curl 7.81 and a server answering 404 at
+   `/`: plain curl exits **0**, `curl -f` exits **22**; the shipped block
+   refuses with "something already answers on …" (rc 1, the app is not
+   started), and the `-f` copy refuses with "could not check … exit 22". The
+   stub `curl` gains mode `inuse404` (every call answers like that server),
+   and `test_a_port_that_answers_404_is_refused_as_taken` pins the refusal's
+   reason and the "ss -ltnp" remedy.
+
+   (B) *The protocol block's per-route status line.* The route snapshots
+   carry `-w '\n[HTTP %{http_code}]\n'`, which the block's prose says
+   "records the status line per route" and which is what makes a timed-out
+   route's evidence `[HTTP 000]` beside curl's own error. Dropping the
+   argument also left the whole file green (**298 passed**), and `http.log`
+   then holds the route bodies with no status at all: a reviewer cannot tell
+   a 200 from a 500, and a route that timed out leaves only the error line.
+   Verified live with real curl: the shipped loop writes `[HTTP 404]` for
+   each of the three routes, and `[HTTP 000]` for each against a socket that
+   accepts and never answers; without `-w` the same runs write bodies only
+   (and the timeout error only). `test_web_ui_layer2_route_snapshots_record_the_status`
+   runs the block with a logging stub `curl` and requires one status-bearing
+   `-w` call per route, with the route list read from the block itself.
+
+   Mutation checks: each mutation fails exactly its new case and nothing else
+   (whole file: **1 failed, 299 passed** each); restored, the file is **300
+   passed** (was 298). Full suite
+   (`env -u PM_HOST_HOME PYTHONPATH=/workspace PATH=/usr/bin:/bin pytest
+   tests/ -q --deselect tests/test_merge_publish.py --deselect
+   tests/test_signoff_integration.py`) **5376 passed, 1 skipped, 121
+   deselected, 0 failed** (450.88 s, final run). Evidence:
+   `/pm-captures/review-928f-i16/` (`probe.log`, `mutation-check.log`,
+   `recipe-file.log`, `suite.log`, `README.md`, `scripts/`).
+
 ## Non-goals
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
 - **No new helper, prompt block, verifier text, or QA-loop change.** Those
@@ -3818,6 +3863,40 @@ R76. **The render block never checked the renderer it runs (review loop 928f
    `tpad`/`setpts` expression deleted and passes unmodified.
 
 ## Evidence notes
+
+- Review loop 928f i16 (R77) found two guarantees the kept web-UI recipe
+  carries with no case, by mutating them in this container; test-only, no
+  recipe or `pm_core/` change. (A) The port pre-check's "any HTTP answer
+  means taken": every port-taken case answered 200, so adding `-f` left the
+  whole file green (**298 passed**, verified) — and a live app that 404s at
+  `/` (the shape R23 fixed the readiness poll for) would then be refused
+  with "could not check … exit 22", a cause its port cannot have. The
+  behaviour was verified live rather than assumed: the recipe's own step-1
+  block, extracted verbatim, run in this container with real curl 7.81 and
+  a server answering 404 at `/` refuses with "something already answers on
+  …" (rc 1, app not started), while the same block with `-f` added refuses
+  with "could not check … exit 22"; plain curl exits 0 against that server
+  and `curl -f` exits 22. The stub `curl` gained mode `inuse404`, and
+  `test_a_port_that_answers_404_is_refused_as_taken` pins the reason, the
+  "ss -ltnp" remedy and that the app is not started. (B) The protocol
+  block's route snapshots carry `-w '\n[HTTP %{http_code}]\n'`, the only
+  record of what each route answered; dropping it also left the file green
+  (**298 passed**). Verified live with the block's own route loop and real
+  curl: `[HTTP 404]` for each route against the 404 server, `[HTTP 000]`
+  beside "Operation timed out" for each against a socket that accepts and
+  never answers, and neither status without `-w` (bodies only, and the
+  timeout error only). `test_web_ui_layer2_route_snapshots_record_the_status`
+  runs the block with a logging stub `curl` and requires one status-bearing
+  `-w` call per route, with the route list read from the block. Mutation
+  checks: each mutation fails exactly its new case (whole file: 1 failed,
+  299 passed each); restored, the file is **300 passed** (was 298). Full
+  suite (`env -u PM_HOST_HOME PYTHONPATH=/workspace PATH=/usr/bin:/bin
+  pytest tests/ -q --deselect tests/test_merge_publish.py --deselect
+  tests/test_signoff_integration.py`) **5376 passed, 1 skipped, 121
+  deselected, 0 failed** (450.88 s, final run). Evidence:
+  `/pm-captures/review-928f-i16/` (`probe.log`, `mutation-check.log`,
+  `recipe-file.log`, `suite.log`, `README.md`, `scripts/probe.sh`). The
+  dropped helper/prompt/verifier work stays dropped.
 
 - Review loop 928f i14 (R75) found one leftover in the kept recipe scope and
   two gaps in its tests; no `pm_core/` change, no product change. (A) Both
