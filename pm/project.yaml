@@ -6378,43 +6378,319 @@ prs:
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-18ac983-session-health-watcher-detect-and-re-f6381eb7
 - id: pr-945546e
   plan: watchers
-  title: 'Project state watcher: monitor project health and recommend actions'
+  title: 'Project watcher sessions: maintain dynamic dependency guidance and choose work'
   branch: pm/pr-945546e-project-state-watcher-monitor-project-health-and-r
   status: pending
   depends_on:
   - pr-3032fb6
-  description: 'Built-in watcher using the BaseWatcher framework that monitors overall
-    project health and surfaces actionable recommendations.
+  description: 'Deliver a project-level watcher session that understands active and proposed
+    work across every plan, maintains shared soft dependency recommendations, and chooses
+    useful next actions within the owner''s authority. Reuse the existing watcher/session
+    framework for launch and wake-up; prompts and agent reasoning perform assessment and choice.
+    This is not a coded eligibility engine or a second automatic phase scheduler.
 
 
-    ## Observations
-
-    - PRs stuck in a state too long
-
-    - Dependency chains unblocked but not started
-
-    - Stale workdirs, orphaned tmux windows, diverged branches
-
-    - Missing project configuration (no plans, no deps set, no container config)
+    Observe project goals, owner guidance, PR/spec changes, session handoffs, branch/base
+    movement and relevant uncommitted implementation changes. Detect new interactions introduced
+    by another session after planning, even when that session did not update dependency metadata.
+    Retain existing project-health observations such as stale workdirs, missing configuration
+    and stalled work, but treat inactivity as evidence to investigate, not proof that an agent
+    should be advanced or restarted.
 
 
-    ## Actions
+    Expose read-only CLI helpers by extending/reusing pm pr ready and related queries where
+    appropriate. They should report recommended next work and deferred work, with reasons,
+    observation freshness and the distinction between soft scheduling advice and explicit
+    holds. Support machine-readable output and active PRs as well as pending starts. Exact
+    command names and minimal record representation belong in the spec. A watcher may use
+    the helper or reason directly from the underlying state; neither querying nor editing
+    a soft dependency dispatches work.
 
-    - Recommends next actions (e.g. PR is ready for next step in flow)
 
-    - Raises recommendations in the watcher TUI pane for user confirmation
+    Reuse safe plan/PR notes and dependency mutations for recording, updating and superseding
+    guidance. Preserve reasons, relevant observations/revisions and other sessions'' concurrent
+    updates. Do not require an elaborate graph framework; a recommendation can describe that
+    implementation is useful now while review should wait. Multiple watcher sessions and restarts
+    must see prior reasoning, reassess stale assumptions and avoid duplicate actions through
+    shared operation ownership. Mutually coupled work needs an agent decision rather than
+    automatic rejection as a cyclic schedule.
 
-    - Gated actions: moving PRs between steps requires user approval in the watcher
-    pane'
+
+    Coordinate with pr-ff9b728, which owns replacing coded flow control with explicit session
+    operations and handoffs. This PR owns project-level watcher prompts, observation/readiness
+    helpers and recommendation continuity. Reuse pr-8162f0f''s owner-guidance backing; pr-af9edb9
+    owns the UI. These boundaries should be reconsidered at spec review if a simpler implementation
+    removes duplication.
+
+
+    Acceptance: another plan session expands a PR after parallel work has started; the watcher
+    discovers the overlap, records its reasoning and chooses an appropriate next activity.
+    Exercise following a CLI recommendation, justified departure, proceeding without querying,
+    later revision/removal of stale advice, restart/another watcher reading the record, independent
+    shared-file changes, and concurrent stale action requests. Preserve explicit approvals
+    and complete evidence requirements. Queries must have no launch or transition side effects.
+
+
+
+
+    2026-10-31 USER DIRECTION: SOFT DEPENDENCIES AND WATCHER-SESSION DECISIONS
+
+
+    Plan/PR dependency edges are soft scheduling rules. CLI commands may consume them and
+    recommend readiness or ordering; watcher sessions decide whether to follow, depart from,
+    or bypass those recommendations. Keep recommendations and reasons in shared durable project/plan/PR
+    context so other watchers and future instantiations can reassess them. No helper result
+    automatically starts, pauses or advances work. Explicit user holds, scope/merge authority,
+    required evidence, resource bounds and concrete operation safety remain separate constraints.
+    This updates planned work only; it does not alter current execution or authorize an alpha
+    test.
+
+
+    Preserve the distinction between the project watcher agent''s reasoning and the deterministic
+    helpers it may consult. A CLI-produced schedule is useful advice, not a mandatory intermediate
+    product. Use current evidence to revise both the recommendation and the chosen action.
+
+
+    Include complete prompt examples for starting implementation before a prerequisite merges
+    while deferring review; waiting on overlapping changes introduced later in a different
+    plan; proceeding with independent work while another PR waits on a human; accepting integration
+    cost for an urgent security fix; and revising a stale dependency or treating unrelated
+    project.yaml edits as independent. Recommendations must be maintained dynamically from
+    observed work, not only from the initial plan or agents volunteering updates. Record decisions
+    and reasons for future sessions without requiring a giant transition table or mandatory
+    scoring formula.
+
+
+    SPEC/PROMPT REVIEW REQUIRED: when this PR is eventually started, prepare the implementation
+    spec and all complete rendered prompts and representative CLI outputs/shared notes, then
+    stop for the user before product implementation or review/QA. Set review_spec=true; never
+    self-approve. No worker, alpha watcher, schedule or policy activation is authorized by
+    this update.
+
+
+
+    2026-10-31 APPROVED D3 MILESTONE RECONCILIATION
+
+
+    D3 in plan-delivery is now a delivery milestone grouping pr-ff9b728, pr-945546e, pr-8162f0f
+    and pr-af9edb9. It is not another PR and must not replace or duplicate these existing
+    implementations. Keep this PR identity, history and owned scope. Shared milestone qualification
+    is documented in plan-delivery; separately owned prerequisites remain separate work. Preserve
+    implementation spec/full-prompt approval before implementation. No start is authorized
+    by this planning update.
+
+
+
+    CODE-DERIVED DEPENDENCY CHECKS (user request 2026-10-31)
+
+
+    The dependency/readiness CLI must compute inexpensive code-based signals as well as consume
+    project.yaml dependencies, so watcher sessions do not repeatedly read large diffs to discover
+    mechanically detectable interactions. Keep these checks inside this PR; do not add a separate
+    automatic scheduler or duplicate analysis in pr-ff9b728.
+
+
+    Start with Git facts: relevant base/HEAD revisions and ancestry, changed paths and rename-aware
+    identities, intersecting changed hunks, and non-destructive merge/conflict previews where
+    applicable. Reuse/refactor the existing pm_core/integration.py analysis rather than creating
+    another incompatible definition of base, overlap or conflicts. Include comparisons between
+    active PRs across plans, not only each PR versus master; an undeclared pair must be discoverable.
+    Do not infer a directed prerequisite solely from same-file overlap, and distinguish already-contained/equivalent
+    changes from new interference.
+
+
+    Add bounded static code analysis for supported languages, beginning with Python where
+    it provides direct value for PM: changed definitions or signatures and statically resolvable
+    imports/references that connect another PR''s code to those changes. Surface concrete
+    symbol/path evidence for cross-file interactions that file-overlap checks miss. Use existing
+    suitable parsers where possible; do not execute or import project code to analyze it,
+    and do not make a universal language/type-analysis framework a prerequisite. Label unresolved
+    dynamic dispatch/imports, unsupported languages, absent workdirs and failed or incomplete
+    analyses as unknown or partial. No detected conflict is not proof of independence.
+
+
+    Observe staged, unstaged and relevant untracked implementation changes as well as committed
+    branches, so new work introduced by another session can invalidate an old recommendation
+    before it is committed or reflected in project.yaml. Pin/fingerprint the inputs actually
+    examined; detect changes during an analysis and mark/retry a stale result within a bounded
+    budget. Never checkout, reset, merge into, run hooks in, or otherwise mutate an active
+    PR workdir to produce a query result. Use isolated temporary objects/workspaces if a preview
+    requires them and preserve user state, drafts and evidence.
+
+
+    Return compact machine-readable facts and advisory findings with source revisions/content
+    fingerprints, affected PRs, paths/symbols, method, freshness, limitations and concise
+    reasons. Separate explicit YAML recommendations, mechanically established facts, heuristic
+    code-derived interactions and explicit user holds. Expose focused drill-down for ambiguous
+    cases instead of dumping every full diff into every prompt. Keep project.yaml-only overlaps
+    distinct from source/API interactions; do not automatically classify every registry edit
+    as a code dependency or silently ignore genuine metadata conflicts.
+
+
+    Cache and incrementally update results by the relevant base/HEAD/content fingerprints
+    and analyzer configuration/version. Recheck changed PRs and their affected neighbors;
+    unchanged work should not require another full-project scan or model read. Measure scan
+    time and result/prompt volume, and preserve deterministic stable output for unchanged
+    inputs. Code-derived findings remain soft scheduling advice: the watcher can follow, depart
+    from or bypass them, explain its choice and persist updated recommendations for other/future
+    watcher sessions. Queries do not launch, pause, change models, relax gates or advance
+    work.
+
+
+    Acceptance fixtures must demonstrate (1) undeclared cross-plan overlapping code changes;
+    (2) a changed API with a statically resolvable consumer in another file/PR; (3) distinct
+    functions or unrelated registry edits that should not be reported as a proven prerequisite;
+    (4) changed hunks/renames and already-contained changes; (5) staging/unstaged/untracked
+    or base/HEAD changes invalidating cached findings; (6) unsupported/dynamic cases and a
+    moving worktree reported as partial/stale rather than falsely independent; and (7) unchanged
+    queries reusing cached results with no active-workdir/index/session mutations. Provide
+    a bounded watcher example consuming the compact report and requesting only a relevant
+    drill-down before choosing whether to implement, review or wait. Include representative
+    CLI outputs, limits and all new/composed prompts in the existing required implementation
+    spec/full-prompt review. Remain pending and unstarted.
+
+
+
+    DEFAULT CONTINUITY AND EXPLICIT FRESH ANALYSIS (user direction 2026-10-31)
+
+
+    Project-level and scheduling watcher sessions must default to reusing shared PR/plan notes,
+    prior recommendations, handoffs and a compact maintained project summary. Do not re-analyze
+    the entire project or reload every full transcript/diff on each invocation or new session.
+    Reuse applies to agent reasoning/context as well as programmatic analysis caches. Refresh
+    cheap current-state facts, identify relevant changes since the previous assessment, and
+    expand context only for affected work or unresolved uncertainty. A recreated watcher should
+    continue from durable context without depending on its predecessor''s conversation window.
+
+
+    Keep the maintained context bounded: current goals/owner guidance, active and held work,
+    outstanding questions, recommendation rationale, source links/revisions and what was last
+    examined. Retain detailed history behind links rather than accumulating an ever-growing
+    prompt. PR-authored notes and recommendations are useful evidence, not authority to override
+    user direction or acceptance gates. Reuse the existing file-based notes/records rather
+    than creating another competing memory store.
+
+
+    Offer an explicit fresh-analysis request that reassesses current project work and prior
+    assumptions instead of treating old summaries/recommendations as sufficient. Preserve
+    the original notes and decision history; fresh analysis does not erase owner instructions,
+    release holds, restart workers or imply permission to execute its recommendations. Show
+    the analysis scope/as-of state, revised recommendations and gaps if an assessment is incomplete.
+    Exact CLI/UI controls and prompt composition belong in the spec. Periodic fresh analysis
+    is an optional design/configuration possibility; no cadence is selected or enabled by
+    this requirement.
+
+
+    This PR owns the shared continuation context, incremental observation/delta queries and
+    fresh-assessment semantics used by project and scheduling watchers. Reuse programmatic
+    code-check fingerprints/caches and compact findings already required here. Detect external
+    or other-session changes even without an explicit handoff; unchanged project.yaml does
+    not establish unchanged work. Revalidate action-relevant state, explicit holds/authority,
+    revisions and operation ownership before acting on reused advice. Mark missing or stale
+    observations rather than treating them as proof that there is no new interaction. The
+    watcher may request a targeted drill-down or broader fresh assessment when uncertainty
+    warrants it.
+
+
+    Validation: two unchanged invocations (including a newly created watcher) reuse the persisted
+    reasoning and avoid repeated whole-project source/transcript loading; a single changed
+    PR causes focused reassessment and updates related recommendations; new cross-plan or
+    uncommitted work is detected; an explicit fresh request can overturn a stale summary while
+    preserving prior notes and owner holds. Measure source/context volume, model input and
+    analysis work so the claimed reduction is observable. Test interrupted/concurrent note
+    updates, stale cached facts before a requested action, missing context and partial analysis.
+    Present both incremental and fresh rendered prompts plus representative persisted notes
+    and CLI outputs at the existing required spec review.
+
+    '
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-09T15:17:16.291505+00:00'
-  updated_at: '2026-03-09T15:17:16.291505+00:00'
+  updated_at: '2026-11-01T20:38:42.683324+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-a8a6c93e
+    text: 'User clarified Oct31: dependency edges are soft rules; CLI readiness/schedule helpers
+      may recommend actions, but watcher sessions may follow or depart from them. Include
+      dynamic cross-plan updates, shared continuity and worked deviation examples. Planned
+      scope only; spec/full-prompt approval required and no start authorized.'
+    created_at: '2026-10-31T18:35:32.721580+00:00'
+    last_edited: '2026-10-31T18:35:32.721580+00:00'
+  - id: note-081c92be
+    text: D3 in plan-delivery is now a delivery milestone grouping pr-ff9b728, pr-945546e,
+      pr-8162f0f and pr-af9edb9. It is not another PR and must not replace or duplicate these
+      existing implementations. Keep this PR identity, history and owned scope. Shared milestone
+      qualification is documented in plan-delivery; separately owned prerequisites remain
+      separate work. Preserve implementation spec/full-prompt approval before implementation.
+      No start is authorized by this planning update.
+    created_at: '2026-10-31T18:43:14.672660+00:00'
+    last_edited: '2026-10-31T18:43:14.672660+00:00'
+  - id: note-4b611af5
+    text: 'User requested programmatic dependency checks based on actual code as well as project.yaml:
+      Git/overlap/conflict facts, bounded static symbol/reference analysis, current dirty
+      work and incremental caching. Return compact evidence-backed soft recommendations for
+      watcher judgment; preserve spec/full-prompt approval and remain unstarted.'
+    created_at: '2026-10-31T18:45:46.508943+00:00'
+    last_edited: '2026-10-31T18:45:46.508943+00:00'
+  - id: note-b15b055d
+    text: User requests default reuse of PR notes and previous recommendations across watcher
+      invocations, with change-focused analysis instead of rescanning the whole project. Provide
+      explicit fresh analysis; periodic refresh remains an undecided option, with no schedule
+      enabled. Coordinate one shared continuity mechanism and preserve spec/prompt review.
+    created_at: '2026-10-31T18:48:52.487362+00:00'
+    last_edited: '2026-10-31T18:48:52.487362+00:00'
+  - id: note-e8e18bb
+    text: 'OWNER SPEC-REVIEW REQUIREMENT (2026-11-01): Full prompt wording is the primary
+      item for human review. Put an early "Full prompts for approval" section directly in
+      the main implementation spec/review document (pm/specs/<pr-id>/impl.md), containing
+      the complete proposed text of every new or revised prompt and its material role/backend
+      variants. Include unchanged portions of the affected prompts so the owner can read the
+      whole result, and clearly label runtime placeholders. Summaries, diffs, excerpts, omitted
+      blocks, or links to separate prompt files are not substitutes for the full inline text;
+      linked files and examples may supplement it and must agree with it. Architecture, implementation
+      details, and tests support this prompt review rather than displacing it. If this PR
+      changes no prompts, state that explicitly without inventing prompt changes.
+
+
+      This clarifies the review presentation only. Keep implementation spec approval pending,
+      preserve existing unanswered decisions and dependency/manual-merge gates, and do not
+      treat this note as approval of any prompt or design option.'
+    created_at: '2026-11-01T20:20:59Z'
+    last_edited: '2026-11-01T20:20:59Z'
+  - id: note-084cf51
+    text: 'User explicitly authorized project-watcher spec preparation on 2026-11-01 with
+      work Opus5.5/xhigh for all roles/helpers/sign-off and mandatory implementation spec
+      review. Prepare only a grounded implementation spec and COMPLETE proposed watcher, scheduling,
+      handoff and affected composed prompts inline in an early Full prompts for approval section
+      of pm/specs/pr-945546e/impl.md. Prompt wording is the primary review item. Include unchanged
+      composed portions, labelled placeholders, representative readiness outputs/shared notes
+      and example decisions; links or excerpts alone are insufficient. Stop for explicit owner
+      approval before product implementation/review/QA; never self-approve.
+
+
+      Watcher sessions choose what runs next. Dependencies and code-derived readiness/overlap
+      checks are recommendations, not a strict scheduler. Use incremental programmatic analysis
+      where useful and bounded reusable PR/plan notes so each wake-up does not rescan all
+      code/transcripts. Preserve an explicit fresh-analysis option. Cover implementation-before-prerequisite
+      with delayed review, newly discovered cross-plan overlap, independent work during human
+      waits, urgent security ordering, and irrelevant planning-only changes. Preserve owner
+      authority, evidence, resource and concrete operation safety constraints.
+
+
+      Coordinate shared guidance and brief contracts with #286/pr-8162f0f and #287/pr-2588ead
+      during spec preparation; defer integration with their contracts until they are approved
+      and available. Keep the broad agent-controlled phase-flow replacement pr-ff9b728 and
+      UI redesign pr-af9edb9 separately scoped. This is specification work, not authorization
+      to activate a watcher or change the current execution schedule. Existing watcher framework
+      #132 is merged. Keep current manual merges and all other holds unchanged.'
+    created_at: '2026-11-01T20:38:42.683324+00:00'
+    last_edited: '2026-11-01T20:38:42.683324+00:00'
+  review_spec: true
+  model: provider:claude-work-xhigh-249
+  effort: high
 - id: pr-c21e2ed
   plan: watchers
   title: 'Review/QA oversight watcher: monitor loops for anomalies and shortcuts'
@@ -53067,3 +53343,267 @@ prs:
   review_spec: true
   model: provider:claude-work-xhigh-249
   effort: high
+- id: pr-cd04629
+  plan: bugs
+  title: 'Bug: centralize fail-closed container launches across all session types'
+  branch: pm/pr-cd04629-bug-centralize-fail-closed-container-launches-acro
+  status: pending
+  depends_on:
+  - pr-574e851
+  description: 'Follow-up to #280 / pr-574e851, explicitly requested by the user after its
+    sign-off discussion on 2026-11-01. Audit EVERY PM-managed session type and launch entry
+    point for the same isolation downgrade, and share the container-start abstraction so fixing
+    one caller cannot leave or reintroduce a host fallback elsewhere.
+
+
+    Confirmed implementation cases on #280 signed-off head d33fa6ff: (1) pm pr start creates
+    a container, then a tmux window creation failure falls through to launch_claude and runs
+    the agent directly on the host, leaving the allocated container unused; (2) outside a
+    PM tmux session, the command skips the container path and directly launches on the host
+    despite container mode being enabled. The original sign-off checked creation failure but
+    missed these later/alternate entry points. User approved keeping #280 and addressing these
+    in follow-up. Evidence: main session signoff-#280, SID 7df9f266-81ec-4b3d-af98-bc0c14f3d55c,
+    discussion Nov1 14:50-14:51 UTC; preserved in /home/matt/.local/state/pm-pr-shepherd/merge-280-267-20261101T145635Z/pr-574e851/signoff-pane.ansi.
+
+
+    Required work:
+
+    - Produce a complete caller/session matrix: implementation; review; sign-off; QA planning,
+    refinement/concretization, execution, interactive, verification and finalization; merge
+    helpers; project/plan/watcher and background/print/helper entry points. Follow actual
+    calls, including CLI, TUI, no-tmux foreground, retries, restart/resume, replacement windows,
+    and nested helpers. Record which roles are already container-eligible versus currently
+    host-only; do not infer safety from one creation exception handler.
+
+    - Centralize execution-policy selection and container start/reuse/exec failure handling
+    in a shared required-container launch path. Once an operation requires a container, runtime/preflight/create/setup/reuse/exec/tmux
+    failures or an absent session must never select a host launch. Explicitly disabled container
+    mode must remain an intentional, separately selected host path. Keep narrow host orchestration/services
+    distinct from host agent execution. Avoid scattered per-role fallbacks and boolean conjunctions
+    that silently turn required isolation off.
+
+    - For no-tmux/failed-window implementation launches, either use an explicitly supported
+    containerized foreground command or refuse with an actionable error. Never print a misleading
+    host fallback message. Reclaim only newly allocated unused resources safely, preserving
+    retained/reused containers, source, dirty files, evidence, drafts and diagnostic context.
+    Keep model/helper routing, prompts, gates and verdict collection intact.
+
+    - Route all existing container-eligible callers through this shared boundary; fix equivalent
+    issues in every type found by the audit. Coordinate with pr-efab0ce (containerizing currently
+    host-only PM operations): those new paths must use the same shared boundary rather than
+    independent fallback code. That broader role/config-isolation work remains in pr-efab0ce;
+    this follow-up owns the launch invariant and existing downgrade paths. Do not add per-PR/action
+    host bypasses.
+
+
+    Acceptance: parameterized regressions across the caller matrix must prove zero host-agent
+    invocations whenever container mode applies, including missing/unavailable runtime, setup/create/reuse/exec
+    failure, tmux failure after allocation, no PM tmux session, retry and resume. Include
+    healthy container and explicit-global-disabled controls, correct cleanup ownership, and
+    a guard against future callers bypassing the common path. Run representative real isolated
+    launches and failure cases, validating process/container identity and unchanged host PM/tmux/config
+    state; mocks alone are insufficient. Test fixtures must never operate on live host sessions
+    or disable the real container setting. Document any intentionally host-only role with
+    its existing containerization follow-up rather than claiming full isolation prematurely.
+
+
+    Filed only; no implementation/autostart or merge authorized by this follow-up request.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-01T14:57:48.450085+00:00'
+  updated_at: '2026-11-01T20:38:42.683324+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-094dc5d
+    text: 'User explicitly authorized this shared fail-closed launcher recommendation on 2026-11-01
+      using DeepSeek1017/high for implementation/review/QA/helpers, retaining work Opus5.5/xhigh
+      sign-off. Begin the complete launch-caller audit and grounded common-interface design
+      now. This is the first isolation item from the approved recommendation list, not broad
+      containerization of currently host-only roles.
+
+
+      SCHEDULING: audit and interface documentation are authorized now. Before overlapping
+      product/lifecycle implementation, wait for #241/pr-1139060 cleanup ownership and #278/pr-073910f
+      tmux isolation to merge and be integrated. Their work is still in flight. Read relevant
+      code/diffs as evidence, record proposed interfaces and integration assumptions, then
+      leave a clear audit handoff and wait for the scheduling watcher to release implementation.
+      Do not independently start review/QA or enable autostart; no owner spec-review gate
+      has been requested for this PR. Existing #280 is merged. pr-efab0ce must consume your
+      shared required-container launcher; coordinate scoped ownership with pr-6820cbc bridge/proxy
+      work instead of inventing a competing lifecycle.
+
+
+      Audit every session/entry point, including no-tmux and failed-window paths after container
+      allocation, foreground/background/print, retry/resume and nested helpers. Preserve explicit
+      disabled mode, scoped cleanup, full prompts and real diagnostics. Do not exercise tests
+      against live host tmux/settings or introduce a host fallback. Preserve all existing
+      scope, evidence, manual merge policy and model/helper settings. Historical filing-only
+      text is superseded by this explicit audit start; no unrelated PR is authorized.'
+    created_at: '2026-11-01T20:38:42.683324+00:00'
+    last_edited: '2026-11-01T20:38:42.683324+00:00'
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    signoff: provider:claude-work-xhigh-249
+  review_spec: false
+- id: pr-efab0ce
+  plan: plan-delivery
+  title: Containerize all PM agent operations and isolate their host control state
+  branch: pm/pr-efab0ce-containerize-all-pm-agent-operations-and-isolate-t
+  status: pending
+  depends_on:
+  - pr-574e851
+  - pr-cd04629
+  description: 'Container mode must apply consistently to PM-managed agent operations. Several
+    roles currently run on the host for convenience even when containers are enabled. Their
+    tests can mutate real PM settings or the live tmux session. Move those agents behind the
+    container boundary while keeping the trusted PM controller and narrowly scoped host services
+    on the host.
+
+
+    Dependency: #280 / pr-574e851 (never fall back to host execution when container mode is
+    enabled) must merge before this PR starts implementation. Use its fail-closed launch contract
+    for every newly containerized operation. Start from current master including #280. User
+    routing update 2026-11-01: run implementation, review, QA and helpers with DeepSeek V4.1
+    Flash1017/high; retain work Opus5.5/xhigh for sign-off, manual wait_for_merge and implementation
+    spec review off. Integrate the shared fail-closed launcher pr-cd04629 before this broader
+    containerization implementation.
+
+
+    Scope:
+
+    - Audit every PM agent entry point, including shell, interactive and print-mode launches.
+    Containerize QA planning, interactive QA Scenario 0, verification and finalization; merge
+    helpers; discussion/main PM agent sessions and watcher/review agents; plan/spec/QA/regression
+    authoring, guide/meta/cluster assistants and other currently host-only agent commands.
+    Existing implementation/review/sign-off/refinement/execution container paths must keep
+    working. Record the complete role/entry-point matrix in the implementation spec so omissions
+    are reviewable.
+
+    - Agent subprocesses and their tools run in containers when global container mode is enabled.
+    A missing runtime, setup/create/exec error, or lost container produces the #280 launch
+    error and never a host fallback, including retries/resume and short print helpers. An
+    exception must not silently become a host-agent launch.
+
+    - Give each operation only its needed repository/workdir and artifact mounts, with an
+    isolated HOME, PM settings/registry and tmux server/socket for tests. Do not expose the
+    real host HOME, global writable PM settings, live tmux control socket or unrestricted
+    container-runtime socket as a convenience shortcut. Preserve provider authentication/routing
+    and completion reporting through scoped mounts or controlled interfaces, avoiding shared
+    writable hook/settings leakage.
+
+    - QA planning/finalization must still read the necessary specs, transcripts and captures,
+    and publish their authorized work to the canonical PR workdir. Preserve interactive S0
+    participation, expected tmux windows, role identity, helpers, collection, retry/resume,
+    evidence retention and lifecycle cleanup. Provide only the required scoped controller/proxy
+    capabilities for host-side actions rather than arbitrary host shell access.
+
+    - The trusted TUI/controller, scheduler, container lifecycle management and narrow Git/auth/reporting
+    services can remain on the host. This change concerns PM-managed agents, not the user''s
+    own shell or external orchestration session. Keep explicitly disabled global container
+    mode supported; do not add per-PR execution overrides, new per-action host escape flags,
+    enrollment/risk popups, broad network profiles or the stopped memory-governor feature.
+
+    - Coordinate with #278 tmux isolation and #241 cleanup without automatically starting
+    other PRs. The older broad pr-ca19555 whole-session/enrollment proposal and pr-726757e
+    hardening-profile proposal remain separate and unstarted.
+
+
+    Concrete evidence:
+
+    - #271 interactive QA Scenario 0, SID 284614fb-83d6-40c2-a0df-774497d5d5f4, ran pm container
+    disable on October 28 at 19:29:30 UTC intending to change a scratch project. It retained
+    the real HOME and changed /home/matt/.pm/settings/container-enabled globally. This was
+    S0, not the scenario planner. Evidence: /home/matt/.local/state/pm-pr-shepherd/container-disabled-20261028-evidence.json.
+
+    - #267 host refinement/testing later targeted the real pm-project_manager-5b29c418 tmux
+    session while assuming it owned a scratch fixture. Evidence: /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z.
+    These incidents motivate containment; do not claim either proves a runtime-failure fallback.
+
+
+    Acceptance:
+
+    - Exercise the complete role matrix with isolated fixtures and verify actual agent/container
+    identity, not merely a container flag or mocked wrapper. Cover interactive, background
+    and print paths plus retries/resume, nested helper/test processes and handoffs.
+
+    - Real representative planning/S0/verification/finalization and project-level agent operations
+    retain their intended function inside containers; artifacts, commits and verdict collection
+    remain correct. Keep model/helper routing and merge/spec gates intact.
+
+    - Attempts from fixtures to change PM container settings or create/kill/detach tmux clients
+    affect only the fixture. Assert host settings, live sessions, registry and unrelated containers
+    are unchanged. Test without disabling the real host''s container mode or targeting its
+    sessions.
+
+    - Failure tests prove zero host-agent launches when containers are required. An explicit
+    global-disabled control still behaves intentionally. Cleanup targets only owned, unused
+    resources and preserves user drafts, source, retained fixtures and evidence.
+
+    '
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T02:19:58.781771+00:00'
+  updated_at: '2026-11-01T20:38:42.683324+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-4d201b1
+    text: 'Confirmed containment regression 2026-11-01: #282 QA scenario 5 (SID d7b432df-dc1c-4619-9f35-2f7d8c39e675,
+      pane %707) at 00:11:38 UTC manually rewrote /home/pm/.claude/settings.json hook commands
+      from /home/matt/.pm/hook_receiver.py to /home/pm/.pm/hooks/hook_receiver.py while repairing
+      a nested fixture. The outer container mounts host /home/matt/.claude read-write at /home/pm/.claude,
+      so this changed the real host configuration. Host main Claude pane %477 then failed
+      UserPromptSubmit with file-not-found. Original host receiver remained present and hash-identical;
+      no deletion occurred. Host restored only the four receiver paths at00:52:42UTC and verified
+      receiver function in isolated HOME. Existing outer container already had the canonical
+      host receiver read-only mounted; missing receiver belonged to a nested fixture. Cover
+      this explicit regression in scoped config/mount isolation: nested QA must not rewrite
+      host Claude settings, and hook paths must work for each intended context without a shared
+      writable config escape. Worker notified; original evidence preserved. Evidence: /home/matt/.local/state/pm-pr-shepherd/hook-investigation-20261101T005154Z.
+      This note does not authorize starting or changing scheduling/model/gates.'
+    created_at: '2026-11-01T00:54:35Z'
+    last_edited: '2026-11-01T00:54:35Z'
+  - id: note-655e078
+    text: 'User-requested #280 follow-up pr-cd04629 owns a complete session/caller audit and
+      shared fail-closed container-start boundary, including implementation tmux failure and
+      no-PM-session paths. Reuse that common required-container launch path for every operation
+      containerized here; do not create a parallel fallback implementation. Preserve this
+      PR''s broader host-only role and config/mount isolation scope. Coordinate implementation
+      ordering when scheduling; this note does not start either pending PR.'
+    created_at: '2026-11-01T14:57:50Z'
+    last_edited: '2026-11-01T14:57:50Z'
+  - id: note-69c551c
+    text: 'User explicitly authorized this broader containerization recommendation on 2026-11-01
+      using DeepSeek1017/high for implementation/review/QA/helpers and work Opus5.5/xhigh
+      sign-off. This newest routing supersedes the older all-Opus instruction in this PR.
+      Keep manual wait_for_merge and implementation spec review off.
+
+
+      ORDER: queue this work behind pr-cd04629''s shared fail-closed launcher, and integrate
+      #241/pr-1139060 lifecycle ownership and #278/pr-073910f tmux isolation before product
+      implementation. #280 is already merged. Reuse the common launcher rather than adding
+      independent failure paths. Coordinate with pr-6820cbc''s bridge/proxy interfaces; do
+      not launch that PR or duplicate its ownership work. The scheduling watcher will start
+      implementation after the required merges and integration are verified. No worker is
+      launched by this queueing step.
+
+
+      Preserve the complete host-only role/config-mount isolation scope and explicit shared
+      writable Claude hook/settings regression. Keep the trusted controller and narrowly scoped
+      services on the host; agent tools must use scoped container mounts, isolated HOME/settings/tmux
+      and existing authentication/reporting boundaries. No per-PR/action host escape feature,
+      live-host fixture or stopped memory governor. This explicit authorization replaces historical
+      filing-only/no-start notes while retaining the approved order.'
+    created_at: '2026-11-01T20:38:42.683324+00:00'
+    last_edited: '2026-11-01T20:38:42.683324+00:00'
+  review_spec: false
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    signoff: provider:claude-work-xhigh-249
