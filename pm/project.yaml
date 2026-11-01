@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T07:40:38.787588+00:00'
+  updated_at: '2026-11-01T08:46:54.657171+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6086,6 +6086,48 @@ prs:
       was touched.'
     created_at: '2026-11-01T07:40:38Z'
     last_edited: '2026-11-01T07:40:38Z'
+  - id: note-9bbf81b
+    text: 'Review loop 2caf i10 (commit de916a568; no requirement changes; full suite
+      5383 passed / 1 skipped, 417.4 s, log /pm-captures/review-2caf-i10/full-suite-final.log).
+      Verification pass over the head after the 8d4e i1 fix; three items, all closing
+      classes earlier iterations had opened. (1) list_pm_sessions() followed a symlinked
+      /tmp/pm-sessions: Path.glob resolves the link, so `pm session list` enumerated
+      the target directory (a path another user can plant in world-writable /tmp)
+      and reported its servers as pm sessions, and discovery scanned them — while
+      `pm session` refuses the same path (paths.ensure_socket_dir, 2caf i8). The scan
+      now lstat''s the directory and skips anything that is not a real directory (a
+      missing directory stays the normal first-run state), logging a warning; the
+      default-server pass is unaffected, so legacy sessions are still listed. Verified
+      live before/after: pre-fix the planted socket was probed and listed. Test: TestListPmSessions::test_does_not_follow_a_symlinked_socket_dir;
+      qa.md R12 gained the read-path bullet (pm session list / plain-shell pm tui
+      view must not list or drive the target''s sessions). (2) The 2caf i5 residual
+      parsers are closed: attached_group_active_windows() used a `|` format whose
+      group field repeats the base session''s name, so a `|` in that name shifted
+      every following field and the popup picker lost the collaborator row; switch_sessions_to_window()
+      parsed "#{session_name} #{client_tty}", so a space in the session name truncated
+      it and the client was never switched to a replacement window (sign-off, QA-loop,
+      watcher and merge paths). Both now use `:`, which tmux forbids in session names
+      (it rewrites `:` and `.` to `_`) while a name may contain `|` or spaces — the
+      rule 2caf i5 applied to _live_panes_and_tuis, list_pm_sessions and sessions_in_group.
+      Verified the `:` format against a real disposable server with a `|`-named base.
+      Tests: TestAttachedGroupActiveWindows::test_group_name_may_contain_the_old_separator,
+      new TestSwitchSessionsToWindow (test_session_name_may_contain_a_space, test_unknown_client_still_selects_the_window);
+      the existing attached_group_active_windows fixtures moved to the `:` format.
+      (3) Test hygiene: this module''s new tests leaked PM_TMUX_SOCKET into later
+      tests — monkeypatch.delenv records nothing for a variable that is already absent,
+      while the code under test exports it — so the new test_tmux.py assertions failed
+      only in a combined run (a stray `-S <tmp socket>`). A module-local autouse fixture
+      now snapshots and restores os.environ; the two new tests also pin the variable
+      to "". Validation: targeted suites (test_session_socket_isolation, test_tmux,
+      test_cli_helpers, test_shared_sessions, test_cli_qa, test_popup_picker, test_qa_background_focus,
+      test_signoff, test_tui_pidfile) 907 passed; full suite 5383 passed / 1 skipped
+      after the edits; every new test verified to fail with the pre-fix code; pm/specs/pr-073910f/session_start_smoke.py
+      re-ran clean on a disposable socket; `pm session list` read-only in this container
+      ("No pm sessions found.", no socket dir created). No live session, server or
+      shared host configuration was touched — every fixture used a disposable socket
+      and a temporary HOME.'
+    created_at: '2026-11-01T08:46:54Z'
+    last_edited: '2026-11-01T08:46:54Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
