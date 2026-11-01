@@ -14331,7 +14331,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-11-01T00:02:00.074384+00:00'
+  updated_at: '2026-11-01T00:21:12.379687+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -15329,6 +15329,38 @@ prs:
       as an extra). Verdict unchanged: PASS.'
     created_at: '2026-11-01T00:01:59Z'
     last_edited: '2026-11-01T00:01:59Z'
+  - id: note-3131145
+    text: 'QA S30 (explicit removal vs cleanup, head 873f1eea): PASS, no code change,
+      6/6 stories driven through the real CLI in disposable-HOME sandboxes against
+      the git-backed fake-github stand-in (no real gh/claude, no pm session/TUI).
+      (1) close --remove on in_progress A (#1, feat-a, dirty workdir, 1 note, dependent
+      C): rc 0, stdout Closing GitHub PR #1... / GitHub PR #1 closed. / Removed registry
+      entry <A> / Kept: branch + workdir / the "no longer tracked by pm" note, and
+      never the default-close line; stderr warns C with the drop-dependency hint;
+      show not found rc 1 + Available PRs; list keeps only B and C with C still <-
+      [A] and * on B (active_pr pr-0258732); stand-in #1 CLOSED; refs/heads/feat-a
+      survives (no --delete-branch); 50-file workdir sha256 listing byte-identical.
+      (2) merged D: plain close rc 1 with the exact "PR #1 is already merged - ..."
+      sentence and no state change; --remove rc 0, stdout "GitHub PR #1 left unchanged
+      (the PR is recorded as merged)." / Removed / Kept: branch only (no workdir),
+      no Closing line, stand-in still OPEN, E warned; --remove --keep-github begins
+      "Leaving GitHub PR #1 unchanged (--keep-github)." and never says "open". (3)
+      close keeps a deleted workdir path (show prints it, list --workdirs says (missing),
+      not recreated) and an outside-repo workdir (list says (clean), tree sha256 unchanged).
+      (4) cleanup is the only destructive step: bare cleanup skips the dirty workdir
+      with the --force hint, --force removes it and nulls workdir while status stays
+      closed, the note survives and closed_at is byte-identical; restored snapshot
+      then bare "pm pr cleanup" prints Auto-selected <id>, not "No merged or closed
+      PRs...". (5) cleanup --all --force on closed/merged/pending removes 3/3 workdirs
+      and deletes no entry (statuses and * marker unchanged, every workdir null).
+      (6) id-less hand-edited entry: cleanup --prune exits 0 "No stale workdir references
+      found.", cleanup --all cleans 1/1 and leaves the malformed entry directory alone,
+      repeat close warns only the real dependent; pm pr list still raises KeyError:
+      id - the known pre-existing limitation, recorded as an observation. Supporting:
+      tests/test_pr_close.py + tests/test_pr_cleanup.py 75 passed. Evidence: /pm-captures/scenarios/30/{story1-remove-registry-only,story2-merged-remove,story2b-merged-keep-github,story3-stale-workdirs,story4-cleanup-explicit,story5-cleanup-all,story6-malformed-records}
+      (cast + mp4 + transcript + driver + manifest).'
+    created_at: '2026-11-01T00:21:12Z'
+    last_edited: '2026-11-01T00:21:12Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
