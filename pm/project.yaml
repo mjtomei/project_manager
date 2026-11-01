@@ -39201,7 +39201,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-11-01T16:10:43.488867+00:00'
+  updated_at: '2026-11-01T17:18:19.048861+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39854,6 +39854,28 @@ prs:
       a link until the next launch reuses the path (accepted limitation, impl.md).'
     created_at: '2026-11-01T16:10:43Z'
     last_edited: '2026-11-01T16:10:43Z'
+  - id: note-2ae828a
+    text: 'Review-loop e757 i2 (2026-11-01): two small findings, no change to the
+      archive/finalize behaviour the fix depends on. (a) archive_transcript now returns
+      the entry when it loses the no-clobber create to a concurrent archiver — the
+      session is preserved there, but the old None made build_claude_shell_cmd log
+      "could not archive ... replacing it" for a session that WAS archived; pinned
+      by test_a_concurrent_archive_is_not_reported_as_a_failure. (b) The include_signoff
+      split between the two bulk sweeps (merged from master 2026-10-31) was untested:
+      test_a_live_signoff_link_follows_the_sweep pins that a watcher completion keeps
+      a live sign-off link (auto-start still on, the driver is still polling) while
+      the disable sweep freezes the same link (auto-start off). impl.md records both;
+      archive test count 35 -> 37. Verified: full suite 5479 passed / 1 skipped (6m54s,
+      markdown installed); 37/37 archive tests; 719 passed across archive/review_loop/breadcrumb/retry/handoff/auto-start/launcher/signoff/watcher
+      suites; post-fix repro (/pm-captures/impl/post-fix/transcript-archive/repro.py
+      --expect fixed) still reports all three symptoms fixed. Pre/post-fix captures
+      in /pm-captures/impl/{pre,post}-fix/transcript-archive/ are present and convincing
+      (pre-fix shows A lost, B collector-blind, C shared i1 path; post-fix all three
+      fixed). Carried over for QA, unchanged: archive entry counts are minimums, and
+      a live step window leaves that step canonical a link until the next launch reuses
+      the path (accepted limitation, impl.md).'
+    created_at: '2026-11-01T17:18:18Z'
+    last_edited: '2026-11-01T17:18:18Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
