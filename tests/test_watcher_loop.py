@@ -295,6 +295,23 @@ class TestWatcherManager:
         assert found is w
         assert mgr.find_by_type("nonexistent") is None
 
+    def test_find_by_type_prefers_running_over_stale_stopped(self):
+        """A finished watcher stays registered; find_by_type must not shadow
+        the live one, or the ws toggle starts a duplicate instead of
+        stopping the running watcher."""
+        from pm_core.watcher_manager import WatcherManager
+        mgr = WatcherManager()
+        stale = self._make_watcher("auto-start")
+        live = self._make_watcher("auto-start")
+        mgr.register(stale)
+        mgr.register(live)
+        stale.state.running = False
+        live.state.running = True
+        assert mgr.find_by_type("auto-start") is live
+        # Both stopped: still return a watcher (the first registered).
+        live.state.running = False
+        assert mgr.find_by_type("auto-start") is stale
+
     def test_unregister(self):
         from pm_core.watcher_manager import WatcherManager
         mgr = WatcherManager()
@@ -324,6 +341,86 @@ class TestWatcherManager:
         mgr.stop_all()
         assert w1.state.stop_requested is True
         assert w2.state.stop_requested is True
+
+
+class TestWatcherUiStop:
+    """The ``ws`` toggle must stop the live watcher, not a stale stopped one.
+
+    This is the user-visible half of 7ba4af77: a finished watcher stays
+    registered for its verdict display, so a ``find_by_type`` that returned
+    the first registered entry made the toggle start a duplicate (killing
+    the previous pane) instead of stopping the running watcher.
+    """
+
+    def _app_with(self, stale_running, live_running):
+        from pm_core.watcher_manager import WatcherManager
+
+        mgr = WatcherManager()
+        stale = AutoStartWatcher(pm_root="")
+        live = AutoStartWatcher(pm_root="")
+        mgr.register(stale)
+        mgr.register(live)
+        stale.state.running = stale_running
+        live.state.running = live_running
+        app = MagicMock()
+        app._watcher_manager = mgr
+        return app, stale, live
+
+    def test_stop_watcher_stops_the_running_instance(self):
+        from pm_core.tui import watcher_ui
+
+        app, stale, live = self._app_with(stale_running=False,
+                                          live_running=True)
+        watcher_ui.stop_watcher(app)
+
+        assert live.state.stop_requested is True
+        assert stale.state.stop_requested is False
+        assert "stopping" in app.log_message.call_args[0][0]
+
+    def test_stop_watcher_reports_nothing_running_when_only_stale(self):
+        from pm_core.tui import watcher_ui
+
+        app, stale, live = self._app_with(stale_running=False,
+                                          live_running=False)
+        watcher_ui.stop_watcher(app)
+
+        assert stale.state.stop_requested is False
+        assert live.state.stop_requested is False
+        assert "No watcher running" in app.log_message.call_args[0][0]
+
+
+class TestDisableStopsLiveWatcher:
+    """Turning auto-start off must stop the LIVE watcher (R5).
+
+    ``auto_start._disable`` asks ``watcher_ui.is_running`` ->
+    ``find_state_by_type`` -> ``find_by_type``.  Before 7ba4af77 that
+    returned the stale stopped instance, so clearing every target turned
+    auto-start off in memory while the running watcher kept acting on its
+    old scope.
+    """
+
+    def test_clearing_targets_stops_the_running_watcher(self, tmp_path):
+        from tests.test_autostart_multi_target import FakeApp, _pr
+        from pm_core.tui import auto_start
+        from pm_core.watcher_manager import WatcherManager
+
+        app = FakeApp([_pr("t1"), _pr("t2", deps=["t1"])])
+        app._root = tmp_path  # keep the transcript run dir out of ~/.pm
+        mgr = WatcherManager()
+        stale = AutoStartWatcher(pm_root="", auto_start_targets=["stale"])
+        live = AutoStartWatcher(pm_root="", auto_start_targets=["stale"])
+        mgr.register(stale)
+        mgr.register(live)
+        stale.state.running = False
+        live.state.running = True
+        app._watcher_manager = mgr
+
+        auto_start.add_targets(app, ["t1"])
+        auto_start.clear_targets(app)
+
+        assert app._auto_start is False
+        assert live.state.stop_requested is True
+        assert stale.state.stop_requested is False
 
 
 # --- AutoStartWatcher tests ---
