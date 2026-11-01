@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T11:43:28.321059+00:00'
+  updated_at: '2026-11-01T12:23:09.189100+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38360,6 +38360,46 @@ prs:
       R88 + Files table. The dropped helper/prompt/verifier work stays dropped. (2026-11-01T11:44:00Z)'
     created_at: '2026-11-01T11:43:28Z'
     last_edited: '2026-11-01T11:43:28Z'
+  - id: note-02de6f0
+    text: 'Review loop 928f i27: one leftover in the kept recipe scope, the PR own
+      class (a start step that inherits the state of the attempt it replaces); recipe
+      + tests, no pm_core change. Step 3 of the tmux recipe is the step a worker pastes
+      on its own to restart a recorder (the recipe says so), and it did not clear
+      the replaced attempt''s cast, status and failure logs, which step 0 clears only
+      for a fresh run. (1) The restart could not start: `asciinema rec` refuses an
+      existing cast ("asciinema: ... already exists, aborting"), the pane command
+      exited before drawing, and the readiness wait reported "recorder exited before
+      it drew — see the cast and .../recorder-stderr.log", blaming the attach (verified
+      live in this container on tmux 3.2a + asciinema 2.1.0: step 3 alone with a previous
+      attempt''s cast exited 1 with that message while recorder-stderr.log held "already
+      exists, aborting"). (2) A killed restart read as a finish: the pane''s shell
+      writes recorder.status only when asciinema returns, so a restarted recorder
+      killed mid-scenario left the previous attempt''s 0, and step 5''s "recorder
+      gone while the TUI is up" branch exited 0 on the cast written so far (verified
+      live: after a clean first attempt, step 3 alone started a new recorder with
+      the old 0 still on disk; killing that recorder left the 0 and step 5 exited
+      0) — the false pass step 0''s stale-status clear exists to prevent, reintroduced
+      on the paste-alone restart. Step 3 now refuses a recorder that is still running
+      first (a live recorder owns the cast it is writing; the message names step 5
+      and the kill-session remedy for an abandoned run), then clears recording.cast,
+      recorder.status, recorder-stderr.log and recorder-pane.log before new-session;
+      step 0''s prose no longer says a leftover cast reaches the recorder. Tests:
+      test_step_three_clears_the_previous_attempt_before_it_starts (order: refuse,
+      clear, start; all four names cleared), test_step_three_restart_clears_the_previous_attempt
+      (step 3 alone in stub mode `dies` leaves no cast/status/stderr), test_a_restarted_recorder_killed_before_its_status_is_not_a_finish
+      (the partial-cast, no-status state fails step 5 instead of passing on the old
+      0), and test_step_three_refuses_a_live_recorder_without_clearing_its_evidence
+      (rc non-zero, "already running" + "step 5", the live cast/status untouched,
+      no new-session call). Mutation check: dropping the refusal fails the order and
+      live-recorder cases; dropping the clear fails the order, restart and killed-restart
+      cases; clearing before the refusal fails the order and live-recorder cases.
+      Recipe file 339 passed (was 335); full suite 5536 passed, 1 skipped, 0 failed
+      (477.44 s). Evidence: /pm-captures/review-928f-i27/ (probe-restart-pre.log,
+      probe-restart-post.log, mutation-check.log, recipe-file.log, suite.log, suite-interrupted.log,
+      README.md, scripts/). impl.md R89 + Files table, qa.md. The dropped helper/prompt/verifier
+      work stays dropped.'
+    created_at: '2026-11-01T12:23:09Z'
+    last_edited: '2026-11-01T12:23:09Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

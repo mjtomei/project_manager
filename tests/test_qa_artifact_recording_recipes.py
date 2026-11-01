@@ -717,6 +717,30 @@ class TestRecipes:
                 "cli-recording: kill-server before new-session races the "
                 "server's exit; clear the session instead")
 
+    def test_step_three_clears_the_previous_attempt_before_it_starts(self):
+        """The recorder-start step is also the restart step, so it clears.
+
+        Step 3 is pasted on its own to restart a recorder, and the attempt
+        being replaced left its cast, its status and its stderr log in the
+        capture directory (step 0 clears them only for a fresh run). The
+        order matters: a recorder that is still up owns the cast it is
+        writing, so the step refuses it first, and only then clears the
+        replaced attempt's files — before `new-session`, because
+        `asciinema rec` refuses an existing cast.
+        """
+        block = _step_three_block()
+        start = block.index("tmux new-session -d -s pm-recorder")
+        refuse = block.index('if tmux has-session -t "=pm-recorder"')
+        clear = block.index("rm -f <capture-dir>/recording.cast")
+        assert refuse < clear < start, (
+            "step 3 must refuse a live recorder before it clears anything, "
+            "and clear the replaced attempt before it starts a new one")
+        for name in ("recording.cast", "recorder.status",
+                     "recorder-stderr.log", "recorder-pane.log"):
+            assert name in block[clear:start], (
+                f"step 3 does not clear {name} before it starts a recorder, "
+                "so the restart inherits the attempt it replaces")
+
     def test_tmux_session_handles_are_exact(self):
         """Every session target needs tmux's ``=``, not a bare name.
 
@@ -7841,6 +7865,110 @@ class TestCaptureFlowExecution:
             + r.stderr)
         assert not (tmp_path / "state" / "pm-recorder").exists(), (
             "a step with no target session created the recorder anyway")
+
+    def test_step_three_restart_clears_the_previous_attempt(self, tmp_path):
+        """The restart step must not inherit the attempt it replaces.
+
+        ``_step_three_block`` is pasted on its own to restart a recorder (the
+        recipe says so), and the attempt being replaced left its cast, its
+        status and its stderr log in the capture directory — step 0 clears
+        them only for a fresh run. Verified live in this container on tmux
+        3.2a + asciinema 2.1.0: step 3 alone with a previous attempt's cast
+        exited 1 with "recorder exited before it drew" while
+        ``recorder-stderr.log`` held "already exists, aborting" — the restart
+        could not start at all. And with the cast out of the way the old
+        ``recorder.status`` ``0`` survived the restart: killing the restarted
+        recorder mid-scenario left the ``0``, and step 5 exited 0 on the cast
+        it had written so far. Both files belong to the attempt being
+        replaced, so the start clears them.
+        """
+        cap = tmp_path / "cap"
+        r, cast = _run_block(
+            _step_three_block(), "dies", tmp_path, target=True,
+            files={"recording.cast": "previous attempt cast\n",
+                   "recorder.status": "0\n",
+                   "recorder-stderr.log": "previous failure\n"})
+
+        assert r.returncode != 0, r.stderr
+        assert "recorder exited before it drew" in r.stderr, r.stderr
+        assert not cast.exists(), (
+            "the restart kept the previous attempt's cast, so asciinema "
+            "refuses to start ('already exists, aborting')")
+        assert not (cap / "recorder.status").exists(), (
+            "the restart kept the previous attempt's recorder.status, so a "
+            "recorder killed before writing its own reads as a clean finish")
+        assert not (cap / "recorder-stderr.log").exists(), (
+            "the restart kept the previous attempt's recorder-stderr.log, "
+            "which the readiness failure names as this attempt's evidence")
+
+    def test_a_restarted_recorder_killed_before_its_status_is_not_a_finish(
+            self, tmp_path):
+        """The status step 5 trusts has to belong to the attempt it judges.
+
+        A restarted recorder that is killed before its pane shell writes the
+        status leaves a partial cast and *no* status file. With the previous
+        attempt's ``0`` still there, step 5's both-gone branch read it as a
+        clean finish and exited 0 on the truncated cast (verified live in this
+        container on tmux 3.2a + asciinema 2.1.0: after a clean first
+        attempt, step 3 alone started a new recorder with the old ``0`` on
+        disk; killing that recorder left the ``0``, and step 5 exited 0).
+        Step 3 now clears it, so the same state is the missing-status failure
+        it looks like.
+        """
+        cap = tmp_path / "cap"
+        r, cast = _run_block(
+            _step_three_block(), "dies", tmp_path, target=True,
+            files={"recording.cast": "previous attempt cast\n",
+                   "recorder.status": "0\n"})
+        assert r.returncode != 0, r.stderr
+        # The restarted recorder wrote part of a cast and was killed before
+        # its pane shell could write a status.
+        cast.write_text('{"version": 2}\n')
+        (cap / "transcript.log").write_text("pane output\n")
+
+        second = tmp_path / "second"
+        second.mkdir()
+        r2, _ = _run_block(
+            _stop_block("tmux-screen-recording.md"), "ok", second,
+            target=True, sessions=("pm-test",), capture=cap)
+
+        assert r2.returncode != 0, (
+            "step 5 read the previous attempt's status as this attempt's "
+            "clean finish: " + r2.stderr)
+        assert "cast is incomplete" in r2.stderr, r2.stderr
+
+    def test_step_three_refuses_a_live_recorder_without_clearing_its_evidence(
+            self, tmp_path):
+        """A live recorder owns the cast it is writing.
+
+        Step 3 is pasted on its own, and a second paste while the recorder is
+        still up (a worker checking its work) must not delete the evidence
+        that recorder is producing. The refusal comes before the clear, so
+        the live attempt's cast and status survive and the message names the
+        step that ends the recorder.
+        """
+        cap = tmp_path / "cap"
+        calls = tmp_path / "tmux-calls"
+        r, cast = _run_block(
+            _step_three_block(), "ok", tmp_path, target=True,
+            sessions=("pm-recorder",),
+            files={"recording.cast": "live attempt cast\n",
+                   "recorder.status": "0\n"},
+            env_extra={"STUB_TMUX_LOG": str(calls)})
+
+        assert r.returncode != 0, (
+            "step 3 started a second recorder beside a live one")
+        assert "already running" in r.stderr, r.stderr
+        assert "step 5" in r.stderr, (
+            "the refusal does not name the step that ends the recorder: "
+            + r.stderr)
+        assert cast.read_text() == "live attempt cast\n", (
+            "the refused restart cleared the live recorder's cast")
+        assert (cap / "recorder.status").read_text() == "0\n", (
+            "the refused restart cleared the live recorder's status")
+        assert "new-session" not in calls.read_text(), (
+            "a step that refused a live recorder still started a session: "
+            + calls.read_text())
 
     @pytest.mark.parametrize("name", RECIPES)
     def test_recorder_session_that_never_starts_is_reported(self, name,

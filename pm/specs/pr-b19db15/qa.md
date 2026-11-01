@@ -1167,6 +1167,21 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   with the redirect it reads nothing. (A `bash < block` run already gets
   `/dev/null` from bash itself, so that is not the case the redirect is
   for.) (review loop 928f i24, R86).
+- The tmux recipe's step 3 is pasted on its own to *restart* a recorder while
+  the previous attempt's files are still in the capture directory → the step
+  must clear them and start. Without the clear the restart cannot start:
+  `asciinema rec` refuses the existing cast ("asciinema: … already exists,
+  aborting"), the recorder exits before it draws, and the step reports
+  "recorder exited before it drew" for the attach (verified live on tmux
+  3.2a + asciinema 2.1.0). And a restarted recorder killed mid-scenario must
+  fail step 5: the pane's shell writes `recorder.status` only when asciinema
+  returns, so without the clear the previous attempt's `0` survived and step
+  5 exited 0 on the cast written so far (verified live: a truncated
+  recording reported as finished). A second paste of step 3 while the
+  recorder is still running must refuse with "a recorder is already
+  running …" naming step 5, and leave that recorder's cast and status
+  untouched — a live recorder owns the evidence it is writing (review loop
+  928f i27, R89).
 
 ## Pass / Fail criteria
 

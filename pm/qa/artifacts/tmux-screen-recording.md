@@ -102,9 +102,10 @@ steps pasted on their own — 2, 3, 4 and 5 — each before it acts on a session
 or a recorder. A leftover cast is worse in the other
 direction: without `--overwrite`, `asciinema rec` aborts on it ("asciinema:
 <path> already exists, aborting" on 2.1.0) and the recorder dies before it
-draws, so the run fails at the readiness wait — loudly, but for a reason
-unrelated to the scenario, and with the earlier run's cast still on disk for
-the render step to pick up if the worker overrides that failure. The
+draws, so a capture that reached the recorder with one would fail at the
+readiness wait — loudly, but for a reason unrelated to the scenario. Step 0
+clears it for a fresh run and step 3 clears it before the paste-alone
+restart, so the recorder never meets an earlier attempt's cast. The
 transcript is appended to, so a stale `transcript.log` would silently mix an
 earlier run into this run's evidence. `recorder.status` holds this run's
 recorder exit status (step 5); a leftover one would let a recorder that was
@@ -566,6 +567,33 @@ tmux has-session -t "=$TARGET" 2>/dev/null || {
         "step 1 first" >&2
     exit 1
 }
+# A restart must not inherit the attempt it replaces. This step is pasted on
+# its own to restart a recorder, and the attempt being replaced left its cast,
+# its status and its failure logs in the capture directory — step 0 clears
+# them only for a fresh run. Without this clear the restart cannot even start:
+# `asciinema rec` refuses an existing cast ("asciinema: … already exists,
+# aborting" on 2.1.0), and the readiness wait below reports that as "recorder
+# exited before it drew — see the cast and …/recorder-stderr.log", pointing at
+# the attach (verified live in this container on tmux 3.2a + asciinema 2.1.0:
+# step 3 alone with a previous attempt's cast exited 1 with that message while
+# recorder-stderr.log held "already exists, aborting"). Once the restart does
+# start, a stale `recorder.status` is worse: the pane's shell writes the
+# status only when asciinema returns, so a restarted recorder killed
+# mid-scenario leaves the previous attempt's `0` behind and step 5 reads it as
+# a clean finish on a truncated cast (verified live: after a clean first
+# attempt, step 3 alone started a new recorder with the old `0` still on disk;
+# killing that recorder left the `0`, and step 5 exited 0 on the cast it had
+# written so far). Only a step with no live recorder may clear this: a
+# recorder that is still up owns the cast it is writing, so refuse it first
+# and name the step that ends it instead of deleting its evidence.
+if tmux has-session -t "=pm-recorder" 2>/dev/null; then
+    echo "a recorder is already running on this server — end it with step 5" \
+        "before starting another; if it is a leftover from an abandoned run," \
+        "'tmux kill-session -t =pm-recorder' clears it" >&2
+    exit 1
+fi
+rm -f <capture-dir>/recording.cast <capture-dir>/recorder.status \
+      <capture-dir>/recorder-stderr.log <capture-dir>/recorder-pane.log
 tmux new-session -d -s pm-recorder -x 200 -y 50 \
     "asciinema rec --quiet <capture-dir>/recording.cast \
         -c 'tmux attach -t =$TARGET' 2> <capture-dir>/recorder-stderr.log; \
