@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T20:07:55.361322+00:00'
+  updated_at: '2026-11-01T21:24:51.486939+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6710,6 +6710,31 @@ prs:
       fixture used a disposable socket directory or a temporary HOME.'
     created_at: '2026-11-01T20:07:55Z'
     last_edited: '2026-11-01T20:07:55Z'
+  - id: note-16d8985
+    text: 'Review loop b48f i12 (no requirement changes; full suite 5464 passed /
+      1 skipped, 429 s, log /pm-captures/review-b48f-i12/full-suite-after-fix.log;
+      commit 2cd7cff1a). Verification pass over the head after the b48f i11 fixes;
+      one gap of the same "a view is not a session" class the earlier iterations closed
+      for `pm-laptop`, one level narrower. (1) `pm session list` gave a user''s own
+      view a row of its own when the view''s name started like a grouped session:
+      the view filter in list_pm_sessions() was `group != own_base and not name.startswith(group
+      + "~")`, and that second clause — there to keep the `base~N` grouped sessions
+      — also kept a view named `pm-x~myview` (a view may be named anything, S118/S121/S124),
+      so a phantom second session was listed on the base''s socket, against R3.3 /
+      qa.md R3 ("no row, whatever it is called"). Only a numeric suffix is a grouped
+      suffix (paths.base_session_name, b48f i11), so the group''s members are exactly
+      the sessions whose own base equals the group name — the base (tmux reports its
+      group as itself, verified on tmux 3.2a) and its `base~N` sessions; the filter
+      is now `group and group != own_base`. Test: TestListPmSessions::test_skips_a_view_whose_name_starts_like_a_grouped_session,
+      verified to fail on the pre-fix head ce3b19519 (the extra row was listed). Deliberately
+      not changed: tmux.list_grouped_sessions() still matches `base~*` by name prefix
+      — it feeds pane_layout''s minimum-window-size computation, current_or_base_session()
+      and the grouped-session lifecycle, where including a view is the safe direction,
+      and on a private server two unrelated sessions can never share one. Targeted
+      suites 22 passed; the preserved smoke script re-ran clean on a disposable socket.
+      No live session, server or shared host configuration was touched.'
+    created_at: '2026-11-01T21:24:51Z'
+    last_edited: '2026-11-01T21:24:51Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
