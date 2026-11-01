@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T05:54:19.704889+00:00'
+  updated_at: '2026-11-01T06:19:43.733293+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38103,6 +38103,41 @@ prs:
       qa.md. No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-11-01T05:54:19Z'
     last_edited: '2026-11-01T05:54:19Z'
+  - id: note-ddba581
+    text: 'Review loop 928f i19: one leftover in the kept tmux-recipe scope plus one
+      unpinned completion check in both recording recipes; no pm_core change. (1)
+      Step 2 — the capture step pasted on its own to re-attach a transcript — guarded
+      its capture directory with `[ -w <capture-dir> ] && [ -x <capture-dir> ]`, and
+      both are true for an *executable regular file*: a <capture-dir> naming one passed,
+      the canonicalising `cd` failed, and the run went on with the capture-dir claim
+      taken on the file and the transcript pipe attached. The pipe''s redirect cannot
+      work, so step 5 reports "transcript.log is empty — the pipe-pane stream never
+      wrote to it" for a path that is not a directory (verified live on tmux 3.2a
+      in this container with the recipe''s own step 2 on a private server: pre-fix
+      rc 0, claim on the file path, no transcript; post-fix rc 1 with "capture directory
+      … is not a directory — run step 0 (it creates and clears it), then this step;
+      check the path", no claim and no pipe). Every other capture-directory guard
+      refuses such a path before it acts (step 0''s `mkdir -p`, the render block''s
+      `[ -d "$cast_dir" ]`, the web-UI driver/finalize/Layer 2 blocks'' `-d`); step
+      2 was the one pasted alone. The new `[ -d ]` check runs after the writability
+      guard, so the existing missing-path and no-write/no-search messages are unchanged.
+      New case test_step_two_refuses_a_capture_path_that_is_not_a_directory in both
+      file shapes (755 -> the new message, 644 -> the pre-existing "cannot be written"),
+      each asserting no claim and no pipe; removing the guard fails exactly the 755
+      case. (2) Both recipes'' completion check on the cast is `test -s`, and nothing
+      exercised the difference from `test -e`: weakening either left the whole file
+      green (305 passed, verified by mutation), so a recorder that exits 0 but leaves
+      a 0-byte cast (the header write failed while the status landed) would have been
+      accepted as a finished recording with no replay in it. Test-only: the new stub
+      mode `emptycast` leaves a 0-byte cast and a `0` status, and test_a_zero_byte_cast_is_not_a_recording
+      (both recipes) requires "asciinema wrote no cast"; the `-s` -> `-e` mutation
+      fails it in each recipe. Tests: recipe file 309 passed (was 305); full suite
+      5385 passed, 1 skipped, 121 deselected, 0 failed (markdown installed into a
+      scratch --target; without it 5373 passed with the 12 test_markdown_render dep
+      failures). Evidence: /pm-captures/review-928f-i19/. The dropped helper/prompt/verifier
+      work stays dropped.'
+    created_at: '2026-11-01T06:19:43Z'
+    last_edited: '2026-11-01T06:19:43Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
