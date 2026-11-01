@@ -894,6 +894,24 @@ class TestCreateQAContainer:
         )
 
     @patch("pm_core.container.create_container")
+    def test_passes_extra_rw_mounts(self, mock_create):
+        """Caller-granted mounts (a regression run's registry) are added to
+        the QA mounts."""
+        mock_create.return_value = "qa-id"
+        config = ContainerConfig()
+        create_qa_container(
+            name="pm-qa-test-s1",
+            config=config,
+            workdir=Path("/clones/c1"),
+            scratch_path=Path("/scratch/s1"),
+            extra_rw_mounts={Path("/proj/pm"): "/pm-project"},
+        )
+        assert mock_create.call_args.kwargs["extra_rw_mounts"] == {
+            Path("/scratch/s1"): _CONTAINER_SCRATCH,
+            Path("/proj/pm"): "/pm-project",
+        }
+
+    @patch("pm_core.container.create_container")
     def test_passes_push_branch(self, mock_create):
         mock_create.return_value = "qa-id"
         config = ContainerConfig()

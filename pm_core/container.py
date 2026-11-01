@@ -1390,6 +1390,7 @@ def create_qa_container(
     session_tag: str | None = None,
     pr_id: str | None = None,
     route_mounts: dict[Path, str] | None = None,
+    extra_rw_mounts: dict[Path, str] | None = None,
 ) -> str:
     """Create a detached container for a QA scenario.
 
@@ -1399,6 +1400,8 @@ def create_qa_container(
       - *route_mounts* (rw): the route bridge socket directory
         (pm_core.router_route.container_mounts) when QA sessions in this
         container use a router provider
+      - *extra_rw_mounts* (rw): anything else the caller grants, e.g. the
+        project registry a regression run files findings into
 
     The container has no access to the parent repo's git directory.
     If *allowed_push_branch* is set, a push proxy is started so the
@@ -1409,7 +1412,8 @@ def create_qa_container(
         config=config,
         workdir=workdir,
         extra_rw_mounts={scratch_path: _CONTAINER_SCRATCH,
-                         **(route_mounts or {})},
+                         **(route_mounts or {}),
+                         **(extra_rw_mounts or {})},
         allowed_push_branch=allowed_push_branch,
         session_tag=session_tag,
         pr_id=pr_id,

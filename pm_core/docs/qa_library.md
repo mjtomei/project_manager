@@ -9,7 +9,7 @@ the TUI, and the CLI.
 | Directory | Purpose |
 |---|---|
 | `pm/qa/instructions/` | Reusable test-environment procedures — anything a QA scenario needs to set up before it can exercise the code (seed a database, start a dev server, prepare fixture data, log in a test user, etc.). Referenced by QA scenarios in their `INSTRUCTION:` field. |
-| `pm/qa/regression/`   | Claude-driven test scenarios run via `pm qa regression <id>`. Each file is a natural-language prompt; the runner launches Claude with the prompt to exercise the project end-to-end and report back. |
+| `pm/qa/regression/`   | Claude-driven test scenarios run via `pm qa regression <id>`. Each file is a natural-language prompt; the runner launches Claude with it in an isolated QA run (a QA container when container mode is enabled), where it exercises a disposable test project built from the setup recipes and reports back. The directory may be empty. |
 | `pm/qa/artifacts/`    | Recipes for capturing concrete evidence of behavior — recordings, logs, screenshots — that unambiguously confirm what happened. |
 | `pm/qa/mocks/`        | Shared mock definitions injected verbatim into every QA scenario prompt so all scenarios use the same contracts for external dependencies. |
 
@@ -107,41 +107,67 @@ navigation and one action keybinding for the area you're testing.
 
 ## Regression tests
 
-> [!CAUTION]
-> This section describes the runner's behavior **after pr-7d5d036
-> lands**. Until then, the runner hardcodes "testing against the pm
-> tmux session" into every prompt and bails out if no `pm` session is
-> running — see pr-7d5d036 for the actual current state.
-
 Files under `pm/qa/regression/` are Claude-driven regression tests.
 The body of each `.md` file is **literally a Claude prompt**. The
-runner reads it, optionally appends a bug-filing or bug-fixing
-addendum, and launches Claude in an isolated environment to exercise
-whatever the test prescribes and report back.
+runner reads it, optionally appends a findings-filing addendum, and
+launches Claude in an isolated environment to exercise whatever the
+test prescribes and report back.
 
-Each test runs in its own ephemeral environment, the same way QA
-scenarios do — nothing the test does affects unrelated state, and
-runs are reproducible across machines and containers. The test body
-is responsible for bringing up whatever surface it needs to exercise
-(spawning a pane, starting a server, invoking a CLI, etc.) and for
-tearing down or simply letting the ephemeral environment vanish at
-the end.
+Each run is isolated the same way a QA scenario is. The runner creates
+a QA workdir for the run, `~/.pm/workdirs/qa/regression-<id>-<run-id>/`.
+It holds a fresh clone of the project at the base branch (`--branch`
+picks another) and an empty scratch dir. The runner copies the
+project's setup recipes (`pm/qa/instructions/`) and capture recipes
+(`pm/qa/artifacts/`) into the scratch dir and names them in the prompt.
+
+- **Container mode enabled**: the session runs in a QA container. The
+  clone is at `/workspace`, scratch at `/scratch`, captures at
+  `/pm-captures`. If the container runtime is unusable or the container
+  cannot be created, the run stops with an error. It never falls back
+  to the host.
+- **Container mode off**: the session runs on the host in the clone,
+  which is the same fallback QA scenarios use.
+
+The test target is a **disposable project** the session creates in the
+scratch dir with a setup recipe, then drives and captures with the
+capture recipes. It is never your own pm project or a pm/tmux session
+the test did not start, and no running pm session is required. The test
+body brings up whatever surface it exercises (spawning a pane, starting
+a server, invoking a CLI, etc.). The run's container is removed when the
+session exits. The workdir is left for inspection, as with `pm qa debug`.
 
 ### Running
 
 ```
 pm qa list                          # list available tests
-pm qa regression <id>               # run one
+pm qa regression <id>               # run one (foreground)
 pm qa regression <id> --file-prs    # run + open PRs for any findings
+pm qa regression <id> --branch <b>  # clone <b> instead of the base branch
 ```
 
+Pressing Enter on a regression test in the TUI QA pane and
+`pm qa launch regression:<id>` (used by the discovery supervisor) run
+`pm qa regression <id> --file-prs` in a new pane, so every surface
+produces the same isolated run.
+
 Regression tests don't fix bugs themselves and don't mutate the
-project's source. The only writes that escape the ephemeral env are
-captures (durable under `~/.pm/sessions/<tag>/captures/regression/...`
-on the host, not committed to the repo) and, when `--file-prs` is
-set, PRs filed via `pm pr add` for any findings (bugs go to
-`--plan bugs`, improvements to `--plan improvements`). The actual
-fix is left to a normal bug-fix PR session.
+project's source. The only writes that escape the ephemeral env are:
+
+- **Captures**, durable on the host but not committed to the repo, under
+  `~/.pm/sessions/<tag>/captures/regression/<test-id>/<run-id>/`. The
+  runner creates the directory, saves the assembled prompt there as
+  `prompt.md`, and names it in the prompt.
+- **Filed PRs**, only when `--file-prs` is set. Findings are filed into
+  the project's registry with `pm -C <registry> pr add` (bugs go to
+  `--plan bugs`, improvements to `--plan improvements`). In container
+  mode the project's pm directory is mounted at `/pm-project` for this,
+  and only when filing is requested. The actual fix is left to a normal
+  bug-fix PR session.
+
+The library can be empty. Then `pm qa list` shows no regression tests,
+`pm qa regression` reports that the library is empty, and the discovery
+supervisor schedules nothing. An empty library is never reported as a
+run or a pass.
 
 A minimal example:
 
@@ -150,9 +176,9 @@ A minimal example:
 title: TUI startup renders PR tree
 description: Verify the TUI comes up and the dependency tree displays
 ---
-You are a careful tester. Open a fresh scratch project (see the
-`throwaway-pm-test-project` instruction), start a `pm session`, and
-verify:
+You are a careful tester. Create a disposable pm project in the
+scratch dir (see the `throwaway-pm-test-project` setup recipe), start
+a `pm session` from it, and verify:
 
 - The TUI renders without error.
 - All PRs you added appear, with dependency edges in the right
@@ -230,8 +256,9 @@ A *capture* is the artifact a recipe produces. Captures live outside
 the project repo, under `~/.pm/sessions/<session-tag>/captures/` on
 the host — they are durable but **not** committed to git. Use
 `pm qa captures-path <pr-id>` to resolve the per-PR directory.
-Regression captures don't have a PR id; resolve their path yourself
-(the session-tag prefix is shared with any PR's captures dir).
+Regression captures don't have a PR id. The regression runner creates
+each run's directory under `captures/regression/` and names it in the
+test's prompt.
 
 Captures are organized by which kind of session produced them:
 
@@ -252,13 +279,14 @@ Captures are organized by which kind of session produced them:
 │           └── …
 └── regression/                # captures from regression tests (no PR)
     └── <test-id>/
-        └── <run-timestamp>/
+        └── <run-id>/          # <UTC timestamp>-<suffix>
+            ├── prompt.md      # written by the runner
             ├── recording.cast
             └── manifest.md
 ```
 
 PR-scoped captures group runs by phase (`impl/pre-fix`, `impl/post-fix`,
-`scenarios/<n>`). Regression captures use a `<test-id>/<run-timestamp>/`
+`scenarios/<n>`). Regression captures use a `<test-id>/<run-id>/`
 layout because regression tests aren't bound to a PR and may run
 repeatedly over time; the timestamp keeps a history.
 
@@ -338,6 +366,8 @@ Reference a mock from a QA scenario by its filename stem in the
 | `pm qa author-instruction <name>` | Same as add-instruction, but launches a guided Claude session that uses this document to interview the author. |
 | `pm qa author-regression <name>` | Guided authoring for a regression test. |
 | `pm qa author-artifact <name>` | Guided authoring for an artifact recipe. |
+| `pm qa regression <id>` | Runs one regression test in an isolated QA workdir (a QA container when container mode is enabled) against a disposable test project; see [Regression tests](#regression-tests). The TUI QA pane (Enter) and `pm qa launch regression:<id>` run the same command in a pane. |
+| Discovery supervisor prompt | Lists `pm/qa/regression/*.md` and launches due tests with `pm qa launch regression:<id>`. An empty library schedules nothing. |
 | `pm qa docs` | Prints this document. |
 | QA planner prompt | `instruction_summary_for_prompt` renders `### Instructions` and `### Artifact Recipes`. Instructions are referenced from a scenario by filename in the `INSTRUCTION:` field; artifact recipes are referenced in the `ARTIFACT:` field (comma-separated for multiple). |
 | Scenario 0 prompt | Same library summary, scoped to the interactive session. |

@@ -1774,11 +1774,16 @@ re-launch a still-running test or re-file a duplicate bug.
 ### 1. Inventory regression tests
 
 ```
-ls {meta_pm_root}/qa/regression/*.md
+ls {meta_pm_root}/qa/regression/*.md 2>/dev/null
 ```
 
 Each file is a regression test definition. Cross-reference with the work log
 to see when each was last run.
+
+If the listing is empty, the regression library is empty and there is no
+test to schedule. Write `regression library empty, nothing scheduled` in this
+tick's work-log entry and skip to step 5. Never record a test as run or
+passing unless it was launched and finished.
 
 ### 2. Detect in-flight tests from prior ticks
 
@@ -1810,9 +1815,17 @@ Use the headless launcher:
 pm qa launch regression:<id> --target-window discovery
 ```
 
-This spawns a Claude pane in the discovery window running the regression test.
-The test session itself files any bugs / improvements into the `bugs` / `ux`
-plans (see the regression filing addendum baked into its prompt).
+This spawns a pane in the discovery window running
+`pm qa regression <id> --file-prs`. The test runs in its own isolated QA
+workdir (a QA container when container mode is enabled) against a disposable
+test project it creates, not against this session or project. Its captures
+land under the session's `captures/regression/<id>/<run-id>/` directory.
+The test session itself files any bugs / improvements into the project's
+registry (see the regression filing addendum baked into its prompt).
+
+If the launch command exits non-zero (for example, container mode is enabled
+but the runtime is unusable), nothing ran. Record the error in the work log
+and do not count it as a run.
 
 ### 5. Reconcile recently-filed PRs
 

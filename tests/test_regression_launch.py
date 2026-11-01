@@ -1,0 +1,441 @@
+"""Regression launch surfaces (pr-7d5d036).
+
+A regression test runs in an isolated QA run: a fresh clone + scratch dir
+made with the QA scenario helpers, inside a QA container when container mode
+is enabled (fail closed), driving a disposable project built from the
+project's setup recipes.  It never targets the user's pm session, and it no
+longer needs one.  The TUI and ``pm qa launch`` run ``pm qa regression`` in
+a pane, so all three surfaces share one launcher.  An empty library is
+reported as such, never run.
+"""
+
+import subprocess
+from contextlib import ExitStack
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import pytest
+from click.testing import CliRunner
+
+import pm_core.container as container_mod
+from pm_core.cli.qa import qa as qa_group
+from pm_core.regression_prompts import regression_launch_cmd
+
+
+PROJECT_YAML = """\
+project:
+  name: demo
+  repo: {repo}
+  base_branch: master
+  backend: local
+prs: []
+plans: []
+"""
+
+
+@pytest.fixture
+def home(tmp_path, monkeypatch):
+    h = tmp_path / "home"
+    h.mkdir()
+    monkeypatch.setenv("HOME", str(h))
+    return h
+
+
+def _git(cwd: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(cwd), *args], check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+@pytest.fixture
+def project(tmp_path):
+    """A real git repo with a pm dir, one regression test and recipes."""
+    repo = tmp_path / "proj"
+    pm = repo / "pm"
+    (pm / "qa" / "regression").mkdir(parents=True)
+    (pm / "qa" / "instructions").mkdir()
+    (pm / "qa" / "artifacts").mkdir()
+    (pm / "project.yaml").write_text(PROJECT_YAML.format(repo=repo))
+    (pm / "qa" / "regression" / "demo.md").write_text(
+        "---\ntitle: Demo flow\ndescription: d\n---\nDrive the demo flow.\n")
+    (pm / "qa" / "instructions" / "setup.md").write_text(
+        "---\ntitle: Throwaway project\n---\n## Setup\n")
+    (pm / "qa" / "artifacts" / "cap.md").write_text(
+        "---\ntitle: CLI recording\n---\n## Capture\n")
+    subprocess.run(["git", "init", "-q", "-b", "master", str(repo)],
+                   check=True)
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=t",
+         "commit", "-q", "-m", "init")
+    return SimpleNamespace(repo=repo, root=pm.resolve(),
+                           head=_git(repo, "rev-parse", "HEAD"))
+
+
+def _run_regression(project, args, *, container_enabled: bool,
+                    runtime_ok: bool = True, create=None,
+                    extra_patches=()):
+    """Invoke ``pm qa regression`` with exec/chdir and the claude command
+    builder replaced by spies.  Returns (result, spies)."""
+    spies = SimpleNamespace(
+        execvpe=MagicMock(),
+        chdir=MagicMock(),
+        build=MagicMock(return_value="CLAUDE-CMD"),
+        exec_cmd=MagicMock(return_value="EXEC-CMD"),
+        create=create or MagicMock(),
+        remove=MagicMock(),
+    )
+    with ExitStack() as stack:
+        stack.enter_context(patch("pm_core.cli.qa.state_root",
+                                  return_value=project.root))
+        # Not inside a pm tmux session: a regression run must not need one.
+        stack.enter_context(patch("pm_core.qa_loop.own_session_tag",
+                                  return_value=None))
+        stack.enter_context(patch.object(container_mod,
+                                         "is_container_mode_enabled",
+                                         return_value=container_enabled))
+        stack.enter_context(patch.object(
+            container_mod, "_runtime_status",
+            return_value=(runtime_ok, "" if runtime_ok else "runtime down")))
+        stack.enter_context(patch.object(container_mod, "create_qa_container",
+                                         spies.create))
+        stack.enter_context(patch.object(container_mod, "remove_container",
+                                         spies.remove))
+        stack.enter_context(patch.object(container_mod, "build_exec_cmd",
+                                         spies.exec_cmd))
+        stack.enter_context(patch.object(container_mod,
+                                         "load_container_config",
+                                         return_value=MagicMock()))
+        stack.enter_context(patch(
+            "pm_core.claude_launcher.build_claude_shell_cmd", spies.build))
+        stack.enter_context(patch("pm_core.cli.qa.os.execvpe",
+                                  spies.execvpe))
+        stack.enter_context(patch("pm_core.cli.qa.os.chdir", spies.chdir))
+        for p in extra_patches:
+            stack.enter_context(p)
+        result = CliRunner().invoke(qa_group, ["regression", *args])
+    return result, spies
+
+
+def _qa_workdirs(home: Path) -> list[Path]:
+    d = home / ".pm" / "workdirs" / "qa"
+    return sorted(d.iterdir()) if d.is_dir() else []
+
+
+# ---------------------------------------------------------------------------
+# pm qa regression
+# ---------------------------------------------------------------------------
+
+def test_host_run_is_isolated_and_needs_no_pm_session(project, home,
+                                                      monkeypatch):
+    """Container mode off: the session runs on the host in a fresh clone,
+    never in the user's project, and without a pm session."""
+    monkeypatch.setenv("PM_PROJECT", str(project.root))
+    monkeypatch.setenv("PM_SESSION", "pm-live-session")
+    result, spies = _run_regression(project, ["demo"],
+                                    container_enabled=False)
+    assert result.exit_code == 0, result.output
+
+    (workdir,) = _qa_workdirs(home)
+    assert workdir.name.startswith("regression-demo-")
+    clone = workdir / "s-0" / "repo"
+    scratch = workdir / "s-0" / "scratch"
+    # A real clone of the project's base branch at its current commit.
+    assert _git(clone, "rev-parse", "HEAD") == project.head
+    assert _git(clone, "rev-parse", "--abbrev-ref", "HEAD") == "master"
+    # The library's recipes were copied into the scratch dir.
+    assert (scratch / "qa-instructions" / "setup.md").is_file()
+    assert (scratch / "qa-artifacts" / "cap.md").is_file()
+
+    kw = spies.build.call_args.kwargs
+    assert kw["cwd"] == str(clone)
+    assert kw["session_type"] == "qa_regression"
+    prompt = kw["prompt"]
+    assert "on the host (container mode is off)" in prompt
+    assert f"`{clone}`" in prompt and f"`{scratch}`" in prompt
+    assert f"`{project.head[:12]}`" in prompt
+    assert f"`{scratch}/qa-instructions/setup.md`: Throwaway project" in prompt
+    assert f"`{scratch}/qa-artifacts/cap.md`: CLI recording" in prompt
+    assert "Drive the demo flow." in prompt
+    assert "pm-live-session" not in prompt
+    assert "testing against tmux session" not in prompt
+    assert "Filing Findings" not in prompt
+
+    # The run's captures dir exists, outside the repo, with the prompt.
+    captures = [p for p in (home / ".pm" / "sessions").rglob("prompt.md")]
+    assert len(captures) == 1
+    assert captures[0].parent.parent.name == "demo"
+    assert captures[0].parent.parent.parent.name == "regression"
+    assert captures[0].read_text() == prompt
+    assert str(captures[0].parent) in prompt
+
+    # Runs in the clone, never the user's project; pm-targeting env dropped.
+    spies.chdir.assert_called_once_with(str(clone))
+    args = spies.execvpe.call_args.args
+    assert args[:2] == ("bash", ["bash", "-c", "CLAUDE-CMD"])
+    assert "PM_PROJECT" not in args[2] and "PM_SESSION" not in args[2]
+    spies.create.assert_not_called()
+    # The user's project is untouched.
+    assert _git(project.repo, "status", "--porcelain") == ""
+
+
+def test_host_run_files_findings_into_the_project_registry(project, home):
+    result, spies = _run_regression(project, ["demo", "--file-prs"],
+                                    container_enabled=False)
+    assert result.exit_code == 0, result.output
+    prompt = spies.build.call_args.kwargs["prompt"]
+    assert f"pm -C {project.root} pr add '<title>' --plan bugs" in prompt
+
+
+def test_container_run_uses_a_qa_container(project, home):
+    """Container mode on and healthy: the session runs inside its QA
+    container via exec; no push proxy; the registry is not mounted
+    unless findings are filed."""
+    result, spies = _run_regression(project, ["demo"],
+                                    container_enabled=True)
+    assert result.exit_code == 0, result.output
+
+    (workdir,) = _qa_workdirs(home)
+    kw = spies.create.call_args.kwargs
+    assert kw["workdir"] == workdir / "s-0" / "repo"
+    assert kw["scratch_path"] == workdir / "s-0" / "scratch"
+    assert kw["pr_id"] == "regression"  # mounts captures/regression/
+    assert kw["allowed_push_branch"] is None
+    assert kw["extra_rw_mounts"] is None
+    assert "-qa-regression-demo-" in kw["name"]
+
+    build = spies.build.call_args.kwargs
+    assert build["cwd"] == container_mod._CONTAINER_WORKDIR
+    assert build["container"] is True
+    prompt = build["prompt"]
+    assert "inside a pm QA container" in prompt
+    assert "`/scratch/qa-instructions/setup.md`" in prompt
+    assert "/pm-captures/demo/" in prompt
+
+    exec_args = spies.exec_cmd.call_args
+    assert exec_args.args[:2] == (kw["name"], "CLAUDE-CMD")
+    assert exec_args.kwargs["cleanup"] is True
+    assert spies.execvpe.call_args.args[1] == ["bash", "-c", "EXEC-CMD"]
+
+
+def test_container_run_mounts_registry_only_for_filing(project, home):
+    result, spies = _run_regression(project, ["demo", "--file-prs"],
+                                    container_enabled=True)
+    assert result.exit_code == 0, result.output
+    assert spies.create.call_args.kwargs["extra_rw_mounts"] == {
+        project.root: "/pm-project"}
+    prompt = spies.build.call_args.kwargs["prompt"]
+    assert "pm -C /pm-project pr add '<title>' --plan bugs" in prompt
+
+
+def test_container_run_fails_closed_when_runtime_unavailable(project, home):
+    result, spies = _run_regression(project, ["demo"],
+                                    container_enabled=True, runtime_ok=False)
+    assert result.exit_code == 1
+    assert "no agent was launched on the host" in result.output
+    # Nothing was prepared and nothing ran.
+    assert _qa_workdirs(home) == []
+    spies.build.assert_not_called()
+    spies.execvpe.assert_not_called()
+
+
+def test_container_create_failure_launches_nothing(project, home):
+    create = MagicMock(side_effect=OSError("podman vanished"))
+    result, spies = _run_regression(project, ["demo"],
+                                    container_enabled=True, create=create)
+    assert result.exit_code == 1
+    assert "podman vanished" in result.output
+    assert "No session was launched on the host" in result.output
+    spies.remove.assert_called_once_with(create.call_args.kwargs["name"])
+    spies.build.assert_not_called()
+    spies.execvpe.assert_not_called()
+
+
+def test_empty_library_is_reported_not_run(project, home):
+    (project.root / "qa" / "regression" / "demo.md").unlink()
+    result, spies = _run_regression(project, ["init-empty"],
+                                    container_enabled=False)
+    assert result.exit_code == 1
+    assert "No regression tests in the library" in result.output
+    assert _qa_workdirs(home) == []
+    spies.execvpe.assert_not_called()
+
+
+def test_unknown_id_with_a_library(project, home):
+    result, spies = _run_regression(project, ["nope"],
+                                    container_enabled=False)
+    assert result.exit_code == 1
+    assert "Unknown regression test: nope" in result.output
+    spies.execvpe.assert_not_called()
+
+
+def test_missing_branch_is_a_clean_error(project, home):
+    result, spies = _run_regression(project, ["demo", "--branch", "nope"],
+                                    container_enabled=False)
+    assert result.exit_code == 1
+    assert "Could not clone 'nope'" in result.output
+    spies.execvpe.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# pm qa launch regression:<id> / TUI launch
+# ---------------------------------------------------------------------------
+
+def _tmux_patches(split):
+    return [
+        patch("pm_core.tmux.has_tmux", return_value=True),
+        patch("pm_core.tmux.in_tmux", return_value=True),
+        patch("pm_core.tmux.get_session_name", return_value="pm-live"),
+        patch("pm_core.tmux.find_window_by_name",
+              return_value={"id": "@7"}),
+        patch("pm_core.tmux.split_pane", split),
+        patch("pm_core.tmux.new_window", MagicMock()),
+    ]
+
+
+def _invoke_launch(project, args, *, runtime_ok=True, container=False):
+    split = MagicMock(return_value="%9")
+    build = MagicMock(return_value="CLAUDE")
+    with ExitStack() as stack:
+        stack.enter_context(patch("pm_core.cli.qa.state_root",
+                                  return_value=project.root))
+        stack.enter_context(patch.object(container_mod,
+                                         "is_container_mode_enabled",
+                                         return_value=container))
+        stack.enter_context(patch.object(
+            container_mod, "_runtime_status",
+            return_value=(runtime_ok, "" if runtime_ok else "runtime down")))
+        stack.enter_context(patch(
+            "pm_core.claude_launcher.build_claude_shell_cmd", build))
+        for p in _tmux_patches(split):
+            stack.enter_context(p)
+        result = CliRunner().invoke(qa_group, ["launch", *args])
+    return result, split, build
+
+
+def test_qa_launch_runs_the_shared_regression_command(project):
+    result, split, build = _invoke_launch(
+        project, ["regression:demo", "--target-window", "discovery"])
+    assert result.exit_code == 0, result.output
+    cmd = split.call_args.args[2]
+    assert cmd == regression_launch_cmd(project.root, "demo")
+    assert cmd.endswith("qa regression demo --file-prs")
+    assert split.call_args.kwargs["window"] == "@7"
+    # No prompt aimed at the live session is built for the pane.
+    build.assert_not_called()
+
+
+def test_qa_launch_reports_empty_library_before_spawning(project):
+    (project.root / "qa" / "regression" / "demo.md").unlink()
+    result, split, _ = _invoke_launch(project, ["regression:init-empty"])
+    assert result.exit_code == 1
+    assert "No regression tests in the library" in result.output
+    split.assert_not_called()
+
+
+def test_qa_launch_reports_unusable_runtime_before_spawning(project):
+    result, split, _ = _invoke_launch(
+        project, ["regression:demo", "--target-window", "discovery"],
+        container=True, runtime_ok=False)
+    assert result.exit_code == 1
+    assert "no agent was launched on the host" in result.output
+    split.assert_not_called()
+
+
+def test_tui_regression_item_runs_the_shared_command(project):
+    from pm_core.tui import pane_ops
+    app = SimpleNamespace(_root=project.root, log_message=MagicMock(),
+                          _session_name="pm-live")
+    with patch.object(pane_ops, "launch_pane") as launch, \
+            patch.object(container_mod, "is_container_mode_enabled",
+                         return_value=False):
+        pane_ops.launch_qa_item(app, "regression:demo", target_window="w")
+    launch.assert_called_once_with(
+        app, regression_launch_cmd(project.root, "demo"), "qa-item",
+        target_window="w")
+
+
+def test_tui_regression_item_with_empty_library_logs(project):
+    from pm_core.tui import pane_ops
+    (project.root / "qa" / "regression" / "demo.md").unlink()
+    app = SimpleNamespace(_root=project.root, log_message=MagicMock(),
+                          _session_name="pm-live")
+    with patch.object(pane_ops, "launch_pane") as launch:
+        pane_ops.launch_qa_item(app, "regression:init-empty")
+    launch.assert_not_called()
+    assert "No regression tests in the library" in (
+        app.log_message.call_args.args[0])
+
+
+# ---------------------------------------------------------------------------
+# Other surfaces
+# ---------------------------------------------------------------------------
+
+def test_standalone_refuses_regression_tests(project):
+    with patch("pm_core.cli.qa.state_root", return_value=project.root):
+        result = CliRunner().invoke(qa_group, ["standalone", "demo"])
+    assert result.exit_code == 1
+    assert "pm qa regression demo" in result.output
+
+
+def test_qa_list_shows_an_empty_regression_library(project):
+    (project.root / "qa" / "regression" / "demo.md").unlink()
+    with patch("pm_core.cli.qa.state_root", return_value=project.root):
+        result = CliRunner().invoke(qa_group, ["list"])
+    assert result.exit_code == 0
+    assert "Regression Tests (0):" in result.output
+    assert "pm qa author-regression" in result.output
+    # Retained recipes are still listed.
+    assert "setup: Throwaway project" in result.output
+    assert "cap: CLI recording" in result.output
+
+
+def test_discovery_prompt_handles_an_empty_library():
+    from pm_core.prompt_gen import generate_discovery_supervisor_prompt
+    out = generate_discovery_supervisor_prompt(
+        {"project": {"name": "demo"}}, session_name="pm-s")
+    assert "ls pm/qa/regression/*.md 2>/dev/null" in out
+    assert "regression library empty, nothing scheduled" in out
+    assert "pm qa launch regression:<id> --target-window discovery" in out
+    assert "isolated QA" in out
+
+
+def test_regression_container_argv_mounts_only_scratch_captures_registry(
+        tmp_path, home):
+    """The real ``podman run`` argv ``create_qa_container`` builds for a
+    filing regression run: clone, scratch, ``captures/regression/`` and the
+    project registry, with no push proxy."""
+    from pm_core.push_proxy import _CONTAINER_SOCKET_DIR
+    clone, scratch, registry = (tmp_path / "clone", tmp_path / "scratch",
+                                tmp_path / "proj" / "pm")
+    for d in (clone, scratch, registry):
+        d.mkdir(parents=True)
+    runtime = MagicMock(return_value=MagicMock(stdout="id\n", returncode=0))
+    with patch.object(container_mod, "container_is_running",
+                      return_value=False), \
+            patch.object(container_mod, "_get_runtime",
+                         return_value="podman"), \
+            patch.object(container_mod, "image_exists", return_value=True), \
+            patch.object(container_mod, "remove_container"), \
+            patch.object(container_mod, "_nested_podman_enabled",
+                         return_value=False), \
+            patch.object(container_mod, "_run_runtime", runtime), \
+            patch("pm_core.push_proxy.start_push_proxy") as proxy:
+        container_mod.create_qa_container(
+            name="pm-tag-qa-regression-demo-r1-s0",
+            config=container_mod.ContainerConfig(),
+            workdir=clone, scratch_path=scratch,
+            allowed_push_branch=None, session_tag="tag",
+            pr_id="regression",
+            extra_rw_mounts={registry: "/pm-project"},
+        )
+    args = runtime.call_args_list[0].args
+    assert args[0] == "run"
+    mounts = [args[i + 1] for i, a in enumerate(args) if a == "-v"]
+    captures = home / ".pm" / "sessions" / "tag" / "captures" / "regression"
+    assert f"{clone}:/workspace" in mounts
+    assert f"{scratch}:/scratch" in mounts
+    assert f"{captures}:/pm-captures" in mounts
+    assert f"{registry}:/pm-project" in mounts
+    assert "PM_CAPTURES_PR=regression" in args
+    assert not any(_CONTAINER_SOCKET_DIR in m for m in mounts)
+    proxy.assert_not_called()

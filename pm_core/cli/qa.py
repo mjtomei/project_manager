@@ -45,7 +45,11 @@ def qa_list():
         items = all_items[category]
         click.echo(f"\n{label} ({len(items)}):")
         if not items:
-            click.echo("  (none)")
+            if category == "regression":
+                click.echo("  (none — author one with "
+                           "'pm qa author-regression <name>')")
+            else:
+                click.echo("  (none)")
         for item in items:
             desc = f" — {item['description']}" if item["description"] else ""
             click.echo(f"  {item['id']}: {item['title']}{desc}")
@@ -296,62 +300,228 @@ def qa_edit(instruction_id: str, category: str | None):
     subprocess.run([editor, item["path"]])
 
 
+# Environment variables that point a ``pm`` command at a particular project or
+# session.  A regression session inheriting them (e.g. ``PM_PROJECT`` set by
+# the TUI command bar) would aim the disposable test project's ``pm`` commands
+# at the user's project, so they are dropped from its environment.
+_REGRESSION_SCRUBBED_ENV = ("PM_PROJECT", "PM_SESSION")
+
+
+def _install_regression_recipes(items: list[dict], scratch_path: Path,
+                                subdir: str, scratch_in: str
+                                ) -> list[tuple[str, str]]:
+    """Copy library recipes into the run's scratch dir.
+
+    Same ``qa-instructions`` / ``qa-artifacts`` layout the QA scenario path
+    installs into, so a container session can read them.  Returns
+    ``(agent-visible path, title)`` per recipe.
+    """
+    import shutil
+    dest_dir = scratch_path / subdir
+    installed: list[tuple[str, str]] = []
+    for item in items:
+        src = Path(item["path"])
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest_dir / src.name)
+        installed.append((f"{scratch_in}/{subdir}/{src.name}",
+                          item.get("title", "")))
+    return installed
+
+
 @qa.command("regression")
 @click.argument("test_id")
-@click.option("--session", "-s", default=None, help="Specify pm session name")
 @click.option("--file-prs", "file_prs", is_flag=True, default=False,
               help="File PRs (--plan bugs, --plan improvements) for any findings")
 @click.option("--file-bugs", "file_prs", is_flag=True, default=False, hidden=True)
-def qa_regression(test_id: str, session: str | None, file_prs: bool):
-    """Run a regression test from pm/qa/regression/.
+@click.option("--branch", "-b", default=None,
+              help="Branch to clone for the run (default: the project's "
+                   "base branch)")
+@click.option("--session", "-s", default=None, hidden=True,
+              help="Ignored: a regression run never targets a pm session")
+def qa_regression(test_id: str, file_prs: bool, branch: str | None,
+                  session: str | None):
+    """Run a regression test from pm/qa/regression/ in an isolated QA run.
 
-    Each test is a Claude prompt; the runner assembles a Session
-    Context, optional findings-filing addendum, and the test body, then
-    launches Claude to exercise the project and report back.
+    The run gets its own QA workdir, created the same way as a QA
+    scenario's: a fresh clone of the project (base branch unless --branch)
+    and an empty scratch dir, plus copies of the project's setup recipes
+    (pm/qa/instructions/) and capture recipes (pm/qa/artifacts/).  With
+    container mode enabled the session runs in a QA container, and an
+    unusable runtime stops the run; it never falls back to the host.  The
+    test drives a disposable project it creates in the scratch dir, never
+    your pm project or a running pm session.  Captures land under
+    ~/.pm/sessions/<tag>/captures/regression/<test-id>/<run-id>/.
 
-    Use `pm qa list` to see available regression tests.
+    Runs in the foreground.  The TUI and `pm qa launch regression:<id>` run
+    this same command in a pane.  Use `pm qa list` to see available tests.
     """
-    from pathlib import Path
-    from pm_core import qa_instructions
-    from pm_core.cli.helpers import _find_tui_pane
-    from pm_core.regression_prompts import build_regression_test_prompt
-    from pm_core.claude_launcher import launch_claude
-
-    try:
-        root = state_root()
-    except FileNotFoundError:
-        root = Path.home() / ".pm"
-
-    item = qa_instructions.get_instruction(root, test_id, category="regression")
-    if not item:
-        click.echo(f"Unknown regression test: {test_id}", err=True)
-        click.echo("Run 'pm qa list' to see available tests.")
-        raise SystemExit(1)
-
-    body = item.get("body", "")
-    title = item.get("title", test_id)
-
-    pane_id, sess = _find_tui_pane(session)
-    if not sess:
-        click.echo("No pm tmux session found. Start one with 'pm session'.", err=True)
-        raise SystemExit(1)
-
-    full_prompt = build_regression_test_prompt(
-        session=sess,
-        pane_id=pane_id,
-        title=title,
-        body=body,
-        file_findings=file_prs,
+    import secrets
+    import time
+    from pm_core import qa_instructions, qa_loop, store
+    from pm_core import container as container_mod
+    from pm_core.claude_launcher import build_claude_shell_cmd
+    from pm_core.paths import (CONTAINER_CAPTURES_MOUNT, captures_dir,
+                               get_session_tag)
+    from pm_core.regression_prompts import (
+        CONTAINER_REGISTRY_MOUNT, build_regression_test_prompt,
+        regression_launch_problem,
     )
 
+    if session:
+        click.echo("Note: --session is ignored; a regression run never "
+                   "targets a pm session.", err=True)
+
+    try:
+        root = state_root().resolve()
+    except FileNotFoundError as exc:
+        click.echo(str(exc) or "No pm project found.", err=True)
+        raise SystemExit(1)
+
+    # Unknown id / empty library / container mode enabled with an unusable
+    # runtime: stop before any workdir, clone or container exists.
+    problem = regression_launch_problem(root, test_id)
+    if problem:
+        click.echo(problem, err=True)
+        raise SystemExit(1)
+    item = qa_instructions.get_instruction(root, test_id, category="regression")
+    title = item.get("title", test_id)
+    use_containers = container_mod.is_container_mode_enabled()
+
+    data = store.load(root)
+    base_branch = (branch or data.get("project", {}).get("base_branch")
+                   or "master")
+    repo_root = root.parent
+    session_tag = (qa_loop.own_session_tag()
+                   or get_session_tag(start_path=repo_root))
+    captures_base = captures_dir("regression", session_tag=session_tag)
+    if captures_base is None:
+        click.echo("Cannot resolve a captures directory for this run: no "
+                   "session tag (not inside a git repo?).", err=True)
+        raise SystemExit(1)
+
+    run_id = (time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+              + f"-{secrets.token_hex(2)}")
+    qa_workdir = qa_loop.create_qa_workdir(f"regression-{test_id}", run_id)
+    try:
+        clone_path, scratch_path = qa_loop.create_scenario_workdir(
+            qa_workdir, 0, repo_root=repo_root,
+            pr_id=f"regression-{test_id}", loop_id=run_id,
+            branch=base_branch,
+        )
+    except Exception as exc:
+        detail = (getattr(exc, "stderr", "") or "").strip()
+        click.echo(f"Could not clone '{base_branch}' for the regression run: "
+                   f"{exc}" + (f"\n{detail}" if detail else ""), err=True)
+        raise SystemExit(1)
+    qa_loop._setup_clone_override(clone_path)
+
+    rev = subprocess.run(["git", "-C", str(clone_path), "rev-parse", "HEAD"],
+                         capture_output=True, text=True)
+    sha = rev.stdout.strip() if rev.returncode == 0 else ""
+    target = (f"`{base_branch}` (commit `{sha[:12]}`)" if sha
+              else f"`{base_branch}`")
+
+    run_captures = captures_base / test_id / run_id
+    run_captures.mkdir(parents=True, exist_ok=True)
+    if use_containers:
+        wd_in = container_mod._CONTAINER_WORKDIR
+        scratch_in = container_mod._CONTAINER_SCRATCH
+        captures_in = f"{CONTAINER_CAPTURES_MOUNT}/{test_id}/{run_id}"
+        registry_in = CONTAINER_REGISTRY_MOUNT
+    else:
+        wd_in, scratch_in = str(clone_path), str(scratch_path)
+        captures_in = str(run_captures)
+        registry_in = str(root)
+
+    prompt = build_regression_test_prompt(
+        title=title,
+        body=item.get("body", ""),
+        workdir=wd_in,
+        scratch_dir=scratch_in,
+        target=target,
+        in_container=use_containers,
+        setup_recipes=_install_regression_recipes(
+            qa_instructions.list_instructions(root), scratch_path,
+            "qa-instructions", scratch_in),
+        capture_recipes=_install_regression_recipes(
+            qa_instructions.list_artifacts(root), scratch_path,
+            "qa-artifacts", scratch_in),
+        captures_dir=captures_in,
+        file_findings=file_prs,
+        registry=registry_in if file_prs else None,
+    )
+    (run_captures / "prompt.md").write_text(prompt)
+
+    env: dict[str, str] = {}
+    cname = None
+    try:
+        if use_containers:
+            cname = container_mod.qa_container_name(
+                f"regression-{test_id}", run_id, 0, session_tag=session_tag)
+            # Captures mount at /pm-captures (captures/regression/ on the
+            # host).  No push proxy: a regression run never pushes.  The
+            # project's pm dir is mounted only when findings are filed, so
+            # filed PRs reach the real registry and nothing else of the
+            # project is reachable.
+            container_mod.create_qa_container(
+                name=cname,
+                config=container_mod.load_container_config(),
+                workdir=clone_path,
+                scratch_path=scratch_path,
+                allowed_push_branch=None,
+                session_tag=session_tag,
+                pr_id="regression",
+                extra_rw_mounts=({root: CONTAINER_REGISTRY_MOUNT}
+                                 if file_prs else None),
+            )
+            claude_cmd = build_claude_shell_cmd(
+                prompt=prompt, cwd=wd_in, write_dir=str(clone_path),
+                session_type="qa_regression", session_tag=session_tag,
+                container=True, env_out=env,
+            )
+            shell_cmd = container_mod.build_exec_cmd(
+                cname, claude_cmd, cleanup=True, env=env)
+            run_cwd = str(qa_workdir)
+        else:
+            shell_cmd = build_claude_shell_cmd(
+                prompt=prompt, cwd=wd_in, session_type="qa_regression",
+                session_tag=session_tag, env_out=env,
+            )
+            run_cwd = str(clone_path)
+    except Exception as exc:
+        # Container mode is an execution boundary: report the failure rather
+        # than continuing on the host.  Release only this run's container.
+        if cname:
+            try:
+                container_mod.remove_container(cname)
+            except Exception:
+                pass
+            click.echo(
+                "Container mode is enabled, but the regression container "
+                f"could not be set up: {exc}\n\n"
+                "No session was launched on the host.\n\n"
+                + container_mod.container_retry_remedy(
+                    "fix the container runtime/image (check 'pm container "
+                    "status'), then retry"),
+                err=True,
+            )
+        else:
+            click.echo(f"Could not build the regression session: {exc}",
+                       err=True)
+        raise SystemExit(1)
+
     click.echo(f"Running regression: {title}")
-    click.echo(f"Session: {sess}")
+    click.echo(f"  Target:   {target.replace('`', '')} (clone {clone_path})")
+    click.echo("  Runs in:  " + (f"container {cname}" if use_containers
+                                  else "host (container mode is off)"))
+    click.echo(f"  Captures: {run_captures}")
     click.echo("-" * 60)
 
-    rc = launch_claude(full_prompt, session_key=f"qa-regression:{test_id}",
-                       pm_root=root, cwd=None, resume=False,
-                       session_type="qa_regression")
-    raise SystemExit(rc)
+    exec_env = {k: v for k, v in os.environ.items()
+                if k not in _REGRESSION_SCRUBBED_ENV}
+    exec_env.update(env)
+    os.chdir(run_cwd)
+    os.execvpe("bash", ["bash", "-c", shell_cmd], exec_env)
 
 
 @qa.command("run")
@@ -711,6 +881,18 @@ def qa_launch(item_id: str, target_window: str | None):
     category, qa_id = parts
 
     root = state_root()
+    if category == "regression":
+        # The pane runs `pm qa regression`, the one regression launcher: an
+        # isolated QA workdir (a QA container when container mode is
+        # enabled) and a disposable test project, never this session.
+        # Report what would stop it here (empty library, unknown id,
+        # unusable container runtime), so the caller (the discovery
+        # supervisor) sees the failure rather than a pane that exits at once.
+        from pm_core.regression_prompts import regression_launch_problem
+        problem = regression_launch_problem(root, qa_id)
+        if problem:
+            click.echo(problem, err=True)
+            raise SystemExit(1)
     item = qa_instructions.get_instruction(root, qa_id, category=category)
     if item is None:
         click.echo(f"QA item not found: {item_id}", err=True)
@@ -729,17 +911,10 @@ def qa_launch(item_id: str, target_window: str | None):
     title = item.get("title", qa_id)
     body = item.get("body", "")
 
+    env: dict[str, str] = {}
     if category == "regression":
-        # Route regression launches through the unified builder so headless
-        # and TUI launches produce identical prompts.
-        from pm_core.regression_prompts import build_regression_test_prompt
-        full_prompt = build_regression_test_prompt(
-            session=sess_label,
-            pane_id=None,
-            title=title,
-            body=body,
-            file_findings=True,
-        )
+        from pm_core.regression_prompts import regression_launch_cmd
+        cmd = regression_launch_cmd(root, qa_id, file_findings=True)
     else:
         full_prompt = f"""\
 ## Session Context
@@ -756,10 +931,8 @@ To interact with this session, use commands like:
 
 {body}
 """
-
-    env: dict[str, str] = {}
-    cmd = build_claude_shell_cmd(prompt=full_prompt, session_type="qa_author",
-                                 env_out=env)
+        cmd = build_claude_shell_cmd(prompt=full_prompt,
+                                     session_type="qa_author", env_out=env)
     cwd = str(root.parent) if root.name == "pm" else str(root)
 
     if target_window:
@@ -782,8 +955,9 @@ To interact with this session, use commands like:
 def qa_standalone(instruction_id: str):
     """Run a QA instruction against the current codebase without a PR.
 
-    Uses a generic prompt without PR-specific context.  Useful for running
-    regression tests against the master branch.
+    Uses a generic prompt without PR-specific context.  Regression tests
+    run with `pm qa regression <id>` instead, which isolates them from
+    your project and pm session.
     """
     import time
     from pm_core import qa_instructions, store, prompt_gen
@@ -794,8 +968,13 @@ def qa_standalone(instruction_id: str):
 
     # Find the instruction
     item = qa_instructions.get_instruction(root, instruction_id, "instructions")
-    if item is None:
-        item = qa_instructions.get_instruction(root, instruction_id, "regression")
+    if item is None and qa_instructions.get_instruction(
+            root, instruction_id, "regression") is not None:
+        # This launcher runs on the host next to the live pm session, which
+        # is exactly what a regression run must not do.
+        click.echo(f"'{instruction_id}' is a regression test; run it with "
+                   f"'pm qa regression {instruction_id}'.", err=True)
+        raise SystemExit(1)
     if item is None:
         click.echo(f"Instruction not found: {instruction_id}", err=True)
         raise SystemExit(1)

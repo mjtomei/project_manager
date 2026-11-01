@@ -513,10 +513,12 @@ def launch_watcher_review(app) -> None:
 
 
 def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
-    """Launch Claude with a QA instruction prompt.
+    """Launch Claude with a QA instruction prompt, or run a regression test.
 
     *item_id* has the form ``category:id`` (e.g. ``instructions:login-flow``
-    or ``regression:pane-layout``).
+    or ``regression:pane-layout``).  A regression item runs
+    ``pm qa regression <id> --file-prs`` in the pane (an isolated run, see
+    :mod:`pm_core.regression_prompts`).
 
     *target_window* optionally directs the launched pane into a specific
     tmux window. When omitted (e.g. the human Enter-key path from the QA
@@ -535,6 +537,23 @@ def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
         return
     category, qa_id = parts
 
+    if category == "regression":
+        # Same launcher as the CLI and `pm qa launch`: `pm qa regression`
+        # runs the test in an isolated QA workdir (a QA container when
+        # container mode is enabled) against a disposable test project, never
+        # this TUI's session.  What would stop it is logged here instead of
+        # flashing by in a pane that exits at once.
+        from pm_core.regression_prompts import (regression_launch_cmd,
+                                                regression_launch_problem)
+        problem = regression_launch_problem(app._root, qa_id)
+        if problem:
+            app.log_message(problem.splitlines()[0])
+            _log.warning("regression launch refused: %s", problem)
+            return
+        launch_pane(app, regression_launch_cmd(app._root, qa_id),
+                    "qa-item", target_window=target_window)
+        return
+
     item = qa_instructions.get_instruction(app._root, qa_id, category=category)
     if not item:
         app.log_message(f"QA item not found: {item_id}")
@@ -546,17 +565,7 @@ def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
     body = item.get("body", "")
     title = item.get("title", qa_id)
 
-    if category == "regression":
-        from pm_core.regression_prompts import build_regression_test_prompt
-        full_prompt = build_regression_test_prompt(
-            session=sess,
-            pane_id=pane_id or None,
-            title=title,
-            body=body,
-            file_findings=True,
-        )
-    else:
-        full_prompt = f"""\
+    full_prompt = f"""\
 ## Session Context
 
 You are running a QA instruction against tmux session: {sess}{pane_line}
