@@ -39201,7 +39201,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-11-01T22:48:31.874386+00:00'
+  updated_at: '2026-11-01T23:19:11.074931+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39979,6 +39979,36 @@ prs:
       (accepted limitation, impl.md).'
     created_at: '2026-11-01T22:48:31Z'
     last_edited: '2026-11-01T22:48:31Z'
+  - id: note-e64e335
+    text: 'Review-loop e757 i8 (2026-11-01): doc + test only, no behavioural change.
+      The auto-start watcher shares its run dir with the review loops and step windows,
+      so its completion is a bulk sweep with include_top_level=False (e757 i4) and
+      freezes only archive/. One consequence the spec never recorded: the watcher''s
+      own <watcher-type>-i<N>.jsonl links (e.g. auto-start-i1.jsonl) stay live after
+      it completes. Unlike loop-scoped iteration names they ARE reused — each watcher
+      run restarts at iteration 1 in the same run dir — so the next watcher run archives
+      the outgoing sessions via archive-on-replace, and the content stays in the native
+      JSONL until then. Added: (a) an impl.md Known limitations bullet for it; (b)
+      a qa.md R5 bullet stating a live auto-start-i<N>.jsonl after a completion is
+      NOT a failure (the CLI watcher''s private watcher-<token> dir remains the exception,
+      frozen whole per R8); (c) test_watcher_completion_leaves_canonicals_live now
+      also links auto-start-i2.jsonl and asserts it stays live with a later appended
+      turn visible, alongside the frozen archive entry (no new test function; archive
+      suite stays at 36); (d) an impl.md e757-i8 section. No code defects found in
+      this pass: archive-on-replace (no-clobber, content/sid-keyed), ownership-checked
+      finalize (readlink at entry, guard after the copy before os.replace), loop-scoped
+      iteration names with allow_legacy only for a resumed in-flight iteration, iteration_sessions
+      round-tripped through the breadcrumb, retire-archives-without-deleting, and
+      the e757-i4 rule that bulk sweeps never freeze a canonical are consistent across
+      every caller. Verified at 30070d5a5: archive suite 36 passed (10/10 consecutive
+      runs); 506 passed across archive/auto-start-finalize/breadcrumb/review-loop/return-handoff/launch-retry/fail-closed/signoff/launcher;
+      full suite 5478 passed / 1 skipped (7m08s, markdown installed); post-fix repro
+      (/pm-captures/impl/post-fix/transcript-archive/repro.py --expect fixed) still
+      reports all three symptoms fixed. Carried over for QA, unchanged: archive entry
+      counts are minimums; a canonical (and a completed watcher''s iteration link)
+      stays a live link until a new attempt reuses its path.'
+    created_at: '2026-11-01T23:19:10Z'
+    last_edited: '2026-11-01T23:19:10Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
