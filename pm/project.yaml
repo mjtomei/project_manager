@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T03:06:26.363904+00:00'
+  updated_at: '2026-11-01T03:09:32.429625+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5773,6 +5773,25 @@ prs:
       a pm session, which is what the scenario''s Then states.'
     created_at: '2026-11-01T03:06:26Z'
     last_edited: '2026-11-01T03:06:26Z'
+  - id: note-b748d7f
+    text: 'QA scenario 13 (legacy default-server session) PASS 6/6 at c94a68b83. Verified
+      end to end on a scenario-private default server: the one-line rollout note +
+      Attaching to session L~1 (no private socket, no second base, TUI pane/pid and
+      pidfile unchanged, a standing client on L stays attached); --print-connect prints
+      the default socket + session name exactly; C in the old-build TUI shows "Not
+      a shared session" while C in the new-build TUI shows the private-socket connect
+      popup and Esc closes it; the --print-connect command pasted into a shell pane
+      inside P attaches to L without disturbing P; pm tui send "?" -s L from inside
+      P reports pane %0 (session: L) and drives L only; pm session kill removes L
+      and L~1 but leaves an unrelated non-pm session and P untouched; bare tmux attach
+      reaches the default server and L. No source changes. Harness gotcha for the
+      next run: bare `tmux attach` with no -t selects the most recently used session,
+      and a legacy default server always has L and L~1, so run the bare-attach story
+      BEFORE the kill story (stories 1-4 make L most recent); otherwise it lands on
+      L~1 — standard tmux selection, not a pm defect (controlled experiment reproduced
+      it). Captures: /pm-captures/scenarios/13/story{1..6}-*/.'
+    created_at: '2026-11-01T03:09:32Z'
+    last_edited: '2026-11-01T03:09:32Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
