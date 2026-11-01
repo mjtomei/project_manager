@@ -14331,7 +14331,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-11-01T03:24:16.410404+00:00'
+  updated_at: '2026-11-01T03:42:05.914647+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -15496,6 +15496,50 @@ prs:
       (cast + mp4 + manifest) and final-state.txt.'
     created_at: '2026-11-01T03:24:16Z'
     last_edited: '2026-11-01T03:24:16Z'
+  - id: note-8e7810b
+    text: 'QA S36 (R10 + R16: the shared reopen sentence on every closed-PR refusal,
+      and the three at-lock refusal sentences from the consolidated `_report_launch_blocked`):
+      PASS 6/6, no code change, at head e8ef33314. Sandbox: throwaway project, disposable
+      HOME, dedicated PM_TMUX_SOCKET, PYTHONPATH=/workspace, PATH without claude,
+      local backend (no GitHub), container mode off. (1) Closed-PR refusals: start/review/qa/signoff
+      each exit 1 with exactly "PR <A> is closed — reopen it first with ''pm pr edit
+      <A> --status pending''."; merge adds " to merge it."; auto-sequence prints only
+      "closed" (rc 0), advancing nothing and creating only the empty pm/transcripts/auto-sequence/<A>/
+      directory. No PR window, no container, workdir sha256 listing byte-identical
+      (39 files), show keeps Status: closed + note + branch + workdir, and pm pr edit
+      --status pending reopens A and clears closed_at. (2-4) signoff/review/start
+      frozen inside store._lock (flock -F holder + /proc/<pid>/fd poll + kill -STOP,
+      "process state: T"), close wins: each exits 1 with its exact "became closed
+      while opening the sign-off/review|starting — …" sentence on stderr, no success
+      line, no window, no traceback; closed_at is the close''s and stays put. Story
+      4 keeps its pre-lock "Updating …"/"Checking out branch …" stdout lines; its
+      workdir content is byte-identical, only .git/logs/HEAD differs (the pre-lock
+      checkout). (5) close --remove wins against review/signoff/start on three fresh
+      PRs: all three "was removed while …" sentences exact, removal prints Removed
+      registry entry + Kept: branch/workdir, pm pr show -> not found, and each removed
+      PR''s workdir and checked-out branch survive byte-identical. (6) TUI command
+      bar: "/ pr signoff <A>" spawns pm_core.wrapper, frozen at its lock fd, close
+      wins -> the TUI logs exactly "Error: PR <A> became closed while opening the
+      sign-off — not marked sign_off and no sign-off window was opened." in the status
+      line, the L log pane and ~/.pm/debug/<tag>.log as "[tui] log: Error: …"; no
+      marked as sign_off line, no signoff-<A> window; the tree falls back to "No PRs
+      to show. Press F to cycle filter." and seven f presses reach filter: ✗ closed
+      with A listed as closed; A''s workdir still exists. tests/test_cli_helpers.py
+      + tests/test_pr_close.py: 132 passed. Evidence: /pm-captures/scenarios/36/{story1-closed-refusals,story2-signoff-vs-close,story3-review-vs-close,story4-start-vs-close,story5-removal-vs-launch,story6-tui-signoff-vs-close}
+      (cast + mp4 + manifest; story 6 also transcript.log, log-pane.txt, pane-*.txt,
+      debug-log.log) plus README.md. Observation, not a defect: story 6''s Then calls
+      the status line "wrapped", but LogLine is height: 1 so it clips rather than
+      wraps — at the full 200-column pane the whole sentence fits on the one row;
+      the capture opens the L pane only after the error so the status line is recorded
+      at full width. Harness notes for the next run: (a) pm pr signoff runs synchronously
+      in the TUI (_run_command_sync, 30 s timeout), so the TUI does not repaint while
+      the subprocess is stopped — keep the freeze short; (b) pm session creates an
+      extra group session <name>~1 on this socket — kill it before taking a window
+      list as evidence; (c) the L log pane tails the shared debug log, so a restarted
+      TUI still shows earlier runs'' entries — slice ~/.pm/debug/<tag>.log by byte
+      offset for the current run.'
+    created_at: '2026-11-01T03:42:05Z'
+    last_edited: '2026-11-01T03:42:05Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
