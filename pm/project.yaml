@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T00:07:22.020715+00:00'
+  updated_at: '2026-11-01T00:36:29.380119+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37860,6 +37860,28 @@ prs:
       stays dropped.'
     created_at: '2026-11-01T00:07:21Z'
     last_edited: '2026-11-01T00:07:21Z'
+  - id: note-d4dbc85
+    text: 'Review loop 928f i10: one test gap in the kept recipe scope, no recipe
+      or pm_core change. The recording recipes'' published-mp4 backstop (`test -s
+      "${cast%.cast}.mp4" || render_fail "ffmpeg wrote no mp4"`) had no case — deleting
+      it left the whole file green (266 passed, both recipes) — and R46''s `test_render_names_an_encoder_that_writes_no_mp4`
+      cannot tell it from `render_cast`''s own `[ -s "$part" ]`: either check alone
+      satisfies the case, so neither was pinned (each mutation gave 266 passed). The
+      backstop is load-bearing: a rename that reports success and publishes nothing
+      leaves the block exiting 0 with no video and no partial. In the web-UI finalize
+      the same rename (backstop removed) runs the step''s final `rm -f recording.webm`
+      and exits 0 — no mp4, no webm, a failed publish reported as success that destroys
+      the only recording; that backstop was pinned only as text. Fix (test-only):
+      the 0-byte case now gives `mv` a logging stub that must never be called (the
+      empty encode is not published); new `test_render_names_a_publish_that_left_no_mp4`
+      (both recipes) fails when the rename publishes nothing; new `test_web_ui_finalize_names_a_publish_that_left_no_mp4`
+      requires the published-mp4 message and the webm kept. Tests: recipe file 269
+      passed (was 266); full suite 5345 passed, 1 skipped, 121 deselected, 0 failed
+      (448.43 s); five mutations each fail exactly their case. Evidence: /pm-captures/review-928f-i10/.
+      impl.md R70, R46''s coverage claim corrected. The dropped helper/prompt/verifier
+      work stays dropped.'
+    created_at: '2026-11-01T00:36:29Z'
+    last_edited: '2026-11-01T00:36:29Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
