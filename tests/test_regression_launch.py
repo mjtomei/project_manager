@@ -184,6 +184,24 @@ def test_host_run_is_isolated_and_needs_no_pm_session(project, home,
     assert _git(project.repo, "status", "--porcelain") == ""
 
 
+def test_host_run_clone_cannot_push(project, home):
+    """On the host the clone's origin is reachable with the user's
+    credentials (here: the project repo itself), so the runner disables
+    origin's push URL.  Fetching still works."""
+    result, _ = _run_regression(project, ["demo"], container_enabled=False)
+    assert result.exit_code == 0, result.output
+    (workdir,) = _qa_workdirs(home)
+    clone = workdir / "s-0" / "repo"
+    _git(clone, "fetch", "-q", "origin")
+    push = subprocess.run(
+        ["git", "-C", str(clone), "push", "origin", "HEAD:refs/heads/leak"],
+        capture_output=True, text=True)
+    assert push.returncode != 0
+    assert "regression-runs-never-push" in push.stderr
+    refs = _git(project.repo, "for-each-ref", "--format=%(refname)")
+    assert "refs/heads/leak" not in refs.split()
+
+
 def test_host_run_files_findings_into_the_project_registry(project, home):
     result, spies = _run_regression(project, ["demo", "--file-prs"],
                                     container_enabled=False)

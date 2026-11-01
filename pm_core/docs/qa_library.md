@@ -151,7 +151,9 @@ Pressing Enter on a regression test in the TUI QA pane and
 produces the same isolated run.
 
 Regression tests don't fix bugs themselves and don't mutate the
-project's source. The only writes that escape the ephemeral env are:
+project's source. The runner disables the push URL of the clone's
+`origin`, so a stray `git push` fails rather than publishing the clone.
+The only writes that escape the ephemeral env are:
 
 - **Captures**, durable on the host but not committed to the repo, under
   `~/.pm/sessions/<tag>/captures/regression/<test-id>/<run-id>/`. The

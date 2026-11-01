@@ -306,6 +306,14 @@ def qa_edit(instruction_id: str, category: str | None):
 # at the user's project, so they are dropped from its environment.
 _REGRESSION_SCRUBBED_ENV = ("PM_PROJECT", "PM_SESSION")
 
+# Push URL given to a regression clone's ``origin``.  The QA scenario clone
+# helper points ``origin`` at the real upstream, and on the host (container
+# mode off) the user's git credentials work there, so a stray ``git push``
+# from the session would publish the clone's base branch.  A path that does
+# not exist makes it fail instead ("does not appear to be a git repository").
+# This guards against an accidental push; the container is the boundary.
+_REGRESSION_NO_PUSH_URL = "/regression-runs-never-push"
+
 
 def _install_regression_recipes(items: list[dict], scratch_path: Path,
                                 subdir: str, scratch_in: str
@@ -409,6 +417,10 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
             pr_id=f"regression-{test_id}", loop_id=run_id,
             branch=base_branch,
         )
+        # A regression run never pushes; fetches still reach the upstream.
+        subprocess.run(["git", "-C", str(clone_path), "remote", "set-url",
+                        "--push", "origin", _REGRESSION_NO_PUSH_URL],
+                       check=True, capture_output=True, text=True)
     except Exception as exc:
         # Nothing ran: drop this run's own, just-created workdir.
         shutil.rmtree(qa_workdir, ignore_errors=True)

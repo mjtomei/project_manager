@@ -25,7 +25,10 @@ CONTAINER_REGISTRY_MOUNT = "/pm-project"
 
 
 def _filing_addendum(registry: str) -> str:
-    pm = f"pm -C {registry}"
+    # Quoted: the commands below are meant to be run as written, and a host
+    # registry path may contain spaces.
+    reg = shlex.quote(registry)
+    pm = f"pm -C {reg}"
     return f"""
 
 ## Filing Findings
@@ -33,7 +36,7 @@ def _filing_addendum(registry: str) -> str:
 For each issue you observed, file a PR — don't fix it here.
 
 File against the project's registry at `{registry}`, always with
-`-C {registry}`. A plain `pm pr add` here writes into this run's disposable
+`-C {reg}`. A plain `pm pr add` here writes into this run's disposable
 clone, and the filing is lost with it.
 
 - **Bug**: `{pm} pr add '<title>' --plan bugs --description '<location, repro, expected vs actual>'`

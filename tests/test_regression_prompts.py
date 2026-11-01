@@ -97,6 +97,14 @@ def test_file_findings_addendum_covers_bugs_and_improvements():
     assert "Filing is independent of your verdict" in out
 
 
+def test_filing_commands_quote_a_registry_path_with_spaces():
+    out = _prompt(in_container=False, file_findings=True,
+                  registry="/home/u/My Projects/app/pm")
+    assert ("pm -C '/home/u/My Projects/app/pm' pr add '<title>' "
+            "--plan bugs") in out
+    assert "pm -C /home/u/My Projects" not in out
+
+
 def test_file_findings_requires_a_registry():
     with pytest.raises(ValueError):
         _prompt(file_findings=True, registry=None)

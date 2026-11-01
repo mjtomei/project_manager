@@ -134,7 +134,11 @@ library audit. Nothing is ported.
   note lists filed PRs as an intended output; nothing else of the project is
   mounted). Needs an optional `extra_rw_mounts` on `create_qa_container`.
 - I2: Regression runs must not push. `allowed_push_branch=None` → no push
-  proxy.
+  proxy. The clone helper points `origin` at the real upstream, and in host
+  mode the user's credentials reach it, so the runner also sets origin's push
+  URL to a nonexistent path (`/regression-runs-never-push`) in both modes; a
+  stray `git push` fails (review fc31 i2). Fetch is unchanged. This guards
+  against accidents; the container is the boundary.
 - I3: The workdir/container naming must not collide with QA runs or with each
   other: workdir `~/.pm/workdirs/qa/regression-<id>-<run-id>/`, container
   `qa_container_name("regression-<id>", run_id, 0, session_tag)` (inside the
