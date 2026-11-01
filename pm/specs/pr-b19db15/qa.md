@@ -907,6 +907,15 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   "the scenario ended the pm session" finish as "recorder exited while the
   TUI was still running". With no resolvable target the step stops and says
   so.
+- The tmux stop step is pasted a *second* time after a clean detach (a
+  resumed session, a worker checking its work) → the recorder is gone, the
+  TUI it attached to is still up and `recorder.status` holds `0`. That must
+  not be reported as "recorder exited while the TUI was still running — the
+  cast is incomplete": the status is the witness that the recording ended
+  by the detach, and the step must fall through to its cast, status and
+  transcript checks and exit 0. A recorder killed mid-scenario leaves *no*
+  status file (the pane's shell dies with it) and must still fail with that
+  message.
 - The web-UI driver block runs with `CAPDIR` set but `APP_URL` missing → it
   stops instead of letting the driver fall back to
   `http://localhost:8000` and record whatever answers there.

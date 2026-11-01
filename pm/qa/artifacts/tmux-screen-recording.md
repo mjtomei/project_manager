@@ -614,10 +614,23 @@ pm tui send a -s "$TARGET" || send_failed   # open the picker
 #    First make sure there is a recorder left to detach. The attach client
 #    follows the session, so it only exits on the detach, when the session
 #    ends, or because it (or asciinema) died. If it is already gone while
-#    the session it was attaching to is still there, it died mid-scenario:
-#    the cast stops at that point and is a truncated recording, not a
-#    finished one. `test -s` below cannot tell the difference, so fail here
-#    instead of rendering a truncated cast as this run's evidence. A
+#    the session it was attaching to is still there, it either died
+#    mid-scenario (the cast stops at that point and is a truncated
+#    recording) or the recording already ended — by the detach this step
+#    sends, so a second paste of this block (a resumed session, a worker
+#    checking its work) sees exactly that state. `test -s` below cannot tell
+#    the difference, so asciinema's own exit status decides here — the same
+#    handle the both-gone branch below trusts. A detach lets the attach
+#    return normally, so the pane's shell writes 0; a recorder killed
+#    mid-scenario never writes the file (the pane's shell dies with it —
+#    verified on tmux 3.2a: `kill-session` left no `recorder.status`) or
+#    writes 128+N when only asciinema was killed. Judging by the session
+#    alone reported a *complete* recording as incomplete the moment this
+#    step was pasted a second time (verified in this container: after a
+#    clean detach the recorder is gone, the TUI is up and `recorder.status`
+#    holds 0, and the re-run printed "the cast is incomplete, not a finished
+#    recording"). With a clean status the cast, status and transcript checks
+#    below decide, exactly as they do when the session is gone too. A
 #    recorder that ended because the session itself ended is a legitimate
 #    finish — the wait below sees it. (Every pipe stop below is best-effort:
 #    when the session is already gone the pipe is gone with it, and
@@ -660,23 +673,31 @@ fi
 detach_key=C-b
 if ! tmux has-session -t "=pm-recorder" 2>/dev/null; then
     if tmux has-session -t "=$TARGET" 2>/dev/null; then
-        echo "recorder exited while the TUI was still running — the cast is" \
-            "incomplete, not a finished recording" >&2
-        tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
-        # This run is over and nothing is recording any more, so release the
-        # claim step 2 took: a failure must not leave a claim behind that
-        # makes the next attempt in this session look like a collision. It is
-        # best-effort like the pipe stop — the session may be gone, which
-        # takes the claim with it — and every failure path below releases it
-        # too.
-        tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
-        exit 1
+        # The recorder is gone while the session it attached to is still
+        # there. asciinema's own status tells a death mid-scenario from a
+        # recording that already ended (see the comment above): only the
+        # former is a truncated cast, and only it may be failed here.
+        recorder_status=$(cat <capture-dir>/recorder.status 2>/dev/null)
+        if [ -z "$recorder_status" ] || [ "$recorder_status" != 0 ]; then
+            echo "recorder exited while the TUI was still running — the cast" \
+                "is incomplete, not a finished recording" >&2
+            tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
+            # This run is over and nothing is recording any more, so release
+            # the claim step 2 took: a failure must not leave a claim behind
+            # that makes the next attempt in this session look like a
+            # collision. It is best-effort like the pipe stop — the session
+            # may be gone, which takes the claim with it — and every failure
+            # path below releases it too.
+            tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
+            exit 1
+        fi
     fi
-    # Both are gone: the session itself ended, which ended the attach and so
-    # the recording. Nothing left to detach; the wait below is a no-op. That
-    # explains why the recorder exited, not whether asciinema finished — the
-    # status check below is what decides in this branch, because there is no
-    # live session left as a witness.
+    # Both are gone (or the recorder already ended with a clean status): the
+    # session itself ended, which ended the attach and so the recording, or
+    # this step's own detach already ran. Nothing left to detach; the wait
+    # below is a no-op. That explains why the recorder exited, not whether
+    # asciinema finished — the status check below is what decides in this
+    # branch, because there is no live session left as a witness.
 else
     # The detach is the last handle that can race the recorder: if it died
     # between the check above and this key send, `send-keys` fails (the

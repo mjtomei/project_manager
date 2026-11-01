@@ -5244,7 +5244,13 @@ case "$sub" in
             printf 'TUI drawn\n' > "$STATE/pane"
             if [ -n "$STUB_STATUS_FILE" ]; then
                 case "$STUB_MODE" in
-                  nostatus|detachnostatus) : ;;
+                  # `midadied`: the recorder session is killed during step 4,
+                  # so the pane's shell dies before asciinema returns and the
+                  # status is never written (verified on tmux 3.2a: a
+                  # `kill-session` left no recorder.status). Writing one here
+                  # would model a killed recorder that still reported a clean
+                  # exit — a state step 5 is right to read as a finish.
+                  nostatus|detachnostatus|midadied) : ;;
                   # `emptystatus`: the pane's shell opened the status file and
                   # was killed (or could not write) before the status landed —
                   # a 0-byte file, which is not an exit status.
@@ -6733,6 +6739,32 @@ class TestCaptureFlowExecution:
         assert r.returncode != 0, (
             "a recorder that died mid-scenario passed on its truncated cast")
         assert "incomplete" in r.stderr, r.stderr
+
+    def test_tmux_stop_step_pasted_twice_is_not_an_incomplete_recording(
+            self, tmp_path):
+        """A recorder that already ended cleanly is not a mid-scenario death.
+
+        Step 5 is pasted on its own whenever the scenario is driven
+        interactively, and a resumed session pastes it again. After a clean
+        detach the recorder is gone, the TUI it attached to is still up, and
+        ``recorder.status`` holds ``0`` — the shape a recorder killed
+        mid-scenario leaves, except that a killed recorder's pane shell dies
+        before writing the status (verified on tmux 3.2a: ``kill-session``
+        left no ``recorder.status``, while the detach left ``0``). Judging by
+        the session alone reported a *complete* recording as "the cast is
+        incomplete, not a finished recording" and told the worker to
+        re-record it, discarding a finished capture.
+        """
+        r, _cast = _run_block(
+            _stop_block("tmux-screen-recording.md"), "ok", tmp_path,
+            target=True,
+            files={"recording.cast": '{"version": 2}\n',
+                   "transcript.log": "pane output\n",
+                   "recorder.status": "0\n"})
+        assert r.returncode == 0, (
+            "a finished recording was reported incomplete because step 5 was "
+            "pasted twice: " + r.stderr)
+        assert "incomplete" not in r.stderr, r.stderr
 
     def test_tmux_detach_that_fails_is_not_a_finished_recording(self, tmp_path):
         """The detach itself is the last handle that can race the recorder.
