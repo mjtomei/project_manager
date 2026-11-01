@@ -164,6 +164,29 @@ def test_launch_survives_an_already_archived_session(env):
     assert (adir / f"impl-pr-abc.{sid}.jsonl").read_text() == "SESSION\n"
 
 
+def test_a_concurrent_archive_is_not_reported_as_a_failure(env, monkeypatch):
+    """Losing the no-clobber create to another archiver is success, not failure.
+
+    The entry exists, so the session is preserved; reporting ``None`` would
+    make the launch log "could not archive ... replacing it" for a session
+    that was in fact archived.
+    """
+    sid = _sid()
+    native = _native(env.cwd, sid, "OUTGOING")
+    canon = env.run / "impl-pr-abc.jsonl"
+    _link(canon, native)
+    dest = cl.transcript_archive_dir(canon) / f"impl-pr-abc.{sid}.jsonl"
+
+    def _lose_the_race(p, d, raw):
+        # Another archiver won between the existence check and the create.
+        os.symlink(str(native), d)
+        return False
+
+    monkeypatch.setattr(cl, "_move_into_archive", _lose_the_race)
+
+    assert cl.archive_transcript(canon) == dest
+
+
 def test_identical_archive_match_is_scoped_to_the_same_stem(env):
     """A different step's entry is never mistaken for this transcript's copy.
 
@@ -694,6 +717,41 @@ def test_watcher_completion_skips_a_live_review_loop(env):
         f.write(_record("NEEDS_WORK") + "\n")
     assert "NEEDS_WORK" in p.read_text()
     assert idle.is_file() and not idle.is_symlink()
+
+
+def test_a_live_signoff_link_follows_the_sweep(env, monkeypatch):
+    """A live sign-off link is kept by a watcher sweep, frozen by a disable.
+
+    The two bulk sweeps differ on purpose (2026-10-31 master integration):
+    a watcher completion runs with auto-start still on, so the sign-off
+    driver may still be polling the link and freezing it would hide the
+    verdict the session appends later; the disable sweep runs because
+    auto-start is off, so the driver stops stepping the PR and the link
+    can be frozen.
+    """
+    from pm_core import tmux as tmux_mod
+    from pm_core.tui import auto_start, watcher_ui
+
+    sid = _sid()
+    app = _fake_app(env, session="pm-x")
+    tdir = env.tmp / "transcripts" / "run"
+    tdir.mkdir(parents=True)
+    live = _native(env.cwd, sid, "ROUTING")
+    p = tdir / "signoff-pr-abc.jsonl"
+    _link(p, live)
+    monkeypatch.setattr(tmux_mod, "live_pane_start_commands",
+                        lambda session: [f"claude --session-id {sid}"])
+
+    watcher_ui._on_complete_from_thread(
+        app, types.SimpleNamespace(_transcript_dir=str(tdir),
+                                   latest_verdict="READY", iteration=1))
+    assert p.is_symlink()  # the driver may still be polling it
+    with live.open("a") as f:
+        f.write(_record("SIGNOFF_MERGE") + "\n")
+    assert "SIGNOFF_MERGE" in p.read_text()
+
+    auto_start._finalize_all_transcripts(app)
+    assert p.is_file() and not p.is_symlink()
 
 
 def test_live_read_transcripts_follow_a_live_pane(env, monkeypatch):

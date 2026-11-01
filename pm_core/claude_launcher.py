@@ -1358,6 +1358,13 @@ def archive_transcript(transcript_path: str | Path) -> Path | None:
         _log.info("transcript: %s already archived at %s", p, dest)
         return dest
     if not _move_into_archive(p, dest, raw if is_link else None):
+        # A concurrent archiver can create the entry between the check
+        # above and the no-clobber create.  That is not a failure: the
+        # session is preserved and the caller may drop the canonical, so
+        # report the entry instead of "could not archive ... replacing it".
+        if dest.is_symlink() or dest.exists():
+            _log.info("transcript: %s already archived at %s", p, dest)
+            return dest
         return None
     _log.info("transcript: archived %s -> %s", p, dest)
     return dest

@@ -379,7 +379,7 @@ No **[UNRESOLVED]** ambiguities.
 
 ## Verification
 
-- New unit tests (35) in `tests/test_transcript_archive.py` covering:
+- New unit tests (37) in `tests/test_transcript_archive.py` covering:
   archive-on-replace, ownership-checked finalize, loop-scoped naming,
   retire preserving history, live-appends visibility, restart fallback
   (legacy fallback for a live link, loop-scoped preference when both
@@ -396,7 +396,11 @@ No **[UNRESOLVED]** ambiguities.
   the live-owner skips (running review loop, running watcher, live step
   windows) for both bulk sweeps, and a stub app's non-string
   `_session_name` never reaching tmux, and a legacy iteration link left
-  live when no session id was recorded (review d468 i4).  One more
+  live when no session id was recorded (review d468 i4).  Review e757 i2
+  adds two: a live sign-off link is kept by a watcher-completion sweep
+  and frozen by the disable sweep (the `include_signoff` split merged
+  from master), and losing the no-clobber archive create to a concurrent
+  archiver is reported as success (review e757 i2).  One more
   (`test_launches_loop_scoped_transcript_and_records_session`) lives in
   `tests/test_review_loop.py` because it drives `run_review_loop_sync`;
   `tests/test_breadcrumb_review_loop.py` gains an
@@ -589,6 +593,20 @@ Applied on top of the design above; keep them when editing the code.
   loop-scoped, which is why a prefix is the right key.  `qa.md` R7 no
   longer asks for a `merge-<pr>.jsonl` on a clean local merge (none is
   written; assert the merge by PR status).
+- `archive_transcript` reports a lost no-clobber create as success
+  (review e757 i2).  If another archiver creates the entry between the
+  existence check and `_move_into_archive`'s create, the session *is*
+  preserved; returning `None` made `build_claude_shell_cmd` log
+  "could not archive … replacing it" for a session that was archived.
+  The entry is returned instead, so the launch's log matches what
+  happened
+  (`test_a_concurrent_archive_is_not_reported_as_a_failure`).
+- The `include_signoff` split between the two bulk sweeps (merged from
+  master) is now pinned by a test (review e757 i2):
+  `test_a_live_signoff_link_follows_the_sweep` shows a watcher
+  completion keeping a live sign-off link (auto-start still on, the
+  driver is still polling) and the disable sweep freezing the same link
+  (auto-start off, the driver stops stepping the PR).
 
 ## Master integration (2026-10-31, merge of `origin/master` eaf3372e)
 
