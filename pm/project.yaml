@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T06:19:43.733293+00:00'
+  updated_at: '2026-11-01T06:43:10.640728+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38138,6 +38138,29 @@ prs:
       work stays dropped.'
     created_at: '2026-11-01T06:19:43Z'
     last_edited: '2026-11-01T06:19:43Z'
+  - id: note-8cacef7
+    text: 'Review loop 928f i20: one leftover in the kept tmux-recipe scope, the PR
+      own class (a completion check that cannot tell a finished recording from a dead
+      one). Step 5 refused the run whenever the recorder was gone while the target
+      TUI was still alive — but that is exactly the state a recording that already
+      ended by this step own detach leaves, so pasting step 5 a second time (a resumed
+      session, a worker checking its work) reported a complete capture as "the cast
+      is incomplete, not a finished recording" and told the worker to re-record it.
+      Verified live in this container on tmux 3.2a + asciinema 2.1.0: after a real
+      C-b d detach the recorder is gone, the target is alive and recorder.status holds
+      0 (pre-fix re-run rc 1 with that message; post-fix rc 0), while a recorder killed
+      by kill-session leaves NO recorder.status and the fixed step still exits 1 with
+      the same message. The branch now reads the recorder own status — the handle
+      the both-gone branch already trusts — and falls through to the cast/status/transcript
+      checks when it holds 0. Harness: stub mode midadied wrote a 0 status for a recorder
+      the stub kills, a state real tmux cannot produce; it now writes none. New case
+      test_tmux_stop_step_pasted_twice_is_not_an_incomplete_recording; mutation (guard
+      removed) fails exactly it. Tests: recipe file 310 passed (was 309); full suite
+      5507 passed, 1 skipped, 0 failed (470.13 s). Evidence: /pm-captures/review-928f-i20/.
+      impl.md R81 + Evidence note, qa.md. No pm_core/ change; the dropped helper/prompt/verifier
+      work stays dropped.'
+    created_at: '2026-11-01T06:43:10Z'
+    last_edited: '2026-11-01T06:43:10Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
