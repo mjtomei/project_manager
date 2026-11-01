@@ -14,6 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from pm_core.model_config import AMBIENT_EFFORT_ENV
 from pm_core.paths import configure_logger, log_shell_command, write_env_file
 from pm_core.prompt_bounds import (
     PROMPT_ARG_LIMIT, PromptTooLargeError, prompt_bytes,
@@ -315,14 +316,13 @@ def _drop_ambient_effort(run_env: dict | None, effort: str | None,
     reports.  A value the provider itself assigns is explicit configuration
     and is kept.  Returns *run_env* unchanged when nothing needs removing.
     """
-    if not effort or (provider_env
-                      and "CLAUDE_CODE_EFFORT_LEVEL" in provider_env):
+    if not effort or (provider_env and AMBIENT_EFFORT_ENV in provider_env):
         return run_env
     base = os.environ if run_env is None else run_env
-    if "CLAUDE_CODE_EFFORT_LEVEL" not in base:
+    if AMBIENT_EFFORT_ENV not in base:
         return run_env
     env = dict(base)
-    env.pop("CLAUDE_CODE_EFFORT_LEVEL", None)
+    env.pop(AMBIENT_EFFORT_ENV, None)
     return env
 
 
@@ -1010,13 +1010,13 @@ def build_claude_shell_cmd(
         # ambient value is removed from the session.  A provider that
         # assigns it explicitly is the user's own configuration: leave it
         # and say so, rather than silently dropping a configured variable.
-        if "CLAUDE_CODE_EFFORT_LEVEL" in provider_env:
+        if AMBIENT_EFFORT_ENV in provider_env:
             _log.warning(
-                "provider %r assigns CLAUDE_CODE_EFFORT_LEVEL; it overrides "
-                "--effort %s for this session",
-                provider or "<default>", effort)
+                "provider %r assigns %s; it overrides --effort %s for this "
+                "session", provider or "<default>", AMBIENT_EFFORT_ENV,
+                effort)
         else:
-            unset = (*unset, "CLAUDE_CODE_EFFORT_LEVEL")
+            unset = (*unset, AMBIENT_EFFORT_ENV)
     if provider_env:
         if env_out is not None:
             env_out.update(provider_env)
