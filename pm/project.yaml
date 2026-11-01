@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T21:33:00.621313+00:00'
+  updated_at: '2026-11-01T22:13:16.285378+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38783,6 +38783,34 @@ prs:
       impl.md R105, qa.md. The dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-11-01T21:33:00Z'
     last_edited: '2026-11-01T21:33:00Z'
+  - id: note-6b9b159
+    text: 'Review loop 928f i40: one leftover in the kept tmux-recipe scope, the PR
+      own class (a completion check that reads the state a failed run left behind);
+      no pm_core change. R106: a recorder that exits before it drew leaves asciinema
+      own error in the cast with status 0 (verified live on tmux 3.2a + asciinema
+      2.1.0: a 168-byte cast holding "cant find session: pm-test", recorder.status
+      0, the transcript step 2 wrote), which step 5 cast/status/transcript checks
+      accept. When the target session ended with the attach, step 5 both-gone branch
+      reads it and the session-option rejection mark died with the session: a step-5
+      paste exited 0 on the error cast. Fix: step 3 two "recorder exited before it
+      drew" branches record the rejection before releasing the claim, in both handles
+      (the session option, which works when the target is alive and the capture directory
+      is read-only, and recorder.rejected in the capture directory, which survives
+      the target session end). Every other rejection site writes both; step 2 clears
+      both after the pipe attaches; step 0 and step 3 clear the file with the rest;
+      step 5 reads either mark in both branches, and the refusal message names both
+      clears and "the recorder never attached". Tests: test_a_failed_start_does_not_let_a_repaste_accept_the_capture
+      (new failedattachboth stub mode: the recorder records the attach error and exits
+      0, the target ends with it; step 3 marks, step 5 must refuse; fails with the
+      mark read removed), both-mark coverage in test_step_two_clears_a_previous_rejection,
+      test_a_rejection_survives_a_re_record_that_cannot_start and test_clearing_the_rejection_lets_a_second_paste_accept,
+      and test_tmux_recipe_lists_its_rejection_mark for the produced-files list and
+      manifest. Recipe file 382 passed (was 380); related suites 199 passed; full
+      suite 5579 passed, 1 skipped, 0 failed (503.55 s, once, final tree). Evidence:
+      /pm-captures/review-928f-i40/. impl.md R106, qa.md. The dropped helper/prompt/verifier
+      work stays dropped.'
+    created_at: '2026-11-01T22:13:16Z'
+    last_edited: '2026-11-01T22:13:16Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
