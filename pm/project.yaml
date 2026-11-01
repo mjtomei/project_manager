@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T21:24:51.486939+00:00'
+  updated_at: '2026-11-01T22:03:07.204380+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6735,6 +6735,52 @@ prs:
       No live session, server or shared host configuration was touched.'
     created_at: '2026-11-01T21:24:51Z'
     last_edited: '2026-11-01T21:24:51Z'
+  - id: note-a06e878
+    text: 'Review loop b48f i13 (no requirement changes; full suite 5470 passed /
+      1 skipped, 431.7 s, log /pm-captures/review-b48f-i13/full-suite-final.log; commit
+      bc276ee16). Verification pass over the head after the b48f i12 fix; one cross-session
+      hazard of the "a name is not a group" class, plus the parser crash that guarding
+      it exposed. Correction to b48f i12: its "deliberately not changed" claim that
+      a `<base>~<non-numeric>` name is one "pm never generates" was wrong — the session
+      name is `pm-<repo directory>-<8-hex hash>`, so the project `x~foo` runs `pm-x~foo-<hash>`,
+      which does start with `pm-x~`. On the legacy default server (the only server
+      where two unrelated bases coexist) the name-prefix match made that other project''s
+      session part of `pm-x`''s group. (1) `list_grouped_sessions()` matched a name
+      prefix, not a grouped session. Verified live on tmux 3.2a with `pm-x` and `pm-x~foo-12345678`
+      on one disposable server: pre-fix `list_grouped_sessions("pm-x")` returned `[''pm-x~foo-12345678'']`
+      and `sessions_in_group("pm-x")` returned both names. Consequences on the legacy
+      default server: `pm session kill pm-x` tore the other project''s session down;
+      `pm session` could reuse it as an "unattached grouped session" and attach the
+      user to the wrong project; Ctrl-Q''s `detach_current_client` fallback could
+      detach that project''s client; `current_or_base_session`/`get_window_id`/`select_window`
+      could target its window. Only an ASCII numeric suffix is a grouped session pm
+      writes (`next_grouped_session_name` is the only producer), so `list_grouped_sessions`
+      now keeps only `_grouped_suffix(line) is not None`. Views stay included through
+      tmux''s session group: `sessions_in_group` now unions only numeric names, and
+      the callers that need views were switched to it — `current_or_base_session`
+      (attached-view fallback), `sessions_on_window` (default candidates), `pane_layout.get_reliable_window_size`
+      (smallest attached client) and `_register_tmux_bindings` (`window-size=smallest`);
+      `attached_group_active_windows` dropped its prefix clause and matches `#{session_group}`
+      only; `qa_status._find_attached_session` (standalone, no pm_core import) does
+      the same with a local `_is_grouped_of()` helper and its priority-2 list now
+      carries the group field. Verified live post-fix on a disposable server: the
+      unrelated `pm-x~foo-12345678` is not a member of `pm-x`''s group, a view of
+      `pm-x` still is, and `current_or_base_session("pm-x")` returns the attached
+      `myview`. (2) `_grouped_suffix()` crashed on a non-ASCII digit suffix: `str.isdigit()`
+      is true for `²`, but `int("²")` raises, and `list_grouped_sessions` calls it
+      for every prefix-matching name, so a session named `pm-x~²` raised out of `pm
+      session`, kill, detach and the session-list group merge. `_grouped_suffix`,
+      `paths.base_session_name` and the wrapper''s inline copy in `_ipc_session_tag`
+      now require `suffix.isascii() and suffix.isdigit()`. Tests +6 (TestBaseSessionName,
+      TestListGroupedSessions x2, TestSessionsInGroup, TestQaStatusSocketRouting,
+      TestCurrentOrBaseSession), every fix-asserting one verified to fail on a worktree
+      of the pre-fix head 6e12b15ab; `TestSessionsOnWindow` now patches `sessions_in_group`.
+      Docs: impl.md gained the b48f i13 section plus a correction note on the i12
+      passage; qa.md R8 gained the unrelated-similarly-named-session bullet. Targeted
+      suites 739 passed. No live session, server or shared host configuration was
+      touched — every fixture used a disposable socket directory or a mocked tmux.'
+    created_at: '2026-11-01T22:03:07Z'
+    last_edited: '2026-11-01T22:03:07Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
