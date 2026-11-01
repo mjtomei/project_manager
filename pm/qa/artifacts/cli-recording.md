@@ -116,11 +116,15 @@ on its own. A leftover cast is worse: without
 `--overwrite` the recorder aborts on it, and the render step rewrites the
 `.mp4` from whatever cast is on disk, so a run that recorded nothing would
 still produce a fresh-looking video of the *previous* run. The no-TTY
-scaffold repeats both steps, and also clears a `rec` session an earlier run
-left behind: a leftover one makes `new-session` fail with "duplicate
-session: rec" — the scaffold reports that as a start failure, instead of
-spinning out its readiness wait against a `rec` session that never writes a
-cast. This recipe's readiness signal is the cast file, not the pane's
+scaffold repeats both steps, and also deals with a `rec` session an earlier
+run left behind: a recorder whose pane is still running is refused (it is a
+capture in progress — clearing it would end that recording, and two runs
+sharing one capture directory then read the same cast and status), while one
+whose pane has returned is cleared, because `new-session` fails with
+"duplicate session: rec" while it exists. A duplicate that appears in the
+gap before `new-session` is reported as a start failure, instead of spinning
+out its readiness wait against a `rec` session that never writes a cast.
+This recipe's readiness signal is the cast file, not the pane's
 content (a quiet command draws nothing), so — unlike the tmux recipe's
 pane-content wait — it cannot pass on the previous run's recorder; it would
 just burn its deadline. The pane is still read as an *end* condition
@@ -190,18 +194,23 @@ where the CLI runs.
 #    asciinema exits the pane's command returns — and the session ends with
 #    it, unless the server's `remain-on-exit` keeps it (steps 2 and 4 read
 #    the pane for that reason). The capture subdirectory has to exist (and
-#    hold no earlier cast) before asciinema writes into it. Clear a leftover
-#    `rec` session from an aborted run first — `new-session` fails with
-#    "duplicate session: rec"
-#    while it exists — with `kill-session`, not `kill-server`: killing the
-#    server and reconnecting immediately races its exit ("server exited
-#    unexpectedly"). The socket *name* is shared by every run on this host,
-#    so two CLI captures must not run at once: the later run's
-#    `kill-session -t rec` ends the earlier run's recorder, and either run's
-#    failure path kills the server under the other. Both then fail loudly (a
-#    torn-down pane has no status file) rather than reading each other's
-#    evidence, but both captures are lost — run them one after the other.
-#    That shared name is why the clear comes *after* the absolute-path guard
+#    hold no earlier cast) before asciinema writes into it. A `rec` session
+#    whose pane is still running is refused (the guard below): it is a
+#    capture in progress, and clearing it would end that recording and let
+#    this run's recorder write over the cast and status its step 4 reads —
+#    two runs sharing one capture directory then both report success on the
+#    same recording (verified live: two scaffolds pasted into one directory
+#    exited 0 with the second run's cast). One whose pane has returned is a
+#    leftover from an aborted run and is cleared with `kill-session`, not
+#    `kill-server`: killing the server and reconnecting immediately races its
+#    exit ("server exited unexpectedly"). The socket *name* is shared by
+#    every run on this host, so two CLI captures must not run at once: the
+#    second run refuses while the first recorder is alive, and either run's
+#    failure path kills the server under the other. A recorder that has
+#    already ended is a dead leftover and is cleared, so a second run that
+#    starts in the gap before the first run's step 4 has read its files can
+#    still replace them — run captures one after the other.
+#    That shared name is why the guard comes *after* the absolute-path guard
 #    and the `mkdir` below: a block that is about to refuse its own input must
 #    not end a concurrent capture's recorder on its way out.
 #    <command-to-record> sits inside single quotes that are
@@ -270,15 +279,36 @@ mkdir -p <capture-dir>/<short-name> || {
         "path and its permissions" >&2
     exit 1
 }
-# Clear the leftover `rec` session now that the path is known good (see the
-# note above): `new-session` fails with "duplicate session: rec" while it
-# exists. It goes *after* the `mkdir` above, not before it: the `scaffold`
-# socket name is shared by every CLI capture on this host, so a block that is
-# about to refuse a capture directory it cannot create would otherwise end a
-# concurrent capture's recorder on its way out — that run then fails as
-# "recorder status is missing", a failure it cannot connect to this block.
-# (The absolute-path guard above comes first for the same reason.)
-tmux -L scaffold kill-session -t rec 2>/dev/null || true
+# A recorder whose pane is still running is a capture in progress — this
+# worker's own earlier attempt, or another run on this host's shared
+# `scaffold` socket. Do not clear it: killing it ends that recording, and the
+# new recorder then writes the same cast and status its step 4 reads, so both
+# runs can report success on one recording (verified live: two scaffolds
+# pasted into one capture directory both exited 0 with the second run's
+# cast). Refuse it and name the step that ends it. `#{pane_dead}` is the
+# handle: 1 once the pane's command has returned (`remain-on-exit on` keeps
+# the session after that), and an empty answer — the session went away
+# between the two calls — is read as live, because acting on a recorder this
+# block cannot see is the worse failure.
+# A recorder whose pane has returned is a leftover from an aborted run: it
+# writes nothing, and `new-session` fails with "duplicate session: rec" while
+# it exists, so clear it (best-effort) and start. This guard runs *after* the
+# `mkdir` above, not before it: the `scaffold` socket name is shared by every
+# CLI capture on this host, so a block that is about to refuse a capture
+# directory it cannot create must not end a concurrent capture's recorder on
+# its way out (the absolute-path guard above comes first for the same
+# reason).
+if tmux -L scaffold has-session -t rec 2>/dev/null; then
+    if [ "$(tmux -L scaffold display-message -p -t rec:0.0 '#{pane_dead}' 2>/dev/null)" != 1 ]; then
+        echo "a recorder is already running on this socket — a CLI capture" \
+            "must not share it: let it finish (run step 4 for your own earlier" \
+            "attempt), or end it with 'tmux -L scaffold kill-server' and" \
+            "re-record. This block did not start another (both runs would" \
+            "write the same cast and status)." >&2
+        exit 1
+    fi
+    tmux -L scaffold kill-session -t rec 2>/dev/null || true
+fi
 rm -f <capture-dir>/<short-name>/recording.cast \
       <capture-dir>/<short-name>/transcript.log \
       <capture-dir>/<short-name>/recording.mp4 \

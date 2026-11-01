@@ -140,8 +140,9 @@ recording-recipe bugs that any worker following the recipe hits:
   larger-bound re-run they prescribe can actually be applied instead of
   meeting a torn-down pane. (The CLI scaffold's `-L scaffold` socket name is
   shared by every run on the host, so two CLI captures must run in sequence;
-  the step-1 prose says so — both runs fail loudly rather than sharing
-  evidence, the same disposition as the tmux recipe's `pm-recorder` note.)
+  the step-1 prose says so, and the scaffold now *refuses* a recorder whose
+  pane is still running instead of clearing it — see the live-recorder
+  refusal below.)
 - a remedy that runs but cannot work says so, and an empty answer never
   becomes a path (review loop 7c9c i3): both recording recipes' `agg` install
   block stops when the binary it just downloaded still does not resolve
@@ -1056,7 +1057,9 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   refusal messages name the manual clear (`tmux set-option -u -t <session>
   @pm_capture_dir`) — "end that capture" alone is impossible advice for a
   claim whose capture already ended. Both
-  collisions now fail loudly on at least one side instead of passing. The
+  collisions now fail loudly on at least one side instead of passing — and a
+  second run into a shared directory is caught even earlier, at step 0's
+  live-recorder refusal (R101). The
   claim is compared as a canonical directory (`cd` + `pwd -P`, with a stored
   claim's `~/` prefix expanded), not as the text a worker typed: `~/cap` and
   an absolute path to the same directory are one claim, so a second session
@@ -1070,6 +1073,23 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   directory was refused as a collision that does not exist. A raw
   `tmux pipe-pane` that does not go through step 2 still bypasses the claim —
   record it as a limitation, not a pass.
+- A second capture starts while another recorder is still running on the same
+  server/socket → it must be **refused** before it clears anything, not clear
+  that recorder and take over. Both start blocks used to clear the shared
+  recorder unconditionally, so two runs sharing one capture directory
+  collided silently: the second run's clear ended the first run's recorder,
+  its own recorder wrote the same cast and status, and the first run's stop
+  step waited on the new session and read the second run's files. Reproduced
+  live with the CLI scaffold's own block (two scaffolds pasted 0.7 s apart
+  into one capture directory): both exited 0 with the second run's cast and
+  status, while different directories made the first run fail loudly. Both
+  blocks now read `#{pane_dead}` and refuse a live recorder ("a recorder is
+  already running …"), clearing only a dead-pane leftover (`remain-on-exit
+  on` keeps the session after its pane returns). A run that starts in the
+  gap after the first recorder has ended but before its stop step has read
+  the files can still replace them, and the first run can then read the
+  second's evidence — captures must run in sequence, which the step-0 prose
+  says (R101).
 - The Layer 2 protocol block runs on a host without `curl` (or with a `PATH`
   that does not resolve it) → it must stop naming the missing tool and write
   neither log. The pre-fix block exits 0 with `http.log` and `sse.log`

@@ -1061,11 +1061,15 @@ R26. **The detach key is the prefix the server actually uses, and the
      a concurrent capture is the *other* run's recorder; that run then fails
      (its recorder vanished mid-scenario, so step 5 fails it instead of
      passing a truncated cast), and its own step 5 detaches whatever
-     `pm-recorder` is up by then — the second run's recorder. Both runs fail
-     loudly rather than reading each other's evidence, so this is recorded as
-     a limitation rather than fixed with a per-run session name: the step-0
-     prose now says two captures must run in sequence on one server, or each
-     on its own server (a private `TMUX_TMPDIR`). Considered and rejected:
+     `pm-recorder` is up by then — the second run's recorder. (The claim
+     that both runs fail loudly rather than reading each other's evidence
+     held only for *different* capture directories; a shared one let the
+     earlier run pass on the later run's files. R101, review loop 928f i36,
+     now refuses a live recorder at step 0 in both recipes.) This is
+     recorded as a limitation rather than fixed with a per-run session name:
+     the step-0 prose now says two captures must run in sequence on one
+     server, or each on its own server (a private `TMUX_TMPDIR`). Considered
+     and rejected:
      deriving the session name from the capture directory — it would have to
      be re-derived in steps 0, 3, 4 and 5 (each its own paste) and the
      execution harness keys its session model by that name, while the
@@ -1135,13 +1139,17 @@ R27. **A port check that cannot tell a free port from a taken one, a
      timeout. The readiness timeout, the cast and status checks keep their
      teardown: nothing there is waiting on a retry.
 
-   Also recorded, not fixed (the tmux recipe's `pm-recorder` note, R26, one
+   Also recorded at the time (the tmux recipe's `pm-recorder` note, R26, one
    file over): the CLI scaffold's `-L scaffold` socket *name* is shared by
    every run on the host, so two CLI captures must not run at once — the
-   later run's `kill-session -t rec` ends the earlier run's recorder, and
-   either run's failure path (`kill-server`) kills the other's server. Both
-   runs fail loudly rather than reading each other's evidence, so the step-1
-   prose now says to run captures in sequence.
+   later run's `kill-session -t rec` ended the earlier run's recorder, and
+   either run's failure path (`kill-server`) kills the other's server. The
+   claim that both runs fail loudly rather than reading each other's evidence
+   held only for *different* capture directories: with a shared one the
+   earlier run's stop step waited on the later run's session and passed on
+   its cast and status (reproduced live, review loop 928f i36). R101 now
+   refuses a live recorder instead of clearing it, in both recipes, and the
+   step-1 prose says to run captures in sequence.
 
 R28. **The stale-video cleanup named a file the render never writes.** One
    leftover in the kept recipe scope found by review loop 9265 i5, in both
@@ -4372,6 +4380,66 @@ R100. **A recorder ended by a detach this step did not send passed as a
      `pre-fix-mutation.log`, `mutation-check.log`, `recipe-file.log`,
      `suite.log`, `README.md`, `scripts/`). No `pm_core/` change; the dropped
      helper/prompt/verifier work stays dropped.
+
+R101. **A second capture cleared a live recorder and read its evidence
+   (review loop 928f i36).** Both start blocks cleared the shared recorder
+   session unconditionally, and the recorded limitation's claim that the
+   collision "fails loudly rather than reading each other's evidence" held
+   only for *different* capture directories.
+
+   - **The defect.** The recorder session — `pm-recorder` on the tmux recipe's
+     server, `rec` on the CLI scaffold's `-L scaffold` socket — is shared by
+     every capture, and step 0 / the scaffold's step 1 ran `kill-session` on
+     it before starting a new one. Two runs pointed at one capture directory
+     therefore collided silently: the later run's clear ended the earlier
+     run's recorder, its own recorder wrote the same `recording.cast` /
+     `recorder.status`, and the earlier run's stop step — which waits on the
+     shared session, not on the recorder it started — read the later run's
+     files and passed. Reproduced live in this container with the CLI
+     scaffold's own block on a private `TMUX_TMPDIR`: two scaffolds pasted
+     0.7 s apart into one capture directory both exited 0, with the second
+     run's cast and status in the directory; with different directories the
+     first run failed loudly ("recorder status is missing or empty"), which
+     is what the recorded limitation described. The recipe prose ("Both then
+     fail loudly … rather than reading each other's evidence") was false for
+     a shared directory.
+   - **Fix.** Both start blocks now read the recorder's `#{pane_dead}` and
+     refuse a recorder whose pane is still running ("a recorder is already
+     running …"), naming the step that ends it (step 5 / step 4, or
+     `kill-session`); only a dead-pane leftover — `remain-on-exit on` keeps
+     the session after its pane returns — is cleared, because `new-session`
+     fails with "duplicate session" while it exists. The refusal runs after
+     the capture-directory guards (a block that refuses its own path still
+     makes no tmux call) and before the file clear, so the live run's
+     evidence survives. An empty `#{pane_dead}` answer is read as live, the
+     rule step 3/step 5 already follow. A recorder that has already ended is
+     still a dead leftover and is cleared, so a second run that starts in the
+     gap before the first run's stop step has read the files can still
+     replace them; the start prose says captures must run in sequence and no
+     longer claims both runs fail loudly.
+   - **Coverage.** `test_a_live_recorder_is_refused_not_cleared` (both
+     recipes) seeds a live recorder and the previous run's cast/status,
+     requires the refusal, the session's survival, no `kill-session` /
+     `kill-server` call and the seeded evidence untouched; it fails against
+     the pre-fix recipes (both cleared the recorder and ran on).
+     `test_a_dead_recorder_leftover_is_cleared` seeds a dead-pane leftover
+     (`STUB_REMAIN`) and requires the run to proceed, the session gone, the
+     stale transcript/cast cleared and a fresh cast written; it passes
+     against the pre-fix recipes too, pinning that the refusal does not
+     over-refuse. The `kill-server` ordering text test now matches an
+     executed `tmux … kill-server` rather than the remedy the new refusal
+     message names in prose.
+   - **Evidence.** Live: two concurrent CLI scaffolds — pre-fix both rc 0 on
+     one recording, post-fix the first rc 0 and the second rc 1 with the
+     refusal. Live tmux step 0 on a private server: a live `pm-recorder` →
+     rc 1 and the session alive; a dead-pane leftover (`remain-on-exit on`)
+     → rc 0 and the session cleared. Recipe file **372 passed** (was 368);
+     full suite **5569 passed, 1 skipped, 0 failed** (497.80 s, run once on
+     the final tree). Evidence: `/pm-captures/review-928f-i36/`
+     (`probe-concurrent-pre.log`, `probe-concurrent-pre-different-dirs.log`,
+     `probe-concurrent-post.log`, `probe-step0-pre.log`, `probe-step0.log`,
+     `mutation-check.log`, `recipe-file.log`, `suite.log`, `README.md`,
+     `scripts/`).
 
 ## Non-goals
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.

@@ -72,28 +72,32 @@ transcript somewhere these steps never look (step 0 refuses one rather than
 failing later as an empty transcript, and every step pasted on its own —
 2, 3, 4 and 5 — refuses it too, because each resolves the path against its
 own shell or the session's directory). A leftover `pm-recorder`
-session is refused by step 3 while its pane is still running ("a recorder is
-already running on this server — end it with step 5 …"); one whose pane has
-already returned — `remain-on-exit on` keeps the session after its only pane's
-command exits — is cleared there instead, like step 0's. A duplicate that
-appears in the gap before `new-session` stops the run at "could not start the
-recorder session". The run stops there, instead of passing the readiness wait
-on the *previous* run's attach client. The clear names the
-session exactly (`=pm-recorder`): a bare name is prefix-matched when no
-session has the whole name, and pm's own sessions are `pm-<repo>-<hash>`, so
+session whose pane is still running is refused by step 0, and again by step 3
+if one appears later: it is a capture in progress, and clearing it would end
+that recording while a new recorder writes over the cast and status its step
+5 reads — two runs sharing one capture directory then report success on the
+same recording. One whose pane has already returned — `remain-on-exit on`
+keeps the session after its only pane's command exits — is cleared instead,
+because `new-session` fails with "duplicate session" while it exists. A
+duplicate that appears in the gap before `new-session` stops the run at
+"could not start the recorder session". The run stops there, instead of
+passing the readiness wait on the *previous* run's attach client. The clear
+names the session exactly (`=pm-recorder`): a bare name is prefix-matched
+when no session has the whole name, and pm's own sessions are
+`pm-<repo>-<hash>`, so
 a repo whose name starts with `recorder` would otherwise lose its pm session
 here — and this capture's target session is exactly that when the repo is
 named `recorder`. That name is shared by every run on the same tmux server,
-so two captures must not run at once on one server: the later run's step 0
-ends the earlier run's recorder, and the earlier run's step 5 detaches the
-later one.
+so two captures must not run at once on one server: the second run refuses
+while the first recorder's pane is alive, and either run's step 5 detaches
+whatever `pm-recorder` is up by then.
 Run captures one after the other, or give each worker its own server with a
-private `TMUX_TMPDIR`. (Both runs then fail loudly — a recorder that vanished
-mid-scenario is a failure in step 5 — rather than reading each other's
-evidence, but the capture is lost either way.) That shared name is also why
-the clear comes *after* the capture directory is created: a block that is
-about to refuse an unusable `<capture-dir>` must not end a concurrent
-capture's recorder on its way out. `asciinema rec` reports
+private `TMUX_TMPDIR`. A recorder that has already ended is a dead leftover
+and is cleared, so a second run that starts in the gap before the first run's
+step 5 has read its files can still replace them — run captures in sequence.
+That shared name is also why the guards come *after* the capture directory is
+created: a block that is about to refuse an unusable `<capture-dir>` must not
+end a concurrent capture's recorder on its way out. `asciinema rec` reports
 "asciicast saved" and exits 0 even when the
 directory does not exist, so a missing `mkdir` looks like a successful
 capture that wrote nothing. A directory that exists and cannot be written is
@@ -132,9 +136,9 @@ stale-evidence bug as a leftover cast, one step earlier. (The web-UI recipe
 clears its mp4 in step 1 for the same reason.)
 
 ```
-# 0. Create the capture directory, then clear what an earlier run left
-#    behind before anything writes into it: the recorder session and the
-#    files in it.
+# 0. Create the capture directory, then deal with the recorder session an
+#    earlier run left behind (refuse a live one, clear a dead one) and clear
+#    its files before anything writes into the directory.
 # <capture-dir> has to be an absolute path (or start with ~/). tmux runs the
 # transcript pipe's
 # command in the pm session's directory, not in the shell that pasted the
@@ -182,13 +186,26 @@ mkdir -p <capture-dir> || {
         "the path and its permissions" >&2
     exit 1
 }
-# Clear the leftover recorder session now that the path is known usable. It
-# goes *after* the directory is created, not before: `pm-recorder` is shared
-# by every capture on this server, so a block that is about to refuse an
-# unusable <capture-dir> would otherwise end a concurrent capture's recorder
-# on its way out — and that run then fails as "recorder exited while the TUI
-# was still running", a failure it cannot connect to this block. (The
-# absolute-path guard above comes first for the same reason.)
+# Deal with the recorder session now that the path is known usable. A
+# recorder whose pane is still running is a capture in progress — another run
+# on this server, or this worker's own earlier attempt — and step 0 must not
+# clear it: killing it ends that recording, and the new recorder then writes
+# over the cast and status that run's step 5 reads, so two captures sharing
+# one capture directory can both report success on the same recording (the
+# CLI scaffold's live repro is one file over). Refuse it and name the step
+# that ends it, as step 3 does for a recorder it finds. `#{pane_dead}` is the
+# handle: 1 once the pane's command has returned (`remain-on-exit on` keeps
+# the session after that), and an empty answer — the session went away
+# between the two calls — is read as live, because acting on a recorder this
+# step cannot see is the worse failure. A recorder whose pane has returned is
+# a leftover from an aborted run: it writes nothing, and `new-session` fails
+# with "duplicate session" while it exists, so clear it (best-effort) and
+# start.
+# Both checks run *after* the directory is created, not before: `pm-recorder`
+# is shared by every capture on this server, so a block that is about to
+# refuse an unusable <capture-dir> must not end a concurrent capture's
+# recorder on its way out (the absolute-path guard above comes first for the
+# same reason).
 # The target carries tmux's `=` so it is exact. A bare `pm-recorder` is
 # *prefix*-matched when no session has the whole name (verified on tmux 3.2a:
 # a bare target killed a `pm-recorder-abc123` session and took the server down
@@ -200,7 +217,17 @@ mkdir -p <capture-dir> || {
 # same `=` (the pane-target commands need the `:0.0` pane spec for it to
 # resolve), so none of them can act on a session that merely starts with the
 # name.
-tmux kill-session -t "=pm-recorder" 2>/dev/null || true
+if tmux has-session -t "=pm-recorder" 2>/dev/null; then
+    if [ "$(tmux display-message -p -t "=pm-recorder:0.0" '#{pane_dead}' 2>/dev/null)" != 1 ]; then
+        echo "a recorder is already running on this server — a capture must" \
+            "not share it: let it finish (run step 5 for your own earlier" \
+            "attempt), or end it with 'tmux kill-session -t =pm-recorder' and" \
+            "re-record. This step did not clear it (a new recorder would" \
+            "write over the cast and status that capture's step 5 reads)." >&2
+        exit 1
+    fi
+    tmux kill-session -t "=pm-recorder" 2>/dev/null || true
+fi
 rm -f <capture-dir>/recording.cast <capture-dir>/transcript.log \
       <capture-dir>/recording.mp4 <capture-dir>/recording.cast.gif \
       <capture-dir>/recording.mp4.partial.mp4 \

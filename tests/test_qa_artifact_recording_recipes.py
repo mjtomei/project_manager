@@ -764,7 +764,9 @@ class TestRecipes:
         assert block.index(cleanup) < start_at, (
             f"{name}: the stale recorder is cleared only after starting a new one")
         if cleanup == "kill-session -t rec":
-            kill_server = re.search(r"^[^#\n]*kill-server", block, re.M)
+            # An executed `kill-server`, not the remedy the refusal messages
+            # name in prose (which sits before the start too).
+            kill_server = re.search(r"^\s*tmux\b[^\n]*kill-server", block, re.M)
             assert kill_server and kill_server.start() > start_at, (
                 "cli-recording: kill-server before new-session races the "
                 "server's exit; clear the session instead")
@@ -7257,6 +7259,94 @@ class TestCaptureFlowExecution:
         assert (tmp_path / "state" / "pm-recorder-abc").exists(), (
             "the run drove and killed a session that merely starts with "
             "pm-recorder instead of failing on its own dead recorder")
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_a_live_recorder_is_refused_not_cleared(self, name, tmp_path):
+        """A live recorder is a capture in progress, not a leftover to clear.
+
+        The recorder session is shared by every capture on its server (the
+        tmux recipe's ``pm-recorder``) or host socket (the CLI scaffold's
+        ``rec``), and both blocks used to clear it unconditionally. Two runs
+        sharing one capture directory then collide silently: the later run's
+        clear ends the earlier run's recorder, its own recorder writes the
+        same cast and status, and the earlier run's stop step waits on the new
+        session and reads the later run's files — both report success on one
+        recording. Reproduced live with the CLI scaffold's own block (two
+        scaffolds pasted 0.7 s apart into one capture directory, a stub
+        ``asciinema`` that writes a cast and sleeps): both exited 0 with the
+        second run's cast and status in the directory.
+
+        The block has to refuse while the recorder's *pane* is running, and
+        clear only a dead-pane leftover (``remain-on-exit on`` keeps the
+        session after its only pane's command returns). The refusal runs
+        before the file clear, so the other run's evidence survives.
+        """
+        calls = tmp_path / "tmux-calls.log"
+        tmux = name == "tmux-screen-recording.md"
+        block = (_step_zero_block() if tmux
+                 else _scaffold_block(_recipe_text(name)))
+        session = "pm-recorder" if tmux else "rec"
+        r, cast = _run_block(
+            block, "ok", tmp_path, target=True, sessions=(session,),
+            files={"recording.cast": '{"version": 2}\n',
+                   "recorder.status": "0\n"},
+            env_extra={"STUB_TMUX_LOG": str(calls)})
+
+        assert r.returncode != 0, (
+            f"{name}: a live recorder was cleared instead of refused, so the "
+            "capture it belongs to loses its evidence")
+        assert "already running" in r.stderr, r.stderr
+        assert (tmp_path / "state" / session).exists(), (
+            f"{name}: the block ended a recorder another capture is running")
+        calls_text = calls.read_text() if calls.exists() else ""
+        assert "kill-session" not in calls_text and \
+            "kill-server" not in calls_text, (
+                f"{name}: the refused block acted on the live recorder: "
+                + calls_text)
+        assert cast.read_text() == '{"version": 2}\n', (
+            f"{name}: the refused block cleared the live capture's cast")
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_a_dead_recorder_leftover_is_cleared(self, name, tmp_path):
+        """A recorder whose pane has returned writes nothing; clear it.
+
+        ``remain-on-exit on`` keeps the session after its only pane's command
+        returns, and ``new-session`` then fails with "duplicate session" while
+        it exists. The live-recorder refusal must not refuse this one: the
+        leftover is dead, so it is cleared and the run starts (step 0's clear
+        takes the previous attempt's cast and status with it).
+        """
+        calls = tmp_path / "tmux-calls.log"
+        tmux = name == "tmux-screen-recording.md"
+        block = (_step_zero_block() if tmux
+                 else _scaffold_block(_recipe_text(name)))
+        session = "pm-recorder" if tmux else "rec"
+        r, cast = _run_block(
+            block, "oneshot", tmp_path, target=True,
+            sessions=(session,), state_files={f"dead.{session}": ""},
+            files={"recording.cast": '{"version": 2}\n',
+                   "recorder.status": "0\n",
+                   "transcript.log": "previous run\n"},
+            env_extra={"STUB_REMAIN": "1", "STUB_TMUX_LOG": str(calls)})
+
+        assert r.returncode == 0, (
+            f"{name}: a dead-pane recorder leftover was refused: " + r.stderr)
+        calls_text = calls.read_text()
+        assert "kill-session" in calls_text, (
+            f"{name}: the dead leftover was not cleared, so `new-session` "
+            "would fail with a duplicate session")
+        assert not (tmp_path / "state" / session).exists(), (
+            f"{name}: the dead leftover was left behind")
+        assert not (cast.parent / "transcript.log").exists(), (
+            f"{name}: the run kept the previous attempt's transcript")
+        if tmux:
+            # Step 0 alone removes the stale cast; the CLI scaffold goes on to
+            # record a new one.
+            assert not cast.exists(), (
+                f"{name}: step 0 kept the previous attempt's cast")
+        else:
+            assert cast.stat().st_size > 0, (
+                f"{name}: the cleared run wrote no cast")
 
     def test_step_two_refuses_an_empty_target(self, tmp_path):
         """Pasted alone with no session name, step 2 must not guess a session.

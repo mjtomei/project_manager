@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T18:42:15.927346+00:00'
+  updated_at: '2026-11-01T19:27:58.862182+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38679,6 +38679,35 @@ prs:
       work stays dropped.'
     created_at: '2026-11-01T18:42:15Z'
     last_edited: '2026-11-01T18:42:15Z'
+  - id: note-17cb92d
+    text: 'Review loop 928f i36: one leftover in the kept recipe scope, the PR''s
+      own class (a completion check that reads another run''s evidence). Both start
+      blocks cleared the shared recorder session unconditionally (`=pm-recorder` in
+      the tmux step 0, `rec` in the CLI scaffold), so two captures sharing one capture
+      directory collided silently: the later run''s clear ended the earlier run''s
+      recorder, its own recorder wrote the same cast/status, and the earlier run''s
+      stop step — which waits on the shared session, not on the recorder it started
+      — read the later run''s files and passed. Reproduced live on a private TMUX_TMPDIR
+      with the CLI scaffold''s own block: two scaffolds pasted 0.7 s apart into one
+      capture directory both exited 0 with the second run''s cast/status; with different
+      directories the first failed loudly ("recorder status is missing or empty"),
+      which is what the recorded limitation described. Both start blocks now read
+      `#{pane_dead}` and refuse a live recorder ("a recorder is already running …",
+      naming step 5/step 4 or kill-session), clearing only a dead-pane leftover (`remain-on-exit
+      on` keeps the session after its pane returns); the refusal runs after the capture-directory
+      guards and before the file clear, and an empty pane_dead answer is read as live.
+      Post-fix live probe: first run rc 0, second rc 1; tmux step 0: live rc 1 with
+      the session alive, dead leftover rc 0 and cleared. Tests: test_a_live_recorder_is_refused_not_cleared
+      (both recipes; fails pre-fix) and test_a_dead_recorder_leftover_is_cleared (passes
+      pre-fix too, so no over-refusal); the kill-server ordering text test now matches
+      an executed command, not the new message''s prose. Recipe file 372 passed (was
+      368); full suite 5569 passed, 1 skipped, 0 failed (497.80 s, run once on the
+      final tree). Evidence: /pm-captures/review-928f-i36/ (probe-concurrent-pre,
+      probe-concurrent-pre-different-dirs, probe-concurrent-post, probe-step0-pre,
+      probe-step0, mutation-check, recipe-file, suite, README, scripts). impl.md R101,
+      qa.md. The dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-11-01T19:27:58Z'
+    last_edited: '2026-11-01T19:27:58Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
