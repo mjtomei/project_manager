@@ -52422,3 +52422,29 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-8984bc7
+  plan: bugs
+  title: 'Bug: read-only pm qa list and pm qa mocks list create empty pm/qa/regression/
+    and pm/qa/mocks/ directories in the project'
+  branch: pm/pr-8984bc7-bug-read-only-pm-qa-list-and-pm-qa-mocks-list-crea
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_instructions.py dir helpers (qa_dir, instructions_dir,
+    regression_dir, mocks_dir, artifacts_dir) all mkdir on every call, and the list/show
+    paths use them. Repro (found in pr-7d5d036 QA scenario 1, after that PR retired
+    the whole pm/qa/regression/ corpus): in a checkout where pm/qa/regression/ and
+    pm/qa/mocks/ do not exist, run `pm qa list` (or `pm qa mocks list`); both empty
+    directories appear (untracked, so git status stays clean). After `git restore
+    --source=HEAD --staged --worktree pm/qa/regression/` removes the restored corpus,
+    the next `pm qa list` re-creates an empty pm/qa/regression/. Expected: listing/show
+    commands treat a missing category dir as empty and do not write to the project;
+    only add/author/edit paths create the directory.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-01T23:39:00.983588+00:00'
+  updated_at: '2026-11-01T23:39:00.983588+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
