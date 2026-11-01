@@ -50020,3 +50020,72 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-6d1e065
+  plan: bugs
+  title: 'Add pm pr reopen: reopen a closed PR in pm and its closed GitHub PR'
+  branch: pm/pr-6d1e065-add-pm-pr-reopen-reopen-a-closed-pr-in-pm-and-its-
+  status: pending
+  depends_on:
+  - pr-62ad13d
+  description: 'Follow-up to pr-62ad13d (#272), requested by the user at its sign-off
+    (2026-11-01). Since #272, pm pr close keeps the record with status: closed, and
+    GitHub sync never reopens a locally closed record (a GitHub OPEN state cannot
+    be told apart from --keep-github or a failed gh close). The only way back today
+    is ''pm pr edit <id> --status pending'', which does not touch GitHub. Add a dedicated
+    reopen command that does both sides.
+
+
+    Required behavior:
+
+    - New ''pm pr reopen [PR_ID]'' (defaults to the active PR, like close). Only a
+    closed record is reopened. A merged record is refused (there is no reopen from
+    merged). A non-terminal record is a no-op that says it is not closed (exit 0).
+
+    - Local side: set status to pending and drop closed_at via helpers._record_status_timestamp(pr,
+    ''pending'', previous_status=''closed''). Keep every other field (notes, depends_on,
+    branch, workdir, gh fields, sign-off/merge evidence). A later sync moves an OPEN
+    GitHub PR on to in_progress/in_review as it does today.
+
+    - GitHub side: when the record has gh_pr_number, read the GitHub state first.
+    CLOSED: run ''gh pr reopen <n>'' through a new gh_ops.reopen_pr wrapper. OPEN:
+    no call; say it is already open. MERGED: refuse without changing the local record,
+    and say a ''pm pr sync-github'' will finalize it as merged. With no gh_pr_number,
+    or the local backend, there is no GitHub step. ''--keep-github'' skips the GitHub
+    step.
+
+    - Non-destructive and failure-tolerant, mirroring close: a gh failure (missing/unauthenticated
+    gh, API error, or the head branch no longer existing on the remote, e.g. a PR
+    closed before #272 with --delete-branch) is a warning. The local reopen still
+    stands and re-running the command retries the GitHub step. Never recreate or push
+    a branch, and never touch the workdir.
+
+    - Lock discipline as in pr_close: the gh call stays outside store.locked_update.
+    The apply re-checks the fresh entry: if it was removed (close --remove) or became
+    merged meanwhile, report it, exit 1, and change nothing.
+
+    - Point users at the new command: helpers._closed_reopen_hint (the start/review/qa/signoff/merge
+    refusals), the ''Reopen:'' line and dependents hint in pm pr close, the pm pr
+    add closed-duplicate hint, and the watcher-prompt lifecycle line. ''pm pr edit
+    --status pending'' keeps working as the local-only path.
+
+    - Fake GitHub: support ''pr reopen'' in FakeGitHubBackend (CLOSED -> OPEN; refuse
+    MERGED and unknown PRs; fail when the git-backed head branch is missing) so tests
+    and QA never touch real GitHub.
+
+
+    Tests (isolated fake GitHub, disposable projects): closed -> pending with closed_at
+    dropped and all other fields intact; GitHub CLOSED is reopened and OPEN gets no
+    call; GitHub MERGED is refused with the record unchanged; no gh_pr_number; --keep-github;
+    gh failure leaves the local reopen and a re-run converges; a missing head branch
+    is a warning; a merged record is refused; a non-closed record is a no-op; concurrent
+    remove/merge at the lock; the updated refusal hints name pm pr reopen; reopen
+    then sync-github moves the record to in_review (ready) / in_progress (draft).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-01T14:19:31.152139+00:00'
+  updated_at: '2026-11-01T14:19:31.152139+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
