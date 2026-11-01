@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T22:43:17.809717+00:00'
+  updated_at: '2026-11-01T23:24:16.364867+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38840,6 +38840,31 @@ prs:
       dropped.'
     created_at: '2026-11-01T22:43:17Z'
     last_edited: '2026-11-01T22:43:17Z'
+  - id: note-2ea3ffb
+    text: 'Review loop 928f i42: one leftover in the kept recipe scope, the PR''s
+      own class (a completion check that cannot tell a finished recording from a dead
+      one); no pm_core change. R108: both recording recipes read asciinema''s own
+      exit status as the handle that tells a finished recording from a killed one,
+      but asciinema catches SIGTERM/SIGHUP, finalizes the cast and exits 0 (verified
+      live on tmux 3.2a + asciinema 2.1.0: a recorder TERMed mid-command left recorder.status
+      0, a non-empty cast and the recorded command killed; SIGINT 130 and SIGKILL
+      137 are already refused), and the pane''s shell survives to write that 0 — so
+      a supervisor''s polite kill left exactly a finished recording''s state and both
+      stop steps exited 0 on it (the CLI scaffold has no claim, and the tmux recipe''s
+      both-gone branch has none left). Fix: the pane command''s -c wraps the recorded
+      command in a subshell and writes recorder.command-done when it returns (a subshell
+      so exit/exec cannot skip it; asciinema''s child dies with it), and both stop
+      steps require the mark after the status check; the mark is cleared in the CLI
+      preamble and scaffold and in the tmux step 0 and step 3 restart, and both produced-files
+      lists plus the tmux manifest example name it. Tests: test_a_stopped_recorder_is_not_a_finished_recording
+      (stub termed/termedboth), failing against the pre-fix recipes (mutation-checked);
+      the stop-block fixtures seed the mark; the two CLI quoting cases assert the
+      wrapper. Recipe file 386 passed (was 384); related suites 145 passed; full suite
+      5462 passed, 1 skipped, 121 deselected, 0 failed (477.77 s, once on the final
+      tree). Evidence: /pm-captures/review-928f-i42/. impl.md R108, qa.md. The dropped
+      helper/prompt/verifier work stays dropped.'
+    created_at: '2026-11-01T23:24:16Z'
+    last_edited: '2026-11-01T23:24:16Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
