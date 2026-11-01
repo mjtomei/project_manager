@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-01T19:13:52.652251+00:00'
+  updated_at: '2026-11-01T20:12:56.028103+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48041,6 +48041,27 @@ prs:
       (bare binary, not a tarball) into /usr/local/bin works. Captures: /pm-captures/scenarios/55/{signoff-record-refusals,merge-gate-refusals,candidate-and-approval-integrity}.'
     created_at: '2026-11-01T19:13:52Z'
     last_edited: '2026-11-01T19:13:52Z'
+  - id: note-e2ec796
+    text: 'QA S58 (R12 lossless edit round-trip) PASS at e62c6ede — no code change.
+      All five stories held live; captures under /pm-captures/scenarios/58/{lossless-edit-noop,unrepresentable-notes-integration}.
+      Harness facts for the next run: (1) `pm pr edit` distinguishes two no-op messages
+      — `No changes made.` means the editor never wrote the file (mtime unchanged,
+      e.g. an EDITOR that only reads), `No changes detected.` means a save was observed
+      and the content was identical. Only the latter exercises the round-trip; `/usr/bin/touch`
+      produces it. (2) A note id is content-derived, so two simultaneous `pm pr note
+      add <pr> "same text"` both succeed with DISTINCT ids by extending the hash:
+      `note-ca1a36a` then `note-ca1a36a8` (8 hex chars, not 7). Any note-id regex
+      must be `note-[0-9a-f]*`, never exactly 7. (3) Editing a note through the template
+      changes its id (text-derived) and stamps a fresh `created_at`/`last_edited`;
+      that is expected, not a loss. (4) The template renders both an empty-text note
+      and a non-mapping `"just a string"` member as the same bare `- ` bullet, and
+      the parser still restores each to its own original shape — do not "fix" that
+      ambiguity by deduping the empty bullets. (5) Both integrate runs on the two-sided
+      fixture printed `resolved: pm/project.yaml (by record id)` and no `duplicate
+      record id`; integrate-1 listed both same-text ids under `added from PR`, integrate-2
+      only the survivor.'
+    created_at: '2026-11-01T20:12:55Z'
+    last_edited: '2026-11-01T20:12:55Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
