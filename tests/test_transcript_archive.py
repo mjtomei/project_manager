@@ -190,8 +190,10 @@ def test_a_concurrent_archive_is_not_reported_as_a_failure(env, monkeypatch):
 def test_identical_archive_match_is_scoped_to_the_same_stem(env):
     """A different step's entry is never mistaken for this transcript's copy.
 
-    Frozen files are keyed by mtime+size, so a naive directory-wide match
-    could drop a transcript that was never archived.
+    A frozen file is content-keyed, but the archive lookup still scopes its
+    candidates to the same stem; a directory-wide match could pair a
+    different step's entry with this transcript, after which the canonical
+    would be dropped unarchived.
     """
     canon = env.run / "impl-pr-abc.jsonl"
     canon.write_text(_record("IMPL CONTENT") + "\n")
