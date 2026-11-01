@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T11:04:15.979720+00:00'
+  updated_at: '2026-11-01T11:22:32.309785+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6287,6 +6287,48 @@ prs:
       SHARED_SOCKET_DIR.'
     created_at: '2026-11-01T11:04:15Z'
     last_edited: '2026-11-01T11:04:15Z'
+  - id: note-0e27d34
+    text: 'QA S17 (socket discovery fails closed and degrades) found one defect and
+      fixed it (commit 6d6bb9e1d). Story 1: with /tmp/pm-sessions a symlink to a 1777
+      directory owned by another user and a live server planted in the target at the
+      victim''s own deterministic name (socket <target>/pm-projA-b50da47c, session
+      pm-projA-b50da47c running pm _tui), `pm session` refused correctly and `pm session
+      list` listed only the legacy default-server session, but `pm tui view` from
+      the victim project directory printed `[Session: pm-projA-b50da47c, Pane: %0]`
+      and drove the planted TUI (exit 0): the cwd branch of _find_tui_pane -> _select_session_socket
+      -> find_session_server probed through the link before list_pm_sessions'' lstat
+      guard applied. qa.md R12 already requires the read path to refuse the link,
+      so this was a spec/code gap, not a new requirement. Fix: new paths.shared_socket_dir_is_usable()
+      (entry must be absent or a real directory, inspected with lstat so a link is
+      never followed) and _find_session_server skips the private probe when it is
+      not usable, so discovery fails closed and still falls through to the default
+      server; `pm tui view` now prints `No TUI pane found. Is there a pm tmux session
+      running?` and exits 1, and the planted server is left untouched. Tests: TestFindSessionServer::test_does_not_probe_a_symlinked_socket_dir
+      and TestFindTuiPaneAcrossServers::test_does_not_resolve_through_a_symlinked_socket_dir,
+      both verified to fail with the pre-fix code ((''%0'',''pm-victim'') vs (None,None)).
+      Stories 2-4 PASS unchanged on the same head: (2) a planted regular file and
+      a symlink to the genuine socket at two plausible pm-* names are skipped by `pm
+      session list` (no duplicate row from the link) and `pm tui view` returns the
+      genuine `[Session: pm-projB-5349d8d3, Pane: %0]` frame; (3) a 129-char tag yields
+      the stable 52-char hashed socket /tmp/pm-sessions/pm-68dc05519f0abae5449f3a1dbda48e8f
+      on two runs, `pm session kill` prints Killed session and removes exactly that
+      socket while pm-projB''s session and socket survive; (4) with tmux off PATH,
+      `pm session list` and `pm session kill` print `tmux is not installed.` to stderr
+      and `pm tui view` prints `No TUI pane found.`, all exit 1 with no traceback,
+      and Ctrl-Q in a respawned TUI whose PATH has no tmux leaves the pane alive and
+      responsive (`?` opens the help screen), both attached clients still in list-clients,
+      with `detach_current_client: tmux cannot be run; leaving clients attached` and
+      `quit_app: no attached client to detach` in ~/.pm/debug/<tag>.log. Captures:
+      /pm-captures/scenarios/17/{pre-fix,post-fix}/story1-symlinked-discovery, story2-planted-entries,
+      story3-long-name, story4-no-tmux-{cli,quit}. Harness notes for the next run:
+      (a) a non-TTY `pm session` create raises a TmuxCommandError traceback from the
+      attach step (tmux `open terminal failed: not a terminal`); the session is created
+      regardless, so run it with `|| true`; (b) `pm session list` pads SESSION to
+      the longest name, so a 129-char session row is very wide; (c) the quit story''s
+      cast is 80x23 because the `script`-attached client is 80x24 and tmux sizes the
+      group to the smallest client.'
+    created_at: '2026-11-01T11:22:32Z'
+    last_edited: '2026-11-01T11:22:32Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
