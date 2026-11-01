@@ -46,8 +46,10 @@ def model_show():
     seen_notes: set[str] = set()
     if resolvable:
         click.echo("Effective config per session type:")
-        click.echo(f"  {'type':15s}  {'model':40s} {'effort':8s}")
-        click.echo(f"  {'─'*15}  {'─'*40} {'─'*8}")
+        # The effort cell also carries a ``*`` or ``(n/a)`` mark, so it is
+        # wider than the longest level.
+        click.echo(f"  {'type':15s}  {'model':40s} {'effort':11s}")
+        click.echo(f"  {'─'*15}  {'─'*40} {'─'*11}")
         effort_notes: list[str] = []
         # Printed notes are deduped per (route, note): the wording does not
         # name the route, so two roles on different routes with the same
@@ -66,7 +68,7 @@ def model_show():
             effort_str = model_settings.effort_mark(
                 model_settings.effort_text(res), res.effort_status)
             marked = marked or res.effort_status in MARKED_EFFORT_STATUSES
-            click.echo(f"  {st:15s}  {model_str:40s} {effort_str:8s}")
+            click.echo(f"  {st:15s}  {model_str:40s} {effort_str:11s}")
             for note in res.effort_notes:
                 # ``seen_notes`` stays flat: it also suppresses the same
                 # finding in the problems section below.

@@ -285,20 +285,58 @@ def peek_fake_verdicts(session_tag: str | None = None) -> dict:
     return out
 
 
-def _resolve_provider(provider: str | None = None, model: str | None = None):
+def _warn_effort_conflicts(provider_cfg, effort: str | None,
+                           provider_env: dict | None) -> None:
+    """Log what a launch cannot confirm about *effort*.
+
+    A provider's own ``CLAUDE_CODE_EFFORT_LEVEL`` overrides ``--effort``
+    inside the CLI (2.1.316), and a level outside the route's declared
+    ``supported_efforts`` may be rejected or ignored upstream.  Neither
+    stops the launch -- the level is still passed, because the metadata is
+    dated and the CLI accepts it -- but neither may read as confirmed.
+    Shared by every launch path so they cannot disagree about one launch.
+    """
+    if not effort:
+        return
+    assigned = (provider_env or {}).get(AMBIENT_EFFORT_ENV)
+    if assigned is not None:
+        kind, level = classify_effort_env(assigned)
+        if kind == "unknown":
+            _log.warning(
+                "provider %r sets %s=%r, which is not a Claude effort "
+                "level; --effort %s applies", provider_cfg.name,
+                AMBIENT_EFFORT_ENV, assigned, effort)
+        elif kind == "level" and level != effort:
+            _log.warning(
+                "provider %r assigns %s=%s; it overrides --effort %s "
+                "for this session", provider_cfg.name,
+                AMBIENT_EFFORT_ENV, level, effort)
+    accepted = accepted_efforts_of(provider_cfg)
+    if accepted is not None and effort not in accepted:
+        _log.warning(
+            "provider %r declares supported_efforts %s; --effort %s is "
+            "not among them (the router may reject or ignore it)",
+            provider_cfg.name, list(accepted), effort)
+
+
+def _resolve_provider(provider: str | None = None, model: str | None = None,
+                      effort: str | None = None):
     """Resolve provider config and return (env_vars, model_flag, run_env).
 
     Shared helper for launch_claude, launch_claude_print, and
     launch_claude_print_background to avoid repeating the same pattern.
     ``model_flag`` is the effective ``--model`` value (an explicit *model*
     overrides the provider's).  The routing environment is built from that
-    selection, as build_claude_shell_cmd's (providers.launch_env).
+    selection, as build_claude_shell_cmd's (providers.launch_env).  *effort*
+    only drives the launch warnings (:func:`_warn_effort_conflicts`); the
+    caller still passes ``--effort`` itself.
     """
     from pm_core.providers import get_provider, launch_env
     provider_cfg = get_provider(provider, strict=bool(provider))
     model_flag = model or provider_cfg.model_flag()
     provider_env, unset = launch_env(provider_cfg, provider_cfg.env_vars(),
                                      model_flag)
+    _warn_effort_conflicts(provider_cfg, effort, provider_env)
     run_env = None
     if provider_env or any(v in os.environ for v in unset):
         run_env = {**os.environ, **provider_env}
@@ -700,7 +738,8 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
         raise FileNotFoundError("claude CLI not found. Install it first.")
 
     # Resolve provider for env vars and model flag (explicit model wins)
-    provider_env, model_flag, run_env = _resolve_provider(provider, model)
+    provider_env, model_flag, run_env = _resolve_provider(
+        provider, model, effort)
     run_env = _drop_ambient_effort(run_env, effort, provider_env)
 
     # Try to resume existing session, or generate new session ID
@@ -826,7 +865,8 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
         raise FileNotFoundError("claude CLI not found. Install it first.")
 
     # Resolve provider (explicit model wins over the provider's)
-    provider_env, effective_model, run_env = _resolve_provider(provider, model)
+    provider_env, effective_model, run_env = _resolve_provider(
+        provider, model, effort)
     run_env = _drop_ambient_effort(run_env, effort, provider_env)
     cleanup_path: str | None = None
     if fc_config is not None:
@@ -1016,31 +1056,10 @@ def build_claude_shell_cmd(
         # "auto"/"unset"/blank mean "no override" (the CLI ignores an
         # unknown value), and an assignment equal to pm's level changes
         # nothing.  model_config's effort notes make the same distinction.
-        assigned = provider_env.get(AMBIENT_EFFORT_ENV)
-        if assigned is None:
+        if provider_env.get(AMBIENT_EFFORT_ENV) is None:
             # A provider's unset_env may already list it; emit it once.
             unset = tuple(dict.fromkeys((*unset, AMBIENT_EFFORT_ENV)))
-        else:
-            kind, level = classify_effort_env(assigned)
-            if kind == "unknown":
-                _log.warning(
-                    "provider %r sets %s=%r, which is not a Claude effort "
-                    "level; --effort %s applies", provider_cfg.name,
-                    AMBIENT_EFFORT_ENV, assigned, effort)
-            elif kind == "level" and level != effort:
-                _log.warning(
-                    "provider %r assigns %s=%s; it overrides --effort %s "
-                    "for this session", provider_cfg.name,
-                    AMBIENT_EFFORT_ENV, level, effort)
-        # The level is still passed (the metadata is dated), but a launch
-        # the route declares unsupported must not read as confirmed.  The
-        # config is already loaded here, so this costs no extra read.
-        accepted = accepted_efforts_of(provider_cfg)
-        if accepted is not None and effort not in accepted:
-            _log.warning(
-                "provider %r declares supported_efforts %s; --effort %s is "
-                "not among them (the router may reject or ignore it)",
-                provider_cfg.name, list(accepted), effort)
+        _warn_effort_conflicts(provider_cfg, effort, provider_env)
     if provider_env:
         if env_out is not None:
             env_out.update(provider_env)

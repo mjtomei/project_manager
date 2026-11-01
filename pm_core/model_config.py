@@ -366,9 +366,14 @@ def resolve_model_and_provider(
     # such assignment, so a note below must not claim pm unsets it.  The
     # provider whose env applies is the one the launch resolves, which with
     # no explicit selection is ``PM_PROVIDER`` or providers.yaml's
-    # ``default:`` entry.
-    assigned_raw = (effort_env_owner(resolution.provider, use_env=use_env)[1]
-                    if ambient_level is not None else None)
+    # ``default:`` entry.  The selected provider's config is loaded once and
+    # reused by the verification below.
+    provider_cfg, provider_cfg_error = _provider_config_or_error(
+        resolution.provider)
+    assigned_raw = None
+    if ambient_level is not None:
+        assigned_raw = (effort_env_of(provider_cfg) if resolution.provider
+                        else effort_env_owner(None, use_env=use_env)[1])
     assigned_level = normalize_ambient_effort(assigned_raw)[0]
 
     # Suppress effort for models that don't support it (e.g. Haiku)
@@ -412,7 +417,9 @@ def resolve_model_and_provider(
                                 else None)
     resolution.effort_notes = notes
     if resolution.effort_status != "not_applicable":
-        _apply_effort_verification(resolution, effort, use_env=use_env)
+        _apply_effort_verification(resolution, effort, use_env=use_env,
+                                   provider_cfg=provider_cfg,
+                                   provider_cfg_error=provider_cfg_error)
         if effort and effort_source == AMBIENT_EFFORT_ENV:
             # The source, not the level's support, is the headline; the
             # verification notes (if any) are still in effort_notes.
@@ -532,6 +539,20 @@ def accepted_efforts_of(cfg) -> tuple[str, ...] | None:
         # substring-matching it would invent support.
         return None
     return tuple(level for level in EFFORT_LEVELS if level in declared)
+
+
+def declared_efforts_text(cfg) -> str:
+    """``supported_efforts`` as one readable cell, for display.
+
+    An empty declaration is "this route accepts none of the Claude levels",
+    which must not print as a bare ``supported_efforts=``.
+    """
+    declared = getattr(cfg, "supported_efforts", None)
+    if not isinstance(declared, (list, tuple)):
+        # Not a declared list (None, or a hand-built config): naming its
+        # characters would invent levels.
+        return "(none)"
+    return ",".join(str(level) for level in declared) or "(none)"
 
 
 def effort_env_of(cfg) -> str | None:
@@ -674,12 +695,18 @@ def _note_provider_effort_env(resolution: ModelResolution,
 
 def _apply_effort_verification(resolution: ModelResolution,
                                effort: str | None, *,
-                               use_env: bool = True) -> None:
-    """Fill effort status/notes for *effort* on *resolution* in place."""
+                               use_env: bool = True,
+                               provider_cfg=None,
+                               provider_cfg_error: str | None = None) -> None:
+    """Fill effort status/notes for *effort* on *resolution* in place.
+
+    *provider_cfg* / *provider_cfg_error* are the selected provider's
+    config, already loaded by the caller (None, None for the built-in
+    claude route), so one resolution reads providers.yaml once.
+    """
     notes = resolution.effort_notes
-    cfg, cfg_error = _provider_config_or_error(resolution.provider)
+    cfg, cfg_error = provider_cfg, provider_cfg_error
     if resolution.provider:
-        # The config is already loaded above; do not read it twice.
         env_owner, env_assigned = (resolution.provider, effort_env_of(cfg))
     else:
         # No provider selected: the launch still resolves PM_PROVIDER or

@@ -231,7 +231,7 @@ class ModelSettingsScreen(ModalScreen):
 
     def _provider_lines(self) -> list[str]:
         from pm_core import router_route
-        from pm_core.model_config import ModelResolution
+        from pm_core.model_config import ModelResolution, declared_efforts_text
         from pm_core.providers import (
             get_default_provider, invalid_provider_entries, list_providers,
             providers_file_problem,
@@ -247,7 +247,8 @@ class ModelSettingsScreen(ModalScreen):
             if p.effort:
                 desc += f"  effort={p.effort}"
             if p.supported_efforts is not None:
-                desc += f"  supported_efforts={','.join(p.supported_efforts)}"
+                desc += ("  supported_efforts="
+                         + declared_efforts_text(p))
             if p.launcher:
                 desc += f"  command={p.launcher}"
             if p.type == "router":

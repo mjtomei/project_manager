@@ -661,6 +661,57 @@ class TestEffortLaunch:
                                env_out={})
         assert not any("not among them" in m for m in seen), seen
 
+    def test_launch_claude_warns_when_the_route_declares_the_level_unsupported(
+            self, monkeypatch, tmp_path):
+        """The subprocess launch paths warn like the shell path does: the
+        level is still passed, but it must not read as confirmed."""
+        import pm_core.claude_launcher as launcher
+        from pm_core import providers
+        monkeypatch.setattr(
+            providers, "load_providers",
+            lambda: {"providers": {"p": {"type": "claude",
+                                         "supported_efforts": ["low"]}}})
+        seen = []
+        monkeypatch.setattr(launcher._log, "warning",
+                            lambda msg, *a: seen.append(msg % a))
+
+        class Result:
+            returncode = 0
+
+        monkeypatch.setattr(launcher, "find_claude", lambda: "/bin/claude")
+        monkeypatch.setattr(launcher, "prepare_workspace", lambda cwd: None)
+        monkeypatch.setattr(launcher, "_skip_permissions", lambda: False)
+        monkeypatch.setattr(launcher.subprocess, "run",
+                            lambda cmd, **kw: Result())
+        launcher.launch_claude("x", "k", tmp_path, cwd=str(tmp_path),
+                               provider="p", effort="high")
+        assert any("not among them" in m for m in seen), seen
+
+    def test_launch_claude_print_warns_on_a_provider_env_override(
+            self, monkeypatch, tmp_path):
+        import pm_core.claude_launcher as launcher
+        from pm_core import providers
+        monkeypatch.setattr(
+            providers, "load_providers",
+            lambda: {"providers": {"p": {
+                "type": "claude",
+                "env": {"CLAUDE_CODE_EFFORT_LEVEL": "max"}}}})
+        seen = []
+        monkeypatch.setattr(launcher._log, "warning",
+                            lambda msg, *a: seen.append(msg % a))
+
+        class Result:
+            returncode = 0
+            stdout = "ok"
+
+        monkeypatch.setattr(launcher, "find_claude", lambda: "/bin/claude")
+        monkeypatch.setattr(launcher, "_skip_permissions", lambda: False)
+        monkeypatch.setattr(launcher.subprocess, "run",
+                            lambda cmd, **kw: Result())
+        launcher.launch_claude_print("x", cwd=str(tmp_path), provider="p",
+                                     effort="high")
+        assert any("overrides --effort high" in m for m in seen), seen
+
     def test_launch_claude_drops_ambient_effort(self, monkeypatch, tmp_path):
         import pm_core.claude_launcher as launcher
         seen = {}

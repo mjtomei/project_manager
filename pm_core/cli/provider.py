@@ -3,7 +3,7 @@
 import click
 
 from pm_core.cli import cli
-from pm_core.model_config import EFFORT_LEVELS
+from pm_core.model_config import EFFORT_LEVELS, declared_efforts_text
 
 
 @cli.group("provider")
@@ -32,7 +32,7 @@ def provider_list():
             click.echo(f"  {p.name}{marker}  [built-in]")
         elif p.type == "router":
             effort = f"  effort={p.effort}" if p.effort else ""
-            supported = (f"  supported_efforts={','.join(p.supported_efforts)}"
+            supported = ("  supported_efforts=" + declared_efforts_text(p)
                          if p.supported_efforts is not None else "")
             click.echo(f"  {p.name}{marker}  type=router  api_base={p.api_base}"
                        f"  model={p.model or '(unset)'}{effort}{supported}")
@@ -43,8 +43,7 @@ def provider_list():
             if p.effort:
                 model_str += f"  effort={p.effort}"
             if p.supported_efforts is not None:
-                model_str += (f"  supported_efforts="
-                              f"{','.join(p.supported_efforts)}")
+                model_str += "  supported_efforts=" + declared_efforts_text(p)
             click.echo(f"  {p.name}{marker}  type={p.type}  api_base={p.api_base}{model_str}")
             if p.capabilities:
                 click.echo(f"    capabilities: {', '.join(p.capabilities)}")
@@ -329,6 +328,7 @@ def provider_edit(name: str, ptype: str | None, clear: tuple, **opts):
                        f"with 'pm provider add {name} ...')", err=True)
             raise SystemExit(1)
         entry = dict(entry)
+        previous_model = entry.get("model")
         for key in clear:
             entry.pop(key, None)
         if ptype:
@@ -338,6 +338,17 @@ def provider_edit(name: str, ptype: str | None, clear: tuple, **opts):
         config["providers"][name] = entry
         save_providers(config)
     click.echo(f"Updated provider '{name}'")
+    # supported_efforts describes the model it was checked against: keeping
+    # it across a model change would present the old model's levels as the
+    # new one's.  Still a warning, not a refusal (the list is advisory).
+    if (opts.get("model") is not None and previous_model != entry.get("model")
+            and entry.get("supported_efforts") is not None
+            and opts.get("supported_efforts") is None):
+        click.echo(
+            f"Warning: supported_efforts was checked against "
+            f"{previous_model or '(no model)'}; re-check it for "
+            f"{entry.get('model')!r} and update --supported-efforts and "
+            "--supported-efforts-checked-at", err=True)
     _echo_provider(name)
 
 

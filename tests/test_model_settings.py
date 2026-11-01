@@ -1010,6 +1010,42 @@ class TestProviderEffortMetadata:
         assert r.exit_code == 0, r.output
         assert "supported_efforts=low,high" in r.output
 
+    def test_an_empty_declaration_prints_as_none_not_blank(self, pm_home_dir):
+        """``[]`` declares "accepts none of the Claude levels"; a bare
+        ``supported_efforts=`` would read as a missing value."""
+        _providers(pm_home_dir, **{ROUTE: _router(supported_efforts=[])})
+        r = _cli("provider", "list")
+        assert r.exit_code == 0, r.output
+        assert "supported_efforts=(none)" in r.output
+        shown = _cli("provider", "show", ROUTE)
+        assert shown.exit_code == 0, shown.output
+        assert "accepted Claude levels: (none)" in shown.output
+
+    def test_edit_warns_when_the_model_changes_under_the_metadata(
+            self, pm_home_dir):
+        """supported_efforts describes the model it was checked against, so
+        a model change must not silently carry it over as if it still
+        described the route."""
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts=["high"], supported_efforts_source="catalog")})
+        r = _cli("provider", "edit", ROUTE, "--model", "rt/small")
+        assert r.exit_code == 0, r.output
+        assert "supported_efforts was checked against rt/big" in r.output
+        assert "rt/small" in r.output
+        # The list is kept: it is advisory, and the user may re-check it.
+        entry = yaml.safe_load((pm_home_dir / "providers.yaml").read_text())[
+            "providers"][ROUTE]
+        assert entry["supported_efforts"] == ["high"]
+
+    def test_edit_does_not_warn_when_the_metadata_is_redeclared(
+            self, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router(supported_efforts=["high"])})
+        r = _cli("provider", "edit", ROUTE, "--model", "rt/small",
+                 "--supported-efforts", "low,medium",
+                 "--supported-efforts-checked-at", "2026-11-01")
+        assert r.exit_code == 0, r.output
+        assert "checked against" not in r.output
+
     def test_show_names_an_effort_env_assignment(self, pm_home_dir):
         _providers(pm_home_dir, **{ROUTE: _router(
             env={"CLAUDE_CODE_EFFORT_LEVEL": "xhigh"})})

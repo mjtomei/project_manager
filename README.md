@@ -265,7 +265,8 @@ pm pr model show pr-001             # per role: model, effort, command, why
 
 `supported_efforts` is advisory and dated, not a guarantee.  It describes
 the provider's *current* model, so re-check and update it (and the date) when
-you change that model with `pm provider edit <name> --model`.  When a role's
+you change that model with `pm provider edit <name> --model` (pm warns when
+a model change leaves an older list in place).  When a role's
 effort is not in the selected route's declared list, `pm model show`,
 `pm pr model show` and the TUI mark it `*` and print the reason, and the
 launch logs a warning (it still passes the level, because the list may be
