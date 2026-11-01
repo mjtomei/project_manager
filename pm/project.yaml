@@ -14331,7 +14331,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-11-01T03:17:15.647577+00:00'
+  updated_at: '2026-11-01T03:24:16.410404+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -15470,6 +15470,32 @@ prs:
       the full recipe.'
     created_at: '2026-11-01T03:17:15Z'
     last_edited: '2026-11-01T03:17:15Z'
+  - id: note-3e2fe16
+    text: 'QA S35 (at-lock merged guard, --remove and plain close), head f9b20b550:
+      PASS 3/3, no code change. Disposable-HOME sandboxes against the git-backed fake-github
+      stand-in, no real gh/claude, no TUI; the store lock was frozen by SIGSTOPping
+      the command once project.yaml.lock appeared in /proc/<pid>/fd, then pm pr sync-github
+      was run to completion and the command resumed. (1) --remove vs merge: rc 1 with
+      exactly "PR #1 became merged while removing — the registry entry was NOT removed.
+      Re-run ... to delete the merged record (branch and workdir are kept)."; stdout
+      only "Closing GitHub PR #1..." (no Removed registry entry); the scripted "X
+      Pull request #1 is already merged" gh failure stayed a warning; A kept status
+      merged + merged_at + signed_off_at + the sign-off note + branch feat-a + workdir;
+      pm pr ready listed B (the merge unblocked it); pm pr list marked B *; stand-in
+      branch feat-a survived; workdir sha256 41/41 identical. (2) the deliberate re-run:
+      rc 0, exact ordered stdout (GitHub PR #1 left unchanged (the PR is recorded
+      as merged). / Removed registry entry / Kept / Note) and the dependent warning
+      + Hint on stderr; show -> not found + Available PRs: B; ready -> No PRs are
+      ready to start; branch and workdir unchanged. (3) plain close vs merge on a
+      fresh project (C in_review, stand-in MERGED): rc 1 with exactly "PR #1 is already
+      merged — closing it would erase the merge record. Use ... --remove ..."; no
+      Closed #1 line; registry merged + merged_at + closed_at None; branch feat-c
+      survived; workdir 41/41 identical. Reproduction tests: 2 passed here; the same
+      file on the pre-fix head 953f32f64 fails test_remove_does_not_delete_a_concurrently_merged_record
+      with assert 0 != 0. Evidence: /pm-captures/scenarios/35/{story1-remove-loses-to-merge,story2-deliberate-rerun,story3-plain-close-loses,reproduction-tests}
+      (cast + mp4 + manifest) and final-state.txt.'
+    created_at: '2026-11-01T03:24:16Z'
+    last_edited: '2026-11-01T03:24:16Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
