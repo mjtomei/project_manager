@@ -156,7 +156,13 @@ hits, regardless of how it waits for a background job:
   refuse a missing or unwritable capture directory where they write, instead
   of reporting an unwritable one as "agg failed on the cast — is 'agg'
   installed?" (a remedy that runs and changes nothing) or a path that is not
-  there as "the recording wrote nothing";
+  there as "the recording wrote nothing"; and a failure that *writes* has to
+  say whether the write landed: the read-only steps' pane saves report "could
+  not be saved" when the capture directory refuses the redirect, instead of
+  naming a ``recorder-pane.log`` that does not exist (the state their
+  ``-d``/``-x`` guard deliberately allows, R84), and the CLI stop bound
+  rejects a ``RECORDER_STOP_TIMEOUT`` too long for the 64-bit deadline
+  arithmetic instead of letting the wrap remove the bound (R87);
 - an input that exists but is empty is not an input, and that holds for the
   web-UI driver too: the driver block's "is ``driver.mjs`` here" check is
   ``-s``, not ``-f``, because an empty file is a *valid* ES module —
@@ -5825,6 +5831,42 @@ class TestCaptureFlowExecution:
             "re-run this step against")
         assert (cast.parent / "recorder-pane.log").exists()
 
+    def test_cli_stop_timeout_names_a_pane_it_could_not_save(self, tmp_path):
+        """A save the directory refuses must not be reported as saved.
+
+        Step 4's guard requires ``-d``/``-x`` but not ``-w`` — a capture
+        directory that became read-only must not refuse a finish that can
+        still be validated (R84) — and the timeout path saves the pane into
+        that directory. With a mode-500 directory the redirect fails, so no
+        ``recorder-pane.log`` exists; the shipped message still said "the pane
+        is saved in …", a failure pointing at evidence that does not exist
+        (verified in this container: the shell answered "Permission denied",
+        the file was absent, and the message named it as saved).
+        """
+        if not hasattr(os, "geteuid") or os.geteuid() == 0:
+            pytest.skip("root bypasses the directory permission bits")
+        cap = tmp_path / "cap"
+        run = cap / "run"
+        run.mkdir(parents=True)
+        run.chmod(0o500)
+        try:
+            r, _cast = _run_block(
+                _stop_block("cli-recording.md"), "stuck", tmp_path,
+                sessions=("rec",), capture=cap,
+                env_extra={"RECORDER_STOP_TIMEOUT": "2"})
+        finally:
+            run.chmod(0o700)
+        assert r.returncode != 0, r.stderr
+        assert "did not exit within" in r.stderr, r.stderr
+        assert "could not be saved" in r.stderr, (
+            "the timeout does not say the pane save failed: " + r.stderr)
+        assert "the pane is saved" not in r.stderr, (
+            "the timeout claims the pane was saved although the capture "
+            "directory refused the write: " + r.stderr)
+        assert "recorder-pane.log" in r.stderr, r.stderr
+        assert not (run / "recorder-pane.log").exists(), (
+            "the read-only capture directory somehow holds the pane log")
+
     def test_cli_mistyped_bound_leaves_the_recording_for_a_retry(self, tmp_path):
         """A typo in the bound is not a reason to destroy the recording.
 
@@ -5847,6 +5889,38 @@ class TestCaptureFlowExecution:
         assert (tmp_path / "state" / "rec").exists(), (
             "a mistyped bound killed the recording the corrected value was "
             "meant to be applied to")
+
+    def test_cli_stop_refuses_a_bound_too_large_to_represent(self, tmp_path):
+        """A whole number that wraps is not a bound either.
+
+        The digit check rejects ``2m``, but bash's arithmetic is 64-bit: a
+        value with more than 18 digits wraps, and the wrap can land on a
+        deadline far in the future. Verified in this container with the stub
+        harness: the shipped block was still waiting at 8 s with
+        ``RECORDER_STOP_TIMEOUT=99999999999999999999`` — the unbounded wait
+        R21 removed, reintroduced by a value the validation accepts. The step
+        must refuse it and leave the recording running for the corrected
+        retry.
+        """
+        try:
+            r, _cast = _run_block(
+                _stop_block("cli-recording.md"), "stuck", tmp_path,
+                sessions=("rec",),
+                files={"recording.cast": '{"version": 2}\n'},
+                env_extra={
+                    "RECORDER_STOP_TIMEOUT": "99999999999999999999"},
+                timeout=20)
+        except subprocess.TimeoutExpired:
+            pytest.fail("the stop block hung on an overflowing "
+                        "RECORDER_STOP_TIMEOUT instead of failing")
+        assert r.returncode != 0, r.stderr
+        assert "RECORDER_STOP_TIMEOUT is too large" in r.stderr, (
+            "the unrepresentable bound is not named: " + r.stderr)
+        assert "still running" in r.stderr, (
+            "the refusal does not say the recording survived: " + r.stderr)
+        assert (tmp_path / "state" / "rec").exists(), (
+            "an overflowing bound killed the recording the corrected value "
+            "was meant to be applied to")
 
     def test_cli_stop_refuses_a_non_numeric_timeout(self, tmp_path):
         """A mistyped RECORDER_STOP_TIMEOUT must fail, not remove the bound.
@@ -7241,6 +7315,41 @@ class TestCaptureFlowExecution:
         assert log.exists() and "TUI drawn" in log.read_text(), (
             "the stop failure did not save what the recorder drew")
 
+    def test_tmux_stop_timeout_names_a_pane_it_could_not_save(self, tmp_path):
+        """The stop timeout must not claim a save the directory refused.
+
+        Step 5's guard requires ``-d``/``-x`` but not ``-w`` (a capture
+        directory that became read-only must not refuse a finish that can
+        still be validated, R84), and its timeout path saves the pane into
+        that directory. With a mode-500 directory the redirect fails, so no
+        ``recorder-pane.log`` exists; the shipped message still said "The pane
+        is saved in …" (verified in this container: the shell answered
+        "Permission denied", the file was absent, and the message named it as
+        saved).
+        """
+        if not hasattr(os, "geteuid") or os.geteuid() == 0:
+            pytest.skip("root bypasses the directory permission bits")
+        cap = tmp_path / "cap"
+        cap.mkdir()
+        cap.chmod(0o500)
+        try:
+            r, _cast = _run_block(
+                _stop_block("tmux-screen-recording.md"), "stuck", tmp_path,
+                target=True, sessions=("pm-recorder",), capture=cap,
+                state_files={"pane": "TUI drawn\n"})
+        finally:
+            cap.chmod(0o700)
+        assert r.returncode != 0, r.stderr
+        assert "did not exit within" in r.stderr, r.stderr
+        assert "could not be saved" in r.stderr, (
+            "the timeout does not say the pane save failed: " + r.stderr)
+        assert "The pane is saved" not in r.stderr, (
+            "the timeout claims the pane was saved although the capture "
+            "directory refused the write: " + r.stderr)
+        assert "recorder-pane.log" in r.stderr, r.stderr
+        assert not (cap / "recorder-pane.log").exists(), (
+            "the read-only capture directory somehow holds the pane log")
+
     def test_tmux_failed_attach_that_drew_its_error_fails(self, tmp_path):
         """The attach error text is content, so it must not count as readiness.
 
@@ -7488,6 +7597,41 @@ class TestCaptureFlowExecution:
         log = cast.parent / "recorder-pane.log"
         assert log.exists() and "TUI drawn" in log.read_text(), (
             "the failure tore the recorder pane down without saving it")
+
+    def test_tmux_driving_step_names_a_pane_it_could_not_save(self, tmp_path):
+        """The failed-send message must not claim a save the directory refused.
+
+        Step 4's directory guard requires ``-d``/``-x`` but not ``-w`` — a
+        capture directory that became read-only must not refuse a finish that
+        can still be validated (R84) — and its failure path saves the recorder
+        pane into that directory. With a mode-500 directory the redirect
+        fails, so no ``recorder-pane.log`` exists; the shipped message still
+        said the pane "is saved in …" (verified in this container: the shell
+        answered "Permission denied", the file was absent, and the message
+        named it as saved).
+        """
+        if not hasattr(os, "geteuid") or os.geteuid() == 0:
+            pytest.skip("root bypasses the directory permission bits")
+        cap = tmp_path / "cap"
+        cap.mkdir()
+        cap.chmod(0o500)
+        try:
+            r, _cast = _run_block(
+                _driving_block(), "sendfail", tmp_path, target=True,
+                sessions=("pm-recorder",), capture=cap,
+                state_files={"pane": "TUI drawn\n"})
+        finally:
+            cap.chmod(0o700)
+        assert r.returncode != 0, r.stderr
+        assert "pm tui send failed" in r.stderr, r.stderr
+        assert "could not be saved" in r.stderr, (
+            "the failed send does not say the pane save failed: " + r.stderr)
+        assert "is saved in" not in r.stderr, (
+            "the failed send claims the pane was saved although the capture "
+            "directory refused the write: " + r.stderr)
+        assert "recorder-pane.log" in r.stderr, r.stderr
+        assert not (cap / "recorder-pane.log").exists(), (
+            "the read-only capture directory somehow holds the pane log")
 
     @pytest.mark.parametrize("name", RECIPES)
     def test_stop_block_pasted_alone_saves_the_pane(self, name, tmp_path):

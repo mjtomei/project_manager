@@ -690,18 +690,26 @@ fi
 #    stale-evidence problem the rest of this recipe removes. The pane is
 #    saved before the teardown, because the teardown destroys it; if the
 #    recorder was already gone there is nothing to save or tear down. The
-#    function lives in this paste, which is self-contained, so the sends
-#    below can call it.
+#    save is best-effort and the message has to say whether it landed: this
+#    step's directory guard requires `-d`/`-x` but not `-w`, because a
+#    capture directory that became read-only must not refuse a finish that
+#    can still be validated (R84), and a save into it fails (verified in this
+#    container with a mode-500 capture directory: the redirect answered
+#    "Permission denied", no recorder-pane.log existed, and the old message
+#    still said the pane was saved there). The function lives in this paste,
+#    which is self-contained, so the sends below can call it.
 send_failed() {
-    tmux capture-pane -p -t "=pm-recorder:0.0" \
-        > <capture-dir>/recorder-pane.log 2>/dev/null || true
+    if tmux capture-pane -p -t "=pm-recorder:0.0" \
+            > <capture-dir>/recorder-pane.log 2>/dev/null; then
+        pane_note="the recorder pane is saved in <capture-dir>/recorder-pane.log"
+    else
+        pane_note="the recorder pane could not be saved in <capture-dir>/recorder-pane.log — the capture directory cannot be written, or the recorder was already gone"
+    fi
     tmux kill-session -t "=pm-recorder" 2>/dev/null
     tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
     tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
     echo "pm tui send failed — the TUI is gone, so this scenario step never" \
-        "ran; re-run the capture instead of accepting it (the recorder pane," \
-        "if the recorder was still up, is saved in" \
-        "<capture-dir>/recorder-pane.log)" >&2
+        "ran; re-run the capture instead of accepting it ($pane_note)" >&2
     exit 1
 }
 pm tui send q -s "$TARGET" || send_failed   # e.g. navigate to the QA pane
@@ -880,13 +888,24 @@ fi
 deadline=$(( $(date +%s) + 30 ))
 while tmux has-session -t "=pm-recorder" 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
-        tmux capture-pane -p -t "=pm-recorder:0.0" \
-            > <capture-dir>/recorder-pane.log 2>/dev/null || true
+        # The pane save is best-effort: this step's guard requires `-d`/`-x`
+        # but not `-w` (a directory that became read-only must not refuse a
+        # finish that can still be validated, R84), and a save into one fails.
+        # The message must then say the pane was not saved instead of naming a
+        # recorder-pane.log that does not exist (verified in this container
+        # with a mode-500 capture directory: the redirect answered "Permission
+        # denied", no file was written, and the old message said it was saved).
+        if tmux capture-pane -p -t "=pm-recorder:0.0" \
+                > <capture-dir>/recorder-pane.log 2>/dev/null; then
+            pane_note="The pane is saved in <capture-dir>/recorder-pane.log"
+        else
+            pane_note="The pane could not be saved in <capture-dir>/recorder-pane.log — the capture directory cannot be written, or the recorder went away as it was saved"
+        fi
         echo "recorder did not exit within 30s — the detach key" \
             "('$detach_key d') did not end it. The recorder is killed below," \
             "so it never writes recorder.status and the cast stops here:" \
             "incomplete, not a finished recording — re-record the scenario." \
-            "The pane is saved in <capture-dir>/recorder-pane.log" >&2
+            "$pane_note" >&2
         tmux kill-session -t "=pm-recorder" 2>/dev/null
         tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
         tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true

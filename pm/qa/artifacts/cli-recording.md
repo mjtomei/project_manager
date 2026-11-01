@@ -417,18 +417,43 @@ case $stop_timeout in
             "RECORDER_STOP_TIMEOUT=120" >&2
         exit 1 ;;
 esac
+# A *whole* number can still stop bounding: bash arithmetic is 64-bit, so a
+# value this long can wrap, and the wrap can land on a deadline far in the
+# future — the unbounded wait this validation exists to remove, reintroduced by
+# a value the digit check accepts (verified in this container with the stub
+# harness: RECORDER_STOP_TIMEOUT=99999999999999999999 left the stop wait
+# running past 8 s instead of timing out). Reject a value too long to be a
+# bound instead of waiting out a wrapped one.
+if [ "${#stop_timeout}" -gt 18 ]; then
+    echo "RECORDER_STOP_TIMEOUT is too large (got '$stop_timeout'); it is" \
+        "whole seconds, and a value with more than 18 digits is not a usable" \
+        "bound (the 64-bit deadline arithmetic wraps it) — the recording is" \
+        "still running: re-run this step with a value such as" \
+        "RECORDER_STOP_TIMEOUT=120" >&2
+    exit 1
+fi
 deadline=$(( $(date +%s) + 10#$stop_timeout ))
 while tmux -L scaffold has-session -t rec 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
-        tmux -L scaffold capture-pane -p -t rec \
-            > <capture-dir>/<short-name>/recorder-pane.log 2>/dev/null || true
+        # The pane save is best-effort: this step's guard requires `-d`/`-x`
+        # but not `-w` (a directory that became read-only must not refuse a
+        # finish that can still be validated, R84), and a save into one fails.
+        # The message must then say the pane was not saved instead of naming a
+        # recorder-pane.log that does not exist (verified in this container
+        # with a mode-500 capture directory: the redirect answered "Permission
+        # denied", no file was written, and the old message said it was saved).
+        if tmux -L scaffold capture-pane -p -t rec \
+                > <capture-dir>/<short-name>/recorder-pane.log 2>/dev/null; then
+            pane_note="the pane is saved in <capture-dir>/<short-name>/recorder-pane.log"
+        else
+            pane_note="the pane could not be saved in <capture-dir>/<short-name>/recorder-pane.log — the capture directory cannot be written, or the recorder went away"
+        fi
         echo "recorder did not exit within ${stop_timeout}s — the recording" \
             "is still running: for a longer command re-run this step with a" \
             "larger RECORDER_STOP_TIMEOUT; an interactive recording needs" \
             "'exit' in the recorded shell (step 3); if it is stuck, 'tmux -L" \
             "scaffold kill-server' ends it and the capture must be" \
-            "re-recorded; the pane is saved in" \
-            "<capture-dir>/<short-name>/recorder-pane.log" >&2
+            "re-recorded; $pane_note" >&2
         exit 1
     fi
     sleep 0.2

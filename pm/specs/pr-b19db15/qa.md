@@ -795,7 +795,12 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   `1.5h`) must fail the step with "RECORDER_STOP_TIMEOUT must be whole
   seconds" instead of removing the bound: in an interactive shell the failed
   arithmetic leaves the deadline empty and the shell carries on, so the stop
-  wait never ends.
+  wait never ends. A *whole* number that wraps the 64-bit deadline arithmetic
+  is the same failure one shape over: `RECORDER_STOP_TIMEOUT` with more than
+  18 digits (verified with `99999999999999999999`, which left the shipped
+  block still waiting at 8 s) must fail with "RECORDER_STOP_TIMEOUT is too
+  large" and leave the recording running for the corrected retry (review
+  loop 928f i25, R87).
 - The TUI dies mid-scenario (a crash, not the scenario quitting pm) → the
   driving step's own `pm tui send` fails and step 5's both-gone branch cannot
   tell that from a legitimate finish, so the capture is re-run rather than
@@ -919,6 +924,15 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   "the scenario ended the pm session" finish as "recorder exited while the
   TUI was still running". With no resolvable target the step stops and says
   so.
+- The capture directory became read-only before a failure path saves the pane
+  (the tmux driving step's failed send, the tmux stop timeout, the CLI stop
+  timeout) → the save fails and the message must say the pane could not be
+  saved, not that it "is saved in …" a `recorder-pane.log` that does not
+  exist. These steps deliberately require `-d`/`-x` and not `-w`, so a
+  read-only directory must neither refuse the finish nor produce a false
+  pointer; verified with a mode-500 capture directory, where the redirect
+  answered "Permission denied", no file was written, and the shipped message
+  still named it as saved (review loop 928f i25, R87).
 - The tmux stop step is pasted a *second* time after a clean detach (a
   resumed session, a worker checking its work) → the recorder is gone, the
   TUI it attached to is still up and `recorder.status` holds `0`. That must

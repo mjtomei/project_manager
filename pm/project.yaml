@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T10:43:52.640902+00:00'
+  updated_at: '2026-11-01T11:14:55.807613+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38293,6 +38293,40 @@ prs:
       work stays dropped.'
     created_at: '2026-11-01T10:43:52Z'
     last_edited: '2026-11-01T10:43:52Z'
+  - id: note-08eccd9
+    text: 'Review loop 928f i25: two leftovers in the kept recipe scope; no pm_core/
+      change. (1) The paste-alone read-only steps'' pane saves claimed a save a read-only
+      capture directory refused. R84 deliberately gives the tmux recipe''s steps 4
+      and 5 and the CLI scaffold''s step 4 a -d/-x guard and not -w (a directory that
+      became read-only must not refuse a finish that can still be validated; the pane
+      save is a failure-only path), but the save is a write: with a mode-500 capture
+      directory the redirect fails, no recorder-pane.log exists, and all three messages
+      still said the pane "is saved in ..." — verified in this container with the
+      stub tmux/pm harness (step 4 "the recorder pane, if the recorder was still up,
+      is saved in ...", step 5 "The pane is saved in ...", CLI step 4 "the pane is
+      saved in ..."; each printed the shell''s own "Permission denied" and left no
+      file). Each save now runs as the if condition and the message says whether it
+      landed ("... is saved in ..." / "... could not be saved in ... — the capture
+      directory cannot be written, or the recorder went away"), so a read-only directory
+      neither refuses the finish nor produces a false pointer. (2) The CLI stop bound''s
+      digit check accepted a value that wraps: bash arithmetic is 64-bit, so RECORDER_STOP_TIMEOUT=99999999999999999999
+      wraps to a deadline far in the future and the shipped block was still waiting
+      at 8 s in the harness — the unbounded wait R21 removed, reachable by a value
+      the check accepts. The block now refuses a value longer than 18 digits ("RECORDER_STOP_TIMEOUT
+      is too large ...") before the arithmetic and leaves the recording running for
+      the corrected retry. Tests: test_tmux_driving_step_names_a_pane_it_could_not_save,
+      test_tmux_stop_timeout_names_a_pane_it_could_not_save and test_cli_stop_timeout_names_a_pane_it_could_not_save
+      (each against a mode-500 capture directory: "could not be saved", no "is saved
+      in" claim, no recorder-pane.log) and test_cli_stop_refuses_a_bound_too_large_to_represent
+      (the refusal, "still running", surviving rec session; a hang fails). All four
+      fail against HEAD''s recipes (three on the false claim, the overflow case by
+      hanging until the harness timeout). Recipe file 333 passed (was 329); full suite
+      5530 passed, 1 skipped, 0 failed (482.60 s). Evidence: /pm-captures/review-928f-i25/
+      (probe-pre.log, probe-post.log, mutation-check.log, recipe-file.log, suite.log,
+      suite-interrupted.log, README.md, scripts/). impl.md R87 + Files table, qa.md.
+      The dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-11-01T11:14:55Z'
+    last_edited: '2026-11-01T11:14:55Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
