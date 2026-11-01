@@ -1831,10 +1831,25 @@ If the launch command exits non-zero (for example, container mode is enabled
 but the runtime is unusable), nothing ran. Record the error in the work log
 and do not count it as a run.
 
+The run can also fail after its pane opens, while it is being set up (the
+clone, or building/creating its container). The runner writes the run's
+`prompt.md` into its run dir just before the session starts; list a test's
+started runs newest first with:
+
+```
+ls -t ~/.pm/sessions/*/captures/regression/<id>/*/prompt.md 2>/dev/null
+```
+
+Run ids (the dir names) start with their UTC start time. If a test's pane has
+exited and none of these is newer than the launch, setup failed and the test
+never ran: record it as not run, never as a run with no findings, and leave
+its cadence unchanged.
+
 ### 5. Reconcile recently-filed PRs
 
 For tests that completed since the last tick (visible in the work log or by a
-pane that has since exited), inspect any new PRs in the `bugs` and `ux` plans:
+pane that has since exited after its run started, see step 4), inspect any
+new PRs in the `bugs` and `ux` plans:
 
 ```
 pm pr list --plan bugs

@@ -615,6 +615,11 @@ def test_discovery_prompt_handles_an_empty_library():
     # current command (in container mode that is the runtime's exec).
     assert "#{pane_start_command}" in out
     assert "qa regression <id>" in out
+    # A pane that exits during setup (clone, container build) is not a run:
+    # only a run dir with prompt.md shows the session started.
+    assert ("ls -t ~/.pm/sessions/*/captures/regression/<id>/*/prompt.md"
+            in out)
+    assert "never as a run with no findings" in out
 
 
 def test_regression_container_argv_mounts_only_scratch_captures_registry(

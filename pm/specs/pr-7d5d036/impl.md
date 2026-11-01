@@ -128,7 +128,13 @@ Change:
   Step 2 lists `#{pane_start_command}` too: a regression pane's current
   command is no longer always `claude` (in container mode it is the runtime's
   `exec`), and its start command names the test (`qa regression <id>`)
-  (review fc31 i4).
+  (review fc31 i4). `pm qa launch` returns 0 once the pane opens, so a run
+  that then fails during setup (the clone, or building/creating its
+  container) is only visible as a pane that exited. Step 4 tells the
+  supervisor that a run whose session started has a `prompt.md` in its run
+  dir (`ls -t ~/.pm/sessions/*/captures/regression/<id>/*/prompt.md`), and
+  that a pane that exited with no `prompt.md` newer than the launch is
+  recorded as not run, never as a run with no findings (review fc31 i7).
 - Docs: `pm_core/docs/qa_library.md` — remove the `[!CAUTION]` callout (PR
   note), rewrite the Regression tests section for the isolated run, update the
   directory table, captures text and the surfaces table. CLI help

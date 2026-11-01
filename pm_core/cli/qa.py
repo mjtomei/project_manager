@@ -315,6 +315,26 @@ _REGRESSION_SCRUBBED_ENV = ("PM_PROJECT", "PM_SESSION")
 _REGRESSION_NO_PUSH_URL = "/regression-runs-never-push"
 
 
+def _discard_unlaunched_run(qa_workdir: Path,
+                            run_captures: Path | None = None) -> None:
+    """Remove what a regression run that never launched created.
+
+    Drops the run's own workdir and, when given, its captures dir and the
+    test's dir if that was its first run.  Only empty captures dirs are
+    removed (``rmdir``), so no evidence is lost; the dir exists then only
+    because container creation made it for its mount.
+    """
+    import shutil
+    shutil.rmtree(qa_workdir, ignore_errors=True)
+    if run_captures is None:
+        return
+    for d in (run_captures, run_captures.parent):
+        try:
+            d.rmdir()
+        except OSError:
+            break
+
+
 def _install_regression_recipes(items: list[dict], scratch_path: Path,
                                 subdir: str, scratch_in: str
                                 ) -> list[tuple[str, str]]:
@@ -364,7 +384,6 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
     this same command in a pane.  Use `pm qa list` to see available tests.
     """
     import secrets
-    import shutil
     import time
     from pm_core import qa_instructions, qa_loop, store
     from pm_core import container as container_mod
@@ -427,7 +446,7 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
                        check=True, capture_output=True, text=True)
     except Exception as exc:
         # Nothing ran: drop this run's own, just-created workdir.
-        shutil.rmtree(qa_workdir, ignore_errors=True)
+        _discard_unlaunched_run(qa_workdir)
         detail = (getattr(exc, "stderr", "") or "").strip()
         click.echo(f"Could not clone '{base_branch}' for the regression run: "
                    f"{exc}" + (f"\n{detail}" if detail else ""), err=True)
@@ -538,15 +557,7 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
         else:
             click.echo(f"Could not build the regression session: {exc}",
                        err=True)
-        shutil.rmtree(qa_workdir, ignore_errors=True)
-        # Container creation makes the run's (still empty) captures dir for
-        # its mount; drop it, and the test's dir if this was its first run.
-        # rmdir only removes empty directories, so no evidence is lost.
-        for d in (run_captures, run_captures.parent):
-            try:
-                d.rmdir()
-            except OSError:
-                break
+        _discard_unlaunched_run(qa_workdir, run_captures)
         raise SystemExit(1)
 
     # In container mode this is the directory mounted at /pm-captures.

@@ -373,7 +373,7 @@ Reference a mock from a QA scenario by its filename stem in the
 | `pm qa author-regression <name>` | Guided authoring for a regression test. |
 | `pm qa author-artifact <name>` | Guided authoring for an artifact recipe. |
 | `pm qa regression <id>` | Runs one regression test in an isolated QA workdir (a QA container when container mode is enabled) against a disposable test project; see [Regression tests](#regression-tests). The TUI QA pane (Enter) and `pm qa launch regression:<id>` run the same command in a pane. |
-| Discovery supervisor prompt | Lists `pm/qa/regression/*.md` and launches due tests with `pm qa launch regression:<id>`. An empty library schedules nothing. |
+| Discovery supervisor prompt | Lists `pm/qa/regression/*.md` and launches due tests with `pm qa launch regression:<id>`. An empty library schedules nothing. A test whose pane exits before the runner wrote the run's `prompt.md` failed during setup and is recorded as not run. |
 | `pm qa docs` | Prints this document. |
 | QA planner prompt | `instruction_summary_for_prompt` renders `### Instructions` and `### Artifact Recipes`. Instructions are referenced from a scenario by filename in the `INSTRUCTION:` field; artifact recipes are referenced in the `ARTIFACT:` field (comma-separated for multiple). |
 | Scenario 0 prompt | Same library summary, scoped to the interactive session. |
