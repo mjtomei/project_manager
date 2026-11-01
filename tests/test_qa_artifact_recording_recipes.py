@@ -433,8 +433,8 @@ class TestRecipes:
         """
         section = _recipe_text(name).split(
             "## What this recipe produces", 1)[1].split("## Capture", 1)[0]
-        for fname in ("recorder.status", "recorder-stderr.log",
-                      "recorder-pane.log"):
+        for fname in ("recorder.status", "recorder.command-done",
+                      "recorder-stderr.log", "recorder-pane.log"):
             assert fname in section, (
                 f"{name}: the produced-files list never names {fname}, which "
                 "the capture flow writes into the capture directory")
@@ -817,6 +817,7 @@ class TestRecipes:
             "starts a new one")
         cleared = set(block[clear:start].replace("\\", " ").split())
         for name in ("recording.cast", "recorder.status",
+                     "recorder.command-done",
                      "recorder-stderr.log", "recorder-pane.log",
                      "recorder.rejected",
                      "recording.mp4", "recording.cast.gif",
@@ -1202,9 +1203,14 @@ class TestRecipes:
 
         _, asci_argv = _drive_recorder_statement(stmt, tmp_path)
         argv = asci_argv.read_text().splitlines()
-        assert argv[argv.index("-c") + 1] == 'bash -c "set -x; cmd-one; cmd-two"', (
+        recorded = argv[argv.index("-c") + 1]
+        expected = 'bash -c "set -x; cmd-one; cmd-two"'
+        assert recorded.startswith(f"({expected}); printf done > "), (
             "cli-recording: the recorded command does not survive the "
             f"scaffold's quoting (asciinema got {argv!r})")
+        assert recorded.endswith(f"{tmp_path}/run/recorder.command-done"), (
+            "cli-recording: the pane command does not write the completion "
+            f"mark the stop step requires (asciinema got {argv!r})")
 
     def test_cli_single_quoted_command_survives_the_scaffold(self, tmp_path):
         """A `'` in the command needs ``'\\''``, like the `"` layer above.
@@ -1232,7 +1238,9 @@ class TestRecipes:
                 .replace("<command-to-record>", cmd))
         _, asci_argv = _drive_recorder_statement(stmt, tmp_path)
         argv = asci_argv.read_text().splitlines()
-        assert argv[argv.index("-c") + 1] == "pm pr note add pr-x 'a note'", (
+        recorded = argv[argv.index("-c") + 1]
+        expected = "pm pr note add pr-x 'a note'"
+        assert recorded.startswith(f"({expected}); printf done > "), (
             "cli-recording: a single-quoted argument does not survive the "
             f"scaffold's quoting (asciinema got {argv!r})")
 
@@ -5695,6 +5703,24 @@ case "$sub" in
         # wait's pane save cannot land (see `capture-pane`).
         norec|nopane) : ;;
         dies)  pane_exit "$s" ;;
+        # `termed`: a supervisor stopped the recorder with SIGTERM, which
+        # asciinema catches — it finalizes the cast, exits 0, and its child
+        # (the recorded command) is killed, so the completion mark is never
+        # written. The pane's shell survives to write that 0, then the pane
+        # ends. The cast and pane are the ones a healthy recorder drew, so
+        # every check except the completion mark passes. `termedboth` is the
+        # same state with the target session also gone (the pm stub ends it
+        # at the driving step), which is where step 5's both-gone branch has
+        # no claim left to catch the stopped recorder.
+        termed)
+            printf '{"version": 2}\n' > "$STUB_CAST"
+            printf 'TUI drawn\n' > "$STATE/pane"
+            [ -n "$STUB_STATUS_FILE" ] && printf '0\n' > "$STUB_STATUS_FILE"
+            ( sleep 0.8; pane_exit "$s" ) & ;;
+        termedboth)
+            printf '{"version": 2}\n' > "$STUB_CAST"
+            printf 'TUI drawn\n' > "$STATE/pane"
+            [ -n "$STUB_STATUS_FILE" ] && printf '0\n' > "$STUB_STATUS_FILE" ;;
         failedattach|failedattachboth)
             # Real asciinema records the failed attach's error into the cast
             # and exits 0 (verified on tmux 3.2a + asciinema 2.1.0: a 168-byte
@@ -5705,6 +5731,11 @@ case "$sub" in
             printf "can't find session: pm-test\n" > "$STATE/pane"
             printf '{"version": 2}\n' > "$STUB_CAST"
             [ -n "$STUB_STATUS_FILE" ] && printf '0\n' > "$STUB_STATUS_FILE"
+            # The attach returned (with an error), so the recorded command's
+            # completion mark landed; the rejection mark is what refuses this
+            # state, not the completion check.
+            [ -n "${STUB_COMMAND_DONE_FILE:-}" ] \
+                && printf 'done\n' > "$STUB_COMMAND_DONE_FILE"
             # `failedattachboth`: the target session ends as the attach fails
             # (the race step 3's exact-session assert cannot cover), taking its
             # claim and pipe with it. That is the state where a session-option
@@ -5746,6 +5777,20 @@ case "$sub" in
                   badstatus|midbothbad|detachbothbad) printf '137\n' > "$STUB_STATUS_FILE" ;;
                   *)         printf '0\n' > "$STUB_STATUS_FILE" ;;
                 esac
+            fi
+            # The recorded command's completion mark. It lands when the
+            # command returned — a clean finish, a command that exited
+            # non-zero, an attach that failed (it returned with an error) —
+            # and not when the recorder was killed before it could: no status
+            # (the pane's shell died with asciinema), a signal status, or
+            # `remaindied`. `emptystatus` did return (the shell was killed
+            # after the command came back), so it gets the mark; the status
+            # check fires first there either way.
+            if [ -n "${STUB_COMMAND_DONE_FILE:-}" ]; then
+                case "$STUB_MODE" in
+                  nostatus|detachnostatus|midadied|remaindied|badstatus|midbothbad|detachbothbad) : ;;
+                  *) printf 'done\n' > "$STUB_COMMAND_DONE_FILE" ;;
+                esac
             fi ;;
       esac
       case "$STUB_MODE" in
@@ -5786,6 +5831,16 @@ case "$1 $2" in
         # but the server keeps the session because `remain-on-exit on` is set —
         # a dead pane, no status file, and a `has-session` that still answers.
         remaindied) : > "$STATE/dead.pm-recorder" ;;
+        # `termedboth`: a supervisor's SIGTERM stopped the recorder mid-scenario
+        # (asciinema exited 0, its command was killed, no completion mark) and
+        # the scenario's own quit then ended the target session, taking its
+        # claim and pipe with it. Step 5's both-gone branch is the one that
+        # reads this state, where no claim is left to catch it.
+        termedboth)
+            rm -f "$STATE/pm-recorder" "$STATE/claim.pm-recorder" \
+                  "$STATE/rejected.pm-recorder" \
+                  "$STATE/pm-test" "$STATE/claim.pm-test" \
+                  "$STATE/pipe.pm-test" ;;
         midboth|midbothbad)
             # A session ending takes its session options (the capture-dir
             # claim) with it, as real tmux does.
@@ -5867,6 +5922,14 @@ def _run_block(raw, mode, tmp_path, target=False, env_extra=None,
         # the stub cannot run the pane command, so it writes the status the
         # recipe's step 4 reads.
         env["STUB_STATUS_FILE"] = str(stub_capture / sub / "recorder.status")
+    if "recorder.command-done" in raw:
+        # The pane command's `-c` wrapper writes this mark when the recorded
+        # command returns — the handle that tells a finished recording from
+        # one asciinema was *stopped* in (it exits 0 for that too). The stub
+        # writes it for the modes whose command returned and withholds it for
+        # the killed ones, as the real wrapper does.
+        env["STUB_COMMAND_DONE_FILE"] = str(
+            stub_capture / sub / "recorder.command-done")
     r = subprocess.run(["bash"], input=block, env=env, cwd=cwd,
                        capture_output=True, text=True, timeout=timeout)
     return r, stub_capture / sub / "recording.cast"
@@ -6513,6 +6576,48 @@ class TestCaptureFlowExecution:
         assert "asciinema exited" not in r.stderr, (
             f"{name}: the failure names an exit status it does not have: "
             + r.stderr)
+
+    @pytest.mark.parametrize("name,mode,message", [
+        ("cli-recording.md", "termed", "the recorded command did not return"),
+        ("tmux-screen-recording.md", "termedboth",
+         "the recorder's command did not return"),
+    ])
+    def test_a_stopped_recorder_is_not_a_finished_recording(self, name, mode,
+                                                            message,
+                                                            tmp_path):
+        """asciinema exits 0 when it is *stopped*, so its status is not enough.
+
+        asciinema catches SIGTERM and SIGHUP, finalizes the cast and exits 0 —
+        verified live in this container on asciinema 2.1.0: a recorder
+        TERMed mid-command left ``recorder.status`` holding ``0``, a cast
+        holding the output so far, and the recorded command killed — and the
+        pane's shell survives to write that ``0``. A supervisor's polite kill
+        therefore leaves exactly the state a finished recording leaves: a
+        non-empty cast and a clean status, which both recipes' completion
+        checks accepted. The pane command's completion mark is the handle its
+        child cannot write once asciinema is stopped, and the stop steps now
+        require it.
+
+        The tmux case is the both-gone branch: the target session ended with
+        the stopped recorder, so no claim is left to catch it and the
+        completion mark is the only thing that can. The CLI case reaches its
+        stop step directly (a one-shot command ends the session). Both modes
+        write the clean status and the cast, so the pre-fix checks pass and
+        the run reports a finished recording (verified by mutation below).
+        """
+        r, cast = _run_capture_block(name, mode, tmp_path, target=True)
+        assert r.returncode != 0, (
+            f"{name}: a recorder stopped with SIGTERM passed as a finished "
+            "recording: " + r.stderr)
+        assert message in r.stderr, r.stderr
+        assert cast.stat().st_size > 0, (
+            "the case did not reach the completion check: the cast is empty")
+        assert (cast.parent / "recorder.status").read_text().strip() == "0", (
+            "the case did not reach the completion check: the status is not "
+            "the clean one a stopped recorder leaves")
+        assert not (cast.parent / "recorder.command-done").exists(), (
+            "the stub wrote the completion mark for a stopped recorder, so "
+            "the case cannot see the check")
 
     def test_tmux_recording_completes(self, tmp_path):
         r, cast = _run_capture_block(
@@ -8215,7 +8320,8 @@ class TestCaptureFlowExecution:
             target=True,
             files={"recording.cast": '{"version": 2}\n',
                    "transcript.log": "pane output\n",
-                   "recorder.status": "0\n"})
+                   "recorder.status": "0\n",
+                   "recorder.command-done": "done\n"})
         assert r.returncode == 0, (
             "a finished recording was reported incomplete because step 5 was "
             "pasted twice: " + r.stderr)
@@ -8277,7 +8383,8 @@ class TestCaptureFlowExecution:
             state_files={"claim.pm-test": str(cap)},
             files={"recording.cast": '{"version": 2}\n',
                    "transcript.log": "pane output\n",
-                   "recorder.status": "0\n"})
+                   "recorder.status": "0\n",
+                   "recorder.command-done": "done\n"})
         assert r.returncode != 0, (
             "the fixture was expected to refuse the capture")
         assert "still in progress" in r.stderr, r.stderr
@@ -8311,7 +8418,8 @@ class TestCaptureFlowExecution:
             state_files={"claim.pm-test": str(cap)},
             files={"recording.cast": '{"version": 2}\n',
                    "transcript.log": "pane output\n",
-                   "recorder.status": "0\n"})
+                   "recorder.status": "0\n",
+                   "recorder.command-done": "done\n"})
         assert r.returncode != 0, (
             "the fixture was expected to refuse the capture")
         assert (tmp_path / "state" / "rejected.pm-test").exists(), (
@@ -8507,6 +8615,7 @@ class TestCaptureFlowExecution:
             target=True, sessions=("pm-recorder",),
             files={"recording.cast": '{"version": 2}\n',
                    "recorder.status": "0\n",
+                   "recorder.command-done": "done\n",
                    "transcript.log": "pane output\n"},
             env_extra={"STUB_PREFIX": "C-a"})
         assert r.returncode == 0, r.stderr
@@ -8757,7 +8866,8 @@ class TestCaptureFlowExecution:
             _stop_block("tmux-screen-recording.md"), "midboth", tmp_path,
             files={"recording.cast": '{"version": 2}\n',
                    "transcript.log": "pane output\n",
-                   "recorder.status": "0\n"})
+                   "recorder.status": "0\n",
+                   "recorder.command-done": "done\n"})
         assert cast.stat().st_size > 0, "the fixture left no cast to misread"
         assert r.returncode == 0, (
             "a legitimate finish was rejected because the stop block ran with "

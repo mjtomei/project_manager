@@ -47,6 +47,12 @@ names):
   failure left as a finished recording. They are failure
   evidence rather than capture artifacts; mention whichever exist in the
   manifest's `## Files` section.
+- `recorder.command-done` — the mark the recorder's command leaves when it
+  returns: the completion handle step 5 needs because asciinema's own exit
+  status is 0 when it is *stopped* as well as when it finishes (step 5
+  explains why). It is present in every finished capture; name it in the
+  manifest's `## Files` section, and its absence means the recording did not
+  finish.
 - `manifest.md` — frontmatter + short prose: workdir path the capture
   came from, the exact commands that produced it, the pre-fix/post-fix
   state demonstrated, and any external setup the recording assumes.
@@ -121,7 +127,10 @@ restart, so the recorder never meets an earlier attempt's cast. The
 transcript is appended to, so a stale `transcript.log` would silently mix an
 earlier run into this run's evidence. `recorder.status` holds this run's
 recorder exit status (step 5); a leftover one would let a recorder that was
-torn down before it finished pass that check. `recorder-stderr.log` and
+torn down before it finished pass that check. `recorder.command-done` is the
+mark the recorder's command leaves when it returns — step 5's handle for a
+recorder that was *stopped* (asciinema exits 0 for that too) — so an earlier
+capture's mark must not stand in for this run's. `recorder-stderr.log` and
 `recorder-pane.log` are this run's failure evidence — asciinema's own
 diagnostics, and the pane's last screen when a wait gives up or the driving
 step's send fails — so an earlier run's copies go too. `recorder.rejected` is
@@ -239,7 +248,8 @@ fi
 rm -f <capture-dir>/recording.cast <capture-dir>/transcript.log \
       <capture-dir>/recording.mp4 <capture-dir>/recording.cast.gif \
       <capture-dir>/recording.mp4.partial.mp4 \
-      <capture-dir>/recorder.status <capture-dir>/recorder-stderr.log \
+      <capture-dir>/recorder.status <capture-dir>/recorder.command-done \
+      <capture-dir>/recorder-stderr.log \
       <capture-dir>/recorder-pane.log <capture-dir>/recorder.rejected \
       <capture-dir>/manifest.md
 # The mp4 and the intermediate gif are here, not only in the render step: a
@@ -547,14 +557,24 @@ rm -f <capture-dir>/recorder.rejected
 #    (the cast inherits this size). 200x50 fits a typical desktop
 #    layout; bump them up if your scenario needs more room.
 #    The pane command also records asciinema's *own* exit status once it
-#    returns: step 5 needs it to tell a finished recording from a recorder
-#    that was killed, and `test -s` on the cast cannot. `\$?` is escaped so
+#    returns: step 5 reads it beside the completion mark below, and `test -s`
+#    on the cast cannot tell either. `\$?` is escaped so
 #    the pane's shell expands it, not this one. asciinema's stderr goes to a
 #    file for the same reason: its own errors (an unwritable cast path, a
 #    bad option) are what a failed run needs, and the failure paths below
 #    that act on the recorder tear the pane down (the capture-directory
 #    guards refuse before they act on anything). The attach's own errors
 #    still go through the pty and stay visible in the pane and the cast.
+#    The status alone cannot tell a recording that finished from one that was
+#    *stopped*: asciinema catches SIGTERM and SIGHUP, finalizes the cast and
+#    exits 0 (verified live on asciinema 2.1.0: a recorder TERMed
+#    mid-scenario left `recorder.status` 0 and the cast written so far,
+#    while the pane's shell survived to write that 0). The recorded
+#    command's own return is the completion handle: the `-c` command runs
+#    the attach in a subshell and then writes `recorder.command-done`, and
+#    asciinema's child is killed when asciinema is, so the mark never lands
+#    for a stopped recorder. Step 5 requires the mark; step 0 and this step
+#    clear it with the rest.
 #    The attach names the target exactly (`=`) for the same reason every other
 #    handle does: a bare name is prefix-matched when the target session is
 #    gone, so the attach would land on a grouped `<base>~N` session and the
@@ -656,7 +676,10 @@ tmux has-session -t "=$TARGET" 2>/dev/null || {
 # a clean finish on a truncated cast (verified live: after a clean first
 # attempt, step 3 alone started a new recorder with the old `0` still on disk;
 # killing that recorder left the `0`, and step 5 exited 0 on the cast it had
-# written so far). Only a step with no live recorder may clear this: a
+# written so far). The completion mark goes with it: a restarted recorder
+# whose attempt is stopped leaves no mark of its own, so the previous
+# attempt's mark would let step 5 accept the truncated cast. Only a step with
+# no live recorder may clear this: a
 # recorder whose pane is still running owns the cast it is writing, so refuse
 # it first and name the step that ends it instead of deleting its evidence.
 #    A recorder whose pane has *returned* is not running: with
@@ -719,13 +742,15 @@ if [ "$(tmux display-message -p -t "=$TARGET:0.0" '#{pane_pipe}' 2>/dev/null)" !
     exit 1
 fi
 rm -f <capture-dir>/recording.cast <capture-dir>/recorder.status \
+      <capture-dir>/recorder.command-done \
       <capture-dir>/recorder-stderr.log <capture-dir>/recorder-pane.log \
       <capture-dir>/recorder.rejected \
       <capture-dir>/recording.mp4 <capture-dir>/recording.cast.gif \
       <capture-dir>/recording.mp4.partial.mp4 <capture-dir>/manifest.md
 tmux new-session -d -s pm-recorder -x 200 -y 50 \
     "asciinema rec --quiet <capture-dir>/recording.cast \
-        -c 'tmux attach -t =$TARGET' 2> <capture-dir>/recorder-stderr.log; \
+        -c '(tmux attach -t =$TARGET); printf done > <capture-dir>/recorder.command-done' \
+        2> <capture-dir>/recorder-stderr.log; \
         echo \$? > <capture-dir>/recorder.status" || {
     # tmux could not create the session at all (server gone or refusing,
     # a duplicate session left by a concurrent run, a bad option): the pane
@@ -1301,13 +1326,20 @@ test -s <capture-dir>/recording.cast || {
 # killed mid-recording leaves a cast holding only its header, and when the
 # target session ended too there is no live session left to witness it — the
 # same position the CLI scaffold's pane is in. asciinema's own exit status is
-# the handle. It is 0 when the recording ran to completion — the *recorded*
+# one handle. It is 0 when the recording ran to completion — the *recorded*
 # command's status is not propagated, so a recording of a command that exits
 # non-zero (or an attach that ends because the session ended) is still a
 # finished recording — and non-zero when asciinema refused to start or was
-# killed, in which case the cast stops wherever it stopped. A missing status
-# file means the pane was torn down before asciinema returned, which is the
-# same failure.
+# killed with SIGINT/SIGKILL, in which case the cast stops wherever it
+# stopped. A missing status file means the pane was torn down before
+# asciinema returned, which is the same failure. It is *not* the whole
+# handle: asciinema catches SIGTERM and SIGHUP, finalizes the cast and exits
+# 0 (verified live on asciinema 2.1.0: a recorder TERMed mid-scenario left
+# `recorder.status` 0 and the cast written so far), so a recorder a
+# supervisor *stopped* writes the same 0 a finished one does — and when the
+# target session ended too there is no claim left to catch it. The
+# recorder's command returning is the completion handle, and the check after
+# the status requires the mark step 3's pane command writes for it.
 # An *empty* status file is that same failure one shape over: the pane's shell
 # creates the file when it opens the redirect and writes the status a moment
 # later, so a kill in that window (a concurrent capture's step 0 ending this
@@ -1333,6 +1365,26 @@ status=$(cat <capture-dir>/recorder.status 2>/dev/null)
 [ "$status" = 0 ] || {
     echo "asciinema exited $status — the cast is incomplete, not a finished" \
         "recording; see <capture-dir>/recorder-stderr.log" >&2
+    # Dead pane, possibly a surviving session (`remain-on-exit on`): end it.
+    tmux kill-session -t "=pm-recorder" 2>/dev/null || true
+    tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
+    tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
+    exit 1
+}
+# The last handle: did the recorder's *command* return? asciinema's status
+# cannot say (a TERM'd or HUP'd recorder exits 0, above), and the cast is
+# just as valid either way. The pane command writes this mark after the
+# attach returns; a recorder that was stopped never gets there, and its
+# child is killed with it. A missing or empty mark is the same failure: the
+# write can fail on a full disk, and an empty file is not a mark (the
+# stage-input rule the cast/gif/webm checks follow).
+[ -s <capture-dir>/recorder.command-done ] || {
+    echo "the recorder's command did not return — asciinema stopped before" \
+        "it did (a recorder that was terminated rather than allowed to" \
+        "finish), so the cast stops where the kill landed and is not a" \
+        "finished recording; if the command did return, its completion mark" \
+        "could not be written (a full disk, or a capture directory that" \
+        "cannot be written)" >&2
     # Dead pane, possibly a surviving session (`remain-on-exit on`): end it.
     tmux kill-session -t "=pm-recorder" 2>/dev/null || true
     tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
@@ -1788,6 +1840,8 @@ recipe: pm/qa/artifacts/tmux-screen-recording.md
   run's recording)
 - `recorder.rejected` — present only when a step rejected this capture (a
   failed start, or a recording that ended early); the recording is incomplete
+- `recorder.command-done` — the mark the recorder's command leaves when it
+  returns; absent when a recorder was stopped before the scenario ended
 - `<any extra file>` — <one-line description>
 ```
 

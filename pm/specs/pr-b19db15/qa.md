@@ -1366,6 +1366,24 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   on that state without the mark and 1 with "an earlier step rejected this
   capture" after it; the stub `failedattachboth` mode reproduces it (review
   loop 928f i40, R106).
+- A recorder that is *stopped* (a supervisor's SIGTERM, or SIGHUP) → the stop
+  steps must **not** accept its cast. asciinema catches both signals,
+  finalizes the cast and exits 0 (verified live on tmux 3.2a + asciinema
+  2.1.0: a recorder TERMed mid-command left `recorder.status` 0, a cast
+  holding the output so far, and the recorded command killed; SIGINT wrote
+  130 and SIGKILL 137, which the status check already refuses), so a stopped
+  recorder leaves the same non-empty cast and clean status a finished one
+  does. Both pane commands now write `recorder.command-done` after the
+  recorded command returns (in a subshell, so an `exit`/`exec` cannot skip
+  it), and both stop steps require it after the status check. Verified live:
+  the CLI step 4 and the tmux step 5 (both-gone branch, the target session
+  ended with the stopped recorder) exit 0 on that state before the fix and 1
+  with "the recorded command did not return / the recorder's command did not
+  return" after it, while a normally finished recording (the one-shot command
+  ends, or the detach ends the attach) still exits 0. The stub `termed` /
+  `termedboth` modes reproduce it (review loop 928f i42, R108). S21/S22/S23
+  re-check that a finished capture still passes and that a stopped one does
+  not.
 
 ## Pass / Fail criteria
 
