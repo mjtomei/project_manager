@@ -996,7 +996,24 @@ def current_or_base_session(base: str) -> str:
                 return current
     # Current pane is in a different group (or not in tmux).
     # The base session may have no clients; prefer an attached grouped session.
-    for name in list_grouped_sessions(base):
+    grouped = list_grouped_sessions(base)
+    for name in grouped:
+        result = _run(
+            _tmux_cmd("display-message", "-t", name, "-p", "#{session_attached}"),
+            text=True,
+        )
+        if result.returncode == 0 and result.stdout.strip() != "0":
+            return name
+    # No attached ``base~N``: a user's own view of the session, grouped
+    # with it under any name (S118/S121/S124), is a client of this session
+    # too — its client is the one the caller must target (the same rule the
+    # first branch applies when the current pane is in that view).  The
+    # candidates come from tmux's group, not from a ``base~`` name prefix,
+    # which on the legacy default server would also match another project
+    # whose directory name contains ``~`` (review-loop b48f i13).
+    for name in sessions_in_group(base):
+        if name == base or name in grouped:
+            continue
         result = _run(
             _tmux_cmd("display-message", "-t", name, "-p", "#{session_attached}"),
             text=True,
@@ -1027,7 +1044,21 @@ def create_grouped_session(base: str, name: str, socket_path: str | None = None)
 
 
 def list_grouped_sessions(base: str, socket_path: str | None = None) -> list[str]:
-    """List grouped sessions matching base~*, sorted by suffix number."""
+    """List pm grouped sessions of *base* (``base~<number>``), sorted.
+
+    pm names its grouped sessions ``<base>~<N>``
+    (``next_grouped_session_name`` is the only producer), so only a name
+    whose suffix after the last ``~`` is a number is a grouped session of
+    *base*.  A *different* session whose name merely starts with ``base~``
+    is not one, and treating it as one is a cross-session hazard: a repo
+    directory may contain ``~``, so the project ``x~foo`` runs session
+    ``pm-x~foo-<hash>`` on the legacy default server, and the old name
+    prefix made ``pm session kill``/detach/attach for ``pm-x`` act on that
+    other project's session (review-loop b48f i13).  A user's own *view*
+    of the session is grouped with it too, but its name says nothing about
+    that; the authoritative membership test is tmux's session group, which
+    ``sessions_in_group`` queries.
+    """
     result = _run(
         _tmux_cmd("list-sessions", "-F", "#{session_name}",
                    socket_path=socket_path),
@@ -1038,7 +1069,7 @@ def list_grouped_sessions(base: str, socket_path: str | None = None) -> list[str
     prefix = base + "~"
     grouped = []
     for line in result.stdout.strip().splitlines():
-        if line.startswith(prefix):
+        if line.startswith(prefix) and _grouped_suffix(line) is not None:
             grouped.append(line)
     # The suffix is the part after the *last* ``~``: the base name is
     # derived from the repo directory and may itself contain ``~``
@@ -1049,9 +1080,15 @@ def list_grouped_sessions(base: str, socket_path: str | None = None) -> list[str
 
 
 def _grouped_suffix(name: str) -> int | None:
-    """Return the ``N`` of a ``<base>~N`` grouped-session name, or None."""
+    """Return the ``N`` of a ``<base>~N`` grouped-session name, or None.
+
+    Only ASCII digits count: ``str.isdigit`` is true for characters such
+    as ``²`` whose ``int()`` raises, which crashed every caller of
+    ``list_grouped_sessions`` on a session whose name ends in one
+    (review-loop b48f i13).
+    """
     suffix = name.rpartition("~")[2]
-    return int(suffix) if suffix.isdigit() else None
+    return int(suffix) if suffix.isascii() and suffix.isdigit() else None
 
 
 def sessions_in_group(base: str, socket_path: str | None = None) -> list[str]:
@@ -1205,7 +1242,10 @@ def attached_group_active_windows(base: str, socket_path: str | None = None) -> 
     row).  The session name comes last (``maxsplit=3``) so it is taken
     whole.  A user's own view grouped with *base* under another name
     (``tmux new-session -t base -s myview``) belongs to the group too
-    (S121).
+    (S121).  Membership is tmux's ``#{session_group}``, not a ``base~``
+    name prefix: a repo directory may contain ``~``, so on the legacy
+    default server another project's ``pm-x~foo-<hash>`` session starts
+    with ``pm-x~`` without being part of ``pm-x`` (review-loop b48f i13).
     """
     result = _run(
         _tmux_cmd("list-sessions", "-F",
@@ -1221,8 +1261,7 @@ def attached_group_active_windows(base: str, socket_path: str | None = None) -> 
         if len(parts) != 4:
             continue
         attached, wid, group, name = parts
-        if (name == base or name.startswith(base + "~") or group == base) \
-                and attached.isdigit():
+        if (name == base or group == base) and attached.isdigit():
             if int(attached) > 0 and wid:
                 active[name] = wid
     return active
@@ -1238,13 +1277,13 @@ def sessions_on_window(base: str, window_id: str,
     ``detach_current_client`` to find the sessions whose clients are
     looking at a given window.
 
-    *members* overrides the candidate sessions (default: base +
-    ``base~N``).  ``detach_current_client`` passes the whole session group
-    from ``sessions_in_group``, which also covers a user's own view of the
-    session.
+    *members* overrides the candidate sessions (default: the session
+    group from ``sessions_in_group`` — the base, its ``base~N`` grouped
+    sessions and a user's own view of the session under any name).
+    ``detach_current_client`` passes the same group explicitly.
     """
     candidates = (list(members) if members is not None
-                  else [base] + list_grouped_sessions(base, socket_path=socket_path))
+                  else sessions_in_group(base, socket_path=socket_path))
     _log.info("sessions_on_window: base=%s window_id=%s candidates=%s", base, window_id, candidates)
     result = []
     for name in candidates:

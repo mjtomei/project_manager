@@ -255,6 +255,13 @@ pane unless stated otherwise.
   **WHEN** the user runs `pm session kill` (which reports no session for
   that name), **THEN** the live server's socket file is *not* removed and
   the client is not stranded.
+- **GIVEN** the legacy default server also hosts an *unrelated* pm
+  session whose name merely starts with the target's name plus `~` — a
+  repo directory may contain `~`, so the project `x~foo` runs
+  `pm-x~foo-<hash>` — **WHEN** the user runs `pm session kill` for
+  `pm-x`, **THEN** only `pm-x`'s group (base, `~N`, views) is torn down;
+  the other project's session, its panes and its clients are untouched
+  (group membership is tmux's session group, never a name prefix).
 - **GIVEN** a stale socket file left behind by a dead server,
   **WHEN** the user runs `pm session kill`, **THEN** it reports no session
   and removes the stale file; a later `pm session` starts a fresh server

@@ -151,9 +151,11 @@ def _register_tmux_bindings(session_name: str) -> None:
     # unattached base session contributing a zero size.
     if _session_is_shared(session_name):
         # Only a numeric ``~N`` is a grouped suffix; a session name may
-        # contain ``~`` itself (paths.base_session_name).
+        # contain ``~`` itself (paths.base_session_name).  The group comes
+        # from tmux (``sessions_in_group``) so a user's own view of the
+        # session gets the option too — its client constrains the size.
         base = pane_registry.base_session_name(session_name)
-        for s in [base] + tmux_mod.list_grouped_sessions(base):
+        for s in tmux_mod.sessions_in_group(base):
             tmux_mod.set_session_option(s, "window-size", "smallest")
 
     subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", "R",

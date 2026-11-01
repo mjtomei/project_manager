@@ -246,6 +246,23 @@ def _tmux_argv(*args: str) -> list[str]:
     return cmd
 
 
+def _is_grouped_of(name: str, base: str) -> bool:
+    """True when *name* is pm's ``<base>~<N>`` grouped session of *base*.
+
+    Only an ASCII numeric suffix is a grouped session (pm never writes
+    another kind), so a *different* session whose name merely starts with
+    ``base~`` — a repo directory may contain ``~``, giving the project
+    ``x~foo`` the session ``pm-x~foo-<hash>`` — is not one.  Kept inline
+    because this module runs standalone (it must not import ``pm_core``);
+    ``pm_core.paths.base_session_name`` is the shared definition.
+    """
+    prefix = base + "~"
+    if not name.startswith(prefix):
+        return False
+    suffix = name[len(prefix):]
+    return suffix.isascii() and suffix.isdigit()
+
+
 def _find_attached_session(base: str) -> str:
     """Find the correct grouped session for window switching.
 
@@ -277,7 +294,7 @@ def _find_attached_session(base: str) -> str:
                 capture_output=True, text=True,
             )
             current, _, group = result.stdout.strip().partition(":")
-            if current and (current == base or current.startswith(base + "~")
+            if current and (current == base or _is_grouped_of(current, base)
                             or group == base):
                 # Verify it has attached clients
                 att = subprocess.run(
@@ -291,23 +308,31 @@ def _find_attached_session(base: str) -> str:
         except Exception:
             pass
 
-    # Priority 2: first attached grouped session.  ``:`` separates the
+    # Priority 2: first attached session in the group.  ``:`` separates the
     # fields: tmux rewrites ``:`` in session names to ``_``, while a session
     # name — derived from the repo directory name — may contain a space or
     # ``|``.  With a space-separated query ``pm-my repo-abc~1`` was read as
     # ``pm-my``, so the attached grouped session was never found and the
     # base's window was switched instead (which the user's client does not
     # follow); the same parser rule the tmux helpers use.
+    #
+    # Membership is tmux's ``#{session_group}``, not a ``base~`` name
+    # prefix: a repo directory may contain ``~``, so on the legacy default
+    # server another project's ``pm-x~foo-<hash>`` session starts with
+    # ``pm-x~`` without being part of ``pm-x`` — switching *its* window
+    # would move a different session's client (review-loop b48f i13).
     try:
         result = subprocess.run(
             _tmux_argv(
-                "list-sessions", "-F", "#{session_name}:#{session_attached}"),
+                "list-sessions", "-F",
+                "#{session_name}:#{session_group}:#{session_attached}"),
             capture_output=True, text=True,
         )
         for line in result.stdout.strip().splitlines():
-            name, _, attached = line.rpartition(":")
-            if name and (name == base or name.startswith(base + "~")) \
-                    and attached != "0":
+            name, _, rest = line.partition(":")
+            group, _, attached = rest.partition(":")
+            if name and (name == base or _is_grouped_of(name, base)
+                         or group == base) and attached != "0":
                 return name
     except Exception:
         pass

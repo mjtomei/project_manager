@@ -3394,7 +3394,10 @@ same "a view is not a session" class the earlier iterations closed for
    row `pm-repo-abc~myview`).
 
    Deliberately not changed: `tmux.list_grouped_sessions()` still matches
-   `base~*` by name prefix.  It feeds `pane_layout`'s minimum-window-size
+   `base~*` by name prefix.  (Correction, review-loop b48f i13: this was
+   wrong — a repo directory may contain `~`, so another project's session
+   can start with `<base>~`; the match is now numeric-suffix only.  See
+   the b48f i13 section below.)  It feeds `pane_layout`'s minimum-window-size
    computation, `current_or_base_session()` and the grouped-session
    lifecycle, where including a view is the safe direction (its client
    constrains the layout and it shares the windows); and on a private
@@ -3411,3 +3414,70 @@ passed / 1 skipped); targeted suites 22 passed; the preserved smoke
 script re-ran clean on a disposable socket.  No live session, server or
 shared host configuration was touched — every fixture used a disposable
 socket directory, a temporary HOME or a mocked tmux.
+
+## Review iteration (2026-11-01, review-loop b48f i13)
+
+Verification pass over the head after the b48f i12 fix; one cross-session
+hazard of the "a name is not a group" class, plus the parser crash that
+guarding it exposed.  **Correction to b48f i12:** the "deliberately not
+changed" paragraph there claimed a `<base>~<non-numeric>` name is one "pm
+never generates".  That is wrong: the session name is
+`pm-<repo directory>-<8-hex hash>`, so the project `x~foo` runs
+`pm-x~foo-<hash>`, which does start with `pm-x~`.  On the legacy default
+server (the only server where two unrelated bases coexist) the name-prefix
+match therefore made another project's session part of `pm-x`'s group.
+
+1. **`list_grouped_sessions()` matched a name prefix, not a grouped
+   session.**  Verified live on tmux 3.2a with sessions `pm-x` and
+   `pm-x~foo-12345678` on one disposable server: the pre-fix
+   `list_grouped_sessions("pm-x")` returned `['pm-x~foo-12345678']` and
+   `sessions_in_group("pm-x")` returned both names.  Consequences on the
+   legacy default server: `pm session kill pm-x` tore the other project's
+   session down; `pm session` could reuse it as an "unattached grouped
+   session" and attach the user to the wrong project; `Ctrl-Q`'s
+   `detach_current_client` fallback could detach that project's client;
+   `current_or_base_session`/`get_window_id`/`select_window` could target
+   its window.  Only an **ASCII numeric** suffix is a grouped session pm
+   writes (`next_grouped_session_name` is the only producer), so
+   `list_grouped_sessions` now keeps only `_grouped_suffix(line) is not
+   None`.  A user's own *view* is still included wherever it belongs,
+   through tmux's session group: `sessions_in_group` (already used by the
+   kill and detach paths) now unions only numeric names, and the four
+   callers that need views were switched from the name list to
+   `sessions_in_group` — `current_or_base_session` (attached-view
+   fallback), `sessions_on_window` (default candidates), `pane_layout.
+   get_reliable_window_size` (the smallest attached client) and
+   `_register_tmux_bindings` (`window-size=smallest`).  `attached_group_
+   active_windows` dropped its prefix clause and matches
+   `#{session_group}` only.  `qa_status._find_attached_session` (standalone
+   module, no `pm_core` import) does the same with a local
+   `_is_grouped_of()` helper; its priority-2 list now carries the group
+   field.  Verified live post-fix on a disposable server: the unrelated
+   `pm-x~foo-12345678` is not a member of `pm-x`'s group, a view of
+   `pm-x` still is, and `current_or_base_session("pm-x")` returns the
+   attached `myview` (not the unrelated session).  Tests: `TestListGroupedSessions::
+   test_only_numeric_suffixes_are_grouped`, `TestSessionsInGroup::
+   test_excludes_a_session_merely_named_like_a_grouped_one`,
+   `TestCurrentOrBaseSession::test_falls_back_to_an_attached_view_in_the_group`,
+   `TestQaStatusSocketRouting::test_does_not_switch_another_projects_
+   similarly_named_session`; `TestSessionsOnWindow` now patches
+   `sessions_in_group`.
+2. **`_grouped_suffix()` crashed on a non-ASCII digit suffix.**
+   `str.isdigit()` is true for `²`, but `int("²")` raises `ValueError`;
+   `list_grouped_sessions` calls it for every prefix-matching name, so a
+   session named `pm-x~²` (a hand-made session or a view) raised out of
+   every caller — `pm session`, kill, detach, `pm session list`'s group
+   merge.  `_grouped_suffix` and `paths.base_session_name` (plus the
+   wrapper's inline copy in `_ipc_session_tag`) now require
+   `suffix.isascii() and suffix.isdigit()`; pm only ever writes ASCII
+   `~N`.  Tests: `TestListGroupedSessions::test_non_ascii_digit_suffix_
+   does_not_crash`, `TestBaseSessionName::test_a_non_ascii_digit_suffix_
+   is_part_of_the_name`.
+
+Validation: full suite 5470 passed / 1 skipped (431.7 s, log
+`/pm-captures/review-b48f-i13/full-suite-final.log`); targeted suites 739
+passed (the changed modules plus `tests/test_shared_sessions.py`,
+`test_pane_layout.py`, `test_cli_helpers.py`, `test_cli_qa.py`,
+`test_tui_pidfile.py`, `test_breadcrumb_review_loop.py`).  Both live
+checks used disposable sockets under a temporary directory.  No live
+session, server or shared host configuration was touched.

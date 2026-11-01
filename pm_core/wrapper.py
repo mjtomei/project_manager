@@ -139,10 +139,12 @@ def _ipc_session_tag(argv: list[str]) -> str | None:
     # Only a *numeric* ``~N`` is a grouped suffix (paths.base_session_name):
     # a session name derived from a repo directory may contain ``~``
     # itself, and splitting at the first one would resolve another
-    # session's tag.  Kept inline for the same reason as
+    # session's tag.  ASCII digits only, like the shared definition: some
+    # non-ASCII characters (``²``) satisfy ``isdigit`` but are not a
+    # grouped suffix pm ever writes.  Kept inline for the same reason as
     # ``_PM_SOCKET_DIR`` — this runs before pm_core is imported.
     base, sep, suffix = session.rpartition("~")
-    if not (sep and suffix.isdigit()):
+    if not (sep and suffix.isascii() and suffix.isdigit()):
         base = session
     if base.startswith("pm-"):
         return base[3:]

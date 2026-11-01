@@ -698,6 +698,27 @@ class TestCurrentOrBaseSession:
             assert current_or_base_session("pm-x") == view
         mock_sg.assert_called_once_with(view)
 
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.sessions_in_group",
+           return_value=["myview", "pm-x", "pm-x~1"])
+    @patch("pm_core.tmux.list_grouped_sessions", return_value=["pm-x~1"])
+    @patch("pm_core.tmux.session_group", return_value="")
+    @patch("pm_core.tmux.get_session_name", return_value="other")
+    @patch("pm_core.tmux.in_tmux", return_value=True)
+    def test_falls_back_to_an_attached_view_in_the_group(
+            self, mock_in, mock_gsn, mock_sg, mock_lg, mock_sig, mock_run):
+        """With no attached ``base~N``, an attached view is the target.
+
+        Views are found through tmux's group (``sessions_in_group``), not a
+        ``base~`` name prefix, so a different project whose directory name
+        contains ``~`` is not a candidate (review-loop b48f i13).
+        """
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="0\n"),  # pm-x~1 not attached
+            MagicMock(returncode=0, stdout="1\n"),  # myview attached
+        ]
+        assert current_or_base_session("pm-x") == "myview"
+
 
 # ---------------------------------------------------------------------------
 # new_window_get_pane
@@ -866,6 +887,30 @@ class TestListGroupedSessions:
         assert list_grouped_sessions("pm-my~repo-abc") == [
             "pm-my~repo-abc~1", "pm-my~repo-abc~2"]
 
+    @patch("pm_core.tmux.subprocess.run")
+    def test_only_numeric_suffixes_are_grouped(self, mock_run):
+        """A session merely *named* ``base~...`` is not a grouped session.
+
+        A repo directory may contain ``~``, so the project ``x~foo`` runs
+        session ``pm-x~foo-<hash>`` on the legacy default server.  The old
+        name-prefix match made that unrelated session part of ``pm-x``:
+        ``pm session kill``/detach/attach for ``pm-x`` acted on it
+        (review-loop b48f i13).
+        """
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=(
+                "pm-x\npm-x~1\npm-x~foo-12345678\npm-x~myview\n"
+            )
+        )
+        assert list_grouped_sessions("pm-x") == ["pm-x~1"]
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_non_ascii_digit_suffix_does_not_crash(self, mock_run):
+        """``²`` is ``isdigit()`` but ``int()`` raises: it is not grouped."""
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="pm-x\npm-x~²\npm-x~1\n")
+        assert list_grouped_sessions("pm-x") == ["pm-x~1"]
+
 
 class TestNextGroupedSessionName:
     @patch("pm_core.tmux.list_grouped_sessions", return_value=[])
@@ -915,14 +960,15 @@ class TestFindUnattachedGroupedSession:
 
 class TestSessionsOnWindow:
     @patch("pm_core.tmux.subprocess.run")
-    @patch("pm_core.tmux.list_grouped_sessions", return_value=[])
-    def test_no_match(self, mock_lg, mock_run):
+    @patch("pm_core.tmux.sessions_in_group", return_value=["proj"])
+    def test_no_match(self, mock_sig, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="@2\n")
         assert sessions_on_window("proj", "@1") == []
 
     @patch("pm_core.tmux.subprocess.run")
-    @patch("pm_core.tmux.list_grouped_sessions", return_value=["proj~1", "proj~2"])
-    def test_returns_matching_sessions(self, mock_lg, mock_run):
+    @patch("pm_core.tmux.sessions_in_group",
+           return_value=["proj", "proj~1", "proj~2"])
+    def test_returns_matching_sessions(self, mock_sig, mock_run):
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="@5\n"),   # base on @5
             MagicMock(returncode=0, stdout="@5\n"),   # proj~1 on @5
@@ -931,8 +977,8 @@ class TestSessionsOnWindow:
         assert sessions_on_window("proj", "@5") == ["proj", "proj~1"]
 
     @patch("pm_core.tmux.subprocess.run")
-    @patch("pm_core.tmux.list_grouped_sessions", return_value=[])
-    def test_display_error_skipped(self, mock_lg, mock_run):
+    @patch("pm_core.tmux.sessions_in_group", return_value=["proj"])
+    def test_display_error_skipped(self, mock_sig, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stdout="")
         assert sessions_on_window("proj", "@1") == []
 

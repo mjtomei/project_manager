@@ -863,9 +863,16 @@ def base_session_name(session: str) -> str:
 
     Idempotent: a base name without a numeric suffix is returned unchanged,
     so passing an already-resolved name is always safe.
+
+    Only *ASCII* digits count.  ``str.isdigit`` is true for characters such
+    as ``²`` whose ``int()`` raises, and pm never produces a non-ASCII
+    grouped suffix — treating one as grouped would make a hand-made session
+    (or a view) collide with a real base name, and the matching
+    ``int()`` in ``tmux._grouped_suffix`` would crash (review-loop b48f
+    i13).
     """
     base, sep, suffix = session.rpartition("~")
-    if sep and suffix.isdigit():
+    if sep and suffix.isascii() and suffix.isdigit():
         return base
     return session
 

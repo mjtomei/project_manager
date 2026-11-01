@@ -181,6 +181,16 @@ class TestBaseSessionName:
     def test_a_non_numeric_suffix_is_part_of_the_name(self):
         assert paths.base_session_name("my~view") == "my~view"
 
+    def test_a_non_ascii_digit_suffix_is_part_of_the_name(self):
+        """Only ASCII digits are a grouped suffix.
+
+        ``str.isdigit`` is true for ``²``, whose ``int()`` raises, so the
+        matching parser in ``tmux._grouped_suffix`` crashed on a session
+        named like this.  pm never writes a non-ASCII grouped suffix, so
+        such a name is data (review-loop b48f i13).
+        """
+        assert paths.base_session_name("pm-x~²") == "pm-x~²"
+
     def test_idempotent(self):
         base = paths.base_session_name("pm-my~repo-abc123~3")
         assert paths.base_session_name(base) == base
@@ -408,7 +418,7 @@ class TestQaStatusSocketRouting:
 
         class _Result:
             returncode = 0
-            stdout = "pm-x:1\n"
+            stdout = "pm-x:pm-x:1\n"
 
         def fake_run(cmd, **kwargs):
             calls.append(cmd)
@@ -437,7 +447,7 @@ class TestQaStatusSocketRouting:
                 return _Result(f"{name}:{group}\n")
             if fmt == "#{session_attached}":
                 return _Result(f"{attached}\n")
-            return _Result("pm-x:1\n")
+            return _Result("pm-x:pm-x:1\n")
 
         return fake_run
 
@@ -501,9 +511,10 @@ class TestQaStatusSocketRouting:
 
         def fake_run(cmd, **kwargs):
             calls.append(cmd)
-            if cmd[-1] == "#{session_name}:#{session_attached}":
-                return _Result("pm-my repo-abc:0\n"
-                               "pm-my repo-abc~1:1\n")
+            if cmd[-1] == ("#{session_name}:#{session_group}"
+                           ":#{session_attached}"):
+                return _Result("pm-my repo-abc:pm-my repo-abc:0\n"
+                               "pm-my repo-abc~1:pm-my repo-abc:1\n")
             return _Result("", returncode=1)
 
         monkeypatch.setattr(qa_status.subprocess, "run", fake_run)
@@ -511,6 +522,38 @@ class TestQaStatusSocketRouting:
 
         assert calls[-1][3:] == ["select-window",
                                  "-t", "pm-my repo-abc~1:qa"]
+
+    def test_does_not_switch_another_projects_similarly_named_session(
+            self, monkeypatch):
+        """A ``base~foo`` name is not a grouped session of ``base``.
+
+        A repo directory may contain ``~``, so the project ``x~foo`` runs
+        session ``pm-x~foo-<hash>`` on the legacy default server.  The
+        name-prefix match returned it as ``pm-x``'s attached session and
+        switched *its* window, moving a different session's client
+        (review-loop b48f i13).
+        """
+        qa_status = self._module()
+        monkeypatch.delenv("TMUX_PANE", raising=False)
+        monkeypatch.setenv("PM_TMUX_SOCKET", "/tmp/pm-sessions/pm-x")
+        calls: list[list[str]] = []
+
+        class _Result:
+            def __init__(self, stdout, returncode=0):
+                self.returncode = returncode
+                self.stdout = stdout
+                self.stderr = ""
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            if "list-sessions" in cmd:
+                return _Result("pm-x~foo-12345678::1\npm-x::1\n")
+            return _Result("", returncode=1)
+
+        monkeypatch.setattr(qa_status.subprocess, "run", fake_run)
+        qa_status._switch_to_window("pm-x", "qa")
+
+        assert calls[-1][3:] == ["select-window", "-t", "pm-x:qa"]
 
     def test_falls_back_to_the_pm_socket_named_by_tmux(self, monkeypatch):
         qa_status = self._module()
@@ -1474,6 +1517,30 @@ class TestSessionsInGroup:
 
         mock_run.side_effect = fake_run
         assert tmux.sessions_in_group("pm-x") == ["my|view", "pm-x"]
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_excludes_a_session_merely_named_like_a_grouped_one(
+            self, mock_run):
+        """The group is tmux's ``#{session_group}``, not a ``base~`` prefix.
+
+        A repo directory may contain ``~``, so the project ``x~foo`` runs
+        session ``pm-x~foo-<hash>`` on the legacy default server.  The
+        prefix union made it a member of ``pm-x``'s group, so ``pm session
+        kill`` tore it down and Ctrl-Q could detach its client
+        (review-loop b48f i13).
+        """
+        def fake_run(cmd, **kwargs):
+            if any("#{session_group}" in a for a in cmd):
+                return MagicMock(
+                    returncode=0,
+                    stdout="pm-x:pm-x\npm-x~1:pm-x\n"
+                           "pm-x~foo-12345678:\nmyview:pm-x\n")
+            return MagicMock(
+                returncode=0,
+                stdout="pm-x\npm-x~1\npm-x~foo-12345678\nmyview\n")
+
+        mock_run.side_effect = fake_run
+        assert tmux.sessions_in_group("pm-x") == ["myview", "pm-x", "pm-x~1"]
 
     @patch("pm_core.tmux.subprocess.run")
     def test_ungrouped_session_is_alone(self, mock_run):
@@ -3844,8 +3911,10 @@ class TestSessionIsShared:
         monkeypatch.delenv("PM_SHARE_MODE", raising=False)
         monkeypatch.setattr(tmux, "get_session_environment",
                             lambda *a, **k: "global")
-        monkeypatch.setattr(tmux, "list_grouped_sessions",
-                            lambda *a, **k: ["pm-x~1"])
+        # The group (including a user's own view) comes from tmux's session
+        # group; patch that boundary rather than the name list it builds on.
+        monkeypatch.setattr(tmux, "sessions_in_group",
+                            lambda *a, **k: ["myview", "pm-x", "pm-x~1"])
         opts = []
         monkeypatch.setattr(
             tmux, "set_session_option",
@@ -3854,6 +3923,7 @@ class TestSessionIsShared:
             session_mod._register_tmux_bindings("pm-x")
         assert ("pm-x", "window-size", "smallest") in opts
         assert ("pm-x~1", "window-size", "smallest") in opts
+        assert ("myview", "window-size", "smallest") in opts
 
     def test_bindings_leave_a_private_session_alone(self, monkeypatch):
         from pm_core.cli import session as session_mod

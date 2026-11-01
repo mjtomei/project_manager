@@ -95,8 +95,12 @@ def get_reliable_window_size(
     if session not in candidates:
         candidates.append(session)
 
-    # Collect all grouped sessions for potential multi-client check
-    grouped = tmux_mod.list_grouped_sessions(base)
+    # Collect all grouped sessions for potential multi-client check.  The
+    # group comes from tmux (``sessions_in_group``) so a user's own view
+    # of the session counts too — its client constrains the layout — while
+    # a *different* session whose name merely starts with ``base~`` (a repo
+    # directory may contain ``~``) does not.
+    grouped = [s for s in tmux_mod.sessions_in_group(base) if s != base]
 
     # If there are multiple grouped sessions (multi-client), find the
     # minimum non-zero size so panes fit on the smallest connected
