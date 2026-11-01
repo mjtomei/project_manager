@@ -665,12 +665,40 @@ class TestCurrentOrBaseSession:
         assert current_or_base_session("proj") == "proj"
 
     @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.session_group", return_value="proj")
     @patch("pm_core.tmux.get_session_name", return_value="proj~2")
     @patch("pm_core.tmux.in_tmux", return_value=True)
-    def test_in_grouped_session(self, mock_in, mock_gsn, mock_run):
-        """When current session is a grouped session and it's attached, return it."""
+    def test_in_grouped_session(self, mock_in, mock_gsn, mock_sg, mock_run):
+        """When current session is a grouped session and it's attached, return it.
+
+        Membership comes from tmux's ``#{session_group}`` — the real answer
+        for ``proj~2`` is ``proj`` — not from a ``base~`` name prefix
+        (review-loop b48f i14).
+        """
         mock_run.return_value = MagicMock(returncode=0, stdout="1\n")
         assert current_or_base_session("proj") == "proj~2"
+        mock_sg.assert_called_once_with("proj~2")
+
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.sessions_in_group", return_value=["pm-x"])
+    @patch("pm_core.tmux.list_grouped_sessions", return_value=[])
+    @patch("pm_core.tmux.session_group", return_value="")
+    @patch("pm_core.tmux.get_session_name", return_value="pm-x~foo-12345678")
+    @patch("pm_core.tmux.in_tmux", return_value=True)
+    def test_attached_session_merely_named_like_a_grouped_one_is_ignored(
+            self, mock_in, mock_gsn, mock_sg, mock_lg, mock_sig, mock_run):
+        """A *different* session whose name starts with ``pm-x~`` is not the target.
+
+        A repo directory may contain ``~``, so the project ``x~foo`` runs
+        the session ``pm-x~foo-<hash>``, which starts with ``pm-x~``
+        without being part of ``pm-x``'s tmux group.  On the legacy default
+        server both bases can run side by side, and the old name-prefix
+        test returned that session whenever it had a client attached —
+        ``get_window_id`` / ``select_window`` / the layout sizing then
+        acted on another project's session (review-loop b48f i14).
+        """
+        mock_run.return_value = MagicMock(returncode=0, stdout="1\n")
+        assert current_or_base_session("pm-x") == "pm-x"
 
     @patch("pm_core.tmux.subprocess.run")
     @patch("pm_core.tmux.session_group", return_value="")

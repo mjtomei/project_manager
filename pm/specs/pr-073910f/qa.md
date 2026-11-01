@@ -161,6 +161,15 @@ pane unless stated otherwise.
   **WHEN** it presses the quit key, **THEN** that client detaches (a
   view's client is a member of the pm session's group, not only
   `base~N`), the TUI keeps running, and no other pm session is touched.
+- **GIVEN** the legacy default server also hosts an *unrelated* pm
+  session whose name merely starts with this session's name plus `~` (a
+  repo directory may contain `~`, so the project `x~foo` runs
+  `pm-x~foo-<hash>`) and that other session has an attached client,
+  **WHEN** a window operation for `pm-x` runs (a new window created with
+  switch, a window selection, or the layout sizing), **THEN** it targets
+  `pm-x`'s own group: the unrelated session's client is not moved and its
+  window size does not constrain the layout (membership is tmux's session
+  group, never a name prefix).
 
 ### R6 — Quitting a TUI never detaches anyone else
 

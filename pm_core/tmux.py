@@ -979,13 +979,23 @@ def current_or_base_session(base: str) -> str:
     1. Current session (from $TMUX_PANE) if it's in the same group
     2. Any attached grouped session (user is watching it)
     3. The base session as fallback
+
+    Membership is tmux's ``#{session_group}``, never a ``base~`` name
+    prefix: a repo directory may contain ``~``, so the project ``x~foo``
+    runs the session ``pm-x~foo-<hash>``, which starts with ``pm-x~``
+    without being part of ``pm-x``'s group.  On the legacy default server
+    (where two unrelated bases can run side by side) the prefix test
+    returned that session whenever it had a client attached, so
+    ``get_window_id``/``select_window`` and the layout sizing acted on
+    another project's session (review-loop b48f i14; the same rule
+    ``list_grouped_sessions``/``sessions_in_group`` follow since b48f i13).
     """
     if in_tmux():
         current = get_session_name()
         # A user's own view grouped with *base* under any name counts
-        # as the same group (S124).
-        if current and (current == base or current.startswith(base + "~")
-                        or session_group(current) == base):
+        # as the same group (S124); a *grouped* session's group is its
+        # base.
+        if current and (current == base or session_group(current) == base):
             # Only return current if it has attached clients — otherwise
             # fall through to find an attached grouped session.
             result = _run(

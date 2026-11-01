@@ -3481,3 +3481,54 @@ passed (the changed modules plus `tests/test_shared_sessions.py`,
 `test_tui_pidfile.py`, `test_breadcrumb_review_loop.py`).  Both live
 checks used disposable sockets under a temporary directory.  No live
 session, server or shared host configuration was touched.
+
+## Review iteration (2026-11-01, review-loop b48f i14)
+
+Verification pass over the head after the b48f i13 fixes; one cross-session
+hazard of the "a name is not a group" class, in the one place i13's rule
+had not reached.  **Correction to b48f i13:** its note said
+`current_or_base_session` had been switched to `sessions_in_group`; only
+its *fallback* loops were.  The first branch — "is the current pane's
+session in this group?" — still tested `current.startswith(base + "~")`.
+
+1. **`current_or_base_session()` still matched a `base~` name prefix.**
+   With `base = "pm-x"` and the current pane in `pm-x~foo-12345678` (the
+   session of the unrelated project `x~foo`, whose repo directory name may
+   contain `~`), the prefix test passed; when that session had an attached
+   client the function returned it.  Verified live on tmux 3.2a on a
+   disposable server: with a client attached to `pm-x~foo-12345678`,
+   `current_or_base_session("pm-x")` returned `pm-x~foo-12345678` and
+   `get_window_id("pm-x")` returned its window `@1` instead of `pm-x`'s
+   `@0`.  The consequences are the ones i13 listed for its fallback: on
+   the legacy default server (the only server where two unrelated bases
+   can coexist) `select_window`/`new_window`'s switch moved the *other*
+   project's client to a window, and `pane_layout.
+   get_reliable_window_size` counted that client in the minimum-size
+   computation, so `pm-x`'s layout was sized for another project's
+   terminal.  The prefix clause was also redundant: a grouped session's
+   `#{session_group}` is its base, and a user's own view resolves through
+   the same group (S118/S121/S124), so the group test alone covers every
+   member; removing it drops only the false positives.  The first branch
+   now tests `current == base or session_group(current) == base`.
+   Tests: `TestCurrentOrBaseSession::
+   test_attached_session_merely_named_like_a_grouped_one_is_ignored`
+   (verified to fail on the pre-fix head: it returned
+   `pm-x~foo-12345678`), and `test_in_grouped_session` now pins the group
+   query (`#{session_group}` is `proj` for `proj~2`) instead of relying on
+   the prefix.
+
+Nothing else surfaced.  The socket derivation and default-server addressing
+(R4.3), discovery scoping (7af7 i1–i3, 3cc7 i1, 703c i1/i4/i6, 2caf
+i4/i5, b48f i5/i6), the precise detach (R5, 703c i3, 2caf i2), the
+kill/unlink rules (R3.2, R8, 2caf i7, b48f i3), the socket-file and
+socket-directory ownership checks (d1c0 i10/i12, 703c i2, 2caf i8,
+QA S17, b48f i7/i9/i10) and the shared-session share-mode handling (d1c0
+i7, 703c i8, 2caf i11, b48f i2) all match the spec, and every new helper
+has direct coverage.
+
+Validation: targeted suites (`test_tmux`, `test_session_socket_isolation`,
+`test_cli_helpers`, `test_shared_sessions`, `test_cli_qa`,
+`test_pane_layout`) 561 passed; full suite 5471 passed / 1 skipped
+(421.3 s, log `/pm-captures/review-b48f-i14/full-suite-final.log`).  The
+live repro used `sleep`-held sessions on a disposable socket under
+`/tmp`; no live session, server or shared host configuration was touched.
