@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T15:52:51.114553+00:00'
+  updated_at: '2026-11-01T16:50:17.565090+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38592,6 +38592,32 @@ prs:
       helper/prompt/verifier work stays dropped.'
     created_at: '2026-11-01T15:52:51Z'
     last_edited: '2026-11-01T15:52:51Z'
+  - id: note-62228a9
+    text: 'Review loop 928f i33: one test gap in the kept recipe scope — the recorder
+      cleanup every ending path promises had no case; test-only, no recipe or pm_core/
+      change. Both recipes end the recorder they started on every path (the CLI scaffold''s
+      `kill-server` in step 2''s readiness timeout, in all three step-4 failure branches,
+      and as step 4''s last statement; the tmux recipe''s `kill-session -t "=pm-recorder"`
+      in step 3''s readiness timeout, step 5''s stop timeout, and at the end of a
+      successful run), but only the tmux driving step''s failed send asserted it.
+      Deleting any of those eight statements left the whole 351-test file green, so
+      a run that finished or failed could leave a dead `rec`/`pm-recorder` session
+      on the host — the leftover state R96 exists to handle, and the state `remain-on-exit
+      on` (this project''s own QA notes prescribe it) produces after every successful
+      run; the timeout branches'' kills are load-bearing even without it (`norec`
+      and `stuck` leave the session running when the bound runs out). Fix: test_cli_run_leaves_no_scaffold_session_behind
+      (success, readiness-timeout, no-cast, no-status, bad-status) and test_tmux_run_leaves_no_recorder_session_behind
+      (success, readiness-timeout, stop-timeout), each running the recipe''s own block
+      with STUB_REMAIN where the session would otherwise end by itself, requiring
+      the branch under test by its message, and asserting the session is gone. Mutation
+      check: each of the eight deletions now fails exactly its own case (all eight
+      were MISSED by the pre-fix file). Recipe file 359 passed (was 351); full suite
+      5556 passed, 1 skipped, 0 failed (495.39 s). Evidence: /pm-captures/review-928f-i33/
+      (mutation-check.log, pre-fix-mutation.log, recipe-file.log, suite.log, README.md,
+      scripts/). impl.md R98, qa.md. The dropped helper/prompt/verifier work stays
+      dropped. (2026-11-01T16:47:00Z)'
+    created_at: '2026-11-01T16:50:17Z'
+    last_edited: '2026-11-01T16:50:17Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

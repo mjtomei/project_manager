@@ -4247,6 +4247,42 @@ R97. **The restart step left the previous attempt's video and manifest
      failed** (482.83 s). Evidence: `/pm-captures/review-928f-i32/`
      (`mutation-check.log`, `probe-step3-leftovers.log`).
 
+R98. **The cleanup every ending path promises had no case (review loop 928f
+   i33).** A test gap in the kept recipe scope: eight "leave nothing behind"
+   statements, none observed.
+
+   - **The gap.** Both recipes end the recorder they started on every path —
+     the CLI scaffold's `kill-server` in step 2's readiness timeout, in all
+     three step-4 failure branches (the cast-missing one is commented "do not
+     leave `rec` behind") and as step 4's last statement; the tmux recipe's
+     `kill-session -t "=pm-recorder"` in step 3's readiness timeout, in step
+     5's stop timeout, and as step 5's last statement ("already gone if it
+     exited"). Only the tmux driving step's failed send asserted it
+     (`test_a_failed_send_tears_the_run_down`). Deleting any of these eight
+     left the whole file green (**351 passed**, verified by mutation in this
+     container), so a run that finished or failed could leave a dead
+     `rec`/`pm-recorder` session behind — the leftover state R96 exists to
+     handle, and the state `remain-on-exit on` (which this project's own QA
+     notes prescribe) produces after every successful run. The timeout
+     branches' kills are load-bearing even without that option: the `norec`
+     and `stuck` fixtures leave the session running when the bound runs out.
+   - **Fix (test-only).** Two parametrized cases run each recipe's own block
+     with `STUB_REMAIN` set where the session would otherwise end by itself,
+     require the branch under test (by its message) so a drifted fixture
+     cannot pass on an earlier failure, and assert the session is gone:
+     `test_cli_run_leaves_no_scaffold_session_behind` (success,
+     readiness-timeout, no-cast, no-status, bad-status) and
+     `test_tmux_run_leaves_no_recorder_session_behind` (success,
+     readiness-timeout, stop-timeout). No recipe change.
+   - **Evidence.** Mutation check in this container: each of the eight
+     deletions now fails exactly its own case and nothing else (the tmux
+     readiness-timeout deletion, the success-path deletions and the three CLI
+     stop-branch deletions were each MISSED by the pre-fix file). Recipe file
+     **359 passed** (was 351); full suite **5556 passed, 1 skipped, 0
+     failed** (495.39 s, run once on the final tree). Evidence:
+     `/pm-captures/review-928f-i33/` (`mutation-check.log`, `recipe-file.log`,
+     `suite.log`, `README.md`, `scripts/`).
+
 ## Non-goals
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
 - **No new helper, prompt block, verifier text, or QA-loop change.** Those

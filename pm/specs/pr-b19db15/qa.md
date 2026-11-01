@@ -1252,6 +1252,18 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   step 0's own clear exists for, one paste over (verified with the stub
   harness: pre-fix all four survived the restart; post-fix none do and the
   restart still starts; review loop 928f i32, R97).
+- A CLI or tmux capture that ends — successfully, at a readiness timeout, or
+  on a stop-path failure — must not leave its recorder session behind: the
+  CLI scaffold ends the host-shared `scaffold` server on every branch, and
+  the tmux recipe kills `pm-recorder` in both timeout branches and at the end
+  of a successful run. `remain-on-exit on` (which this project's own QA notes
+  prescribe) keeps the session after its only pane returns, which is the
+  state a successful run ends in, so the cleanup is what removes it rather
+  than the pane's death. No case observed any of these statements — deleting
+  the success-path, readiness-timeout or stop-branch kill left the whole
+  test file green (351 passed, verified by mutation), and the run would then
+  leave a dead session the next capture has to clear (review loop 928f i33,
+  R98).
 
 ## Pass / Fail criteria
 

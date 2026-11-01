@@ -228,7 +228,15 @@ hits, regardless of how it waits for a background job:
   *interactive paste's* half — job control is on there, so a background app
   that reads the terminal eats the rest of the pasted block — while a
   ``bash < block`` run already gets ``/dev/null`` from bash itself; the case
-  runs with ``set -m`` so it models the paste.
+  runs with ``set -m`` so it models the paste;
+- every ending path ends the recorder it started, and the cleanup is a
+  guarantee of its own: the CLI scaffold's ``kill-server`` on its readiness
+  timeout, its three stop-path failures and its success, and the tmux
+  recipe's ``kill-session`` in both timeout branches and at the end of a
+  successful run. ``remain-on-exit on`` keeps the session after its pane
+  returns — the state a successful run ends in — so the pane's death does not
+  remove it. Deleting any of those eight statements left the whole file green
+  until the two cleanup cases were added (review loop 928f i33, R98).
 
 The capture flow's readiness and stop logic is also *executed* against stub
 ``tmux``/``pm`` (``TestCaptureFlowExecution``), because its failure modes are
@@ -5872,6 +5880,48 @@ class TestCaptureFlowExecution:
             "session outlived its pane: " + r.stderr)
         assert cast.stat().st_size > 0, "the completed cast is missing"
 
+    @pytest.mark.parametrize("mode,message", [
+        ("oneshot", None),
+        ("norec", "did not start within"),
+        ("emptycast", "asciinema wrote no cast"),
+        ("nostatus", "recorder status is missing"),
+        ("badstatus", "asciinema exited 137"),
+    ], ids=["success", "readiness-timeout", "no-cast", "no-status",
+            "bad-status"])
+    def test_cli_run_leaves_no_scaffold_session_behind(self, mode, message,
+                                                       tmp_path):
+        """Every exit path has to end the `rec` session it started.
+
+        The scaffold runs on the host-shared ``-L scaffold`` socket, and
+        ``remain-on-exit on`` — which this project's own QA notes prescribe —
+        keeps ``rec`` after its only pane's command returns. Each failure
+        branch therefore ends the server it started (the cast-missing one
+        says "do not leave `rec` behind"), and the success path does the same
+        as its last statement. No case observed any of it: deleting the
+        success-path ``kill-server``, the readiness-timeout one, or either
+        stop-path one left the whole file green (351 passed, verified by
+        mutation), so a run that failed or finished could leave the scaffold
+        session on the host for the next capture to clear. ``STUB_REMAIN`` is
+        what makes the session outlive its pane; without it the stub's pane
+        death removes the session and the assertion could not see the
+        cleanup.
+        """
+        r, _cast = _run_capture_block(
+            "cli-recording.md", mode, tmp_path,
+            env_extra={"STUB_REMAIN": "1"})
+        if message is None:
+            assert r.returncode == 0, r.stderr
+        else:
+            assert r.returncode != 0, r.stderr
+            assert message in r.stderr, (
+                f"{mode}: the run failed somewhere other than the branch "
+                "under test, so its cleanup line is not exercised: "
+                + r.stderr)
+        assert not (tmp_path / "state" / "rec").exists(), (
+            f"{mode}: the run left the scaffold's `rec` session behind, so "
+            "the host-shared socket carries a dead recorder into the next "
+            "capture")
+
     def test_cli_recorder_dying_with_remain_on_exit_ends_the_readiness_wait(
             self, tmp_path):
         """A dead pane ends the readiness wait, even when its session lingers.
@@ -6368,6 +6418,44 @@ class TestCaptureFlowExecution:
             "a finished recording was killed at the stop bound because the "
             "session outlived its pane: " + r.stderr)
         assert cast.stat().st_size > 0, "the completed cast is missing"
+
+    @pytest.mark.parametrize("mode,message", [
+        ("ok", None),
+        ("norec", "did not come up within"),
+        ("stuck", "did not exit within"),
+    ], ids=["success", "readiness-timeout", "stop-timeout"])
+    def test_tmux_run_leaves_no_recorder_session_behind(self, mode, message,
+                                                        tmp_path):
+        """A run that ends must not leave its recorder session on the server.
+
+        ``pm-recorder`` is the one name every capture on a server shares, and
+        ``remain-on-exit on`` keeps the session after its only pane's command
+        returns — exactly the state a successful run ends in, and the state
+        both timeout branches end in (a recorder that never drew, a detach
+        that never ended it). Step 5's last statement removes it ("already
+        gone if it exited") and step 3's readiness timeout kills the session
+        it started, but no case observed either: deleting the success path's
+        ``kill-session`` or the step-3 timeout's left the whole file green
+        (351 passed, verified by mutation). The run then leaves a dead
+        session the next capture has to clear — the leftover state R96
+        exists to handle, so the cleanup is what keeps it from being left at
+        all. ``STUB_REMAIN`` keeps the success case's session after its pane.
+        """
+        env = {"STUB_REMAIN": "1"} if mode == "ok" else {}
+        r, _cast = _run_capture_block(
+            "tmux-screen-recording.md", mode, tmp_path, target=True,
+            env_extra=env)
+        if message is None:
+            assert r.returncode == 0, r.stderr
+        else:
+            assert r.returncode != 0, r.stderr
+            assert message in r.stderr, (
+                f"{mode}: the run failed somewhere other than the branch "
+                "under test, so its cleanup line is not exercised: "
+                + r.stderr)
+        assert not (tmp_path / "state" / "pm-recorder").exists(), (
+            f"{mode}: the run left its pm-recorder session on the server, "
+            "so the next capture finds a recorder it never started")
 
     def test_tmux_failed_attach_with_remain_on_exit_is_not_readiness(
             self, tmp_path):
