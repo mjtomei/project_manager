@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T11:22:32.309785+00:00'
+  updated_at: '2026-11-01T11:36:28.436610+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6329,6 +6329,36 @@ prs:
       group to the smallest client.'
     created_at: '2026-11-01T11:22:32Z'
     last_edited: '2026-11-01T11:22:32Z'
+  - id: note-7f42102
+    text: 'QA S18 (legacy sessions: quoted connect commands + vanish mid-start) PASS
+      4/4 on head 00a826f46, no source changes. Story 1: a genuine pre-isolation session
+      named "pm-qa legacy repo-0fdef15c" on a scenario-private default server printed
+      exactly one line, `tmux -S /…/tmux-1000/default attach -t ''pm-qa legacy repo-0fdef15c''`
+      (bare socket, single-quoted name, 2caf i8); pasting it into a pty put a client
+      on that session, and the TUI connect popup showed the same one-line command
+      at 200 cols and closed on Esc. Story 2: `pm session` in the legacy dir printed
+      the rollout note + `Attaching to session ''…~1''…` and no `Creating tmux session`,
+      attached to ~1 on the default server, and `pm tui send n` driven from a shell
+      pane inside a *private*-server session found the legacy TUI, naming `%0 (session:
+      pm-qa legacy repo-0fdef15c)`; the legacy session gained the `pm notes` pane,
+      the private session did not, and no /tmp/pm-sessions/<legacy> socket appeared.
+      Story 3 (8d4e i1): 12 concurrent `pm session` starts vs 8 `pm session kill`s
+      — rounds 1-5 printed the note and each also printed the attach line, rounds
+      6/9/11 printed only `Creating tmux session`, no round printed both, row-counts
+      never exceeded 1, and the end state was the private socket with the default
+      server holding no pm-* session. Story 4: quoted private connect command, client
+      on the private socket, `Killed session ''…''.`, socket gone, has-session failing,
+      `misc` untouched on the default server. Captures (cast+mp4+manifest): /pm-captures/scenarios/18/{legacy-connect-quoted,connect-popup,legacy-vanish-race}.
+      Harness gotchas for the next run, none a product bug: (1) a recording scaffold
+      pane HAS a tty, so `pm session` there attaches and blocks — run each concurrent
+      start with `</dev/null` and `unset TMUX TMUX_PANE` (otherwise `pm session kill`
+      can also resolve the scaffold session as the ambient target and take the whole
+      recording server down); (2) a hand-made scenario TMUX_TMPDIR socket dir must
+      be chmod 700 or tmux refuses it as "unsafe permissions"; (3) `tmux -L <name>`
+      shares that TMUX_TMPDIR, so kill-server/new-session back-to-back can race —
+      sleep ~0.5 s between them.'
+    created_at: '2026-11-01T11:36:28Z'
+    last_edited: '2026-11-01T11:36:28Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
