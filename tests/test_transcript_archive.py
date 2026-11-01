@@ -211,6 +211,55 @@ def test_identical_archive_match_is_scoped_to_the_same_stem(env):
     assert "IMPL CONTENT" in other.read_text()  # untouched
 
 
+def test_identical_size_and_mtime_do_not_make_a_match(env):
+    """Two different sessions can share a frozen file's size *and* mtime.
+
+    The caller deletes the frozen canonical when an archive entry matches,
+    so size+mtime alone is only a pre-filter: the bytes must match too, or
+    the run dir would lose the only copy of a session that was never
+    archived (pr-9ee4d64 R4).
+    """
+    canon = env.run / "impl-pr-abc.jsonl"
+    canon.write_text(_record("SESSION ONE") + "\n")
+    adir = cl.transcript_archive_dir(canon)
+    adir.mkdir()
+    other = adir / "impl-pr-abc.deadbeef.jsonl"
+    other.write_text(_record("SESSION TWO") + "\n")
+    st = canon.stat()
+    os.utime(other, ns=(st.st_atime_ns, st.st_mtime_ns))
+    # Same record shape, so the sizes collide too.
+    assert canon.stat().st_size == other.stat().st_size
+    assert canon.stat().st_mtime_ns == other.stat().st_mtime_ns
+
+    archived = cl.archive_transcript(canon)
+
+    assert archived is not None and archived != other
+    assert "SESSION ONE" in archived.read_text()
+    assert "SESSION TWO" in other.read_text()  # untouched
+    assert not canon.exists()
+
+
+def test_two_frozen_sessions_with_the_same_size_and_mtime_both_archive(env):
+    """A frozen file's entry name is content-keyed, so two sessions that
+    collide on size *and* mtime still get distinct entries (and neither is
+    dropped when the canonical path is reused)."""
+    first = env.run / "impl-pr-abc.jsonl"
+    first.write_text(_record("SESSION ONE") + "\n")
+    st = first.stat()
+    a = cl.archive_transcript(first)
+
+    second = env.run / "impl-pr-abc.jsonl"
+    second.write_text(_record("SESSION TWO") + "\n")
+    os.utime(second, ns=(st.st_atime_ns, st.st_mtime_ns))
+    assert second.stat().st_size == st.st_size
+    assert second.stat().st_mtime_ns == st.st_mtime_ns
+    b = cl.archive_transcript(second)
+
+    assert a is not None and b is not None and a != b
+    assert "SESSION ONE" in a.read_text()
+    assert "SESSION TWO" in b.read_text()
+
+
 def test_frozen_session_is_not_archived_twice(env):
     """Finalize archives the session; a later replacement does not duplicate
     it under a second name."""
@@ -248,8 +297,8 @@ def test_two_sign_off_returns_keep_both_original_sessions(env):
     assert "ROUND 2 IMPL" in (adir / f"impl-pr-abc.{sid2}.jsonl").read_text()
     # One entry per *superseded* attempt: a two-return run archives two and
     # leaves the third attempt live (qa.md R7's count).
-    assert sorted(p.name for p in adir.iterdir()) == [
-        f"impl-pr-abc.{sid1}.jsonl", f"impl-pr-abc.{sid2}.jsonl"]
+    assert sorted(p.name for p in adir.iterdir()) == sorted([
+        f"impl-pr-abc.{sid1}.jsonl", f"impl-pr-abc.{sid2}.jsonl"])
     # The canonical is the third (live) attempt, not an archived one.
     assert canon.is_symlink()
     assert cl.session_id_from_transcript(canon) not in (sid1, sid2)

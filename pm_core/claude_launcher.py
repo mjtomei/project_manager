@@ -1,5 +1,6 @@
 """Launch claude CLI sessions."""
 
+import filecmp
 import hashlib
 import json
 import logging
@@ -1188,9 +1189,16 @@ def _archive_name(transcript_path: Path, sid: str | None,
     Symlinks are keyed by the Claude session id of their target, so the
     same session always maps to the same immutable entry.  A link whose
     target is not session-named is keyed on that target instead, and a
-    finalized regular file (no recoverable session id) on its identity
-    (mtime + size) — both deterministic, so re-archiving the same attempt
-    never adds a duplicate entry.
+    finalized regular file (no recoverable session id) on its *content*
+    — deterministic whenever the content can be read, so re-archiving the
+    same attempt never adds a duplicate entry.
+
+    A frozen file is keyed by a content hash, not mtime + size: those can
+    coincide for two different sessions (same-length turns written within
+    the filesystem's timestamp granularity), and a shared name would make
+    the second archive silently return the first session's entry while
+    the caller drops the frozen copy — the run dir's only copy of the
+    second session (pr-9ee4d64 R4).
     """
     stem = _transcript_stem(transcript_path)
     if sid:
@@ -1198,12 +1206,23 @@ def _archive_name(transcript_path: Path, sid: str | None,
     if link_target is not None:
         digest = hashlib.sha256(link_target.encode()).hexdigest()
         return f"{stem}.{digest[:12]}.jsonl"
+    if frozen is not None:
+        digest = _file_sha256(frozen)
+        if digest:
+            return f"{stem}.{digest[:12]}.jsonl"
+    return f"{stem}.{uuid.uuid4().hex[:12]}.jsonl"
+
+
+def _file_sha256(path: Path) -> str | None:
+    """Hex sha256 of a file's content, or None when it cannot be read."""
+    h = hashlib.sha256()
     try:
-        st = frozen.stat() if frozen is not None else None
-        key = f"{st.st_mtime_ns}-{st.st_size}" if st else uuid.uuid4().hex[:12]
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
     except OSError:
-        key = uuid.uuid4().hex[:12]
-    return f"{stem}.{key}.jsonl"
+        return None
+    return h.hexdigest()
 
 
 def _absolute_link_target(p: Path, raw: str) -> Path:
@@ -1223,6 +1242,12 @@ def _find_identical_archive(adir: Path, p: Path) -> Path | None:
     Only entries for the same stem are considered: a different step's
     transcript must never be mistaken for a copy of this one (the caller
     drops *p* when a match is found).
+
+    Size and mtime are only a cheap pre-filter: two *different* sessions
+    can share both (same-length turns written within the filesystem's
+    timestamp granularity), and the caller deletes the frozen canonical on
+    a match.  The bytes are compared before a candidate is accepted, so a
+    false match can never drop the run dir's only copy of a session.
     """
     stem = _transcript_stem(p)
     try:
@@ -1235,8 +1260,14 @@ def _find_identical_archive(adir: Path, p: Path) -> Path | None:
             cst = cand.stat()
         except OSError:
             continue
-        if cst.st_size == st.st_size and cst.st_mtime_ns == st.st_mtime_ns:
-            return cand
+        if cst.st_size != st.st_size or cst.st_mtime_ns != st.st_mtime_ns:
+            continue
+        try:
+            if not filecmp.cmp(cand, p, shallow=False):
+                continue
+        except OSError:
+            continue
+        return cand
     return None
 
 
@@ -1303,8 +1334,9 @@ def archive_transcript(transcript_path: str | Path) -> Path | None:
     """Preserve the transcript at *transcript_path* in the run archive.
 
     Moves the outgoing attempt (symlink or finalized copy) to
-    ``<dir>/archive/<stem>.<session-id>.jsonl`` before a new attempt
-    reuses the canonical path.  Returns the archive path, or ``None`` when
+    ``<dir>/archive/<stem>.<key>.jsonl`` — the session id for a symlink, a
+    content hash for a frozen copy — before a new attempt reuses the
+    canonical path.  Returns the archive path, or ``None`` when
     there is nothing to archive *or* archiving failed (an unwritable
     archive dir, an unreadable path); callers treat ``None`` as "the
     canonical is not preserved, replace it anyway".  Archive entries are

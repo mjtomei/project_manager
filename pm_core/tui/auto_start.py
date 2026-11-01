@@ -1700,6 +1700,7 @@ def _adopt_return_review(app, pr: dict) -> bool:
     from pm_core.claude_launcher import pane_transcript_path
     from pm_core.review_loop import (
         ReviewLoopState, _compute_review_window_name, _find_claude_pane,
+        iteration_transcript,
     )
     from pm_core.signoff import open_return, parse_ts
 
@@ -1728,7 +1729,6 @@ def _adopt_return_review(app, pr: dict) -> bool:
     except (OSError, TypeError, ValueError):
         return False
     tdir = get_transcript_dir(app)
-    from pm_core.review_loop import iteration_transcript
     from pm_core.tui.review_loop_ui import _start_loop
     state = ReviewLoopState(pr_id=pr_id, iteration=1,
                             _transcript_dir=str(tdir))

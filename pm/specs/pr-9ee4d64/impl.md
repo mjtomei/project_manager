@@ -199,10 +199,11 @@ available in the run dir:
 - Add `archive_transcript(path) -> Path | None`:
   - missing → `None`;
   - compute archive name: `<stem>.<sid>.jsonl` for a symlink whose target
-    is a UUID-named JSONL, else `<stem>.<mtime_ns>-<size>.jsonl` for a
-    frozen file, else `<stem>.<sha256(target)[:12]>.jsonl` for a symlink
+    is a UUID-named JSONL, else `<stem>.<sha256(content)[:12]>.jsonl` for
+    a frozen file, else `<stem>.<sha256(target)[:12]>.jsonl` for a symlink
     whose target is not UUID-named (deterministic, so re-archiving the
-    same attempt reuses the entry);
+    same attempt reuses the entry; a content key cannot collide for two
+    different sessions the way mtime + size can — review e757 i6);
   - `archive_dir.mkdir(parents=True, exist_ok=True)`;
   - if the archive already exists, do not overwrite (if it is a symlink
     to the same target, drop only the redundant canonical link);
@@ -346,7 +347,7 @@ No **[UNRESOLVED]** ambiguities.
   wrote): archived as a dangling link; harmless, and `finalize_transcript`
   no-ops because the target is missing.
 - **Regular (frozen) outgoing path**: hard-linked (or copied) into the
-  archive under an mtime/size key, then removed; never confused with a
+  archive under a content-hash key, then removed; never confused with a
   session-id archive.
 - **Two launches racing on one path** (sign-off has a per-PR launch lock;
   impl `--fresh` is guarded): the entry is created no-clobber, so the
@@ -374,7 +375,8 @@ No **[UNRESOLVED]** ambiguities.
 
 ## Verification
 
-- New unit tests (34, after the e757-i4 rewrite; 37 before it) in
+- New unit tests (36, after the e757-i4 rewrite and the e757-i6
+  content-key fixes; 37 before e757 i4) in
   `tests/test_transcript_archive.py` covering:
   archive-on-replace, ownership-checked finalize, loop-scoped naming,
   retire preserving history, live-appends visibility, restart fallback
@@ -390,11 +392,15 @@ No **[UNRESOLVED]** ambiguities.
   failed copy left alone by finalize, a redirect before and *during* the
   freeze copy, a fresh loop never launching over a live legacy link,
   and a legacy iteration link left live when no session id was recorded
-  (review d468 i4).  Review e757 i4 replaces the old live-owner/skip
-  tests with the new rule: a bulk sweep (disable and watcher completion)
-  leaves every canonical link live — impl, sign-off, merge, review — and
-  appends to the native JSONL stay visible through it, while `archive/`
-  entries are frozen; the CLI watcher's private dir is frozen whole.
+  (review d468 i4), plus (review e757 i6) a frozen canonical whose size
+  and mtime collide with a different session's archive entry never being
+  treated as already archived, and two frozen sessions that collide on
+  size and mtime both getting distinct entries.  Review e757 i4 replaces
+  the old live-owner/skip tests with the new rule: a bulk sweep (disable
+  and watcher completion) leaves every canonical link live — impl,
+  sign-off, merge, review — and appends to the native JSONL stay visible
+  through it, while `archive/` entries are frozen; the CLI watcher's
+  private dir is frozen whole.
   `tests/test_autostart_transcript_finalize.py` (master's S31 file) is
   rewritten to the same rule: a live, a gone and a dead pane's canonical
   all stay live, and only the archive entry is frozen.  Losing the
@@ -454,7 +460,10 @@ Applied on top of the design above; keep them when editing the code.
   `symlink_to` would then raise `FileExistsError` and kill the launch.
 - `_find_identical_archive` scopes its mtime+size match to the same stem;
   a directory-wide match could pair a different step's entry with this
-  transcript, after which the canonical would be dropped unarchived.
+  transcript, after which the canonical would be dropped unarchived.  The
+  size+mtime match is now a pre-filter confirmed by content (review
+  e757 i6), so two different sessions that happen to share both cannot
+  be paired either.
 - `_freeze_archive_copy` writes its temp file under a per-call unique name
   (pid + random suffix): a bulk sweep and a loop completion can finalize
   the same transcript from two threads of one process.
@@ -504,11 +513,12 @@ Applied on top of the design above; keep them when editing the code.
   still the only safe way to read that attribute.
 - `resolve_iteration_transcript` falls back to the legacy iteration name
   only while that path is a symlink (review d468 i2).  A *frozen* legacy
-  transcript is a completed iteration of an earlier loop — loop
-  completion and the bulk sweeps both freeze it — so reusing it would
-  hand a fresh loop (a REVIEW return) the shared name, reintroducing the
-  cross-loop collision this PR removes and making the legacy name sticky
-  for every later loop at that iteration.
+  transcript is a completed iteration of an earlier loop — the loop's own
+  completion freezes it (a bulk sweep no longer touches a canonical link,
+  review e757 i4) — so reusing it would hand a fresh loop (a REVIEW
+  return) the shared name, reintroducing the cross-loop collision this PR
+  removes and making the legacy name sticky for every later loop at that
+  iteration.
 - `qa.md` R7 now states that archive entry counts are a minimum (review
   d468 i3).  At that time the run-end disable sweep froze every canonical
   link, so a run with two returns ended with three `impl-<pr>` / three
@@ -691,8 +701,10 @@ Verified after this integration: full suite **5477 passed / 1 skipped**
   A loop restored from a pre-upgrade breadcrumb polls the shared legacy
   `review-<pr>-i<N>.jsonl`; the loop's own completion freezes it (with the
   recorded session id) when the loop ends.  A stale legacy link from an
-  earlier loop that this loop never adopts is left for its own loop's
-  completion or a `finalize_transcript_dir` caller to handle.
+  earlier loop that this loop never adopts stays live: the TUI bulk sweeps
+  pass `include_top_level=False` (review e757 i4), so no sweep freezes it,
+  and its own loop's completion (or an explicit `finalize_transcript`) is
+  the only thing that will.
 - **A loop-scoped iteration link whose loop never reached completion stays
   live.**  Loop completion is what freezes a loop's own
   `review-<pr>-<loop_id>-i<N>.jsonl` files, and their names are never
@@ -800,3 +812,65 @@ passed / 1 skipped** (6m59s, `markdown` installed — without it the 12
 unrelated).  The post-fix repro
 (`/pm-captures/impl/post-fix/transcript-archive/repro.py --expect fixed`)
 still reports all three symptoms fixed.
+
+## Review e757 i6 — content-keyed archive identity, stale passages, a flaky test
+
+Two identity fixes in the archive matcher and naming, plus docs, one test
+assertion and one import move.  The archive/finalize flow is otherwise
+unchanged.
+
+- The d468-i2 bullet still said a frozen legacy `review-<pr>-i<N>.jsonl`
+  is frozen by "loop completion and the bulk sweeps".  Under e757 i4 a
+  bulk sweep no longer touches a canonical link, so only the loop's own
+  completion freezes it.  Corrected.
+- Known limitations said a stale legacy link "is left for its own loop's
+  completion or a `finalize_transcript_dir` caller to handle".  Every TUI
+  sweep passes `include_top_level=False`, and the only default caller is
+  the CLI watcher's private `watcher-<token>` dir (which never holds a
+  legacy review link), so no sweep will freeze it: its own loop's
+  completion (or an explicit `finalize_transcript`) is the only thing
+  that will.  Corrected.
+- `_adopt_return_review` imports `iteration_transcript` with the rest of
+  the `pm_core.review_loop` names instead of a second import statement.
+- **Frozen-file identity is now content-based, not size+mtime.**  Two
+  different sessions can share a byte size and a nanosecond mtime
+  (same-length turns written within the filesystem's timestamp
+  granularity), and size+mtime was used as identity in two places:
+  - `_find_identical_archive` treated an entry with the same size+mtime
+    as a copy of the frozen canonical, and `archive_transcript` *deletes*
+    the canonical on a match — so a false match dropped the run dir's
+    only copy of a session that was never archived (the exact loss R4
+    forbids).  Size+mtime is now a cheap pre-filter and
+    `filecmp.cmp(..., shallow=False)` confirms the bytes before a
+    candidate is accepted.  New test
+    `test_identical_size_and_mtime_do_not_make_a_match`.
+  - `_archive_name` keyed a frozen file by `<mtime_ns>-<size>`, so a
+    colliding second session's entry name already existed and
+    `archive_transcript` returned the first session's entry without
+    archiving the second (the caller then drops the frozen copy).  A
+    frozen file is now keyed by `<sha256(content)[:12]>` (with a random
+    fallback only when the file cannot be read), so the name cannot
+    collide for two different sessions.  New test
+    `test_two_frozen_sessions_with_the_same_size_and_mtime_both_archive`.
+
+  Archive tests 34 -> 36.  Both new tests fail with the old size+mtime
+  identity (the first on `archived != other`, the second on `a != b`).
+- **Flaky test fixed (e757 i5 introduced it).**
+  `test_two_sign_off_returns_keep_both_original_sessions` compared
+  `sorted(actual archive names)` against an *unsorted* expected list
+  (`[sid1, sid2]` in creation order), so it failed whenever the second
+  session id sorted before the first — about half the time on a fresh
+  temp dir, which is why some runs passed by luck.  The expected list is
+  sorted too now; the test passed 20/20 consecutive runs after the fix,
+  and the archive suite passed 10/10 consecutive full-file runs.  The
+  archive content and counts were always correct — only the assertion was
+  order-sensitive.
+
+Verified: full suite **5478 passed / 1 skipped** (6m59s, `markdown`
+installed — 5476 + the two new archive tests); 400 passed across the
+archive / auto-start-finalize / breadcrumb / review-loop /
+return-handoff / launch-retry / signoff / launcher suites; the archive
+suite passed 8/8 consecutive runs; the post-fix repro
+(`/pm-captures/impl/post-fix/transcript-archive/repro.py --expect fixed`)
+still reports all three symptoms fixed, and the pre-fix repro on
+`3699f71a` reports all three present.
