@@ -202,8 +202,10 @@ available in the run dir:
     is a UUID-named JSONL, else `<stem>.<sha256(content)[:12]>.jsonl` for
     a frozen file, else `<stem>.<sha256(target)[:12]>.jsonl` for a symlink
     whose target is not UUID-named (deterministic, so re-archiving the
-    same attempt reuses the entry; a content key cannot collide for two
-    different sessions the way mtime + size can — review e757 i6);
+    same attempt reuses the entry; the key is the sha256 of the *absolute*
+    target, so a relative link and its absolute form agree, and a content
+    key cannot collide for two different sessions the way mtime + size
+    can — review e757 i6);
   - `archive_dir.mkdir(parents=True, exist_ok=True)`;
   - if the archive already exists, do not overwrite (if it is a symlink
     to the same target, drop only the redundant canonical link);
@@ -217,7 +219,9 @@ available in the run dir:
   symlink; log the archive.
 - `finalize_transcript(path, *, session_id=None) -> bool`:
   - not a symlink → `False`;
-  - `raw = os.readlink(path)`; `target = Path(raw)`;
+  - `raw = os.readlink(path)`;
+    `target = _absolute_link_target(path, raw)` — a relative link is
+    resolved against the link's own directory, never the process CWD;
   - `sid = _session_id_of_path(target)`;
   - `if session_id and sid and sid != session_id: return False` (a target
     with no session id cannot be compared, so it is frozen as usual);
@@ -567,9 +571,12 @@ Applied on top of the design above; keep them when editing the code.
   values) two loops for one PR could share an iteration path — the exact
   cross-loop freeze this PR removes — so the guarantee is only structural
   up to a collision.  8 hex chars makes that negligible; the value stays
-  opaque and hex-only (never starts with `i`), which the legacy-name
-  patterns rely on.  Old breadcrumbs keep
-  their 4-char ids: the value is opaque everywhere.
+  opaque and hex-only, so it can never look like the `i<N>` iteration
+  marker the legacy `review-<pr>-i<N>.jsonl` pattern and the
+  loop-scoped prefix a completion scan strips are built around.  (No
+  pattern *requires* the property — the separators already prevent a
+  match — it just keeps the naming scheme unambiguous.)  Old breadcrumbs
+  keep their 4-char ids: the value is opaque everywhere.
 - Loop completion finalizes a *legacy* `review-<pr>-i<N>.jsonl` only when a
   session id is recorded for that iteration (review d468 i4).  The legacy
   name is shared with other loops, so without an id the ownership check
@@ -918,3 +925,48 @@ launch-retry / fail-closed / signoff / launcher suites; full suite
 **5478 passed / 1 skipped** (7m08s, `markdown` installed); the post-fix
 repro (`/pm-captures/impl/post-fix/transcript-archive/repro.py --expect
 fixed`) still reports all three symptoms fixed.
+
+## Review e757 i9 — stale source docstrings and two design bullets
+
+No behavioural change: the archive/finalize flow is exactly as e757 i4
+left it.  Two *source* docstrings and two design bullets still described
+the pre-e757-i4 rule or a mechanism that no longer exists — the same
+drift class that produced the S10 confusion and the S16-story-3
+INPUT_REQUIRED, this time in code rather than in the QA text.
+
+- `review_loop.resolve_iteration_transcript`'s docstring justified
+  "a frozen legacy transcript is never reused" with "loop completion and
+  the bulk sweeps both freeze it".  Since e757 i4 a bulk sweep never
+  touches a canonical link, so only the loop's own completion freezes a
+  legacy iteration transcript.  (e757 i6 corrected the same sentence in
+  this spec; the docstring was missed.)
+- `review_loop._generate_loop_id`'s docstring said the loop id's
+  hex-only shape is what "the live-owner prefix matching relies on".
+  That machinery was deleted in e757 i4.  The property is still worth
+  stating (an opaque hex id can never look like the `i<N>` iteration
+  marker), but nothing depends on it — the `-` separators already keep
+  a loop-scoped name out of the legacy pattern — so it is described as a
+  naming-scheme property rather than a load-bearing requirement.
+- Design section, `finalize_transcript`: `target = Path(raw)` was wrong
+  for a relative link (it would resolve against the process CWD).  The
+  code uses `_absolute_link_target(path, raw)`, which resolves against
+  the link's own directory; the bullet now says so.
+- Design section, `archive_transcript`: the non-session-named link key is
+  the sha256 of the *absolute* target (so a relative link and its
+  absolute form map to one entry); the bullet now says that too.
+
+No code defect found in this pass: archive-on-replace (no-clobber,
+content/sid-keyed, never `rename`), ownership-checked finalize (readlink
+at entry, guard after the copy before `os.replace`, archive copy written
+first), loop-scoped iteration names with `allow_legacy` only for a
+resumed in-flight iteration, `iteration_sessions` round-tripped through
+the breadcrumb, retire-archives-without-deleting, and the e757-i4 rule
+that bulk sweeps never freeze a canonical are consistent across every
+caller.
+
+Verified: `tests/test_transcript_archive.py` 36 passed; 281 passed across
+the archive / review-loop / breadcrumb / launch-retry / return-handoff /
+auto-start-finalize suites; full suite **5478 passed / 1 skipped**
+(`markdown` installed); the post-fix repro
+(`/pm-captures/impl/post-fix/transcript-archive/repro.py --expect fixed`)
+still reports all three symptoms fixed.

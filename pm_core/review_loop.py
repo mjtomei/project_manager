@@ -110,8 +110,11 @@ def _generate_loop_id() -> str:
     lease/breadcrumb id started with, whose 65536 values would let a
     superseded and a fresh loop share one iteration path and reintroduce
     the cross-loop freeze this PR removes.  The value stays opaque and
-    hex-only (never starts with "i"), which the live-owner prefix
-    matching relies on.
+    hex-only, so it can never be confused with the ``i<N>`` iteration
+    marker the transcript-name patterns are built around (the ``-``
+    separators already keep a loop-scoped name out of the legacy
+    ``review-<pr>-i<N>.jsonl`` pattern; the shape just keeps the scheme
+    unambiguous).
     """
     return secrets.token_hex(4)
 
@@ -236,7 +239,8 @@ def resolve_iteration_transcript(transcript_dir: str | Path, pr_id: str,
 
     Only a *link* counts as that in-flight iteration: a frozen (regular
     file) legacy transcript is a completed iteration of an earlier loop
-    (loop completion and the bulk sweeps both freeze it).  Falling back
+    (only that loop's own completion freezes it — a bulk sweep never
+    freezes a canonical link, review e757 i4).  Falling back
     to it would hand this loop the shared name — reintroducing the
     cross-loop collision the loop-scoped name exists to prevent, and
     making the legacy name sticky for every later loop at that iteration.
