@@ -74,8 +74,10 @@ sessions today).
    ambient-state guessing. `--print-connect` prints `tmux -S <socket> attach`
    for private sessions too (not only shared ones).
 2. `pm session kill` targets the server that hosts the session (private
-   socket preferred, legacy default server as fallback), kills grouped
-   sessions then the base, and unlinks the socket file **only when no server
+   socket preferred, legacy default server as fallback), kills every session
+   in the session *group* — the `base~N` grouped sessions and a user's own
+   view however it is named (`sessions_in_group()`; review-loop 2caf i7) —
+   then the base, and unlinks the socket file **only when no server
    answers on it** (`server_alive()`; tmux leaves the file behind after
    `kill-server` / last-session exit — verified — but a live server can
    outlive its base session, and unlinking its socket would strand the
@@ -2097,14 +2099,17 @@ disposable real-tmux servers; no live session, server or shared host
 configuration was touched.
 
 Residual (non-blocking): a user's own view that *survives* its base
-session (the base killed while the view's client stays attached) is not
-discoverable from a plain shell — `list_pm_sessions()` reports pm-named
-sessions only, and `find_session_server()` cannot match a non-pm-named
-view by the base name.  From *inside* the view discovery resolves it
-through the group (above), and a direct `tmux -S <socket> attach` still
-reaches it; only the plain-shell auto-discovery of a view-only server is
-absent, and it previously worked only by listing the view under a
-non-session name.  Not a supported R3/R7 shape (a view is not a session).
+session (the base killed **by hand**, e.g. `tmux kill-session`, while the
+view's client stays attached) is not discoverable from a plain shell —
+`list_pm_sessions()` reports pm-named sessions only, and
+`find_session_server()` cannot match a non-pm-named view by the base
+name.  From *inside* the view discovery resolves it through the group
+(above), and a direct `tmux -S <socket> attach` still reaches it; only
+the plain-shell auto-discovery of a view-only server is absent, and it
+previously worked only by listing the view under a non-session name.
+Not a supported R3/R7 shape (a view is not a session).  `pm session kill`
+no longer produces this state: it tears down the whole group, views
+included (review-loop 2caf i7).
 
 ## Review iteration (2026-11-01, review-loop 2caf i5)
 
@@ -2221,3 +2226,45 @@ Validation: targeted suites (`test_session_socket_isolation`,
 pass; full suite re-run after the edit (see the PR note); every fixture
 used a disposable socket and a temporary HOME — no live session, server
 or shared host configuration was touched.
+
+## Review iteration (2026-11-01, review-loop 2caf i7)
+
+Verification pass over the head after the i6 fix; one destructive-path
+gap, the same "a user's own view is part of the session group" rule the
+detach (i2), discovery (703c i1, 2caf i4) and QA-status (i6) fixes
+applied elsewhere:
+
+1. **`pm session kill` left a user's own view (and its client) alive.**
+   The kill enumerated the group with `list_grouped_sessions()`, which
+   matches `base~N` by *name*, so a view created with `tmux new-session -t
+   base -s myview` (S118/S121/S124) survived: its client stayed attached,
+   the shared windows — and therefore the old `pm _tui` pane — stayed
+   alive, the server kept running, and the socket file could not be
+   removed (`server_alive()` correctly refused to unlink it).  `pm session
+   list` shows nothing for that server (a view is not a session), and a
+   later `pm session` starts a second base with the same name on the same
+   server — two TUIs for one session name.  The kill now enumerates
+   `sessions_in_group()` (tmux's `#{session_group}` plus the `base~N`
+   names) and kills every member, then the base; the group is gone, the
+   server exits, and the socket is unlinked.  Tests:
+   `TestSessionKillServerSelection::test_kill_also_tears_down_a_users_view`
+   (verified to fail with the name-prefix list: only the base was killed)
+   and the disposable-server
+   `TestServerIsolationIntegration::test_kill_tears_down_the_whole_group_including_a_view`
+   (a real base + `~1` + `myview`; `sessions_in_group()` returns all
+   three, killing them exits the server).
+
+Nothing else surfaced.  The socket derivation and default-server
+addressing (R4.3), discovery scoping (7af7 i1–i3, 3cc7 i1, 703c
+i1/i4/i6, 2caf i4/i5), the precise detach (R5, 703c i3, 2caf i2), the
+kill/unlink rules (R3.2, R8), the socket-directory and ownership checks
+(d1c0 i10/i12, 703c i2) and the shared-session share-mode handling (d1c0
+i7, 703c i8) all match the spec, and every new helper has direct
+coverage.  The i4 residual is narrowed accordingly: the view-only state
+now arises only from a manual `tmux kill-session` of the base.
+
+Validation: targeted suites (`test_session_socket_isolation`,
+`test_tmux`, `test_cli_helpers`, `test_shared_sessions`, `test_cli_qa`)
+389 passed; full suite re-run after the edit (see the PR note); every
+fixture used a disposable socket and a temporary HOME — no live session,
+server or shared host configuration was touched.

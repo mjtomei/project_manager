@@ -904,10 +904,20 @@ def session_kill(start_dir):
                 pass
         raise SystemExit(1)
 
-    # Kill grouped sessions first, then the base, on the hosting server.
-    for g in tmux_mod.list_grouped_sessions(session_name,
-                                            socket_path=hosting_socket):
-        tmux_mod.kill_session(g, socket_path=hosting_socket)
+    # Kill every session in the group — the `~N` grouped sessions and a
+    # user's own view however it is named — then the base, on the hosting
+    # server.  A view (``tmux new-session -t base -s myview``,
+    # S118/S121/S124) is not a session of its own: it shares the windows,
+    # so leaving it behind would keep the old TUI pane and the server
+    # alive, the socket could not be unlinked, and a later `pm session`
+    # would start a second base with the same name on the same server.
+    # Enumerate through tmux's session *group*, not the ``base~N`` name
+    # prefix, which cannot see a view (R8: nothing of the session is left
+    # behind).
+    for member in tmux_mod.sessions_in_group(session_name,
+                                             socket_path=hosting_socket):
+        if member != session_name:
+            tmux_mod.kill_session(member, socket_path=hosting_socket)
     tmux_mod.kill_session(session_name, socket_path=hosting_socket)
 
     pane_layout.set_force_mobile(session_name, False)

@@ -1980,7 +1980,7 @@ class TestSessionKillServerSelection:
 
     def _invoke(self, monkeypatch, tmp_path, hosting, *, ambient=None,
                 ambient_share_mode=None, hosting_for=None, alive=False,
-                args=("kill",)):
+                args=("kill",), members=None):
         from click.testing import CliRunner
         from pm_core.cli import session as session_mod
         from pm_core import container, push_proxy
@@ -2013,9 +2013,13 @@ class TestSessionKillServerSelection:
         monkeypatch.setattr(session_mod.tmux_mod, "find_exact_session_server",
                             resolver)
         killed: list[tuple[str, str | None]] = []
+        # The kill enumerates the whole session group (base + ~N + a
+        # user's own view); the base is killed last.  Default fixture: the
+        # base and its ~1 grouped session.
         monkeypatch.setattr(
-            session_mod.tmux_mod, "list_grouped_sessions",
-            lambda name, socket_path=None: [f"{name}~1"])
+            session_mod.tmux_mod, "sessions_in_group",
+            lambda name, socket_path=None: (
+                list(members) if members is not None else [f"{name}~1", name]))
         monkeypatch.setattr(
             session_mod.tmux_mod, "kill_session",
             lambda name, socket_path=None: killed.append((name, socket_path)))
@@ -2035,6 +2039,25 @@ class TestSessionKillServerSelection:
 
         assert result.exit_code == 0, result.output
         assert killed == [("pm-repo-abc~1", sock), ("pm-repo-abc", sock)]
+
+    def test_kill_also_tears_down_a_users_view(self, monkeypatch, tmp_path):
+        """A user's own view of the session is a group member: kill it too.
+
+        ``list_grouped_sessions`` matches ``base~N`` by name, so a view
+        (``tmux new-session -t base -s myview``, S118/S121/S124) survived
+        ``pm session kill``: its client stayed attached, the old TUI pane
+        and the server stayed alive, and the socket could not be removed.
+        The kill enumerates tmux's session *group*, so the view is torn
+        down as well and nothing of the session is left behind (R8).
+        """
+        sock = str(tmp_path / "pm-repo-abc")
+        result, killed = self._invoke(
+            monkeypatch, tmp_path, (sock, True),
+            members=["myview", "pm-repo-abc", "pm-repo-abc~1"])
+
+        assert result.exit_code == 0, result.output
+        assert killed == [("myview", sock), ("pm-repo-abc~1", sock),
+                          ("pm-repo-abc", sock)]
 
     def test_private_kill_keeps_a_socket_a_server_still_answers_on(
             self, monkeypatch, tmp_path):
@@ -2108,9 +2131,6 @@ class TestSessionKillServerSelection:
                             "find_exact_session_server",
                             lambda name: (None, False))
         killed: list[tuple[str, str | None]] = []
-        monkeypatch.setattr(
-            session_mod.tmux_mod, "list_grouped_sessions",
-            lambda name, socket_path=None: [f"{name}~1"])
         monkeypatch.setattr(
             session_mod.tmux_mod, "kill_session",
             lambda name, socket_path=None: killed.append((name, socket_path)))
@@ -3290,6 +3310,38 @@ class TestServerIsolationIntegration:
                          "-t", "myview").returncode == 0
         finally:
             _close(proc, sock)
+
+    def test_kill_tears_down_the_whole_group_including_a_view(
+            self, short_sock_dir):
+        """R8 end to end: base + ``~1`` + a user's view all go, server exits.
+
+        The kill enumerates ``sessions_in_group``; a name-prefix list
+        (``list_grouped_sessions``) cannot see the view, which kept the
+        server — and the old TUI pane in the shared window — alive after a
+        kill, so the socket could not be removed.
+        """
+        sock = short_sock_dir / "k.sock"
+        base = _make_server(sock, "pm-iso-k")
+        try:
+            assert _tmux(sock, "new-session", "-d", "-t", base,
+                         "-s", f"{base}~1").returncode == 0
+            assert _tmux(sock, "new-session", "-d", "-t", base,
+                         "-s", "myview").returncode == 0
+
+            members = tmux.sessions_in_group(base, socket_path=str(sock))
+            assert sorted(members) == sorted([base, f"{base}~1", "myview"])
+
+            # The kill path: group members first, then the base.
+            for member in members:
+                if member != base:
+                    tmux.kill_session(member, socket_path=str(sock))
+            tmux.kill_session(base, socket_path=str(sock))
+
+            # Nothing of the session is left: the server exits with its
+            # last session (tmux leaves the socket file for pm to unlink).
+            assert tmux.server_alive(str(sock)) is False
+        finally:
+            _close(None, sock)
 
     def test_session_environment_comes_from_the_named_server(
             self, short_sock_dir):

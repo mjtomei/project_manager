@@ -214,6 +214,13 @@ pane unless stated otherwise.
   **THEN** A's grouped sessions and base session are gone, A's socket file
   is removed, and B's session, server, clients, panes and TUI are
   untouched.
+- **GIVEN** session A is also open through a user's own tmux view grouped
+  with it under an arbitrary name (R5, e.g. `myview`),
+  **WHEN** the user runs `pm session kill` in project A,
+  **THEN** the view is torn down with the base and its `~N` sessions (its
+  client is detached, the old TUI pane is gone), the server exits, A's
+  socket file is removed, and nothing of the session is left behind — a
+  later `pm session` starts a fresh base on a fresh server.
 - **GIVEN** a session whose base session was killed elsewhere but whose
   grouped session still has a client,
   **WHEN** the user runs `pm session kill` (which reports no session for
