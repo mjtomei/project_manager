@@ -318,7 +318,9 @@ available in the run dir:
    archive-on-replace for shared canonical paths, loop-scoped names only
    where a path is provably reused across live loops (review iterations).
    This keeps every reader on its existing canonical path and still gives
-   every session an immutable archive entry.
+   every *superseded* session an immutable archive entry.  The attempt
+   that is live when a run ends stays a link until a new attempt reuses
+   its path (review e757 i4); see Known limitations.
 2. **Where archives live.** `<run>/archive/` (a subdirectory), so all
    existing top-level scans ignore them and `_adopt_orphaned_run`'s
    `*/signoff-*.head` glob is unaffected.
@@ -508,12 +510,16 @@ Applied on top of the design above; keep them when editing the code.
   cross-loop collision this PR removes and making the legacy name sticky
   for every later loop at that iteration.
 - `qa.md` R7 now states that archive entry counts are a minimum (review
-  d468 i3).  The run-end disable sweep freezes every canonical link, so a
-  run with two returns ends with three `impl-<pr>` / three `signoff-<pr>`
-  entries and no canonical link; the "exactly two entries + `readlink`
-  names the live attempt" reading only holds at the post-return checkpoint.
-  That ambiguity produced a QA INPUT_REQUIRED that was a scenario-text
-  conflict, not a code defect.
+  d468 i3).  At that time the run-end disable sweep froze every canonical
+  link, so a run with two returns ended with three `impl-<pr>` / three
+  `signoff-<pr>` entries and no canonical link, and the "exactly two
+  entries + `readlink` names the live attempt" reading only held at the
+  post-return checkpoint.  That ambiguity produced a QA INPUT_REQUIRED that
+  was a scenario-text conflict, not a code defect.  **Superseded by review
+  e757 i4**: a sweep no longer freezes a canonical, so the same run now
+  ends with *two* entries per step (every superseded attempt) plus the
+  canonical link naming the third (live) attempt.  qa.md R7 was corrected
+  to that count in review e757 i5.
 - `resolve_iteration_transcript(..., allow_legacy=...)` (review d468 i3):
   the legacy fallback is now restricted to a loop *resuming* an iteration
   that was already in flight (`run_review_loop_sync` derives the flag from
@@ -687,6 +693,16 @@ Verified after this integration: full suite **5477 passed / 1 skipped**
   recorded session id) when the loop ends.  A stale legacy link from an
   earlier loop that this loop never adopts is left for its own loop's
   completion or a `finalize_transcript_dir` caller to handle.
+- **A loop-scoped iteration link whose loop never reached completion stays
+  live.**  Loop completion is what freezes a loop's own
+  `review-<pr>-<loop_id>-i<N>.jsonl` files, and their names are never
+  reused (a new loop gets a new id), so archive-on-replace never runs for
+  them either.  If the TUI is killed before the loop's completion callback
+  (a crash, a `kill -9`), those links stay symlinks to
+  `~/.claude/projects` and a later prune can dangle them.  Freezing them in
+  a bulk sweep would mean guessing that the loop is dead, which is the
+  liveness rule review e757 i4 removed; the content remains in the native
+  JSONL until it is pruned.
 - **Finalize's last check and `os.replace` are not atomic together.**  The
   readlink guard runs immediately before the replace, so the unguarded
   window is one `os.replace` call; POSIX has no compare-and-swap for a
@@ -741,3 +757,46 @@ Trade-off recorded above (Known limitations): only a *superseded* attempt
 is self-contained in the run dir.  The attempt that is live when a run
 ends stays a symlink to `~/.claude/projects`, so pruning can lose it;
 freezing it would need a definitive end-of-run signal, not a guess.
+
+## Review e757 i5 — spec text catches up with the e757-i4 sweep rule
+
+No code change: the archive/finalize behaviour is exactly as e757 i4 left
+it.  The review found five passages where the specs still described the
+*pre*-e757-i4 rule, the same class of scenario-text drift that produced
+the S10 confusion and the S16-story-3 INPUT_REQUIRED.
+
+- `qa.md` R7's two-return count was self-contradictory: "three
+  `impl-<pr>` / three `signoff-<pr>` entries … with the canonical names
+  still links to the last attempt".  Under the e757-i4 rule the last
+  attempt is *not* archived (its path is never reused during the run), so
+  a two-return run ends with **two** entries per step — every superseded
+  attempt — plus the canonical link naming the third (live) attempt.
+  Corrected, and `test_two_sign_off_returns_keep_both_original_sessions`
+  now asserts that exact entry set, so the number cannot drift again
+  unnoticed.
+- `impl.md`'s d468-i3 bullet stated the old sweep behaviour as current
+  fact (the run-end disable sweep freezing every canonical, three entries
+  and no canonical link).  Annotated as superseded by e757 i4 with the
+  current count.
+- `qa.md`'s Ambiguity 2 still framed a canonical link after a disable as
+  a consequence of an *open step window* (the deleted liveness rule).
+  Rewritten as the rule it now is: a bulk sweep never freezes a canonical
+  link, whatever the pane or window state.
+- `impl.md`'s Ambiguities #1 claimed archive-on-replace "gives every
+  session an immutable archive entry"; only a *superseded* session has
+  one until its path is reused (e757 i4).  Corrected.
+- `impl.md`'s Known limitations gains the abandoned-loop case: a
+  loop-scoped iteration link whose loop never reached completion (a TUI
+  crash or `kill -9`) is never frozen, because its name is never reused
+  and only the loop's own completion finalizes it.  Freezing it in a bulk
+  sweep would be exactly the "the loop must be dead" guess e757 i4
+  removed; the content stays in the native JSONL until pruning.
+
+Verified: `tests/test_transcript_archive.py` 34 passed; 385 passed across
+the archive / auto-start-finalize / breadcrumb / review-loop /
+return-handoff / launch-retry / fail-closed suites; full suite **5476
+passed / 1 skipped** (6m59s, `markdown` installed — without it the 12
+`test_markdown_render` tests fail with `ModuleNotFoundError`, env-only and
+unrelated).  The post-fix repro
+(`/pm-captures/impl/post-fix/transcript-archive/repro.py --expect fixed`)
+still reports all three symptoms fixed.

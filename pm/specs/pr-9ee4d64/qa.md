@@ -134,9 +134,10 @@ watcher), not the helper functions.
   - Archive entry counts are a **minimum**, never an exact count: the
     canonical link of each step names the attempt that is live *now* and
     is never frozen by a bulk sweep (R5), so it stays a link after the
-    run ends.  A run with two returns therefore ends with three
-    `impl-<pr>` and three `signoff-<pr>` entries in `archive/`, with the
-    canonical names still links to the last attempt of each step.
+    run ends.  A run with two returns therefore ends with two
+    `impl-<pr>` and two `signoff-<pr>` entries in `archive/` — every
+    superseded attempt, archived when the next attempt reused its path —
+    plus the canonical link naming the third (live) attempt of each step.
     Assert each pre-return session is *present* in `archive/` (by session
     id) instead of asserting an entry count, and read the canonical link
     only to confirm it names the most recent attempt.
@@ -302,10 +303,12 @@ Resolved without user input:
    `~/.claude/projects` while the run is live and a self-contained copy after
    a finalize sweep; both pass. The native JSONL existing alone does not
    count — the run archive must carry it.
-2. **A step window left as a link after auto-start disable.** The
-   implementation treats an open step window as possibly still writing, so a
-   disable may leave that step's canonical transcript a link. Pass, provided
-   the content is readable and it is archived when the path is next reused.
+2. **Canonical transcripts left as links after auto-start disable.** Not a
+   possibility to be judged, but the rule: a bulk sweep never freezes a
+   canonical link (R5, review e757 i4), so *every* canonical transcript in
+   the run dir stays a link after a disable, whatever its pane or window
+   state. Pass, provided the content is readable and the outgoing session
+   is archived when the path is next reused.
 3. **Auto-sequence CLI iteration naming.** `pm pr auto-sequence` continues
    iteration numbering across a REVIEW return (unlike the TUI loop, which
    restarts at 1 with a new loop id). Both are acceptable; what matters is

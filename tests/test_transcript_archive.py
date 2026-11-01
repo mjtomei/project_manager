@@ -246,6 +246,10 @@ def test_two_sign_off_returns_keep_both_original_sessions(env):
     adir = cl.transcript_archive_dir(canon)
     assert "ROUND 1 IMPL" in (adir / f"impl-pr-abc.{sid1}.jsonl").read_text()
     assert "ROUND 2 IMPL" in (adir / f"impl-pr-abc.{sid2}.jsonl").read_text()
+    # One entry per *superseded* attempt: a two-return run archives two and
+    # leaves the third attempt live (qa.md R7's count).
+    assert sorted(p.name for p in adir.iterdir()) == [
+        f"impl-pr-abc.{sid1}.jsonl", f"impl-pr-abc.{sid2}.jsonl"]
     # The canonical is the third (live) attempt, not an archived one.
     assert canon.is_symlink()
     assert cl.session_id_from_transcript(canon) not in (sid1, sid2)
