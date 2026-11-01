@@ -1574,6 +1574,44 @@ class TestListPmSessions:
         assert rows[0]["attached"] == 2  # base + ~1; the view's client not counted
 
     @patch("pm_core.tmux.subprocess.run")
+    def test_skips_a_view_whose_name_starts_like_a_grouped_session(
+            self, mock_run, tmp_path):
+        """A view named ``pm-x~myview`` is a view, not a session of its own.
+
+        R3: a view gets no row "whatever it is called".  The name-prefix
+        clause that keeps the ``~N`` grouped sessions let such a view
+        through — its name starts with ``<base>~`` — so it was listed as a
+        phantom session on the base's socket.  Only a *numeric* suffix is
+        a grouped suffix (``paths.base_session_name``), so the group's
+        members are exactly the sessions whose own base is the group name
+        (review-loop b48f i12).
+        """
+        sock_dir = tmp_path / "pm-sessions"
+        sock_dir.mkdir()
+        sock = sock_dir / "pm-repo-abc"
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            s.bind(str(sock))
+        finally:
+            s.close()
+
+        def fake_run(cmd, **kwargs):
+            if str(sock) in cmd:
+                return MagicMock(returncode=0, stdout=(
+                    "pm-repo-abc:pm-repo-abc:0\n"
+                    "pm-repo-abc~1:pm-repo-abc:2\n"
+                    "pm-repo-abc~myview:pm-repo-abc:1\n"
+                ))
+            return MagicMock(returncode=1, stdout="")
+
+        mock_run.side_effect = fake_run
+        with patch.object(paths, "SHARED_SOCKET_DIR", sock_dir):
+            rows = tmux.list_pm_sessions()
+
+        assert [r["name"] for r in rows] == ["pm-repo-abc"]
+        assert rows[0]["attached"] == 2  # base + ~1; the view's client not counted
+
+    @patch("pm_core.tmux.subprocess.run")
     def test_lists_a_session_whose_name_contains_a_pipe(self, mock_run,
                                                         tmp_path):
         """A repo directory name may contain ``|``, so a session name may.

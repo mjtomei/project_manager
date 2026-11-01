@@ -1601,14 +1601,20 @@ def list_pm_sessions() -> list[dict]:
             # truncating there collapsed distinct sessions into one row
             # (review-loop b48f i11).
             own_base = base_session_name(name)
-            if group and group != own_base and not name.startswith(group + "~"):
+            if group and group != own_base:
                 # A user's own view of another session (S118/S121/S124),
                 # however it is named — including a name that looks like a
-                # pm session (``pm-laptop``).  It shares the windows but is
-                # not a session of its own, so it must not appear as a
-                # second row.  Its clients are deliberately not counted
-                # either (``tmux list-clients`` is authoritative for a
-                # view's client).
+                # pm session (``pm-laptop``) and one that starts like a
+                # grouped session (``pm-x~myview``: only a *numeric* suffix
+                # is a grouped one, so its base is itself, not ``pm-x``).
+                # A view shares the windows but is not a session of its
+                # own, so it must not appear as a second row.  The group's
+                # own members all have ``own_base == group`` — the base
+                # session (tmux reports its group as itself once a view
+                # exists) and its ``base~N`` grouped sessions — so this
+                # test keeps them and drops only views.  Its clients are
+                # deliberately not counted either (``tmux list-clients`` is
+                # authoritative for a view's client).
                 _log.debug("list_pm_sessions: skipping view %s of %s",
                            name, group)
                 continue

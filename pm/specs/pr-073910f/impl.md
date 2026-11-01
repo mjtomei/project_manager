@@ -3366,3 +3366,48 @@ name (`pm session` crashes with "duplicate session" on every re-run,
 rewritten name).  Pre-existing and unrelated to the socket scheme, but
 the deterministic socket is derived from the same name, so a naming
 policy (sanitize or reject) is needed; that is a separate decision.
+
+## Review iteration (2026-11-01, review-loop b48f i12)
+
+Verification pass over the head after the b48f i11 fixes; one gap of the
+same "a view is not a session" class the earlier iterations closed for
+`pm-laptop`, one level narrower.
+
+1. **`pm session list` gave a user's own view a row of its own when the
+   view's name started like a grouped session.**  The view filter in
+   `list_pm_sessions()` was `group != own_base and not
+   name.startswith(group + "~")`; the second clause exists to keep the
+   `base~N` grouped sessions, but it also kept a view named
+   `pm-x~myview` (a view may be named anything, S118/S121/S124).  Such a
+   view was listed as a phantom second session on the base's socket —
+   R3.3 / qa.md R3 require "no row, whatever it is called" (reproduced
+   against a mocked server: the pre-fix listing returned
+   `['pm-repo-abc', 'pm-repo-abc~myview']`).  Only a *numeric* suffix is
+   a grouped suffix (`paths.base_session_name`, b48f i11), so the group's
+   own members are exactly the sessions whose own base equals the group
+   name — the base itself (tmux reports its group as itself once a view
+   exists) and its `base~N` sessions.  The filter is now
+   `group and group != own_base`, which drops every view, whatever its
+   name.  Test:
+   `TestListPmSessions::test_skips_a_view_whose_name_starts_like_a_grouped_session`
+   (verified to fail on the pre-fix head `ce3b19519`: returned the extra
+   row `pm-repo-abc~myview`).
+
+   Deliberately not changed: `tmux.list_grouped_sessions()` still matches
+   `base~*` by name prefix.  It feeds `pane_layout`'s minimum-window-size
+   computation, `current_or_base_session()` and the grouped-session
+   lifecycle, where including a view is the safe direction (its client
+   constrains the layout and it shares the windows); and on a private
+   server two unrelated sessions can never share one, so the over-inclusive
+   prefix can only see another project's session on the legacy default
+   server when that project's *directory name* is literally
+   `<base>~<non-numeric>` — a name pm never generates (every session name
+   carries an 8-hex hash after the repo name).
+
+Validation: full suite 5464 passed / 1 skipped (429 s, log
+`/pm-captures/review-b48f-i12/full-suite-after-fix.log`; the pre-fix
+baseline run in the same directory is `full-suite-final.log`, 5463
+passed / 1 skipped); targeted suites 22 passed; the preserved smoke
+script re-ran clean on a disposable socket.  No live session, server or
+shared host configuration was touched — every fixture used a disposable
+socket directory, a temporary HOME or a mocked tmux.
