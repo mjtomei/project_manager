@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T07:11:01.777370+00:00'
+  updated_at: '2026-11-01T07:40:38.787588+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6055,6 +6055,37 @@ prs:
       used a disposable socket and a temporary HOME.'
     created_at: '2026-11-01T07:11:01Z'
     last_edited: '2026-11-01T07:11:01Z'
+  - id: note-475434e
+    text: 'Review loop 8d4e i1 (no requirement changes; full suite 5379 passed / 1
+      skipped, log /pm-captures/review-8d4e-i1/full-suite-final.log). Verification
+      pass over the head after the 2caf i8 fixes; one rollout-path gap. (1) A vanished
+      legacy session still sent the create path to the default server: _resolve_session_socket()
+      decides "legacy" from a find_session_server() snapshot and exports the default
+      socket, and _session_start() then asked a moment later whether the session was
+      running. A concurrent `pm session kill` between the two probes made that answer
+      "no" while the process was still pointed at the default server, so the create
+      path made a brand-new session there (outside its own server, R1) and every later
+      `pm session` saw it as legacy again, making the state self-perpetuating. The
+      existence check is now taken once; when it says the legacy session is gone,
+      the socket is re-resolved (yielding the deterministic private path) and re-checked
+      before the rollout note is printed, so the note never describes a session that
+      is not being attached. Test: TestSessionStartAttachesToLegacySession::test_a_vanished_legacy_session_is_created_on_its_private_socket,
+      verified to fail with the old order (it created with socket_path=None on the
+      default server and printed the note). (2) Cross-PR residual recorded on pr-6de8207
+      (not fixed here): a repo directory containing "." or ":" gets a tag that tmux
+      rewrites to "_" when it creates the session, so the session name and the tag-derived
+      socket diverge; the duplicate-session convergence cannot find it and re-raises,
+      and `pm session kill` / `pm tui ... -s <the name list reports>` derive a different
+      socket. Verified on a disposable socket and against origin/master (pre-existing;
+      same root cause as the "~" case - get_session_tag() uses the repository directory
+      name unsanitised). Validation: targeted suites 394 passed; full suite re-run
+      after the edit; pm/specs/pr-073910f/session_start_smoke.py re-ran clean on a
+      disposable socket (private server, session env, global env and hooks correct;
+      default server untouched); `pm session list` read-only ("No pm sessions found.",
+      no socket directory created). No live session, server or shared host configuration
+      was touched.'
+    created_at: '2026-11-01T07:40:38Z'
+    last_edited: '2026-11-01T07:40:38Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
@@ -48448,11 +48479,31 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-29T03:19:50.032775+00:00'
-  updated_at: '2026-10-29T03:19:50.032775+00:00'
+  updated_at: '2026-11-01T07:40:40.191888+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-15ec158
+    text: 'Additional repro of the same root cause, found while reviewing pr-073910f
+      (review loop 8d4e i1, 2026-11-01): characters tmux itself rewrites break the
+      tag/name invariant too, not only "~". A repo directory containing "." or ":"
+      yields tag "<dir>-<hash>"; `tmux new-session -s pm-foo.bar-<hash>` creates the
+      session as "pm-foo_bar-<hash>" (tmux rewrites ":" and "." to "_"), while pm
+      keeps using the original name: `has-session -t pm-foo.bar-<hash>` and `-t =pm-foo.bar-<hash>`
+      both fail ("can''t find pane: ..."), so a second `pm session` does not converge
+      on the duplicate and dies with TmuxCommandError("duplicate session: pm-foo_bar-...");
+      `pm session kill` reports "No session found" and leaves the server running;
+      and `pm tui ... -s <the name pm session list reports>` derives a different socket
+      from the tag. Verified on a disposable socket (never the live server) and against
+      origin/master''s create_session, which re-raises the duplicate identically -
+      pre-existing, not introduced by pr-073910f. A sanitising fix in get_session_tag
+      (map anything outside [A-Za-z0-9_-] to "-") covers this case as well as the
+      "~" one; note it would change the tags (and therefore sockets and registry keys)
+      of repos whose names contain those characters, so existing sessions for such
+      repos would need a migration path.'
+    created_at: '2026-11-01T07:40:40Z'
+    last_edited: '2026-11-01T07:40:40Z'
 - id: pr-ea98f71
   plan: bugs
   title: 'Bug: a second concurrent `pm session` start can respawn the TUI of a session
