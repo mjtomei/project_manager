@@ -857,7 +857,26 @@ def ensure_socket_dir() -> None:
 
     Uses 1777 (sticky + rwx for all) so any user can create sockets
     but only the owner can delete their own.
+
+    A symbolic link at the path is refused, whatever it resolves to: pm
+    always creates a real directory, so a link was planted there by
+    someone else.  ``/tmp`` is world-writable, so another local user can
+    create ``/tmp/pm-sessions`` as a link to a 1777 directory they own;
+    our ``chmod`` then fails (we are not the target's owner) and the mode
+    fallback below would see *their* directory's mode and accept it.
+    Everything pm binds there would live in a directory whose owner can
+    unlink it — the sticky bit only protects a file from users other than
+    the directory's owner — so a later connection can be hijacked.
+    Inspect the entry itself (``lstat``), like the per-socket ownership
+    check in ``pm session`` does.
     """
+    try:
+        entry = SHARED_SOCKET_DIR.lstat()
+    except FileNotFoundError:
+        entry = None
+    if entry is not None and stat.S_ISLNK(entry.st_mode):
+        raise OSError(
+            f"{SHARED_SOCKET_DIR} is a symbolic link, not a directory")
     SHARED_SOCKET_DIR.mkdir(mode=0o1777, parents=True, exist_ok=True)
     # Ensure permissions are correct even if directory already existed.
     try:
@@ -871,8 +890,10 @@ def ensure_socket_dir() -> None:
         # world-write we cannot create our socket at all, and proceeding
         # would surface as an opaque "couldn't create socket" out of tmux
         # instead of the actionable message `pm session` prints for this
-        # refusal.  Refuse rather than proceed on either.
-        mode = SHARED_SOCKET_DIR.stat().st_mode
+        # refusal.  Refuse rather than proceed on either.  ``lstat`` again:
+        # a link planted between the check above and here reports its own
+        # mode (0777, never sticky), not its target's.
+        mode = SHARED_SOCKET_DIR.lstat().st_mode
         if not (mode & stat.S_ISVTX and mode & stat.S_IWOTH):
             raise
 

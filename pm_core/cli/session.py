@@ -381,13 +381,16 @@ def _resolve_session_socket(session_name: str,
         ensure_socket_dir()
     except OSError as e:
         # ensure_socket_dir refuses a world-writable directory without the
-        # sticky bit: another user could unlink our socket there, and the
-        # uid check below cannot prevent it (it runs once, before tmux
-        # binds).  Report the fix instead of a traceback.
+        # sticky bit (another user could unlink our socket there, and the
+        # uid check below cannot prevent it: it runs once, before tmux
+        # binds) and a symbolic link at the path (its target's owner can
+        # unlink our sockets there).  Report the fix instead of a
+        # traceback.
         click.echo(
             f"Cannot use tmux socket directory '{SHARED_SOCKET_DIR}': {e}. "
-            "It must be owned by you, or have the sticky bit set (1777) so "
-            "no other user can remove your sockets.", err=True)
+            "It must be a real directory (not a symlink) owned by you, or "
+            "one with the sticky bit set (1777) so no other user can remove "
+            "your sockets.", err=True)
         raise SystemExit(1)
     socket_path = tmux_mod.session_socket_for(session_name)
     # Private servers live in a world-writable directory; refuse to connect

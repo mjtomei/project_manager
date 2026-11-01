@@ -123,6 +123,33 @@ class TestSessionSocketPath:
         with pytest.raises(PermissionError):
             paths.ensure_socket_dir()
 
+    def test_refuses_a_symlinked_socket_dir(self, tmp_path, monkeypatch):
+        """A link at the well-known path is refused, not followed.
+
+        ``/tmp`` is world-writable, so another local user can plant
+        ``/tmp/pm-sessions`` as a symlink to a 1777 directory they own.
+        The ``chmod`` then fails (we are not the target's owner), and the
+        old mode fallback used ``stat`` — the *target's* mode — and
+        accepted it, so every socket pm bound lived in a directory whose
+        owner can unlink it (the sticky bit does not protect a file from
+        the directory's owner) and could be replaced by their own server.
+        pm always creates a real directory, so a link is never ours: refuse
+        it even when its target happens to be ours and 1777.
+        """
+        real = tmp_path / "attacker"
+        real.mkdir()
+        real.chmod(0o1777)
+        fake = tmp_path / "pm-sessions"
+        fake.symlink_to(real)
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", fake)
+
+        with pytest.raises(OSError) as exc:
+            paths.ensure_socket_dir()
+
+        assert "symbolic link" in str(exc.value)
+        # Nothing was created through the link.
+        assert list(real.iterdir()) == []
+
 
 # ---------------------------------------------------------------------------
 # tmux: session name -> socket path
@@ -1938,6 +1965,35 @@ class TestResolveSessionSocket:
         assert str(tmp_path) in err
         assert "sticky bit" in err
 
+    def test_refuses_a_symlinked_socket_dir(self, monkeypatch, tmp_path,
+                                            capsys):
+        """A symlinked socket directory is reported, not used.
+
+        ``/tmp`` is world-writable, so another user can plant the
+        well-known path as a link to a directory they own; their directory
+        owner can unlink our sockets even with the sticky bit.  Fail closed
+        with the actionable message, like the other unusable-directory
+        states.
+        """
+        from pm_core.cli import session as session_mod
+
+        real = tmp_path / "elsewhere"
+        real.mkdir()
+        real.chmod(0o1777)
+        link = tmp_path / "pm-sessions"
+        link.symlink_to(real)
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", link)
+
+        with pytest.raises(SystemExit) as exc:
+            session_mod._resolve_session_socket("pm-repo-abc", False)
+
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "Cannot use tmux socket directory" in err
+        assert "symbolic link" in err
+        assert "sticky bit" in err
+        assert list(real.iterdir()) == []
+
     def test_refuses_socket_owned_by_another_user(self, monkeypatch, tmp_path):
         """The socket dir is world-writable; never connect to a planted one."""
         from pm_core.cli import session as session_mod
@@ -2763,6 +2819,32 @@ class TestPrintConnect:
         assert result.exit_code == 0, result.output
         assert result.output.strip() == f"tmux -S '{sock}' attach"
 
+    def test_legacy_command_quotes_a_session_name_with_a_space(
+            self, monkeypatch, tmp_path):
+        """The legacy form names the session with ``-t``; quote that too.
+
+        The session name is derived from the repo directory name, so it
+        may contain a space.  ``shlex.quote`` leaves ordinary names bare,
+        so the existing exact-output assertions still hold.
+        """
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+
+        default = str(paths.default_socket_path())
+        monkeypatch.setattr(session_mod, "_resolve_start_session_name",
+                            lambda shared=False: "pm-my repo-abc12345")
+        monkeypatch.setattr(
+            session_mod.tmux_mod, "session_socket_for",
+            lambda name: "/tmp/pm-sessions/pm-my repo-abc12345")
+        monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
+                            lambda name: (default, False))
+
+        result = CliRunner().invoke(session_mod.session, ["--print-connect"])
+
+        assert result.exit_code == 0, result.output
+        assert result.output.strip() == (
+            f"tmux -S {default} attach -t 'pm-my repo-abc12345'")
+
 
 # ---------------------------------------------------------------------------
 # CLI: `pm session list`
@@ -2908,6 +2990,28 @@ class TestShowConnect:
         screen = app.push_screen.call_args[0][0]
         assert screen._command == (
             "tmux -S '/tmp/pm-sessions/pm-my repo-abc12345' attach")
+
+    def test_legacy_command_quotes_a_session_name_with_a_space(
+            self, monkeypatch):
+        """The connect popup's legacy form quotes the ``-t`` name too.
+
+        The popup tells the user what to paste, so a session name with a
+        space must not split into two arguments.
+        """
+        from pm_core.tui import pane_ops
+
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        default = str(paths.default_socket_path())
+        monkeypatch.setattr(pane_ops.tmux_mod, "find_session_server",
+                            lambda name: (default, False))
+        app = MagicMock()
+        app._session_name = "pm-my repo-abc12345"
+
+        pane_ops.show_connect(app)
+
+        screen = app.push_screen.call_args[0][0]
+        assert screen._command == (
+            f"tmux -S {default} attach -t 'pm-my repo-abc12345'")
 
 
 # ---------------------------------------------------------------------------

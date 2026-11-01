@@ -17,7 +17,8 @@ The user-visible consequences are:
 
 The implementation also tightens a second class of hazard in the same
 code: the socket directory is world-writable, so sockets owned by another
-user, symlinks planted at a session's socket path, a non-sticky
+user, symlinks planted at a session's socket path or at the directory
+itself, a non-sticky
 world-writable directory, and a sticky directory that is not
 world-writable must fail closed rather than be used. Discovery with no
 session context of its own never auto-selects *another user's* server.
@@ -321,6 +322,13 @@ pane unless stated otherwise.
   **THEN** it refuses with the same actionable message (owned by the user,
   or 1777) and creates no server, rather than surfacing an opaque
   "couldn't create socket" from tmux.
+- **GIVEN** `/tmp/pm-sessions` is a symbolic link (e.g. planted by another
+  user before pm first ran, pointing at a 1777 directory they own),
+  **WHEN** the user runs `pm session`,
+  **THEN** it refuses with a message saying the path is a symlink and
+  creates no server or socket anywhere through the link — the link's
+  target owner could otherwise unlink (and replace) every socket pm binds
+  there, sticky bit or not.
 - **GIVEN** a regular file or a symlink planted at a session's socket
   path, **WHEN** the user runs `pm session list`, **THEN** the entry is
   skipped (not reported as one of the user's sessions) and nothing is

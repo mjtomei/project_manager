@@ -267,7 +267,12 @@ must be left untouched:
    sessions keep the existing chmod/`server-access` path.  Because the
    socket directory is world-writable, private sessions refuse to use an
    existing socket file owned by another UID (shared sessions skip this
-   check — the sharing user owns the socket by design).
+   check — the sharing user owns the socket by design).  The directory
+   itself must be a real 1777 directory: a sticky bit is required, and a
+   symbolic link at `/tmp/pm-sessions` is refused even when it resolves to
+   such a directory (review-loop 2caf i8 — its target's owner can unlink
+   our sockets; the sticky bit does not protect a file from the directory's
+   owner).
 
 ### R8 — Destructive and concurrent session operations are exact and convergent
 
@@ -2268,3 +2273,43 @@ Validation: targeted suites (`test_session_socket_isolation`,
 389 passed; full suite re-run after the edit (see the PR note); every
 fixture used a disposable socket and a temporary HOME — no live session,
 server or shared host configuration was touched.
+
+## Review iteration (2026-11-01, review-loop 2caf i8)
+
+Verification pass over the head after the i7 kill fix; no requirement
+changes.  One fail-closed gap in the socket-directory guard, the same
+class as the per-socket checks (d1c0 i10/i12, 703c i2) but one level up:
+
+1. **`ensure_socket_dir()` accepted a *symlinked* `/tmp/pm-sessions`.**
+   `/tmp` is world-writable, so another local user can create the
+   well-known path as a symlink to a directory they own before pm ever
+   runs.  `mkdir(exist_ok=True)` succeeds through the link, our `chmod`
+   then fails (we are not the target's owner), and the d1c0 i12 fallback
+   used `stat()` — the *target's* mode — so a 1777 target passed the
+   guard and every socket pm bound lived in a directory whose owner can
+   unlink it (the sticky bit protects a file from users *other* than the
+   directory's owner), allowing the socket to be replaced by an
+   attacker-run server that pm would then connect to.  The guard now
+   refuses a symbolic link at the path outright — pm always creates a
+   real directory, so a link is never ours, even when its target is —
+   and the mode fallback inspects the entry with `lstat` (defence in
+   depth for a link planted between the two checks).  `pm session`
+   reports it with the same actionable message as the other unusable
+   directory states.  Tests: `TestSessionSocketPath::
+   test_refuses_a_symlinked_socket_dir` and
+   `TestResolveSessionSocket::test_refuses_a_symlinked_socket_dir`, both
+   verified to fail with the pre-fix guard (no exception was raised).
+
+Nothing else surfaced.  The socket derivation and default-server
+addressing (R4.3), discovery scoping (7af7 i1–i3, 3cc7 i1, 703c
+i1/i4/i6, 2caf i4/i5), the precise detach (R5, 703c i3, 2caf i2), the
+kill/unlink rules (R3.2, R8, 2caf i7), the socket-file and
+socket-directory ownership checks (d1c0 i10/i12, 703c i2, above) and the
+shared-session share-mode handling (d1c0 i7, 703c i8) all match the
+spec, and every new helper has direct coverage.
+
+Validation: targeted suites (`test_session_socket_isolation`,
+`test_tmux`, `test_cli_helpers`, `test_shared_sessions`, `test_cli_qa`)
+pass; full suite re-run after the edit (see the PR note); every fixture
+used a disposable socket and a temporary HOME — no live session, server
+or shared host configuration was touched.
