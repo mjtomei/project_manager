@@ -514,7 +514,10 @@ Playwright's native recording is VP8 webm, which iOS Safari cannot
 decode. Transcode to H.264 and keep only the mp4. The encode publishes
 through `recording.mp4.partial.mp4` and renames onto `recording.mp4` only
 after a complete encode, so an interrupted transcode never leaves a file
-under the name the manifest and the report present:
+under the name the manifest and the report present. The step is also safe to
+paste again after it succeeded: with no webm left to transcode it reports the
+capture as already finalized and leaves the published mp4 alone, instead of
+removing it and blaming the driver:
 
 ```bash
 # The placeholders above are shell variables; a block pasted into a fresh
@@ -548,6 +551,40 @@ fi
         "permissions" >&2
     exit 1
 }
+# A finalize that already ran must not run again. It publishes
+# `recording.mp4` and then removes `recording.webm` — the source — so a second
+# paste of this block has nothing to transcode, and without this check it
+# deleted the *published* mp4 first and then reported "the driver wrote no
+# video; re-run step 2 and check the driver's recordVideo option": a cause the
+# driver does not have, and a remedy that throws a finished capture away
+# (verified in this container with the recipe's own block and real ffmpeg
+# 4.4.2: after the first finalize the capture directory held only a
+# 13,917-byte `recording.mp4`, and the second paste left it **empty** and
+# exited 1 with that message). Every block here is pasted on its own, and a
+# resumed session (or a worker checking its work) pastes this one again — the
+# same state the tmux recipe's step 5 handles after its own detach. An mp4
+# with no webm *and no partial* is this step's own finished state: step 1's
+# and step 2's cleanups both remove `recording.mp4`, so an mp4 here can only
+# be a finalize's output. Say so and leave it alone; a repeated step is a
+# check, not a re-encode. The partial is looked for first because a killed
+# driver's partial is a *different* state — it is named below, and the
+# earlier attempt's mp4 still goes with it.
+partial=
+if [ ! -e "$CAPDIR/recording.webm" ]; then
+    for f in "$CAPDIR"/page@*.webm; do
+        [ -e "$f" ] || continue
+        partial=$f
+        break
+    done
+    if [ -z "$partial" ] && [ -s "$CAPDIR/recording.mp4" ]; then
+        echo "this capture is already finalized — $CAPDIR/recording.mp4 is" \
+            "the published video, and the finalize step removed" \
+            "recording.webm when it published it; nothing to transcode." \
+            "(For a new attempt, run step 1, which clears the capture" \
+            "directory, and then step 2.)" >&2
+        exit 0
+    fi
+fi
 # Drop the old mp4 first: ffmpeg leaves an existing output untouched when it
 # fails, so a failed transcode would otherwise keep the previous run's video
 # as this run's recording. The interrupted transcode's partial goes with it —
@@ -569,20 +606,13 @@ rm -f "$CAPDIR/recording.mp4" "$CAPDIR/recording.mp4.partial.mp4"
 # `page@<hash>.webm` in the capture directory the block printed "the driver
 # wrote no video; … check the driver's recordVideo option"). Name the partial
 # where it is and say to re-record; the step still refuses to publish it.
-if [ ! -e "$CAPDIR/recording.webm" ]; then
-    partial=
-    for f in "$CAPDIR"/page@*.webm; do
-        [ -e "$f" ] || continue
-        partial=$f
-        break
-    done
-    if [ -n "$partial" ]; then
-        echo "there is no webm to transcode — the driver was killed before" \
-            "it renamed its video onto recording.webm; this attempt holds" \
-            "only Playwright's partial $partial, which is not this run's" \
-            "video. Re-run step 2 to record it again" >&2
-        exit 1
-    fi
+# (`$partial` was found above, before the earlier attempt's mp4 was dropped.)
+if [ -n "$partial" ]; then
+    echo "there is no webm to transcode — the driver was killed before" \
+        "it renamed its video onto recording.webm; this attempt holds" \
+        "only Playwright's partial $partial, which is not this run's" \
+        "video. Re-run step 2 to record it again" >&2
+    exit 1
 fi
 # The other shapes — no video at all, or an empty one (the check is `test -s`,
 # so a 0-byte webm is not an input either) — are the driver's own failure, and

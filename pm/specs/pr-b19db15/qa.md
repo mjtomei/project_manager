@@ -895,6 +895,18 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   the mp4 and drops the webm. With `CAPDIR` *set but missing* it stops with
   "capture directory … does not exist" rather than reporting "there is no
   webm to transcode — the driver wrote no video".
+- The web-UI finalize step is pasted a *second* time after a successful
+  finalize (a resumed session, a worker checking its work) → the step
+  published `recording.mp4` and removed `recording.webm`, so it must report
+  "this capture is already finalized … nothing to transcode" and exit 0
+  with the mp4 untouched. The shipped block deleted the published mp4 first
+  and then reported "the driver wrote no video; re-run step 2 and check the
+  driver's recordVideo option" — a cause the driver does not have, and a
+  remedy that throws a finished capture away (verified with the recipe's own
+  block and real ffmpeg 4.4.2: the second paste left the capture directory
+  empty and exited 1). A killed driver's `page@<hash>.webm` partial is still
+  named, and that failure still drops the earlier attempt's mp4 (review loop
+  928f i21, R82).
 - The CLI no-TTY scaffold is pasted whole for the interactive `bash` form →
   the stop step times out with the shell still at its prompt, and its failure
   message names the remedy (`exit` in the recorded shell, step 3) rather than
@@ -916,6 +928,17 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   transcript checks and exit 0. A recorder killed mid-scenario leaves *no*
   status file (the pane's shell dies with it) and must still fail with that
   message.
+- The tmux recipe's step 3 is pasted *on its own* to restart a recorder (the
+  same paste-alone case steps 2, 4 and 5 re-derive `$TARGET` for) → it must
+  re-derive the target and refuse an empty one before its first tmux call.
+  An empty target is not a no-op: the pane command's `tmux attach -t =` fails
+  ("no mouse target", verified on 3.2a), so the run dies as "recorder exited
+  before it drew" for a target that was never set, and the failure paths'
+  `-t "=:0.0"` is accepted by a real server and resolves to whatever session
+  it treats as current (verified: both `pipe-pane -t '=:0.0'` and
+  `set-option -u -t '=:0.0' @pm_capture_dir` exit 0 on the current session),
+  so a failed start could stop another run's transcript pipe and clear its
+  capture-directory claim (review loop 928f i21, R82).
 - The web-UI driver block runs with `CAPDIR` set but `APP_URL` missing → it
   stops instead of letting the driver fall back to
   `http://localhost:8000` and record whatever answers there.

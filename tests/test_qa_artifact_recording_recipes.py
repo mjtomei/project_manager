@@ -2911,6 +2911,45 @@ def test_web_ui_finalize_transcodes_when_capdir_is_set(tmp_path):
         "the finalize step keeps the webm although the mp4 exists")
 
 
+def test_web_ui_finalize_pasted_twice_keeps_the_published_video(tmp_path):
+    """A repeated finalize is a check, not a re-encode.
+
+    The step publishes ``recording.mp4`` and then removes ``recording.webm``,
+    the source, so a second paste has nothing to transcode. Without a guard it
+    removed the *published* mp4 first and then reported "there is no webm to
+    transcode — the driver wrote no video; re-run step 2 and check the
+    driver's recordVideo option": a cause the driver does not have, and a
+    remedy that throws a finished capture away. Verified in this container
+    with the recipe's own block and real ffmpeg 4.4.2 — after the first
+    finalize the directory held only a 13,917-byte ``recording.mp4``, and the
+    second paste left it **empty** and exited 1 with that message. Every block
+    in this recipe is pasted on its own, and a resumed session (or a worker
+    checking its work) pastes this one again; the tmux recipe's step 5 handles
+    the same state after its own detach.
+    """
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    (capdir / "recording.mp4").write_bytes(b"published")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    called = tmp_path / "ffmpeg-called"
+    _stub_tool(bindir, "ffmpeg", f'touch "{called}"\n')
+    env = dict(os.environ, CAPDIR=str(capdir),
+               PATH=f"{bindir}:{os.environ['PATH']}")
+    r = subprocess.run(["bash"], input=_web_ui_finalize_block(), env=env,
+                       capture_output=True, text=True)
+
+    assert r.returncode == 0, (
+        "a finalize pasted after a successful finalize failed: " + r.stderr)
+    assert "already finalized" in r.stderr, r.stderr
+    assert "the driver wrote no video" not in r.stderr, (
+        "a finished capture is reported as a driver that recorded nothing: "
+        + r.stderr)
+    assert (capdir / "recording.mp4").read_bytes() == b"published", (
+        "the second paste destroyed the published recording")
+    assert not called.exists(), "the second paste ran ffmpeg"
+
+
 def test_web_ui_finalize_never_consumes_the_script_on_stdin(tmp_path):
     """The finalize ffmpeg must not read the worker's stdin.
 
@@ -3030,9 +3069,15 @@ def test_web_ui_finalize_says_when_there_is_no_webm(tmp_path, webm_shape):
 
     capdir = tmp_path / "cap"
     capdir.mkdir()
-    (capdir / "recording.mp4").write_bytes(b"an earlier run's video")
     if webm_shape == "empty":
         (capdir / "recording.webm").write_bytes(b"")
+        # The failing step still drops the earlier attempt's mp4 — the stale
+        # rule this case has always pinned. The *no-file* shape seeds none:
+        # step 1's and step 2's cleanups remove it, so "no webm, no partial,
+        # an mp4 here" is the finalize's own finished state and is reported
+        # as "already finalized" instead
+        # (test_web_ui_finalize_pasted_twice_keeps_the_published_video).
+        (capdir / "recording.mp4").write_bytes(b"an earlier run's video")
     bindir = tmp_path / "bin"
     bindir.mkdir()
     called = tmp_path / "ffmpeg-called"
@@ -5413,6 +5458,16 @@ def _step_two_block():
     return raw[raw.index("# 2."):raw.index("# 3.")]
 
 
+def _step_three_block():
+    """The tmux recipe's recorder-start step (``# 3.`` … ``# 4.``).
+
+    Pasted on its own when a run restarts its recorder, which is the same
+    paste-alone case steps 2, 4 and 5 re-derive ``$TARGET`` for.
+    """
+    raw = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+    return raw[raw.index("# 3."):raw.index("# 4.")]
+
+
 def _step_zero_block():
     """The tmux recipe's create-and-clear step (``# 0.`` … ``# 1.``).
 
@@ -7026,6 +7081,43 @@ class TestCaptureFlowExecution:
         assert r.returncode != 0, (
             "the stop block ran with no target session at all")
         assert "TARGET is unset" in r.stderr, r.stderr
+
+    def test_step_three_rederives_the_target_session(self, tmp_path):
+        """Step 3 is pasted alone too, so it must not act on an empty target.
+
+        Step 3 was the one step that used ``$TARGET`` without re-deriving it
+        (steps 2, 4 and 5 do, each because it is pasted on its own). An empty
+        target is not a no-op there: the recorder's ``tmux attach -t =`` fails
+        ("no mouse target", verified on tmux 3.2a), so the run dies at the
+        readiness check as "recorder exited before it drew" for a target that
+        was never set — and the failure paths' ``-t "=:0.0"`` is accepted by a
+        real server and resolves to whatever session it treats as current
+        (verified on 3.2a: ``pipe-pane -t '=:0.0'`` and
+        ``set-option -u -t '=:0.0'`` both exit 0 on the current session), so a
+        failed start could stop another run's transcript pipe and clear its
+        capture-directory claim — the collision the claim exists to prevent.
+        """
+        calls = tmp_path / "tmux-calls"
+        r, _cast = _run_block(
+            _step_three_block(), "ok", tmp_path,
+            env_extra={"STUB_PM_NAME": "", "STUB_TMUX_LOG": str(calls)})
+        assert r.returncode != 0, (
+            "step 3 ran with no target session at all")
+        assert "TARGET is unset" in r.stderr, r.stderr
+        assert not calls.exists(), (
+            "a step that could not resolve its target acted on one anyway: "
+            + (calls.read_text() if calls.exists() else ""))
+
+        derived = tmp_path / "derived"
+        derived.mkdir()
+        calls.unlink(missing_ok=True)
+        r, _cast = _run_block(
+            _step_three_block(), "ok", derived, target=True,
+            env_extra={"STUB_TMUX_LOG": str(calls)})
+        assert r.returncode == 0, r.stderr
+        assert "=pm-test" in calls.read_text(), (
+            "the recorder was not started against the re-derived target: "
+            + calls.read_text())
 
     @pytest.mark.parametrize("name", RECIPES)
     def test_recorder_session_that_never_starts_is_reported(self, name,

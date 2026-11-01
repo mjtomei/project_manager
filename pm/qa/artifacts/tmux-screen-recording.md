@@ -492,6 +492,23 @@ tmux pipe-pane -t "=$TARGET:0.0" "cat >> <capture-dir>/transcript.log" || {
 #    step-5 witness (exact) seeing only that the target ended. Exact, the
 #    attach fails, asciinema exits, and the readiness check below reports the
 #    recorder that never drew.
+#    This step is pasted on its own when a run restarts its recorder, which is
+#    why steps 2, 4 and 5 re-derive the target; it must too. An empty `$TARGET`
+#    is not a no-op here: the pane command's `tmux attach -t =` fails ("no
+#    mouse target", verified on tmux 3.2a), so the recorder dies before it
+#    draws and the readiness check below reports "recorder exited before it
+#    drew" for a target that was simply never set — and the failure paths'
+#    `-t "=:0.0"` is accepted by a real server and resolves to whatever
+#    session it treats as current (verified on 3.2a: `pipe-pane -t '=:0.0'`
+#    and `set-option -u -t '=:0.0'` both exit 0 on the current session), so a
+#    failed start could stop another run's transcript pipe and clear its
+#    capture-directory claim — the collision the claim exists to prevent.
+TARGET=${TARGET:-$(pm session name)}
+if [ -z "$TARGET" ]; then
+    echo "TARGET is unset and 'pm session name' printed nothing — run this" \
+        "step with pm on PATH, in the project directory" >&2
+    exit 1
+fi
 tmux new-session -d -s pm-recorder -x 200 -y 50 \
     "asciinema rec --quiet <capture-dir>/recording.cast \
         -c 'tmux attach -t =$TARGET' 2> <capture-dir>/recorder-stderr.log; \
