@@ -168,7 +168,13 @@ hits, regardless of how it waits for a background job:
   ``-s``, not ``-f``, because an empty file is a *valid* ES module —
   ``node driver.mjs`` exits 0 having run nothing, so the block reports
   success and the finalize step then blames the driver's ``recordVideo``
-  option with a re-run that passes again;
+  option with a re-run that passes again; the same rule governs the two
+  *completion* handles, and both now have a case: the tmux recipe's
+  ``test -s`` on ``transcript.log`` (a ``pipe-pane`` that opened the file
+  but wrote nothing is not a transcript) and the web-UI finalize's
+  "already finalized" state, which is a *non-empty* mp4 (an empty file is
+  not a published video, and the step must not exit 0 presenting it as
+  one);
 - a remedy that runs but cannot work says so: the ``agg`` install stops when
   the binary it just downloaded still does not resolve (``~/.local/bin`` not
   on ``PATH``), instead of exiting 0 and sending the worker back to the same
@@ -2989,6 +2995,42 @@ def test_web_ui_finalize_pasted_twice_keeps_the_published_video(tmp_path):
     assert not called.exists(), "the second paste ran ffmpeg"
 
 
+def test_web_ui_finalize_does_not_treat_an_empty_mp4_as_published(tmp_path):
+    """An empty mp4 is not this step's own finished state.
+
+    The "already finalized" branch exists for a second paste of the step: an
+    mp4 with no webm and no partial can only be a finalize's output, because
+    step 1's and step 2's cleanups both remove ``recording.mp4``. The check
+    is ``test -s``, so a 0-byte file is *not* that state — an empty output is
+    exactly what the step's own ``[ -s partial ]`` check keeps off the
+    published name. Mutating it to ``-e`` left the whole file green: the
+    block would report a capture holding an empty file as "already
+    finalized", exit 0 and present it as the run's video, the same
+    "an artifact that exists but is empty is not an artifact" gap R46/R80
+    closed for the stage inputs.
+    """
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    (capdir / "recording.mp4").write_bytes(b"")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    called = tmp_path / "ffmpeg-called"
+    _stub_tool(bindir, "ffmpeg", f'touch "{called}"\n')
+    env = dict(os.environ, CAPDIR=str(capdir),
+               PATH=f"{bindir}:{os.environ['PATH']}")
+    r = subprocess.run(["bash"], input=_web_ui_finalize_block(), env=env,
+                       capture_output=True, text=True)
+
+    assert r.returncode != 0, (
+        "a capture holding only an empty mp4 was reported as finalized")
+    assert "already finalized" not in r.stderr, r.stderr
+    assert "there is no webm to transcode" in r.stderr, r.stderr
+    assert not called.exists(), (
+        "the finalize step ran ffmpeg with no webm to read")
+    assert not (capdir / "recording.mp4").exists(), (
+        "the failed step left the empty mp4 as this run's recording")
+
+
 def test_web_ui_finalize_never_consumes_the_script_on_stdin(tmp_path):
     """The finalize ffmpeg must not read the worker's stdin.
 
@@ -5304,7 +5346,16 @@ case "$sub" in
                     # pane shell expands that, so model it here rather than
                     # writing into a literal ``~`` directory.
                     case "$out" in "~/"*) out="$HOME/${out#"~/"}";; esac
-                    printf 'pane output\n' >> "$out" ;;
+                    # `emptytranscript`: the pipe is attached and its command
+                    # opens the file, but the pane emits nothing — a 0-byte
+                    # transcript. That is the state the recipe's `test -s`
+                    # check exists for (the file exists, so `-e` passes), and
+                    # it is what a real `pipe-pane` leaves on an idle pane.
+                    if [ "$STUB_MODE" = emptytranscript ]; then
+                        : > "$out"
+                    else
+                        printf 'pane output\n' >> "$out"
+                    fi ;;
           esac
       fi
       exit 0 ;;
@@ -7227,6 +7278,33 @@ class TestCaptureFlowExecution:
         assert cast.stat().st_size > 0, "the fixture left no cast to misread"
         assert r.returncode != 0, (
             "a capture with no transcript was reported as a success")
+        assert "transcript.log is empty" in r.stderr, r.stderr
+
+    def test_tmux_empty_transcript_is_not_a_transcript(self, tmp_path):
+        """A 0-byte transcript is a pipe that wrote nothing.
+
+        ``tmux pipe-pane`` opens ``transcript.log`` as soon as its command
+        starts, so a pane that emits nothing between the attach and the stop
+        leaves an *empty* file rather than no file. The check is ``test -s``
+        for exactly that state, but the only execution case modelled the
+        missing file (``notranscript`` writes nothing at all): mutating the
+        check to ``-e`` failed only the *text* assertion in
+        ``test_tmux_transcript_is_required_and_checked``, which pins the
+        spelling, not the behaviour — no case ran the block against a
+        transcript that exists and is empty, and the run would then report a
+        capture whose manifest lists a transcript this run never produced.
+        That is the same gap R46/R80 closed for the cast, gif and webm
+        checks, one artifact over.
+        """
+        r, cast = _run_capture_block(
+            "tmux-screen-recording.md", "emptytranscript", tmp_path,
+            target=True)
+        assert cast.stat().st_size > 0, "the fixture left no cast to misread"
+        assert (cast.parent / "transcript.log").exists(), (
+            "the fixture wrote no transcript at all, so the case would pass "
+            "on the missing-file branch")
+        assert r.returncode != 0, (
+            "a capture whose transcript is empty was reported as a success")
         assert "transcript.log is empty" in r.stderr, r.stderr
 
     def test_tmux_failed_transcript_pipe_is_reported(self, tmp_path):
