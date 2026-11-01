@@ -25137,44 +25137,70 @@ prs:
   notes: []
 - id: pr-7d5d036
   plan: plan-regression
-  title: 'Bug: pm tui test hardcodes "testing against the pm tmux session" — wrong
-    for containers and for non-pm targets'
+  title: Retire legacy regression scenarios and reuse the container/recipe launch
+    path
   branch: pm/pr-7d5d036-bug-pm-tui-test-hardcodes-testing-against-the-pm-t
   status: pending
   depends_on:
   - pr-abcf70f
   - pr-9603d04
-  description: "## Symptom\n\n`pm tui test <id>` always prepends a Session Context\
-    \ that says:\n\n    You are testing against tmux session: <pm-session>\n\n   \
-    \ To interact with this session, use commands like:\n    - pm tui view -s <pm-session>\n\
-    \    - pm tui send <keys> -s <pm-session>\n    - tmux list-panes -t <pm-session>\
-    \ ...\n    - cat ~/.pm/pane-registry/<pm-session>.json\n\nThat framing assumes\
-    \ (a) every regression test drives a tmux session,\nand (b) that session is the\
-    \ user's running pm session.\n\nBoth assumptions are wrong:\n\n- A regression\
-    \ test running inside a container has no tmux session\n  to target (there isn't\
-    \ one in the container).\n- Even outside a container, pointing the test at the\
-    \ user's main pm\n  session is the wrong default — it pollutes the user's actual\
-    \ work\n  state, can race with whatever the user is doing, and isn't isolated\n\
-    \  from one test run to the next.\n\n## Diagnosis\n\n`pm_core/cli/tui.py:574-583`\
-    \ builds `full_prompt` with the session\nname interpolated as a hard \"you are\
-    \ testing against this session\"\npreamble, plus pm-flavored helpers. `pm_core/cli/helpers.py:_find_tui_pane`\n\
-    also forces the runner to bail out if the user doesn't have a pm\nsession up.\n\
-    \n## Proposed direction\n\nRegression tests should be like QA scenarios: run in\
-    \ their own\nephemeral environment (container or scratch dir) and let the test\n\
-    body set up whatever surface it needs.\n\nConcretely:\n- Drop the hardcoded \"\
-    testing against tmux session: X\" preamble.\n- Remove the requirement that a pm\
-    \ session is running. The test runs\n  wherever the runner is invoked.\n- If a\
-    \ test wants to drive a tmux session, it spins one up itself in\n  its body (or\
-    \ via an `INSTRUCTION:` reference). Same for any other\n  surface — server, CLI,\
-    \ web app.\n- Keep `pm tui send` / `pm tui view` available as helpers for tests\n\
-    \  that DO want to drive a pm TUI, but don't bake them into the\n  Session Context\
-    \ for every test.\n\n## Out of scope\n\n- Changing the QA scenario runner.\n-\
-    \ Adding new driving primitives."
+  description: 'User direction, 2026-11-01: remove the legacy agent regression scenarios
+    instead of porting them now. The cost of reviewing and executing the whole migrated
+    corpus is not justified for the delivery MVP. This is the first of two near-term
+    PRs; pr-2680fbf owns standard-scenario reuse and automatic authoring. Full historical
+    porting remains pr-c77561b, deferred until costs fall and the user chooses to
+    resume it.
+
+
+    Scope:
+
+    - Inventory and remove the old-style agent regression definitions under pm/qa/regression
+    from the active library/discovery inputs. Record their exact paths and pre-removal
+    Git revision so the later port can recover every definition. Record the intentional
+    coverage gap; removal is not equivalent coverage or a passing rerun.
+
+    - Keep the existing automated unit/integration tests, shared setup/execution/capture
+    recipes, mocks, historical QA evidence and unrelated current work. Do not delete
+    historical captures or all QA scenario records.
+
+    - Remove stale live-PM targeting instructions/requirements in the regression launch
+    surface. Reuse the existing containerized QA execution path and setup recipes
+    that create disposable test projects, plus recipes for driving/capturing them.
+    Containers supply the execution boundary; recipe-created projects supply the test
+    target. Do not create another sandbox/runner/recipe framework, assume the user''s
+    live PM session is the target, or fall back to host execution when container mode
+    is enabled.
+
+    - Handle an empty active regression library cleanly and reconcile discovery, CLI/TUI
+    references and docs. Only the minimum launch integration needed by this cleanup
+    belongs here; broad container-launch hardening remains in its existing PRs.
+
+    - Supersede the old captures-in-Git and exhaustive new-instruction audit notes:
+    captures remain in the existing external evidence store. Do not turn removal into
+    a corpus port, whole-project coverage audit or bulk QA campaign.
+
+
+    Acceptance: bounded checks demonstrate that retired entries are no longer selected/discovered,
+    the empty-library case is honest, retained recipes/tests remain available, and
+    any supported regression launch uses the intended container/test target. Keep
+    an inventory and recoverable source revision, not a requirement to execute or
+    verify every removed legacy scenario. The later reuse/authoring PR demonstrates
+    the complete durable-regression loop.
+
+
+    User authorized starting this cleanup on work Opus on 2026-11-01 and explicitly
+    removed the mandatory spec-review pause (review_spec=false). Generate the normal
+    implementation spec and proceed. Any prompt edits are limited to removing stale
+    live-PM targeting instructions in the existing regression launch surface; the
+    new planner/authoring/worker workflow belongs to pr-2680fbf. Manual merge approval
+    remains required.
+
+    '
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-05-14T01:12:48.557344+00:00'
+  updated_at: '2026-11-01T19:44:04.458343+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25244,6 +25270,25 @@ prs:
       that drives it end-to-end so future scenarios have a Given to build on.'
     created_at: '2026-05-14T01:12:48Z'
     last_edited: '2026-05-14T01:12:48Z'
+  - id: note-b68a2206
+    text: '2026-11-01 user scope revision: the current description governs. Remove
+      legacy scenarios now to avoid bulk verification expense; deliver reuse/authoring
+      together; defer the complete port and historical-PR QA backfill. Use existing
+      containers and setup/execution/capture recipes. No launch authorized by this
+      planning edit.'
+    created_at: '2026-11-01T18:48:08.515632+00:00'
+    last_edited: '2026-11-01T18:48:08.515632+00:00'
+  - id: note-5cdd78d
+    text: User authorized both near-term regression PRs on work Opus5.5/xhigh, all
+      PR roles/helpers/sign-off. The current description supersedes historical porting,
+      captures-in-Git and whole-library audit notes. No mandatory spec-review pause
+      for this cleanup. Preserve recipes, automated tests, evidence and exact recoverable
+      legacy source revision.
+    created_at: '2026-11-01T19:44:04.458343+00:00'
+    last_edited: '2026-11-01T19:44:04.458343+00:00'
+  review_spec: false
+  model: provider:claude-work-xhigh-249
+  effort: high
 - id: pr-f4dc8a2
   plan: plan-regression
   title: 'QA library auditor: scan a project and propose regression-test fills (with
@@ -27101,133 +27146,110 @@ prs:
   notes: []
 - id: pr-2680fbf
   plan: plan-regression
-  title: QA scenario planner creates new regression test when none fits
+  title: 'QA uses standard regression scenarios: reuse existing flows and author missing
+    ones'
   branch: pm/pr-2680fbf-qa-scenario-planner-creates-new-regression-test-wh
   status: pending
   depends_on:
-  - pr-06a96fa
-  description: '## Goal
+  - pr-7d5d036
+  description: 'User direction, 2026-11-01: combine regression binding/reuse (formerly
+    pr-06a96fa) and missing-regression authoring in one PR, following legacy-scenario
+    removal/minimum launch integration in pr-7d5d036. This is the second near-term
+    PR. Do not wait for the expensive historical corpus port or historical-PR QA backfill.
 
 
-    When the QA scenario planner is producing scenarios for a PR and finds no existing
-    regression test in pm/qa/regression/ that drives the user flow a scenario needs,
-    it authors a new regression test as part of the QA run rather than falling back
-    to ad-hoc INSTRUCTION + ARTIFACT scaffolding. The new regression test lands in
-    pm/qa/regression/ in the same PR''s branch, becomes a durable asset the discovery
-    supervisor (pr-271cb3a) can rerun, and is bound to the scenario via the REGRESSION:
-    field introduced by pr-06a96fa.
+    Goal: standard, durable regression scenarios become the normal QA flow driver.
+    Reuse a suitable existing scenario; if none fits, author and save one, then execute
+    it through that same path with the PR-specific observable assertions. The library
+    grows from work we are already paying to QA instead of a mandatory upfront corpus
+    conversion.
 
 
-    ## Why
+    Reuse the infrastructure that exists: containerized QA execution, setup recipes
+    for disposable projects, execution/capture recipes, the pm/qa regression library
+    and discovery machinery. Recipes remain reusable building blocks; a standard regression
+    references them and defines its flow/assertions. No parallel recipe mechanism,
+    new isolation framework, or implicit targeting of the user''s live project/tmux.
+    Respect configured container mode and its failure behavior.
 
 
-    After pr-06a96fa lands, QA scenarios prefer binding to existing regression tests.
-    INSTRUCTION + ARTIFACT remain only as a fallback. But fallback-as-permanent-strategy
-    is exactly the dynamic that prevents the regression library from growing — the
-    planner takes the easy path and the library never accumulates new drivers. The
-    compounding-value of the regression flow only kicks in when ''no regression fits
-    → write one'' is the planner''s default, not an afterthought.
+    Scope:
+
+    - Define the shared regression template/reference contract and add REGRESSION
+    binding to planner, concretizer and execution worker. Check fit to the user-visible
+    flow and preserve the scenario''s PR-specific Given/When/Then assertions.
+
+    - Add NEW_REGRESSION authoring when coverage is missing, then bind and run the
+    durable result through the same execution path. Reuse or extend a fitting definition
+    instead of creating duplicates. Keep a narrow escape for genuinely one-off probes/oracles,
+    not the default way to avoid authoring.
+
+    - Store regression source and recipe edits on the PR branch and include them in
+    the ordinary QA handoff/finalization. Captures stay outside Git in the existing
+    evidence store with test/recipe and target revision, run identity and artifact
+    links. Do not leave new definitions as uncommitted planner output or claim historical
+    recordings as fresh verification.
+
+    - A failed setup, draft or execution remains failed/blocked according to the existing
+    flow; authoring alone is not PASS. A later QA/discovery run reuses the persisted
+    definition and produces fresh evidence. New mock-selection automation remains
+    pr-51586d2; existing mock recipes can still be used.
 
 
-    ## Shape
+    Acceptance: exercise existing-scenario reuse; an initially empty library/no-fit
+    case that authors, commits and executes a scenario; later reuse without duplicate
+    authoring; and a meaningful failed/blocked setup or execution. Verify recipe resolution,
+    intended container/test-project targeting and independently checked evidence.
+    Keep this bounded rather than porting or rerunning the historical corpus.
 
 
-    1. **Planner decision:** during scenario planning, for each candidate scenario
-    the planner classifies its driving flow. If an existing regression test matches
-    the flow, emit REGRESSION: <id>. If none matches, emit NEW_REGRESSION: <slug>
-    with a one-line description and the planner proceeds to draft the regression test.
+    Required for plan-delivery D3/D9 and sign-off prompt/report pr-5f4f595. The complete
+    new/changed planner, authoring and worker prompts must be ready at implementation
+    spec review for the user''s approval (review_spec=true). Do not self-approve,
+    launch the future backfills or treat a sign-off recommendation as authority for
+    unrelated work. This scope supersedes the old pr-06a96fa split and capture-commit
+    wording.
 
-
-    2. **New-regression authoring sub-step:** for each NEW_REGRESSION, a sub-session
-    (or a planner-extension turn) drafts pm/qa/regression/<slug>.md following the
-    existing regression-test conventions (frontmatter, setup, drive, capture, assertions).
-    The drafted file lands in the PR''s branch as part of the scenario''s QA workdir
-    commits, the same way scenario captures already do.
-
-
-    3. **Scenario rebinding:** the scenario emitted by the planner references the
-    newly-drafted regression test by its slug. Concretizer and worker treat it the
-    same as an existing regression test — load and run it.
-
-
-    4. **Discovery-supervisor pickup:** because the new regression lives in pm/qa/regression/,
-    it''s automatically in scope for the discovery supervisor (pr-271cb3a) on subsequent
-    ticks. The library grows by accumulation as designed.
-
-
-    ## Awareness handoff to mocks
-
-
-    This is the point where the mocks library becomes relevant — NOT during scenario
-    authoring (the pr-942aa21 / pr-6be8ee6 failure mode), but when a regression test
-    is being drafted. A regression test specifies a flow against a surface; that surface
-    may have mocks the test should use (e.g. FakeGitHubBackend if the test exercises
-    github-backend behavior). The new-regression authoring prompt is where the diff-scoped
-    mocks block belongs. Sequencing: this PR first, pr-51586d2 (mocks reconnection)
-    reads its hand-off contract from here.
-
-
-    ## Failure paths
-
-
-    - Planner thinks a regression fits but it doesn''t quite — the scenario fails
-    to bind and falls back to NEW_REGRESSION. Handled by treating REGRESSION: as a
-    hint that can be downgraded mid-concretization.
-
-    - Drafted regression test fails to run on first attempt — same retry/INPUT_REQUIRED
-    pattern that exists for scenarios today; the half-drafted file stays on the branch
-    for next iteration.
-
-    - INSTRUCTION + ARTIFACT fallback still exists for scenarios where authoring a
-    regression doesn''t make sense (one-shot probes, oracle questions, etc.); planner
-    is taught the bar: prefer existing regression, then draft new regression, then
-    fall back.
-
-
-    ## Scope
-
-
-    - Extend QA planner output schema with NEW_REGRESSION block (sibling of REGRESSION).
-
-    - Add new-regression authoring sub-step to the planner pipeline (prompt-builder
-    + invocation).
-
-    - Concretizer + worker accept newly-drafted regression by slug.
-
-    - pr-06a96fa''s REGRESSION-binding code path consumes the new entries seamlessly.
-
-    - Tests: planner emits NEW_REGRESSION when no fit; authoring sub-step produces
-    a well-formed markdown file; scenario binds to the drafted regression; falls back
-    to INSTRUCTION when neither REGRESSION nor NEW_REGRESSION is appropriate.
-
-
-    ## Depends on
-
-
-    - pr-06a96fa (scenarios bind to regression tests as their flow driver — this PR
-    extends that binding to newly-authored regressions)
-
-
-    ## Related
-
-
-    - pr-51586d2 (mocks reconnection) — depends on this PR; the mocks-awareness block
-    lives in the new-regression authoring prompt, not in scenario generation.
-
-    - pr-f4dc8a2 (QA library auditor) — scans for missing fills; this PR is the runtime
-    equivalent (write the fill on the spot when a scenario needs one).
-
-    - pr-271cb3a (discovery supervisor) — picks up newly-authored regressions on next
-    tick.'
+    '
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-14T01:59:40.177233+00:00'
-  updated_at: '2026-05-17T20:19:45.579340+00:00'
+  updated_at: '2026-11-01T19:44:04.458343+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-02b32b2
+    text: 'User correction 2026-10-26: automatic regression authoring is required
+      for the new sign-off feature. pr-5f4f595 now depends on pr-2680fbf, preserving
+      pr-2680fbf -> pr-06a96fa -> pr-7d5d036. plan-delivery D3 handoff and D9 qualification
+      require the authoring flow alongside runner/corpus migration. Retain full human
+      review of the new sign-off prompt and recipe modification/removal recommendations.
+      This records dependencies only; no implementation, autostart, account, merge-gate
+      or timed-message changes.'
+    created_at: '2026-10-26T19:11:30.136983+00:00'
+    last_edited: '2026-10-26T19:11:30.136983+00:00'
+  - id: note-7a9cd950
+    text: '2026-11-01 user scope revision: the current description governs. Remove
+      legacy scenarios now to avoid bulk verification expense; deliver reuse/authoring
+      together; defer the complete port and historical-PR QA backfill. Use existing
+      containers and setup/execution/capture recipes. No launch authorized by this
+      planning edit.'
+    created_at: '2026-11-01T18:48:08.515632+00:00'
+    last_edited: '2026-11-01T18:48:08.515632+00:00'
+  - id: note-00d65ed
+    text: User authorized both near-term regression PRs on work Opus5.5/xhigh, all
+      PR roles/helpers/sign-off. The current description supersedes historical porting,
+      captures-in-Git and whole-library audit notes. Start the spec session now and
+      present complete planner/authoring/worker prompts for owner review. Do not implement
+      product changes before spec approval. Keep downstream review/QA held until pr-7d5d036
+      merges and its changes are integrated.
+    created_at: '2026-11-01T19:44:04.458343+00:00'
+    last_edited: '2026-11-01T19:44:04.458343+00:00'
+  review_spec: true
+  model: provider:claude-work-xhigh-249
+  effort: high
 - id: pr-eb4b7e3
   plan: bugs
   title: 'Bug: editor subprocess inherits TUI''s process group — orphaned editors
