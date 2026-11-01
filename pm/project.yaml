@@ -52480,3 +52480,125 @@ prs:
   review_spec: true
   model: provider:claude-work-xhigh-249
   effort: high
+- id: pr-2588ead
+  plan: watchers
+  title: Scheduled concise multi-project progress and change briefs
+  branch: pm/pr-2588ead-scheduled-concise-multi-project-progress-and-chang
+  status: pending
+  depends_on: []
+  description: 'Add an owner-configured scheduled brief for the automated delivery flow: a
+    quickly consumed set of line items explaining what changed, where each selected project
+    stands, and any potential issues, blockers or owner decisions. Make this part of plan-delivery
+    D3''s unattended handoff and D9 qualification, and exercise it across D5/D8 adoption projects.
+
+
+    Use a configurable schedule, project selection and existing report/dashboard surface.
+    The brief should be useful in roughly a minute: group short lines by project, show changes
+    since the last successfully published brief, current phase or milestone, merged PRs and
+    their impact, work ready for owner approval, material problems and the next useful action.
+    Put actionable issues and blockers first. Include project identity, PR number/link when
+    available, source/report links, as-of time and the reporting interval so the reader can
+    inspect detail without reading transcripts. Distinguish completed/published work from
+    planned, running, waiting, failed and stale/unavailable observations. Do not invent progress,
+    estimates or acceptance verdicts.
+
+
+    Include the one-line heads-ups from the owner-defined automatic-merge policy; label automatic
+    versus owner-approved merges accurately and show why a PR is waiting for the owner. A
+    notification is informational, never approval. Reuse #277/pr-c3e2f70 INPUT_REQUIRED briefs
+    when available for deeper question/options context, but do not expand or replace that
+    PR''s narrow 5-minute review/QA scope. This overview also covers project progress, merged
+    changes and sign-off approval waits. Reuse project-state watcher observations and existing
+    sign-off reports; neither the broad watcher rewrite nor Radar''s external-feed infrastructure
+    must be required just to generate a useful brief.
+
+
+    Keep summaries compact: batch related updates, avoid repeating unchanged details every
+    interval, retain still-actionable unresolved blockers with their age, and show a terse
+    no-material-change result when appropriate. Persist the successful report boundary and
+    stable event identity so restart, retry or overlapping schedules do not lose or duplicate
+    merge notices; a failed delivery must not advance the boundary. A missed interval may
+    be caught up in one bounded summary. Explicitly identify projects that could not be refreshed
+    rather than silently omitting them.
+
+
+    Owners configure cadence, destination, scope and pause/resume. Publish locally through
+    the existing dashboard/report surface initially; sending to email/chat or other external
+    recipients requires an explicitly configured, authorized destination. Brief generation
+    is read-only with respect to PR workflow: it cannot answer INPUT_REQUIRED, change gates,
+    start work, merge, or override a pause. No schedule or external message is enabled merely
+    by registering this PR.
+
+
+    Acceptance: exercise at least two projects with ordinary progress, automatic and manually
+    approved merges, a manual approval hold, a genuine blocker, an unchanged interval, a stale/unavailable
+    project and links to source evidence. Verify bounded readable output, correct deltas,
+    no lost/duplicate heads-ups after failed delivery/restart, and pause/resume without workflow
+    mutations. Demonstrate actual rendered briefs as well as meaningful data-path tests. Keep
+    this separate from restoring any review-loop stop command; that proposed PR is on hold.
+
+
+    USER CLARIFICATION: INTERACTIVE GUIDANCE, NOT ANOTHER MANUAL CONFIGURATION TASK. Reuse
+    the existing task-specific prompt-note feature (pm_core/notes.py and the composed prompt
+    sections) as the durable backing. Provide an agent-led getting-started conversation and
+    later feedback flow: ask only what is needed, turn the owner''s examples and corrections
+    into a concise scoped note, show the effective guidance, and maintain it on the owner''s
+    behalf. The owner should not have to hand-author or repeatedly edit prompt notes. Preserve
+    direct edits, provenance and rollback; do not overwrite unrelated sections or leak one
+    project''s preferences into another. Distinguish explicitly authorized feedback from guesses.
+    Updates that broaden merge authority need owner authorization; a report''s content or
+    a worker''s own suggested exemption is not that authorization. Avoid a second competing
+    policy/prompt storage system unless the spec demonstrates why the existing mechanism cannot
+    suffice.
+
+
+    Guidance applies to the scheduled owner brief itself: preferred length/detail, organization,
+    topics to emphasize or omit, what counts as material, blocker escalation and cadence/destination
+    preferences. The agent manages the appropriate prompt note through onboarding and subsequent
+    owner feedback. The INPUT_REQUIRED brief (#277) is primarily consumed by the watcher;
+    the owner may read it when assisting the watcher. Keep it distinct from this owner-facing
+    scheduled overview. Test that a preference correction changes subsequent briefs, while
+    preserving source fidelity, required issues and all workflow gates.
+
+
+    USER-REQUIRED SPEC REVIEW BEFORE IMPLEMENTATION. Set review_spec=true. When started, prepare
+    the grounded implementation spec and all complete candidate prompts/composed guidance
+    for getting started, interpreting and applying feedback, and the feature''s merge assessment
+    or scheduled brief. Provide representative rendered prompts, example persisted task notes
+    and resulting decisions/briefs, including how corrections change them. Show storage/scope,
+    authority precedence, updates/restarts, and interactions with existing manual gates and
+    #277. Link every artifact from impl.md. Then stop for the user''s explicit spec/prompt
+    approval before product implementation, review or QA. Never self-approve. This filing
+    does not authorize starting the PR or enabling a schedule.
+
+    '
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T15:40:08.179151+00:00'
+  updated_at: '2026-11-01T20:07:49.728968+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-897bb0e
+    text: 'User authorized starting this scheduled owner-briefs PR on work Opus5.5/xhigh on2026-11-01,
+      all roles/helpers/sign-off. Prepare only the grounded implementation spec, complete
+      onboarding/feedback/brief-generation prompts, representative composed prompts, persisted
+      task-note examples and rendered example briefs, then stop for explicit owner approval
+      before product implementation, review or QA. Never self-approve. Use existing project
+      state, sign-off reports and dashboard surfaces; the new agent flow/project watchers
+      are not yet implemented and are not prerequisites for spec preparation or a useful read-only
+      brief. Do not implement a watcher as incidental scope. Keep this owner-facing scheduled
+      summary distinct from #277/pr-c3e2f70 five-minute INPUT_REQUIRED briefs. Coordinate
+      reusable agent-managed prompt-note guidance with #286/pr-8162f0f, which is currently
+      preparing its spec; avoid a second policy/note store and document interface assumptions
+      for owner review. Starting this session does not enable a new reporting schedule, external
+      delivery, automatic merges, or workflow mutations. Existing hourly PM checks stay as
+      configured. Preserve manual merge and spec approval gates. Historical filing-only/no-start
+      text records the earlier registration; this note is the new explicit start authorization.'
+    created_at: '2026-11-01T20:07:49.728968+00:00'
+    last_edited: '2026-11-01T20:07:49.728968+00:00'
+  review_spec: true
+  model: provider:claude-work-xhigh-249
+  effort: high
