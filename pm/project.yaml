@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T10:40:52.531481+00:00'
+  updated_at: '2026-11-01T10:54:37.874687+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6257,6 +6257,23 @@ prs:
       /pm-captures/scenarios/14/{s1..s6} (cast+mp4+manifest).'
     created_at: '2026-11-01T10:40:52Z'
     last_edited: '2026-11-01T10:40:52Z'
+  - id: note-1ce7f66
+    text: 'QA scenario 16 (own tmux view is part of the pm session) PASS 5/5 on 7cc2e7295.
+      Stories: (1) a user view (zview) is not listed — one row for the base, CLIENTS
+      0, no zview row, both from outside and from inside the view; (2) a view named
+      like a session (pm-laptop) creates no phantom row (CLIENTS 1) and `pm tui view`
+      from inside it reports the base session; (3) Ctrl-Q with the only client on
+      zview detaches that client, leaves base/~1/zview alive, TUI still renders, project
+      B untouched; (4) `pm session kill` removes base+~1+zview, socket gone, both
+      clients detached and panes accept input, B untouched, restart recreates base+~1
+      on a fresh socket; (5) Ctrl-Q with two A clients detaches exactly one (2->1),
+      other keeps rendering, B windows byte-identical. No source changes. Captures:
+      /pm-captures/scenarios/16/. Harness note: `tmux -S <socket>` returned a transient
+      "error connecting ... (No such file or directory)" once right after killing
+      another session''s client window; the server was alive on the next probe and
+      stayed stable for the rest of the run — not reproduced, not a product finding.'
+    created_at: '2026-11-01T10:54:37Z'
+    last_edited: '2026-11-01T10:54:37Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
