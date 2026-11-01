@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-01T20:15:45.980039+00:00'
+  updated_at: '2026-11-01T21:57:43.374710+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25300,6 +25300,16 @@ prs:
       review is not marked; press d.'
     created_at: '2026-11-01T20:15:45Z'
     last_edited: '2026-11-01T20:15:45Z'
+  - id: note-e8997d3
+    text: 'Review fc31 i6: pm qa regression now resolves the code repo to clone with
+      cli.helpers._resolve_repo_dir (in-repo pm/ -> parent; standalone pm repo from
+      pm init --dir -> project.repo local checkout, else cwd), the resolution pm cluster/plan/PR
+      sync use, instead of root.parent, which failed or picked an unrelated repo for
+      a standalone pm repo. Test: test_standalone_pm_repo_clones_the_code_repo. pm
+      qa debug has the same root.parent assumption; filed as pr-f5325d4 rather than
+      widened here.'
+    created_at: '2026-11-01T21:57:43Z'
+    last_edited: '2026-11-01T21:57:43Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
@@ -52343,3 +52353,32 @@ prs:
     signoff: provider:claude-work-xhigh-249
     merge: provider:deepseek-flash
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-049649a-remove-all-pr-autostart-and-fail-clo-registered-20261027
+- id: pr-f5325d4
+  plan: bugs
+  title: 'Bug: pm qa debug clones the pm dir''s parent, wrong for a standalone pm
+    repo'
+  branch: pm/pr-f5325d4-bug-pm-qa-debug-clones-the-pm-dir-s-parent-wrong-f
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/qa.py qa_debug sets repo_root = root.parent unconditionally
+    ("The repo root is the parent of the pm/ state directory"). For a standalone pm
+    repo (pm init --dir, project.yaml at the root of a repo holding only pm state;
+    store.is_internal_pm_dir(root) is False) the parent is not the code repo: git
+    clone --local fails, or clones an unrelated repo if the parent happens to be one,
+    and the default branch is read from that directory. Repro: pm init --dir ../app-pm
+    from a code checkout, add pm/qa/instructions/x.md in the pm repo, run pm -C ../app-pm
+    qa debug x. Expected: clone the code checkout, as pm cluster / pm plan / PR sync
+    resolve it with cli.helpers._resolve_repo_dir (parent of an in-repo pm/ dir, else
+    project.repo when local, else cwd). pm qa regression switched to _resolve_repo_dir
+    in pr-7d5d036 review fc31 i6 (test_standalone_pm_repo_clones_the_code_repo); qa_debug
+    does not load project.yaml before that point, so the fix also needs a store.load
+    and fixture updates in tests/test_container_fail_closed.py.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-01T21:57:30.306829+00:00'
+  updated_at: '2026-11-01T21:57:30.306829+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

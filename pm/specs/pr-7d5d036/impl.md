@@ -245,6 +245,12 @@ No [UNRESOLVED] items.
 - E11: Host mode (container mode off) shares the user's tmux server, as QA
   host scenarios do. The prompt requires explicit `-s <session>` and forbids
   driving sessions the test did not start. Container mode is the boundary.
+- E12: Standalone pm repo (`pm init --dir`, project.yaml at the root of a
+  repo that holds only pm state). The code repo to clone is resolved with the
+  shared `cli.helpers._resolve_repo_dir` (the parent of an in-repo `pm/` dir,
+  else project.repo when it is a local checkout, else the cwd), the same
+  resolution `pm cluster`, `pm plan` and PR sync use. Cloning `root.parent`
+  would fail, or clone an unrelated repo, for that layout (review fc31 i6).
 
 ## 5. Verification (bounded)
 

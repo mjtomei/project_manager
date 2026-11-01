@@ -369,6 +369,7 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
     from pm_core import qa_instructions, qa_loop, store
     from pm_core import container as container_mod
     from pm_core.claude_launcher import build_claude_shell_cmd
+    from pm_core.cli.helpers import _resolve_repo_dir
     from pm_core.paths import (CONTAINER_CAPTURES_MOUNT, captures_dir,
                                get_session_tag)
     from pm_core.regression_prompts import (
@@ -399,7 +400,10 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
     data = store.load(root)
     base_branch = (branch or data.get("project", {}).get("base_branch")
                    or "master")
-    repo_root = root.parent
+    # The code repo the run clones: the parent of an in-repo pm/ dir, or,
+    # for a standalone pm repo (`pm init --dir`, which holds only pm state),
+    # the local checkout project.repo names.
+    repo_root = _resolve_repo_dir(root, data)
     session_tag = (qa_loop.own_session_tag()
                    or get_session_tag(start_path=repo_root))
     captures_base = captures_dir("regression", session_tag=session_tag)

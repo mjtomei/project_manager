@@ -383,6 +383,38 @@ def test_unknown_id_with_a_library(project, home):
     spies.execvpe.assert_not_called()
 
 
+def test_standalone_pm_repo_clones_the_code_repo(tmp_path, home):
+    """A standalone pm repo (``pm init --dir``) holds only pm state: the run
+    clones the code checkout project.repo names, not the pm dir's parent."""
+    code = tmp_path / "app"
+    code.mkdir()
+    (code / "app.py").write_text("print('app')\n")
+    subprocess.run(["git", "init", "-q", "-b", "master", str(code)],
+                   check=True)
+    _git(code, "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A")
+    _git(code, "-c", "user.email=t@t", "-c", "user.name=t",
+         "commit", "-q", "-m", "app")
+    pm = tmp_path / "app-pm"
+    (pm / "qa" / "regression").mkdir(parents=True)
+    (pm / "project.yaml").write_text(PROJECT_YAML.format(repo=code))
+    (pm / "qa" / "regression" / "demo.md").write_text(
+        "---\ntitle: Demo flow\n---\nDrive the demo flow.\n")
+    subprocess.run(["git", "init", "-q", "-b", "master", str(pm)],
+                   check=True)
+    _git(pm, "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A")
+    _git(pm, "-c", "user.email=t@t", "-c", "user.name=t",
+         "commit", "-q", "-m", "pm")
+    standalone = SimpleNamespace(root=pm.resolve())
+
+    result, spies = _run_regression(standalone, ["demo"],
+                                    container_enabled=False)
+    assert result.exit_code == 0, result.output
+    (workdir,) = _qa_workdirs(home)
+    clone = workdir / "s-0" / "repo"
+    assert (clone / "app.py").is_file()
+    assert _git(clone, "rev-parse", "HEAD") == _git(code, "rev-parse", "HEAD")
+
+
 def test_missing_branch_is_a_clean_error(project, home):
     result, spies = _run_regression(project, ["demo", "--branch", "nope"],
                                     container_enabled=False)
