@@ -284,15 +284,23 @@ also the number of the matching user story in `qa.md` ("Killing a session
 tears down only that session").
 
 1. `pm session kill` resolves the session with an **exact** name match
-   (`find_exact_session_server`, tmux target `=name`).  A bare tmux target is
-   a *prefix* match, so `has-session -t pm-x` also succeeds for a surviving
+   (`find_exact_session_server`, tmux target `=name`) **and kills with exact
+   targets** (`kill_session(..., exact=True)`, i.e. `kill-session -t =name`,
+   for the base and for every group member).  A bare tmux target is a
+   *prefix* match, so `has-session -t pm-x` also succeeds for a surviving
    grouped session `pm-x~1`; treating that as "running" killed the grouped
-   session (detaching its client) and unlinked a live server's socket.  When
-   nothing matches exactly, the command reports `No session '<name>' found.`
-   and leaves the server alone (it unlinks the socket file only when
-   `server_alive()` says nothing answers on it).  Discovery (`pm tui …`)
-   keeps prefix matching on purpose, so `pm tui view -s pm-x` still reaches
-   the group's TUI after the base was killed elsewhere.
+   session (detaching its client) and unlinked a live server's socket.  The
+   same prefix rule applies to `kill-session`: with the base already gone,
+   `kill-session -t pm-x` kills whichever remaining session starts with
+   `pm-x` (verified on tmux 3.2a: `pm-xyz`), so the resolution being exact
+   is not enough — a base that vanishes between the lookup and the kill
+   could still tear down a different session (on the legacy default
+   server, another pm session's TUI).  When nothing matches exactly, the
+   command reports `No session '<name>' found.` and leaves the server alone
+   (it unlinks the socket file only when `server_alive()` says nothing
+   answers on it).  Discovery (`pm tui …`) keeps prefix matching on
+   purpose, so `pm tui view -s pm-x` still reaches the group's TUI after
+   the base was killed elsewhere.
 2. Paired simultaneous `pm session` starts converge.  Both invocations pass
    the caller's `session_exists` check and then race into `new-session`; the
    loser gets "duplicate session".  `create_session` /
@@ -2685,3 +2693,71 @@ clean on a disposable socket (private server, session env, global env
 and hooks correct; default server untouched).  No live session, server
 or shared host configuration was touched — every fixture used a
 disposable socket and a temporary HOME.
+
+## Review iteration (2026-11-01, review-loop b48f i3)
+
+Verification pass over the head after the b48f i2 fixes; no requirement
+changes.  One destructive-path gap of the class R8 defines, plus coverage
+for three "degrade, never crash" branches added by the recent iterations.
+
+1. **`pm session kill` resolved the session exactly but killed by
+   prefix.**  `find_exact_session_server` decided *whether* the session
+   exists with tmux's `=name` target, but the kill itself was
+   `kill-session -t <bare name>`.  A bare target is a *prefix* match:
+   verified on tmux 3.2a that with only `pm-xyz` running,
+   `kill-session -t pm-x` kills `pm-xyz` (the same rule that made
+   `has-session -t pm-x` match a surviving `pm-x~1`, QA scenario 6).  The
+   resolution is exact, but a base — or a group member — that vanishes
+   between the lookup and the kill (a concurrent `pm session kill`, a
+   manual `tmux kill-session`) leaves a bare target that tmux then
+   resolves to whichever remaining session starts with the name.  On the
+   legacy default server, which hosts every pre-isolation pm session,
+   that can be another pm session's TUI — the cross-session damage this
+   change exists to prevent.  `tmux.kill_session()` gained
+   `exact=True` (tmux target `=name`) and `session_kill` passes it for
+   the base and for every group member; the normal case is unchanged
+   (the exact name always matches).  R8.1 above records the rule.
+   Tests: `TestKillSession` (`test_bare_target_by_default`,
+   `test_exact_target_uses_tmux_exact_syntax`) and
+   `TestSessionKillServerSelection::test_kill_targets_are_exact` (every
+   kill of the group + base carries `exact=True`); the two tests that
+   assert the fix were verified to fail on the pre-fix tree in a
+   worktree (`test_kill_targets_are_exact` recorded `False` for every
+   kill).
+
+2. **Coverage for the "degrade, never crash" branches in the newest
+   discovery helpers** (the contract every earlier iteration established,
+   but untested in these two functions):
+   - `helpers._pm_session_of()`'s `OSError` fallback to the plain base
+     name: `TestFindLiveTuiPane::
+     test_group_resolution_degrades_when_tmux_cannot_be_queried`.
+   - `helpers._registry_tui_pane()`'s `OSError` → no live pane:
+     `TestFindTuiPaneAcrossServers::
+     test_recorded_pane_probe_degrades_when_tmux_cannot_be_run`.
+   - `pane_ops._pm_session_for()`'s two degrades (no session resolvable
+     when tmux cannot be queried; base name when the group query fails):
+     `TestPaneOpsSessionResolution::
+     test_session_resolution_degrades_when_tmux_cannot_be_queried` and
+     `::test_session_resolution_falls_back_to_the_base_name`.
+   These document behaviour that is already correct; they passed on the
+   pre-fix tree too (they close gaps, they do not fix a defect).
+
+Nothing else surfaced.  The socket derivation and default-server
+addressing (R4.3), discovery scoping (7af7 i1–i3, 3cc7 i1, 703c
+i1/i4/i6, 2caf i4/i5), the precise detach (R5, 703c i3, 2caf i2), the
+kill/unlink rules (R3.2, R8, 2caf i7, above), the socket-file and
+socket-directory ownership checks (d1c0 i10/i12, 703c i2, 2caf i8,
+QA S17) and the shared-session share-mode handling (d1c0 i7, 703c i8,
+2caf i11) all match the spec, and every new helper has direct coverage.
+
+Validation: targeted suites (`test_session_socket_isolation`,
+`test_tmux`, `test_cli_helpers`, `test_shared_sessions`, `test_cli_qa`)
+930 passed; full suite **5406 passed / 1 skipped / 0 failed / 0 errors**
+(422 s, log `/pm-captures/review-b48f-i3/full-suite-final.log`).  Every
+new test was checked in both directions where it asserts a fix (the two
+exact-kill tests fail on the pre-fix tree in a worktree).
+`pm/specs/pr-073910f/session_start_smoke.py` re-ran clean on a disposable
+socket with `TMUX_TMPDIR` on a scratch dir (private server, session env,
+global env and hooks correct; default server untouched).  No live
+session, server or shared host configuration was touched — every
+fixture used a disposable socket and a temporary HOME.

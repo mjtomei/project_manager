@@ -1569,6 +1569,37 @@ class TestFindTuiPaneAcrossServers:
 
         assert helpers._find_tui_pane() == (None, None)
 
+    def test_recorded_pane_probe_degrades_when_tmux_cannot_be_run(
+            self, monkeypatch):
+        """The recorded-pane liveness probe degrades like the rest.
+
+        ``_registry_tui_pane`` runs in the in-tmux, cwd and scan branches.
+        If ``pane_exists`` raised (tmux missing/unexecutable) an implicit
+        ``pm tui view`` / ``pm autostart`` would trace back instead of
+        reporting no TUI.
+        """
+        from pm_core.cli import helpers
+        from pm_core import pane_registry
+
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        # No ambient socket either, so the identified-server fallback cannot
+        # make the scan query a real tmux server.
+        monkeypatch.delenv("TMUX", raising=False)
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: True)
+        monkeypatch.setattr(helpers.tmux_mod, "get_session_name",
+                            lambda: "pm-test")
+        monkeypatch.setattr(pane_registry, "pm_session_name",
+                            lambda name: "pm-test")
+        monkeypatch.setattr(
+            pane_registry, "load_registry",
+            lambda name: {"windows": {"@1": {"panes": [
+                {"id": "%6", "role": "tui"}]}}})
+        monkeypatch.setattr(helpers.tmux_mod, "pane_exists",
+                            MagicMock(side_effect=OSError("no tmux")))
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions", lambda: [])
+
+        assert helpers._find_tui_pane() == (None, None)
+
     def test_failed_scan_restores_ambient_socket(self, monkeypatch):
         """A lookup that finds nothing must not leave the env re-pointed."""
         from pm_core.cli import helpers
@@ -2214,7 +2245,8 @@ class TestSessionKillServerSelection:
                 list(members) if members is not None else [f"{name}~1", name]))
         monkeypatch.setattr(
             session_mod.tmux_mod, "kill_session",
-            lambda name, socket_path=None: killed.append((name, socket_path)))
+            lambda name, socket_path=None, exact=False:
+            killed.append((name, socket_path)))
         monkeypatch.setattr(session_mod.pane_layout, "set_force_mobile",
                             lambda *a, **k: None)
         monkeypatch.setattr(container, "cleanup_session_containers",
@@ -2341,7 +2373,8 @@ class TestSessionKillServerSelection:
         killed: list[tuple[str, str | None]] = []
         monkeypatch.setattr(
             session_mod.tmux_mod, "kill_session",
-            lambda name, socket_path=None: killed.append((name, socket_path)))
+            lambda name, socket_path=None, exact=False:
+            killed.append((name, socket_path)))
 
         result = CliRunner().invoke(session_mod.session, ["kill"])
 
@@ -2349,6 +2382,57 @@ class TestSessionKillServerSelection:
         assert "No session 'pm-repo-abc' found." in result.output
         assert killed == []          # the grouped session survives
         assert sock.exists()         # and so does its live server's socket
+
+    def test_kill_targets_are_exact(self, monkeypatch, tmp_path):
+        """The kill itself must be exact, not only the existence check.
+
+        A bare ``kill-session -t pm-x`` is a *prefix* match.  The lookup is
+        exact (``find_exact_session_server``), but if the base — or a group
+        member — disappears between that lookup and the kill, tmux resolves
+        the bare name to whichever remaining session starts with it
+        (verified on tmux 3.2a: with only ``pm-xyz`` running,
+        ``kill-session -t pm-x`` kills ``pm-xyz``).  On the legacy default
+        server, which hosts every pre-isolation pm session, that can be
+        another pm session's TUI: R8 requires the kill to tear down only
+        the named session.
+        """
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+        from pm_core import container, push_proxy
+
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: True)
+        # A live server: the socket file is left alone (not under test).
+        monkeypatch.setattr(session_mod.tmux_mod, "server_alive",
+                            lambda sock: True)
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: "pm-repo-abc")
+        monkeypatch.setattr(session_mod, "_known_ambient_session",
+                            lambda: None)
+        sock = str(tmp_path / "pm-repo-abc")
+        monkeypatch.setattr(session_mod.tmux_mod,
+                            "find_exact_session_server",
+                            lambda name: (sock, True))
+        monkeypatch.setattr(
+            session_mod.tmux_mod, "sessions_in_group",
+            lambda name, socket_path=None: ["myview", f"{name}~1", name])
+        killed: list[tuple[str, str | None, bool]] = []
+        monkeypatch.setattr(
+            session_mod.tmux_mod, "kill_session",
+            lambda name, socket_path=None, exact=False:
+            killed.append((name, socket_path, exact)))
+        monkeypatch.setattr(session_mod.pane_layout, "set_force_mobile",
+                            lambda *a, **k: None)
+        monkeypatch.setattr(container, "cleanup_session_containers",
+                            lambda tag: 0)
+        monkeypatch.setattr(push_proxy, "stop_session_proxies", lambda tag: 0)
+
+        result = CliRunner().invoke(session_mod.session, ["kill"])
+
+        assert result.exit_code == 0, result.output
+        assert killed == [("myview", sock, True),
+                          ("pm-repo-abc~1", sock, True),
+                          ("pm-repo-abc", sock, True)]
 
     def test_missing_session_unlinks_stale_socket(self, monkeypatch, tmp_path):
         stale = tmp_path / "pm-repo-abc"
@@ -2984,6 +3068,32 @@ class TestPaneOpsSessionResolution:
                             lambda session: "@7")
 
         assert pane_ops.get_session_and_window(app) == ("pm-base", "@7")
+
+    def test_session_resolution_degrades_when_tmux_cannot_be_queried(
+            self, monkeypatch):
+        """A missing tmux must not crash a pane launch from the TUI.
+
+        ``_pm_session_for`` asks tmux for the pane's session when the app
+        has none yet; that probe has to degrade to "no session" like every
+        other one in this change, not raise out of the key handler.
+        """
+        from pm_core.tui import pane_ops
+
+        app = self._app()
+        monkeypatch.setattr(pane_ops.tmux_mod, "get_session_name",
+                            MagicMock(side_effect=OSError("no tmux")))
+
+        assert pane_ops._pm_session_for(app) is None
+
+    def test_session_resolution_falls_back_to_the_base_name(self, monkeypatch):
+        """Without a group query, the plain base name is the best answer."""
+        from pm_core.tui import pane_ops
+
+        app = self._app()
+        monkeypatch.setattr(pane_ops.pane_registry, "pm_session_name",
+                            MagicMock(side_effect=OSError("no tmux")))
+
+        assert pane_ops._pm_session_for(app, "myview") == "myview"
 
     def test_plan_window_registers_under_the_pm_base(self, monkeypatch):
         from pm_core.tui import pane_ops

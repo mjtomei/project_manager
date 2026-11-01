@@ -407,10 +407,24 @@ def attach(name: str, socket_path: str | None = None) -> None:
     )
 
 
-def kill_session(name: str, socket_path: str | None = None) -> None:
-    """Kill a tmux session."""
+def kill_session(name: str, socket_path: str | None = None, *,
+                 exact: bool = False) -> None:
+    """Kill a tmux session.
+
+    *exact* addresses the session with tmux's ``=name`` target, i.e. no
+    prefix fallback.  ``pm session kill`` passes it for every session it
+    tears down: the lookup is already exact (``find_exact_session_server``),
+    but a bare ``-t`` is a *prefix* match, so a session that vanished
+    between the lookup and this call would make tmux kill whichever
+    remaining session starts with the name — on the legacy default server,
+    which hosts every pre-isolation pm session, that can be another pm
+    session's TUI (verified on tmux 3.2a: with only ``pm-xyz`` running,
+    ``kill-session -t pm-x`` kills ``pm-xyz``).  R8: tearing down a session
+    affects only that session.
+    """
+    target = f"={name}" if exact else name
     _run(
-        _tmux_cmd("kill-session", "-t", name, socket_path=socket_path),
+        _tmux_cmd("kill-session", "-t", target, socket_path=socket_path),
     )
 
 

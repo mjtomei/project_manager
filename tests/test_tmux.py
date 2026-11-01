@@ -20,6 +20,7 @@ from pm_core.tmux import (
     split_pane_at,
     send_keys_literal,
     kill_window,
+    kill_session,
     apply_layout,
     get_pane_indices,
     get_pane_geometries,
@@ -398,6 +399,31 @@ class TestKillWindow:
         cmd = mock_run.call_args[0][0]
         assert "kill-window" in cmd
         assert "sess:1" in cmd
+
+
+# ---------------------------------------------------------------------------
+# kill_session
+# ---------------------------------------------------------------------------
+
+class TestKillSession:
+    @patch("pm_core.tmux.subprocess.run")
+    def test_bare_target_by_default(self, mock_run):
+        kill_session("pm-x")
+        cmd = mock_run.call_args[0][0]
+        assert cmd[-2:] == ["-t", "pm-x"]
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_exact_target_uses_tmux_exact_syntax(self, mock_run):
+        """``exact=True`` must address ``=name`` so tmux cannot prefix-match.
+
+        A bare ``-t pm-x`` is a prefix match: with ``pm-x`` already gone,
+        tmux kills whichever remaining session starts with it (verified on
+        tmux 3.2a: ``pm-xyz``).  ``pm session kill`` passes ``exact=True``
+        for every session it tears down (R8).
+        """
+        kill_session("pm-x", socket_path="/tmp/s", exact=True)
+        cmd = mock_run.call_args[0][0]
+        assert cmd == ["tmux", "-S", "/tmp/s", "kill-session", "-t", "=pm-x"]
 
 
 # ---------------------------------------------------------------------------

@@ -951,12 +951,18 @@ def session_kill(start_dir):
     # would start a second base with the same name on the same server.
     # Enumerate through tmux's session *group*, not the ``base~N`` name
     # prefix, which cannot see a view (R8: nothing of the session is left
-    # behind).
+    # behind).  Every kill uses an exact target: the lookup above is exact,
+    # and a bare ``-t`` would prefix-match a *different* session if the base
+    # (or a member) disappeared between the lookup and here (verified on
+    # tmux 3.2a) — on the legacy default server that is another pm
+    # session's TUI.
     for member in tmux_mod.sessions_in_group(session_name,
                                              socket_path=hosting_socket):
         if member != session_name:
-            tmux_mod.kill_session(member, socket_path=hosting_socket)
-    tmux_mod.kill_session(session_name, socket_path=hosting_socket)
+            tmux_mod.kill_session(member, socket_path=hosting_socket,
+                                  exact=True)
+    tmux_mod.kill_session(session_name, socket_path=hosting_socket,
+                          exact=True)
 
     pane_layout.set_force_mobile(session_name, False)
 

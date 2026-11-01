@@ -579,6 +579,27 @@ class TestFindLiveTuiPane:
              self._panes('%8:zview:"pm _tui"\n'):
             assert _find_live_tui_pane("pm-test") == ("%8", "pm-test")
 
+    def test_group_resolution_degrades_when_tmux_cannot_be_queried(self):
+        """Without a group query the pane is attributed by its base name.
+
+        ``_pm_session_of`` resolves a tmux session through its group; when
+        that query cannot run (tmux missing/unexecutable) it must fall back
+        to the plain base name rather than raise out of ``pm tui view`` /
+        ``pm tui send`` — the same degrade contract as the rest of the scan.
+        """
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        data = self._registry(
+            {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             patch("pm_core.tmux.find_session_server",
+                   return_value=(None, False)), \
+             patch("pm_core.cli.helpers.pane_registry.pm_session_name",
+                   side_effect=OSError("no tmux")), \
+             self._panes("%6:pm-test:bash\n"):
+            assert _find_live_tui_pane("pm-test") == ("%6", "pm-test")
+
     def test_tmux_unavailable_degrades_to_no_live_tui(self):
         from pm_core.cli.helpers import _find_live_tui_pane
 

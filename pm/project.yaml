@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T12:48:55.686465+00:00'
+  updated_at: '2026-11-01T13:31:48.539634+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6436,6 +6436,24 @@ prs:
       requires. No live session, server or shared host configuration was touched.'
     created_at: '2026-11-01T12:48:55Z'
     last_edited: '2026-11-01T12:48:55Z'
+  - id: note-af5eb0c
+    text: 'Review loop b48f i3 (no requirement changes; full suite 5406 passed / 1
+      skipped, log /pm-captures/review-b48f-i3/full-suite-final.log). One destructive-path
+      gap: `pm session kill` resolved the session exactly (`find_exact_session_server`,
+      `=name`) but killed with a bare `kill-session -t <name>`, which tmux resolves
+      as a prefix match — verified on tmux 3.2a that with only `pm-xyz` running, `kill-session
+      -t pm-x` kills `pm-xyz`. A base or group member that vanished between the exact
+      lookup and the kill could therefore tear down a different session; on the legacy
+      default server, which hosts every pre-isolation pm session, that can be another
+      pm session''s TUI. `tmux.kill_session()` gained `exact=True` (target `=name`)
+      and `session_kill` passes it for the base and every group member (R8.1 in impl.md
+      updated). Also added coverage for the "degrade, never crash" branches of `helpers._pm_session_of()`,
+      `helpers._registry_tui_pane()` and `pane_ops._pm_session_for()` (behaviour unchanged;
+      those tests pass on the pre-fix tree, the two exact-kill tests fail on it in
+      a worktree). No live session, server or shared host configuration was touched
+      — every fixture used a disposable socket and a temporary HOME.'
+    created_at: '2026-11-01T13:31:48Z'
+    last_edited: '2026-11-01T13:31:48Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
