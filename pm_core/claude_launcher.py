@@ -14,7 +14,9 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pm_core.model_config import AMBIENT_EFFORT_ENV, classify_effort_env
+from pm_core.model_config import (
+    AMBIENT_EFFORT_ENV, accepted_efforts_of, classify_effort_env,
+)
 from pm_core.paths import configure_logger, log_shell_command, write_env_file
 from pm_core.prompt_bounds import (
     PROMPT_ARG_LIMIT, PromptTooLargeError, prompt_bytes,
@@ -1023,13 +1025,22 @@ def build_claude_shell_cmd(
             if kind == "unknown":
                 _log.warning(
                     "provider %r sets %s=%r, which is not a Claude effort "
-                    "level; --effort %s applies", provider or "<default>",
+                    "level; --effort %s applies", provider_cfg.name,
                     AMBIENT_EFFORT_ENV, assigned, effort)
             elif kind == "level" and level != effort:
                 _log.warning(
                     "provider %r assigns %s=%s; it overrides --effort %s "
-                    "for this session", provider or "<default>",
+                    "for this session", provider_cfg.name,
                     AMBIENT_EFFORT_ENV, level, effort)
+        # The level is still passed (the metadata is dated), but a launch
+        # the route declares unsupported must not read as confirmed.  The
+        # config is already loaded here, so this costs no extra read.
+        accepted = accepted_efforts_of(provider_cfg)
+        if accepted is not None and effort not in accepted:
+            _log.warning(
+                "provider %r declares supported_efforts %s; --effort %s is "
+                "not among them (the router may reject or ignore it)",
+                provider_cfg.name, list(accepted), effort)
     if provider_env:
         if env_out is not None:
             env_out.update(provider_env)

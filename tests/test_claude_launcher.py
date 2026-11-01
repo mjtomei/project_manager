@@ -628,6 +628,39 @@ class TestEffortLaunch:
         assert _drop_ambient_effort(
             env, "high", {"CLAUDE_CODE_EFFORT_LEVEL": "xhigh"}) is env
 
+    def test_shell_cmd_warns_when_the_route_declares_the_level_unsupported(
+            self, monkeypatch):
+        """The level is still passed (the metadata is dated), but a launch
+        must not read as confirmed."""
+        import pm_core.claude_launcher as launcher
+        from pm_core import providers
+        monkeypatch.setattr(
+            providers, "load_providers",
+            lambda: {"providers": {"p": {"type": "claude",
+                                         "supported_efforts": ["low"]}}})
+        seen = []
+        monkeypatch.setattr(launcher._log, "warning",
+                            lambda msg, *a: seen.append(msg % a))
+        build_claude_shell_cmd(prompt="x", provider="p", effort="high",
+                               env_out={})
+        assert any("not among them" in m for m in seen), seen
+        assert any("--effort high" in m for m in seen), seen
+
+    def test_shell_cmd_does_not_warn_for_a_declared_level(
+            self, monkeypatch):
+        import pm_core.claude_launcher as launcher
+        from pm_core import providers
+        monkeypatch.setattr(
+            providers, "load_providers",
+            lambda: {"providers": {"p": {"type": "claude",
+                                         "supported_efforts": ["high"]}}})
+        seen = []
+        monkeypatch.setattr(launcher._log, "warning",
+                            lambda msg, *a: seen.append(msg % a))
+        build_claude_shell_cmd(prompt="x", provider="p", effort="high",
+                               env_out={})
+        assert not any("not among them" in m for m in seen), seen
+
     def test_launch_claude_drops_ambient_effort(self, monkeypatch, tmp_path):
         import pm_core.claude_launcher as launcher
         seen = {}

@@ -336,6 +336,21 @@ does not fetch a catalog in this PR.
   an unknown level.
 - A provider whose `unset_env` already lists `CLAUDE_CODE_EFFORT_LEVEL`
   while pm sets an effort: the command unsets it once, not twice.
+- A role with no `provider:` setting still launches on providers.yaml's
+  `default:` entry (`get_provider(None)`; `PM_PROVIDER` is resolved by a
+  launch too), so that provider's `env:` block decides the session's level
+  as well.  Its assignment is reported exactly like an explicitly selected
+  provider's: `provider <name> env` as the source, the level in the effort
+  column, and no "pm unsets it" note.  `use_env=False` (configuration
+  checks) ignores `PM_PROVIDER`.  A session's own provider file is runtime
+  state and is not read (documented limitation).
+- A `supported_efforts` declaration that is not a list (a hand-built
+  `ProviderConfig`): read as "not declared", never substring-matched
+  (`"high" in "xhigh"`).
+- `supported_efforts_checked_at` without a `supported_efforts` list: no
+  stale note (nothing is stale about a list the route does not declare).
+- A level outside the route's declared list: the launch still passes it,
+  and logs a warning naming the declared set (the metadata may be stale).
 
 ## Implementation plan (files)
 
@@ -343,14 +358,17 @@ does not fetch a catalog in this PR.
    `normalize_ambient_effort`, `classify_effort_env` (the one classifier the
    launch warning, the effort notes and `pm provider show` share, so they
    cannot disagree about an `auto`/blank/unknown assignment),
-   `accepted_efforts_of`, `provider_effort_env`
+   `accepted_efforts_of`, `effort_env_owner` (the provider whose `env:`
+   block applies: the selected one, else `PM_PROVIDER`, else providers.yaml's
+   `default:`)
    and `unsupported_effort_problem`; extend `ModelResolution`; resolve the
    ambient `CLAUDE_CODE_EFFORT_LEVEL`; compute status/notes (including a
    provider `env:` assignment of it); extend `validate_model_config`.
 2. `pm_core/providers.py` — `supported_efforts` / source / checked-at on
    `ProviderConfig`, entry validation, and a helper for the intersection.
 3. `pm_core/claude_launcher.py` — unset `CLAUDE_CODE_EFFORT_LEVEL` when PM
-   sets an effort (shell and subprocess paths); update docstrings.
+   sets an effort (shell and subprocess paths); warn at launch for a level
+   the route declares unsupported; update docstrings.
 4. `pm_core/model_settings.py` — `RoleRow.effort_status` / `effort_notes`,
    display footnotes, set-time warning.
 5. `pm_core/cli/model.py`, `pm_core/cli/pr.py`, `pm_core/cli/provider.py` —

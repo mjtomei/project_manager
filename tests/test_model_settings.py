@@ -643,6 +643,25 @@ class TestEffortCapability:
         assert res.effort_status == "ok"
         assert any("days old" in n for n in res.effort_notes)
 
+    def test_stale_date_without_a_list_is_not_noted(self, pm_home_dir):
+        """A date alone is not metadata: nothing is stale about a list the
+        route does not declare, and the note would read as a finding."""
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts_checked_at="2020-01-01")})
+        data = _project(session_effort={"impl": "high"})
+        res = resolve_model_and_provider(
+            "impl", pr_model=f"provider:{ROUTE}", project_data=data)
+        assert res.effort_status == "unverified"
+        assert not any("days old" in n for n in res.effort_notes)
+
+    def test_a_non_list_declaration_is_not_read(self):
+        """A hand-built config whose supported_efforts is a string must not
+        be substring-matched ("high" is in "xhigh")."""
+        from pm_core.model_config import accepted_efforts_of
+        cfg = ProviderConfig(name="p", type="claude",
+                             supported_efforts="xhigh")
+        assert accepted_efforts_of(cfg) is None
+
     def test_pm_setting_wins_over_ambient_env(self, pm_home_dir, monkeypatch):
         monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "xhigh")
         data = _project(session_effort={"impl": "high"})
@@ -881,6 +900,55 @@ class TestEffortCapability:
                        for n in res.effort_notes)
         assert any("pm passes no --effort for this model" in n
                    for n in res.effort_notes)
+
+    def test_default_provider_env_assignment_is_reported(self, pm_home_dir):
+        """With no provider selected the launch still resolves
+        providers.yaml's ``default:`` entry, so that entry's env block
+        decides the session's level; "(default)" would name a level the
+        session does not run."""
+        (pm_home_dir / "providers.yaml").write_text(yaml.safe_dump({
+            "default": "home",
+            "providers": {"home": {
+                "type": "claude",
+                "env": {"CLAUDE_CODE_EFFORT_LEVEL": "max"}}}}))
+        res = resolve_model_and_provider("impl", project_data=_project())
+        assert (res.effort, res.effort_status, res.effort_env_level) == \
+            (None, "overridden", "max")
+        assert res.effort_source == "provider home env"
+        assert any("provider 'home' sets CLAUDE_CODE_EFFORT_LEVEL=max" in n
+                   for n in res.effort_notes)
+
+    def test_default_provider_env_assignment_overrides_pm_effort_visibly(
+            self, pm_home_dir):
+        """The same entry overrides pm's own ``--effort`` too, so the note
+        must say so instead of claiming pm unsets the variable."""
+        (pm_home_dir / "providers.yaml").write_text(yaml.safe_dump({
+            "default": "home",
+            "providers": {"home": {
+                "type": "claude",
+                "env": {"CLAUDE_CODE_EFFORT_LEVEL": "max"}}}}))
+        data = _project(session_effort={"impl": "high"})
+        res = resolve_model_and_provider("impl", project_data=data)
+        assert (res.effort, res.effort_status) == ("high", "overridden")
+        assert any("applies it instead of --effort high" in n
+                   for n in res.effort_notes)
+        assert not any("pm unsets it" in n for n in res.effort_notes)
+
+    def test_pm_provider_env_assignment_is_reported_only_for_launches(
+            self, pm_home_dir, monkeypatch):
+        """``get_provider(None)`` honors PM_PROVIDER, so a launch runs that
+        provider's env; a configuration check must not depend on the
+        caller's environment."""
+        _providers(pm_home_dir, **{ROUTE: _router(
+            env={"CLAUDE_CODE_EFFORT_LEVEL": "xhigh"})})
+        monkeypatch.setenv("PM_PROVIDER", ROUTE)
+        res = resolve_model_and_provider("impl", project_data=_project())
+        assert res.effort_env_level == "xhigh"
+        assert any(f"provider {ROUTE!r} sets" in n for n in res.effort_notes)
+        checked = resolve_model_and_provider("impl", project_data=_project(),
+                                             use_env=False)
+        assert (checked.effort_status, checked.effort_env_level) == \
+            ("none", None)
 
     def test_unreadable_route_is_not_reported_as_declaring_nothing(
             self, pm_home_dir):

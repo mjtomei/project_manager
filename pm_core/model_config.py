@@ -363,10 +363,11 @@ def resolve_model_and_provider(
         ambient_source = True
     # Whether the provider's own env block assigns the variable at all (a
     # level, ``auto``/``unset`` or a blank value): the launcher keeps any
-    # such assignment, so a note below must not claim pm unsets it.  Only
-    # read when there is something to reconcile, so the common launch path
-    # keeps its single providers.yaml read.
-    assigned_raw = (provider_effort_env(resolution.provider)
+    # such assignment, so a note below must not claim pm unsets it.  The
+    # provider whose env applies is the one the launch resolves, which with
+    # no explicit selection is ``PM_PROVIDER`` or providers.yaml's
+    # ``default:`` entry.
+    assigned_raw = (effort_env_owner(resolution.provider, use_env=use_env)[1]
                     if ambient_level is not None else None)
     assigned_level = normalize_ambient_effort(assigned_raw)[0]
 
@@ -411,7 +412,7 @@ def resolve_model_and_provider(
                                 else None)
     resolution.effort_notes = notes
     if resolution.effort_status != "not_applicable":
-        _apply_effort_verification(resolution, effort)
+        _apply_effort_verification(resolution, effort, use_env=use_env)
         if effort and effort_source == AMBIENT_EFFORT_ENV:
             # The source, not the level's support, is the headline; the
             # verification notes (if any) are still in effort_notes.
@@ -525,7 +526,10 @@ def accepted_efforts_of(cfg) -> tuple[str, ...] | None:
     if cfg is None:
         return None
     declared = getattr(cfg, "supported_efforts", None)
-    if declared is None:
+    if not isinstance(declared, (list, tuple)):
+        # None is "not declared"; anything else that is not a sequence (a
+        # hand-built ProviderConfig, say) is not a list of names, and
+        # substring-matching it would invent support.
         return None
     return tuple(level for level in EFFORT_LEVELS if level in declared)
 
@@ -533,7 +537,7 @@ def accepted_efforts_of(cfg) -> tuple[str, ...] | None:
 def effort_env_of(cfg) -> str | None:
     """The effort variable *cfg* assigns, for an already-loaded config.
 
-    See :func:`provider_effort_env`.
+    See :func:`effort_env_owner`.
     """
     if cfg is None:
         return None
@@ -548,17 +552,44 @@ def effort_env_of(cfg) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def provider_effort_env(provider_name: str | None) -> str | None:
-    """The ``CLAUDE_CODE_EFFORT_LEVEL`` a provider's env block assigns.
+def effort_env_owner(provider_name: str | None, *,
+                     use_env: bool = True) -> tuple[str | None, str | None]:
+    """``(provider, value)`` for the env block that sets the effort variable.
 
     ``alias_models`` is the older name for ``env`` and ``env`` wins where
     both set it, as in ``ProviderConfig._apply_env``.  A null value drops
-    the variable rather than assigning one, so it yields None.  Any other
+    the variable rather than assigning one, so *value* is None.  Any other
     value -- a level, ``auto``/``unset``, or a blank -- is the provider's
     explicit configuration: the launcher keeps it (it is never unset) and
     Claude Code applies it instead of ``--effort``.
+
+    The launcher resolves its provider through ``providers.get_provider``,
+    so a session with no provider selected still runs ``PM_PROVIDER`` (when
+    *use_env*) or providers.yaml's ``default:`` entry, and that entry's
+    ``env:`` block decides the variable too.  Reporting only an explicitly
+    selected provider would show an effort the session does not run.  A
+    session's own provider file is runtime state, not configuration, and is
+    not read here.  Only the effort variable is reconciled: a route's
+    ``supported_efforts`` stays tied to the explicitly selected provider.
     """
-    return effort_env_of(_provider_config(provider_name))
+    name = provider_name
+    if not name and use_env:
+        name = os.environ.get("PM_PROVIDER") or None
+    if not name:
+        try:
+            from pm_core.providers import BUILTIN_CLAUDE, get_default_provider
+            name = get_default_provider()
+        except Exception:  # an unreadable file is the launch's finding
+            return None, None
+        if not name or name == BUILTIN_CLAUDE:
+            return None, None
+    cfg = _provider_config(name)
+    if cfg is None:
+        # An unreadable entry assigns nothing pm can name (the launch
+        # reports the entry itself); an explicitly selected one is still
+        # worth naming for the note's "provider ..." text.
+        return (name, None) if provider_name else (None, None)
+    return name, effort_env_of(cfg)
 
 
 def metadata_age_of(cfg) -> int | None:
@@ -591,17 +622,20 @@ def unsupported_effort_problem(resolution: ModelResolution) -> str | None:
 
 
 def _note_provider_effort_env(resolution: ModelResolution,
-                              effort: str | None, cfg=None,
+                              effort: str | None, owner: str | None,
+                              assigned: str | None,
                               accepted: tuple[str, ...] | None = None) -> None:
     """Note a provider env block that assigns the ambient effort variable.
 
     The launcher keeps a provider's explicit assignment (it is the user's
     own configuration) instead of unsetting it, so Claude Code applies
     that value rather than ``--effort``.  The display must not report pm's
-    level as the one that runs.  *accepted* (the route's declared levels)
-    lets the note say when the assigned level is not among them.
+    level as the one that runs.  *owner* names the provider whose env block
+    applies (not always ``resolution.provider``: with none selected the
+    launch still uses ``PM_PROVIDER`` or providers.yaml's default).
+    *accepted* (the route's declared levels) lets the note say when the
+    assigned level is not among them.
     """
-    assigned = effort_env_of(cfg)
     if assigned is None:
         return
     kind, level = classify_effort_env(assigned)
@@ -610,14 +644,14 @@ def _note_provider_effort_env(resolution: ModelResolution,
         # override": the provider assigns one explicitly, so --effort still
         # applies.
         resolution.effort_notes.append(
-            f"provider {resolution.provider!r} sets "
+            f"provider {owner!r} sets "
             f"{AMBIENT_EFFORT_ENV}={assigned!r} (no override); "
             + (f"--effort {effort} applies" if effort
                else "the CLI default applies"))
         return
     if kind == "unknown":
         resolution.effort_notes.append(
-            f"provider {resolution.provider!r} sets {AMBIENT_EFFORT_ENV}="
+            f"provider {owner!r} sets {AMBIENT_EFFORT_ENV}="
             f"{assigned!r}, which is not a Claude effort level pm knows")
         return
     if level == effort:
@@ -626,8 +660,8 @@ def _note_provider_effort_env(resolution: ModelResolution,
     # column would otherwise say "(default)" while the session runs this).
     resolution.effort_env_level = level
     if effort is None:
-        resolution.effort_source = f"provider {resolution.provider} env"
-    note = (f"provider {resolution.provider!r} sets {AMBIENT_EFFORT_ENV}="
+        resolution.effort_source = f"provider {owner} env"
+    note = (f"provider {owner!r} sets {AMBIENT_EFFORT_ENV}="
             f"{level}; Claude Code applies it "
             + (f"instead of --effort {effort}" if effort
                else "for this provider's sessions"))
@@ -639,17 +673,25 @@ def _note_provider_effort_env(resolution: ModelResolution,
 
 
 def _apply_effort_verification(resolution: ModelResolution,
-                               effort: str | None) -> None:
+                               effort: str | None, *,
+                               use_env: bool = True) -> None:
     """Fill effort status/notes for *effort* on *resolution* in place."""
     notes = resolution.effort_notes
     cfg, cfg_error = _provider_config_or_error(resolution.provider)
+    if resolution.provider:
+        # The config is already loaded above; do not read it twice.
+        env_owner, env_assigned = (resolution.provider, effort_env_of(cfg))
+    else:
+        # No provider selected: the launch still resolves PM_PROVIDER or
+        # providers.yaml's default entry, whose env block decides too.
+        env_owner, env_assigned = effort_env_owner(None, use_env=use_env)
     if not effort:
         # Nothing selected: the CLI default applies.  No note -- the route's
         # declared levels are shown by `pm provider list/show`, and a note
         # here would read as a warning for a perfectly valid configuration.
         resolution.effort_status = "none"
         resolution.supported_efforts = accepted_efforts_of(cfg)
-        _note_provider_effort_env(resolution, effort, cfg,
+        _note_provider_effort_env(resolution, effort, env_owner, env_assigned,
                                   resolution.supported_efforts)
         return
 
@@ -678,11 +720,13 @@ def _apply_effort_verification(resolution: ModelResolution,
         if problem:
             notes.append(problem)
     age = metadata_age_of(cfg)
-    if age is not None and age > EFFORT_METADATA_STALE_DAYS:
+    if (accepted is not None and age is not None
+            and age > EFFORT_METADATA_STALE_DAYS):
         notes.append(
             f"supported_efforts metadata is {age} days old; refresh it "
             "(pm provider edit <name> --supported-efforts ...)")
-    _note_provider_effort_env(resolution, effort, cfg, accepted)
+    _note_provider_effort_env(resolution, effort, env_owner, env_assigned,
+                              accepted)
 
 
 def provider_effort(name: str) -> str | None:

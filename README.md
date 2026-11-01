@@ -191,6 +191,10 @@ its own `env:` block is your explicit configuration, so pm leaves it in place
 and reports the conflict instead of dropping it; when pm has no level of its
 own the role table shows the provider's level (marked `*`) with
 `provider <name> env` as the source, because that is what the session runs.
+A role with no `provider:` setting still launches on providers.yaml's
+`default:` entry (a launch resolves `PM_PROVIDER` too), so that provider's
+`env:` block is reported the same way.  A session's own provider file is
+chosen at run time and is not read here.
 A model pm knows does not take effort (Haiku) suppresses it entirely, and
 the role table shows the level that was asked for as `xhigh (n/a)` beside
 the setting that asked for it.
@@ -263,8 +267,9 @@ pm pr model show pr-001             # per role: model, effort, command, why
 the provider's *current* model, so re-check and update it (and the date) when
 you change that model with `pm provider edit <name> --model`.  When a role's
 effort is not in the selected route's declared list, `pm model show`,
-`pm pr model show` and the TUI mark it `*` and print the reason (the launch
-still passes the level, because the list may be stale).  A route that
+`pm pr model show` and the TUI mark it `*` and print the reason, and the
+launch logs a warning (it still passes the level, because the list may be
+stale).  A route that
 declares no list shows the effort as unverified rather than supported.
 pm only ever sends the levels Claude Code itself accepts; whether the router
 maps `output_config.effort` to an upstream provider's reasoning control is
