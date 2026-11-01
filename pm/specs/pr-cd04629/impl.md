@@ -143,7 +143,7 @@ pr-efab0ce's scope.  Line numbers are on base `81e5d7f4`.
 
 | Role | Session type | Entry points (actual calls) | Current container path | Defect |
 |---|---|---|---|---|
-| Implementation | `impl` | `pm pr start` → `cli/pr.py:883`; TUI `s`/`S` → `tui/pr_view.py:79` → wrapper subprocess → `pm pr start`; auto-start `tui/auto_start.py:1774` → `pm pr start --background` | `wrap_claude_cmd` at `cli/pr.py:1221` inside the tmux block | **D1** window failure → host `launch_claude`; **D2** no PM session → host; **D5** no reclaim |
+| Implementation | `impl` | `pm pr start` → `cli/pr.py:891`; TUI `s`/`S` → `tui/pr_view.py:79` → wrapper subprocess → `pm pr start`; auto-start `tui/auto_start.py:1774` → `pm pr start --background` | `wrap_claude_cmd` at `cli/pr.py:1221` inside the tmux block | **D1** window failure → host `launch_claude`; **D2** no PM session → host; **D5** no reclaim |
 | Review | `review` | `pm pr review` → `cli/pr.py:1618`; `_launch_review_window` `:1353`; TUI `d`; review loop; auto-start | `wrap_claude_cmd` at `:1476` | **D3** leak on window failure; **D6** cwd policy scattered |
 | Sign-off | `signoff` | `pm pr signoff` → `cli/pr.py:1794`; `launch_signoff_window` `signoff.py:401`; TUI `signoff_ui.py:207`; auto-sequence | `wrap_claude_cmd` at `signoff.py:539` | **D4** leak on window failure |
 | QA refiner / concretizer | `qa_concretize` | `_launch_scenarios_in_containers` `qa_loop.py:3210`; `_launch_scenarios_in_tmux` `:2977` (host control) | `create_qa_container` `:3329` + `_build_concretize_cmd` `:2591` → `build_exec_cmd` `:2638` | **D6** policy from `bool(container_name)`; create/failure handling is local |
@@ -169,7 +169,7 @@ re-declare it, and `qa_interactive` (scenario 0) must stay outside it.
 | Cluster explore | `cluster` | `cli/cluster.py:224`; bridge `:207` | Host-side bridge/daemon by design |
 | Watcher / discovery / bug-fix-impl / improvement-fix-impl | `watcher`, … | `cli/watcher.py:377-419`; `watcher_base.py:142-155`; `build_launch_cmd` per type | Monitors host panes/state |
 | TUI discuss / claude / watcher-review / qa-item | `discuss`, `watcher_review`, `qa_author`, `qa_regression` | `tui/pane_ops.py:347,396,461,515` | TUI-hosted helper panes |
-| QA authoring / regression | `qa_author`, `qa_regression` | `cli/qa.py:246,351`; `pm qa launch` `:690` | Authoring helpers |
+| QA authoring / regression | `qa_author`, `qa_regression` | `cli/qa.py:246,351`; `pm qa launch` `:694` | Authoring helpers |
 | Spec generation | (none) | `spec_gen.py:304` (`launch_claude_print`) | One-shot host print |
 | Plan review (background) | (none) | `plans/review.py:170` (`launch_claude_print_background`) | One-shot host print |
 | Mock generation | (none) | `qa_loop.py:2361` (`launch_claude_print`) | One-shot host print |
@@ -192,7 +192,7 @@ Host **services** (no agent): push proxy (`push_proxy.py`), route bridge
 - **Background/print**: `launch_claude_print`,
   `launch_claude_print_background` (host-only roles above).
 - **Foreground/no-tmux**: `pr_start` `launch_claude` (D2);
-  `pm qa debug --foreground` (`cli/qa.py:641`, already containerized).
+  `pm qa debug --foreground` (`cli/qa.py:650`, already containerized).
 
 ## Requirements
 
