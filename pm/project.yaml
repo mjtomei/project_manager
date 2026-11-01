@@ -14331,7 +14331,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-11-01T00:21:12.379687+00:00'
+  updated_at: '2026-11-01T01:33:54.423925+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -15361,6 +15361,19 @@ prs:
       (cast + mp4 + transcript + driver + manifest).'
     created_at: '2026-11-01T00:21:12Z'
     last_edited: '2026-11-01T00:21:12Z'
+  - id: note-a97ab87
+    text: 'QA S32 fix: the tree showed a raw widget repr ("TechTree#tech-tree") instead
+      of an empty-state message when the default "hide closed" filter hid every PR
+      — the state a project reaches once all its PRs are closed and retained. tech_tree._empty_message()
+      had no branch for "everything hidden by the hide-closed/hide-merged toggles
+      with no status filter", so _rebuild mounted no children and Textual painted
+      the repr (reproduced on the S32 story-2 sandbox after pm tui restart with one
+      closed record; stayed for minutes until a filter change). Added that branch
+      ("No PRs to show. Press F to cycle filter.") plus test_hide_closed_empty_state_renders,
+      which fails on the previous head. Captures: /pm-captures/scenarios/32/pre-fix
+      and /post-fix.'
+    created_at: '2026-11-01T01:33:54Z'
+    last_edited: '2026-11-01T01:33:54Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
