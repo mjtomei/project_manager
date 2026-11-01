@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-01T17:30:03.109954+00:00'
+  updated_at: '2026-11-01T19:00:38.015520+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48000,6 +48000,28 @@ prs:
       delta file. Captures: /pm-captures/scenarios/52/{r6-refusals,r7-resolve-and-record,driver-coercion}.'
     created_at: '2026-11-01T17:30:03Z'
     last_edited: '2026-11-01T17:30:03Z'
+  - id: note-a6aed86
+    text: 'QA scenario 54 (hostile hand-edited project.yaml, R13/R16) — NEEDS_WORK,
+      fixed in 7654bdff. Three real defects found live, each with a test that fails
+      on the pre-fix tree: (1) pm pr signoff on a PR with a missing workdir printed
+      "Failed to clone: expected string or bytes-like object" and never opened the
+      sign-off window when project.base_branch was hand-edited to a mapping — _clone_workdir
+      passed it to git clone --branch and shlex.join raised; now a non-string branch/repo/base_branch
+      reads as absent/default. (2) pm pr merge refused EVERY merge with "the project
+      merges into {\"bad\": True}" because pr_merge read project.base_branch raw;
+      the target-repository refusal was unreachable. pr_merge and the TUI auto-merge
+      gate now fall back to master. (3) pm pr show dropped "Resolution digest:" when
+      the record had a resolution but no stored digest (the merge gate recomputes
+      one from the same record); show now derives it. Harness facts for the next run:
+      (a) `pm fake-claude config set` is PER PROJECT SESSION TAG — set it for each
+      new throwaway project before any pm pr signoff/review launch, or the launch
+      spawns a REAL Claude agent (two did here before I caught them); (b) the check
+      is "already contained in master" unless the PR branch has a commit ahead of
+      master — add one or the up_to_date story cannot be driven; (c) put /usr/bin
+      before /home/pm/.local/bin so the push-proxy git wrapper does not intercept;
+      (d) full suite 5738 passed, 1 skipped.'
+    created_at: '2026-11-01T19:00:37Z'
+    last_edited: '2026-11-01T19:00:37Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
