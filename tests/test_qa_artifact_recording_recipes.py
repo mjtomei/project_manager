@@ -243,7 +243,18 @@ hits, regardless of how it waits for a background job:
   cases were added (review loop 928f i33, R98); the failure branches were
   still missed because the cleanup cases covered only the success and timeout
   paths, so a failed run left a dead ``pm-recorder`` behind until review loop
-  928f i34 (R99) extended the same case to them.
+  928f i34 (R99) extended the same case to them;
+- a clean status is not proof that the *stop step* ended the recording:
+  asciinema's status is 0 whenever the recording ran to completion, and any
+  detach ends it that way (the prefix pressed in the recorder pane, ``pm
+  session --disconnect-others``, a supervisor detaching clients), leaving a
+  cast that stops where the scenario was — the same state a re-paste of the
+  tmux stop step legitimately sees, so the status alone cannot tell them
+  apart. The capture-directory claim is the in-progress handle: a capture
+  holds it from step 2 until the stop step's last statement releases it, so
+  a re-paste finds it clear and a recorder that ended under a claim that is
+  still set is failed with a message that names the early detach (review
+  loop 928f i35, R100).
 
 The capture flow's readiness and stop logic is also *executed* against stub
 ``tmux``/``pm`` (``TestCaptureFlowExecution``), because its failure modes are
@@ -7891,6 +7902,11 @@ class TestCaptureFlowExecution:
         the session alone reported a *complete* recording as "the cast is
         incomplete, not a finished recording" and told the worker to
         re-record it, discarding a finished capture.
+
+        The claim is clear here because the first paste released it as its
+        last statement; that is the handle which keeps this acceptance from
+        covering a detach that ended the recording early (see
+        ``test_tmux_recorder_detached_from_outside_is_not_a_finished_recording``).
         """
         r, _cast = _run_block(
             _stop_block("tmux-screen-recording.md"), "ok", tmp_path,
@@ -7902,6 +7918,43 @@ class TestCaptureFlowExecution:
             "a finished recording was reported incomplete because step 5 was "
             "pasted twice: " + r.stderr)
         assert "incomplete" not in r.stderr, r.stderr
+
+    def test_tmux_recorder_detached_from_outside_is_not_a_finished_recording(
+            self, tmp_path):
+        """A detach this step did not send ends the recording early.
+
+        asciinema's status is 0 whenever the recording ran to completion, and
+        *any* detach ends it that way: the prefix pressed in the recorder
+        pane, `pm session --disconnect-others`, a supervisor detaching
+        clients. The state is exactly the one the re-paste case above accepts
+        (recorder gone, TUI alive, `recorder.status` 0), so the status alone
+        cannot tell a finished capture from one that stopped where the
+        scenario was — the completion check the PR exists to close.
+
+        The capture-directory claim (step 2) is the handle that can: a capture
+        in progress holds it, and step 5 releases it as its last statement, so
+        a re-paste finds it clear. Verified live in this container on tmux
+        3.2a + asciinema 2.1.0 with the recipe's own recorder and step-5
+        block: a `C-b d` sent from outside left status 0, a non-empty cast,
+        a non-empty transcript and the claim still set, and the pre-fix step 5
+        exited 0 on it.
+        """
+        r, _cast = _run_block(
+            _stop_block("tmux-screen-recording.md"), "ok", tmp_path,
+            target=True,
+            state_files={"claim.pm-test": str(tmp_path / "cap")},
+            files={"recording.cast": '{"version": 2}\n',
+                   "transcript.log": "pane output\n",
+                   "recorder.status": "0\n"})
+        assert r.returncode != 0, (
+            "a recorder detached from outside passed as a finished "
+            "recording: " + r.stderr)
+        assert "still in progress" in r.stderr, (
+            "the early end was not named as a capture still in progress: "
+            + r.stderr)
+        assert not (tmp_path / "state" / "claim.pm-test").exists(), (
+            "the refusal left the claim behind, so the next attempt in this "
+            "session is refused by a capture that is no longer running")
 
     def test_tmux_detach_that_fails_is_not_a_finished_recording(self, tmp_path):
         """The detach itself is the last handle that can race the recorder.

@@ -879,7 +879,13 @@ pm tui send a -s "$TARGET" || send_failed   # open the picker
 #    recording"). With a clean status the cast, status and transcript checks
 #    below decide, exactly as they do when the session is gone too. A
 #    recorder that ended because the session itself ended is a legitimate
-#    finish — the wait below sees it. (Every pipe stop and recorder-session
+#    finish — the wait below sees it. A clean status is not proof this step
+#    ended the recording, though: any detach ends it the same way (the prefix
+#    pressed in the recorder pane, `pm session --disconnect-others`, a
+#    supervisor detaching clients) and leaves a cast that stops where the
+#    scenario was. The capture-directory claim tells a re-paste — which finds
+#    it released — from a recording that ended under a capture still in
+#    progress, which is failed. (Every pipe stop and recorder-session
 #    kill below is best-effort: when the session is already gone the pipe is
 #    gone with it, and `tmux pipe-pane`/`tmux kill-session` would otherwise
 #    print "can't find session: …" on a run that succeeded. Every path that
@@ -992,13 +998,44 @@ if ! tmux has-session -t "=pm-recorder" 2>/dev/null || \
             tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
             exit 1
         fi
+        # ... and a clean status is not proof that *this step* ended it. Any
+        # detach ends the attach the same way — the prefix pressed in the
+        # recorder pane, `pm session --disconnect-others`, a supervisor
+        # detaching clients — and leaves asciinema's status 0 with a cast that
+        # stops wherever the scenario was, which is the truncated recording
+        # this check exists to reject. The status cannot tell the two apart;
+        # the capture-directory claim can. A capture in progress holds it
+        # (step 2 takes it before the pipe, every failure path and step 5's
+        # own end release it), so a re-paste of this block — the state a
+        # resumed session sees, and the reason a clean status is accepted here
+        # at all — finds it clear, while a recorder that ended under a claim
+        # that is still set did not end here. Verified live in this container
+        # on tmux 3.2a + asciinema 2.1.0: a `C-b d` sent from outside left
+        # status 0, a non-empty cast and the claim still set, and the block
+        # without this check exited 0 on it.
+        in_progress=$(tmux show-options -t "=$TARGET:0.0" -v @pm_capture_dir 2>/dev/null || true)
+        if [ -n "$in_progress" ]; then
+            echo "the recorder had already ended with a clean status, but this" \
+                "capture is still in progress (step 2's claim on $TARGET is" \
+                "still set) — the detach that ended it was not this step's, so" \
+                "the cast stops where the scenario was and is not a finished" \
+                "recording; re-record the scenario (a claim left by a step 5" \
+                "killed after its checks is the one state this cannot tell" \
+                "apart: 'tmux set-option -u -t =$TARGET:0.0 @pm_capture_dir'" \
+                "and a re-run is then the worker's call)" >&2
+            tmux kill-session -t "=pm-recorder" 2>/dev/null || true
+            tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
+            tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
+            exit 1
+        fi
     fi
-    # Both are gone (or the recorder already ended with a clean status): the
-    # session itself ended, which ended the attach and so the recording, or
-    # this step's own detach already ran. Nothing left to detach; the wait
-    # below is a no-op. That explains why the recorder exited, not whether
-    # asciinema finished — the status check below is what decides in this
-    # branch, because there is no live session left as a witness.
+    # Both are gone (or the recorder already ended with a clean status and
+    # this capture's claim released): the session itself ended, which ended
+    # the attach and so the recording, or this step's own detach already ran.
+    # Nothing left to detach; the wait below is a no-op. That explains why the
+    # recorder exited, not whether asciinema finished — the status check below
+    # is what decides in this branch, because there is no live session left as
+    # a witness.
 else
     # The detach is the last handle that can race the recorder: if it died
     # between the check above and this key send, `send-keys` fails (the

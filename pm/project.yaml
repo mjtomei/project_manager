@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T17:36:35.225699+00:00'
+  updated_at: '2026-11-01T18:42:15.927346+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38649,6 +38649,36 @@ prs:
       dropped.'
     created_at: '2026-11-01T17:36:35Z'
     last_edited: '2026-11-01T17:36:35Z'
+  - id: note-36b7d7e
+    text: 'Review loop 928f i35: one leftover in the kept recipe scope, the PR''s
+      own class (a completion check that cannot tell a finished recording from one
+      that stopped early); recipe + tests + specs, no pm_core change. (1) Step 5 accepts
+      ''recorder gone, TUI alive, recorder.status 0'' as a finish (R81), which is
+      right for a re-paste — but any detach leaves that state: the prefix pressed
+      in the recorder pane, `pm session --disconnect-others`, a supervisor detaching
+      clients. asciinema''s status is 0 whenever the recording ran to completion,
+      so the check could not tell a finished capture from one that stopped where the
+      scenario was. Verified live on tmux 3.2a + asciinema 2.1.0 with the recipe''s
+      own recorder command and its step-5 block extracted verbatim on a private TMUX_TMPDIR:
+      a `C-b d` sent from outside left status 0, a non-empty cast, a non-empty transcript
+      and step 2''s claim still set, and HEAD''s step 5 exited 0 on it, while the
+      normal path exits 0 and releases the claim. (2) The capture-directory claim
+      is the in-progress handle: a capture holds it from step 2 until step 5''s last
+      statement releases it, so a re-paste finds it clear and a recorder that ended
+      under a set claim did not end here. Step 5 now fails that state — the message
+      names the early detach and the one state it cannot tell apart (a claim left
+      by a step 5 killed after its checks) — and its failure path kills the dead recorder
+      session, stops the pipe and releases the claim. No new file or state; produced-files
+      list and manifest unchanged. test_tmux_recorder_detached_from_outside_is_not_a_finished_recording
+      fails against HEAD''s recipes (rc 0) and passes with the fix; deleting the check
+      fails exactly it (1 failed, 367 passed). Recipe file 368 passed (was 367); full
+      suite 5565 passed, 1 skipped, 0 failed (494.46 s, run once on the final tree).
+      Evidence: /pm-captures/review-928f-i35/ (probe-live.log, pre-fix-mutation.log,
+      mutation-check.log, recipe-file.log, suite.log, README.md, scripts/). impl.md
+      R100 (and the Files table completed for R96-R100), qa.md. The dropped helper/prompt/verifier
+      work stays dropped.'
+    created_at: '2026-11-01T18:42:15Z'
+    last_edited: '2026-11-01T18:42:15Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

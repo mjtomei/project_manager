@@ -1274,6 +1274,20 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   The next capture clears such a leftover, so a capture is not lost — but the
   failed run leaves the shared name on the server, which is exactly the state
   R96 handles.
+- A tmux recorder detached by something other than step 5 — the prefix
+  pressed in the recorder pane, `pm session --disconnect-others`, a
+  supervisor detaching clients — must not be accepted as a finished
+  recording. That detach leaves asciinema's status 0 with a cast that stops
+  where the scenario was, the same state a re-paste of step 5 legitimately
+  sees, so the status alone cannot tell them apart. Step 5's Then: with the
+  capture-directory claim still set (a capture in progress) it exits 1 with
+  "the recorder had already ended with a clean status, but this capture is
+  still in progress", and with the claim released (a re-paste after a
+  successful run) it exits 0. Verified live on tmux 3.2a + asciinema 2.1.0:
+  a `C-b d` sent from outside left status 0, a non-empty cast, a non-empty
+  transcript and the claim set, and the pre-fix step 5 exited 0 on it while
+  the fixed step exits 1; the normal path exits 0 and releases the claim
+  (review loop 928f i35, R100).
 
 ## Pass / Fail criteria
 
