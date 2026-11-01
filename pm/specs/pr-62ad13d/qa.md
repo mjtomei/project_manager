@@ -1,7 +1,7 @@
 # pr-62ad13d — QA spec: `pm pr close` is a non-destructive lifecycle action
 
 Implementation spec: `pm/specs/pr-62ad13d/impl.md`.
-Regression suite: `tests/test_pr_close.py` (66 tests) plus
+Regression suite: `tests/test_pr_close.py` (67 tests) plus
 `tests/test_fake_github.py`, `tests/test_cli_helpers.py`,
 `tests/test_store_validation.py`, `tests/test_watcher_loop.py`.
 
@@ -13,6 +13,14 @@ Review-loop `3dcb i1` (2026-11-01) added R16's `--remove` vs concurrent-merge
 case: `pr_close`'s at-lock merged guard now also covers `--remove`, so a record
 that merged while the removal was in flight is refused rather than deleted
 (`test_remove_does_not_delete_a_concurrently_merged_record`).
+
+Review-loop `3dcb i2` (2026-11-01) changed no behaviour: the three at-lock
+refusal sentences (`PR <id> {was removed|became <status>} while <doing> — …`)
+now come from one `helpers._report_launch_blocked`, so the wording QA verified
+in S25/S27 is produced by a single definition and the three commands cannot
+drift. `tests/test_cli_helpers.py::TestReportLaunchBlocked` pins both
+branches; the end-to-end launch tests and their sentences are unchanged, so
+the runtime checks of S25/S27 still apply verbatim.
 
 History: the user-authorized integration merged `origin/master` `eaf3372e`
 (PR #249, QA execution workers routed through Claude mixed workers) into this
@@ -54,7 +62,7 @@ head; both fixed races must be re-verified at runtime.**
 Change under test: `pm_core/cli/pr.py:pr_close()` (with
 `pm_core/cli/helpers.py:_record_status_timestamp`,
 `_terminal_status_at_lock`, `_launch_blocked_at_lock`,
-`LAUNCH_REMOVED_AT_LOCK`, `_closed_reopen_hint`,
+`LAUNCH_REMOVED_AT_LOCK`, `_report_launch_blocked`, `_closed_reopen_hint`,
 `pm_core/pr_utils.py:TERMINAL_PR_STATES`, `pm_core/pr_sync.py`,
 `pm_core/tui/sync.py`, `pm_core/qa_loop.py` terminal guards and
 `_live_pr_status()`, `pm_core/review_loop.py` `_pr_is_terminal`,

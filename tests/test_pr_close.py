@@ -149,6 +149,69 @@ def _close_calls(backend: FakeGitHubBackend) -> list[list[str]]:
     return [c for c in backend.calls if c[:2] == ["pr", "close"]]
 
 
+def _racing_close(pm_dir: Path, pr_id: str = "pr-001",
+                  closed_at: str = "2026-09-01T00:00:00+00:00"):
+    """A ``store.locked_update`` stand-in that closes *pr_id* on the way in.
+
+    A launch command (or a competing close) checks its pre-lock snapshot, then
+    does real work before writing under the store lock — the window a
+    concurrent `pm pr close` lands in.
+    """
+    real_locked_update = store.locked_update
+
+    def racing_update(root, fn, **kwargs):
+        data = store.load(root)
+        entry = store.get_pr(data, pr_id)
+        entry["status"] = "closed"
+        entry["closed_at"] = closed_at
+        store.save(data, root)
+        return real_locked_update(root, fn, **kwargs)
+
+    return racing_update
+
+
+def _racing_remove(pm_dir: Path, pr_id: str = "pr-001"):
+    """A ``store.locked_update`` stand-in that deletes *pr_id* on the way in.
+
+    ``pm pr close --remove`` deletes the registry entry outright (the branch
+    and workdir stay on disk).  A launch that loaded its pre-lock snapshot
+    before that removal finds ``store.get_pr`` answering ``None`` inside the
+    lock — the removed-entry half of the at-lock guard.
+    """
+    real_locked_update = store.locked_update
+
+    def racing_update(root, fn, **kwargs):
+        data = store.load(root)
+        data["prs"] = [p for p in data.get("prs") or []
+                       if p.get("id") != pr_id]
+        store.save(data, root)
+        return real_locked_update(root, fn, **kwargs)
+
+    return racing_update
+
+
+def _racing_merge(pm_dir: Path, pr_id: str = "pr-001",
+                  merged_at: str | None = None):
+    """A ``store.locked_update`` stand-in that merges *pr_id* on the way in.
+
+    A merge landing between a close's load and its store lock is newer than
+    the command's request: a plain close must refuse rather than rewrite the
+    merge, and ``--remove`` must not delete the evidence it never saw.
+    """
+    real_locked_update = store.locked_update
+
+    def racing_update(root, fn, **kwargs):
+        data = store.load(root)
+        entry = store.get_pr(data, pr_id)
+        entry["status"] = "merged"
+        if merged_at:
+            entry["merged_at"] = merged_at
+        store.save(data, root)
+        return real_locked_update(root, fn, **kwargs)
+
+    return racing_update
+
+
 # ---------------------------------------------------------------------------
 # default close: retain everything
 # ---------------------------------------------------------------------------
@@ -747,19 +810,10 @@ def test_merge_discovered_after_close_drops_the_closure_time(tmp_path):
 def test_close_does_not_overwrite_a_concurrent_merge(tmp_path):
     """A merge landing between load and the store lock must not become closed."""
     project = _make_project(tmp_path)
-    real_locked_update = store.locked_update
-
-    def racing_update(root, fn, **kwargs):
-        # Another process (e.g. `pm pr merge` / a sync) merges the PR after
-        # this command loaded its snapshot but before it takes the lock.
-        data = store.load(root)
-        store.get_pr(data, "pr-001")["status"] = "merged"
-        store.save(data, root)
-        return real_locked_update(root, fn, **kwargs)
-
     with _fake_gh() as backend:
         backend.add_pr(head="pm/pr-001")
-        with mock.patch.object(pr_mod.store, "locked_update", racing_update):
+        with mock.patch.object(pr_mod.store, "locked_update",
+                               _racing_merge(project["pm_dir"])):
             result = _run_close(project["pm_dir"], "pr-001")
 
     assert result.exit_code != 0
@@ -777,21 +831,12 @@ def test_remove_does_not_delete_a_concurrently_merged_record(tmp_path):
     like the plain close, and let a re-run act on the now-known merged record
     (A5)."""
     project = _make_project(tmp_path, status="qa")
-    real_locked_update = store.locked_update
-
-    def racing_update(root, fn, **kwargs):
-        # `pm pr merge` (or a sync) finalizes the PR after this command loaded
-        # its snapshot but before it takes the lock.
-        data = store.load(root)
-        entry = store.get_pr(data, "pr-001")
-        entry["status"] = "merged"
-        entry["merged_at"] = "2026-09-01T00:00:00+00:00"
-        store.save(data, root)
-        return real_locked_update(root, fn, **kwargs)
-
     with _fake_gh() as backend:
         backend.add_pr(head="pm/pr-001")
-        with mock.patch.object(pr_mod.store, "locked_update", racing_update):
+        with mock.patch.object(
+                pr_mod.store, "locked_update",
+                _racing_merge(project["pm_dir"],
+                              merged_at="2026-09-01T00:00:00+00:00")):
             result = _run_close(project["pm_dir"], "pr-001", "--remove")
 
     assert result.exit_code != 0
@@ -810,17 +855,10 @@ def test_close_noops_when_entry_removed_concurrently(tmp_path):
     """A concurrent `--remove` between load and lock must not raise or
     resurrect the entry."""
     project = _make_project(tmp_path)
-    real_locked_update = store.locked_update
-
-    def racing_update(root, fn, **kwargs):
-        data = store.load(root)
-        data["prs"] = [p for p in data["prs"] if p["id"] != "pr-001"]
-        store.save(data, root)
-        return real_locked_update(root, fn, **kwargs)
-
     with _fake_gh() as backend:
         backend.add_pr(head="pm/pr-001")
-        with mock.patch.object(pr_mod.store, "locked_update", racing_update):
+        with mock.patch.object(pr_mod.store, "locked_update",
+                               _racing_remove(project["pm_dir"])):
             result = _run_close(project["pm_dir"], "pr-001")
 
     assert result.exit_code == 0, result.output
@@ -833,17 +871,10 @@ def test_remove_noops_when_entry_removed_concurrently(tmp_path):
     """A concurrent `--remove` must not make this one claim it removed a
     record that was already gone (and must not raise)."""
     project = _make_project(tmp_path)
-    real_locked_update = store.locked_update
-
-    def racing_update(root, fn, **kwargs):
-        data = store.load(root)
-        data["prs"] = [p for p in data["prs"] if p["id"] != "pr-001"]
-        store.save(data, root)
-        return real_locked_update(root, fn, **kwargs)
-
     with _fake_gh() as backend:
         backend.add_pr(head="pm/pr-001")
-        with mock.patch.object(pr_mod.store, "locked_update", racing_update):
+        with mock.patch.object(pr_mod.store, "locked_update",
+                               _racing_remove(project["pm_dir"])):
             result = _run_close(project["pm_dir"], "pr-001", "--remove")
 
     assert result.exit_code == 0, result.output
@@ -1085,27 +1116,6 @@ def test_closed_pr_cannot_be_started(tmp_path):
     assert "pm pr edit pr-001 --status pending" in start.output
 
 
-def _racing_close(pm_dir: Path, pr_id: str = "pr-001",
-                  closed_at: str = "2026-09-01T00:00:00+00:00"):
-    """A ``store.locked_update`` stand-in that closes *pr_id* on the way in.
-
-    The launch commands check their pre-lock snapshot, then do real work
-    (clone/push, draft-PR upgrade) before writing the transition under the
-    store lock — the window a concurrent `pm pr close` lands in.
-    """
-    real_locked_update = store.locked_update
-
-    def racing_update(root, fn, **kwargs):
-        data = store.load(root)
-        entry = store.get_pr(data, pr_id)
-        entry["status"] = "closed"
-        entry["closed_at"] = closed_at
-        store.save(data, root)
-        return real_locked_update(root, fn, **kwargs)
-
-    return racing_update
-
-
 def test_start_does_not_record_a_start_on_a_concurrently_closed_pr(tmp_path):
     """`pm pr start` clones and pushes before it writes the start under the
     lock; a close landing in that window must win — the terminal record keeps
@@ -1187,26 +1197,6 @@ def test_signoff_does_not_launch_against_a_concurrently_closed_pr(tmp_path):
     entry = _load_entry(project["pm_dir"])
     assert entry["status"] == "closed"
     assert entry["closed_at"] == "2026-09-01T00:00:00+00:00"
-
-
-def _racing_remove(pm_dir: Path, pr_id: str = "pr-001"):
-    """A ``store.locked_update`` stand-in that deletes *pr_id* on the way in.
-
-    ``pm pr close --remove`` deletes the registry entry outright (the branch
-    and workdir stay on disk).  A launch that loaded its pre-lock snapshot
-    before that removal finds ``store.get_pr`` answering ``None`` inside the
-    lock — the removed-entry half of the at-lock guard.
-    """
-    real_locked_update = store.locked_update
-
-    def racing_update(root, fn, **kwargs):
-        data = store.load(root)
-        data["prs"] = [p for p in data.get("prs") or []
-                       if p.get("id") != pr_id]
-        store.save(data, root)
-        return real_locked_update(root, fn, **kwargs)
-
-    return racing_update
 
 
 def test_review_does_not_launch_against_a_removed_pr(tmp_path):

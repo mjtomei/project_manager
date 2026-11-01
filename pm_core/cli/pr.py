@@ -32,7 +32,6 @@ from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_s
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
-    LAUNCH_REMOVED_AT_LOCK,
     _closed_reopen_hint,
     _ensure_workdir,
     _get_pm_session,
@@ -45,6 +44,7 @@ from pm_core.cli.helpers import (
     format_pr_line,
     _pr_id_sort_key,
     _record_status_timestamp,
+    _report_launch_blocked,
     _require_pr,
     _resolve_pr_id,
     _resolve_repo_dir,
@@ -1152,17 +1152,11 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         data["project"]["active_pr"] = pr_id
 
     data = store.locked_update(root, apply)
-    if blocked_at_lock == LAUNCH_REMOVED_AT_LOCK:
-        click.echo(
-            f"PR {pr_id} was removed while starting — not recording the "
-            f"start. Any prepared workdir is left in place.", err=True)
-        raise SystemExit(1)
     if blocked_at_lock:
-        click.echo(
-            f"PR {pr_id} became {blocked_at_lock} while starting — not "
-            f"recording the start. Any prepared workdir is left in place.",
-            err=True)
-        raise SystemExit(1)
+        _report_launch_blocked(
+            pr_id, blocked_at_lock, doing="starting",
+            consequence="not recording the start. Any prepared workdir is "
+                        "left in place.")
     # Reload pr_entry from updated data (now contains gh_pr_number)
     pr_entry = store.get_pr(data, pr_id) or pr_entry
     trigger_tui_refresh()
@@ -1751,16 +1745,11 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         _record_status_timestamp(pr, "in_review")
 
     store.locked_update(root, apply)
-    if blocked_at_lock == LAUNCH_REMOVED_AT_LOCK:
-        click.echo(
-            f"PR {pr_id} was removed while opening the review — not marked "
-            f"in_review and no review window was opened.", err=True)
-        raise SystemExit(1)
     if blocked_at_lock:
-        click.echo(
-            f"PR {pr_id} became {blocked_at_lock} while opening the review — "
-            f"not marked in_review and no review window was opened.", err=True)
-        raise SystemExit(1)
+        _report_launch_blocked(
+            pr_id, blocked_at_lock, doing="opening the review",
+            consequence="not marked in_review and no review window was "
+                        "opened.")
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
     if no_window:
@@ -1869,17 +1858,11 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
             transitioned = True
 
     store.locked_update(root, apply)
-    if blocked_at_lock == LAUNCH_REMOVED_AT_LOCK:
-        click.echo(
-            f"PR {pr_id} was removed while opening the sign-off — not "
-            f"marked sign_off and no sign-off window was opened.", err=True)
-        raise SystemExit(1)
     if blocked_at_lock:
-        click.echo(
-            f"PR {pr_id} became {blocked_at_lock} while opening the "
-            f"sign-off — not marked sign_off and no sign-off window was "
-            f"opened.", err=True)
-        raise SystemExit(1)
+        _report_launch_blocked(
+            pr_id, blocked_at_lock, doing="opening the sign-off",
+            consequence="not marked sign_off and no sign-off window was "
+                        "opened.")
     if transitioned:
         click.echo(f"PR {_pr_display_id(pr_entry)} marked as sign_off.")
         trigger_tui_refresh()

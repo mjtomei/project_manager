@@ -6,11 +6,13 @@ from unittest.mock import patch
 import pytest
 
 from pm_core.cli.helpers import (
+    LAUNCH_REMOVED_AT_LOCK,
     _infer_pr_id,
     _make_pr_entry,
     _pr_display_id,
     _pr_id_sort_key,
     _record_status_timestamp,
+    _report_launch_blocked,
     _resolve_pr_id,
 )
 
@@ -305,6 +307,39 @@ class TestRecordStatusTimestampClosedAt:
         entry = {"status": "in_review"}
         with pytest.raises(TypeError):
             _record_status_timestamp(entry, "closed", "in_review")
+
+
+# ---------------------------------------------------------------------------
+# _report_launch_blocked — one wording for a launch that lost the lock
+# ---------------------------------------------------------------------------
+
+
+class TestReportLaunchBlocked:
+    """The three launch commands pass their own ``doing``/``consequence``
+    clauses; the state half ("was removed" vs "became <status>") is derived
+    from ``_launch_blocked_at_lock``'s result here, so the sentence a user
+    reads when a concurrent close beat their launch cannot drift apart
+    (pr-62ad13d)."""
+
+    def test_removed_record_reads_was_removed(self, capsys):
+        with pytest.raises(SystemExit) as exc:
+            _report_launch_blocked(
+                "pr-001", LAUNCH_REMOVED_AT_LOCK, doing="starting",
+                consequence="not recording the start.")
+        assert exc.value.code == 1
+        assert capsys.readouterr().err.strip() == (
+            "PR pr-001 was removed while starting — not recording the start.")
+
+    def test_terminal_status_reads_became(self, capsys):
+        with pytest.raises(SystemExit) as exc:
+            _report_launch_blocked(
+                "pr-001", "closed", doing="opening the review",
+                consequence="not marked in_review and no review window was "
+                            "opened.")
+        assert exc.value.code == 1
+        assert capsys.readouterr().err.strip() == (
+            "PR pr-001 became closed while opening the review — not marked "
+            "in_review and no review window was opened.")
 
 
 # ---------------------------------------------------------------------------

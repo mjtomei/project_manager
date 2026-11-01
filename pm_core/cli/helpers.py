@@ -529,6 +529,25 @@ def _launch_blocked_at_lock(pr: dict | None) -> str | None:
     return _terminal_status_at_lock(pr)
 
 
+def _report_launch_blocked(pr_id: str, blocked: str, *, doing: str,
+                           consequence: str) -> None:
+    """Report a launch that lost the store lock to a close/merge/removal.
+
+    ``doing`` is the gerund phrase after "while" (``"starting"``,
+    ``"opening the review"``) and ``consequence`` the clause after the em
+    dash.  The state wording — "was removed" versus "became <status>" — is
+    derived here from :func:`_launch_blocked_at_lock`'s result, so start,
+    review and sign-off cannot drift apart in the one sentence a user reads
+    when their launch was beaten by a concurrent close (pr-62ad13d).  Echoes
+    and exits 1; the caller must not have printed a success line or opened a
+    window yet.
+    """
+    state = ("was removed" if blocked == LAUNCH_REMOVED_AT_LOCK
+             else f"became {blocked}")
+    click.echo(f"PR {pr_id} {state} while {doing} — {consequence}", err=True)
+    raise SystemExit(1)
+
+
 def _closed_reopen_hint(pr_id: str, purpose: str | None = None) -> str:
     """The refusal sentence for a command run against a retained closed PR.
 

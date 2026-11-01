@@ -566,6 +566,22 @@ workdirs are touched.
     `test_remove_does_not_delete_a_concurrently_merged_record` (fails on the
     previous head — exit 0, the merged entry is gone).
 
+54. The at-lock refusal sentence has one definition (review 3dcb i2).  The
+    start, review and sign-off commands each repeated the same five lines —
+    `PR <id> {was removed|became <status>} while {doing} — <consequence>`,
+    echo and `SystemExit(1)` — with only two clauses differing, exactly the
+    drift class items 47 (`_closed_reopen_hint`) and 51
+    (`_launch_blocked_at_lock`) consolidated.  `helpers._report_launch_blocked`
+    now derives the state half from `_launch_blocked_at_lock`'s result and
+    takes the command-specific `doing`/`consequence` clauses; the three call
+    sites are one call each and `pr.py` no longer imports the
+    `LAUNCH_REMOVED_AT_LOCK` sentinel.  No behaviour change — the messages
+    are byte-identical and the three end-to-end launch tests plus the new
+    `tests/test_cli_helpers.py::TestReportLaunchBlocked` pin both branches.
+    The concurrent-close tests also reuse `_racing_close` / `_racing_remove`
+    (and a new `_racing_merge`) instead of four inline
+    `store.locked_update` closures.
+
 The pre-existing `tests/test_pr_enhancements.py:746`
 (`TestGitHubCloseResilience`) asserted the *old* destructive outcome (workdir
 removed, entry removed); it was rewritten to assert retention
@@ -713,13 +729,19 @@ No **[UNRESOLVED]** ambiguities.
   warning set derives from `TERMINAL_PR_STATES` (review e89f i2).
 - `pm/plans/plan-a35369f.md` — `note` bullet marking the branch-deletion
   premise of its ruleset item obsolete (review c02f i13).
+- `pm/plans/refactor-migration-map.md` — the two `pr close` migration notes
+  drop the stale "branch cleanup" premise (close retains the registry entry,
+  branch and workdir; review 3dcb i1).
 - `pm_core/cli/helpers.py` — `_record_status_timestamp` `closed_at`, plus the
   `previous_status` parameter that makes the helper the single owner of the
   field's history (drop on leaving `closed`, keep on restating it; review
   b320 i1), `_terminal_status_at_lock` — the in-lock re-check `pm pr
   start` / `pm pr review` use so a concurrent close wins (review e89f i4) —
-  and `_closed_reopen_hint`, the one definition of the closed-PR refusal
-  sentence every lifecycle command prints (review e086 i1).
+  `_launch_blocked_at_lock` (the same check plus the removed-record case,
+  item 51), `_closed_reopen_hint`, the one definition of the closed-PR refusal
+  sentence every lifecycle command prints (review e086 i1), and
+  `_report_launch_blocked`, the one definition of the at-lock refusal sentence
+  start/review/sign-off print (review 3dcb i2).
 - `pm_core/pr_utils.py` — `TERMINAL_PR_STATES` (the `merged`/`closed` pair
   shared by the sync guards and the `pm pr list --open` filter).
 - `pm_core/autostart_state.py`, `pm_core/cli/session.py`, `pm_core/qa_loop.py`,
@@ -756,7 +778,8 @@ No **[UNRESOLVED]** ambiguities.
   `--delete-branch` emulation), `tests/test_store_validation.py`
   (`closed_at` lifecycle backfill, review e89f i2),
   `tests/test_cli_helpers.py` (`TestRecordStatusTimestampClosedAt` — the
-  helper's `closed_at` contract, review e89f i1),
+  helper's `closed_at` contract, review e89f i1 — and `TestReportLaunchBlocked`,
+  the at-lock refusal wording, review 3dcb i2),
   `tests/test_tech_tree_widgets.py` (the hide-closed empty state, QA S32), and
   `tests/test_watcher_loop.py` (the watcher prompt's `closed` lifecycle line,
   review a81e i1).
