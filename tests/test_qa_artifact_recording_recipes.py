@@ -689,16 +689,20 @@ class TestRecipes:
         """A leftover recorder from an earlier run must be cleared first.
 
         ``new-session`` fails with "duplicate session" while the previous
-        run's recorder is still there, and the start check reports that as
-        "could not start the recorder session", so a re-run would end before
-        recording anything. (Before that check the run carried on, but not
-        into a false pass: the tmux readiness wait took the *old* session's
-        pane content as readiness and drove the previous run's attach client,
-        while the CLI wait — which is on the cast file, and step 0 clears it —
-        ran out its deadline against a ``rec`` session that never wrote a
-        cast.) Clearing the session up front is what makes a re-run
-        deterministic, and the start check is what makes the leftover loud if
-        a concurrent run recreates it after the clear.
+        run's recorder is still there, so a leftover has to be cleared (the
+        CLI scaffold's ``kill-session``) or refused (the tmux recipe's step
+        3, which stops at "a recorder is already running on this server …"
+        and names step 5); a duplicate that appears in the gap before
+        ``new-session`` is reported as "could not start the recorder
+        session", and either way a re-run ends before recording anything.
+        (Before that check the run carried on, but not into a false pass: the
+        tmux readiness wait took the *old* session's pane content as
+        readiness and drove the previous run's attach client, while the CLI
+        wait — which is on the cast file, and step 0 clears it — ran out its
+        deadline against a ``rec`` session that never wrote a cast.) Clearing
+        the session up front (or refusing the live one) is what makes a
+        re-run deterministic, and the start check is what makes a duplicate
+        loud if a concurrent run recreates it after the clear.
 
         The CLI scaffold clears the *session*, not the server: killing a
         server and reconnecting a few milliseconds later races its exit and
@@ -1152,7 +1156,9 @@ class TestRecipes:
         """asciinema's own error must land on disk, not only in the pane.
 
         Its startup errors — a broken ``-c`` command, an unwritable cast path
-        — go to stderr, and every failure path tears the pane down, so
+        — go to stderr, and the failure paths tear the pane down (the stop
+        step's retryable failures are the exception, and they leave it up
+        with a message saying so), so
         without the redirect the worker is told the recording failed and has
         nothing left to read.
         """
@@ -1335,10 +1341,12 @@ class TestRecipes:
         """The recorder's own error has to survive the pane it was printed in.
 
         The attach's errors travel through the pty and stay in the pane and
-        the cast, but asciinema's *own* startup errors go to stderr — and
-        every failure path tears the recorder session down. The redirect puts
-        them on disk; verified that it does not disturb the recording (the
-        attach error is still drawn in the pane and recorded in the cast).
+        the cast, but asciinema's *own* startup errors go to stderr — and the
+        failure paths that act on the recorder tear the session down (the
+        capture-directory guards refuse before they act on anything). The
+        redirect puts them on disk; verified that it does not disturb the
+        recording (the attach error is still drawn in the pane and recorded in
+        the cast).
         """
         block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
         cap = tmp_path / "cap"

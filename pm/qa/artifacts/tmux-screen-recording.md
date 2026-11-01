@@ -72,8 +72,10 @@ transcript somewhere these steps never look (step 0 refuses one rather than
 failing later as an empty transcript, and every step pasted on its own —
 2, 3, 4 and 5 — refuses it too, because each resolves the path against its
 own shell or the session's directory). A leftover `pm-recorder`
-session makes step 3's `new-session` fail with "duplicate session" — step 3
-reports that as a start failure, so the run stops there instead of passing
+session is refused by step 3 before it starts anything ("a recorder is
+already running on this server — end it with step 5 …"), and a duplicate that
+appears in the gap before `new-session` stops the run at "could not start the
+recorder session" — either way the run stops there instead of passing
 the readiness wait on the *previous* run's attach client. The clear names the
 session exactly (`=pm-recorder`): a bare name is prefix-matched when no
 session has the whole name, and pm's own sessions are `pm-<repo>-<hash>`, so
@@ -280,11 +282,16 @@ done
 #    writes over them, so both stop steps read the same files as their own.
 #    Claim the capture directory before attaching the pipe and refuse one that
 #    is already claimed. The claim is a tmux session option, so it outlives
-#    this paste; step 5 clears it when the run ends, and every failure path
-#    after the claim is taken releases it too. A claim left behind by a run
-#    that was killed outright (no failure path runs) is cleared with
-#    `tmux set-option -u -t <session> @pm_capture_dir` — both refusal messages
-#    below say so, because a stale claim would otherwise block the next run.
+#    this paste; step 5 clears it when the run ends, and the failure paths
+#    that reach the session's handle release it too. The capture-directory
+#    guards of steps 3, 4 and 5 refuse before the step can tell which claim is
+#    its own — and a claim a live run still owns must not be cleared — so a
+#    run abandoned at one of those refusals leaves the claim behind; the next
+#    step 2 in this session, into another directory, then refuses and names
+#    the clear. A claim left behind by a run that was killed outright (no
+#    failure path runs) is cleared the same way (`tmux set-option -u -t
+#    <session> @pm_capture_dir` — both refusal messages below say so), because
+#    a stale claim would otherwise block the next run.
 #    The claim is compared as a *directory*, not as the text typed: `~/cap`
 #    and an absolute path to it are one claim (a quoted `~` never expands, so
 #    comparing the strings let two runs claim one directory), and `pwd -P`
@@ -451,9 +458,11 @@ fi
 # window in which a second run passes the same check, attaches its own pipe
 # (replacing this one — the takeover the claim exists to stop), and only then
 # writes its claim over this one. The claim is released again if the pipe
-# cannot be attached — nothing is recording then — and every later failure
-# path releases it the same way (step 5 does at the end of a successful run),
-# so a failed run does not leave a stale claim behind.
+# cannot be attached — nothing is recording then — and the later failure
+# paths that reach the session's handle release it the same way (step 5 does
+# at the end of a successful run). A step refused by its own capture-directory
+# guard fires before it can tell which claim is its own, so that run leaves
+# the claim for the next step 2 in this session to name.
 #    The write names the target exactly (`=…:0.0`), and the guard below depends
 # on it: a plain `-t "$TARGET"` is prefix-matched when the target ends between
 # the assert above and this write, so it *succeeds* against a grouped
@@ -485,9 +494,10 @@ tmux pipe-pane -t "=$TARGET:0.0" "cat >> <capture-dir>/transcript.log" || {
 #    that was killed, and `test -s` on the cast cannot. `\$?` is escaped so
 #    the pane's shell expands it, not this one. asciinema's stderr goes to a
 #    file for the same reason: its own errors (an unwritable cast path, a
-#    bad option) are what a failed run needs, and every failure path below
-#    tears the pane down. The attach's own errors still go through the pty
-#    and stay visible in the pane and the cast.
+#    bad option) are what a failed run needs, and the failure paths below
+#    that act on the recorder tear the pane down (the capture-directory
+#    guards refuse before they act on anything). The attach's own errors
+#    still go through the pty and stay visible in the pane and the cast.
 #    The attach names the target exactly (`=`) for the same reason every other
 #    handle does: a bare name is prefix-matched when the target session is
 #    gone, so the attach would land on a grouped `<base>~N` session and the
@@ -586,6 +596,14 @@ tmux has-session -t "=$TARGET" 2>/dev/null || {
 # written so far). Only a step with no live recorder may clear this: a
 # recorder that is still up owns the cast it is writing, so refuse it first
 # and name the step that ends it instead of deleting its evidence.
+#    The transcript is deliberately not cleared here. It belongs to step 2's
+#    pipe, which is still attached: removing the file leaves that `cat`
+#    writing to an unlinked inode (verified on tmux 3.2a: after `rm` the path
+#    stays absent while the pane keeps printing, so the output is lost), and
+#    step 5 would report "transcript.log is empty" for a pipe that works. A
+#    restarted attempt's transcript therefore also holds the replaced
+#    attempt's output; the cast, which this step clears, is the per-attempt
+#    evidence.
 if tmux has-session -t "=pm-recorder" 2>/dev/null; then
     echo "a recorder is already running on this server — end it with step 5" \
         "before starting another; if it is a leftover from an abandoned run," \

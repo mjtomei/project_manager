@@ -221,8 +221,10 @@ where the CLI runs.
 #    the pane's shell expands it, not this one. asciinema's stderr goes to
 #    a file rather than the pane for the same reason: its own errors (a
 #    broken `-c` command, an unwritable cast path) are what a failed run
-#    needs, and every failure path below tears the pane down. The recorded
-#    command's own stderr still goes to the pty and is recorded.
+#    needs, and the failure paths below tear the pane down — the stop step's
+#    retryable failures are the exception, and their messages say the
+#    recording is still running. The recorded command's own stderr still goes
+#    to the pty and is recorded.
 # <capture-dir> has to be an absolute path or start with ~/ (the preamble
 # above explains why):
 # the pane command below and step 4's checks resolve it against whichever
@@ -289,11 +291,12 @@ rm -f <capture-dir>/<short-name>/recording.cast \
 # the document that interprets the rest.
 # Failure paths below that tear the scaffold server down save the pane's last
 # screen into the capture dir first — otherwise the messages that point at the
-# pane point at evidence that no longer exists. The stop step's two failures
-# are the exception: they leave the recorder running (the recording is what
-# the worker retries the step against), and the timeout case saves the pane
-# while it is still up. The save is written out at each site rather than
-# defined as a function here: step 4 is
+# pane point at evidence that no longer exists. The stop step's three
+# retryable failures (a mistyped value, one too long to represent, and a bound
+# that ran out) are the exception: they leave the recorder running (the
+# recording is what the worker retries the step against), and the timeout case
+# saves the pane while it is still up. The save is written out at each site
+# rather than defined as a function here: step 4 is
 # pasted on its own for an interactive recording (step 3 is what drives the
 # shell, so the block cannot run as one paste), and a function defined in this
 # block does not exist in that shell.
@@ -360,14 +363,15 @@ done
 #    prefix this block with RECORDER_STOP_TIMEOUT=120 (the variable does not
 #    survive a separate shell invocation, so set it in the same call). The
 #    bound is a hang detector, not a time limit on the recorded work, and
-#    killing a healthy recording loses the evidence — so neither failure
-#    below (a mistyped value, or a bound that ran out on a long command)
-#    tears the recorder down: the recording is exactly what the worker
-#    re-runs this step against. Killing it here made the documented remedy
-#    impossible: re-running with a larger bound then failed with "recorder
-#    status is missing", because the previous run had already destroyed the
-#    pane it was told to wait for (verified live: `sleep 6` recorded, stop
-#    with RECORDER_STOP_TIMEOUT=1, re-run with 60 → the recording was gone).
+#    killing a healthy recording loses the evidence — so none of the failures
+#    below (a mistyped value, one too long for the deadline arithmetic, or a
+#    bound that ran out on a long command) tears the recorder down: the
+#    recording is exactly what the worker re-runs this step against. Killing
+#    it here made the documented remedy impossible: re-running with a larger
+#    bound then failed with "recorder status is missing", because the previous
+#    run had already destroyed the pane it was told to wait for (verified
+#    live: `sleep 6` recorded, stop with RECORDER_STOP_TIMEOUT=1, re-run with
+#    60 → the recording was gone).
 #    The capture directory has to be absolute here too (or start with ~/):
 #    this step is pasted on its own for an interactive recording (step 3 is
 #    what drives the shell, so the scaffold cannot run as one paste), and it

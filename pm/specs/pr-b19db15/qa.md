@@ -134,8 +134,9 @@ recording-recipe bugs that any worker following the recipe hits:
   relative path writes the cast/transcript where the end-of-run checks never
   look — including the tmux recipe's step 2 pasted on its own, whose claim is
   canonicalized while its pipe's command runs in the session's directory
-  (R56); and the CLI stop step's two failures (a bound that ran out, a
-  mistyped `RECORDER_STOP_TIMEOUT`) leave the recording running, so the
+  (R56); and the CLI stop step's three retryable failures (a bound that ran
+  out, a mistyped `RECORDER_STOP_TIMEOUT`, one too long for the 64-bit
+  deadline arithmetic) leave the recording running, so the
   larger-bound re-run they prescribe can actually be applied instead of
   meeting a torn-down pane. (The CLI scaffold's `-L scaffold` socket name is
   shared by every run on the host, so two CLI captures must run in sequence;
@@ -174,8 +175,9 @@ recording-recipe bugs that any worker following the recipe hits:
   attach followed it out" finish the both-gone branch accepts, so the cast,
   `recorder.status` and transcript checks decide: status 0 passes, 128+N or a
   missing status file still fails. Both recipes' step-0 prose also no longer
-  claims a leftover recorder session would pass the readiness wait — the
-  start check stops a duplicate `new-session` before that.
+  claims a leftover recorder session would pass the readiness wait — the tmux
+  recipe's step 3 refuses a live recorder, and a duplicate that appears in
+  the gap is stopped by the start check, before that.
 - a missing input is not a failed job (review loop 7c9c i4): the web-UI
   driver block refuses a missing `driver.mjs` — or an empty one, which is a
   valid ES module that `node` runs successfully (review loop ebd1 i10, below)
@@ -679,9 +681,10 @@ render output (`recording.mp4`/`recording.cast.gif`) left by an earlier run,
 **When** the capture step starts, **Then** the stale files and session are
 cleared first, so the recorder does not abort on it ("asciinema: <path>
 already exists, aborting" on asciinema 2.1.0, the version in the QA image)
-and a duplicate session does not stop the run at "could not start the recorder
-session" (the start check reports that, so the run never reaches the readiness
-wait with the previous run's recorder in place), the new cast is this run's,
+and a leftover recorder session stops the run at the start step (the tmux
+recipe's live-recorder refusal, or "could not start the recorder session" for
+a duplicate that appears in the gap), so the run never reaches the readiness
+wait with the previous run's recorder in place, the new cast is this run's,
 the transcript holds only this run, a capture that fails before the render
 step still leaves no earlier run's video in the capture directory, and the
 directory's `manifest.md` is this run's rather than the previous run's — a
@@ -1034,10 +1037,13 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   Step 2 claims the capture directory in a `@pm_capture_dir` session option
   *before* attaching the pipe, and refuses a session recording a different
   directory, or a directory another live pm session is recording; step 5
-  releases the claim, and so does every failure path after it is taken (a
-  failed run must not make the next attempt look like a collision). A run
-  killed outright leaves a claim no path can release, so both refusal
-  messages name the manual clear (`tmux set-option -u -t <session>
+  releases the claim, and so do the failure paths that reach the session's
+  handle (a failed run must not make the next attempt look like a collision).
+  The capture-directory guards of steps 3, 4 and 5 refuse before they can
+  tell which claim is theirs (and a live run's must not be cleared), so a run
+  abandoned at one of those refusals leaves the claim for the next step 2 to
+  name. A run killed outright leaves a claim no path can release, so both
+  refusal messages name the manual clear (`tmux set-option -u -t <session>
   @pm_capture_dir`) — "end that capture" alone is impossible advice for a
   claim whose capture already ended. Both
   collisions now fail loudly on at least one side instead of passing. The

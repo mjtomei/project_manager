@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T12:23:09.189100+00:00'
+  updated_at: '2026-11-01T12:57:11.667356+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38400,6 +38400,49 @@ prs:
       work stays dropped.'
     created_at: '2026-11-01T12:23:09Z'
     last_edited: '2026-11-01T12:23:09Z'
+  - id: note-569dd27
+    text: 'Review loop 928f i28: four statements the last two iterations left disagreeing
+      with the code (prose/comments only; no recipe behaviour, no test change, no
+      pm_core change). (1) The CLI stop step has three retryable failures, not two:
+      R87 added the bound-too-long branch beside R21/R27''s mistyped value and timeout,
+      but the scaffold''s start comment still said "every failure path below tears
+      the pane down", its stop-step comment said "the stop step''s two failures are
+      the exception", and the stop preamble enumerated "a mistyped value, or a bound
+      that ran out"; all three now name three (or the failure paths that do tear down),
+      and the same count is corrected in qa.md and the Files table. The tmux recipe''s
+      parallel "every failure path below tears the pane down" is qualified the same
+      way, because its capture-directory guards refuse before acting on the recorder.
+      (2) R89 made step 3 refuse a live recorder before new-session, so the step-0
+      prose''s "a leftover pm-recorder session makes step 3''s new-session fail with
+      duplicate session - step 3 reports that as a start failure" describes a path
+      a leftover can no longer take; only a duplicate that appears in the gap reaches
+      the start check. The recipe, the parametrized test docstring, R2 and qa.md (the
+      R3 Then and the step-0 note) now name the live-recorder refusal first and keep
+      the duplicate-in-the-gap start failure as the race. (3) Step 2''s prose said
+      "every failure path after the claim is taken releases it" and "so a failed run
+      does not leave a stale claim behind"; the capture-directory guards of steps
+      3, 4 and 5 (R84) refuse before the step can tell which claim is its own (and
+      a live run''s claim must not be cleared), so they leave it. Verified in this
+      container with the stub tmux/pm harness: step 2 claims one directory, the stop
+      block pasted with a relative <capture-dir> is refused at its guard and the claim
+      survives, and step 2 into a second directory then refuses with "already being
+      recorded into ... - clear the claim with ''tmux set-option -u ...'' if it is
+      stale" (the documented recovery). The prose, the Files table and qa.md now say
+      which paths release and which cannot. (4) Step 3 deliberately does not clear
+      the transcript, and now says why: the transcript belongs to step 2''s attached
+      pipe, and removing the file leaves that `cat` writing to an unlinked inode (verified
+      on tmux 3.2a: after rm the path stays absent while the pane keeps printing),
+      so step 5 would report "transcript.log is empty" for a pipe that works; a restarted
+      attempt''s transcript therefore also holds the replaced attempt''s output, while
+      the cleared cast is the per-attempt evidence, so a later consistency fix cannot
+      reintroduce the empty-transcript failure. Tests: no test change needed (every
+      correction is prose or a comment, and the behaviours are already executed);
+      recipe file 339 passed; full suite 5536 passed, 1 skipped, 0 failed (480.39
+      s). Evidence: /pm-captures/review-928f-i28/ (probe-claim.log, probe-pipe-unlink.log,
+      recipe-file.log, suite.log, README.md, scripts/). impl.md R90 + Files table,
+      qa.md. The dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-11-01T12:57:11Z'
+    last_edited: '2026-11-01T12:57:11Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
