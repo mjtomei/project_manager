@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T05:26:13.368300+00:00'
+  updated_at: '2026-11-01T05:52:06.271307+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5933,6 +5933,38 @@ prs:
       was touched — every fixture used a disposable socket.'
     created_at: '2026-11-01T05:26:13Z'
     last_edited: '2026-11-01T05:26:13Z'
+  - id: note-3940f2d
+    text: 'Review loop 2caf i5 (no requirement changes; full suite 5370 passed / 1
+      skipped, 407.9 s, log /pm-captures/review-2caf-i5/full-suite-final.log). Verification
+      pass over the head after the i4 fixes; two defects, both from parsing tmux format
+      output with a separator that can appear in a session name. (1) `pm tui view`
+      / `send` / `restart` and `pm qa regression` reported "No TUI pane found" for
+      a session whose repo directory name contains a space: `_live_panes_and_tuis()`
+      split the space-separated `list-panes -a` output, so `pm-my repo-abc` was read
+      as `pm-my`; since d1c0 i4 the recorded pane is accepted only when tmux''s session
+      for it matches, so a live registered pane was rejected (before d1c0 i4 the check
+      was a bare pane-id set, so the PR''s own cross-server guard introduced this).
+      The query now uses `:` — tmux rewrites `:` and `.` in session names to `_`,
+      so a session name can never contain it — with the start command last. (2) `pm
+      session list` silently dropped a session whose name contains `|`: the group
+      field repeats the base session''s name, so `rsplit("|", 2)` still split the
+      name; `sessions_in_group()`''s group query had the same limitation for a view
+      named with `|`. Both now use `:`-separated fields. Tests: `TestFindLiveTuiPane::test_live_tui_in_a_session_whose_name_contains_a_space`
+      (verified end to end on a disposable server: pre-fix `_find_live_tui_pane` returned
+      (None, "pm-my repo-abc") for the live `%0`, post-fix ("%0", "pm-my repo-abc")),
+      `TestListPmSessions::test_lists_a_session_whose_name_contains_a_pipe`, `TestSessionsInGroup::test_includes_a_view_whose_name_contains_the_old_separator`;
+      the existing `_panes()` / `list-sessions` fixtures moved to the `:` format.
+      Also corrected impl.md R4.4 (qa_status builds its argv with its own `_tmux_argv`,
+      not `tmux_mod._tmux_cmd`, because the module must not import pm_core). Residual,
+      pre-existing and out of scope: `attached_group_active_windows` (name last; a
+      `|` in the base name shifts its group field) and `switch_sessions_to_window`
+      (name first; space-name truncation) keep their formats. QA for the next run:
+      R7 with a repo directory named e.g. "my repo" now exercises the space path,
+      and R3 with a `|` in a directory name exercises the listing. No live session,
+      server or shared host configuration was touched — every fixture used a disposable
+      socket and a temporary HOME.'
+    created_at: '2026-11-01T05:52:06Z'
+    last_edited: '2026-11-01T05:52:06Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
