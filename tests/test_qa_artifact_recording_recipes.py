@@ -8193,6 +8193,47 @@ class TestCaptureFlowExecution:
             "step 2 took the claim but left the previous attempt's rejection "
             "mark, so this capture's step 5 refuses it")
 
+    def test_a_rejection_survives_a_re_record_that_cannot_start(self,
+                                                                tmp_path):
+        """A failed pipe attach must not clear the mark that rejects a capture.
+
+        Step 2 takes the claim and then attaches the transcript pipe, and it
+        releases the claim again when the pipe cannot be attached — the state
+        a refused step leaves. The rejection mark step 5 sets was cleared
+        together with the claim, so that path left the mark gone as well,
+        while the rejected capture's cast, status and transcript are still on
+        disk (step 3 is what clears them for a new attempt). A paste of step 5
+        then found recorder gone, TUI alive, status 0, claim and mark clear —
+        exactly the re-paste state it accepts — and exited 0 on the truncated
+        cast the first paste rejected (verified in this container with the
+        stub harness: step 2 in ``pipefail`` mode, then step 5, rc 0 with no
+        message). The mark now goes once the pipe is attached, so a re-record
+        that never starts cannot erase the refusal.
+        """
+        cap = tmp_path / "cap"
+        r, _cast = _run_block(
+            _step_two_block(), "pipefail", tmp_path, target=True,
+            state_files={"rejected.pm-test": "1\n"},
+            files={"recording.cast": '{"version": 2}\n',
+                   "transcript.log": "pane output\n",
+                   "recorder.status": "0\n"})
+        assert r.returncode != 0, r.stderr
+        assert "could not stream" in r.stderr, r.stderr
+        assert not (tmp_path / "state" / "claim.pm-test").exists(), (
+            "the refused pipe left its claim behind (R25)")
+        assert (tmp_path / "state" / "rejected.pm-test").exists(), (
+            "a re-record that never started cleared the previous paste's "
+            "rejection mark, so the state it leaves reads as a finished "
+            "recording")
+
+        r2, _ = _run_block(
+            _stop_block("tmux-screen-recording.md"), "ok", tmp_path,
+            target=True, capture=cap, reuse=True)
+        assert r2.returncode != 0, (
+            "a step 5 pasted after the failed re-record accepted the "
+            "truncated cast the first paste rejected: " + r2.stderr)
+        assert "rejected this capture" in r2.stderr, r2.stderr
+
     def test_tmux_detach_that_fails_is_not_a_finished_recording(self, tmp_path):
         """The detach itself is the last handle that can race the recorder.
 
@@ -8208,6 +8249,45 @@ class TestCaptureFlowExecution:
             "a detach that failed because the recorder was already gone was "
             "reported as a finished recording")
         assert "incomplete" in r.stderr, r.stderr
+
+    def test_a_detach_race_does_not_let_a_repaste_accept_the_capture(
+            self, tmp_path):
+        """The detach-race refusal must not leave a state a re-paste accepts.
+
+        The recorder can end *cleanly* in the gap between step 5's liveness
+        check and its key send (a detach from outside), so the status on disk
+        is 0 and the TUI is still up. The failed-send branch releases the
+        capture-directory claim, so the state it left — recorder gone, TUI
+        alive, status 0, claim clear — is exactly the one the re-paste case
+        accepts: a second paste of step 5 exited 0 on the truncated cast the
+        first paste rejected (verified in this container with the stub
+        harness, ``detachfail`` mode over a clean status). The mark step 5's
+        in-progress refusal sets is now set here too, before the claim goes.
+        """
+        cap = tmp_path / "cap"
+        r, _cast = _run_block(
+            _stop_block("tmux-screen-recording.md"), "detachfail", tmp_path,
+            target=True, sessions=("pm-recorder",),
+            files={"recording.cast": '{"version": 2}\n',
+                   "transcript.log": "pane output\n",
+                   "recorder.status": "0\n"},
+            state_files={"claim.pm-test": str(cap.resolve()),
+                         "pane": "TUI drawn\n"})
+        assert r.returncode != 0, r.stderr
+        assert "recorder exited before the detach" in r.stderr, r.stderr
+        assert not (tmp_path / "state" / "claim.pm-test").exists(), (
+            "the detach-race refusal left its claim behind (R25)")
+        assert (tmp_path / "state" / "rejected.pm-test").exists(), (
+            "the detach-race refusal released the claim without marking the "
+            "capture, so the state it leaves reads as a finished recording")
+
+        r2, _ = _run_block(
+            _stop_block("tmux-screen-recording.md"), "ok", tmp_path,
+            target=True, capture=cap, reuse=True)
+        assert r2.returncode != 0, (
+            "a second paste of step 5 accepted the truncated cast the "
+            "detach-race refusal rejected: " + r2.stderr)
+        assert "rejected this capture" in r2.stderr, r2.stderr
 
     def test_tmux_detach_race_with_the_sessions_own_end_passes(self, tmp_path):
         """A quit that races the detach is not a truncated recording.
@@ -8392,6 +8472,47 @@ class TestCaptureFlowExecution:
         log = cast.parent / "recorder-pane.log"
         assert log.exists() and "TUI drawn" in log.read_text(), (
             "the failure tore the recorder pane down without saving it")
+
+    def test_a_failed_send_does_not_let_a_repaste_accept_the_capture(
+            self, tmp_path):
+        """The send failure's teardown must leave the capture marked rejected.
+
+        The driving step tears the run down — kills the recorder, stops the
+        pipe and releases the claim — and the capture's cast, status and
+        transcript stay on disk. The recorder can already have ended *cleanly*
+        (a detach from outside, which the send failure hides), so a later
+        paste of step 5 found recorder gone, TUI alive, status 0 and both the
+        claim and the rejection mark clear — the re-paste state it accepts —
+        and exited 0 on the truncated cast (verified in this container with
+        the stub harness: the driving step in ``sendfail`` mode over a
+        dead-pane recorder, then step 5). The mark goes before the claim is
+        released, as step 5's own refusal does; step 2 clears it once a
+        re-record attaches its pipe.
+        """
+        cap = tmp_path / "cap"
+        r, _cast = _run_block(
+            _driving_block(), "sendfail", tmp_path, target=True,
+            sessions=("pm-recorder",),
+            files={"recording.cast": '{"version": 2}\n',
+                   "transcript.log": "pane output\n",
+                   "recorder.status": "0\n"},
+            state_files={"dead.pm-recorder": "", "pane": "TUI drawn\n",
+                         "claim.pm-test": str(cap.resolve())})
+        assert r.returncode != 0, r.stderr
+        assert "pm tui send failed" in r.stderr, r.stderr
+        assert not (tmp_path / "state" / "claim.pm-test").exists(), (
+            "the failed send left the capture-dir claim on the session")
+        assert (tmp_path / "state" / "rejected.pm-test").exists(), (
+            "the failed send released the claim without marking the capture, "
+            "so the state it leaves reads as a finished recording")
+
+        r2, _ = _run_block(
+            _stop_block("tmux-screen-recording.md"), "ok", tmp_path,
+            target=True, capture=cap, reuse=True)
+        assert r2.returncode != 0, (
+            "a step 5 pasted after the failed send accepted the truncated "
+            "cast the driving step rejected: " + r2.stderr)
+        assert "rejected this capture" in r2.stderr, r2.stderr
 
     def test_tmux_driving_step_names_a_pane_it_could_not_save(self, tmp_path):
         """The failed-send message must not claim a save the directory refused.

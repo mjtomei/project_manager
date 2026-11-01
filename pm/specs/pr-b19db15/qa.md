@@ -1324,12 +1324,25 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   first paste rejected passed the second: the same block exited 0 with no
   message (verified in this container and live on tmux 3.2a). The refusal now
   marks the capture as rejected on the session (`@pm_capture_rejected`) and
-  the clean-status branch fails that mark with "an earlier paste of this step
-  rejected this capture"; step 2 clears the mark when a re-record takes the
-  claim. The one state the refusal cannot tell apart — a step 5 killed after
-  its checks, where the recording is complete — keeps its recovery: clear
-  both the claim and the mark, and a second paste exits 0 (verified live;
-  review loop 928f i37, R102).
+  the clean-status branch fails that mark with "an earlier step rejected this
+  capture"; step 2 clears the mark once a re-record attaches its pipe. The one
+  state the refusal cannot tell apart — a step 5 killed after its checks,
+  where the recording is complete — keeps its recovery: clear both the claim
+  and the mark, and a second paste exits 0 (verified live; review loop 928f
+  i37, R102).
+- Every other path that refuses a capture and releases the claim → the state
+  it leaves must not pass a later step-5 paste. The mark is set before the
+  claim goes by the two other paths that leave the capture's files on disk:
+  step 5's failed-detach branch (the recorder can have ended cleanly in the
+  gap, so status is 0) and the driving step's failed `pm tui send` (the
+  recorder can already have ended cleanly, which the send failure hides). Step
+  2's premature clear is gone too: a re-record whose transcript pipe cannot be
+  attached releases the claim but keeps the mark, so the rejected capture is
+  still refused. Verified in this container with the stub harness — step 2 in
+  `pipefail` mode, the driving step in `sendfail` mode over a dead-pane
+  recorder, and step 5 in `detachfail` mode over a clean status: each followed
+  by a step-5 paste exited 0 before the fix and exits 1 with "an earlier step
+  rejected this capture" after it (review loop 928f i39, R105).
 
 ## Pass / Fail criteria
 

@@ -4574,6 +4574,55 @@ R104. **A padded bound is not an overflowing one (review loop 928f i38).** A
      `/pm-captures/review-928f-i38/` (`mutation-check.log`,
      `recipe-file.log`, `related-suites.log`, `suite.log`, `README.md`).
 
+R105. **A refusal that releases the claim must not hand step 5 the state it
+   accepts (review loop 928f i39).** Three sites in the kept tmux-recipe
+   scope, all the PR's own class: a completion check that reads the state a
+   failed run left behind. R102 (i37) introduced the rejection mark, but the
+   mark was (a) cleared too early by step 2 and (b) not set by the two other
+   failure paths that release the capture-directory claim while leaving the
+   capture's files on disk.
+
+   - **The defect.** Step 5 accepts a recording when the recorder is gone,
+     the TUI is alive, `recorder.status` is 0 and both the claim and the
+     rejection mark are clear — the re-paste state. Three paths produced
+     exactly that state after a refusal:
+     (1) step 2 cleared the mark with the claim, *before* attaching the
+     transcript pipe; when the pipe cannot be attached the block releases the
+     claim and exits, so the rejected capture's cast, status and transcript
+     stayed on disk with no mark and no claim;
+     (2) the driving step's `send_failed` killed the recorder, stopped the
+     pipe and released the claim without marking — and the recorder can
+     already have ended *cleanly* (a detach from outside, which the send
+     failure hides), leaving status 0;
+     (3) step 5's failed-detach branch ("recorder exited before the detach")
+     releases the claim, and the recorder can have ended cleanly in that gap
+     (the same third-party detach), leaving status 0.
+     Verified in this container with the stub harness: each path, followed by
+     a paste of step 5, exited **0** with no message on the truncated cast the
+     first step rejected.
+   - **Fix.** The mark is cleared by step 2 only once the re-record attaches
+     its pipe — not with the claim, which step 2 releases again if the pipe
+     cannot be attached — and the two failure paths that release the claim
+     while leaving the capture's files set the mark before they release it,
+     as step 5's in-progress refusal does. The mark therefore means "a step of
+     this capture rejected it", and the "rejected this capture" message says
+     so (a detach from outside, or a step that could not drive the TUI)
+     instead of naming only the in-progress case. Step 2 still clears it for
+     the attempt that replaces the refused one, so a re-record is not refused
+     by the capture it replaces.
+   - **Coverage.** `test_a_rejection_survives_a_re_record_that_cannot_start`
+     (step 2 in `pipefail` mode over a rejected capture, then step 5),
+     `test_a_failed_send_does_not_let_a_repaste_accept_the_capture` (the
+     driving step in `sendfail` mode over a dead-pane recorder, then step 5)
+     and `test_a_detach_race_does_not_let_a_repaste_accept_the_capture`
+     (step 5 in `detachfail` mode over a clean status, then step 5). Each
+     fails with its fix removed (`mutation-check.log`).
+   - **Evidence.** Recipe file **380 passed** (was 377 before i39); related
+     suites **199 passed**; full suite **5577 passed, 1 skipped, 0 failed**
+     (run once on the final tree). Evidence:
+     `/pm-captures/review-928f-i39/` (`mutation-check.log`, `recipe-file.log`,
+     `related-suites.log`, `suite.log`, `probe-*.log`, `README.md`).
+
 ## Non-goals
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
 - **No new helper, prompt block, verifier text, or QA-loop change.** Those
