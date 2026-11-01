@@ -1437,6 +1437,62 @@ def test_waiting_suffix_fits_the_status_line():
         assert len(visible) <= 80, repr(visible)
 
 
+def test_error_block_wraps_inside_the_pane():
+    """The fail-closed error block must wrap to the pane width.
+
+    A cause+remedy line from ``container_unavailable_message()`` is ~190
+    columns, so on a normal 100-column status pane it wraps on its own and
+    scrolls the pane's own ``QA Status:`` header off the top — the user
+    loses the title of the error view exactly when the run has failed.
+    """
+    import re
+
+    from pm_core import qa_status
+
+    error = (
+        "Container 'pm-x-qa-pr-1-s2' for scenario 2 is no longer running. "
+        "Container mode is enabled, so the worker will not be relaunched "
+        "on the host.\n"
+        "\n"
+        "To retry:\n"
+        "  - fix the container runtime, then retry QA; or\n"
+        "  - if host execution is intended, disable container mode "
+        "explicitly with 'pm container disable'."
+    )
+    status = {"pr_id": "pr-001", "overall": "ERROR", "error": error,
+              "scenarios": []}
+    for cols in (60, 80, 100, 120):
+        out = qa_status._render(status, -1, 24, cols, tick=0)
+        visible = [re.sub(r"\033\[[0-9;?]*[A-Za-z]", "", line)
+                   for line in out.splitlines()]
+        assert visible[0].startswith("QA Status: pr-001"), visible[0]
+        assert all(len(v) <= cols for v in visible), (cols, visible)
+        rows = sum(max(1, -(-len(v) // cols)) for v in visible)
+        assert rows <= 24, (cols, rows)
+        joined = "\n".join(visible)
+        assert "To retry:" in joined
+        assert "disable container mode" in joined
+
+
+def test_status_pane_tolerates_a_non_object_status_file(tmp_path):
+    """A valid-JSON non-object qa_status.json must not kill the status pane.
+
+    ``_write_status_file`` always writes an object, but a hand-edited or
+    corrupt file can hold any valid JSON.  ``_render`` would raise
+    AttributeError on ``.get()`` and the pane process would exit (leaving a
+    frozen or one-pane window); it is treated as unreadable instead, exactly
+    like a missing or truncated file.
+    """
+    from pm_core import qa_status
+
+    path = tmp_path / "qa_status.json"
+    path.write_text("[]")
+    loaded = qa_status._load_status(path)
+    assert loaded is None
+    out = qa_status._render(loaded, -1, 24, 80, tick=0)
+    assert "Waiting for qa_status.json" in out
+
+
 def test_status_file_marks_waiting_scenarios(tmp_path):
     """The status file is what the TUI renders from, so a waiting scenario
     must be flagged per row (and at the top level) for the ``(waiting)``

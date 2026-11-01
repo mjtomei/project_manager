@@ -311,17 +311,96 @@ def _invalidate_image_exists_cache(tag: str | None = None) -> None:
             _image_exists_cache.pop(tag, None)
 
 
-def _runtime_available() -> bool:
-    """Check if the configured container runtime is available."""
+def _runtime_status() -> tuple[bool, str]:
+    """Check the configured container runtime, keeping the failure cause.
+
+    Returns ``(available, problem)``.  ``problem`` is a short human
+    diagnostic when unavailable (missing binary, timeout, nonzero ``info``);
+    it is ``""`` when the runtime answers.
+
+    Callers that must fail closed when container mode is enabled use this
+    (via :func:`container_preflight_error`) instead of the boolean-only
+    :func:`_runtime_available`, so the launch error names the original cause
+    and the user gets an actionable remedy.
+    """
     runtime = _get_runtime()
     try:
         result = subprocess.run(
             [runtime, "info"],
             capture_output=True, timeout=10,
         )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
+    except FileNotFoundError:
+        return False, f"container runtime '{runtime}' was not found on PATH"
+    except subprocess.TimeoutExpired:
+        return False, f"'{runtime} info' timed out after 10s"
+    except OSError as exc:
+        return False, f"could not run '{runtime} info': {exc}"
+    if result.returncode != 0:
+        raw = result.stderr or result.stdout or ""
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", "replace")
+        detail = str(raw).strip().splitlines()
+        message = f"'{runtime} info' exited {result.returncode}"
+        if detail:
+            message += f": {detail[0][:300]}"
+        return False, message
+    return True, ""
+
+
+def _runtime_available() -> bool:
+    """Check if the configured container runtime is available."""
+    return _runtime_status()[0]
+
+
+def container_preflight_error() -> str | None:
+    """Return why a container-mode launch cannot proceed, or ``None``.
+
+    ``None`` when container mode is disabled (host execution is intended) or
+    the runtime answers ``info``.  Otherwise the diagnostic from
+    :func:`_runtime_status`.
+    """
+    if not is_container_mode_enabled():
+        return None
+    ok, problem = _runtime_status()
+    return None if ok else problem
+
+
+def container_retry_remedy(first_step: str) -> str:
+    """The shared ``To retry:`` block for container-mode launch errors.
+
+    Every fail-closed container launch offers the same two remedies: fix the
+    runtime and retry, or deliberately give up the isolation with
+    ``pm container disable``.  *first_step* is the situation-specific half of
+    the first bullet (which runtime check to fix).  Keeping this in one place
+    stops the messages on the different launch paths from drifting apart.
+    """
+    return (
+        "To retry:\n"
+        f"  - {first_step}; or\n"
+        "  - if host execution is intended, disable container mode "
+        "explicitly with 'pm container disable'."
+    )
+
+
+def container_unavailable_message(problem: str) -> str:
+    """Actionable error for a container-mode launch blocked by the runtime.
+
+    Container mode is an execution boundary, not a best-effort preference:
+    the message states that no agent was launched on the host, names the
+    original cause, and gives both remedies (fix the runtime, or deliberately
+    disable container mode).
+    """
+    runtime = _get_runtime()
+    return (
+        "Container mode is enabled, but the container runtime is unavailable, "
+        "so no agent was launched on the host.\n\n"
+        f"Cause: {problem}\n\n"
+        "Container mode is an execution boundary, not a best-effort "
+        "preference; pm will not silently run this agent on the host.\n\n"
+        + container_retry_remedy(
+            f"start or install the '{runtime}' container runtime and verify "
+            f"that '{runtime} info' succeeds, then retry this launch")
+    )
 
 
 def load_container_config() -> ContainerConfig:

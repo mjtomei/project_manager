@@ -1,9 +1,10 @@
 """Auto-start watcher: the original watcher loop refactored as a BaseWatcher.
 
 This watcher monitors all active tmux panes for issues during auto-start
-mode, attempting fixes when possible and surfacing problems that need
-human input.  It uses the same prompt and window management as the legacy
-``pm watcher`` command.
+mode, attempting fixes within its target scope and surfacing problems that
+need human input.  It uses the same prompt and window management as the
+legacy ``pm watcher`` command.  With no auto-start targets it is
+observation-only (no wildcard/all-PR authority).
 """
 
 import sys
@@ -16,7 +17,12 @@ _log = configure_logger("pm.watchers.auto_start")
 
 
 class AutoStartWatcher(BaseWatcher):
-    """Concrete watcher for auto-start monitoring."""
+    """Concrete watcher for auto-start monitoring.
+
+    Its authority is the TUI-owned target set.  With no targets (e.g. started
+    from the CLI outside the TUI) it is observation-only: the prompt tells it
+    not to start, restart, fix or merge anything.  There is no all-PR mode.
+    """
 
     WATCHER_TYPE = "auto-start"
     DISPLAY_NAME = "Auto-Start Watcher"
