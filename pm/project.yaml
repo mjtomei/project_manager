@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T06:48:44.785390+00:00'
+  updated_at: '2026-11-01T07:11:01.777370+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6025,6 +6025,36 @@ prs:
       HOME.'
     created_at: '2026-11-01T06:48:44Z'
     last_edited: '2026-11-01T06:48:44Z'
+  - id: note-7c65858
+    text: 'Review loop 2caf i8 (no requirement changes; full suite 5378 passed / 1
+      skipped, 416.2 s, log /pm-captures/review-2caf-i8/full-suite-final.log). Verification
+      pass over the head after the i7 kill fix; one fail-closed gap in the socket-directory
+      guard. (1) ensure_socket_dir() accepted a *symlinked* /tmp/pm-sessions: /tmp
+      is world-writable, so another local user can create the well-known path as a
+      symlink to a 1777 directory they own. mkdir(exist_ok=True) succeeds through
+      the link, our chmod then fails (we are not the target''s owner), and the d1c0
+      i12 mode fallback used stat() — the *target''s* mode — so a 1777 target passed
+      the guard; every socket pm bound then lived in a directory whose owner can unlink
+      it (the sticky bit does not protect a file from the directory''s owner), so
+      the socket could be replaced by an attacker-run server pm would connect to.
+      The guard now refuses a symbolic link at the path outright (pm always creates
+      a real directory, so a link is never ours, even when its target is), and the
+      mode fallback inspects the entry with lstat for defence in depth. `pm session`
+      reports it with the same actionable message as the other unusable-directory
+      states. Tests: TestSessionSocketPath::test_refuses_a_symlinked_socket_dir and
+      TestResolveSessionSocket::test_refuses_a_symlinked_socket_dir, both verified
+      to fail with the pre-fix guard (no exception was raised). (2) Two quoting test
+      gaps closed: the legacy `-t <session>` form of `pm session --print-connect`
+      and of the TUI connect popup was not asserted for a session name containing
+      a space (the code already quotes it). impl.md R7.3 and a new i8 section; qa.md
+      R12 gained the symlinked-directory bullet. Validation: targeted suites 393 passed;
+      full suite 5378 passed / 1 skipped (416.2 s); pm/specs/pr-073910f/session_start_smoke.py
+      re-ran clean on a disposable socket with TMUX_TMPDIR on a scratch dir (private
+      server, session env, global env and hooks correct; default server untouched).
+      No live session, server or shared host configuration was touched — every fixture
+      used a disposable socket and a temporary HOME.'
+    created_at: '2026-11-01T07:11:01Z'
+    last_edited: '2026-11-01T07:11:01Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
