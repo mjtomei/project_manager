@@ -205,7 +205,10 @@ bare `effort=high` never claims support the route did not declare.
   absent and stale metadata; a provider whose `supported_efforts` uses a
   non-Claude value (`none`); save/load round-trips through project, PR,
   global and provider forms; `next_effort` wrapping all six states.
-- `validate_model_config` warnings for an unsupported configured level.
+- `validate_model_config` warnings for an unsupported configured level, for
+  both the per-role `session_effort` forms and the PR-wide `effort` (which
+  decides every PR role, so one rejected level on one route is reported
+  once, not once per role).
 - Display tests: `format_rows` / `role_rows` never print a bare level for
   an `unsupported` or `overridden` one, and `router_route.describe` marks
   `unsupported`/`overridden`.  `unverified` is deliberately left bare
@@ -330,7 +333,7 @@ does not fetch a catalog in this PR.
 ## Implementation plan (files)
 
 1. `pm_core/model_config.py` — widen `EFFORT_LEVELS`; add `is_effort_level`,
-   `normalize_ambient_effort`, `accepted_efforts`, `provider_effort_env`
+   `normalize_ambient_effort`, `accepted_efforts_of`, `provider_effort_env`
    and `unsupported_effort_problem`; extend `ModelResolution`; resolve the
    ambient `CLAUDE_CODE_EFFORT_LEVEL`; compute status/notes (including a
    provider `env:` assignment of it); extend `validate_model_config`.

@@ -190,6 +190,12 @@ take effort (Haiku) suppresses it entirely, and the role table shows the
 level that was asked for as `xhigh (n/a)` beside the setting that asked for
 it.
 
+pm does not read Claude Code's own settings files: `effortLevel` /
+`maxEffortLevel` there take precedence over `--effort` as well, so a session
+started with a level pm reports can still run at the level those files set.
+Check what a running session actually uses with `/effort` in it; that is the
+one source pm cannot see.
+
 The choice is explicit and per role: any of those roles may be routed to
 a provider. A role with no setting of its own falls back to its parent
 (the QA sub-roles follow `qa`, `signoff` follows `review`), and with

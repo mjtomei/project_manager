@@ -677,6 +677,27 @@ class TestEffortCapability:
         problems = "\n".join(validate_model_config(data))
         assert "supported_efforts" in problems and "max" in problems
 
+    def test_validate_warns_on_unsupported_pr_wide_effort(self, pm_home_dir):
+        """The PR-wide ``effort`` decides every PR role too, so it is
+        checked against each role's route -- once, not once per role."""
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts=["low"])})
+        data = _project()
+        data["prs"] = [{"id": "pr-1", "effort": "max",
+                        "session_models": {"impl": f"provider:{ROUTE}"}}]
+        problems = validate_model_config(data)
+        matching = [p for p in problems if "supported_efforts" in p]
+        assert len(matching) == 1, matching
+        assert matching[0].startswith("prs[pr-1].effort: ")
+
+    def test_validate_accepts_a_supported_pr_wide_effort(self, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts=["max", "high"])})
+        data = _project()
+        data["prs"] = [{"id": "pr-1", "effort": "max",
+                        "session_models": {"impl": f"provider:{ROUTE}"}}]
+        assert validate_model_config(data) == []
+
     def test_empty_supported_efforts_is_unsupported_not_unverified(
             self, pm_home_dir):
         """[] declares "accepts none", distinct from "declares nothing"."""
@@ -768,6 +789,38 @@ class TestEffortCapability:
         assert not any("pm unsets it" in n for n in res.effort_notes)
         assert any("sets CLAUDE_CODE_EFFORT_LEVEL=max" in n
                    for n in res.effort_notes)
+
+    def test_provider_env_no_override_assignment_is_still_an_assignment(
+            self, pm_home_dir, monkeypatch):
+        """``auto`` is an assignment too: the launcher exports it (so the
+        ambient value is replaced, not removed), and the note must say that
+        rather than claim pm unsets the ambient variable."""
+        monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "xhigh")
+        _providers(pm_home_dir, **{ROUTE: _router(
+            env={"CLAUDE_CODE_EFFORT_LEVEL": "auto"})})
+        data = _project(session_effort={"impl": "high"})
+        res = resolve_model_and_provider(
+            "impl", pr_model=f"provider:{ROUTE}", project_data=data)
+        # The route declares no supported_efforts: unverified, not overridden
+        # -- "auto" changes nothing about which level runs.
+        assert (res.effort, res.effort_status) == ("high", "unverified")
+        assert not any("pm unsets it" in n for n in res.effort_notes)
+        assert any("(no override); --effort high applies" in n
+                   for n in res.effort_notes)
+
+    def test_provider_env_blank_assignment_is_no_override(
+            self, pm_home_dir, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "xhigh")
+        _providers(pm_home_dir, **{ROUTE: _router(
+            env={"CLAUDE_CODE_EFFORT_LEVEL": ""})})
+        data = _project(session_effort={"impl": "high"})
+        res = resolve_model_and_provider(
+            "impl", pr_model=f"provider:{ROUTE}", project_data=data)
+        assert not any("pm unsets it" in n for n in res.effort_notes)
+        assert any("(no override); --effort high applies" in n
+                   for n in res.effort_notes)
+        assert not any("not a Claude effort level" in n
+                       for n in res.effort_notes)
 
     def test_haiku_with_ambient_only_never_claims_passing_the_level(
             self, pm_home_dir, monkeypatch):

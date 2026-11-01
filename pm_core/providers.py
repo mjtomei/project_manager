@@ -282,7 +282,7 @@ class ProviderConfig:
     defaults).  ``alias_models`` is the older name for ``env``.
     ``supported_efforts`` is optional, dated capability metadata: the
     effort levels this provider's model accepts (see
-    model_config.accepted_efforts).  It is never passed to ``--effort``.
+    model_config.accepted_efforts_of).  It is never passed to ``--effort``.
     """
     name: str
     type: str = "claude"  # "claude", "local", "openai", or "router"
@@ -300,7 +300,7 @@ class ProviderConfig:
     # every type
     effort: str = ""
     # Optional per-model capability metadata: the effort levels this
-    # provider's model/route accepts (see model_config.accepted_efforts).
+    # provider's model/route accepts (see model_config.accepted_efforts_of).
     # None means "not declared"; [] means "declares it accepts none".
     # Provenance is kept so a dated list is shown as dated.
     supported_efforts: list[str] | None = None
