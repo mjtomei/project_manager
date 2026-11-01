@@ -1218,6 +1218,13 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   readiness (step 3's settle check) nor a recorder that died mid-scenario into
   "the detach key did not end it" (step 5's already-gone branch), and the CLI
   scaffold's stop wait has the same handle (review loop 928f i30, R92).
+- The CLI scaffold's *readiness* wait has the same handle: a recorder that
+  dies at startup on a `remain-on-exit on` host must end step 2 at once and
+  be reported by step 4 as the missing cast ("asciinema wrote no cast — see
+  …/recorder-stderr.log"), not as "recorder did not start within 30s" after
+  the whole bound — a start timeout for a recorder that started and exited
+  (verified live on tmux 3.2a: pre-fix rc 1 after the bound, post-fix rc 0 in
+  7 ms on the same state; review loop 928f i31, R94).
 
 ## Pass / Fail criteria
 

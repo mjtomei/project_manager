@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T14:39:42.764666+00:00'
+  updated_at: '2026-11-01T15:14:07.702036+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38521,6 +38521,40 @@ prs:
       it is not guessed at here.'
     created_at: '2026-11-01T14:39:42Z'
     last_edited: '2026-11-01T14:39:42Z'
+  - id: note-49572d0
+    text: 'Review loop 928f i31: two leftovers in the kept recipe scope; no pm_core/
+      change. (1) The CLI scaffold''s step-2 readiness wait was the one recorder wait
+      R92 did not reach: it waited for the cast or the session''s end, so on a host
+      with `set -g remain-on-exit on` — which this project''s own QA notes prescribe
+      for a shared pane — a recorder that died at startup (asciinema refused to start,
+      a broken `-c` command) left a live session and no cast, and the wait ran out
+      its 30 s bound reporting "recorder did not start within 30s", a start timeout
+      for a recorder that started and exited, while asciinema''s own error sat in
+      the recorder-stderr.log both messages point at (reproduced live in this container
+      on tmux 3.2a with a private TMUX_TMPDIR server and remain-on-exit on: `has-session`
+      0, `#{pane_dead}` 1, pre-fix rc 1 after the bound with that message; post-fix
+      rc 0 in 7 ms on the same state). Step 2 now treats the pane''s death as the
+      recorder''s end, exactly as step 4''s stop wait does, so the run falls through
+      to step 4, which names the real failure ("asciinema wrote no cast — see …/recorder-stderr.log");
+      the prose says the recorder has ended rather than that the session is gone,
+      the step-1 comment says both waits read the pane, and the readiness-signal paragraph
+      no longer says the pane is not read at all. Test: test_cli_recorder_dying_with_remain_on_exit_ends_the_readiness_wait
+      (dies + STUB_REMAIN), which fails against HEAD''s recipe. (2) The tmux recipe''s
+      step-3 readiness loop''s `#{pane_dead}` half (R92) had no case: removing only
+      that half left the file green (348 passed), because the existing remain-on-exit
+      cases reach the settle check (failedattach draws its error first) or the session-gone
+      half (dies without the option) — a recorder that dies before drawing with the
+      option set never writes pane content, so only the loop''s own pane check ends
+      that wait. Test-only fix: test_tmux_recorder_dying_before_drawing_with_remain_on_exit_fails
+      (dies + STUB_REMAIN) requires "recorder exited before it drew" and forbids "did
+      not come up within"; it fails when the loop''s pane half is removed. Recipe
+      file 350 passed (was 348); full suite 5547 passed, 1 skipped, 0 failed (489.84
+      s). Evidence: /pm-captures/review-928f-i31/ (probe-cli-readiness-remain.log,
+      probe-tmux-loop-remain.log, mutation-check.log, recipe-file.log, suite.log,
+      README.md, scripts/). impl.md R94+R95, qa.md. The dropped helper/prompt/verifier
+      work stays dropped. (2026-11-01T15:16:00Z)'
+    created_at: '2026-11-01T15:14:07Z'
+    last_edited: '2026-11-01T15:14:07Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

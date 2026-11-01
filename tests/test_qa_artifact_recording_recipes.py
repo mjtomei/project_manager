@@ -5865,6 +5865,33 @@ class TestCaptureFlowExecution:
             "session outlived its pane: " + r.stderr)
         assert cast.stat().st_size > 0, "the completed cast is missing"
 
+    def test_cli_recorder_dying_with_remain_on_exit_ends_the_readiness_wait(
+            self, tmp_path):
+        """A dead pane ends the readiness wait, even when its session lingers.
+
+        Step 2's wait is the cast *or* the session ending, and `set -g
+        remain-on-exit on` keeps the session after its only pane's command
+        returns. A recorder that died at startup (asciinema refused to start,
+        a broken `-c` command) therefore left the wait polling a live session
+        with no cast: it burned the whole readiness bound and reported
+        "recorder did not start within 30s" — a start timeout for a recorder
+        that started and exited, while asciinema's own error sat in the
+        `recorder-stderr.log` both messages point at. The pane's state
+        (`#{pane_dead}`) is the handle step 4's stop wait already reads; with
+        it, step 4 names the missing cast, which is the actual failure.
+        """
+        r, cast = _run_capture_block(
+            "cli-recording.md", "dies", tmp_path,
+            env_extra={"STUB_REMAIN": "1"})
+        assert r.returncode != 0, "a dead recorder was reported as a start"
+        assert "asciinema wrote no cast" in r.stderr, (
+            "a recorder that started and died is reported as one that never "
+            "started: " + r.stderr)
+        assert "did not start within" not in r.stderr, (
+            "the readiness wait ran out its bound on a recorder that had "
+            "already exited: " + r.stderr)
+        assert not cast.exists()
+
     def test_cli_recorder_that_never_writes_a_cast_fails(self, tmp_path):
         """A recorder that starts but records nothing is a failure, not a hang.
 
@@ -6375,6 +6402,31 @@ class TestCaptureFlowExecution:
         assert "recorder exited while the TUI was still running" in r.stderr, (
             "a recorder that died mid-scenario was reported as one the detach "
             "could not end: " + r.stderr)
+
+    def test_tmux_recorder_dying_before_drawing_with_remain_on_exit_fails(
+            self, tmp_path):
+        """The readiness loop's own pane check has to stand on its own.
+
+        A recorder that dies before drawing leaves a dead pane and, with
+        `remain-on-exit on`, a session that `has-session` still answers for.
+        The settle check below reads the pane too, but it runs only after
+        pane *content* appears — which a recorder that died before drawing
+        never writes. Without the loop's own `#{pane_dead}` half the run
+        burns the whole readiness bound and reports "recorder did not come up
+        within 30s" for a recorder that started and exited, instead of the
+        "recorder exited before it drew" the same state gets on a server
+        without that option.
+        """
+        r, _ = _run_capture_block(
+            "tmux-screen-recording.md", "dies", tmp_path, target=True,
+            env_extra={"STUB_REMAIN": "1"})
+        assert r.returncode != 0, r.stderr
+        assert "recorder exited before it drew" in r.stderr, (
+            "a recorder that died before drawing was reported as one that "
+            "never came up: " + r.stderr)
+        assert "did not come up within" not in r.stderr, (
+            "the readiness loop ran out its bound on a dead pane whose "
+            "session remain-on-exit kept: " + r.stderr)
 
     def test_step_one_refuses_an_empty_target(self, tmp_path):
         """`pm session name` printing nothing must stop step 1, not the wait.

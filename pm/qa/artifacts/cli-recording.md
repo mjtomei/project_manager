@@ -120,9 +120,12 @@ scaffold repeats both steps, and also clears a `rec` session an earlier run
 left behind: a leftover one makes `new-session` fail with "duplicate
 session: rec" — the scaffold reports that as a start failure, instead of
 spinning out its readiness wait against a `rec` session that never writes a
-cast. This recipe's readiness handle is the cast file, not the pane (a quiet
-command draws nothing), so — unlike the tmux recipe's pane-content wait — it
-cannot pass on the previous run's recorder; it would just burn its deadline.
+cast. This recipe's readiness signal is the cast file, not the pane's
+content (a quiet command draws nothing), so — unlike the tmux recipe's
+pane-content wait — it cannot pass on the previous run's recorder; it would
+just burn its deadline. The pane is still read as an *end* condition
+(`#{pane_dead}`), because `remain-on-exit on` keeps a finished recorder's
+session alive.
 `recorder.status` holds this run's recorder exit status (step 4 of
 the no-TTY scaffold); a leftover one would let a recorder that was torn down
 before it finished pass that check. `recorder-stderr.log` and
@@ -185,7 +188,7 @@ where the CLI runs.
 # 1. Scaffold tmux on its own socket and start the recorder as the pane's
 #    command, so the pane's lifetime *is* the recording's lifetime: when
 #    asciinema exits the pane's command returns — and the session ends with
-#    it, unless the server's `remain-on-exit` keeps it (step 4's wait reads
+#    it, unless the server's `remain-on-exit` keeps it (steps 2 and 4 read
 #    the pane for that reason). The capture subdirectory has to exist (and
 #    hold no earlier cast) before asciinema writes into it. Clear a leftover
 #    `rec` session from an aborted run first — `new-session` fails with
@@ -323,11 +326,20 @@ tmux -L scaffold new-session -d -s rec -x 100 -y 30 \
 #    a non-empty cast means the pty is live and keys will land. Pane content
 #    is *not* a readiness signal here: a command that prints nothing for a
 #    while (a long run, a quiet `-q` command) is recording fine with a blank
-#    pane. A quick one-shot command can finish first — then the session is
-#    already gone and there is nothing left to drive.
+#    pane. A quick one-shot command can finish first — then the recorder has
+#    ended and there is nothing left to drive: its session is gone, or
+#    `remain-on-exit on` keeps the session after the pane's command returns,
+#    so the wait reads the pane (`#{pane_dead}`) as well. Without that half a
+#    recorder that died at startup (asciinema refused to start, a broken `-c`
+#    command) left the wait polling a live session with no cast: it ran out
+#    its bound and reported "recorder did not start within 30s" for a
+#    recorder that started and exited, while asciinema's own error sat in the
+#    `recorder-stderr.log` both messages point at. Either way the recorder
+#    has ended, and step 4 then names the missing cast instead.
 deadline=$(( $(date +%s) + 30 ))
 until [ -s <capture-dir>/<short-name>/recording.cast ] ||
-      ! tmux -L scaffold has-session -t rec 2>/dev/null; do
+      ! tmux -L scaffold has-session -t rec 2>/dev/null ||
+      [ "$(tmux -L scaffold display-message -p -t rec:0.0 '#{pane_dead}' 2>/dev/null)" = 1 ]; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
         # The save is a write into a directory this block checked a moment
         # ago, and the recorder can go away in the gap: either makes the
