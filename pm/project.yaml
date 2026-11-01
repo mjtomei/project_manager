@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T19:29:55.390718+00:00'
+  updated_at: '2026-11-01T20:07:55.361322+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6669,6 +6669,47 @@ prs:
       HOME.'
     created_at: '2026-11-01T19:29:55Z'
     last_edited: '2026-11-01T19:29:55Z'
+  - id: note-f35c7d4
+    text: 'Review loop b48f i11 (no requirement changes; full suite 5463 passed /
+      1 skipped, 417 s, log /pm-captures/review-b48f-i11/full-suite-final.log; an
+      earlier run in that directory used pytest 9.2.0 by accident — pytest-cov pulled
+      it into the scratch --target and shadowed the system 8.4.2 — and its 6 test_worker_route
+      caplog failures are the known pytest-9 env trap, kept as full-suite-pytest9-invalid.log).
+      Verification pass over the head after the b48f i10 fixes; one cross-project
+      defect, the same "a session name is not a tag prefix" class earlier iterations
+      closed for spaces, pipes and user views. (1) A `~` in the session tag collapsed
+      two projects onto one tmux server. `~` separates grouped sessions (`base~N`)
+      and every "strip the grouped suffix" site split at the first `~`, but a session
+      name is `pm-<repo name>-<hash>` and the repo directory name may contain `~`.
+      Verified live on tmux 3.2a: `pm-my~repo-3080b71d` and `pm-my~other-29e78cf8`
+      were both created on /tmp/pm-sessions/pm-my (two unrelated projects sharing
+      one server, which R1 forbids), `pm session list` reported one row named `pm-my`
+      for both, and the pane registry, TUI pidfile/command queue, TUI history file,
+      layout file and merge-restart marker were all keyed by the truncated `pm-my`
+      (two live TUIs, one registry file); `list_grouped_sessions` ordering and `next_grouped_session_name`
+      read `repo` for a number so the `~N` counter never advanced past `~1`, and `wrapper._ipc_session_tag`
+      resolved `~/.pm/sessions/<tag>/` from the truncated tag for hooks/popups. New
+      `paths.base_session_name()` is the single definition (only a numeric `~N` is
+      a grouped suffix, so it is idempotent and a `~` in the tag is data); `pane_registry.base_session_name`
+      delegates to it and every site above uses it (the wrapper repeats the two-line
+      rule inline because it runs before pm_core is imported; a test pins the copy).
+      `tmux._grouped_suffix` reads the part after the last `~`. Post-fix live: two
+      distinct sockets, two rows under their full names, numbering advancing to `~3`,
+      and `pm session kill` tearing down only its own group and socket. Tests +17
+      (TestBaseSessionName incl. distinct registry keys, TestSessionSocketFor, TestListPmSessions,
+      TestListGroupedSessions, TestNextGroupedSessionName, TestWrapperIpcSessionTag,
+      the merge-restart marker; test_pane_layout multiple-tildes updated); every fix-asserting
+      one fails on a worktree of the pre-fix head 12c46553a. (2) Incidental, outside
+      this PR scope and filed as pr-bebe64b: tmux rewrites ":" and "." to "_" in session
+      names, so a repo whose name contains either produces a session pm cannot address
+      by its computed name (a second `pm session` dies with "duplicate session", `pm
+      session kill` says "no session", `pm session list` shows the rewritten name);
+      pre-existing, but the deterministic socket is derived from the same name, and
+      the fix needs a naming-policy decision (sanitize or reject), so it is not taken
+      here. No live session, server or shared host configuration was touched — every
+      fixture used a disposable socket directory or a temporary HOME.'
+    created_at: '2026-11-01T20:07:55Z'
+    last_edited: '2026-11-01T20:07:55Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
