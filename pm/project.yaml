@@ -14331,7 +14331,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-11-01T02:59:53.548151+00:00'
+  updated_at: '2026-11-01T03:17:15.647577+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -15455,6 +15455,21 @@ prs:
       so create the scaffold server on a fresh socket name.'
     created_at: '2026-11-01T02:59:53Z'
     last_edited: '2026-11-01T02:59:53Z'
+  - id: note-3e0d6a3
+    text: 'S35 refiner (2026-11-01, head 24d7d4201), verified live: the at-lock merge
+      race is drivable with git-backed fake-github plus a held store lock. Non-obvious
+      setup: fake-claude never writes report.html, so pm pr signoff record cannot
+      create pr[signoff] — use pm pr edit --status sign_off (signed_off_at) plus a
+      pm pr note add note as the preserved evidence; seed the fake PR before pm init
+      --backend github (init imports OPEN stand-in PRs even with --no-import, attaching
+      gh_pr_number); commit the pm state before pm pr start (it refuses a PR not committed
+      on the base branch) and run start with claude off PATH; hold the lock with flock
+      --no-fork pm/project.yaml.lock sleep 120 (flock -c leaks the lock to the child
+      when killed); SIGSTOP the close once project.yaml.lock shows in /proc/<pid>/fd,
+      then release, run pm pr sync-github to completion, SIGCONT. Refined steps carry
+      the full recipe.'
+    created_at: '2026-11-01T03:17:15Z'
+    last_edited: '2026-11-01T03:17:15Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
