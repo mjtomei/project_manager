@@ -690,6 +690,24 @@ class TestEffortCapability:
         assert len(matching) == 1, matching
         assert matching[0].startswith("prs[pr-1].effort: ")
 
+    def test_validate_does_not_blame_the_pr_wide_effort_for_a_role_override(
+            self, pm_home_dir):
+        """A role's own ``session_effort`` entry decides its level, so its
+        unsupported level is reported under the role, not as the PR-wide
+        effort (which is supported)."""
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts=["low"])})
+        data = _project()
+        data["prs"] = [{"id": "pr-1", "effort": "low",
+                        "session_models": {"impl": f"provider:{ROUTE}"},
+                        "session_effort": {"impl": "max"}}]
+        problems = validate_model_config(data)
+        assert not any(p.startswith("prs[pr-1].effort:") for p in problems), \
+            problems
+        matching = [p for p in problems if "supported_efforts" in p]
+        assert len(matching) == 1, matching
+        assert matching[0].startswith("prs[pr-1] impl: ")
+
     def test_validate_accepts_a_supported_pr_wide_effort(self, pm_home_dir):
         _providers(pm_home_dir, **{ROUTE: _router(
             supported_efforts=["max", "high"])})
@@ -758,10 +776,28 @@ class TestEffortCapability:
         res = resolve_model_and_provider(
             "impl", pr_model=f"provider:{ROUTE}", project_data=_project())
         assert (res.effort, res.effort_status) == (None, "overridden")
+        assert res.effort_env_level == "max"
         assert any("sets CLAUDE_CODE_EFFORT_LEVEL=max" in n
                    for n in res.effort_notes)
-        assert any("instead of the CLI default" in n
+        assert any("for this provider's sessions" in n
                    for n in res.effort_notes)
+
+    def test_provider_env_assignment_with_no_pm_effort_is_displayed(
+            self, pm_home_dir):
+        """The session runs the provider's level, so the effort column must
+        not say "(default)" and the source must name the provider."""
+        from pm_core.router_route import describe
+        _providers(pm_home_dir, **{ROUTE: _router(
+            env={"CLAUDE_CODE_EFFORT_LEVEL": "max"})})
+        data = _project(session_models={"impl": f"provider:{ROUTE}"})
+        rows = model_settings.role_rows(data, None)
+        impl = next(r for r in rows if r.role == "impl")
+        assert model_settings.effort_cell(impl) == "max *"
+        assert impl.effort_source == f"provider {ROUTE} env"
+        lines = model_settings.format_rows([impl])
+        assert any("effort: provider rt env" in line for line in lines)
+        res = resolve_model_and_provider("impl", project_data=data)
+        assert "effort=max (overridden)" in describe(res)
 
     def test_provider_env_assignment_matching_pm_level_is_not_a_conflict(
             self, pm_home_dir):
@@ -891,6 +927,16 @@ class TestProviderEffortMetadata:
         assert ("effort env: CLAUDE_CODE_EFFORT_LEVEL=auto "
                 "(no override; --effort applies)") in r.output
 
+    def test_show_names_a_blank_assignment_as_no_override(self, pm_home_dir):
+        """A blank value is still an exported assignment ("no override"),
+        so it is shown rather than dropped from the output."""
+        _providers(pm_home_dir, **{ROUTE: _router(
+            env={"CLAUDE_CODE_EFFORT_LEVEL": ""})})
+        r = _cli("provider", "show", ROUTE)
+        assert r.exit_code == 0, r.output
+        assert ("effort env: CLAUDE_CODE_EFFORT_LEVEL= "
+                "(no override; --effort applies)") in r.output
+
     @pytest.mark.parametrize("efforts", ["high", [1], ["high", 2], [""]])
     def test_bad_supported_efforts_is_an_invalid_entry(self, pm_home_dir,
                                                        efforts):
@@ -931,6 +977,9 @@ class TestEffortDisplay:
         assert any(l.startswith("impl ") and "xhigh *" in l for l in lines)
         assert any("is not in the selected route's supported_efforts" in l
                    for l in lines)
+        # The marker is explained once, as a footnote (not a column).
+        assert any(l.startswith("* effort not confirmed by pm")
+                   for l in lines)
 
     def test_unverified_is_noted_without_the_inline_mark(self, pm_home_dir):
         _providers(pm_home_dir, **{ROUTE: _router()})
@@ -942,6 +991,9 @@ class TestEffortDisplay:
         lines = model_settings.format_rows(rows)
         assert any(l.startswith("impl ") and "high  " in l for l in lines)
         assert any("declares no supported_efforts" in l for l in lines)
+        # No marker, so no marker legend either.
+        assert not any(l.startswith("* effort not confirmed by pm")
+                       for l in lines)
 
     def test_provider_env_conflict_is_marked_and_noted(self, pm_home_dir):
         _providers(pm_home_dir, **{ROUTE: _router(
@@ -987,7 +1039,10 @@ class TestEffortDisplay:
         impl = next(l for l in r.output.splitlines()
                     if l.strip().startswith("impl "))
         assert "max *" in impl
-        assert "not in the selected route's supported_efforts" in r.output
+        # One finding, one line: the effort note and the problems section
+        # say the same sentence, so it is printed once, not twice.
+        assert r.output.count(
+            "not in the selected route's supported_efforts") == 1
 
     def test_describe_marks_unsupported(self, pm_home_dir):
         from pm_core.router_route import describe

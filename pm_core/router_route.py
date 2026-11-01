@@ -238,7 +238,12 @@ def bridge_host_argv(sock: Path, host: str, port: int) -> list[str]:
 
 def describe(resolution, *, container: bool = False) -> str:
     """One-line, credential-free description of where a session runs."""
-    effort = getattr(resolution, "effort", None) or "(default)"
+    # A provider's own env assignment decides the level when pm passes no
+    # --effort; showing "(default)" there would name a level the session
+    # does not run.
+    effort = (getattr(resolution, "effort", None)
+              or getattr(resolution, "effort_env_level", None)
+              or "(default)")
     # Never let a bare level read as verified when it is known not to be.
     # ``unverified`` (the route declares no capability metadata) stays out
     # of this inline marker to keep route lines readable; it is reported in

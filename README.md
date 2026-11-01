@@ -185,10 +185,12 @@ unsets it when it has its own selection (so the reported level is the one
 that runs) and shows the conflict; with no pm setting, the ambient value is
 reported as the source.  A provider that sets `CLAUDE_CODE_EFFORT_LEVEL` in
 its own `env:` block is your explicit configuration, so pm leaves it in place
-and reports the conflict instead of dropping it.  A model pm knows does not
-take effort (Haiku) suppresses it entirely, and the role table shows the
-level that was asked for as `xhigh (n/a)` beside the setting that asked for
-it.
+and reports the conflict instead of dropping it; when pm has no level of its
+own the role table shows the provider's level (marked `*`) with
+`provider <name> env` as the source, because that is what the session runs.
+A model pm knows does not take effort (Haiku) suppresses it entirely, and
+the role table shows the level that was asked for as `xhigh (n/a)` beside
+the setting that asked for it.
 
 pm does not read Claude Code's own settings files: `effortLevel` /
 `maxEffortLevel` there take precedence over `--effort` as well, so a session

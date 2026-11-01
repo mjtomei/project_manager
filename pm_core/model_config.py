@@ -148,7 +148,8 @@ class ModelResolution:
     - ``unverified``: routed, but the route declares no supported_efforts
     - ``unsupported``: the route declares the level unsupported
     - ``not_applicable``: the model does not take effort (Haiku)
-    - ``overridden``: CLAUDE_CODE_EFFORT_LEVEL decides the session
+    - ``overridden``: CLAUDE_CODE_EFFORT_LEVEL decides the session (set
+      ambiently or by the provider's own ``env:`` block)
     """
     model: str | None = None
     provider: str | None = None
@@ -164,6 +165,12 @@ class ModelResolution:
     effort_requested: str | None = None
     effort_status: str = "none"
     effort_notes: list[str] = field(default_factory=list)
+    # The level a provider's own ``env:`` block applies through
+    # CLAUDE_CODE_EFFORT_LEVEL.  It overrides --effort inside the CLI, so
+    # display shows it as the effective level (``effort`` stays None: pm
+    # passes nothing, the provider's variable decides).  None unless the
+    # assignment differs from what pm passes.
+    effort_env_level: str | None = None
     # The Claude levels the selected route declares it accepts, or None
     # when it declares none.
     supported_efforts: tuple[str, ...] | None = None
@@ -587,9 +594,15 @@ def _note_provider_effort_env(resolution: ModelResolution,
         return
     if level == effort:
         return
+    # The assignment decides the session's level: display it (the effort
+    # column would otherwise say "(default)" while the session runs this).
+    resolution.effort_env_level = level
+    if effort is None:
+        resolution.effort_source = f"provider {resolution.provider} env"
     note = (f"provider {resolution.provider!r} sets {AMBIENT_EFFORT_ENV}="
-            f"{level}; Claude Code applies it instead of "
-            + (f"--effort {effort}" if effort else "the CLI default"))
+            f"{level}; Claude Code applies it "
+            + (f"instead of --effort {effort}" if effort
+               else "for this provider's sessions"))
     if accepted is not None and level not in accepted:
         note += (f"; the route does not declare {level!r} in "
                  "supported_efforts")
@@ -765,17 +778,23 @@ def validate_model_config(project_data: dict | None) -> list[str]:
                       else "ignored; the project settings apply")
             errors.append(f"prs[{pr.get('id')}].model: {model!r} is "
                           f"not a model name or 'provider:<name>' ({effect})")
+        efforts = pr.get("session_effort")
+        role_efforts = efforts if isinstance(efforts, dict) else {}
         effort = pr.get("effort")
         if effort is not None and effort not in EFFORT_LEVELS:
             errors.append(f"prs[{pr.get('id')}].effort: invalid effort "
                           f"{effort!r} (ignored). Valid levels: "
                           f"{list(EFFORT_LEVELS)}")
         elif is_effort_level(effort):
-            # The PR-wide effort decides every role the PR covers, so the
-            # same rejected level on one route is one finding, not one per
-            # role (the roles' routes may differ, so check each).
+            # The PR-wide effort decides every role without an entry of its
+            # own (a role's own session_effort entry is checked, and
+            # reported, by _route_effort_warnings below), so the same
+            # rejected level on one route is one finding, not one per role
+            # (the roles' routes may differ, so check each).
             seen_problems: list[str] = []
             for st in PR_SESSION_TYPES:
+                if is_effort_level(role_efforts.get(st)):
+                    continue
                 problem = unsupported_effort_problem(
                     resolve_model_and_provider(
                         st, project_data=project_data, pr_entry=pr,
@@ -783,7 +802,6 @@ def validate_model_config(project_data: dict | None) -> list[str]:
                 if problem and problem not in seen_problems:
                     seen_problems.append(problem)
                     errors.append(f"prs[{pr.get('id')}].effort: {problem}")
-        efforts = pr.get("session_effort")
         if efforts is not None:
             where = f"prs[{pr.get('id')}].session_effort"
             if not isinstance(efforts, dict):

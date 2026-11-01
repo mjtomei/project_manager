@@ -403,10 +403,12 @@ def provider_detail_lines(p, *, status: bool = False) -> list[str]:
             lines.append(f"  supported_efforts checked: "
                          f"{p.supported_efforts_checked_at}{suffix}")
     assigned = effort_env_of(p)
-    if assigned:
+    if assigned is not None:
         # Say what the assignment does: a level overrides --effort, while
-        # "auto"/"unset" explicitly means "no override".
-        if assigned.strip().lower() in ("auto", "unset"):
+        # "auto"/"unset" (and a blank, which is still an exported
+        # assignment) explicitly means "no override".
+        if (not assigned.strip()
+                or assigned.strip().lower() in ("auto", "unset")):
             effect = "(no override; --effort applies)"
         elif normalize_ambient_effort(assigned)[0] is None:
             effect = "(not a Claude effort level pm knows)"

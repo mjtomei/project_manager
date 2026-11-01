@@ -41,12 +41,14 @@ def model_show():
         isinstance(config_block(mc, block), dict)
         for block in ("session_models", "session_effort"))
 
+    # Effort notes already printed above, so a problem that repeats one is
+    # not printed twice below.
+    seen_notes: set[str] = set()
     if resolvable:
         click.echo("Effective config per session type:")
         click.echo(f"  {'type':15s}  {'model':40s} {'effort':8s}")
         click.echo(f"  {'─'*15}  {'─'*40} {'─'*8}")
         effort_notes: list[str] = []
-        seen_notes: set[str] = set()
         marked = False
         for st in SESSION_TYPES:
             res = resolve_model_and_provider(st, project_data=data)
@@ -154,8 +156,11 @@ def model_show():
             res = resolve_model_and_provider(
                 st, pr_model=pr_model, project_data=data, pr_entry=pr)
             if res.provider:
+                # The effort is reported per role below, so strip it here
+                # (including a provider env level) to key the route line.
                 key = describe(st, dataclasses.replace(
-                    res, effort=None, effort_status="none", effort_notes=[]))
+                    res, effort=None, effort_env_level=None,
+                    effort_status="none", effort_notes=[]))
                 routes.setdefault(key, []).append((st, res))
         for items in routes.values():
             types = [st for st, _ in items]
@@ -163,7 +168,10 @@ def model_show():
                      else ", ".join(types))
             efforts: dict[str, list[str]] = {}
             for st, res in items:
-                efforts.setdefault(res.effort or "(default)", []).append(st)
+                # The level the role runs: pm's own, else one a provider
+                # env block assigns, else the CLI default.
+                efforts.setdefault(res.effort or res.effort_env_level
+                                   or "(default)", []).append(st)
             res = items[0][1]
             if len(efforts) > 1:
                 common = max(efforts, key=lambda e: len(efforts[e]))
@@ -184,7 +192,12 @@ def model_show():
     # silently ignored at resolution time, so a typo would otherwise just
     # never take effect.
     from pm_core.model_config import validate_model_config
-    problems = validate_model_config(data)
+    # A project-level route-effort finding is already one of the effort
+    # notes above (the same sentence, from the same helper); print it once.
+    # A PR's finding keeps its line: the prefix names where it is.
+    problems = [p for p in validate_model_config(data)
+                if p.startswith("prs[")
+                or not any(p.endswith(note) for note in seen_notes)]
     if problems:
         click.echo()
         click.echo("⚠ Problems in project.yaml model settings:")

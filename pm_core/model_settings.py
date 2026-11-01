@@ -49,13 +49,17 @@ def effort_text(res) -> str:
     """The effort column text for a :class:`ModelResolution`.
 
     The effective level; the *requested* one when it was suppressed as not
-    applicable (so "configured xhigh, nothing passed" stays visible); or
+    applicable (so "configured xhigh, nothing passed" stays visible); the
+    level a provider's own ``env:`` block applies when pm passes none (the
+    session runs it even though pm's ``--effort`` is absent); or
     ``(default)`` when nothing was selected.
     """
     if res.effort:
         return res.effort
     if res.effort_status == "not_applicable" and res.effort_requested:
         return res.effort_requested
+    if res.effort_env_level:
+        return res.effort_env_level
     return "(default)"
 
 

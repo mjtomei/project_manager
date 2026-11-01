@@ -207,8 +207,9 @@ bare `effort=high` never claims support the route did not declare.
   global and provider forms; `next_effort` wrapping all six states.
 - `validate_model_config` warnings for an unsupported configured level, for
   both the per-role `session_effort` forms and the PR-wide `effort` (which
-  decides every PR role, so one rejected level on one route is reported
-  once, not once per role).
+  decides every role without an entry of its own, so one rejected level on
+  one route is reported once, not once per role; a role's own entry is
+  reported under that role, never as the PR-wide effort).
 - Display tests: `format_rows` / `role_rows` never print a bare level for
   an `unsupported` or `overridden` one, and `router_route.describe` marks
   `unsupported`/`overridden`.  `unverified` is deliberately left bare
@@ -308,6 +309,9 @@ does not fetch a catalog in this PR.
 - A provider that assigns `CLAUDE_CODE_EFFORT_LEVEL` through its `env:`
   block: PM leaves the provider's assignment (the user configured it
   explicitly) and notes it; it does not silently drop a user-set variable.
+  With no PM level of its own, the effort column shows that level (marked
+  `*`, source `provider <name> env`) rather than `(default)`, because the
+  session runs the assigned level even though pm passes no `--effort`.
 - A provider `env:` assignment *and* an ambient `CLAUDE_CODE_EFFORT_LEVEL`
   with a PM level of its own: the provider's value wins in the launched
   process, so the notes must not claim pm unsets the ambient variable (it
