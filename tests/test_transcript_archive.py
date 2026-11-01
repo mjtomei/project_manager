@@ -730,13 +730,18 @@ def test_disable_freezes_archive_entries_only(env):
 
 def test_watcher_completion_leaves_canonicals_live(env):
     """The auto-start watcher shares its run dir with review loops and
-    step windows, so its completion freezes only the archive."""
+    step windows, so its completion freezes only the archive — including
+    the watcher's own iteration links (a later run reuses those names and
+    archives them, so they are not frozen here either)."""
     from pm_core.tui import watcher_ui
 
     app = _fake_app(env)
     tdir = env.run
     p = tdir / "impl-pr-abc.jsonl"
     _link(p, _native(env.cwd, _sid(), "IMPL"))
+    own = tdir / "auto-start-i2.jsonl"
+    own_native = _native(env.cwd, _sid(), "WATCHER ITERATION")
+    _link(own, own_native)
     archived = tdir / "archive" / "impl-pr-abc.old.jsonl"
     archived.parent.mkdir()
     _link(archived, _native(env.cwd, _sid(), "ARCHIVED"))
@@ -746,6 +751,10 @@ def test_watcher_completion_leaves_canonicals_live(env):
                                    latest_verdict="READY", iteration=2))
 
     assert p.is_symlink()
+    assert own.is_symlink()
+    with own_native.open("a") as f:
+        f.write(_record("READY") + "\n")
+    assert "READY" in own.read_text()
     assert archived.is_file() and not archived.is_symlink()
 
 

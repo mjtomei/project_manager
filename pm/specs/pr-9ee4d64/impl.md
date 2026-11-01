@@ -715,6 +715,17 @@ Verified after this integration: full suite **5477 passed / 1 skipped**
   a bulk sweep would mean guessing that the loop is dead, which is the
   liveness rule review e757 i4 removed; the content remains in the native
   JSONL until it is pruned.
+- **A completed TUI watcher's own iteration links stay live.**  The
+  auto-start watcher shares the run dir with the review loops and the
+  step windows, so its completion is a bulk sweep with
+  `include_top_level=False` (review e757 i4): it freezes only `archive/`.
+  Its own `<watcher-type>-i<N>.jsonl` links (e.g. `auto-start-i1.jsonl`)
+  are therefore not self-contained when the watcher ends.  Unlike the
+  loop-scoped iteration names they *are* reused — each new watcher run
+  restarts at iteration 1 in the same dir — so the next run archives the
+  outgoing sessions through archive-on-replace; until then their content
+  stays in the native JSONL.  The CLI watcher is the exception: its
+  private `watcher-<token>` dir is frozen whole (nothing else reads it).
 - **Finalize's last check and `os.replace` are not atomic together.**  The
   readlink guard runs immediately before the replace, so the unguarded
   window is one `os.replace` call; POSIX has no compare-and-swap for a
@@ -874,3 +885,36 @@ suite passed 8/8 consecutive runs; the post-fix repro
 (`/pm-captures/impl/post-fix/transcript-archive/repro.py --expect fixed`)
 still reports all three symptoms fixed, and the pre-fix repro on
 `3699f71a` reports all three present.
+
+## Review e757 i8 — the TUI watcher's own iteration links, documented and pinned
+
+No behavioural change: the archive/finalize flow is exactly as e757 i4
+left it.  Review found one undocumented consequence of that rule and no
+code defects.
+
+- **The auto-start watcher's own `<watcher-type>-i<N>.jsonl` links stay
+  live after its completion.**  `watcher_ui._on_complete_from_thread`
+  calls `finalize_transcript_dir(tdir, include_top_level=False)` because
+  the watcher shares the run dir with the review loops and the step
+  windows, so it freezes only `archive/`.  That is the e757-i4 rule, but
+  the spec's Known limitations covered only canonical names and
+  loop-scoped iteration names, so a QA reader could reasonably have
+  expected the watcher's finished iterations to be frozen.  Unlike the
+  loop-scoped names, these *are* reused (each watcher run restarts at
+  iteration 1), so the next run archives the outgoing sessions via
+  archive-on-replace.  Now a Known limitations bullet, and `qa.md` R5
+  states that a live `auto-start-i<N>.jsonl` after a completion is not a
+  failure (the CLI watcher's private `watcher-<token>` dir stays the
+  exception: frozen whole).
+- **Pinned by test.**  `test_watcher_completion_leaves_canonicals_live`
+  now also links `auto-start-i2.jsonl` and asserts it stays live and that
+  a later appended turn is visible through it, alongside the frozen
+  archive entry.  No new test function (archive suite stays at 36).
+
+Verified at the e757-i8 tree: `tests/test_transcript_archive.py` 36
+passed (10/10 consecutive runs); 506 passed across the archive /
+auto-start-finalize / breadcrumb / review-loop / return-handoff /
+launch-retry / fail-closed / signoff / launcher suites; full suite
+**5478 passed / 1 skipped** (7m08s, `markdown` installed); the post-fix
+repro (`/pm-captures/impl/post-fix/transcript-archive/repro.py --expect
+fixed`) still reports all three symptoms fixed.

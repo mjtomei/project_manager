@@ -97,6 +97,15 @@ watcher), not the helper functions.
   - links already inside `archive/` are frozen into self-contained
     copies, so archived sessions survive Claude transcript pruning;
   - the sweep removes and truncates nothing;
+  - the auto-start watcher's own `<watcher-type>-i<N>.jsonl` iteration
+    links in the shared run dir are still symlinks too — a watcher
+    completion is a bulk sweep over a directory the loops and step
+    windows also use, so it freezes only `archive/`.  Their names *are*
+    reused (each new watcher run restarts at iteration 1), so the next
+    watcher run archives the outgoing sessions; do not read a live
+    `auto-start-i<N>.jsonl` after a completion as a failure.  The CLI
+    watcher's private `watcher-<token>` dir is the exception (R8): it is
+    frozen whole;
   - a canonical link is replaced only when a new attempt launches on the
     same path, and the outgoing session is then archived under
     `archive/<stem>.<session-id>.jsonl` (R1).
