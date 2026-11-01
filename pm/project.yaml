@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T01:59:19.294229+00:00'
+  updated_at: '2026-11-01T02:21:22.313584+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37938,6 +37938,42 @@ prs:
       the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-11-01T01:59:19Z'
     last_edited: '2026-11-01T01:59:19Z'
+  - id: note-62f4faa
+    text: 'Review loop 928f i13: two guards the kept recipes carry had no case, found
+      by mutating them in this container (test-only; no recipe or pm_core/ change).
+      (1) The render block''s 2x-upscale size guard is two bounds — `[ "$((gw * 2))"
+      -le 4096 ]` and `[ "$((gh * 2))" -le 2304 ]` — and R71''s cases moved them together:
+      every past-the-budget case (3000x2000) exceeded both, so deleting either half
+      alone left the recipe file green (280 passed, verified) while the surviving
+      half does not measure the other dimension. A tall gif that fits the width budget
+      (2000x1200) doubled to 4000x2400 and a wide one that fits the height budget
+      (3000x1000) doubled to 6000x2000 — over level 5.1''s frame-size limit in the
+      dimension nothing checks, and still labelled level 5.1, the artifact iPhone/iPad
+      hardware decoders silently refuse. Verified live with both recipes'' own render
+      blocks extracted verbatim and real ffprobe/ffmpeg 4.4.2 plus a stub agg that
+      copies a real GIF: shipped 2000x1200 and 3000x1000 (rc 0), one bound deleted
+      4000x2400 and 6000x2000 (rc 0 both ways — silent, level=51). Fix: the parametrization
+      gained ((2000, 1200), False) (past-the-height-budget) and ((3000, 1000), False)
+      (past-the-width-budget) beside the existing both-past case, so each half has
+      its own case and the whole guard the both-past one. (2) R72''s failed download
+      removes its mktemp file, and test_renderer_install_is_bounded_and_drops_a_partial_download
+      said "It has to be removed" while asserting only that the shared agg was never
+      written: deleting the `rm -f "$agg_tmp"` left all 15 install cases green, and
+      a failed transfer then left agg.tmp.* in ~/.local/bin (the block''s own failure
+      path is the only thing that removes it, since the partial is no longer on PATH
+      for anything else to notice). The case now asserts no agg.tmp.* remains, and
+      its docstring describes the temp-file shape instead of the pre-R72 in-place
+      download. Mutation check: height bound removed fails exactly the two past-the-height-budget
+      cases, width bound exactly the two past-the-width-budget cases, whole guard
+      six, the install rm exactly the two download cases. Tests: recipe file 284 passed
+      (was 280); full suite env -u PM_HOST_HOME PATH=/usr/bin:/bin pytest tests/ -q
+      --deselect tests/test_merge_publish.py --deselect tests/test_signoff_integration.py
+      -> 5360 passed, 1 skipped, 121 deselected, 0 failed (445.88 s). Evidence: /pm-captures/review-928f-i13/
+      (probe-size-guard.log, before-after.log, mutation-check.log, recipe-file.log,
+      suite.log, README.md, scripts/). impl.md R73, R74 + Evidence note. The dropped
+      helper/prompt/verifier work stays dropped.'
+    created_at: '2026-11-01T02:21:22Z'
+    last_edited: '2026-11-01T02:21:22Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
