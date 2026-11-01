@@ -286,18 +286,28 @@ pane unless stated otherwise.
   beside the shared one) rather than guessing the shared tag; re-joining
   needs the flag (see R9's join bullet and the README).
 - **GIVEN** a shared session whose owner is attached through a grouped
-  session (`~1`) and opens a shell pane *in that grouped session* (whose
-  session environment carries no `PM_SHARE_MODE` — tmux copies no session
-  environment into a grouped session), **WHEN** the owner runs a plain
-  `pm session kill` (no `--global`/`--group`) from that pane, **THEN** it
-  kills that shared session (no mode requested means "the session I am
-  in", whatever mode it was created with) and touches no other session.
+  session (`~1`) and opens a shell pane *in that grouped session* (its
+  *session* environment is empty — tmux copies no session environment
+  into a grouped session — and the pane normally inherits
+  `PM_SHARE_MODE` from the server's global environment, so the shell must
+  `unset PM_SHARE_MODE` to exercise the no-mode rule), and the project
+  has **no private twin session** running, **WHEN** the owner runs a
+  plain `pm session kill` (no `--global`/`--group`) from that pane,
+  **THEN** it kills that shared session (no mode requested means "the
+  session I am in", whatever mode it was created with) and touches no
+  other session.  (With a private twin running, the cwd-derived name is
+  tried first and the twin is the one killed — the cwd-first rule of
+  R8/R3; that is the documented trade-off, not part of this bullet.)
 - **GIVEN** a shared session whose TUI pane was killed so that its window
-  was recreated by the `after-kill-pane` hook (`pm _pane-closed` — a
-  `run-shell` command sees only the server's global environment, so no
-  `PM_SHARE_MODE`), **WHEN** the TUI is respawned, **THEN** the new window
-  carries `window-size=smallest` (read from the session environment), so
-  the smallest connected client still sees the full layout.
+  was recreated by the `after-kill-pane` hook (`pm _pane-closed`), with
+  `PM_SHARE_MODE` removed from the server's global environment (`tmux
+  set-environment -g -u PM_SHARE_MODE`) so the hook's `run-shell` command
+  does not inherit it — the server global environment normally does carry
+  it from the creating `pm session --global` process, so removing it is
+  what exercises the session-environment fallback — **WHEN** the TUI is
+  respawned, **THEN** the new window carries `window-size=smallest` (read
+  from the session environment), so the smallest connected client still
+  sees the full layout.
 
 ### R10 — Existing (legacy) sessions are preserved, not migrated
 

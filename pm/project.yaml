@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T12:23:23.502721+00:00'
+  updated_at: '2026-11-01T12:48:55.686465+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6416,6 +6416,26 @@ prs:
       No live session, server or shared host configuration was touched.'
     created_at: '2026-11-01T12:23:23Z'
     last_edited: '2026-11-01T12:23:23Z'
+  - id: note-97c1ecf
+    text: 'Review loop b48f i2 (no requirement changes; full suite 5399 passed / 1
+      skipped, 419.8 s, log /pm-captures/review-b48f-i2/full-suite-final.log). Verification
+      pass over the head after the b48f i1 fixes. (1) test_failed_detach_is_not_reported_as_success
+      was vacuous: its fake left #{session_group} at the generic "0", so the attached
+      client was never a candidate and the test passed via the "no attached client"
+      path; the detach-failure branch (b972 i5) had no coverage at all. The fake now
+      resolves the group to pm-x, the test asserts the detach was attempted on /dev/pts/1,
+      and it fails when the branch returns True. (2) Added the two missing CLI error-branch
+      tests: `pm session kill` without tmux, and `pm session --print-connect --dir
+      <non-git dir>`. (3) Corrected the shared-session propagation claims in impl.md,
+      qa.md R9 and `tmux.session_is_shared()`''s docstring: verified on tmux 3.2a
+      that a server started with PM_SHARE_MODE=global propagates it to panes and run-shell
+      hooks through the global environment, so the session-environment fallback covers
+      the contexts where that did not happen; qa.md''s two R9 bullets now say how
+      to reach the fallback (unset it in the shell / `tmux set-environment -g -u PM_SHARE_MODE`)
+      and the kill bullet states the no-private-twin condition the cwd-first rule
+      requires. No live session, server or shared host configuration was touched.'
+    created_at: '2026-11-01T12:48:55Z'
+    last_edited: '2026-11-01T12:48:55Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

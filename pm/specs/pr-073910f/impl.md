@@ -2444,16 +2444,28 @@ adoption for the commands it did not touch.
    The 703c i8 fix taught `_register_tmux_bindings()` to ask the session
    for its share mode, but the per-window option kept the old
    `os.environ.get("PM_SHARE_MODE")` test.  That variable is absent in
-   exactly the contexts that respawn a shared session's TUI:
-   - a `run-shell` command from a *global* hook sees only the server's
-     global environment — verified on tmux 3.2a: a global
-     `after-kill-pane` hook knows `#{session_name}` but not the session's
-     variables — so `pm _pane-closed` (`pane_layout._respawn_tui`)
-     ran without it; and
+   the contexts that respawn a shared session's TUI:
+   - a `run-shell` command from a *global* hook sees the server's global
+     environment (verified on tmux 3.2a: a global `after-kill-pane` hook
+     knows `#{session_name}` but not the *session's* variables).  That
+     global environment normally carries `PM_SHARE_MODE` because the
+     server was started by the `pm session --global` process, but it does
+     not when the variable was missing from the client that started the
+     server (a joiner's plain `tmux -S … attach` after the owner's server
+     exited) — then `pm _pane-closed` (`pane_layout._respawn_tui`) ran
+     without it; and
    - a plain `pm session` that adopted an already-shared ambient session
      clears it in its own environment (`_set_share_mode_env(False,
      None)`, the 703c i8 case), so its `_respawn_tui` path lost the
      option too.
+
+   *(b48f i2 correction: the first bullet originally claimed the hook
+   always ran without the variable.  The server global environment
+   normally propagates it from the creating `pm session --global`
+   process — verified 2026-11-01: a pane and a `run-shell` command on a
+   server started with `PM_SHARE_MODE=global` both see it — so the
+   fallback covers the contexts where that did not happen, not every
+   hook.)*
    A window recreated in either path kept tmux's default
    `window-size=latest`, which overrides the session-level `smallest`
    (the helper's own docstring says so), so the smallest connected client
@@ -2475,15 +2487,24 @@ adoption for the commands it did not touch.
    shell pane in its grouped session.**  `_ambient_session_for_share_mode`
    treated "no `--global`/`--group` requested" as "private wanted", so an
    ambient session whose recorded mode was `global` was rejected.  A
-   grouped session (`base~N`) does not inherit the base session's
-   environment (tmux copies no session environment into a grouped
-   session — verified on tmux 3.2a), so the shell pane the user opens in
-   the view they are attached to has no `PM_SHARE_MODE`, and the command
-   reported "No session found" for the very session hosting it.  A plain
-   `pm session` already adopts a shared ambient session whatever its mode
-   (`_resolve_start_session_name`), so the two commands now agree: no mode
-   requested means "the session I am in".  A *requested* mode still
+   grouped session (`base~N`) has an empty *session* environment (tmux
+   copies no session environment into a grouped session — verified on
+   tmux 3.2a), so its panes fall back to the server's *global*
+   environment.  That normally still carries `PM_SHARE_MODE` (the
+   creating `pm session --global` process exported it), but not when the
+   shell that started the server did not — the case the no-mode rule must
+   handle — and the command then reported "No session found" for the very
+   session hosting it.  A plain `pm session` already adopts a shared
+   ambient session whatever its mode (`_resolve_start_session_name`), so
+   the two commands now agree: no mode requested means "the session I am
+   in".  A *requested* mode still
    rejects a mismatched ambient (the guard R9 depends on).
+   *(b48f i2 correction: the original text said the shell pane "has no
+   `PM_SHARE_MODE`".  It has none in its *session* environment, but a
+   pane normally inherits the server global value — see the b48f i2
+   section, which also records the residual for the genuinely-absent
+   case: with a private twin of the same project running, the cwd
+   candidate still wins.)*
    Tests: `TestResolveTargetSession::
    test_no_flag_targets_a_shared_ambient_session` (fails with the old
    comparison: only the cwd candidate is offered) and
@@ -2594,3 +2615,73 @@ suite **5397 passed / 1 skipped** (414 s, log
 live session, server or shared host configuration was touched — every
 fixture used a disposable socket or a temporary HOME, and the one live
 tmux check used a throwaway socket under `/tmp`.
+
+## Review iteration (2026-11-01, review-loop b48f i2)
+
+Verification pass over the head after the b48f i1 fixes; no requirement
+changes.  One vacuous test in the detach path, two small coverage gaps on
+CLI error branches, and a factual correction to the shared-session
+propagation notes this spec and `qa.md` carried.
+
+1. **`test_failed_detach_is_not_reported_as_success` never reached the
+   branch it is named for.**  Its fake resolved `#{session_group}` through
+   the generic fallback (`"0"`), so the detach base became `0`, the
+   attached client `pm-x` was not a candidate, and
+   `detach_current_client()` returned `False` from the *"no attached
+   client"* path — the test passed whether or not a rejected
+   `detach-client` was reported as success.  Coverage of this test showed
+   the whole detach attempt *and* the failure return missed; running the
+   class showed the failure branch (`_log.warning(...); return False`,
+   b972 i5) is executed by no test at all.  The fake now resolves the
+   group to `pm-x` and the test asserts the detach was attempted on
+   `/dev/pts/1`; verified to fail when the branch is changed to
+   `return True`, and the branch is now covered.
+
+2. **`pm session kill`'s no-tmux guard had no test** (unlike `list` and
+   `mobile`, whose guards are tested).  New
+   `TestSessionKillServerSelection::test_requires_tmux`: it asserts the
+   `tmux is not installed.` message, exit 1, and that the session lookup
+   is never attempted.
+
+3. **`pm session --print-connect --dir <non-git dir>`'s refusal had no
+   test** while `pm session kill --dir`'s (b48f i1) did.  New
+   `TestPrintConnect::test_dir_without_a_session_tag_is_rejected` asserts
+   the refusal and that no command is printed.
+
+4. **Corrected the shared-session propagation claims in this document,
+   `qa.md` and `tmux.session_is_shared()`'s docstring.**  The 2caf i11
+   notes said a `run-shell` hook and a grouped-session pane have no
+   `PM_SHARE_MODE`.  Verified on tmux 3.2a: the server *global*
+   environment inherits it from the creating `pm session --global`
+   process, so panes and `run-shell` commands normally do see it (a
+   session's own environment is still empty for a grouped session, and
+   `set-environment -g -u` really does remove it from a hook's
+   environment).  The `session_is_shared()` session-environment fallback
+   is still the right behaviour — it covers the contexts where the global
+   environment lacks the variable (a server started by a client without
+   it) and the process environment was cleared (`_set_share_mode_env`) —
+   only the explanation was wrong.  `qa.md` R9's two bullets now say how
+   to reach the fallback (unset it in the shell / remove it from the
+   global environment) so the scenarios exercise it instead of passing
+   through the process variable; the kill bullet also states the
+   no-private-twin condition that the cwd-first rule (R3.2/R8) requires.
+
+Nothing else surfaced.  The socket derivation and default-server
+addressing (R4.3), discovery scoping (7af7 i1–i3, 3cc7 i1, 703c
+i1/i4/i6, 2caf i4/i5), the precise detach (R5, 703c i3, 2caf i2), the
+kill/unlink rules (R3.2, R8, 2caf i7), the socket-file and
+socket-directory ownership checks (d1c0 i10/i12, 703c i2, 2caf i8,
+QA S17) and the shared-session share-mode handling (d1c0 i7, 703c i8,
+2caf i11) all match the spec, and every new helper has direct coverage.
+
+Validation: targeted suites (`test_session_socket_isolation`,
+`test_tmux`, `test_cli_helpers`, `test_shared_sessions`, `test_cli_qa`)
+414 passed; full suite **5399 passed / 1 skipped** (419.8 s, log
+`/pm-captures/review-b48f-i2/full-suite-final.log`).  The corrected
+detach test was verified to fail when the failure branch returns `True`;
+the two new tests exercise CLI error branches that existed before this
+iteration.  `pm/specs/pr-073910f/session_start_smoke.py` re-ran
+clean on a disposable socket (private server, session env, global env
+and hooks correct; default server untouched).  No live session, server
+or shared host configuration was touched — every fixture used a
+disposable socket and a temporary HOME.

@@ -807,7 +807,14 @@ class TestDetachCurrentClient:
     @patch("pm_core.tmux.subprocess.run")
     def test_failed_detach_is_not_reported_as_success(self, mock_run,
                                                       monkeypatch):
-        """A non-zero detach-client must not be claimed as a detach."""
+        """A non-zero detach-client must not be claimed as a detach.
+
+        The fake must resolve the session *group* (``#{session_group}``) to
+        ``pm-x``, not leave it to the generic fallback: with a different
+        base the client is not a candidate, nothing is detached, and the
+        test would pass without ever reaching the failure branch it is
+        named for.
+        """
         monkeypatch.setenv("TMUX_PANE", "%7")
         monkeypatch.setenv("PM_TMUX_SOCKET", "")
 
@@ -820,6 +827,8 @@ class TestDetachCurrentClient:
             if "detach-client" in cmd:
                 return MagicMock(returncode=1, stdout="",
                                  stderr="no such client")
+            if "#{session_group}" in cmd:
+                return MagicMock(returncode=0, stdout="pm-x\n")
             if "#{window_id}" in cmd:
                 return MagicMock(returncode=0, stdout="@1\n")
             if "#{session_name}" in cmd:
@@ -828,6 +837,13 @@ class TestDetachCurrentClient:
 
         mock_run.side_effect = fake_run
         assert tmux.detach_current_client() is False
+
+        # The detach was actually attempted (and rejected) — that is the
+        # branch under test.
+        detaches = [c[0][0] for c in mock_run.call_args_list
+                    if "detach-client" in c[0][0]]
+        assert len(detaches) == 1
+        assert detaches[0][-2:] == ["-t", "/dev/pts/1"]
 
     @patch("pm_core.tmux.subprocess.run")
     def test_never_issues_bare_detach(self, mock_run, monkeypatch):
@@ -2216,6 +2232,22 @@ class TestSessionKillServerSelection:
         assert result.exit_code == 0, result.output
         assert killed == [("pm-repo-abc~1", sock), ("pm-repo-abc", sock)]
 
+    def test_requires_tmux(self, monkeypatch):
+        """Without tmux nothing can be resolved or killed: say so, exit 1."""
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: False)
+        resolver = MagicMock()
+        monkeypatch.setattr(session_mod.tmux_mod,
+                            "find_exact_session_server", resolver)
+
+        result = CliRunner().invoke(session_mod.session, ["kill"])
+
+        assert result.exit_code == 1
+        assert "tmux is not installed." in result.output
+        resolver.assert_not_called()
+
     def test_kill_also_tears_down_a_users_view(self, monkeypatch, tmp_path):
         """A user's own view of the session is a group member: kill it too.
 
@@ -3066,6 +3098,30 @@ class TestPrintConnect:
 
         assert result.exit_code == 1
         assert "--dir requires --global or --group" in result.output
+
+    def test_dir_without_a_session_tag_is_rejected(self, monkeypatch,
+                                                   tmp_path):
+        """A `--dir` that names no session must not print a cwd command.
+
+        Same refusal as `pm session kill --dir`: the flag names the target,
+        so silently falling back to the caller's cwd would print a command
+        for a different project's session.
+        """
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+
+        # Record the value so the group callback's mutation is undone.
+        monkeypatch.setenv("PM_SHARE_MODE", "")
+        monkeypatch.setattr(paths, "get_session_tag",
+                            lambda start_path=None, use_github_name=True: None)
+
+        result = CliRunner().invoke(
+            session_mod.session,
+            ["--global", "--dir", str(tmp_path), "--print-connect"])
+
+        assert result.exit_code == 1
+        assert "Cannot determine session from directory" in result.output
+        assert "tmux " not in result.output
 
     def test_dir_with_share_flags_prints_the_shared_socket(
             self, monkeypatch, tmp_path):

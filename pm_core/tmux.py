@@ -838,12 +838,20 @@ def session_is_shared(session: str, socket_path: str | None = None) -> bool:
       clears the variable in its own environment (``_set_share_mode_env``)
       yet still operates on the shared session;
     - ``run-shell`` commands run from a *global* hook (``pm _pane-closed``,
-      ``pm _window-resized``) see only the server's global environment —
-      verified on tmux 3.2a: the hook knows ``#{session_name}`` but not the
-      session's variables — so ``PM_SHARE_MODE`` is absent there;
-    - a shell pane the user opens in a grouped session (``base~N``) does
-      not inherit the base session's environment (tmux copies no session
-      environment into a grouped session).
+      ``pm _window-resized``) see the server's *global* environment, which
+      normally carries ``PM_SHARE_MODE`` because the server was started by
+      the ``pm session --global`` process.  It is absent when that
+      variable was not in the environment of whatever client started the
+      server (a joiner's plain ``tmux -S … attach`` after the owner's
+      server exited), and then only the session environment has it;
+    - a grouped session (``base~N``) has an empty *session* environment
+      (tmux copies none into a grouped session), so a pane there sees the
+      server global environment rather than the base session's variables —
+      again present only when the server inherited it.
+
+    In short: the process variable is the fast path, and the session
+    environment is the authoritative record of how the session was
+    created.
 
     An empty value counts as unset, like every other reader of the
     variable.  A session that cannot be queried (no such session, tmux
