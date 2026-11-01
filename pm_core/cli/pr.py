@@ -4137,6 +4137,11 @@ def _qa_status_for(pr_id: str) -> tuple[str | None, Path | None]:
         data = json.loads(latest.read_text())
     except (OSError, ValueError):
         return None, latest
+    # A hand-edited/corrupt file can hold any valid JSON; a non-object would
+    # raise AttributeError on ``.get()`` and crash the auto-sequence tick.
+    # Treat it like an unreadable file (no overall), as the other readers do.
+    if not isinstance(data, dict):
+        return None, latest
     return data.get("overall") or None, latest
 
 

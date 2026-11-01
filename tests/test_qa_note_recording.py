@@ -369,3 +369,53 @@ class TestProgressLogLine:
         assert Text.from_markup(msg).plain == (
             "QA [pr-001]: QA complete: NEEDS_WORK [finalize: FINALIZE_DONE]"
             " — Login flow: PASS")
+
+
+class TestInfrastructureErrorNote:
+    """A fail-closed (infrastructure ERROR) run must carry its cause into
+    the PR note, even when some scenarios already have a verdict."""
+
+    def test_error_cause_included_when_scenarios_have_verdicts(self, tmp_path):
+        app = _make_app(tmp_path)
+        state = _make_state(verdict="ERROR", verdicts={1: "PASS"})
+        state._error = (
+            "Container mode is enabled, but the container for at least one "
+            "QA scenario could not be created, so the run was stopped "
+            "instead of launching on the host.\n\n"
+            "Cause: scenario 2: image not found\n\n"
+            "To retry:\n"
+            "  - fix the container runtime/image (check 'pm container "
+            "status'), then retry QA; or\n"
+            "  - if host execution is intended, disable container mode "
+            "explicitly with 'pm container disable'.")
+        _record_qa_note(app, state)
+
+        data = store.load(tmp_path)
+        text = store.get_pr(data, "pr-001")["notes"][0]["text"]
+        assert text.startswith("QA ERROR: Login Flow: PASS")
+        assert "scenario 2: image not found" in text
+        assert "pm container disable" in text
+        assert "\n" not in text  # the note stays a single line
+
+    def test_error_cause_not_duplicated_when_no_scenario_ran(self, tmp_path):
+        """``qa_outcome_detail`` already returns the error when nothing ran;
+        the note must not repeat it."""
+        app = _make_app(tmp_path)
+        state = _make_state(verdict="ERROR", verdicts={})
+        state._error = "Container runtime is unavailable: boom"
+        _record_qa_note(app, state)
+
+        data = store.load(tmp_path)
+        text = store.get_pr(data, "pr-001")["notes"][0]["text"]
+        assert text.count("boom") == 1
+
+    def test_verdict_notes_unchanged(self, tmp_path):
+        """A completed verdict carries no error text."""
+        app = _make_app(tmp_path)
+        state = _make_state(verdict="PASS", verdicts={1: "PASS", 2: "PASS"})
+        state._error = ""
+        _record_qa_note(app, state)
+
+        data = store.load(tmp_path)
+        text = store.get_pr(data, "pr-001")["notes"][0]["text"]
+        assert text == "QA PASS: Login Flow: PASS; Dashboard: PASS"
