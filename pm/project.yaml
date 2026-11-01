@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T02:09:00.137876+00:00'
+  updated_at: '2026-11-01T02:14:12.171933+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5616,6 +5616,48 @@ prs:
       from story 5 makes the "B unchanged" frame misleading. Captures: /pm-captures/scenarios/9/{story1-view-and-send,story2-colliding-view,story3-quit-detaches-right-client,story4-quit-no-client,story5-explicit-session-b}/.'
     created_at: '2026-11-01T01:46:40Z'
     last_edited: '2026-11-01T01:46:40Z'
+  - id: note-bfa2233
+    text: 'QA scenario 11 (hostile socket-directory states and other users'' servers)
+      PASS 7/7 stories on 4f30f6d62 (code unchanged since e311f8fe5), no source changes.
+      (1) root-owned 1755 sticky-but-not-writable dir: `pm session` exits 1 with exactly
+      the actionable "Cannot use tmux socket directory ... It must be owned by you,
+      or have the sticky bit set (1777) ..." message, empty stdout, no traceback,
+      no pm-* entry, no tmux server, dir still 1755. (2) root-owned 0777 non-sticky:
+      same refusal, dir still 0777 (chmod to 1777 failed and pm refused). (3) root-owned
+      1777: session starts; socket exists owned by the user at 0600, list-sessions
+      shows base + ~1, session env has PM_TMUX_SOCKET=<sock>, panes start with `PM_TMUX_SOCKET=<sock>
+      pm _tui`, `pm session list` shows one row with SOCKET=<sock>, no (shared). (4)
+      live foreign-owned server (uid 1001) at the expected path, socket chmod 0777:
+      `pm session` exits 1 with "Refusing to use tmux socket ... owned by uid 1001,
+      not you ..."; foreign server untouched (evil 0, socket still qaother), no project
+      server created. (5) qaother --global session live (socket 0777) with qasubject
+      having no session: `pm session list` shows only the (shared) row; no-`--session`
+      `pm tui view` and `pm tui send ?` both print "No TUI pane found. Is there a
+      pm tmux session running?" rc 1 and leave qaother''s pane byte-identical to baseline
+      (no overlay, attached 0); explicit -s works (view prints [Session: ..., Pane:
+      %0], send prints "Sent keys ... to TUI pane %0", following view shows the Keyboard
+      Shortcuts overlay). (6) hostile entries next to a live private socket (symlink
+      to the live socket, dangling symlink, regular file): `pm session list` rc 0,
+      exactly one row for the real session with no (shared), none of the planted names
+      reported, all three entries unchanged. (7) tmux absent via a removable shadow-PATH
+      symlink: `pm session list` and `pm session kill` print "tmux is not installed."
+      rc 1 and leave the session running; `pm tui view` with $TMUX set prints "No
+      TUI pane found." rc 1; C-q logs `INFO [tui.pane_ops] quit_app` then `WARNING
+      [tmux] detach_current_client: tmux cannot be run; leaving clients attached`
+      then `quit_app: no attached client to detach`, both panes still dead=0 and a
+      later view still captures a frame. Harness gotchas, none a product bug: (a)
+      never `rm -rf /tmp/pm-sessions` while a session is live - that unlinks the live
+      server''s socket and orphans the tmux server + `pm _tui`, which then holds ~/.pm/tui-<session>.pid
+      and makes the next `pm session` refuse with "another TUI (pid N) already owns
+      session ... refusing to start a second TUI"; kill the session first, and after
+      an orphan kill the `_tui` pid and remove the pidfile. This is what made my first
+      story-7 recording diverge (the TUI exited before C-q). (b) mute xtrace around
+      the ~559-entry /usr/bin symlink loop or the cast is mostly `ln -s` noise. (c)
+      `pm session </dev/null` inside a recorded pane still prints the benign no-TTY
+      attach traceback - redirect to files and cat them. (d) agg is absent from the
+      container; fetch agg-aarch64-unknown-linux-gnu v1.5.0. Captures: /pm-captures/scenarios/11/{story1-2-refusals,story3-1777-start,story4-foreign-server,story5-cross-user,story6-hostile-entries,story7-no-tmux}/.'
+    created_at: '2026-11-01T02:14:12Z'
+    last_edited: '2026-11-01T02:14:12Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
