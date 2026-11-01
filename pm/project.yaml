@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-01T23:20:47.950537+00:00'
+  updated_at: '2026-11-01T23:21:45.240577+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48194,6 +48194,37 @@ prs:
       or report.html gets a two-line tag. Captures: /pm-captures/scenarios/63/.'
     created_at: '2026-11-01T23:20:47Z'
     last_edited: '2026-11-01T23:20:47Z'
+  - id: note-13a479d
+    text: 'QA S64 (concurrent writers of the resolution artifacts and the sign-off
+      window) PASS at de24e490 — no code change; all four triples held live. Verified:
+      (1) two simultaneous read-only `pm pr signoff integrate` both exit 0 with the
+      identical summary `PR pr-28dc43e: conflicts with master@751dbe1a resolved by
+      record (pm/project.yaml; 1 added from PR, 1 from base)` and the identical delta
+      path; the shared `integration-resolution.diff` is a complete 2-hunk unified
+      diff naming both appended record ids, and `pm pr show` still has no `## Integration`
+      (read-only recorded nothing); (2) read-only + `--record` racing: the artifact
+      is complete valid JSON (status resolved, 64-hex digest, diff_path exists and
+      `resolution.diff` equals the file byte-for-byte, candidate_tree a real git tree,
+      no applied_merge_sha) and the compact record agrees — repeated 3x; (3) two simultaneous
+      `pm pr signoff` launches: the per-PR launch flock makes exactly one clone and
+      one window, the loser prints exactly `Switched to existing sign-off window ''signoff-pr-28dc43e''`
+      and does not clone, both RC=0; (4) `--fresh` launch vs `--record`: the launch
+      applies in the workdir and the stored artifact and compact record name the newer
+      applied check (head == workdir HEAD, candidate_tree == HEAD^{tree}, status up_to_date)
+      while the `--record` output legitimately still prints its pre-apply head. Harness
+      facts for the next run: (a) `agg` is absent from the QA container and the aarch64
+      asset is `agg-aarch64-unknown-linux-gnu` (there is NO aarch64 musl build) —
+      install to a writable dir and prepend it to PATH; (b) `pm pr show` prints no
+      `Workdir:` line until a launch provisions one; (c) PR ids are title-derived,
+      so `pm pr add "Feature"` yields pr-28dc43e in every project — stale `~/.pm/workdirs/repo*`
+      dirs and a `.signoff-launch-pm-repo-<other>-pr-28dc43e.lock` from earlier container
+      runs are present, so count `.git` only under your own `~/.pm/workdirs/<project>-<repo_id>/`;
+      (d) story 2''s Given must be restored between repeats — `git checkout -- pm/project.yaml`
+      plus removing `$CAP/integration.json` is enough. Captures: /pm-captures/scenarios/64/
+      (story1-readonly-race, story2-record-race, story3-launch-race, story4-launch-vs-record;
+      each has recording.cast + recording.mp4 + manifest).'
+    created_at: '2026-11-01T23:21:45Z'
+    last_edited: '2026-11-01T23:21:45Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
