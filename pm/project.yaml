@@ -52749,3 +52749,321 @@ prs:
   review_spec: true
   model: provider:claude-work-xhigh-249
   effort: high
+- id: pr-5f4f595
+  plan: plan-regression
+  title: 'Sign-off report: review/QA efficiency, plan feedback and full human prompt review'
+  branch: pm/pr-5f4f595-sign-off-report-review-qa-efficiency-recommendatio
+  status: pending
+  depends_on:
+  - pr-8e693f6
+  - pr-2680fbf
+  description: 'Update the sign-off report prompt so each report considers what would have
+    reduced the time spent reviewing and QAing the PR, and whether its result warrants changes
+    to the plan or proposed new work, grounded in the actual implementation, review iterations,
+    QA attempts, findings and retained evidence.
+
+
+    Report content:
+
+    - Recommend concrete code refactorings or architecture changes that would have made review
+    and QA faster, simpler or more reliable. Identify the repeated difficulty, affected code
+    or interface, proposed change, likely benefit and tradeoffs. Distinguish observed causes
+    from hypotheses; quantify time or repeated work only when supported by recorded evidence.
+
+    - Identify missing reusable setup/capture recipes and agent-driven regression scenarios
+    that should be added. Describe the behavior, prerequisites, meaningful assertions and
+    evidence needed, and check the existing library for a reusable entry before proposing
+    duplicates.
+
+    - Evaluate existing recipes that caused difficulties, including misleading or stale instructions,
+    brittle setup, unsuitable environment assumptions, redundant steps or excessive effort.
+    Recommend modifying, consolidating, replacing, retiring or removing them when appropriate.
+    Name the recipe and supporting failed attempts/findings, explain the change, identify
+    consumers and migration/replacement coverage, and retain useful coverage. Adding more
+    recipes is not the only allowed recommendation.
+
+    - Keep recommendations actionable and prioritized, with links to the relevant PR notes,
+    iterations/scenarios, captures and existing follow-up PRs. Explicitly say when no justified
+    recommendation was found instead of inventing one. Separate acceptance-blocking correctness/evidence
+    gaps from optional future efficiency improvements; recommendations do not waive assertions
+    or authorize unrelated changes or recipe deletion.
+
+
+    Plan feedback and proposed new work (user clarification, 2026-10-26):
+
+    Ask explicitly: "Given the result of this PR, does the plan need to change, and is there
+    any new work worth proposing?"
+
+    - Consider changed goals or assumptions, new evidence, priorities, missing steps, dependencies,
+    sequencing, obsolete work and useful follow-up investigations. Identify the affected plan/section,
+    the proposed adjustment, why the result supports it and any uncertainty or human decision
+    needed.
+
+    - Describe proposed follow-up PRs with a concrete purpose/deliverable, supporting findings,
+    plan membership and real prerequisites. Search existing work first, link or refine a matching
+    PR rather than duplicate it, and link new proposals/entries back to the originating PR
+    and evidence. Distinguish acceptance-blocking prerequisites from optional later work.
+    State when no justified plan change or new work was found.
+
+    - Plans need not predefine every PR. An ordinary PR can be scoped to exploration and deliver
+    findings, decisions and proposals for further PRs; it does not need to invent a code change
+    or claim to have solved an open research question. Its accepted scope can be the exploration
+    report itself, with unresolved questions made explicit.
+
+    - PR is the unit of work for all projects. Mechanical work can use the existing flow unattended;
+    work that needs exploratory judgment is developed by the human and agent together in the
+    same implementation session, then continues through normal review, QA and sign-off with
+    checks appropriate to the deliverable. Do not add software/analysis/research PR types
+    or another lifecycle.
+
+    - PRs already can create PRs. Use existing PM PR creation, notes, dependency and plan-editing
+    operations when authorized. This scope covers shared all-session recommendation guidance
+    and the final sign-off prompt/report review, using existing operations rather than new
+    spawning infrastructure. Recommending or filing work does not itself start it or grant
+    authority to change unrelated plans. Preserve configured human gates and pending user
+    questions.
+
+
+    Validation of plan feedback:
+
+    Use representative evidence for (1) a result justifying a concrete plan revision, (2)
+    an exploratory PR proposing useful follow-up PRs, (3) a matching existing follow-up that
+    should be reused, and (4) no justified plan change or new work. Show the report''s reasoning
+    and links and preserve the difference between findings, proposed actions and actions already
+    taken through existing tools. Review the exploration''s actual deliverable without certifying
+    unresolved hypotheses. Include this entire addition in the complete prompt shown to the
+    user for manual review.
+
+
+    All-session recommendations and final proposal/bug review (user decision, 2026-10-31):
+
+    - Allow every working session, including individual QA scenarios, to propose useful features,
+    refactorings, recipe improvements or further investigations when supported by its observations.
+    Do not require broad architectural judgment from a narrow scenario or force a suggestion
+    when none is justified. Retain the observation, origin PR/session/scenario and evidence
+    for whole-PR assessment later.
+
+    - Reuse existing PR, notes and plan operations. Search existing work before filing, link
+    a matching entry rather than duplicate it, and distinguish a proposal from implemented
+    work. Shared session guidance and the relevant composed prompts are in scope; no new spawning
+    infrastructure is needed. Proposing or filing work is not authorization to start it.
+
+    - At sign-off, review ALL bugs and proposals accumulated during this PR, including other
+    sessions'' filings, rather than only suggestions made by sign-off itself. Check for duplicate/overlapping
+    work, already-fixed findings, unsupported or incorrect premises, conflict with explicit
+    user goals, and complexity disproportionate to a concrete benefit. Ground these judgments
+    in the findings and actual code/plan context; preserve valid observations from narrowly
+    scoped scenarios.
+
+    - Provide a concise disposition and canonical PR/note/evidence links: justified new work,
+    link/merge with an existing proposal, already addressed, unsupported/out of scope, or
+    needing a human decision. Say why. Report recommendations separately from actions actually
+    taken. Report generation does not itself authorize deleting/closing entries, changing
+    unrelated plans, weakening criteria or starting follow-ups; reconciliation uses existing
+    operations within their authority and preserves history.
+
+    - Preserve the existing NEEDS_WORK rules exactly: a bug found and fixed still requires
+    another review round. Useful review/QA loops must not be shortened by relabeling fixes
+    as optional recommendations, adding PASS_WITH_FOLLOWUPS or waiving acceptance requirements.
+    Keep actual acceptance blockers visible alongside longer-term ideas.
+
+    - Validate multiple sessions reporting the same bug/proposal, an evidence-backed novel
+    feature, an already-fixed or unsupported proposal, no justified suggestions, and a code
+    fix that still goes through another review round. Include all new shared guidance and
+    the complete final sign-off prompt in the mandatory human prompt review, together with
+    representative consolidated reports.
+
+
+    Required human review of the WHOLE prompt:
+
+    The user has not manually reviewed a recent addition to the sign-off prompt. As part of
+    this PR, inventory and reconcile the current sign-off/report prompt, including that recent
+    addition and all relevant composed sections. Produce a readable complete rendered candidate
+    prompt with representative context, together with a before/after diff and concise explanation
+    of changes. Present the entire candidate to the user for manual review, not only the new
+    retrospective section. Record the user''s explicit review and resolve their feedback before
+    calling this PR accepted or merging it. Do not infer approval from earlier sign-offs,
+    existing prompt text or automated review. This is a requirement for this PR, not a change
+    to spec-review settings or gates on existing PRs.
+
+
+    Implementation/validation scope:
+
+    Extend generate_signoff_prompt, shared session recommendation guidance and the report
+    guidance consistently with the existing evidence-based, recommendation-only sign-off contract
+    and current integration/return instructions. Validate the generated prompt and a representative
+    report against retained review/QA evidence, including an example recommending a missing
+    regression, one proposing recipe modification/removal, and a case with no justified efficiency
+    recommendation. Verify that unsupported savings are not asserted, existing behavior/evidence
+    sections and routing requirements remain intact, and the complete prompt is available
+    for the user''s review. Any later implementation of recommended refactorings or recipe
+    changes belongs in explicitly scoped follow-up work.
+
+
+    Required regression dependency (user decision, 2026-10-26): this sign-off feature depends
+    on automatic regression authoring in pr-2680fbf, in addition to the existing report prerequisite
+    pr-8e693f6. User scope revision 2026-11-01: pr-2680fbf now owns regression binding and
+    authoring together and depends on pr-7d5d036 legacy cleanup/existing container-recipe
+    launch integration; pr-06a96fa is consolidated, not a separate prerequisite. Use the implemented
+    authoring flow for missing-regression findings instead of leaving the capability deferred.
+    Validate a recommendation leading through the normal authorized workflow to a durable
+    newly authored regression, execution with independently checked evidence, and later reuse
+    without duplicate authoring. Report generation itself does not authorize unrelated implementation
+    or recipe deletion. The whole-prompt human review requirement remains mandatory.
+
+
+    Related work: plan-regression Phases 10/11 and plan-delivery''s required regression/authoring
+    loop; pr-c77561b deferred historical-corpus porting, pr-51586d2 mocks at authoring, and
+    pr-f4dc8a2 library auditing remain alignment references. Automatic authoring is a prerequisite,
+    not merely an alignment reference.
+
+
+    Registration only: keep pending; do not add this PR to autostart or start implementation
+    as part of filing it.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-26T17:35:25.573006+00:00'
+  updated_at: '2026-11-01T20:29:31.277311+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-0438427
+    text: 'User correction 2026-10-26: automatic regression authoring is required for the
+      new sign-off feature. pr-5f4f595 now depends on pr-2680fbf, preserving pr-2680fbf ->
+      pr-06a96fa -> pr-7d5d036. plan-delivery D3 handoff and D9 qualification require the
+      authoring flow alongside runner/corpus migration. Retain full human review of the new
+      sign-off prompt and recipe modification/removal recommendations. This records dependencies
+      only; no implementation, autostart, account, merge-gate or timed-message changes.'
+    created_at: '2026-10-26T19:11:30.136983+00:00'
+    last_edited: '2026-10-26T19:11:30.136983+00:00'
+  - id: note-94ae717
+    text: 'User correction 2026-10-26: one PR workflow for all projects; human-agent collaboration
+      happens in implementation when research/exploration needs judgment. Sign-off must ask
+      whether the PR result suggests plan changes or proposed new work. An ordinary exploratory
+      PR may deliver findings and candidate next PRs. PRs already can create other PRs using
+      current PM operations; no new spawning functionality or separate research lifecycle
+      is needed. Full-prompt human review, authoring prerequisite and recipe modification/removal
+      guidance remain required. Pending registration only; no work started.'
+    created_at: '2026-10-26T19:30:54.699557+00:00'
+    last_edited: '2026-10-26T19:30:54.699557+00:00'
+  - id: note-f8db244
+    text: 'User-requested additional sign-off prompt/report change (2026-10-28): include the
+      GitHub PR number and a clickable link to the actual GitHub PR prominently near the top
+      of every GitHub-backed sign-off report, as #273 did (https://github.com/mjtomei/project_manager/pull/273).
+      Keep the local PM PR ID available too, so the report identifies both records. Use the
+      recorded GitHub number/URL; do not invent a link for projects without a GitHub PR. Include
+      this requirement in the complete rendered prompt presented for the already-required
+      human review, and verify it in a representative generated report. This is an addition
+      to pr-5f4f595; it does not authorize starting the PR or change its pending status, dependencies,
+      or human-review requirement.'
+    created_at: '2026-10-28T23:27:18Z'
+    last_edited: '2026-10-28T23:27:18Z'
+  - id: note-15a38f9
+    text: 'User decision 2026-10-31: fold feature/refactoring proposals from ALL sessions,
+      including QA scenarios, into this existing sign-off change. Sign-off reviews the accumulated
+      bugs and proposals once more for duplicates, support, usefulness and consistency with
+      user goals. Preserve existing NEEDS_WORK behavior: fixes require another review round.
+      The separate architecture/spec checkpoint is pr-b491378, default two failed QA rounds
+      with configurable interval and mandatory implementation spec/full-prompt review, required
+      by plan-delivery alongside conservative breakup. Keep this PR pending; preserve its
+      regression-authoring dependency, whole-prompt human review and GitHub PR number/link
+      requirement.'
+    created_at: '2026-10-31T17:52:59.436278+00:00'
+    last_edited: '2026-10-31T17:52:59.436278+00:00'
+  - id: note-191e3b6
+    text: 'User-requested addition 2026-11-01 — planning-only updates from an already completed
+      sign-off session. Desired user story: the sign-off session has already recommended merge;
+      the user returns to that SAME session, discusses the PR, and asks it to add or modify
+      proposed follow-up work. The session makes those project planning changes, commits and
+      pushes them, updates the sign-off report, and directly updates its sign-off to cover
+      that new commit. It already knows what it changed: when its changes are limited to project
+      planning, no additional check/revalidation pass, fresh sign-off session, implementation,
+      review or QA cycle is required. This includes pending follow-up PR entries and notes
+      in project.yaml, and planning changes in plan files once sign-off edits those too.
+
+
+      The previous commit''s sign-off becoming stale temporarily is acceptable. What matters
+      is that the SAME session can directly carry its existing merge recommendation forward
+      to the planning-only commit it just authored and pushed, updating the report and sign-off
+      revision/provenance together. Do not implement this as a request to inspect the updated
+      project state again or re-run sign-off. This supersedes the assistant''s earlier interpretation
+      that the session should revalidate or re-attest after those planning edits.
+
+
+      Include explicit permission and instructions for this workflow in the complete sign-off
+      prompt presented for the required human review, and provide any lifecycle support needed
+      so the automatic stale-HEAD path does not retire/relaunch that session while it performs
+      the authorized planning-only follow-up. Scope this permission to its own project planning
+      changes; it does not extend to product/code changes or changes to the PR''s accepted
+      behavior or evidence. Preserve the existing manual merge gate and keep newly proposed
+      work pending unless separately authorized to start.
+
+
+      Acceptance example: after SIGNOFF_MERGE, the user discusses the PR with the existing
+      sign-off agent; the agent revises/adds pending work in project.yaml and/or plan files,
+      commits and pushes, updates report.html and its recorded sign-off to the new commit,
+      and the PR remains ready for the user''s merge decision without a new session or extra
+      review/check cycle. Include both project.yaml and plan-file examples. Keep this PR pending;
+      adding this note does not authorize starting it.'
+    created_at: '2026-11-01T14:25:48Z'
+    last_edited: '2026-11-01T14:25:48Z'
+  - id: note-378533e
+    text: 'OWNER SPEC-REVIEW REQUIREMENT (2026-11-01): Full prompt wording is the primary
+      item for human review. Put an early "Full prompts for approval" section directly in
+      the main implementation spec/review document (pm/specs/<pr-id>/impl.md), containing
+      the complete proposed text of every new or revised prompt and its material role/backend
+      variants. Include unchanged portions of the affected prompts so the owner can read the
+      whole result, and clearly label runtime placeholders. Summaries, diffs, excerpts, omitted
+      blocks, or links to separate prompt files are not substitutes for the full inline text;
+      linked files and examples may supplement it and must agree with it. Architecture, implementation
+      details, and tests support this prompt review rather than displacing it. If this PR
+      changes no prompts, state that explicitly without inventing prompt changes.
+
+
+      This clarifies the review presentation only. Keep implementation spec approval pending,
+      preserve existing unanswered decisions and dependency/manual-merge gates, and do not
+      treat this note as approval of any prompt or design option.'
+    created_at: '2026-11-01T20:20:59Z'
+    last_edited: '2026-11-01T20:20:59Z'
+  - id: note-7774bff
+    text: 'User explicitly authorized starting this sign-off prompt/report improvement PR
+      on 2026-11-01 with work Opus5.5/xhigh for all roles/helpers/sign-off, for SPEC AND PROMPT
+      PREPARATION ONLY. Prepare a grounded implementation spec and present the complete proposed
+      sign-off prompt and all affected shared recommendation/handoff prompt variants inline
+      in an early Full prompts for approval section of pm/specs/pr-5f4f595/impl.md. Full prompt
+      wording is the primary human review item; not only summaries, changed sentences or links.
+      Include unchanged composed portions, clearly labelled placeholders, before/after differences
+      and representative reports. Preserve all existing notes and the owner''s same-session
+      planning-only follow-up story. Stop for explicit owner spec/prompt approval before product
+      implementation, review or QA; never self-approve.
+
+
+      The proposal covers review/QA efficiency, refactoring/architecture recommendations,
+      missing or problematic recipes/regressions including modification/removal, plan feedback
+      and new-work proposals, final deduplication/quality review of accumulated bugs/proposals,
+      the GitHub PR number/link, and user-requested follow-up work added in the same completed
+      sign-off session. For its own planning-only edits the same agent commits/pushes and
+      updates report/sign-off to its new commit directly, without a separate revalidation
+      pass or replacement session. Product/code/accepted-behavior changes are outside that
+      permission. Preserve NEEDS_WORK semantics and manual merge authority; recommendations
+      do not authorize unrelated work.
+
+
+      Implementation must follow #285/pr-2680fbf''s regression reuse/authoring capability
+      and integration; the existing #226/pr-8e693f6 report prerequisite is merged. Spec preparation
+      may proceed now. Coordinate same-session revision/provenance and stale-signoff lifecycle
+      behavior with #253/pr-5cee3d5''s integration/evidence changes, documenting the shared
+      interfaces and remaining uncertainty before implementing them. Reuse existing mechanisms,
+      not a parallel lifecycle or watcher.
+
+
+      This explicit start authorization supersedes historical registration-only/no-start wording
+      for this PR. It does not approve a spec, change other PRs or gates, start other work,
+      or enable automatic merges.'
+    created_at: '2026-11-01T20:29:31.277311+00:00'
+    last_edited: '2026-11-01T20:29:31.277311+00:00'
+  review_spec: true
+  model: provider:claude-work-xhigh-249
+  effort: high
