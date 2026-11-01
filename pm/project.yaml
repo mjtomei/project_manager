@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-31T23:46:12.537291+00:00'
+  updated_at: '2026-11-01T00:07:22.020715+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37842,6 +37842,24 @@ prs:
       work stays dropped.'
     created_at: '2026-10-31T23:46:12Z'
     last_edited: '2026-10-31T23:46:12Z'
+  - id: note-322a601
+    text: 'Review loop 928f i9: one test gap in the kept scope, no recipe or pm_core
+      change. The CLI scaffold stop bound is `deadline=$(( $(date +%s) + 10#$stop_timeout
+      ))` with `stop_timeout=${RECORDER_STOP_TIMEOUT:-30}` — the one deadline whose
+      value is not a literal. `test_every_deadline_is_a_real_bound_and_its_message_agrees`
+      (R43) pins every literal `deadline=$(( … + N ))` at >=10s but cannot see this
+      form, so retuning the default to 1s left the file green (266 passed, verified
+      against the pre-fix test file) while a healthy few-second one-shot command is
+      killed at the deadline — the regression the raisable bound exists to prevent
+      (the recipe records a `sleep 6` recording lost to RECORDER_STOP_TIMEOUT=1).
+      Fix (test-only): the meta-test bound set also collects `RECORDER_STOP_TIMEOUT:-N`
+      and applies the same >=10s rule; the mutation now fails exactly the cli-recording.md
+      case. Tests: file 266 passed (count unchanged); full suite -> 5342 passed, 1
+      skipped, 121 deselected, 0 failed (448.80s). Evidence: /pm-captures/review-928f-i9/.
+      No recipe change; no pm_core change; the dropped helper/prompt/verifier work
+      stays dropped.'
+    created_at: '2026-11-01T00:07:21Z'
+    last_edited: '2026-11-01T00:07:21Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
