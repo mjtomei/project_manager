@@ -324,24 +324,24 @@ def resolve_model_and_provider(
     #    CLI, so pm must not report a different level than the one the
     #    session will use.  When pm has its own selection, pm wins and the
     #    launch unsets this variable (claude_launcher); with no pm
-    #    selection, the ambient value is the session's level.
+    #    selection, the ambient value is the session's level.  A provider
+    #    that assigns the variable in its own ``env:`` block is explicit
+    #    configuration: the launcher keeps it, so that value -- not the
+    #    ambient one -- is what the session runs.
     ambient_level, ambient_raw = normalize_ambient_effort(
         os.environ.get(AMBIENT_EFFORT_ENV) if use_env else None)
+    ambient_source = False
     if ambient_raw is not None and ambient_level is None:
         notes.append(f"ignoring invalid {AMBIENT_EFFORT_ENV}={ambient_raw!r} "
                      f"(valid: {list(EFFORT_LEVELS)})")
-    elif ambient_level is not None:
-        if effort:
-            if ambient_level != effort:
-                notes.append(
-                    f"{AMBIENT_EFFORT_ENV}={ambient_level} would override "
-                    f"--effort for the session; pm unsets it so {effort} "
-                    "applies")
-        else:
-            effort, effort_source = ambient_level, AMBIENT_EFFORT_ENV
-            notes.append(
-                f"{AMBIENT_EFFORT_ENV}={ambient_level} selected the effort "
-                "for this session (pm passes it as --effort)")
+    elif ambient_level is not None and not effort:
+        effort, effort_source = ambient_level, AMBIENT_EFFORT_ENV
+        ambient_source = True
+    # Only read when there is something to reconcile, so the common launch
+    # path keeps its single providers.yaml read.
+    assigned_level = (normalize_ambient_effort(
+        provider_effort_env(resolution.provider))[0]
+        if ambient_level is not None else None)
 
     # Suppress effort for models that don't support it (e.g. Haiku)
     resolution.effort_requested = effort
@@ -356,6 +356,19 @@ def resolve_model_and_provider(
                 "environment; pm passes no --effort for this model")
         effort, effort_source = None, None
         resolution.effort_status = "not_applicable"
+    elif ambient_source and assigned_level in (None, effort):
+        notes.append(
+            f"{AMBIENT_EFFORT_ENV}={ambient_level} selected the effort "
+            "for this session (pm passes it as --effort)")
+    elif (ambient_level is not None and effort and ambient_level != effort
+          and assigned_level is None):
+        # A provider assignment is reported by _note_provider_effort_env;
+        # claiming pm unsets the variable would contradict it (and be false:
+        # the launcher keeps a provider's own value).
+        notes.append(
+            f"{AMBIENT_EFFORT_ENV}={ambient_level} would override "
+            f"--effort for the session; pm unsets it so {effort} "
+            "applies")
 
     resolution.effort = effort
     resolution.effort_source = effort_source if effort else None
@@ -419,19 +432,24 @@ def normalize_ambient_effort(value) -> tuple[str | None, str | None]:
     return (level, raw) if level in EFFORT_LEVELS else (None, raw)
 
 
-def _provider_config(provider_name: str | None):
-    """The ProviderConfig of *provider_name*, or None.
+def _provider_config_or_error(provider_name: str | None):
+    """``(cfg, why)`` for *provider_name*: its ProviderConfig, or None.
 
-    Read raw for display: a missing or invalid entry yields None (the
-    launch itself reports it with its one-line error).  Never raises.
+    Read raw for display: a missing or invalid entry yields ``(None, why)``
+    (the launch itself reports it with its one-line error).  Never raises.
     """
     if not provider_name:
-        return None
+        return None, None
     try:
         from pm_core.providers import get_provider
-        return get_provider(provider_name, strict=True)
-    except Exception:  # a broken entry is reported by the launch itself
-        return None
+        return get_provider(provider_name, strict=True), None
+    except Exception as exc:  # a broken entry is reported by the launch itself
+        return None, str(exc) or type(exc).__name__
+
+
+def _provider_config(provider_name: str | None):
+    """The ProviderConfig of *provider_name*, or None (see above)."""
+    return _provider_config_or_error(provider_name)[0]
 
 
 def _accepted_from(cfg) -> tuple[str, ...] | None:
@@ -543,7 +561,7 @@ def _apply_effort_verification(resolution: ModelResolution,
                                effort: str | None) -> None:
     """Fill effort status/notes for *effort* on *resolution* in place."""
     notes = resolution.effort_notes
-    cfg = _provider_config(resolution.provider)
+    cfg, cfg_error = _provider_config_or_error(resolution.provider)
     if not effort:
         resolution.effort_status = "none"
         if resolution.provider:
@@ -561,9 +579,16 @@ def _apply_effort_verification(resolution: ModelResolution,
     if accepted is None:
         if resolution.provider:
             resolution.effort_status = "unverified"
-            notes.append(
-                f"route {resolution.provider!r} declares no "
-                "supported_efforts; the level cannot be verified")
+            # A route whose entry cannot be read is not the same finding as
+            # one that declares no levels; say which, so the note is never
+            # a false statement about the file.
+            if cfg_error:
+                notes.append(f"route {resolution.provider!r} could not be "
+                             "read; the level cannot be verified")
+            else:
+                notes.append(f"route {resolution.provider!r} declares no "
+                             "supported_efforts; the level cannot be "
+                             "verified")
         else:
             resolution.effort_status = "cli"
     elif effort in accepted:

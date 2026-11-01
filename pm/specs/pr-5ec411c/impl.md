@@ -206,8 +206,11 @@ bare `effort=high` never claims support the route did not declare.
   non-Claude value (`none`); save/load round-trips through project, PR,
   global and provider forms; `next_effort` wrapping all six states.
 - `validate_model_config` warnings for an unsupported configured level.
-- Display tests: `format_rows` / `role_rows` / `router_route.describe`
-  never print a bare `effort=` for an unsupported/unverified level.
+- Display tests: `format_rows` / `role_rows` never print a bare level for
+  an `unsupported` or `overridden` one, and `router_route.describe` marks
+  `unsupported`/`overridden`.  `unverified` is deliberately left bare
+  inline (R3) and named in the notes, so route lines stay readable; the
+  test asserts the note, not the marker.
 - No paid probe and no network in tests.
 
 ## Implicit requirements
@@ -302,6 +305,19 @@ does not fetch a catalog in this PR.
 - A provider that assigns `CLAUDE_CODE_EFFORT_LEVEL` through its `env:`
   block: PM leaves the provider's assignment (the user configured it
   explicitly) and notes it; it does not silently drop a user-set variable.
+- A provider `env:` assignment *and* an ambient `CLAUDE_CODE_EFFORT_LEVEL`
+  with a PM level of its own: the provider's value wins in the launched
+  process, so the notes must not claim pm unsets the ambient variable (it
+  does not, for that provider).  The provider note is the only one emitted.
+- Haiku with the ambient variable as the *only* selection: the suppression
+  note says the variable remains and nothing is passed; no note may claim
+  pm passes the level as `--effort`.
+- A route whose providers.yaml entry cannot be read: `unverified` with a
+  "could not be read" note, not "declares no supported_efforts" (that
+  would be a false statement about the file).
+- `pm model show` and `pm pr model show` agree on the effort column: a
+  suppressed level is shown as the requested one (`xhigh (n/a)`), not as
+  `(default)`.
 
 ## Implementation plan (files)
 

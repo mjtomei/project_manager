@@ -21,7 +21,7 @@ def model():
 @model.command("show")
 def model_show():
     """Show effective model for each session type."""
-    from pm_core import store
+    from pm_core import model_settings, store
     from pm_core.model_config import (
         SESSION_TYPES,
         config_block,
@@ -54,7 +54,7 @@ def model_show():
                 model_str = res.model
             else:
                 model_str = "(default)"
-            effort_str = res.effort or "(default)"
+            effort_str = model_settings.effort_text(res)
             if res.effort_status in ("unsupported", "overridden"):
                 effort_str += " *"
             elif res.effort_status == "not_applicable":
@@ -67,7 +67,8 @@ def model_show():
                 effort_notes.append(f"  ! {st}: {note}")
         click.echo()
         if effort_notes:
-            click.echo("Effort notes (* = not verified; see the notes):")
+            click.echo("Effort notes (* = not confirmed by pm; see the "
+                       "notes):")
             for line in effort_notes:
                 click.echo(line)
             click.echo()

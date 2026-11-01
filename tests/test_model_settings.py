@@ -724,6 +724,49 @@ class TestEffortCapability:
         assert not any("CLAUDE_CODE_EFFORT_LEVEL" in n
                        for n in res.effort_notes)
 
+    def test_provider_env_assignment_does_not_claim_pm_unsets_the_ambient(
+            self, pm_home_dir, monkeypatch):
+        """Both an ambient variable and a provider assignment: the launcher
+        keeps the provider's value, so the note must not say pm unsets the
+        ambient one (that would name a level the session does not run)."""
+        monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "xhigh")
+        _providers(pm_home_dir, **{ROUTE: _router(
+            env={"CLAUDE_CODE_EFFORT_LEVEL": "max"})})
+        data = _project(session_effort={"impl": "high"})
+        res = resolve_model_and_provider(
+            "impl", pr_model=f"provider:{ROUTE}", project_data=data)
+        assert (res.effort, res.effort_status) == ("high", "overridden")
+        assert not any("pm unsets it" in n for n in res.effort_notes)
+        assert any("sets CLAUDE_CODE_EFFORT_LEVEL=max" in n
+                   for n in res.effort_notes)
+
+    def test_haiku_with_ambient_only_never_claims_passing_the_level(
+            self, pm_home_dir, monkeypatch):
+        """Ambient xhigh is the only selection and Haiku suppresses it, so
+        "pm passes it as --effort" would contradict the suppression note."""
+        monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "xhigh")
+        res = resolve_model_and_provider("impl", pr_model="haiku",
+                                         project_data=_project())
+        assert (res.effort, res.effort_status, res.effort_requested) == \
+            (None, "not_applicable", "xhigh")
+        assert not any("pm passes it as --effort" in n
+                       for n in res.effort_notes)
+        assert any("pm passes no --effort for this model" in n
+                   for n in res.effort_notes)
+
+    def test_unreadable_route_is_not_reported_as_declaring_nothing(
+            self, pm_home_dir):
+        """A broken entry and a route with no metadata are different
+        findings; the note must not invent an absent supported_efforts."""
+        _providers(pm_home_dir, **{ROUTE: {"type": "bogus"}})
+        data = _project(session_effort={"impl": "high"})
+        res = resolve_model_and_provider(
+            "impl", pr_model=f"provider:{ROUTE}", project_data=data)
+        assert res.effort_status == "unverified"
+        assert any("could not be read" in n for n in res.effort_notes)
+        assert not any("declares no supported_efforts" in n
+                       for n in res.effort_notes)
+
 
 class TestProviderEffortMetadata:
     def test_add_round_trips_supported_efforts(self, pm_home_dir):
@@ -812,6 +855,22 @@ class TestEffortDisplay:
         assert model_settings.effort_cell(impl) == "high *"
         lines = model_settings.format_rows(rows)
         assert any("CLAUDE_CODE_EFFORT_LEVEL=max" in l for l in lines)
+
+    def test_model_show_names_the_requested_level_for_haiku(
+            self, project_root, pm_home_dir, monkeypatch):
+        """`pm model show` and `pm pr model show` agree: a suppressed level
+        stays visible as the requested one, never as the CLI default."""
+        import pm_core.cli.model as model_cli
+        monkeypatch.setattr(model_cli, "state_root", lambda: project_root)
+        data = store.load(project_root)
+        data["project"]["model_config"] = {
+            "session_models": {"impl": "haiku"},
+            "session_effort": {"impl": "xhigh"}}
+        store.save(data, project_root)
+        r = _cli("model", "show")
+        assert r.exit_code == 0, r.output
+        assert "xhigh (n/a)" in r.output
+        assert "does not support the --effort flag" in r.output
 
     def test_describe_marks_unsupported(self, pm_home_dir):
         from pm_core.router_route import describe

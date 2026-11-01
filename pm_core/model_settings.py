@@ -45,6 +45,20 @@ class RoleRow:
     effort_notes: list[str] = field(default_factory=list)
 
 
+def effort_text(res) -> str:
+    """The effort column text for a :class:`ModelResolution`.
+
+    The effective level; the *requested* one when it was suppressed as not
+    applicable (so "configured xhigh, nothing passed" stays visible); or
+    ``(default)`` when nothing was selected.
+    """
+    if res.effort:
+        return res.effort
+    if res.effort_status == "not_applicable" and res.effort_requested:
+        return res.effort_requested
+    return "(default)"
+
+
 def role_rows(data: dict, pr: dict | None = None, *,
               container_mode: bool | None = None) -> list[RoleRow]:
     """Effective settings per session type for *pr* (or the project).
@@ -79,10 +93,7 @@ def role_rows(data: dict, pr: dict | None = None, *,
                     command = "claude (container route bridge)"
         rows.append(RoleRow(
             role=st, value=value, model=model or "(default)",
-            effort=(res.effort
-                    or (res.effort_requested
-                        if res.effort_status == "not_applicable" else None)
-                    or "(default)"),
+            effort=effort_text(res),
             command=command, route=route,
             source=res.source or "(CLI default)",
             effort_source=res.effort_source or "(CLI default)",
@@ -92,15 +103,16 @@ def role_rows(data: dict, pr: dict | None = None, *,
     return rows
 
 
-# Statuses whose effort is not verified; the display marks them so a bare
-# level never reads as confirmed.  ``unverified`` (no capability metadata)
-# is reported in the notes instead of the column, so route tables stay
-# readable.
+# Statuses whose effort pm cannot confirm (the route declares it
+# unsupported, or the environment/provider overrides it); the display marks
+# them so a bare level never reads as confirmed.  ``unverified`` (no
+# capability metadata) is reported in the notes instead of the column, so
+# route tables stay readable.
 _UNVERIFIED_EFFORT_STATUSES = ("unsupported", "overridden")
 
 
 def effort_cell(row: RoleRow) -> str:
-    """The effort column for *row*, marked when it is not verified."""
+    """The effort column for *row*, marked when pm cannot confirm it."""
     if row.effort_status in _UNVERIFIED_EFFORT_STATUSES:
         return f"{row.effort} *"
     if row.effort_status == "not_applicable":
@@ -123,7 +135,10 @@ def format_rows(rows: list[RoleRow]) -> list[str]:
         lines.append("  ".join(row[i].ljust(widths[i]) for i in range(4))
                      + "  " + row[4])
     if any(r.effort_status in _UNVERIFIED_EFFORT_STATUSES for r in rows):
-        lines.append("* effort not verified (see the notes below)")
+        # ``*`` covers both "the route declares it unsupported" and "the
+        # environment/provider overrides it", so name neither: the notes
+        # say which.
+        lines.append("* effort not confirmed by pm (see the notes below)")
     seen_notes: set[str] = set()
     for r in rows:
         if r.problem:
