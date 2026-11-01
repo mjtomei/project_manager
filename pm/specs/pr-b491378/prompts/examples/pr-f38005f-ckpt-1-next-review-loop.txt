@@ -1,0 +1,158 @@
+You are reviewing PR pr-f38005f: "Add file locking to project.yaml read-modify-write operations"
+
+## Task
+Review the code changes in this PR for quality, correctness, and architectural fit.
+
+## Description
+Add advisory file locking to store.py so that concurrent processes (TUI background sync, CLI commands, multiple users) cannot corrupt project.yaml with lost-update races. Introduce a locked_update(root, fn) helper that acquires an fcntl.flock exclusive lock, loads fresh state, applies mutations, saves, and releases. All read-modify-write call sites must migrate to locked_update. Critical constraint: lock must never be held across network calls — operations interleaving GitHub API calls must be restructured to do the external call first, then acquire the lock, load fresh state, merge results, and save. Lock timeout of 2 seconds with clear error message.
+
+## PR Notes
+- Review loop (review_loop_ui.py), QA loop (qa_loop_ui.py), and auto_start.py also do store.load()/store.save() and modify app._data — these should be converted to locked_update too, or they can still overwrite with stale data. (2026-03-07T15:29:28Z)
+- QA NEEDS_WORK: Unit tests — test_store_locking.py and test_store.py pass: PASS; Regression — all pre-existing test suites pass: PASS; Code audit — no bare store.save() in CLI or TUI modules: PASS; Code audit — no network calls inside locked_update callbacks: PASS; CLI integration — pm pr add creates correct on-disk state: PASS; CLI integration — pm pr edit updates fields atomically: PASS; CLI integration — pm pr select, pm plan add, pm model set: PASS; CLI integration — pm pr close removes PR and cleans up: PASS; CLI integration — pm pr note add/edit/delete: PASS; Concurrent pm pr add — no lost writes: NEEDS_WORK; StoreLockTimeout — CLI error message: PASS; pm edit command — editor under lock: PASS; Atomic write — file never truncated: PASS; Read-only permissions and YAML header after save: PASS; Exception in mutation function — lock released, data unsaved: PASS; ProjectYamlParseError — corrupt YAML handling: PASS; TUI sync graceful lock timeout handling: PASS; pr_sync — network calls before lock, results applied inside lock: PASS; spec_gen — locked_update for generate, approve, reject: PASS; plan_load and GitHub import — concurrent-safe duplicate checks: PASS; watcher_ui — intentional store.save for creation is preserved: PASS; _finalize_merge — no data parameter, loads fresh inside lock: PASS; lock file left on disk after unlock — standard fcntl pattern: PASS; make_plan_entry helper used consistently: PASS; helpers.py — _ensure_workdir and _resolve_repo_id use locked_update: PASS; background_sync handles corrupt YAML without clobbering app state: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-f38005f-d8d59509902b0358) (2026-04-07T22:51:44Z)
+- QA INPUT_REQUIRED:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-f38005f-592c914eaa2d86f9) (2026-04-09T11:42:22Z)
+- QA NEEDS_WORK: Unit tests — test_store_locking.py and test_store.py pass: PASS; Regression — all pre-existing test suites pass: PASS; Code audit — no bare store.save() in CLI or TUI modules: PASS; Code audit — no network calls inside locked_update callbacks: PASS; CLI integration — pm pr add creates correct on-disk state: PASS; CLI integration — pm pr edit updates fields atomically: PASS; CLI integration — pm pr select, pm plan add, pm model set: PASS; CLI integration — pm pr close removes PR and cleans up: PASS; CLI integration — pm pr note add/edit/delete: PASS; Concurrent pm pr add — no lost writes: INPUT_REQUIRED; Concurrent duplicate-title prevention in pr_add: PASS; StoreLockTimeout — CLI error message: PASS; pm edit command — editor under lock: PASS; Atomic write — file never truncated: PASS; Read-only permissions and YAML header after save: PASS; Exception in mutation function — lock released, data unsaved: NEEDS_WORK; ProjectYamlParseError — corrupt YAML handling: PASS; TUI sync graceful lock timeout handling: PASS; pr_sync — network calls before lock, results applied inside lock: PASS; spec_gen — locked_update for generate, approve, reject: PASS; plan_load and GitHub import — concurrent-safe duplicate checks: PASS; watcher_ui — intentional store.save for creation is preserved: PASS; _finalize_merge — no data parameter, loads fresh inside lock: PASS; lock file left on disk after unlock — standard fcntl pattern: PASS; make_plan_entry helper used consistently: PASS; helpers.py — _ensure_workdir and _resolve_repo_id use locked_update: PASS; background_sync handles corrupt YAML without clobbering app state: PASS (workdir: /home/mjtomei/.pm/workdirs/qa/pr-f38005f-bdca24011d0bf8cd) (2026-04-09T18:18:02Z)
+- Architecture/spec checkpoint ckpt-1 complete (2 completed QA NEEDS_WORK runs (threshold 2); covers QA runs d8d59509902b0358, bdca24011d0bf8cd; reviewed HEAD «NOT_RECORDED_BEFORE_THIS_FEATURE»): outcomes corrections, spec_clarification; owner question: none; follow-ups: none. Assessment: pm/specs/pr-f38005f/checkpoints/ckpt-1.md. The next review iteration receives it; QA findings still need fixes, another review and QA. («CHECKPOINT_COMPLETED_AT»)
+
+## Implementation Spec — MISSING
+
+No implementation spec was generated for this PR.  The implementation session
+should have produced one as Step 0.  Without a spec, the reviewer cannot
+verify that the implementation matches an agreed-upon set of requirements.
+
+**Action**: If the implementation is otherwise sound, generate the spec now
+with `pm pr spec pr-f38005f impl` so it is available for QA.  If the
+implementation has significant gaps, consider requesting re-implementation
+with spec generation enabled.
+
+## Architecture/Spec Checkpoint ckpt-1
+
+A whole-PR architecture and specification checkpoint completed «CHECKPOINT_COMPLETED_AT» on HEAD «NOT_RECORDED_BEFORE_THIS_FEATURE» (outcomes: corrections, spec_clarification; owner question: none). Read the full assessment at `pm/specs/pr-f38005f/checkpoints/ckpt-1.md`. Its summary and requested changes:
+
+**Summary**
+Keep `store.locked_update` as the mechanism: no round failed inside it. The two
+counted runs, the review notes and the commit history point to one shared
+cause — callers are converted to locking, and given its error handling, one
+call site at a time, so each round finds the next unconverted or unguarded
+caller. The next review iteration should finish the conversion as one audited
+pass and give the TUI one shared error path.
+
+**Current-PR corrections**
+- Audit every `store.load(`, `store.save(` and `locked_update(` caller under `pm_core/` in one pass, convert the remaining load-modify-save sequences, and record the audited list in a PR note — why: piecemeal conversion is the repeated cause — verify by: the QA audit scenario as clarified below.
+- Give TUI callers one helper that applies the shared StoreLockTimeout / ProjectYamlParseError / mutation-exception handling, replacing per-site try/except — where: the TUI modules named in note-181f05d — why: the same handling keeps being added one site at a time — verify by: unit tests of the helper for lock timeout, parse error and an exception in the mutation; existing scenarios unchanged.
+
+**Specification**
+- No implementation spec exists (`pm/specs/pr-f38005f/impl.md`). The description states the goal and the QA spec (32f1f681) supplies the checks; no implementation spec is needed for this PR's size.
+- QA spec, scenario "Code audit — no bare store.save() in CLI or TUI modules" — ambiguous: a bare `store.load()` that mutates `app._data` and is saved later is also a read-modify-write — proposed: "no read-modify-write of project.yaml outside `locked_update`, including load-then-save sequences" — clarification (it strengthens the check and changes no requirement in the description).
+
+**Questions for the owner**
+None.
+
+Use it as evidence for this review, not as a verdict:
+- It does not replace this review. The problems QA found still have to be fixed and reviewed, and the verdict rules below are unchanged.
+- If its current-PR corrections are not in the code yet (compare `git log «NOT_RECORDED_BEFORE_THIS_FEATURE»..HEAD`), make the ones you agree with in this iteration along with the QA fixes, and explain any you decline — the code may show the checkpoint was wrong.
+- You may apply its spec clarifications (no requirement change) to `pm/specs/pr-f38005f/impl.md`, citing ckpt-1. Proposed requirement changes wait for the owner: do not apply them or judge this PR against them.
+- Follow-ups it lists are filed, not started; they do not remove anything from this PR's scope.
+
+## Plan Context
+This PR is part of plan "Multiuser Support" (plan-003). Other PRs in this plan:
+- pr-022: Handle merging pm directory changes across clones [merged]
+- pr-024: Add multi-user support to sessions [merged]
+- pr-c11d04f: Add notes field to PRs for post-start addendums [merged]
+- pr-9177f5e: Add TUI external control request protocol [pending]
+- pr-0778fbe: Add PR ownership tracking with workdir history [pending]
+
+## Interacting with the TUI
+
+The base pm tmux session is `pm-project_manager-c5a1006b`. Use `-s pm-project_manager-c5a1006b` with pm tui commands so they target the correct session even from workdir clones:
+- `pm tui view -s pm-project_manager-c5a1006b` — capture and view the current TUI screen
+- `pm tui send <keys> -s pm-project_manager-c5a1006b` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
+
+**Do not** run commands that spawn new Claude sessions yourself (e.g. `pm pr start`, `pm pr done`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be triggered through the TUI so panes are managed correctly. Use `pm tui send` to press the appropriate key in the TUI instead.
+
+## Steps
+1. Pull the latest changes for `pm/pr-f38005f-add-file-locking-to-project-yaml-read-modify-write` from the remote. Resolve any merge conflicts before continuing.
+2. Run `git diff origin/master...HEAD` to see all changes
+3. **Generic checks** — things any codebase should get right:
+   - Excessive file/function length, duplicated code, dead or unnecessary code, potential bugs, security issues, confusing code that lacks comments, sufficient test coverage
+4. **Project-specific checks** — does the change fit this codebase?
+   - Convention consistency, architectural patterns
+   - Search for similar code elsewhere in the repo — flag opportunities for shared helpers or reuse
+5. **Architectural review** — does the implementation approach make sense?
+   - Were the PR's goals achieved in a reasonable way, or is there a simpler/better design?
+   - If plan context is listed above, check whether choices in this PR make any of those sibling PRs harder to implement. Are there data models, interfaces, or patterns introduced here that will need awkward workarounds later?
+   - Run `pm pr list` to see all PRs and plans for the repo. If any other plans or standalone PRs touch related areas, consider whether this PR's approach conflicts with or complicates them.
+   - Consider likely future changes beyond the current PR list — does this PR paint the codebase into a corner or leave good extension points?
+   - If the same kind of problem keeps coming back across rounds, fixes keep adding special cases, or the spec seems to require something the evidence shows is wrong, you can ask for an early whole-PR checkpoint: `pm pr checkpoint request pr-f38005f --reason '<evidence: note ids, scenarios, commits>'`. It runs before the next review iteration and does not change this review's verdict.
+6. Output per-file notes: **filename** — GOOD / FIX / RETHINK
+7. End with an overall verdict on its own line — one of:
+   - **PASS** — No changes needed. The code is ready to merge as-is.
+   - **NEEDS_WORK** — Blocking issues or non-blocking suggestions found — either way, fix them in this iteration. Separate code-quality fixes from architectural concerns.
+   - **INPUT_REQUIRED** — Any issue that needs the user's attention before the PR can proceed: ambiguities in the PR spec, architectural decisions you can't make alone, something that looks broken but you can't tell if it's intentional, a dependency or environmental problem you can't resolve, or anything else you'd want a human to look at before moving on. If in doubt between NEEDS_WORK and INPUT_REQUIRED, prefer INPUT_REQUIRED — an unresolved concern silently rolled into a PASS is the worst outcome. Do NOT use INPUT_REQUIRED for manual testing — QA handles testing separately. Include specific questions that need the user's decision.
+
+## Incidental Bugs
+
+If you spot a bug or quality issue that isn't part of this PR's stated
+scope, try to fix it if the fix doesn't require separate planning or user
+input. If you do decide to fix it, then record what you did with:
+  ```
+  pm pr note add <pr-id> '<short summary of the incidental fix>'
+  ```
+
+If you don't, file a separate bug PR so it doesn't get lost:
+  ```
+  pm pr add '<title>' --plan bugs --description '<location, repro>'
+  ```
+  Skim `pm pr list --plan bugs` first to avoid duplicates.
+
+
+## PR Notes — Handoff Channel
+
+`pm pr note add <pr-id> '<text>'` is the canonical way to hand off context
+between sessions. A note persists on the target PR (in project.yaml) and is
+injected into the prompt of every future session for that PR (the `## PR
+Notes` section). Prefer pm PR notes over GitHub PR comments or description
+edits for any handoff — GitHub comments are for external review
+communication, not internal handoff. When the user says "leave a note" /
+"add a note" / "notes" without qualification, they mean a pm PR note.
+
+- **Same-PR, next session** — to leave context for whoever resumes this PR,
+  run `pm pr note add pr-f38005f '<text>'`.
+- **Cross-PR** — when leaving work or context for a *different* PR to pick
+  up, add the note to that PR's id: `pm pr note add <other-pr-id> '<text>'`.
+  It attaches to that PR and surfaces in its sessions. If incidental work
+  belongs to a PR that already exists, prefer a note on that PR over opening
+  a brand-new one (see the Incidental Bugs guidance for recording incidental
+  fixes).
+
+It is fine to run this from your own workdir, including a note targeting
+another PR. The note is written to the git-tracked `project.yaml`; it
+travels to master when your PR merges, and the target PR's sessions pick it
+up the next time they clone or pull master. So a cross-PR note may surface
+after your PR merges rather than instantly — that delay is expected, not a
+reason to use a GitHub comment instead.
+
+
+## Review Loop Mode (iteration 1) [«LOOP_ID»]
+
+This review is running in an automated loop.  After completing your review:
+
+1. If you find anything worth changing — bugs, missing error handling,
+   architectural problems, test gaps, OR non-blocking suggestions (style
+   nits, minor refactors, optional improvements) — that's **NEEDS_WORK**:
+   - Implement ALL the fixes and suggestions you identified
+   - Run any relevant tests to verify your changes
+   - Stage and commit your changes — prefix the message with `review-loop «LOOP_ID» i1: ` (e.g. `review-loop «LOOP_ID» i1: fix null check, add tests`)
+   - Push to the remote: `git push origin pm/pr-f38005f-add-file-locking-to-project-yaml-read-modify-write`
+   - Then output your verdict: **NEEDS_WORK** with a summary of what you changed and what may still need attention on the next iteration
+
+2. If the code is ready to merge as-is with nothing you'd change (**PASS**):
+   - Output: **PASS**
+
+3. If ANY issue needs the user's attention before the PR can proceed (**INPUT_REQUIRED**):
+   - Use this for: ambiguities in the PR spec, architectural decisions you can't make alone, code that looks broken but you can't tell if it's intentional, a dependency/environment problem you can't resolve, or anything else you'd want a human to look at before moving on.
+   - If in doubt between NEEDS_WORK and INPUT_REQUIRED, prefer INPUT_REQUIRED — an unresolved concern silently rolled into a PASS is the worst outcome.
+   - Do NOT use this for manual testing — QA handles testing separately.
+   - Include specific questions that need the user's decision.
+   - Output: **INPUT_REQUIRED** — the user will respond directly in this pane
+
+IMPORTANT: Always end your response with the verdict keyword on its own line — one of **PASS**, **NEEDS_WORK**, or **INPUT_REQUIRED**.

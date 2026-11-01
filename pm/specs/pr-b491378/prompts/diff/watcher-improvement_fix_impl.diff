@@ -1,0 +1,18 @@
+--- current/watcher-improvement_fix_impl.txt
++++ proposed/watcher-improvement_fix_impl.txt
+@@ -96,6 +96,15 @@
+   has already notified the human. Note in the log and move on.
+ - `paused: spec_pending` — spec is awaiting human review. Same:
+   log and move on.
++- `running: checkpoint (ckpt-<n>)` / `checkpoint: complete (ckpt-<n>),
++  continuing review (iteration N)` — an architecture/spec checkpoint is
++  running or just finished; come back next tick.
++- `paused: input_required (checkpoint)` — the checkpoint pane is waiting
++  for the owner. **Do not** escalate to watcher-level INPUT_REQUIRED; log
++  and move on.
++- `paused: checkpoint_blocked (ckpt-<n>)` — the checkpoint used up its
++  attempts and needs the owner (`pm pr checkpoint status <pr-id>`). Log it
++  explicitly and surface it in your verdict.
+ - `ready_to_merge` — QA PASSED. **Do not run `pm pr merge`.** This PR
+   is now held for human taste check. Log it explicitly.
+ 

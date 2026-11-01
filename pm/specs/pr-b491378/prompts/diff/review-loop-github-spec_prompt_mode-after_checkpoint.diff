@@ -1,0 +1,29 @@
+--- current/review-loop-github-spec_prompt_mode-after_checkpoint.txt
++++ proposed/review-loop-github-spec_prompt_mode-after_checkpoint.txt
+@@ -16,6 +16,18 @@
+ Before proceeding, check the spec's Ambiguities section for any items marked **[UNRESOLVED]** (the session that generated it may have exited before resolving them). Resolve any you can confidently handle based on the codebase and document them in the spec. Re-save to `pm/specs/«PR_ID»/impl.md`. If any remain genuinely unresolvable, present them to the user and wait for their response before proceeding. Also check whether the spec is still consistent with the current code and PR notes — the code or notes may have changed since the spec was generated. If you find requirements that no longer match the implementation, or PR notes that contradict or extend the spec, update the spec in `pm/specs/«PR_ID»/impl.md`.
+ 
+ «IMPL_SPEC_TEXT»
++
++## Architecture/Spec Checkpoint «CHECKPOINT_ID»
++
++A whole-PR architecture and specification checkpoint completed «COMPLETED_AT» on HEAD «REVIEWED_HEAD_SHORT» (outcomes: «OUTCOMES»; owner question: «HUMAN_QUESTION»). Read the full assessment at `pm/specs/«PR_ID»/checkpoints/«CHECKPOINT_ID».md`. Its summary and requested changes:
++
++«ASSESSMENT_DIGEST»
++
++Use it as evidence for this review, not as a verdict:
++- It does not replace this review. The problems QA found still have to be fixed and reviewed, and the verdict rules below are unchanged.
++- If its current-PR corrections are not in the code yet (compare `git log «REVIEWED_HEAD_SHORT»..HEAD`), make the ones you agree with in this iteration along with the QA fixes, and explain any you decline — the code may show the checkpoint was wrong.
++- You may apply its spec clarifications (no requirement change) to `pm/specs/«PR_ID»/impl.md`, citing «CHECKPOINT_ID». Proposed requirement changes wait for the owner: do not apply them or judge this PR against them.
++- Follow-ups it lists are filed, not started; they do not remove anything from this PR's scope.
+ 
+ ## Plan Context
+ This PR is part of plan "«PLAN_NAME»" («PLAN_ID»). Other PRs in this plan:
+@@ -45,6 +57,7 @@
+    - If plan context is listed above, check whether choices in this PR make any of those sibling PRs harder to implement. Are there data models, interfaces, or patterns introduced here that will need awkward workarounds later?
+    - Run `pm pr list` to see all PRs and plans for the repo. If any other plans or standalone PRs touch related areas, consider whether this PR's approach conflicts with or complicates them.
+    - Consider likely future changes beyond the current PR list — does this PR paint the codebase into a corner or leave good extension points?
++   - If the same kind of problem keeps coming back across rounds, fixes keep adding special cases, or the spec seems to require something the evidence shows is wrong, you can ask for an early whole-PR checkpoint: `pm pr checkpoint request «PR_ID» --reason '<evidence: note ids, scenarios, commits>'`. It runs before the next review iteration and does not change this review's verdict.
+ 6. Output per-file notes: **filename** — GOOD / FIX / RETHINK
+ 7. End with an overall verdict on its own line — one of:
+    - **PASS** — No changes needed. The code is ready to merge as-is.

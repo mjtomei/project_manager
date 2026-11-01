@@ -1,0 +1,68 @@
+
+pr-f38005f [merged] Add file locking to project.yaml read-modify-write operations
+  2026-04-07T22:51  NEEDS_WORK     run d8d59509902b0358 note-60be829  
+  2026-04-09T11:42  INPUT_REQUIRED run 592c914eaa2d86f9 note-23e1756  
+  2026-04-09T18:18  NEEDS_WORK     run bdca24011d0bf8cd note-ed85f13  due@2
+  2026-04-09T21:20  NEEDS_WORK     run 1fd1b3aeb3203659 note-2ffde86  due@3
+  2026-04-09T23:47  NEEDS_WORK     run c31d04be54fae4fa note-5482f04  due@2
+
+pr-5e96046 [merged] Enable git push from inside containers scoped to PR branch
+  2026-03-06T19:22  NEEDS_WORK     run 680a9ab455ce5ed2 note-56cffae  
+  2026-03-06T21:20  NEEDS_WORK     run 04d08ed25bc9e5fb note-9fd62b3  due@2
+  2026-03-06T21:34  PASS           run 957b39c4945aadc3 note-d0d634b  
+  2026-03-06T22:20  INPUT_REQUIRED run df2926b3edc43295 note-8f83a78  
+  2026-03-06T22:30  INPUT_REQUIRED run 7faea1d77db35a11 note-fd332b8  
+  2026-03-06T22:49  NEEDS_WORK     run fd9b35ff9c100f35 note-9654ddb  due@3
+  2026-03-07T00:46  NEEDS_WORK     run 7bab4540a50d7d4a note-8dd33f2  due@2
+
+pr-0b827df [in_review] Add running tasks pane to TUI with window switching and grouping
+  2026-03-14T23:51  INPUT_REQUIRED run 67def9313b116f3c note-834855f  
+  2026-03-21T15:26  NEEDS_WORK     run bbcfc8c8564443e6 note-0ce0bb4  
+  2026-03-22T18:20  ERROR          run 7714a0bc4691fb5e note-3749948  
+  2026-03-22T18:52  ERROR          run 93218e8d27ec4b9b note-27c2daa  
+  2026-03-22T19:55  NEEDS_WORK     run 0c2cb1730e4e9231 note-20cfcd2  due@2
+  2026-03-23T13:50  NEEDS_WORK     run c16f3600a94a4026 note-cb79f13  due@3
+
+pr-88fdba1 [merged] Fix shared push proxy using first-scenario workdir for all push and fe
+  2026-03-21T20:30  NEEDS_WORK     run de29a757585710fc note-b291388  
+  2026-03-22T00:35  NEEDS_WORK     run 1d7fcc38c605a2c2 note-157591f  due@2
+  2026-03-22T01:15  PASS           run 191081034d1f856f note-b9d2950  
+
+pr-6be8ee6 [merged] Bug-fix flow: surface TUI QA repro instructions in session prompt
+  2026-05-09T12:24  INPUT_REQUIRED run bbce993ad40dfe10 note-1caa724  
+  2026-05-12T14:06  INPUT_REQUIRED run 6a87858569a89e07 note-c311734  
+  2026-05-12T15:25  INPUT_REQUIRED run cb4de4c7f7048cd2 note-2b42dc6  
+  2026-05-12T22:06  NEEDS_WORK     run 4b86c9cea69d568c note-42f35c2  
+  2026-05-12T23:28  INPUT_REQUIRED run ba760724d2c7b159 note-7a59cd4  
+  2026-05-13T20:51  INPUT_REQUIRED run 60f01be41a9734aa note-9a47908  
+  2026-05-13T21:40  INPUT_REQUIRED run 5b3236ea0e767f20 note-72ceda9  
+  2026-05-14T00:28  INPUT_REQUIRED run 608b1b9a0bd5b9cf note-24cbc85  
+  2026-05-14T00:47  NEEDS_WORK     run 387044f9ea662722 note-95b17f6  due@2
+
+pr-2d5f712 [merged] Sign-off step — dedicated window + lifecycle status + comprehensive ve
+  2026-05-25T23:42  NEEDS_WORK     run ad009382b7b0e6d6 note-094efa5  
+  2026-05-26T01:29  NEEDS_WORK     run a953490cbd95dbd7 note-c9aeedc  due@2
+  2026-05-26T02:33  NEEDS_WORK     run 90cd44caf25e1f07 note-e2e71ef  due@3
+  2026-05-26T03:41  PASS           run 85a527f2b04265f3 note-6179177  
+  2026-05-26T17:37  PASS           run 12125069f90ecd21 note-15d22d2  
+
+pr-8e693f6 [merged] Sign-off UI: per-PR BDD report + all-PR behavior dashboard (HTML)
+  2026-05-26T04:06  NEEDS_WORK     run 47b30e4a8869f42d note-596f78b  
+  2026-05-26T13:25  NEEDS_WORK     run bb8854012f0ad8f2 note-083c051  due@2
+  2026-05-26T16:53  INPUT_REQUIRED run 52ceab6a4b9efba7 note-0a52232  
+  2026-05-30T21:30  INPUT_REQUIRED run c3ed44e830d89f4a note-17ee935  
+  2026-06-22T21:44  PASS           run f1947182207d8db4 note-244e2e8  
+  2026-07-15T16:31  NEEDS_WORK     run 699a7f80b871788e note-045e022  due@3
+  2026-07-18T16:19  NEEDS_WORK     run a58141bd5b0e3dc5 note-d7a7e6f  due@2
+  2026-07-18T18:40  PASS           run cb96dc47704b6254 note-caa1226  
+  2026-07-18T21:24  PASS           run 9f301b4f8833fe85 note-fef9eb4  
+  2026-07-18T22:40  NEEDS_WORK     run 480f115292d5d5be note-92ba3c0  
+  2026-07-18T23:42  NEEDS_WORK     run 4b1a11236913d1e3 note-422773c  due@2 due@3
+  2026-07-19T01:52  PASS           run 88674f6fb21959f7 note-a89d22f  
+  2026-07-22T02:34  PASS           run 49cd3b5fc58763de note-af58dff  
+
+Registry totals (QA-noted runs only):
+  PRs with QA notes: 51; runs: 142; NEEDS_WORK runs: 51
+  threshold 1: 51 checkpoints across 28 PRs
+  threshold 2: 17 checkpoints across 13 PRs
+  threshold 3: 6 checkpoints across 5 PRs
