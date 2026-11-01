@@ -198,6 +198,26 @@ class TestSocketPathFromTmuxEnv:
             env = {"TMUX": "/tmp/tmux-1000/default,1234,0"}
             assert tmux.socket_path_from_tmux_env(env) is None
 
+    def test_pm_only_false_accepts_any_server(self, tmp_path):
+        """A caller that already identified a pm session needs its server.
+
+        A legacy session's panes carry no ``PM_TMUX_SOCKET`` and its server
+        is the default one, so discovery must be able to resolve it from
+        ``$TMUX`` to scope its scan (review-loop b48f i6).
+        """
+        with patch.object(paths, "SHARED_SOCKET_DIR", tmp_path / "pm-sessions"):
+            env = {"TMUX": "/tmp/tmux-1000/default,1234,0"}
+            assert tmux.socket_path_from_tmux_env(env, pm_only=False) == \
+                "/tmp/tmux-1000/default"
+            assert tmux.resolve_ambient_socket(env, pm_only=False) == \
+                "/tmp/tmux-1000/default"
+
+    def test_pm_only_false_keeps_the_explicit_socket(self, tmp_path):
+        with patch.object(paths, "SHARED_SOCKET_DIR", tmp_path):
+            env = {"PM_TMUX_SOCKET": "/explicit",
+                   "TMUX": "/tmp/tmux-1000/default,1,0"}
+            assert tmux.resolve_ambient_socket(env, pm_only=False) == "/explicit"
+
     def test_parses_socket_with_commas(self, tmp_path):
         with patch.object(paths, "SHARED_SOCKET_DIR", tmp_path):
             sock = tmp_path / "pm-with,comma"
@@ -2100,6 +2120,66 @@ class TestFindTuiPaneAcrossServers:
         assert helpers._find_tui_pane() == (None, None)
         # The failed lookup leaves the process on the server it came in on.
         assert os.environ["PM_TMUX_SOCKET"] == "/tmp/a"
+
+    def test_legacy_ambient_session_scopes_the_scan_to_the_default_server(
+            self, monkeypatch):
+        """Inside a legacy session the scan must not reach a same-named twin.
+
+        A pre-isolation session lives on the default server and its panes
+        carry no ``PM_TMUX_SOCKET`` (R6.1 propagates nothing into a legacy
+        session), so ``resolve_ambient_socket()`` returns None even though
+        ``$TMUX`` names the server the identified session is on.  Scoping
+        the fallback scan by *name* alone then lets a private twin of the
+        session — same pane-registry key, and pane ids are only unique per
+        server — hand its live pane back to ``pm tui send``, the
+        cross-server confusion this change exists to remove (review-loop
+        b48f i5 closed the mirror case, a legacy twin reached from a
+        private session).
+        """
+        from pm_core.cli import helpers
+        from pm_core import pane_registry
+
+        default = str(paths.default_socket_path())
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.setenv("TMUX", f"{default},123,0")
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: True)
+        monkeypatch.setattr(helpers.tmux_mod, "get_session_name",
+                            lambda: "pm-a~1")
+        monkeypatch.setattr(pane_registry, "pm_session_name",
+                            lambda name: "pm-a")
+        monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-other")
+        # The same session name on two servers: the legacy one we are in,
+        # and a private twin on its own socket.
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions", lambda: [
+            {"name": "pm-a", "socket": "/tmp/pm-sessions/pm-a",
+             "attached": 0, "shared": False},
+            {"name": "pm-a", "socket": None, "attached": 0,
+             "shared": False},
+        ])
+        monkeypatch.setattr(
+            pane_registry, "load_registry",
+            lambda name: {"windows": {"@1": {"panes": [
+                {"id": "%0", "role": "tui"}]}}})
+
+        # The recorded pane id is alive only on the private twin (pane ids
+        # restart per server, so %0 exists there too).  The legacy
+        # session's TUI is the unregistered %7 on the default server.
+        def fake_pane_exists(pane):
+            return (pane == "%0" and os.environ.get("PM_TMUX_SOCKET")
+                    == "/tmp/pm-sessions/pm-a")
+
+        def fake_live():
+            if os.environ.get("PM_TMUX_SOCKET") == default:
+                return {"%7": "pm-a"}, [("%7", "pm-a")]
+            return {}, []
+
+        monkeypatch.setattr(helpers.tmux_mod, "pane_exists",
+                            fake_pane_exists)
+        monkeypatch.setattr(helpers, "_live_panes_and_tuis", fake_live)
+
+        assert helpers._find_tui_pane() == ("%7", "pm-a")
+        assert os.environ["PM_TMUX_SOCKET"] == default
 
 
 # ---------------------------------------------------------------------------

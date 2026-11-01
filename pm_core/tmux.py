@@ -47,13 +47,17 @@ class TmuxCommandError(subprocess.CalledProcessError):
         return f"{base} tmux: {err}" if err else base
 
 
-def socket_path_from_tmux_env(environ: dict | None = None) -> str | None:
-    """Return the private pm socket named by ``$TMUX``, if there is one.
+def socket_path_from_tmux_env(environ: dict | None = None, *,
+                              pm_only: bool = True) -> str | None:
+    """Return the socket named by ``$TMUX``, if there is one.
 
     tmux exposes ``$TMUX`` as ``<socket>,<server-pid>,<session-id>`` inside
-    panes, popups and ``run-shell`` commands.  Only sockets under the pm
-    socket directory qualify, so commands run inside an ordinary tmux
-    session keep targeting the default server.
+    panes, popups and ``run-shell`` commands.  By default only sockets under
+    the pm socket directory qualify, so commands run inside an ordinary tmux
+    session keep targeting the default server.  *pm_only=False* returns any
+    server's socket — for callers that have already established the current
+    pane's session is a pm session, which a legacy pre-isolation one on the
+    default server (or one on a ``tmux -L`` server) is.
     """
     env = os.environ if environ is None else environ
     raw = env.get("TMUX")
@@ -64,6 +68,8 @@ def socket_path_from_tmux_env(environ: dict | None = None) -> str | None:
     path = raw.rsplit(",", 2)[0]
     if not path:
         return None
+    if not pm_only:
+        return path
     # Imported here rather than at module scope so the value is read when
     # the function runs: callers (and tests) may re-point
     # ``paths.SHARED_SOCKET_DIR``, and a top-level ``from … import`` would
@@ -74,10 +80,18 @@ def socket_path_from_tmux_env(environ: dict | None = None) -> str | None:
     return path
 
 
-def resolve_ambient_socket(environ: dict | None = None) -> str | None:
-    """Return the tmux socket the current process should talk to."""
+def resolve_ambient_socket(environ: dict | None = None, *,
+                           pm_only: bool = True) -> str | None:
+    """Return the tmux socket the current process should talk to.
+
+    *pm_only* is forwarded to :func:`socket_path_from_tmux_env`: discovery
+    that has already identified a pm session from the current pane passes
+    ``False`` so a legacy session's default-server socket is found too
+    (its panes carry no ``PM_TMUX_SOCKET``).
+    """
     env = os.environ if environ is None else environ
-    return env.get("PM_TMUX_SOCKET") or socket_path_from_tmux_env(env)
+    return env.get("PM_TMUX_SOCKET") or socket_path_from_tmux_env(
+        env, pm_only=pm_only)
 
 
 def export_ambient_socket(environ: dict | None = None) -> str | None:

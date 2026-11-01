@@ -1490,7 +1490,15 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
         if current_session.startswith("pm-"):
             base = pane_registry.base_session_name(current_session)
             identified = base
-            identified_server = tmux_mod.resolve_ambient_socket()
+            # The server hosting this pane, *any* server: a legacy
+            # (pre-isolation) session lives on the default server and its
+            # panes carry no PM_TMUX_SOCKET, so the pm-only resolution
+            # returns None there and the fallback scan below would be
+            # scoped by name alone — enough to reach a private twin of the
+            # session, whose pane id may collide with the recorded one.
+            # `$TMUX` names the server this pane is on (review-loop b48f
+            # i6).
+            identified_server = tmux_mod.resolve_ambient_socket(pm_only=False)
             pane_id = _registry_tui_pane(base)
             if pane_id:
                 return pane_id, base

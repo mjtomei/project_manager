@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T14:25:50.077649+00:00'
+  updated_at: '2026-11-01T14:56:45.901344+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6491,6 +6491,28 @@ prs:
       was touched.'
     created_at: '2026-11-01T14:25:32Z'
     last_edited: '2026-11-01T14:25:50Z'
+  - id: note-9388355
+    text: 'Review loop b48f i6 (no requirement changes; full suite 5413 passed / 1
+      skipped, 411.4 s, log /pm-captures/review-b48f-i6/full-suite-final.log). One
+      cross-server scoping gap in TUI discovery, the mirror image of the b48f i5 fix:
+      inside a legacy (pre-isolation) session, whose panes carry no PM_TMUX_SOCKET,
+      resolve_ambient_socket() returned None even though $TMUX names the server the
+      identified session is on, so the fallback scan in _find_tui_pane() was scoped
+      by session *name* alone. A private twin of the same session (an older pm binary
+      run from a plain shell creates one; it cannot see the private server) shares
+      the pane-registry key, and pane ids restart per server, so `pm tui send` run
+      inside the legacy session could drive the twin''s pane - the cross-session damage
+      this PR exists to remove. Fix: tmux.socket_path_from_tmux_env() and resolve_ambient_socket()
+      gained pm_only (default True, so the startup export and every existing caller
+      are unchanged); the in-tmux branch resolves identified_server with pm_only=False,
+      scoping the scan to the server $TMUX names (the default server, or a tmux -L
+      server). Test: test_legacy_ambient_session_scopes_the_scan_to_the_default_server,
+      verified to fail on the pre-fix tree at cb7ea1bb5 (returned the twin''s %0 instead
+      of the legacy session''s unregistered %7); qa.md R7 gained the matching bullet.
+      Smoke script re-ran clean; no live session, server or shared host configuration
+      was touched.'
+    created_at: '2026-11-01T14:56:45Z'
+    last_edited: '2026-11-01T14:56:45Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

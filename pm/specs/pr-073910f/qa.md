@@ -221,6 +221,15 @@ pane unless stated otherwise.
   and again from a shell inside that session's own pane, **THEN** it finds
   and drives that session's live TUI rather than reporting "No TUI pane
   found" (review-loop 2caf i5).
+- **GIVEN** a legacy (pre-isolation) session L running on the default
+  server — its panes carry no `PM_TMUX_SOCKET` — and a *private* session
+  with the same name running on its own socket (an older pm binary
+  creates such a twin from a plain shell), **WHEN** the user runs
+  `pm tui view` / `pm tui send` from a shell inside L (or from L's TUI
+  with no `--session`), **THEN** it drives L's own TUI on the default
+  server and never the twin's pane, even though both sessions share the
+  pane-registry key and both servers can use the same pane id
+  (review-loop b48f i6).
 
 ### R8 — Killing a session tears down only that session
 
