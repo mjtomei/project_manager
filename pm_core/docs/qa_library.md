@@ -165,8 +165,10 @@ The only writes that escape the ephemeral env are:
   the project's registry with `pm -C <registry> pr add` (bugs go to
   `--plan bugs`, improvements to `--plan improvements`). In container
   mode the project's pm directory is mounted at `/pm-project` for this,
-  and only when filing is requested. The actual fix is left to a normal
-  bug-fix PR session.
+  and only when filing is requested. Everything already in it except
+  `project.yaml` and its lock is mounted read-only, so the session can
+  file PRs but not change specs, plans or the QA library. The actual fix
+  is left to a normal bug-fix PR session.
 
 The library can be empty. Then `pm qa list` shows no regression tests,
 `pm qa regression` reports that the library is empty, and the discovery

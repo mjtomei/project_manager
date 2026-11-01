@@ -1391,6 +1391,7 @@ def create_qa_container(
     pr_id: str | None = None,
     route_mounts: dict[Path, str] | None = None,
     extra_rw_mounts: dict[Path, str] | None = None,
+    extra_ro_mounts: dict[Path, str] | None = None,
 ) -> str:
     """Create a detached container for a QA scenario.
 
@@ -1401,7 +1402,10 @@ def create_qa_container(
         (pm_core.router_route.container_mounts) when QA sessions in this
         container use a router provider
       - *extra_rw_mounts* (rw): anything else the caller grants, e.g. the
-        project registry a regression run files findings into
+        project pm dir a regression run files findings into
+      - *extra_ro_mounts* (ro): read-only mounts, which may overlay paths
+        inside an rw mount (the runtime mounts parents first), e.g. every
+        entry of that pm dir except the registry
 
     *pr_id* also names the captures dir mounted at /pm-captures
     (``captures/<pr_id>/``).  A regression run passes
@@ -1418,6 +1422,7 @@ def create_qa_container(
         extra_rw_mounts={scratch_path: _CONTAINER_SCRATCH,
                          **(route_mounts or {}),
                          **(extra_rw_mounts or {})},
+        extra_ro_mounts=extra_ro_mounts,
         allowed_push_branch=allowed_push_branch,
         session_tag=session_tag,
         pr_id=pr_id,

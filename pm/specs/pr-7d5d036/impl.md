@@ -148,8 +148,15 @@ library audit. Nothing is ported.
   the registry explicitly (`pm -C <registry> …`): the host pm dir in host
   mode; in container mode the project's pm state dir is bind-mounted rw at
   `/pm-project` **only when filing is requested** (the 2026-05-08 containment
-  note lists filed PRs as an intended output; nothing else of the project is
-  mounted). Needs an optional `extra_rw_mounts` on `create_qa_container`.
+  note lists filed PRs in `pm/project.yaml` as an intended output; nothing
+  else of the project is mounted). The store saves by rename in that dir and
+  locks `project.yaml.lock` beside it, so the dir must be rw; every other
+  entry already in it (specs, plans, the QA library, notes, a pm repo's
+  `.git`) is overlaid read-only (`regression_prompts.registry_mounts`, review
+  fc31 i5), which keeps the note's boundary: only the registry is writable.
+  Residual: new top-level files can be created, and symlinks are not
+  overlaid. Needs optional `extra_rw_mounts` / `extra_ro_mounts` on
+  `create_qa_container`.
 - I2: Regression runs must not push. `allowed_push_branch=None` → no push
   proxy. The clone helper points `origin` at the real upstream, and in host
   mode the user's credentials reach it, so the runner also sets origin's push
@@ -185,7 +192,7 @@ library audit. Nothing is ported.
 - A2 — Foreground vs window: `pm qa regression` stays foreground/blocking as
   it was; the pane surfaces wrap it. No new `--window` mode.
 - A3 — Filing from a container (see I1): mount the pm state dir only for
-  `--file-prs`. Alternatives rejected: writing findings to captures and adding
+  `--file-prs`, read-only except the registry files. Alternatives rejected: writing findings to captures and adding
   a host filing step (a new mechanism; changes the discovery workflow), or
   host-only filing (silently drops container findings).
 - A4 — Where to record the inventory: `pm/qa/retired-regressions.md` (not
@@ -253,3 +260,9 @@ No [UNRESOLVED] items.
   blob matches at `c1fcecc5`; the instructions/artifacts recipes and fakes are
   unchanged against master. A real container run was not done because no
   pm-dev image was built in this environment.
+- Registry overlay (review fc31 i5): on podman 3.4.4 with pm's nested flags
+  (`--uts=host --userns=keep-id --security-opt label=disable`), a busybox
+  container with the pm dir rw plus its entries ro (children listed before the
+  parent, as `create_container` emits them) could rename a temp file over
+  `project.yaml` and append to its lock, and could not write, create in or
+  remove the ro entries.

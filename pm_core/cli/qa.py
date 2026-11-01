@@ -373,7 +373,7 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
                                get_session_tag)
     from pm_core.regression_prompts import (
         CONTAINER_REGISTRY_MOUNT, build_regression_test_prompt,
-        regression_launch_problem,
+        registry_mounts, regression_launch_problem,
     )
 
     if session:
@@ -456,35 +456,39 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
         captures_in = str(run_captures)
         registry_in = str(root)
 
-    prompt = build_regression_test_prompt(
-        title=title,
-        body=item.get("body", ""),
-        workdir=wd_in,
-        scratch_dir=scratch_in,
-        target=target,
-        in_container=use_containers,
-        setup_recipes=_install_regression_recipes(
-            qa_instructions.list_instructions(root), scratch_path,
-            "qa-instructions", scratch_in),
-        capture_recipes=_install_regression_recipes(
-            qa_instructions.list_artifacts(root), scratch_path,
-            "qa-artifacts", scratch_in),
-        captures_dir=captures_in,
-        file_findings=file_prs,
-        registry=registry_in if file_prs else None,
-    )
-
     env: dict[str, str] = {}
     cname = None
     try:
+        # Inside the guarded block: a failed recipe copy is a run that
+        # never launched, so it is cleaned up like one (below).
+        prompt = build_regression_test_prompt(
+            title=title,
+            body=item.get("body", ""),
+            workdir=wd_in,
+            scratch_dir=scratch_in,
+            target=target,
+            in_container=use_containers,
+            setup_recipes=_install_regression_recipes(
+                qa_instructions.list_instructions(root), scratch_path,
+                "qa-instructions", scratch_in),
+            capture_recipes=_install_regression_recipes(
+                qa_instructions.list_artifacts(root), scratch_path,
+                "qa-artifacts", scratch_in),
+            captures_dir=captures_in,
+            file_findings=file_prs,
+            registry=registry_in if file_prs else None,
+        )
         if use_containers:
             cname = container_mod.qa_container_name(
                 f"regression-{test_id}", run_id, 0, session_tag=session_tag)
             # This run's captures dir mounts at /pm-captures (creating it
             # on the host).  No push proxy: a regression run never pushes.
-            # The project's pm dir is mounted only when findings are filed,
-            # so filed PRs reach the real registry and nothing else of the
-            # project is reachable.
+            # The project's pm dir is mounted only when findings are filed:
+            # read-write so filed PRs reach the real registry, with every
+            # other entry in it overlaid read-only (registry_mounts).  No
+            # other part of the project is mounted.
+            reg_rw, reg_ro = (registry_mounts(root) if file_prs
+                              else (None, None))
             container_mod.create_qa_container(
                 name=cname,
                 config=container_mod.load_container_config(),
@@ -493,8 +497,8 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
                 allowed_push_branch=None,
                 session_tag=session_tag,
                 pr_id=captures_key,
-                extra_rw_mounts=({root: CONTAINER_REGISTRY_MOUNT}
-                                 if file_prs else None),
+                extra_rw_mounts=reg_rw,
+                extra_ro_mounts=reg_ro or None,
             )
             claude_cmd = build_claude_shell_cmd(
                 prompt=prompt, cwd=wd_in, write_dir=str(clone_path),

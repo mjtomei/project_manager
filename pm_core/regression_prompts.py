@@ -18,10 +18,35 @@ from pathlib import Path
 
 
 # Where the project's pm state dir is mounted inside a regression container
-# when findings filing is requested (``--file-prs``): the only part of the
-# user's project the container can reach, so filed PRs land in the real
-# registry instead of the run's disposable clone.
+# when findings filing is requested (``--file-prs``), so filed PRs land in
+# the real registry instead of the run's disposable clone.  The only part of
+# the user's project the container can reach; see :func:`registry_mounts`
+# for what of it is writable.
 CONTAINER_REGISTRY_MOUNT = "/pm-project"
+
+# What filing writes in the pm dir: the registry, the temp file it is saved
+# through and its lock (``pm_core.store.save`` / ``store._lock``).
+_REGISTRY_FILES = frozenset(
+    {"project.yaml", "project.yaml.tmp", "project.yaml.lock"})
+
+
+def registry_mounts(pm_root: Path) -> tuple[dict[Path, str], dict[Path, str]]:
+    """``(rw, ro)`` container mounts for filing findings into *pm_root*.
+
+    The registry cannot be mounted on its own: the store saves it by
+    renaming a temp file over it and locks a file beside it, so the pm dir
+    is mounted read-write at :data:`CONTAINER_REGISTRY_MOUNT`.  Every other
+    entry already in it (specs, plans, the QA library, notes, a pm repo's
+    ``.git``) is overlaid read-only, so the session can change the registry
+    and nothing else the user has there.  Not covered: new top-level files
+    (the dir itself is writable) and symlinks, which are left alone because
+    a bind mount would follow them.
+    """
+    root = Path(pm_root)
+    ro = {entry: f"{CONTAINER_REGISTRY_MOUNT}/{entry.name}"
+          for entry in sorted(root.iterdir())
+          if entry.name not in _REGISTRY_FILES and not entry.is_symlink()}
+    return {root: CONTAINER_REGISTRY_MOUNT}, ro
 
 
 def _filing_addendum(registry: str) -> str:

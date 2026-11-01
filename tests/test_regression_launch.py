@@ -227,6 +227,7 @@ def test_container_run_uses_a_qa_container(project, home):
     assert kw["pr_id"] == f"regression/demo/{run_id}"
     assert kw["allowed_push_branch"] is None
     assert kw["extra_rw_mounts"] is None
+    assert kw["extra_ro_mounts"] is None
     assert "-qa-regression-demo-" in kw["name"]
 
     build = spies.build.call_args.kwargs
@@ -247,13 +248,46 @@ def test_container_run_uses_a_qa_container(project, home):
 
 
 def test_container_run_mounts_registry_only_for_filing(project, home):
+    """Filing mounts the pm dir read-write for the registry, with every
+    other entry (here the QA library) overlaid read-only."""
     result, spies = _run_regression(project, ["demo", "--file-prs"],
                                     container_enabled=True)
     assert result.exit_code == 0, result.output
-    assert spies.create.call_args.kwargs["extra_rw_mounts"] == {
-        project.root: "/pm-project"}
+    kw = spies.create.call_args.kwargs
+    assert kw["extra_rw_mounts"] == {project.root: "/pm-project"}
+    assert kw["extra_ro_mounts"] == {project.root / "qa": "/pm-project/qa"}
     prompt = spies.build.call_args.kwargs["prompt"]
     assert "pm -C /pm-project pr add '<title>' --plan bugs" in prompt
+
+
+def test_registry_mounts_leave_only_the_registry_writable(tmp_path):
+    from pm_core.regression_prompts import registry_mounts
+    root = tmp_path / "pm"
+    for d in ("qa/regression", "specs", "plans", ".git"):
+        (root / d).mkdir(parents=True)
+    for f in ("project.yaml", "project.yaml.lock", "project.yaml.tmp",
+              "notes.txt"):
+        (root / f).write_text("x")
+    (root / "link").symlink_to(tmp_path)
+    rw, ro = registry_mounts(root)
+    assert rw == {root: "/pm-project"}
+    assert ro == {root / n: f"/pm-project/{n}"
+                  for n in (".git", "notes.txt", "plans", "qa", "specs")}
+
+
+def test_recipe_copy_failure_leaves_no_run(project, home):
+    """Copying the recipes happens before launch: a failure there is a run
+    that never launched, so its workdir and captures are dropped."""
+    result, spies = _run_regression(
+        project, ["demo"], container_enabled=False,
+        extra_patches=[patch("shutil.copy2",
+                             side_effect=PermissionError("denied"))])
+    assert result.exit_code == 1
+    assert "Could not build the regression session" in result.output
+    assert "denied" in result.output
+    assert _qa_workdirs(home) == []
+    assert _run_captures(home) == []
+    spies.execvpe.assert_not_called()
 
 
 def test_container_run_fails_closed_when_runtime_unavailable(project, home):
@@ -554,13 +588,16 @@ def test_discovery_prompt_handles_an_empty_library():
 def test_regression_container_argv_mounts_only_scratch_captures_registry(
         tmp_path, home):
     """The real ``podman run`` argv ``create_qa_container`` builds for a
-    filing regression run: clone, scratch, ``captures/regression/`` and the
-    project registry, with no push proxy."""
+    filing regression run: clone, scratch, this run's captures dir and the
+    project pm dir (rw, with its other entries ro), with no push proxy."""
     from pm_core.push_proxy import _CONTAINER_SOCKET_DIR
+    from pm_core.regression_prompts import registry_mounts
     clone, scratch, registry = (tmp_path / "clone", tmp_path / "scratch",
                                 tmp_path / "proj" / "pm")
-    for d in (clone, scratch, registry):
+    for d in (clone, scratch, registry / "specs"):
         d.mkdir(parents=True)
+    (registry / "project.yaml").write_text("x")
+    reg_rw, reg_ro = registry_mounts(registry)
     runtime = MagicMock(return_value=MagicMock(stdout="id\n", returncode=0))
     with patch.object(container_mod, "container_is_running",
                       return_value=False), \
@@ -578,7 +615,7 @@ def test_regression_container_argv_mounts_only_scratch_captures_registry(
             workdir=clone, scratch_path=scratch,
             allowed_push_branch=None, session_tag="tag",
             pr_id="regression/demo/r1",
-            extra_rw_mounts={registry: "/pm-project"},
+            extra_rw_mounts=reg_rw, extra_ro_mounts=reg_ro,
         )
     args = runtime.call_args_list[0].args
     assert args[0] == "run"
@@ -591,6 +628,8 @@ def test_regression_container_argv_mounts_only_scratch_captures_registry(
     assert (captures / "demo" / "r1").is_dir()
     assert not any(m.startswith(f"{captures}:") for m in mounts)
     assert f"{registry}:/pm-project" in mounts
+    assert f"{registry / 'specs'}:/pm-project/specs:ro" in mounts
+    assert not any("project.yaml" in m for m in mounts)
     assert "PM_CAPTURES_PR=regression/demo/r1" in args
     assert not any(_CONTAINER_SOCKET_DIR in m for m in mounts)
     proxy.assert_not_called()

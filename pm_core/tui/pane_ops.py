@@ -582,7 +582,7 @@ def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
     pane), the pane opens in the TUI's current window.
     """
     from pm_core import qa_instructions
-    from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
+    from pm_core.claude_launcher import build_claude_shell_cmd
 
     if not app._root:
         app.log_message("No project root")
