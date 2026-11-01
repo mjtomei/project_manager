@@ -156,7 +156,10 @@ source, its status and the notes.  A level the route declares unsupported
 is marked inline (`effort=high (unsupported)`, `high *` in the role table);
 an `unverified` level (the route declares no `supported_efforts`) is left
 unmarked in the inline column but always named in the effort notes, so a
-bare `effort=high` never claims support the route did not declare.
+bare `effort=high` never claims support the route did not declare.  A route
+line that summarizes several levels (`max (impl), high otherwise`) is not
+one level, so it carries no `(unsupported)`/`(overridden)` marker: the
+per-role table names each role's status.
 
 ### R4 — Environment precedence is visible and truthful
 - `CLAUDE_CODE_EFFORT_LEVEL` (valid level, not `auto`/`unset`) is detected.
@@ -337,7 +340,10 @@ does not fetch a catalog in this PR.
 ## Implementation plan (files)
 
 1. `pm_core/model_config.py` — widen `EFFORT_LEVELS`; add `is_effort_level`,
-   `normalize_ambient_effort`, `accepted_efforts_of`, `provider_effort_env`
+   `normalize_ambient_effort`, `classify_effort_env` (the one classifier the
+   launch warning, the effort notes and `pm provider show` share, so they
+   cannot disagree about an `auto`/blank/unknown assignment),
+   `accepted_efforts_of`, `provider_effort_env`
    and `unsupported_effort_problem`; extend `ModelResolution`; resolve the
    ambient `CLAUDE_CODE_EFFORT_LEVEL`; compute status/notes (including a
    provider `env:` assignment of it); extend `validate_model_config`.

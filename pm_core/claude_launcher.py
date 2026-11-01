@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pm_core.model_config import AMBIENT_EFFORT_ENV
+from pm_core.model_config import AMBIENT_EFFORT_ENV, classify_effort_env
 from pm_core.paths import configure_logger, log_shell_command, write_env_file
 from pm_core.prompt_bounds import (
     PROMPT_ARG_LIMIT, PromptTooLargeError, prompt_bytes,
@@ -1010,14 +1010,26 @@ def build_claude_shell_cmd(
         # ambient value is removed from the session.  A provider that
         # assigns it explicitly is the user's own configuration: leave it
         # and say so, rather than silently dropping a configured variable.
-        if AMBIENT_EFFORT_ENV in provider_env:
-            _log.warning(
-                "provider %r assigns %s; it overrides --effort %s for this "
-                "session", provider or "<default>", AMBIENT_EFFORT_ENV,
-                effort)
-        else:
+        # Only a level that actually differs from --effort is a conflict:
+        # "auto"/"unset"/blank mean "no override" (the CLI ignores an
+        # unknown value), and an assignment equal to pm's level changes
+        # nothing.  model_config's effort notes make the same distinction.
+        assigned = provider_env.get(AMBIENT_EFFORT_ENV)
+        if assigned is None:
             # A provider's unset_env may already list it; emit it once.
             unset = tuple(dict.fromkeys((*unset, AMBIENT_EFFORT_ENV)))
+        else:
+            kind, level = classify_effort_env(assigned)
+            if kind == "unknown":
+                _log.warning(
+                    "provider %r sets %s=%r, which is not a Claude effort "
+                    "level; --effort %s applies", provider or "<default>",
+                    AMBIENT_EFFORT_ENV, assigned, effort)
+            elif kind == "level" and level != effort:
+                _log.warning(
+                    "provider %r assigns %s=%s; it overrides --effort %s "
+                    "for this session", provider or "<default>",
+                    AMBIENT_EFFORT_ENV, level, effort)
     if provider_env:
         if env_out is not None:
             env_out.update(provider_env)

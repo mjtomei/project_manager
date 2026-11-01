@@ -669,6 +669,16 @@ class TestEffortCapability:
         assert res.effort is None
         assert any("invalid PM_EFFORT" in n for n in res.effort_notes)
 
+    def test_effort_env_classification(self):
+        """One classifier decides what an assignment does, so the launch
+        warning, the notes and `pm provider show` cannot disagree."""
+        from pm_core.model_config import classify_effort_env
+        assert classify_effort_env("xhigh") == ("level", "xhigh")
+        assert classify_effort_env("XHIGH") == ("level", "xhigh")
+        for value in ("auto", "unset", "", "  ", "AUTO"):
+            assert classify_effort_env(value) == ("no_override", None)
+        assert classify_effort_env("turbo") == ("unknown", None)
+
     def test_validate_warns_on_unsupported_route_level(self, pm_home_dir):
         _providers(pm_home_dir, **{ROUTE: _router(
             supported_efforts=["low"])})
@@ -911,6 +921,13 @@ class TestProviderEffortMetadata:
         assert "non-Claude levels kept for provenance: none" in r.output
         assert "supported_efforts source: catalog" in r.output
 
+    def test_list_names_supported_efforts(self, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts=["low", "high"])})
+        r = _cli("provider", "list")
+        assert r.exit_code == 0, r.output
+        assert "supported_efforts=low,high" in r.output
+
     def test_show_names_an_effort_env_assignment(self, pm_home_dir):
         _providers(pm_home_dir, **{ROUTE: _router(
             env={"CLAUDE_CODE_EFFORT_LEVEL": "xhigh"})})
@@ -1043,6 +1060,33 @@ class TestEffortDisplay:
         # say the same sentence, so it is printed once, not twice.
         assert r.output.count(
             "not in the selected route's supported_efforts") == 1
+
+    def test_mixed_effort_route_summary_is_not_marked(
+            self, project_root, pm_home_dir, monkeypatch):
+        """A route line whose roles run different levels carries a summary,
+        not one role's verification status: "max (impl), high otherwise
+        (unsupported)" would read as if every role were unsupported.  The
+        per-role table above names each one."""
+        import pm_core.cli.model as model_cli
+        monkeypatch.setattr(model_cli, "state_root", lambda: project_root)
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts=["high"])})
+        data = store.load(project_root)
+        data["prs"][0]["model"] = f"provider:{ROUTE}"
+        data["prs"][0]["session_effort"] = {"impl": "max", "review": "high"}
+        store.save(data, project_root)
+        r = _cli("model", "show")
+        assert r.exit_code == 0, r.output
+        route = next(l for l in r.output.splitlines()
+                     if l.strip().startswith("pr-001 ") and "route=" in l)
+        assert "otherwise" in route
+        assert "unsupported" not in route
+        # The per-role table still reports the unsupported level, and the
+        # problems section keeps the PR finding.
+        assert "prs[pr-001] impl: effort 'max' is not in" in r.output
+        roles = _cli("pr", "model", "show", "pr-001")
+        assert roles.exit_code == 0, roles.output
+        assert "max *" in roles.output
 
     def test_describe_marks_unsupported(self, pm_home_dir):
         from pm_core.router_route import describe

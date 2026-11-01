@@ -461,6 +461,28 @@ def normalize_ambient_effort(value) -> tuple[str | None, str | None]:
     return (level, raw) if level in EFFORT_LEVELS else (None, raw)
 
 
+def classify_effort_env(assigned) -> tuple[str, str | None]:
+    """``(kind, level)`` for a ``CLAUDE_CODE_EFFORT_LEVEL`` assignment.
+
+    *kind* says what the value does to ``--effort``:
+
+    - ``"level"``: a level Claude accepts (*level* is it, lowercased), so
+      the session runs it instead of ``--effort``;
+    - ``"no_override"``: ``auto``/``unset``/blank, which the CLI reads as
+      "no override", so ``--effort`` still applies;
+    - ``"unknown"``: a value pm does not recognise, which the CLI ignores.
+
+    Shared by the launch warning, the effort notes and ``pm provider
+    show`` so the three never disagree about one assignment.
+    """
+    if not isinstance(assigned, str) or not assigned.strip():
+        return "no_override", None
+    if assigned.strip().lower() in ("auto", "unset"):
+        return "no_override", None
+    level = normalize_ambient_effort(assigned)[0]
+    return ("level", level) if level is not None else ("unknown", None)
+
+
 def _provider_config_or_error(provider_name: str | None):
     """``(cfg, why)`` for *provider_name*: its ProviderConfig, or None.
 
@@ -574,23 +596,21 @@ def _note_provider_effort_env(resolution: ModelResolution,
     assigned = effort_env_of(cfg)
     if assigned is None:
         return
-    level, _raw = normalize_ambient_effort(assigned)
-    if level is None:
-        no_override = (not assigned.strip()
-                       or assigned.strip().lower() in ("auto", "unset"))
-        if no_override:
-            # "auto"/"unset" (and blank) are valid Claude values meaning
-            # "no override": the provider assigns one explicitly, so
-            # --effort still applies.
-            resolution.effort_notes.append(
-                f"provider {resolution.provider!r} sets "
-                f"{AMBIENT_EFFORT_ENV}={assigned!r} (no override); "
-                + (f"--effort {effort} applies" if effort
-                   else "the CLI default applies"))
-        else:
-            resolution.effort_notes.append(
-                f"provider {resolution.provider!r} sets {AMBIENT_EFFORT_ENV}="
-                f"{assigned!r}, which is not a Claude effort level pm knows")
+    kind, level = classify_effort_env(assigned)
+    if kind == "no_override":
+        # "auto"/"unset" (and blank) are valid Claude values meaning "no
+        # override": the provider assigns one explicitly, so --effort still
+        # applies.
+        resolution.effort_notes.append(
+            f"provider {resolution.provider!r} sets "
+            f"{AMBIENT_EFFORT_ENV}={assigned!r} (no override); "
+            + (f"--effort {effort} applies" if effort
+               else "the CLI default applies"))
+        return
+    if kind == "unknown":
+        resolution.effort_notes.append(
+            f"provider {resolution.provider!r} sets {AMBIENT_EFFORT_ENV}="
+            f"{assigned!r}, which is not a Claude effort level pm knows")
         return
     if level == effort:
         return
@@ -685,18 +705,21 @@ def get_model_config_summary(project_data: dict | None = None) -> dict[str, str]
     return result
 
 
-def _route_effort_warnings(project_data: dict | None, roles_levels,
+def _route_effort_warnings(project_data: dict | None, roles,
                            *, pr_entry: dict | None = None,
                            prefix: str = "") -> list[str]:
-    """Warnings for explicit (role, level) settings the route rejects.
+    """Warnings for the effort each listed role actually resolves to.
 
-    Configuration-only (``use_env=False``): the caller's environment is not
-    part of what project.yaml declares.  A warning, not an error: the
-    metadata is dated and the launch still passes the level (see
-    ``ModelResolution.effort_status``).
+    *roles* are the ones with an explicit, valid configured level; the
+    level itself is resolved, so a role whose setting a higher-precedence
+    one overrides (a PR's effort, a provider default) is checked at the
+    level that will run.  Configuration-only (``use_env=False``): the
+    caller's environment is not part of what project.yaml declares.  A
+    warning, not an error: the metadata is dated and the launch still
+    passes the level (see ``ModelResolution.effort_status``).
     """
     out = []
-    for st, _ in roles_levels:
+    for st in roles:
         res = resolve_model_and_provider(st, project_data=project_data,
                                          pr_entry=pr_entry, use_env=False)
         problem = unsupported_effort_problem(res)
@@ -760,7 +783,7 @@ def validate_model_config(project_data: dict | None) -> list[str]:
                 )
         errors.extend(_route_effort_warnings(
             project_data,
-            [(st, level) for st, level in effort_entries.items()
+            [st for st, level in effort_entries.items()
              if st in SESSION_TYPES and is_effort_level(level)]))
     # A PR's role exceptions are ignored the same way, so a typo would
     # leave that role on the PR-wide model.
@@ -818,7 +841,7 @@ def validate_model_config(project_data: dict | None) -> list[str]:
                                       f"{list(EFFORT_LEVELS)}")
                 errors.extend(_route_effort_warnings(
                     project_data,
-                    [(st, level) for st, level in efforts.items()
+                    [st for st, level in efforts.items()
                      if st in PR_SESSION_TYPES and is_effort_level(level)],
                     pr_entry=pr, prefix=f"prs[{pr.get('id')}] "))
         if pr.get("session_models") is None:

@@ -178,8 +178,13 @@ def model_show():
                 summary = ", ".join(f"{e} ({', '.join(sts)})"
                                     for e, sts in efforts.items()
                                     if e != common)
+                # A mixed summary is not one level, so it cannot carry one
+                # role's verification status: "high (impl), max otherwise
+                # (unsupported)" would read as if every role were
+                # unsupported.  The per-role table above names each one.
                 res = dataclasses.replace(
-                    res, effort=f"{summary}, {common} otherwise")
+                    res, effort=f"{summary}, {common} otherwise",
+                    effort_status="none")
             route_lines.append(
                 f"  {pr.get('id')} ({label}) {describe(items[0][0], res)}")
     if route_lines:

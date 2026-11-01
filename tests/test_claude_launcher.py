@@ -586,6 +586,25 @@ class TestEffortLaunch:
         assert "-u CLAUDE_CODE_EFFORT_LEVEL" not in cmd
         assert env["CLAUDE_CODE_EFFORT_LEVEL"] == "max"
 
+    def test_shell_cmd_keeps_a_provider_no_override_assignment(
+            self, monkeypatch):
+        """``auto``/blank is an explicit "no override": the command keeps
+        the provider's assignment (and does not unset it), so --effort
+        applies as pm reports."""
+        from pm_core import providers
+        for value in ("auto", "unset", ""):
+            monkeypatch.setattr(
+                providers, "load_providers",
+                lambda value=value: {"providers": {"p": {
+                    "type": "claude",
+                    "env": {"CLAUDE_CODE_EFFORT_LEVEL": value}}}})
+            env: dict[str, str] = {}
+            cmd = build_claude_shell_cmd(prompt="x", provider="p",
+                                         effort="high", env_out=env)
+            assert "--effort high" in cmd
+            assert "-u CLAUDE_CODE_EFFORT_LEVEL" not in cmd
+            assert env["CLAUDE_CODE_EFFORT_LEVEL"] == value
+
     def test_shell_cmd_unsets_the_level_once(self, monkeypatch):
         """A provider that already unsets the variable must not make the
         command unset it twice."""

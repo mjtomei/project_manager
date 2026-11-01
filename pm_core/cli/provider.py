@@ -381,8 +381,8 @@ def provider_detail_lines(p, *, status: bool = False) -> list[str]:
         if value:
             lines.append(f"  {label}: {value}")
     from pm_core.model_config import (
-        AMBIENT_EFFORT_ENV, accepted_efforts_of, effort_env_of,
-        metadata_age_of, normalize_ambient_effort,
+        AMBIENT_EFFORT_ENV, accepted_efforts_of, classify_effort_env,
+        effort_env_of, metadata_age_of,
     )
     if p.supported_efforts is not None:
         # The declared list minus anything outside the Claude vocabulary
@@ -398,7 +398,10 @@ def provider_detail_lines(p, *, status: bool = False) -> list[str]:
                          f"{p.supported_efforts_source}")
         if p.supported_efforts_checked_at:
             age = metadata_age_of(p)
-            suffix = ("" if age is None
+            # A future date (a typo, or a clock that moved back) has no
+            # meaningful age: print the date alone rather than "(-3 days
+            # old)".
+            suffix = ("" if age is None or age < 0
                       else f" ({age} day{'s' if age != 1 else ''} old)")
             lines.append(f"  supported_efforts checked: "
                          f"{p.supported_efforts_checked_at}{suffix}")
@@ -407,13 +410,10 @@ def provider_detail_lines(p, *, status: bool = False) -> list[str]:
         # Say what the assignment does: a level overrides --effort, while
         # "auto"/"unset" (and a blank, which is still an exported
         # assignment) explicitly means "no override".
-        if (not assigned.strip()
-                or assigned.strip().lower() in ("auto", "unset")):
-            effect = "(no override; --effort applies)"
-        elif normalize_ambient_effort(assigned)[0] is None:
-            effect = "(not a Claude effort level pm knows)"
-        else:
-            effect = "(overrides --effort for this provider's sessions)"
+        kind, _level = classify_effort_env(assigned)
+        effect = {"no_override": "(no override; --effort applies)",
+                  "unknown": "(not a Claude effort level pm knows)"}.get(
+                      kind, "(overrides --effort for this provider's sessions)")
         lines.append(f"  effort env: {AMBIENT_EFFORT_ENV}={assigned} {effect}")
     if p.type == "router":
         lines.extend(f"  {line}" for line in _router_detail_lines(p))
