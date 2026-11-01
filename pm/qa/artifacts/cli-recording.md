@@ -184,10 +184,12 @@ where the CLI runs.
 ```
 # 1. Scaffold tmux on its own socket and start the recorder as the pane's
 #    command, so the pane's lifetime *is* the recording's lifetime: when
-#    asciinema exits, the session ends and step 4's wait can see it. The
-#    capture subdirectory has to exist (and hold no earlier cast) before
-#    asciinema writes into it. Clear a leftover `rec` session from an
-#    aborted run first — `new-session` fails with "duplicate session: rec"
+#    asciinema exits the pane's command returns — and the session ends with
+#    it, unless the server's `remain-on-exit` keeps it (step 4's wait reads
+#    the pane for that reason). The capture subdirectory has to exist (and
+#    hold no earlier cast) before asciinema writes into it. Clear a leftover
+#    `rec` session from an aborted run first — `new-session` fails with
+#    "duplicate session: rec"
 #    while it exists — with `kill-session`, not `kill-server`: killing the
 #    server and reconnecting immediately races its exit ("server exited
 #    unexpectedly"). The socket *name* is shared by every run on this host,
@@ -327,11 +329,20 @@ deadline=$(( $(date +%s) + 30 ))
 until [ -s <capture-dir>/<short-name>/recording.cast ] ||
       ! tmux -L scaffold has-session -t rec 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
-        tmux -L scaffold capture-pane -p -t rec \
-            > <capture-dir>/<short-name>/recorder-pane.log 2>/dev/null || true
-        echo "recorder did not start within 30s — the pane is saved in" \
-            "<capture-dir>/<short-name>/recorder-pane.log, asciinema's own" \
-            "error (if any) in recorder-stderr.log" >&2
+        # The save is a write into a directory this block checked a moment
+        # ago, and the recorder can go away in the gap: either makes the
+        # redirect fail, and the message must then say the pane was not saved
+        # instead of naming a file nothing wrote (the rule step 4's stop
+        # timeout follows — a full disk is the same state, and it is one this
+        # recipe already reasons about for the status file).
+        if tmux -L scaffold capture-pane -p -t rec \
+                > <capture-dir>/<short-name>/recorder-pane.log 2>/dev/null; then
+            pane_note="the pane is saved in <capture-dir>/<short-name>/recorder-pane.log"
+        else
+            pane_note="the pane could not be saved in <capture-dir>/<short-name>/recorder-pane.log — the capture directory cannot be written, or the recorder went away"
+        fi
+        echo "recorder did not start within 30s — $pane_note, asciinema's" \
+            "own error (if any) in recorder-stderr.log" >&2
         tmux -L scaffold kill-server 2>/dev/null
         exit 1
     fi
@@ -355,8 +366,11 @@ done
 #    Re-run the capture rather than accept it.
 
 # 4. Wait (bounded) for asciinema to exit — the pane *is* the recording, so
-#    the session ending is the completion signal — then confirm the cast is
-#    there and non-empty *and* that asciinema itself exited 0 (a killed
+#    the pane's command returning is the completion signal (the session
+#    ending is its usual consequence; `remain-on-exit on` keeps the session
+#    after its pane returns, which is why the wait below reads `#{pane_dead}`
+#    as well) — then confirm the cast is there and non-empty *and* that
+#    asciinema itself exited 0 (a killed
 #    recorder leaves a header-only cast). For a one-shot command that
 #    legitimately runs longer than the default bound, raise
 #    RECORDER_STOP_TIMEOUT (seconds):
@@ -438,6 +452,15 @@ if [ "${#stop_timeout}" -gt 18 ]; then
 fi
 deadline=$(( $(date +%s) + 10#$stop_timeout ))
 while tmux -L scaffold has-session -t rec 2>/dev/null; do
+    # The pane's death is the completion signal, not only the session's end:
+    # the pane *is* the recording, so asciinema returning ends the pane — but
+    # a server with `set -g remain-on-exit on` (a common way to keep a
+    # crashed pane visible, and what this project's own QA notes prescribe)
+    # keeps the session after its only pane returns. Waiting on the session
+    # alone then runs out this bound on a recording that finished and tells
+    # the worker it is still running. `#{pane_dead}` is 1 once the pane's
+    # command has returned (verified on tmux 3.2a).
+    [ "$(tmux -L scaffold display-message -p -t rec:0.0 '#{pane_dead}' 2>/dev/null)" = 1 ] && break
     if [ "$(date +%s)" -ge "$deadline" ]; then
         # The pane save is best-effort: this step's guard requires `-d`/`-x`
         # but not `-w` (a directory that became read-only must not refuse a

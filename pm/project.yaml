@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T13:38:19.337692+00:00'
+  updated_at: '2026-11-01T14:39:42.764666+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38482,6 +38482,45 @@ prs:
       helper/prompt/verifier work stays dropped.'
     created_at: '2026-11-01T13:38:19Z'
     last_edited: '2026-11-01T13:38:19Z'
+  - id: note-a32cd27
+    text: 'Review loop 928f i30: two leftovers in the kept recipe scope. (1) Both
+      recipes waited for the recorder by waiting for its tmux *session* to end — a
+      server-config default, not a tmux property: with `set -g remain-on-exit on`
+      (a common way to keep a crashed pane visible, and what this project''s own QA
+      notes prescribe for a shared pane) the session survives its only pane''s command
+      returning, so a healthy recording was killed at the stop bound and reported
+      "the detach key did not end it ... incomplete, not a finished recording" (reproduced
+      live on tmux 3.2a + asciinema 2.1.0 with the recipe''s own step-5 block: pre-fix
+      rc 1 on a complete capture directory, post-fix rc 0), a failed attach''s dead
+      pane passed step 3''s settle check as a drawn TUI, and step 5 misdiagnosed a
+      recorder that died mid-scenario. The completion handle is now the pane (`#{pane_dead}`,
+      read through the same exact `=...:0.0` target): step 3''s readiness loop and
+      settle check, step 5''s already-gone branch and stop wait, and the CLI scaffold''s
+      stop wait treat the recorder as ended when the session is gone *or* the pane
+      is dead. (2) The two readiness timeouts (tmux step 3, CLI step 2) still used
+      `capture-pane ... || true` with an unconditional "the pane is saved in ..."
+      — the two pane saves R87 did not reach; a read-only directory, a full disk or
+      a pane that went away then produced a pointer to a file nothing wrote, while
+      the branch killed the pane. Both now use R87''s two-branch form. Tests: 6 new
+      cases (4 remain-on-exit + 2 readiness saves), all failing against HEAD''s recipes;
+      the stub models STUB_REMAIN (a new session inherits remain-on-exit on, a pane
+      exit marks the pane dead instead of removing the session, keys sent to a dead
+      pane are accepted and do nothing, display-message #{pane_dead} answers it) plus
+      `remaindied` and `nopane` modes. Recipe file 348 passed (was 342); full suite
+      5545 passed, 1 skipped, 0 failed (498.30 s). Evidence: /pm-captures/review-928f-i30/
+      (probe-remain-step5.log, probe-pane-dead.log, mutation-check.log, recipe-file.log,
+      suite.log, README.md, scripts/). impl.md R92+R93, qa.md. The dropped helper/prompt/verifier
+      work stays dropped. Known residual: under remain-on-exit, step 3''s live-recorder
+      refusal still reads a dead-pane leftover session as "a recorder is already running"
+      (the refusal is safe and names the kill-session clear; only a paste-alone restart
+      after an abandoned run reaches it). Separately filed "Bug: web-UI recording
+      readiness poll can match a concurrent capture''s app": the pre-check refuses
+      a server already up, but a second capture can bind the port between that check
+      and this app''s bind and the poll then passes on the other app — a sound fix
+      needs port-ownership tooling this image lacks (no ss/lsof/netstat/fuser), so
+      it is not guessed at here.'
+    created_at: '2026-11-01T14:39:42Z'
+    last_edited: '2026-11-01T14:39:42Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -52175,6 +52214,41 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-29T11:24:39.224612+00:00'
   updated_at: '2026-10-29T11:24:39.224612+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-87406f8
+  plan: bugs
+  title: 'Bug: web-UI recording readiness poll can match a concurrent capture''s app'
+  branch: pm/pr-87406f8-bug-web-ui-recording-readiness-poll-can-match-a-co
+  status: pending
+  depends_on: []
+  description: 'pm/qa/artifacts/web-ui-recording.md step 1 (the app-start block).
+    The port pre-check refuses a server that already answers on $APP_URL, but a second
+    capture can bind the port in the window between that check and this block''s own
+    app bind: this app then exits with "Address already in use", the readiness poll
+    passes on the *other* app, and the driver records that app''s screens as this
+    run''s evidence. server.pid then holds the dead pid, so the teardown signals nothing
+    and the other app keeps the port. The recipe''s PORT is the hard-coded 8000, so
+    two concurrent web-UI captures on one host collide.
+
+
+    A sound fix needs a handle that says the answer is ours — port ownership (ss -ltnp
+    / lsof) — and the image used for QA here has none of those (only ps), so a pid-liveness
+    check would be a one-shot sample that can miss the death (the poll can pass before
+    the app has exited). Decide: require a per-run PORT (documented), parse /proc/net/tcp
+    + /proc/<pid>/fd for ownership, or document a one-web-UI-capture-at-a-time rule
+    like the tmux/CLI shared-name notes.
+
+
+    Found while reviewing pr-b19db15 (review loop 928f i30); not fixed there because
+    it needs that decision.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-01T14:39:32.238969+00:00'
+  updated_at: '2026-11-01T14:39:32.238969+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

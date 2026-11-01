@@ -935,7 +935,12 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   read-only directory must neither refuse the finish nor produce a false
   pointer; verified with a mode-500 capture directory, where the redirect
   answered "Permission denied", no file was written, and the shipped message
-  still named it as saved (review loop 928f i25, R87).
+  still named it as saved (review loop 928f i25, R87). The two *readiness*
+  timeouts (tmux step 3, CLI step 2) are the same write a whole bound after
+  their own writability guard: a directory that became read-only, a full disk,
+  or a recorder whose pane went away in the gap makes their save fail too, and
+  they must say so rather than claim a `recorder-pane.log` they then destroy
+  the pane behind (review loop 928f i30, R93).
 - The tmux stop step is pasted a *second* time after a clean detach (a
   resumed session, a worker checking its work) → the recorder is gone, the
   TUI it attached to is still up and `recorder.status` holds `0`. That must
@@ -1199,6 +1204,20 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   released and appends to the same transcript; after that step 3 starts and
   step 5 passes on a transcript that covers the restarted attempt (review
   loop 928f i29, R91).
+- A capture runs to completion on a host whose tmux config keeps a dead pane
+  (`set -g remain-on-exit on`, which this project's own QA notes prescribe for
+  a shared pane) → the run must still pass: the detach ends the attach client,
+  asciinema flushes the cast and exits 0, and the recorder is complete — the
+  wait must read the *pane* (`#{pane_dead}`) rather than only its session,
+  which `remain-on-exit` keeps alive. Without that, every healthy capture is
+  killed at the stop bound and reported "the detach key did not end it …
+  incomplete, not a finished recording" (verified live on tmux 3.2a +
+  asciinema 2.1.0 with the recipe's own step-5 block: pre-fix rc 1 on a
+  non-empty cast with `recorder.status` 0 and a 21-byte transcript; post-fix
+  rc 0). The same config must not turn a failed attach's dead pane into
+  readiness (step 3's settle check) nor a recorder that died mid-scenario into
+  "the detach key did not end it" (step 5's already-gone branch), and the CLI
+  scaffold's stop wait has the same handle (review loop 928f i30, R92).
 
 ## Pass / Fail criteria
 

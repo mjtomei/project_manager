@@ -31,7 +31,16 @@ hits, regardless of how it waits for a background job:
   finish needs the status handle too — and that handle is only worth anything
   if the earlier run's status file is cleared first: otherwise a run whose
   pane was torn down before asciinema returned reads the previous run's ``0``
-  and reports a recording that never finished as a finished one;
+  and reports a recording that never finished as a finished one. The
+  *completion handle* is the recorder pane's death (``#{pane_dead}``), not
+  only its session's end: a server with ``set -g remain-on-exit on`` — a
+  common way to keep a crashed pane visible, and what this project's own QA
+  notes prescribe — keeps the session after its only pane's command returns,
+  so a healthy recording's stop wait ran out its bound and reported "the
+  detach key did not end it … incomplete" (and a failed attach's dead pane
+  passed the settle check as a drawn TUI). Both recipes read the pane's own
+  state for liveness and for the wait, and the session's absence remains the
+  other half of the answer;
 - readiness polls (pm session, web-ui server) carry a deadline and an
   actionable failure instead of hanging forever, the pm-session poll waits on
   the computed session rather than any ``pm-`` session (which would also
@@ -168,7 +177,11 @@ hits, regardless of how it waits for a background job:
   say whether the write landed: the read-only steps' pane saves report "could
   not be saved" when the capture directory refuses the redirect, instead of
   naming a ``recorder-pane.log`` that does not exist (the state their
-  ``-d``/``-x`` guard deliberately allows, R84), and the CLI stop bound
+  ``-d``/``-x`` guard deliberately allows, R84), and so do the two *readiness*
+  timeouts, whose save runs a whole bound after the step's own writability
+  guard — a directory that became read-only, a full disk, or a recorder whose
+  pane went away makes that redirect fail too, and the branch then kills the
+  pane it claimed to have saved (R87/R93); and the CLI stop bound
   rejects a ``RECORDER_STOP_TIMEOUT`` too long for the 64-bit deadline
   arithmetic instead of letting the wrap remove the bound (R87);
 - an input that exists but is empty is not an input, and that holds for the
@@ -891,8 +904,10 @@ class TestRecipes:
     def test_tmux_recorder_dying_mid_scenario_fails(self):
         """A recorder gone before the detach did not finish the recording.
 
-        The stop step's completion signal is the recorder session ending
-        *after* the detach. The attach client follows the session, so it
+        The stop step's completion signal is the recorder *pane* ending
+        *after* the detach (the session's end is its usual consequence; a
+        server with `remain-on-exit` keeps it, which is why the step reads
+        `#{pane_dead}` too). The attach client follows the session, so it
         exits only on the detach, when the session ends, or because it (or
         asciinema) died. A recorder that is already gone while the session it
         was attaching to is still there therefore died mid-scenario: the cast
@@ -5344,10 +5359,23 @@ resolve() {
     for f in "$STATE"/*; do
         [ -e "$f" ] || continue
         b=${f##*/}
-        case "$b" in pane|sends|pipeclaim|claim.*|pipe.*) continue ;; esac
+        case "$b" in pane|sends|pipeclaim|claim.*|pipe.*|dead.*|roexit.*) continue ;; esac
         case "$b" in "$t"*) echo "$b"; return 0 ;; esac
     done
     return 1
+}
+# The pane's command returned. With `remain-on-exit on` (`STUB_REMAIN`) the
+# server keeps the session and marks the pane dead — real tmux 3.2a: the
+# session stays, `has-session` succeeds, `capture-pane` still answers and
+# `#{pane_dead}` is 1 (verified) — so the session's existence is *not* the
+# completion signal. Without it the pane's death ends the session.
+pane_exit() {
+    if [ -n "${STUB_REMAIN:-}" ] && [ -f "$STATE/roexit.$1" ]; then
+        : > "$STATE/dead.$1"
+    else
+        rm -f "$STATE/$1" "$STATE/claim.$1" "$STATE/pipe.$1" \
+              "$STATE/dead.$1" "$STATE/roexit.$1"
+    fi
 }
 case "$sub" in
   has-session)
@@ -5362,10 +5390,13 @@ case "$sub" in
       s=$(val -t "$@")
       r=$(resolve "$s") || exit 0
       # A session ending takes its pipe with it.
-      rm -f "$STATE/$r" "$STATE/claim.$r" "$STATE/pipe.$r"; exit 0 ;;
+      rm -f "$STATE/$r" "$STATE/claim.$r" "$STATE/pipe.$r" \
+            "$STATE/dead.$r" "$STATE/roexit.$r"; exit 0 ;;
   kill-server)  rm -f "$STATE/rec" "$STATE/pm-recorder" "$STATE/claim.rec" \
                      "$STATE/claim.pm-recorder" "$STATE/pipe.rec" \
-                     "$STATE/pipe.pm-recorder"; exit 0 ;;
+                     "$STATE/pipe.pm-recorder" "$STATE/dead.rec" \
+                     "$STATE/dead.pm-recorder" "$STATE/roexit.rec" \
+                     "$STATE/roexit.pm-recorder"; exit 0 ;;
   pipe-pane)
       s=$(val -t "$@")
       r=$(resolve "${s%%:*}")
@@ -5426,6 +5457,13 @@ case "$sub" in
       if [ -z "$r" ]; then
           echo "can't find session: $s" >&2; exit 1
       fi
+      # `nopane`: the session is there but its pane is not (a window that went
+      # away, or the full-disk/read-only state's write failure): real tmux
+      # answers "can't find window: 0" and fails, so a failing wait's pane save
+      # cannot land.
+      if [ "$STUB_MODE" = nopane ]; then
+          echo "can't find window: 0" >&2; exit 1
+      fi
       cat "$STATE/pane" 2>/dev/null; exit 0 ;;
   display-message)
       # `#{pane_pipe}` is the recipe's handle for "step 2's transcript pipe is
@@ -5438,6 +5476,13 @@ case "$sub" in
       case "$*" in
         *pane_pipe*)
             [ -f "$STATE/pipe.$r" ] && { echo 1; exit 0; }
+            echo 0; exit 0 ;;
+        # The pane's command has returned. Real tmux (3.2a, verified) answers 1
+        # for a pane kept by `remain-on-exit` and 0 while it runs; the session
+        # is still there in the first case, which is why the recipes cannot use
+        # `has-session` alone.
+        *pane_dead*)
+            [ -f "$STATE/dead.$r" ] && { echo 1; exit 0; }
             echo 0; exit 0 ;;
       esac
       exit 0 ;;
@@ -5528,7 +5573,12 @@ case "$sub" in
           for a in "$@"; do last2=$last1; last1=$a; done
           [ "$last2" = "${STUB_PREFIX:-C-b}" ] || exit 0
       fi
-      rm -f "$STATE/$r"
+      # A pane whose command has returned receives nothing, but real tmux
+      # (3.2a, verified) still accepts the keys and returns 0 — so a recipe
+      # that treats the send as its handle sees a success. `remain-on-exit`
+      # is what leaves such a pane in place.
+      [ -f "$STATE/dead.$r" ] && exit 0
+      pane_exit "$r"
       # `detachboth`/`detachbothbad`: the detach races the pm session's own
       # end. The attach followed the session out, so the recorder is already
       # gone when the key is sent (`send-keys` fails) and the session it was
@@ -5552,12 +5602,17 @@ case "$sub" in
       fi
       s=$(val -s "$@")
       touch "$STATE/$s"
+      # `remain-on-exit on` is a server-wide window option in the user's
+      # ~/.tmux.conf, so every pane this server creates inherits it.
+      [ -n "${STUB_REMAIN:-}" ] && : > "$STATE/roexit.$s"
       case "$STUB_MODE" in
-        norec) : ;;
-        dies)  rm -f "$STATE/$s" ;;
+        # `nopane`: the session exists but its pane does not, so the failing
+        # wait's pane save cannot land (see `capture-pane`).
+        norec|nopane) : ;;
+        dies)  pane_exit "$s" ;;
         failedattach)
             printf "can't find session: pm-test\n" > "$STATE/pane"
-            ( sleep 0.02; rm -f "$STATE/$s" ) & ;;
+            ( sleep 0.02; pane_exit "$s" ) & ;;
         *)
             # `detachnocast`/`detachnostatus`: the recorder draws and the
             # detach ends it (the pm session survives, as it does in a real
@@ -5581,7 +5636,7 @@ case "$sub" in
                   # `kill-session` left no recorder.status). Writing one here
                   # would model a killed recorder that still reported a clean
                   # exit — a state step 5 is right to read as a finish.
-                  nostatus|detachnostatus|midadied) : ;;
+                  nostatus|detachnostatus|midadied|remaindied) : ;;
                   # `emptystatus`: the pane's shell opened the status file and
                   # was killed (or could not write) before the status landed —
                   # a 0-byte file, which is not an exit status.
@@ -5592,12 +5647,12 @@ case "$sub" in
             fi ;;
       esac
       case "$STUB_MODE" in
-        oneshot|badstatus|nostatus) ( sleep 0.3; rm -f "$STATE/$s" ) & ;;
+        oneshot|badstatus|nostatus) ( sleep 0.3; pane_exit "$s" ) & ;;
         # The CLI scaffold's pane *is* the recording, so its session ends when
         # the one-shot command ends; the tmux recipe's recorder must stay up
         # until the detach ends it, so `emptystatus`/`emptycast` only end the
         # scaffold's own `rec` session.
-        emptystatus|emptycast) [ "$s" = rec ] && ( sleep 0.3; rm -f "$STATE/$s" ) & ;;
+        emptystatus|emptycast) [ "$s" = rec ] && ( sleep 0.3; pane_exit "$s" ) & ;;
       esac
       exit 0 ;;
 esac
@@ -5624,6 +5679,10 @@ case "$1 $2" in
       fi
       case "$STUB_MODE" in
         midadied) rm -f "$STATE/pm-recorder" "$STATE/claim.pm-recorder" ;;
+        # `remaindied`: the recorder died mid-scenario (asciinema was killed)
+        # but the server keeps the session because `remain-on-exit on` is set —
+        # a dead pane, no status file, and a `has-session` that still answers.
+        remaindied) : > "$STATE/dead.pm-recorder" ;;
         midboth|midbothbad)
             # A session ending takes its session options (the capture-dir
             # claim) with it, as real tmux does.
@@ -5786,6 +5845,26 @@ class TestCaptureFlowExecution:
         assert r.returncode == 0, r.stderr
         assert cast.stat().st_size > 0, "the completed cast is missing"
 
+    def test_cli_recording_completes_with_remain_on_exit(self, tmp_path):
+        """A session kept alive by remain-on-exit must not look like a recorder.
+
+        `set -g remain-on-exit on` (a common way to keep a crashed pane
+        visible — this project's own QA notes prescribe it) keeps the `rec`
+        session after its only pane's command returns. The stop wait's
+        `has-session` handle then never ends: a finished one-shot recording
+        ran out the bound and was reported as "the recording is still
+        running", with a retry that fails the same way. The pane's death
+        (`#{pane_dead}`) is the completion signal; the session ending is only
+        its usual consequence.
+        """
+        r, cast = _run_capture_block(
+            "cli-recording.md", "oneshot", tmp_path,
+            env_extra={"STUB_REMAIN": "1"})
+        assert r.returncode == 0, (
+            "a finished recording was reported as still running because the "
+            "session outlived its pane: " + r.stderr)
+        assert cast.stat().st_size > 0, "the completed cast is missing"
+
     def test_cli_recorder_that_never_writes_a_cast_fails(self, tmp_path):
         """A recorder that starts but records nothing is a failure, not a hang.
 
@@ -5809,6 +5888,32 @@ class TestCaptureFlowExecution:
         assert log.exists(), "the failing wait left no pane evidence"
         assert "recorder output" in log.read_text(), (
             "the saved pane does not hold what the recorder drew")
+
+    def test_cli_readiness_timeout_names_a_pane_it_could_not_save(self, tmp_path):
+        """The CLI readiness save must not claim a file nothing wrote.
+
+        Same state as the tmux case, one recipe over: the block's own
+        capture-directory guard passed when it ran, and the timeout branch
+        writes the pane a whole bound later. The ``|| true`` save made the
+        message's "the pane is saved in …" unconditional (R87 fixed the stop
+        timeout this way; this is the readiness branch beside it).
+        """
+        r, cast = _run_block(
+            _scaffold_block(_recipe_text("cli-recording.md")), "nopane",
+            tmp_path, state_files={"pane": "recorder output\n"})
+        assert r.returncode != 0, r.stderr
+        assert "did not start within" in r.stderr, r.stderr
+        assert "could not be saved" in r.stderr, (
+            "the readiness failure claims a save that did not land: "
+            + r.stderr)
+        assert "is saved in" not in r.stderr, (
+            "the readiness failure claims the pane was saved: " + r.stderr)
+        # The redirect creates the file before `capture-pane` fails, so it can
+        # be there — but it holds nothing, which is what "could not be saved"
+        # says.
+        log = cast.parent / "recorder-pane.log"
+        assert not log.exists() or log.stat().st_size == 0, (
+            "the failing wait saved pane content it said it could not save")
 
     @pytest.mark.parametrize("name", RECIPES)
     def test_a_failed_capture_leaves_no_previous_video(self, name, tmp_path):
@@ -6209,6 +6314,67 @@ class TestCaptureFlowExecution:
         assert cast.stat().st_size > 0, "the completed cast is missing"
         assert "can't find session" not in r.stderr, (
             "a clean run prints a tmux error while stopping the transcript pipe")
+
+    def test_tmux_recording_completes_with_remain_on_exit(self, tmp_path):
+        """A session kept alive by remain-on-exit must not look like a recorder.
+
+        `set -g remain-on-exit on` (a common way to keep a crashed pane
+        visible — this project's own QA notes prescribe it) keeps the recorder
+        session after the detach ends its only pane's command. Step 5's wait
+        is `has-session`, which then never ends: a complete recording (cast
+        flushed, status 0, transcript written) was killed at the 30 s bound
+        and reported as "the detach key did not end it ... incomplete". The
+        pane's death (`#{pane_dead}`) is the flush signal; the session ending
+        is only its usual consequence.
+        """
+        r, cast = _run_capture_block(
+            "tmux-screen-recording.md", "ok", tmp_path, target=True,
+            env_extra={"STUB_REMAIN": "1"})
+        assert r.returncode == 0, (
+            "a finished recording was killed at the stop bound because the "
+            "session outlived its pane: " + r.stderr)
+        assert cast.stat().st_size > 0, "the completed cast is missing"
+
+    def test_tmux_failed_attach_with_remain_on_exit_is_not_readiness(
+            self, tmp_path):
+        """A dead pane is not a drawn TUI, even when its session lingers.
+
+        A failed attach draws its own error and exits ~25 ms later. The
+        settle check exists to keep that error text from counting as
+        readiness, and it asks `has-session` — which `remain-on-exit on` keeps
+        true after the pane's command returns. The dead pane then passed the
+        settle check, step 4's sends were accepted by a pane that no longer
+        exists, and step 5 ran out its bound. The pane's own state
+        (`#{pane_dead}`) is the handle; without it the error cast was one
+        step from being reported as this run's recording.
+        """
+        r, _ = _run_capture_block(
+            "tmux-screen-recording.md", "failedattach", tmp_path, target=True,
+            env_extra={"STUB_REMAIN": "1"})
+        assert r.returncode != 0, r.stderr
+        assert "recorder exited before it drew" in r.stderr, (
+            "a failed attach whose session was kept alive by remain-on-exit "
+            "was not named as a recorder that never drew: " + r.stderr)
+
+    def test_tmux_recorder_dying_with_remain_on_exit_names_the_right_cause(
+            self, tmp_path):
+        """A dead recorder is "exited while the TUI was still running".
+
+        Step 5's first branch tells a recorder that died mid-scenario from one
+        whose recording already ended by asking `has-session`, and
+        `remain-on-exit on` keeps that answer true for a pane whose command
+        has returned. The step then sent the detach into a dead pane (which
+        real tmux accepts and returns 0 for) and ran out its bound, reporting
+        "the detach key did not end it" for a recorder that had already died —
+        the wrong cause, on a failure that is otherwise correct.
+        """
+        r, _ = _run_capture_block(
+            "tmux-screen-recording.md", "remaindied", tmp_path, target=True,
+            env_extra={"STUB_REMAIN": "1"})
+        assert r.returncode != 0, r.stderr
+        assert "recorder exited while the TUI was still running" in r.stderr, (
+            "a recorder that died mid-scenario was reported as one the detach "
+            "could not end: " + r.stderr)
 
     def test_step_one_refuses_an_empty_target(self, tmp_path):
         """`pm session name` printing nothing must stop step 1, not the wait.
@@ -7439,6 +7605,34 @@ class TestCaptureFlowExecution:
             + r.stderr)
         assert (cast.parent / "recorder-pane.log").exists(), (
             "the failing wait left no pane evidence")
+
+    def test_tmux_readiness_timeout_names_a_pane_it_could_not_save(
+            self, tmp_path):
+        """The readiness message must not claim a save the pane refused.
+
+        The save is a write, and the timeout branch runs a whole bound after
+        the capture-directory guard: a directory that became read-only, a full
+        disk, or a recorder whose pane went away in the gap makes the redirect
+        fail. The message then said "the pane is saved in …" for a file
+        nothing wrote — the rule R87 fixed at the other three pane saves, at
+        the two sites it missed. The branch also kills the recorder, so the
+        pane is gone by the time a worker could look.
+        """
+        r, cast = _run_capture_block(
+            "tmux-screen-recording.md", "nopane", tmp_path, target=True)
+        assert r.returncode != 0, r.stderr
+        assert "did not come up within" in r.stderr, r.stderr
+        assert "could not be saved" in r.stderr, (
+            "the readiness failure claims a save that did not land: "
+            + r.stderr)
+        assert "is saved in" not in r.stderr, (
+            "the readiness failure claims the pane was saved: " + r.stderr)
+        # The redirect creates the file before `capture-pane` fails, so it can
+        # be there — but it holds nothing, which is what "could not be saved"
+        # says.
+        log = cast.parent / "recorder-pane.log"
+        assert not log.exists() or log.stat().st_size == 0, (
+            "the failing wait saved pane content it said it could not save")
 
     def test_tmux_stop_timeout_saves_the_pane(self, tmp_path):
         """A stop timeout has to keep what the recorder last drew."""

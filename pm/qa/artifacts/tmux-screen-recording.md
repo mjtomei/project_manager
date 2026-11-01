@@ -661,9 +661,19 @@ tmux new-session -d -s pm-recorder -x 200 -y 50 \
 # attach failed — so that is a failure, not a recording that finished
 # early: the cast it leaves holds asciinema's error, not the session, and
 # treating it as done would report a useless capture as success.
+#    "The recorder exited" is its *pane* ending, not only its session: with
+#    `set -g remain-on-exit on` — a common way to keep a crashed pane on
+#    screen, and what this project's own QA notes prescribe — tmux keeps the
+#    session after its only pane's command returns, so `has-session` stays
+#    true for a recorder that has already exited. `#{pane_dead}` is 1 once the
+#    pane's command has returned and 0 while it runs (verified on tmux 3.2a),
+#    read through the same exact `=…:0.0` pane target every other handle
+#    here uses; it is empty when the session is gone, which the `has-session`
+#    half already answers.
 deadline=$(( $(date +%s) + 30 ))
 while :; do
-    if ! tmux has-session -t "=pm-recorder" 2>/dev/null; then
+    if ! tmux has-session -t "=pm-recorder" 2>/dev/null || \
+       [ "$(tmux display-message -p -t "=pm-recorder:0.0" '#{pane_dead}' 2>/dev/null)" = 1 ]; then
         echo "recorder exited before it drew — see the cast and" \
             "<capture-dir>/recorder-stderr.log" >&2
         tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
@@ -673,11 +683,20 @@ while :; do
     tmux capture-pane -p -t "=pm-recorder:0.0" 2>/dev/null \
         | grep -q '[^[:space:]]' && break
     if [ "$(date +%s)" -ge "$deadline" ]; then
-        tmux capture-pane -p -t "=pm-recorder:0.0" \
-            > <capture-dir>/recorder-pane.log 2>/dev/null || true
-        echo "recorder did not come up within 30s — the pane is saved in" \
-            "<capture-dir>/recorder-pane.log, asciinema's own error (if any)" \
-            "in recorder-stderr.log" >&2
+        # The save is a write into a directory this step checked a moment
+        # ago, and the recorder can go away in the gap: either makes the
+        # redirect fail, and the message must then say the pane was not saved
+        # instead of naming a file nothing wrote (the rule step 5's stop
+        # timeout follows — a full disk is the same state, and it is one this
+        # recipe already reasons about for the status file).
+        if tmux capture-pane -p -t "=pm-recorder:0.0" \
+                > <capture-dir>/recorder-pane.log 2>/dev/null; then
+            pane_note="the pane is saved in <capture-dir>/recorder-pane.log"
+        else
+            pane_note="the pane could not be saved in <capture-dir>/recorder-pane.log — the capture directory cannot be written, or the recorder went away"
+        fi
+        echo "recorder did not come up within 30s — $pane_note," \
+            "asciinema's own error (if any) in recorder-stderr.log" >&2
         tmux kill-session -t "=pm-recorder" 2>/dev/null
         tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
         tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
@@ -691,9 +710,13 @@ done
 # check above can break on asciinema's error text and the cast check in
 # step 5 then passes on a cast holding that error. The error is drawn
 # milliseconds before the recorder exits, so confirm the recorder is still
-# alive a moment later before treating the content as a drawn TUI.
+# alive a moment later before treating the content as a drawn TUI. "Alive" is
+# the pane's answer, for the `remain-on-exit` reason above: a session kept
+# alive by it would otherwise make a failed attach's dead pane count as a
+# drawn TUI — and step 5 would then pass on the error cast.
 sleep 0.3
-if ! tmux has-session -t "=pm-recorder" 2>/dev/null; then
+if ! tmux has-session -t "=pm-recorder" 2>/dev/null || \
+   [ "$(tmux display-message -p -t "=pm-recorder:0.0" '#{pane_dead}' 2>/dev/null)" = 1 ]; then
     echo "recorder exited before it drew — see the cast and" \
         "<capture-dir>/recorder-stderr.log" >&2
     tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
@@ -790,10 +813,14 @@ pm tui send a -s "$TARGET" || send_failed   # open the picker
 
 # 5. End the recording by detaching the recorder's attach client.
 #    The attach exits, the recorded command exits, asciinema flushes
-#    the cast and the pane (started *as* the asciinema command) closes,
-#    which ends the recorder session. Wait for that — it is the only
-#    evidence the cast was flushed — instead of tearing the session
-#    down underneath a still-running recorder.
+#    the cast and the pane (started *as* the asciinema command) closes.
+#    Wait for that — it is the only evidence the cast was flushed — instead
+#    of tearing the session down underneath a still-running recorder. The
+#    *pane* closing is the signal the wait below uses (`#{pane_dead}`): the
+#    session ending is its usual consequence, but a server with
+#    `remain-on-exit on` keeps the session after its pane returns, and
+#    waiting on the session alone would then kill a finished recording at
+#    the bound.
 #    First make sure there is a recorder left to detach. The attach client
 #    follows the session, so it only exits on the detach, when the session
 #    ends, or because it (or asciinema) died. If it is already gone while
@@ -889,7 +916,18 @@ fi
 # not a hard-coded C-b; it is read just before the send below. Initialised
 # here so the stop-timeout message can always name the key it relied on.
 detach_key=C-b
-if ! tmux has-session -t "=pm-recorder" 2>/dev/null; then
+# "The recorder is gone" is its *pane* having ended, not only its session:
+# with `set -g remain-on-exit on` (a common way to keep a crashed pane
+# visible, and what this project's own QA notes prescribe) tmux keeps the
+# session after its only pane's command returns, so a `has-session` check
+# alone reads a recorder that already ended as one that is still running —
+# and this branch is the one that has to tell a death mid-scenario from a
+# recording that already finished. `#{pane_dead}` is 1 once the pane's
+# command has returned (verified on tmux 3.2a), read through the same exact
+# `=…:0.0` pane target every other handle here uses, and empty when the
+# session is gone — which the `has-session` half answers.
+if ! tmux has-session -t "=pm-recorder" 2>/dev/null || \
+   [ "$(tmux display-message -p -t "=pm-recorder:0.0" '#{pane_dead}' 2>/dev/null)" = 1 ]; then
     if tmux has-session -t "=$TARGET" 2>/dev/null; then
         # The recorder is gone while the session it attached to is still
         # there. asciinema's own status tells a death mid-scenario from a
@@ -959,6 +997,14 @@ else
 fi
 deadline=$(( $(date +%s) + 30 ))
 while tmux has-session -t "=pm-recorder" 2>/dev/null; do
+    # The pane's death is what step 5 waits for — the detach lets the attach
+    # client return, asciinema flushes the cast and exits, and the pane's
+    # command returns. The session's end is the usual consequence, but with
+    # `remain-on-exit on` the session outlives its pane, so waiting on the
+    # session alone runs out this bound on a recording that finished and
+    # reports it as one the detach never ended. `#{pane_dead}` is 1 once the
+    # pane's command has returned (verified on tmux 3.2a).
+    [ "$(tmux display-message -p -t "=pm-recorder:0.0" '#{pane_dead}' 2>/dev/null)" = 1 ] && break
     if [ "$(date +%s)" -ge "$deadline" ]; then
         # The pane save is best-effort: this step's guard requires `-d`/`-x`
         # but not `-w` (a directory that became read-only must not refuse a
