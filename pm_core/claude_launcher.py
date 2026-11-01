@@ -1574,8 +1574,15 @@ def finalize_transcript_dir(directory: str | Path, *,
         except OSError:
             return []
 
-    links = [p for p in _links_in(d)
-             if not (skip is not None and skip(p.name))]
+    links: list[Path] = []
+    for p in _links_in(d):
+        if skip is not None and skip(p.name):
+            # Kept live on purpose: a debug line, because a sweep may skip
+            # many files and the reason (a live collector) is not visible
+            # from the file itself.
+            _log.debug("transcript: %s is still live — not finalized", p)
+            continue
+        links.append(p)
     adir = d / TRANSCRIPT_ARCHIVE_DIR
     if adir.is_dir():
         links.extend(_links_in(adir))

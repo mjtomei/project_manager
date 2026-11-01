@@ -838,22 +838,20 @@ def _adopt_live_qa(app) -> None:
         _log.warning("auto_start: QA adoption scan failed", exc_info=True)
 
 
-def _live_transcript_owners(app) -> tuple[set[str], set[str]]:
-    """Transcript names/prefixes whose session may still be writing.
+def _live_transcript_owners(app) -> set[str]:
+    """Name prefixes of the transcripts a loop *structurally* owns.
 
-    Returns ``(exact_names, prefixes)`` for the transcripts a loop
-    *structurally* owns: a running review loop owns every
-    ``review-<pr>-<loop_id>-i*`` path, plus the legacy shared
-    ``review-<pr>-i*`` name a loop restored from a pre-upgrade breadcrumb
-    may still be polling; a running watcher loop owns its
-    ``<watcher-type>-i*`` paths.
+    A running review loop owns every ``review-<pr>-<loop_id>-i*`` path,
+    plus the legacy shared ``review-<pr>-i*`` name a loop restored from a
+    pre-upgrade breadcrumb may still be polling; a running watcher loop
+    owns its ``<watcher-type>-i*`` paths.  Every owned name is
+    loop-scoped, so a prefix (not an exact name) is the right key.
 
     Step windows (impl / review / sign-off / merge) are handled by
     :func:`_live_read_transcripts` instead: a transcript is live only
     while a *live* pane still runs that session, so a dead or finished
     pane does not keep it a symlink forever.
     """
-    exact: set[str] = set()
     prefixes: set[str] = set()
     # Snapshot: this also runs from a watcher's completion callback (a
     # background thread) while the TUI thread adds/removes loops, and
@@ -879,7 +877,7 @@ def _live_transcript_owners(app) -> tuple[set[str], set[str]]:
                     prefixes.add(f"{info['type']}-i")
         except Exception:
             _log.debug("auto_start: list_watchers failed", exc_info=True)
-    return exact, prefixes
+    return prefixes
 
 
 def _live_transcript_skip(app, tdir: Path | None = None, *,
@@ -898,7 +896,7 @@ def _live_transcript_skip(app, tdir: Path | None = None, *,
     frozen.  A watcher completion (auto-start still on) passes it, so a
     sign-off the driver is still polling is never frozen.
     """
-    exact, prefixes = _live_transcript_owners(app)
+    prefixes = _live_transcript_owners(app)
     live_paths: set[str] = set()
     if tdir is not None and Path(tdir).is_dir():
         try:
@@ -908,7 +906,7 @@ def _live_transcript_skip(app, tdir: Path | None = None, *,
             _log.debug("auto_start: live-read scan failed", exc_info=True)
 
     def _live(name: str) -> bool:
-        if name in exact or any(name.startswith(p) for p in prefixes):
+        if any(name.startswith(p) for p in prefixes):
             return True
         return bool(tdir is not None and
                     os.path.abspath(Path(tdir) / name) in live_paths)

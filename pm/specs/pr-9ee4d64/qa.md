@@ -119,8 +119,12 @@ watcher), not the helper functions.
   - the returned PR's archive holds both pre-return implementation
     sessions and both returning router sessions;
   - the other PR's transcripts are unaffected (no cross-PR file mixups);
-  - merge transcripts for both PRs exist, and any superseded merge/impl/
-    sign-off attempts are archived rather than lost;
+  - both PRs reach `merged` — assert the merge by PR status, not by a
+    `merge-<pr>.jsonl`: a clean local merge goes `_publish_approved` →
+    `_after_publish` → `_finalize_merge` with no repo-update window, so no
+    merge transcript is written (QA S1/S6).  A superseded merge/impl/
+    sign-off attempt that *did* get a transcript is archived rather than
+    lost;
   - every archive entry has a unique name; none was overwritten.
   - Archive entry counts are a **minimum**, never an exact count: the
     canonical link of each step names the attempt that is live *now*, and

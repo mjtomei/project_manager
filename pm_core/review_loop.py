@@ -1548,7 +1548,6 @@ def run_review_loop_sync(
     saved_transcript_dir = state._transcript_dir or transcript_dir
     # Stash transcript_dir on state so _on_complete_from_thread can finalize
     state._transcript_dir = transcript_dir
-    from pm_core.claude_launcher import session_id_from_transcript
     state.running = True
     # ``stop_requested`` is owned by the caller, not reset here: ``_start_loop``
     # marks the loop running *before* it creates this thread (so a second
@@ -1612,7 +1611,7 @@ def run_review_loop_sync(
                         transcript_dir, state.pr_id, state.loop_id,
                         state.iteration, allow_legacy=resuming)
                 if iter_transcript:
-                    sid = session_id_from_transcript(iter_transcript)
+                    sid = _transcript_session_id(iter_transcript)
                     if sid:
                         state.iteration_sessions[state.iteration] = sid
             except PaneKilledError as e:

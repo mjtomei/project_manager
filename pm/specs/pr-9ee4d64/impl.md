@@ -240,10 +240,12 @@ available in the run dir:
   in flight can own a legacy link, so a fresh loop (a REVIEW return
   restarts at iteration 1) never launches over another loop's live link.
 - `run_review_loop_sync`: record
-  `state.iteration_sessions[iteration] = session_id_from_transcript(path)`
-  after each iteration (launched or adopted) when a session id resolves,
-  using `resolve_iteration_transcript` to find the path that iteration
-  actually used.
+  `state.iteration_sessions[iteration]` after each iteration (launched or
+  adopted) when a session id resolves, using `resolve_iteration_transcript`
+  to find the path that iteration actually used and the module's existing
+  `_transcript_session_id` helper (the exception-safe wrapper around
+  `session_id_from_transcript`) to read its id — no second import of the
+  launcher in this function.
 - `_run_iteration_with_retry` (the launch-retry path merged from master):
   resolves its iteration transcript with `resolve_iteration_transcript`,
   so every retry attempt of one iteration writes the same loop-scoped path
@@ -278,7 +280,7 @@ available in the run dir:
 
 ### `pm_core/tui/auto_start.py`
 
-- `_live_transcript_owners(app)` returns `(exact_names, prefixes)` of
+- `_live_transcript_owners(app)` returns the set of *name prefixes* of
   the transcripts a loop *structurally* owns: every
   `review-<pr>-<loop_id>-i*` of a running review loop and every
   `<watcher-type>-i*` of a running watcher loop.  A running loop also
@@ -286,7 +288,8 @@ available in the run dir:
   pre-upgrade breadcrumb polls the legacy shared iteration name, and
   freezing it would hide the verdict it appends later.  Loop-scoped names
   can never match that prefix (the loop id is hex, so it never starts
-  with `i`).  `exact_names` is now empty: step windows are resolved by
+  with `i`).  Every owned name is loop-scoped, so a prefix is the right
+  key and there are no exact names: step windows are resolved by
   :func:`_live_read_transcripts` instead (a window name alone cannot tell
   a live session from a finished or dead pane).
 - `_live_read_transcripts(app, tdir, *, include_signoff=False)` returns
@@ -460,9 +463,11 @@ Applied on top of the design above; keep them when editing the code.
   only copy of its content) is never removed.  A leftover regular file is
   caught by the missing-`.head` guard in `_step_signoff_locked`, which
   retires and relaunches rather than replaying it.
-- `_live_transcript_owners` snapshots `app._review_loops` / `app._data`
-  before iterating: the watcher-completion sweep calls it from a
-  background thread while the TUI thread mutates those containers.
+- `_live_transcript_owners` snapshots `app._review_loops` before
+  iterating and reaches watchers through `app._watcher_manager`'s locked
+  `list_watchers()`: the watcher-completion sweep calls it from a
+  background thread while the TUI thread adds/removes loops, and
+  iterating a dict being resized raises `RuntimeError`.
 - Legacy iteration coverage (8602 i3): a running loop also marks the
   legacy `review-<pr>-i` prefix live, so a bulk sweep cannot freeze the
   iteration that a loop restored from a pre-upgrade breadcrumb is still
@@ -574,6 +579,16 @@ Applied on top of the design above; keep them when editing the code.
   through `resolve_iteration_transcript`'s legacy fallback.  A
   *wrong-typed* id (an int, say) is malformed saved state: the record is
   skipped, per the fail-closed restore policy merged from pr-049649a.
+- Cleanup (review e757 i1), no behaviour change: `run_review_loop_sync`
+  reads an iteration's session id through the module's existing
+  `_transcript_session_id` helper instead of importing
+  `session_id_from_transcript` into the function, and
+  `_live_transcript_owners` returns just the owner-name *prefixes* — the
+  `exact_names` half of its old tuple was never populated, so the
+  corresponding membership test was dead code.  Every owned name is
+  loop-scoped, which is why a prefix is the right key.  `qa.md` R7 no
+  longer asks for a `merge-<pr>.jsonl` on a clean local merge (none is
+  written; assert the merge by PR status).
 
 ## Master integration (2026-10-31, merge of `origin/master` eaf3372e)
 
