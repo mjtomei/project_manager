@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-31T18:30:32.069703+00:00'
+  updated_at: '2026-11-01T15:47:31.107519+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -47927,6 +47927,39 @@ prs:
       R17) before any earlier PASS is reused.'
     created_at: '2026-10-31T18:30:31Z'
     last_edited: '2026-10-31T18:30:31Z'
+  - id: note-f5a1999
+    text: 'impl 2026-11-01: merged origin/master@53bcbd72 (#267 fail-closed autostart,
+      #280 container boundary, #272 non-destructive `pm pr close`) INTO the PR branch
+      as 2c2c9e45. Conflicts: pm/project.yaml, pm_core/autostart_state.py, pm_core/cli/pr.py,
+      pm_core/home_window/pr_list.py, pm_core/prompt_gen.py. (1) autostart_state:
+      imports union (this PR''s graph + master''s TERMINAL_PR_STATES/usable_prs);
+      master removed the all-PR mode outright, so the `mode == "all"` branch (and
+      the graph.deps_of guard inside it) goes with it — graph.deps_of is still used
+      by the closure and the run entries. (2) cli/pr.py: pr_close no longer deletes
+      the workdir (master #272); this PR''s `.is_dir()` guard on that block is obsolete
+      with the block and stays on every other workdir reader. (3) home_window/pr_list.py:
+      master''s TERMINAL_PR_STATES filter + this PR''s `str(...)` sort key/comment.
+      (4) prompt_gen.py: master''s _QA_STATUS_UNREADABLE for the unreadable case,
+      this PR''s distinct "malformed" message for valid-JSON-but-not-an-object kept
+      (R9-14). (5) project.yaml: reconciled by this PR''s own resolver, which accepted
+      it as-is this time — 591 PR records (580 ours / 582 theirs / 571 shared), 22
+      plans, no id lost, no duplicates, `project` identical to both sides, pr-5cee3d5
+      keeps its status and 115 notes; independent preservation check reports zero
+      lost changes. Merge-discovered fixes in cli/pr.py: _apply_pr_edit now also treats
+      a parsed value equal to the stored value verbatim as unchanged (title/description/notes)
+      — master''s new test passed the raw stored text as the editor output, and the
+      notes path would have rebuilt every note with a new id and fresh created_at;
+      _EDIT_NOTE_TS_RE accepts a numeric ISO offset (+00:00) as well as Z. Our two
+      collect_status_inputs tests now scope the PR as an explicit autostart target
+      (fail-closed scope replaced `_auto_start_all`), and master''s QA-status fallback
+      test asserts this PR''s documented "malformed" message, with a new sibling test
+      for the unparseable file ("unreadable"). Validation: full suite 5733 passed,
+      1 skipped, 0 failed (markdown installed); `pm pr signoff integrate` reports
+      up to date with master@53bcbd72 at head 2c2c9e45 (candidate tree 4bb5b310).
+      The autostart/close/prompt surfaces this merge touched need a fresh review and
+      targeted QA before any earlier PASS is reused.'
+    created_at: '2026-11-01T15:47:31Z'
+    last_edited: '2026-11-01T15:47:31Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249

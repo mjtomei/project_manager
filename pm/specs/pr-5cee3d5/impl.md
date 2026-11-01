@@ -1339,3 +1339,74 @@ reconciliation touched, so the merged tree needs a fresh review and targeted
 QA of the owed-REQA deferral and launch-ownership paths (the newest QA spec
 section, R17, covers them) before any earlier QA PASS can be reused; the
 merge itself changes no other behaviour of this PR.
+
+## Integration with master: fail-closed autostart, container boundary, non-destructive close (pr-049649a / pr-574e851 / pr-62ad13d)
+
+A later base (`master@53bcbd72`) carries three merged PRs: fail-closed
+autostart with the whole-backlog/all-PR mode **removed** (pr-049649a), the
+container-mode execution boundary (pr-574e851), and `pm pr close` made
+non-destructive (pr-62ad13d). Five files conflicted; the merge keeps master's
+new behaviour and this PR's guards:
+
+- `pm_core/autostart_state.py` — two conflicts. (1) Imports: this PR's
+  `graph` (the hand-edited `depends_on` reader) and master's
+  `TERMINAL_PR_STATES` + `usable_prs` are all needed. (2) `build_status`'s
+  `mode == "all"` branch: master removed all-PR mode outright (`mode` is
+  `"targets"` or `"off"`), so the branch — and the `graph.deps_of` guard this
+  PR had added inside it — goes with it. `graph.deps_of` is still used by the
+  dependency closure and the run entries, so the import stays.
+- `pm_core/cli/pr.py` — `pr_close` no longer deletes the workdir (master's
+  #272: close is a lifecycle action; cleanup is `pm pr cleanup`). This PR's
+  `.is_dir()` guard on that block is obsolete with the block itself; the same
+  guard remains on every other workdir reader in the file.
+- `pm_core/home_window/pr_list.py` — the closed/merged filter now uses
+  master's `TERMINAL_PR_STATES` (same values), while this PR's `str(...)`
+  sort key and its hand-edited-timestamp comment stay.
+- `pm_core/prompt_gen.py` — master introduced the shared
+  `_QA_STATUS_UNREADABLE` constant. The unreadable case uses it; this PR's
+  distinct "malformed" message for valid-JSON-but-not-an-object is kept,
+  because the file *did* parse and "unreadable" would send the agent looking
+  for a permissions problem (R9-14).
+- `pm/project.yaml` — reconciled by this PR's own resolver (base/ours/theirs
+  from the merge index), which this time accepted the document as-is (no
+  two-sided `prs` reorder): 591 PR records (580 on this branch, 582 on the
+  base, 571 shared) and 22 plans, no id lost from either side, no duplicates,
+  the `project` block identical to both sides (`active_pr` unchanged), and
+  `pr-5cee3d5` keeps its status and its 115 notes. The independent
+  preservation check (a field only one side changed must carry that side's
+  value) reports zero lost changes.
+
+Everything else auto-merged, including the surfaces both sides touched:
+`pm_core/tui/auto_start.py` (master's breadcrumb validation and target-only
+scope beside this PR's `graph.deps_of` reload comparison and the
+hand-edited-`signoff` status snapshot), `pm_core/cli/helpers.py` (master's
+`_record_status_timestamp` / at-lock guards beside this PR's `deps_of`,
+timestamp rendering and `_resolve_repo_dir`/`_ensure_workdir` guards),
+`pm_core/pr_sync.py` (master's terminal-record sync guards beside this PR's
+merge-integrity workdir guard), `pm_core/tui/qa_loop_ui.py`,
+`pm_core/tui/tech_tree.py` and the corresponding test modules.
+
+Two merge-discovered fixes in `pm_core/cli/pr.py` (the surfaces master's
+new tests exercise, both on this PR's own "a no-op save is a no-op" contract):
+
+- `_apply_pr_edit` now also treats a parsed value equal to the *stored* value
+  verbatim as unchanged (title, description, notes), not only one equal to the
+  rendered form.  Master's `test_editor_reopen_drops_the_closure_time` passes
+  the raw stored text as the editor's output; the old comparison reported
+  "description updated"/"notes updated" for a save that wrote back exactly what
+  was stored, and the notes path would have rebuilt every note under a new id
+  and a fresh `created_at`.
+- `_EDIT_NOTE_TS_RE` accepts a numeric ISO offset (`+00:00`) as well as `Z`.
+  pm writes `Z`, but `created_at` is project.yaml state and an unquoted
+  YAML/foreign timestamp carries an offset; a comment the parser did not
+  recognise would become part of the note text on the next save.
+
+Our two `collect_status_inputs` hand-edited-state tests were updated for
+master's fail-closed scope (an explicit target instead of the removed
+`_auto_start_all`), and master's `TestSignoffQaStatusFallback` test now asserts
+this PR's documented "malformed" message for a valid-JSON non-object
+`qa_status.json` (with a new sibling test for the genuinely unparseable file,
+which still says "unreadable").
+
+Validation: full suite on the merged tree — 5733 passed, 1 skipped, 0
+failed (with `markdown` installed in the test venv).
