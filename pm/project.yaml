@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T03:04:17.554807+00:00'
+  updated_at: '2026-11-01T03:58:59.520303+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37998,6 +37998,29 @@ prs:
       The dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-11-01T03:04:17Z'
     last_edited: '2026-11-01T03:04:17Z'
+  - id: note-d39b8c7
+    text: 'Review loop 928f i15: one leftover in the kept recipe scope, the PR own
+      class (a failure that names a cause the step cannot have, whose remedy runs
+      and does nothing). Both recording recipes'' render blocks guarded ffmpeg and
+      ffprobe but not agg — the only renderer check was the install block''s, a separate
+      paste — so every agg failure reached render_cast''s ''agg failed on the cast
+      — is agg installed?''. When agg is installed and runs and the cast (or the disk)
+      is the problem, that question''s remedy is the install block, which exits 0
+      for a working renderer: verified in this container with agg 1.9.0, a non-asciicast
+      cast gives that message, the install block exits 0 doing nothing, and the second
+      render repeats it — a remedy that cannot work, in a loop (the R52 shape, one
+      cause over). Both render blocks now check the renderer on the install block''s
+      own handles (command -v agg, then agg --version) with the encoder/prober guards,
+      and render_cast''s message names the cast and says the renderer is installed
+      and runs. New cases: test_render_names_a_missing_renderer, test_render_names_a_renderer_that_does_not_run,
+      test_render_names_a_cast_the_renderer_cannot_read (both recipes); the render
+      stubs now answer agg --version. Mutations: pre-i15 blocks -> exactly 6 new cases
+      fail; command -v guard removed -> 2; agg --version guard removed -> 2. Tests:
+      recipe file 298 passed (was 292); full suite 5374 passed, 1 skipped, 121 deselected,
+      0 failed (436.26 s). Evidence: /pm-captures/review-928f-i15/. impl.md R76. No
+      pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-11-01T03:58:59Z'
+    last_edited: '2026-11-01T03:58:59Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
