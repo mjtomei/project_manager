@@ -150,7 +150,9 @@ def _register_tmux_bindings(session_name: str) -> None:
     # the default tmux window-size is fine and avoids issues with the
     # unattached base session contributing a zero size.
     if _session_is_shared(session_name):
-        base = session_name.split("~")[0]
+        # Only a numeric ``~N`` is a grouped suffix; a session name may
+        # contain ``~`` itself (paths.base_session_name).
+        base = pane_registry.base_session_name(session_name)
         for s in [base] + tmux_mod.list_grouped_sessions(base):
             tmux_mod.set_session_option(s, "window-size", "smallest")
 

@@ -111,7 +111,11 @@ pane unless stated otherwise.
   - a session whose name contains a space or a `|` (both legal in a repo
     directory name, and in a tmux session name) is listed with its full
     name and its own socket — never dropped, truncated or split
-    (review-loop 2caf i5).
+    (review-loop 2caf i5);
+  - two projects whose names contain `~` (e.g. `my~repo`, `my~other`)
+    are listed as two rows, each under its own full name and its own
+    socket.  `~N` is a *grouped-session* suffix only when it is numeric,
+    so a `~` in the tag must not be truncated (review-loop b48f i11).
 
 ### R4 — Connect commands name the right server
 

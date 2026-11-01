@@ -51097,3 +51097,38 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-bebe64b
+  plan: bugs
+  title: 'Bug: a repo name containing "." or ":" makes pm session crash on every re-run
+    (tmux rewrites the session name)'
+  branch: pm/pr-bebe64b-bug-a-repo-name-containing-or-makes-pm-session-cra
+  status: pending
+  depends_on: []
+  description: "pm derives the tmux session name from the repo directory name (or\
+    \ the GitHub repo name), and tmux silently rewrites \":\" and \".\" to \"_\" in\
+    \ session names. pm then never sees the session it created, because every tmux\
+    \ target it builds uses the un-rewritten name.\n\nLocation: pm_core/cli/session.py\
+    \ (_session_start / _get_session_name_for_cwd via pm_core/paths.py::get_session_tag),\
+    \ pm_core/tmux.py::create_session.\n\nRepro (tmux 3.2a):\n  mkdir -p /tmp/qa/my.repo\
+    \ && cd /tmp/qa/my.repo && git init -q && pm init --backend local --no-import\n\
+    \  pm session            # creates session \"pm-my_repo-<hash>\" on /tmp/pm-sessions/pm-my.repo-<hash>\n\
+    \  pm session            # Traceback: TmuxCommandError ... tmux: duplicate session:\
+    \ pm-my_repo-<hash>\n  pm session list       # row name is \"pm-my_repo-<hash>\"\
+    , not the name pm session computes\n  pm session kill       # \"No session pm-my.repo-<hash>\
+    \ found.\" (server keeps running; socket left behind)\n  pm tui view         \
+    \  # only works by accident, through the unscoped cross-server scan\n\nSame for\
+    \ \":\" (also rewritten to \"_\"). Pre-existing, but it now also breaks the deterministic\
+    \ per-session socket (pr-073910f derives the socket from the same name) and makes\
+    \ the new `pm session list` report a name the rest of pm cannot match. A fix needs\
+    \ a naming policy decision: sanitize the tag/session name once at derivation (so\
+    \ every consumer and tmux agree) or reject such a repo with an actionable error\
+    \ instead of a traceback."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-01T19:51:29.990480+00:00'
+  updated_at: '2026-11-01T19:51:29.990480+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

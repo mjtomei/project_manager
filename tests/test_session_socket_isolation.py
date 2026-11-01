@@ -152,6 +152,54 @@ class TestSessionSocketPath:
 
 
 # ---------------------------------------------------------------------------
+# paths: the grouped-session suffix rule
+# ---------------------------------------------------------------------------
+
+class TestBaseSessionName:
+    """Only a *numeric* ``~N`` suffix is a grouped session.
+
+    A session name is derived from the repo directory name, which may
+    contain ``~``.  Splitting at the first ``~`` truncated such a name to
+    its prefix, so two unrelated projects (`my~repo-abc`, `my~other-def`)
+    were given the same socket (``/tmp/pm-sessions/pm-my``), the same pane
+    registry file and the same pidfile key, and `pm session list`
+    collapsed them into one row (review-loop b48f i11).
+    """
+
+    def test_strips_a_numeric_suffix(self):
+        assert paths.base_session_name("pm-x~1") == "pm-x"
+        assert paths.base_session_name("pm-x~12") == "pm-x"
+
+    def test_keeps_a_tilde_in_the_tag(self):
+        assert (paths.base_session_name("pm-my~repo-abc123")
+                == "pm-my~repo-abc123")
+
+    def test_keeps_a_tilde_in_the_tag_and_strips_the_group(self):
+        assert (paths.base_session_name("pm-my~repo-abc123~2")
+                == "pm-my~repo-abc123")
+
+    def test_a_non_numeric_suffix_is_part_of_the_name(self):
+        assert paths.base_session_name("my~view") == "my~view"
+
+    def test_idempotent(self):
+        base = paths.base_session_name("pm-my~repo-abc123~3")
+        assert paths.base_session_name(base) == base
+
+    def test_empty(self):
+        assert paths.base_session_name("") == ""
+
+    def test_pane_registry_keys_stay_distinct(self, tmp_path, monkeypatch):
+        """Two ``~`` projects must not share one registry file."""
+        from pm_core import pane_registry
+
+        monkeypatch.setattr(paths, "pane_registry_dir", lambda: tmp_path)
+        a = pane_registry.registry_path("pm-my~repo-abc123")
+        b = pane_registry.registry_path("pm-my~other-def456")
+        assert a != b
+        assert pane_registry.registry_path("pm-my~repo-abc123~1") == a
+
+
+# ---------------------------------------------------------------------------
 # tmux: session name -> socket path
 # ---------------------------------------------------------------------------
 
@@ -177,6 +225,20 @@ class TestSessionSocketFor:
         sock = tmux.session_socket_for("pm-" + "x" * 200)
         assert len(sock) <= 100
         assert sock.startswith(str(paths.SHARED_SOCKET_DIR / "pm-"))
+
+    def test_a_tilde_in_the_tag_is_not_a_grouped_suffix(self):
+        """Two ``~`` projects get two servers, not one shared one.
+
+        Splitting at the first ``~`` derived ``/tmp/pm-sessions/pm-my`` for
+        both ``pm-my~repo-abc123`` and ``pm-my~other-def456``: one tmux
+        server for two unrelated sessions, one pane-registry key, one
+        listing row (review-loop b48f i11).
+        """
+        a = tmux.session_socket_for("pm-my~repo-abc123")
+        b = tmux.session_socket_for("pm-my~other-def456")
+        assert a == str(paths.session_socket_path("my~repo-abc123"))
+        assert a != b
+        assert tmux.session_socket_for("pm-my~repo-abc123~1") == a
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +341,31 @@ class TestWrapperMarksTmuxSocket:
         env: dict[str, str] = {}
         wrapper._mark_tmux_socket(env)
         assert "PM_TMUX_SOCKET" not in env
+
+
+class TestWrapperIpcSessionTag:
+    """The wrapper resolves the IPC tag before pm_core is imported.
+
+    It repeats the grouped-suffix rule inline, so pin it: only a numeric
+    ``~N`` is a grouped suffix, and a tag containing ``~`` (a repo
+    directory may) is not truncated to its prefix — which would resolve a
+    *different* session's ``~/.pm/sessions/<tag>/`` config.
+    """
+
+    def test_strips_a_grouped_suffix(self):
+        from pm_core import wrapper
+        assert wrapper._ipc_session_tag(
+            ["pm", "_pane-closed", "pm-x~2"]) == "x"
+
+    def test_keeps_a_tilde_in_the_tag(self):
+        from pm_core import wrapper
+        assert (wrapper._ipc_session_tag(
+            ["pm", "_pane-closed", "pm-my~repo-abc"]) == "my~repo-abc")
+
+    def test_keeps_a_tilde_and_strips_the_group(self):
+        from pm_core import wrapper
+        assert (wrapper._ipc_session_tag(
+            ["pm", "_pane-closed", "pm-my~repo-abc~1"]) == "my~repo-abc")
 
 
 class TestQaStatusSocketLiteral:
@@ -1518,6 +1605,48 @@ class TestListPmSessions:
 
         assert [r["name"] for r in rows] == ["pm-my|repo-abc"]
         assert rows[0]["attached"] == 2
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_lists_two_sessions_whose_tags_contain_a_tilde(
+            self, mock_run, tmp_path):
+        """A ``~`` in the tag is not a grouped suffix.
+
+        ``pm-my~repo-abc`` and ``pm-my~other-def`` both truncate to
+        ``pm-my`` under a first-``~`` split, so the listing collapsed them
+        into one row under a name neither session has — and, since the
+        socket is derived from the same name, onto one server
+        (review-loop b48f i11).
+        """
+        sock_dir = tmp_path / "pm-sessions"
+        sock_dir.mkdir()
+        socks = {}
+        for tag in ("my~repo-abc", "my~other-def"):
+            sock = sock_dir / f"pm-{tag}"
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                s.bind(str(sock))
+            finally:
+                s.close()
+            socks[tag] = sock
+
+        def fake_run(cmd, **kwargs):
+            for tag, sock in socks.items():
+                if str(sock) in cmd:
+                    return MagicMock(returncode=0, stdout=(
+                        f"pm-{tag}:pm-{tag}:0\n"
+                        f"pm-{tag}~1:pm-{tag}:1\n"
+                    ))
+            return MagicMock(returncode=1, stdout="")
+
+        mock_run.side_effect = fake_run
+        with patch.object(paths, "SHARED_SOCKET_DIR", sock_dir):
+            rows = tmux.list_pm_sessions()
+
+        assert [(r["name"], r["socket"]) for r in rows] == [
+            ("pm-my~other-def", str(socks["my~other-def"])),
+            ("pm-my~repo-abc", str(socks["my~repo-abc"])),
+        ]
+        assert [r["attached"] for r in rows] == [1, 1]
 
     @patch("pm_core.tmux.subprocess.run")
     def test_skips_dead_socket(self, mock_run, tmp_path):

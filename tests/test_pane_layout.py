@@ -39,8 +39,11 @@ class TestBaseSessionName:
         assert base_session_name("my-project~42") == "my-project"
 
     def test_multiple_tildes(self):
-        # Only the first ~ splits
-        assert base_session_name("a~b~c") == "a"
+        # Only a *numeric* suffix is a grouped session, so a tilde that is
+        # part of the tag stays: splitting at the first one truncated two
+        # different projects onto one name (and one socket).
+        assert base_session_name("a~b~c") == "a~b~c"
+        assert base_session_name("a~b~2") == "a~b"
 
 
 class TestComputeLayout:

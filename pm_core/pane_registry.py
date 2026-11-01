@@ -23,8 +23,15 @@ def _ensure_logging():
 
 
 def base_session_name(session: str) -> str:
-    """Strip grouped-session suffix (~N) to get the base session name."""
-    return session.split("~")[0]
+    """Strip grouped-session suffix (~N) to get the base session name.
+
+    Delegates to :func:`pm_core.paths.base_session_name`, the one
+    definition shared with the socket derivation: only a *numeric* suffix
+    is a grouped session, so a name that itself contains ``~`` (a repo
+    directory may) is not truncated.
+    """
+    from pm_core.paths import base_session_name as _base_session_name
+    return _base_session_name(session)
 
 
 def pm_session_name(session: str) -> str:

@@ -32,6 +32,10 @@ The partial infrastructure already exists:
 1. Compute the session name first (`_get_current_pm_session()` /
    `_get_session_name_for_cwd()` / `--dir` tag), then derive the session tag
    from that name (`session_name.removeprefix("pm-")`).
+   "Strip the grouped suffix" always means `paths.base_session_name()`, which
+   removes only a **numeric** `~N`: a session name is derived from the repo
+   directory name, which may contain `~` itself, and splitting at the first
+   `~` gave two unrelated projects the same socket (review-loop b48f i11).
 2. Compute `socket_path = str(paths.session_socket_path(tag))`, i.e.
    `/tmp/pm-sessions/pm-<tag>`. `paths.session_socket_path()` is the new
    canonical name; `paths.shared_socket_path()` remains as an alias.
@@ -3304,3 +3308,61 @@ against a real disposable server (group killed, server exits, socket
 file removed); the planted-link and qa_status cases are unit-level.  No
 live session, server or shared host configuration was touched — every
 fixture used a disposable socket directory or a temporary HOME.
+
+## Review iteration (2026-11-01, review-loop b48f i11)
+
+Verification pass over the head after the b48f i10 fixes; one
+cross-project defect, the same "a session name is not a tag prefix"
+class earlier iterations closed for spaces, pipes and user views.
+
+1. **A `~` in the session tag collapsed two projects onto one tmux
+   server.**  `~` separates grouped sessions (`base~N`), and every
+   "strip the grouped suffix" site split at the *first* `~`.  A session
+   name is `pm-<repo name>-<hash>`, and the repo directory name may
+   contain `~` (`pm-my~repo-abc123`), so:
+   - `tmux.session_socket_for()` derived `/tmp/pm-sessions/pm-my` for
+     both `pm-my~repo-abc123` and `pm-my~other-def456` — two unrelated
+     projects sharing one server, which R1 forbids (verified live: one
+     socket, four sessions);
+   - `pane_registry.registry_path()`, the TUI pidfile/command queue, the
+     TUI history file, the layout file and the merge-restart marker were
+     all keyed by the truncated `pm-my`, so two live TUIs shared one
+     registry file;
+   - `pm session list` reported one row named `pm-my` for both sessions
+     (R3.3: one row per session, named correctly);
+   - `list_grouped_sessions()`'s ordering and
+     `next_grouped_session_name()` read `repo` for a number, so the
+     grouped-session counter never advanced past `~1`;
+   - `wrapper._ipc_session_tag()` resolved `~/.pm/sessions/<tag>/` from
+     the truncated tag for hook/popup invocations.
+
+   New `paths.base_session_name()` is the single definition — only a
+   numeric `~N` suffix is stripped, so it is idempotent and a `~` in the
+   tag is data.  `pane_registry.base_session_name()` delegates to it,
+   and every site above uses it (the wrapper repeats the two-line rule
+   inline because it runs before `pm_core` is imported, and the copy is
+   pinned by a test).  `tmux._grouped_suffix()` reads the part after the
+   *last* `~` for the ordering/next-name helpers.
+
+   Verified live on tmux 3.2a with two disposable `~` repos: two
+   distinct sockets, one row each under its full name, `~N` numbering
+   advancing to `~3`, and `pm session kill` tearing down only its own
+   group and socket.  New tests: `TestBaseSessionName` (suffix rule,
+   idempotence, registry keys stay distinct),
+   `TestSessionSocketFor::test_a_tilde_in_the_tag_is_not_a_grouped_suffix`,
+   `TestListPmSessions::test_lists_two_sessions_whose_tags_contain_a_tilde`,
+   `TestListGroupedSessions::test_base_name_may_contain_a_tilde`,
+   `TestNextGroupedSessionName` (two cases),
+   `TestWrapperIpcSessionTag` (three cases) and
+   `TestMergeRestartMarkerSessionScope::test_tilde_in_the_tag_is_not_a_grouped_suffix`;
+   all of them fail on the pre-fix head (verified in a worktree of
+   `12c46553a`, the only passes being the unchanged-behaviour cases).
+
+Residual (incidental, filed as pr-bebe64b — not this PR's scope): tmux
+rewrites `:` and `.` to `_` in session names, so a repo whose name
+contains either produces a session pm cannot address by its computed
+name (`pm session` crashes with "duplicate session" on every re-run,
+`pm session kill` reports "no session", and `pm session list` shows the
+rewritten name).  Pre-existing and unrelated to the socket scheme, but
+the deterministic socket is derived from the same name, so a naming
+policy (sanitize or reject) is needed; that is a separate decision.

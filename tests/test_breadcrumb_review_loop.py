@@ -1145,6 +1145,31 @@ class TestMergeRestartMarkerSessionScope:
             assert tui_pidfile.clear_merge_restart_marker("pm-alpha~1") is True
             assert not (tmp_path / "merge-restart").exists()
 
+    def test_tilde_in_the_tag_is_not_a_grouped_suffix(self, tmp_path):
+        """A tag containing ``~`` is scoped whole, not truncated to ``pm-my``.
+
+        The marker owner and the reader both normalize with
+        ``paths.base_session_name`` (numeric ``~N`` only), so two ``~``
+        projects no longer share one marker scope (review-loop b48f i11).
+        """
+        from pm_core import tui_pidfile
+
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            tui_pidfile.write_merge_restart_marker("pm-my~repo-abc")
+            assert (tui_pidfile.read_merge_restart_marker()
+                    == (True, "pm-my~repo-abc"))
+            # The grouped session resolves to its own base ...
+            assert (tui_pidfile.has_merge_restart_marker("pm-my~repo-abc~1")
+                    is True)
+            # ... and a different ``~`` project is not its owner.
+            assert (tui_pidfile.has_merge_restart_marker("pm-my~other-def")
+                    is False)
+            assert (tui_pidfile.clear_merge_restart_marker("pm-my~other-def")
+                    is False)
+            assert (tmp_path / "merge-restart").exists()
+            assert (tui_pidfile.clear_merge_restart_marker("pm-my~repo-abc~1")
+                    is True)
+
     def test_clear_leaves_another_sessions_marker(self, tmp_path):
         from pm_core import tui_pidfile
 

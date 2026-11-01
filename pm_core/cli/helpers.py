@@ -473,7 +473,8 @@ def _canonical_session(session: str) -> str:
     """Strip the tmux session-group suffix (``~N``) from ``session``.
 
     The TUI keys its pidfile and command-queue by its own session name
-    with the group suffix removed (see TechTreeApp: ``split("~")[0]``).
+    with the group suffix removed (``pane_registry.base_session_name``:
+    only a numeric ``~N``, so a name containing ``~`` is kept whole).
     A user started via ``pm session`` is attached to the *grouped*
     session (e.g. ``pm-foo~1``), so callers that resolve the current
     session name (``_find_tui_pane`` -> ``get_session_name``) see the

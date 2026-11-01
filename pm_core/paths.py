@@ -845,6 +845,31 @@ def default_socket_path() -> Path:
     return Path("/tmp") / f"tmux-{os.getuid()}" / "default"
 
 
+def base_session_name(session: str) -> str:
+    """Strip a grouped-session ``~N`` suffix from *session*.
+
+    The single definition of "the pm base session a tmux session name
+    belongs to".  pm names grouped sessions ``<base>~<number>``
+    (``tmux.next_grouped_session_name`` is the only producer), so only a
+    *numeric* suffix is a grouped session; anything else is part of the
+    name itself.  A session name is derived from the repo directory name,
+    which may contain ``~`` — ``pm-my~repo-abc123`` — and splitting at the
+    first ``~`` truncated it to ``pm-my``.  Every consumer keyed by that
+    name then addressed a different session: the pane registry and pidfile
+    collided, and since every session has its own server, two unrelated
+    projects were also given the *same* socket (``/tmp/pm-sessions/pm-my``)
+    and `pm session list` collapsed them into one row (review-loop b48f
+    i11).
+
+    Idempotent: a base name without a numeric suffix is returned unchanged,
+    so passing an already-resolved name is always safe.
+    """
+    base, sep, suffix = session.rpartition("~")
+    if sep and suffix.isdigit():
+        return base
+    return session
+
+
 def session_socket_path(session_tag: str) -> Path:
     """Return the deterministic tmux server socket path for a pm session.
 

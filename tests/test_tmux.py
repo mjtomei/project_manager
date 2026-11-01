@@ -36,6 +36,7 @@ from pm_core.tmux import (
     get_session_name,
     current_or_base_session,
     list_grouped_sessions,
+    next_grouped_session_name,
     find_unattached_grouped_session,
     sessions_on_window,
     attached_group_active_windows,
@@ -846,6 +847,46 @@ class TestListGroupedSessions:
         )
         result = list_grouped_sessions("proj")
         assert result == ["proj~1", "proj~2"]
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_base_name_may_contain_a_tilde(self, mock_run):
+        """The suffix is the part after the *last* ``~``.
+
+        A repo directory name may contain ``~`` (``pm-my~repo-abc``).  The
+        old first-``~`` split read the tag for a number, so every grouped
+        session sorted as 0 and ``next_grouped_session_name`` always
+        returned ``~1``.
+        """
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=(
+                "pm-my~repo-abc\npm-my~repo-abc~2\npm-my~repo-abc~1\n"
+                "pm-my~other-def~1\n"
+            )
+        )
+        assert list_grouped_sessions("pm-my~repo-abc") == [
+            "pm-my~repo-abc~1", "pm-my~repo-abc~2"]
+
+
+class TestNextGroupedSessionName:
+    @patch("pm_core.tmux.list_grouped_sessions", return_value=[])
+    def test_first_grouped_session(self, mock_lg):
+        assert next_grouped_session_name("proj") == "proj~1"
+
+    @patch("pm_core.tmux.list_grouped_sessions",
+           return_value=["proj~1", "proj~2"])
+    def test_next_after_the_highest(self, mock_lg):
+        assert next_grouped_session_name("proj") == "proj~3"
+
+    @patch("pm_core.tmux.list_grouped_sessions",
+           return_value=["pm-my~repo-abc~1", "pm-my~repo-abc~2"])
+    def test_base_name_may_contain_a_tilde(self, mock_lg):
+        """The tag's own ``~`` is not the grouped suffix.
+
+        A first-``~`` split read ``repo`` for a number, so the counter
+        never advanced past ``~1`` and every reattach converged on it.
+        """
+        assert (next_grouped_session_name("pm-my~repo-abc")
+                == "pm-my~repo-abc~3")
 
 
 class TestFindUnattachedGroupedSession:

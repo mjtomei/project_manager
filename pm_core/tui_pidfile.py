@@ -80,15 +80,20 @@ _EMPTY_CMDLINE_POLL_S = 0.01
 
 
 def pidfile_path(session: str) -> Path:
-    """Path to the pidfile a TUI in *session* writes."""
-    from pm_core.paths import pm_home
-    return pm_home() / f"tui-{session.split('~')[0]}.pid"
+    """Path to the pidfile a TUI in *session* writes.
+
+    Keyed by the base session (``paths.base_session_name``: only a numeric
+    ``~N`` is a grouped suffix), so two sessions whose tags both contain
+    ``~`` do not share one file.
+    """
+    from pm_core.paths import base_session_name, pm_home
+    return pm_home() / f"tui-{base_session_name(session)}.pid"
 
 
 def command_queue_path(session: str) -> Path:
-    """Path to the per-session TUI command queue file."""
-    from pm_core.paths import pm_home
-    return pm_home() / f"tui-{session.split('~')[0]}.cmd-queue"
+    """Path to the per-session TUI command queue file (base session key)."""
+    from pm_core.paths import base_session_name, pm_home
+    return pm_home() / f"tui-{base_session_name(session)}.cmd-queue"
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +141,10 @@ def _marker_owner(raw: str | None) -> str | None:
     if isinstance(data, dict):
         session = data.get("session")
         if isinstance(session, str) and session:
-            return session.split("~")[0]
+            # Only a numeric ``~N`` is a grouped suffix; a session name may
+            # contain ``~`` itself (paths.base_session_name).
+            from pm_core.paths import base_session_name
+            return base_session_name(session)
     return None
 
 
@@ -165,7 +173,8 @@ def write_merge_restart_marker(session: str | None) -> Path:
     path = merge_restart_marker_path()
     payload: dict[str, str] = {}
     if session:
-        payload["session"] = session.split("~")[0]
+        from pm_core.paths import base_session_name
+        payload["session"] = base_session_name(session)
     _atomic_write(path, json.dumps(payload))
     return path
 
@@ -187,7 +196,8 @@ def has_merge_restart_marker(session: str | None = None) -> bool:
         return True
     if session is None:
         return False
-    return owner == session.split("~")[0]
+    from pm_core.paths import base_session_name
+    return owner == base_session_name(session)
 
 
 def clear_merge_restart_marker(session: str | None = None) -> bool:
@@ -212,8 +222,9 @@ def clear_merge_restart_marker(session: str | None = None) -> bool:
         # it with a readable marker keeps its own.
         return unlink_if_unchanged(path, None)
     owner = _marker_owner(raw)
+    from pm_core.paths import base_session_name
     if owner is not None and (session is None
-                              or owner != session.split("~")[0]):
+                              or owner != base_session_name(session)):
         return False
     return unlink_if_unchanged(path, raw)
 

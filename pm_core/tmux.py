@@ -7,7 +7,7 @@ import stat
 import subprocess
 from pathlib import Path
 
-from pm_core.paths import configure_logger, write_env_file
+from pm_core.paths import base_session_name, configure_logger, write_env_file
 
 _log = configure_logger("pm.tmux")
 
@@ -303,10 +303,10 @@ def session_socket_for(session_name: str) -> str:
     """
     from pm_core.paths import session_socket_path
 
-    # Same rule as pane_registry.base_session_name; kept inline because
-    # tmux.py is the lower-level module and should not depend on the
-    # registry.
-    base = session_name.split("~", 1)[0]
+    # ``base_session_name`` (module level) is the shared definition: only a
+    # *numeric* ``~N`` suffix is grouped, so a tag containing ``~`` is not
+    # truncated onto another session's socket.
+    base = base_session_name(session_name)
     return str(session_socket_path(base.removeprefix("pm-")))
 
 
@@ -315,7 +315,11 @@ def _find_session_server(session_name: str, *, exact: bool,
     from pm_core.paths import (default_socket_path,
                                shared_socket_dir_is_usable)
 
-    base = session_name.split("~", 1)[0]
+    # Only a numeric ``~N`` suffix is a grouped session, so a session name
+    # that contains ``~`` (a repo directory may) keeps its own socket
+    # instead of sharing one with an unrelated project (review-loop b48f
+    # i11).
+    base = base_session_name(session_name)
     # ``=name`` is tmux's exact-match target syntax; a bare name is a
     # prefix match.
     target = f"={session_name}" if exact else base
@@ -1036,8 +1040,18 @@ def list_grouped_sessions(base: str, socket_path: str | None = None) -> list[str
     for line in result.stdout.strip().splitlines():
         if line.startswith(prefix):
             grouped.append(line)
-    grouped.sort(key=lambda s: int(s.split("~")[1]) if s.split("~")[1].isdigit() else 0)
+    # The suffix is the part after the *last* ``~``: the base name is
+    # derived from the repo directory and may itself contain ``~``
+    # (``pm-my~repo-abc~1``), where splitting at the first one read the
+    # tag for a number and left the ordering at 0.
+    grouped.sort(key=lambda s: _grouped_suffix(s) or 0)
     return grouped
+
+
+def _grouped_suffix(name: str) -> int | None:
+    """Return the ``N`` of a ``<base>~N`` grouped-session name, or None."""
+    suffix = name.rpartition("~")[2]
+    return int(suffix) if suffix.isdigit() else None
 
 
 def sessions_in_group(base: str, socket_path: str | None = None) -> list[str]:
@@ -1101,9 +1115,8 @@ def next_grouped_session_name(base: str, socket_path: str | None = None) -> str:
         return f"{base}~1"
     max_n = 0
     for name in existing:
-        suffix = name.split("~")[1]
-        if suffix.isdigit():
-            max_n = max(max_n, int(suffix))
+        # Last ``~``, not first: the base name may contain ``~`` itself.
+        max_n = max(max_n, _grouped_suffix(name) or 0)
     return f"{base}~{max_n + 1}"
 
 
@@ -1452,7 +1465,7 @@ def _detach_current_client(socket_path: str | None) -> bool:
     # detach a different client of the same session than the one that
     # pressed it (R5.2 defines the candidates as the whole session group).
     base = (session_group(session, socket_path=socket_path)
-            or session.split("~", 1)[0])
+            or base_session_name(session))
     # Every session in the group, whatever it is called.  A user's own view
     # shares the windows, so its client is a client of this pm session and
     # must be a candidate: with only the ``base~N`` names, Ctrl-Q pressed
@@ -1583,7 +1596,11 @@ def list_pm_sessions() -> list[dict]:
             name, group, attached = parts
             if not name.startswith("pm-"):
                 continue
-            own_base = name.split("~", 1)[0]
+            # Only a numeric ``~N`` is a grouped suffix: a session name
+            # derived from a repo directory may contain ``~`` itself, and
+            # truncating there collapsed distinct sessions into one row
+            # (review-loop b48f i11).
+            own_base = base_session_name(name)
             if group and group != own_base and not name.startswith(group + "~"):
                 # A user's own view of another session (S118/S121/S124),
                 # however it is named — including a name that looks like a

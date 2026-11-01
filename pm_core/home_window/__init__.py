@@ -135,7 +135,8 @@ def park_if_on(session: str | None, target_window_id: str | None) -> list[str]:
     try:
         if not tmux_mod.session_exists(session):
             return []
-        base = session.split("~")[0]
+        from pm_core.paths import base_session_name
+        base = base_session_name(session)
         watching = tmux_mod.sessions_on_window(base, target_window_id)
         if not watching:
             return []

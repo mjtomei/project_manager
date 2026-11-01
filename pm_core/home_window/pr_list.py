@@ -29,7 +29,8 @@ DEFAULT_SIZE = (80, 24)
 
 def _refresh_sentinel(session: str) -> Path:
     """Per-base-session sentinel file: touched by refresh(), polled by the loop."""
-    base = session.split("~")[0]
+    from pm_core.paths import base_session_name
+    base = base_session_name(session)
     runtime = pm_home() / "runtime"
     runtime.mkdir(parents=True, exist_ok=True)
     return runtime / f"home-refresh-{base}"

@@ -353,7 +353,10 @@ async def consume_breadcrumb(app) -> None:
     if "session" in data and not isinstance(owner, str):
         _log.warning("consume_breadcrumb: ignoring non-string session (%s)",
                      type(owner).__name__)
-    owner = owner.split("~")[0] if isinstance(owner, str) else ""
+    # Only a numeric ``~N`` is a grouped suffix (paths.base_session_name):
+    # a session name may contain ``~`` itself.
+    from pm_core.paths import base_session_name
+    owner = base_session_name(owner) if isinstance(owner, str) else ""
     mine = _app_session(app)
     if owner and owner != mine:
         _log.info("consume_breadcrumb: leaving breadcrumb for session %s "
