@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T01:30:26.649059+00:00'
+  updated_at: '2026-11-01T01:59:19.294229+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37909,6 +37909,35 @@ prs:
       impl.md R71. The dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-11-01T01:30:26Z'
     last_edited: '2026-11-01T01:30:26Z'
+  - id: note-2fd6bec
+    text: 'Review loop 928f i12: one leftover in the kept recipe scope, the PR own
+      class (a failure that names the wrong cause, on a handle shared by two runs),
+      left by QA S22 for a future iteration (note-7248e7a). Both recording recipes''
+      `agg` install downloaded in place to `~/.local/bin/agg`; two workers sharing
+      one HOME both pass the `agg --version` guard, so one transfer holds the shared
+      path open for writing while the other executes it — ETXTBSY, reported by the
+      block as "the agg on PATH (…) does not run — remove it (''rm -f …'') and re-run
+      the render" and by the render as "agg failed on the cast — is ''agg'' installed?"
+      for a binary that is complete and runs once the other transfer closes (verified
+      in this container: pre-fix install rc 1 with that message, the shipped render
+      block rc 1 with "Text file busy" plus its message). The block now downloads
+      to a per-process `mktemp` file and `mv`s it into place — atomic within the directory,
+      so a reader sees either the previous binary or the complete new one, never a
+      download in progress — and a failed download/chmod removes only the temp, never
+      the shared binary (the old `rm -f ~/.local/bin/agg` could delete the other worker''s
+      finished install); both recipes carry the identical block. Post-fix probe under
+      the same holder: rc 0, the downloaded agg in place, no temp. Tests: file 280
+      passed (was 278); new test_renderer_install_survives_a_concurrent_in_place_download
+      (both recipes) holds the shared path open for the whole run, `_run_install_block`
+      gained the `hold_agg_open` knob plus `mktemp`/`mv` stubs, and test_render_documents_how_to_get_the_renderer
+      pins the temp file''s chmod. Mutation check: reverting both recipes to the in-place
+      download fails exactly the two new cases (the other 13 install cases pass).
+      Related suites (test_qa_artifact_web_ui_recording, test_qa_instructions, test_qa_loop,
+      test_markdown_render) 199 passed. Full suite 5356 passed, 1 skipped, 121 deselected,
+      0 failed (440.77 s). Evidence: /pm-captures/review-928f-i12/. No pm_core/ change;
+      the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-11-01T01:59:19Z'
+    last_edited: '2026-11-01T01:59:19Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
