@@ -401,9 +401,11 @@ No **[UNRESOLVED]** ambiguities.
   the existing consume test (an unparsable key and a non-string value are
   dropped), pins that a malformed (non-object) `iteration_sessions`
   value does not abort the restore, and (review d468 i5) that a missing,
-  blank or wrong-typed `loop_id` is regenerated at the widened width
-  while a valid one is preserved (the regeneration tests fail on the
-  pre-fix restore path).
+  blank or null `loop_id` is regenerated at the widened width while a
+  valid one is preserved (the regeneration tests fail on the pre-fix
+  restore path).  Since the 2026-11-01 integration, a *wrong-typed*
+  `loop_id` skips the whole record instead (fail-closed restore policy
+  from pr-049649a, pinned in `tests/test_autostart_fail_closed.py`).
   `tests/test_review_launch_retry.py`: the fake that writes a transcript
   now links the path the launcher was given (not a hardcoded legacy
   name), and `test_retry_never_adopts_a_previous_runs_transcript` is
@@ -562,14 +564,16 @@ Applied on top of the design above; keep them when editing the code.
   `iteration_sessions` value (a hand-edited breadcrumb must not silently
   disable the check).
 - `consume_breadcrumb` regenerates a restored loop's `loop_id` when the
-  breadcrumb's value is missing, blank or not a string (review d468 i5).
-  The id is the ownership identity in every loop-scoped iteration
-  filename, so the restore path must not keep the old 4-hex default
-  (`secrets.token_hex(2)`) that the i4 widening retired, and a
-  wrong-typed value must never reach a filename.  A *valid* id is
+  breadcrumb's value is missing, blank or null (review d468 i5; since the
+  2026-11-01 merge this lives in `_loop_record_fields`).  The id is the
+  ownership identity in every loop-scoped iteration filename, so the
+  restore path must not keep the old 4-hex default
+  (`secrets.token_hex(2)`) that the i4 widening retired.  A *valid* id is
   preserved verbatim (a resumed loop must reproduce its loop-scoped
   path); a regenerated one still adopts a legacy in-flight iteration
-  through `resolve_iteration_transcript`'s legacy fallback.
+  through `resolve_iteration_transcript`'s legacy fallback.  A
+  *wrong-typed* id (an int, say) is malformed saved state: the record is
+  skipped, per the fail-closed restore policy merged from pr-049649a.
 
 ## Master integration (2026-10-31, merge of `origin/master` eaf3372e)
 
@@ -621,6 +625,32 @@ master tests needed adapting to loop-scoped naming: the S79 adoption test
 `review-<pr>-<loop_id>-i1.jsonl`, and the two live-owner unit tests in
 `tests/test_transcript_archive.py` now pin `_live_read_transcripts`
 (live-pane, not window-name, liveness).
+
+## Master integration (2026-11-01, merge of `origin/master` 53bcbd72)
+
+The second user-authorized integration merged `53bcbd72` (#267, plus the
+already-in-master #272 and #280) into this branch.  Conflicts were in
+`pm/project.yaml` and `pm_core/tui/auto_start.py`:
+
+- **`pm/project.yaml`**: master reordered the PR list (e.g. `pr-7f74c77`
+  moved near the end) and added new records (`pr-a3b86b7`, the #272/#280
+  follow-ups).  Resolution keeps master's order and every master record,
+  drops the stale duplicate `pr-7f74c77` block, keeps this branch's
+  branch-only records (`pr-bab46cf`, `pr-bac971d`, `pr-9966785`) and the
+  cross-PR note on `pr-22ea6a2`.  Result: 585 unique PRs = master's 582 +
+  this branch's 3; master's order is a subsequence.
+- **`auto_start.consume_breadcrumb`**: master's #267 refactored the review
+  loop restore into `_loop_record_fields` with fail-closed field
+  validation.  This PR's d468-i5 loop-id hardening is folded into that
+  helper: a missing/blank/null `loop_id` is regenerated at
+  `_generate_loop_id()`'s 8-hex width; a wrong-typed one now makes the
+  record malformed and it is skipped (fail-closed policy wins over
+  repair).  The `iteration_sessions` restore and its ownership checks are
+  unchanged, and `_live_transcript_owners` / `_live_read_transcripts` /
+  `_finalize_all_transcripts` auto-merged unchanged.
+
+Verified after this integration: full suite **5477 passed / 1 skipped**
+(7m08s), and the post-fix repro still reports all three symptoms fixed.
 
 ## Known limitations (accepted)
 

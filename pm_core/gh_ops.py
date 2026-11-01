@@ -302,7 +302,11 @@ def merge_pr(workdir: str, pr_ref: str | int,
 
 def close_pr(pr_ref: str | int, delete_branch: bool = False,
              cwd: Optional[str] = None) -> subprocess.CompletedProcess:
-    """Close a GitHub PR via gh CLI. Returns the completed process."""
+    """Close a GitHub PR via gh CLI. Returns the completed process.
+
+    ``delete_branch`` is opt-in and deliberately unused by ``pm pr close``
+    (pr-62ad13d): closing a PR never deletes a local or remote branch.
+    """
     args = ["pr", "close", str(pr_ref)]
     if delete_branch:
         args.append("--delete-branch")

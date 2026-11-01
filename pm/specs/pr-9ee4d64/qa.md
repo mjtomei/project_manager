@@ -240,7 +240,10 @@ Cross-cutting setup for every scenario:
   transcript; archive entries stay complete.
 - **Malformed / truncated breadcrumb** (`iteration_sessions` not an object):
   the restart still restores the remaining loops and auto-start state rather
-  than abandoning the run.
+  than abandoning the run.  A review-loop record whose scalar field has the
+  wrong type (e.g. `loop_id: 7`) is malformed saved state and is skipped
+  whole (fail-closed policy from pr-049649a); a missing, blank or null
+  `loop_id` is regenerated at the 8-hex width instead.
 - **A step window whose pane has exited**: step-window liveness is
   checked on the pane, not the window name, so a disable finalizes the
   transcript of a dead or finished pane.  A live sign-off pane keeps its

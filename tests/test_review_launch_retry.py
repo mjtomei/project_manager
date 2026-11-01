@@ -1615,7 +1615,6 @@ def test_breadcrumb_round_trips_retry_episode(tmp_path):
     app = MagicMock()
     app._auto_start = True
     app._auto_start_targets = {PR: {}}
-    app._auto_start_all = False
     app._auto_start_run_id = "run"
     app._review_loops = {PR: state}
     app._root = tmp_path
@@ -1647,7 +1646,6 @@ def _auto_app(tmp_path, state):
     app = MagicMock()
     app._auto_start = True
     app._auto_start_targets = {PR: {}}
-    app._auto_start_all = False
     app._auto_start_run_id = "run"
     app._review_loops = {PR: state}
     app._qa_loops = {}
@@ -1959,7 +1957,6 @@ def test_launch_failure_notice_does_not_promise_a_retry_outside_auto_start(
     app = MagicMock()
     app._auto_start = False
     app._auto_start_targets = {}
-    app._auto_start_all = False
     state = ReviewLoopState(
         pr_id=PR, running=False, iteration=1,
         latest_verdict=VERDICT_LAUNCH_FAILED, launch_retryable=True,
@@ -1990,7 +1987,6 @@ def test_launch_failure_notice_promises_the_retry_for_an_auto_start_target(
     app = MagicMock()
     app._auto_start = True
     app._auto_start_targets = {PR: {}}
-    app._auto_start_all = False
     app._review_retry_timer = None
     state = ReviewLoopState(
         pr_id=PR, running=False, iteration=1,
@@ -2344,7 +2340,6 @@ def test_hold_completion_notice_does_not_print_the_failed_attempts_artifact(
     app = MagicMock()
     app._auto_start = False
     app._auto_start_targets = {}
-    app._auto_start_all = False
     state = ReviewLoopState(
         pr_id=PR, running=False, iteration=2, latest_verdict=VERDICT_HOLD,
         latest_output="workspace trust prompt in review pane",
@@ -2372,7 +2367,6 @@ def test_launch_failed_completion_notice_still_prints_its_artifact(tmp_path):
     app = MagicMock()
     app._auto_start = False
     app._auto_start_targets = {}
-    app._auto_start_all = False
     state = ReviewLoopState(
         pr_id=PR, running=False, iteration=2,
         latest_verdict=VERDICT_LAUNCH_FAILED, launch_retryable=False,
@@ -2402,7 +2396,6 @@ def _notice_app(state, tmp_path):
     app = MagicMock()
     app._auto_start = False
     app._auto_start_targets = {}
-    app._auto_start_all = False
     app._review_loops = {PR: state}
     app._impl_poll_counter = 0
     app._qa_loops = {}
