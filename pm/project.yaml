@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T06:13:20.356755+00:00'
+  updated_at: '2026-11-01T06:48:44.785390+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5997,6 +5997,34 @@ prs:
       HOME - no live session, server or shared host configuration was touched.'
     created_at: '2026-11-01T06:13:20Z'
     last_edited: '2026-11-01T06:13:20Z'
+  - id: note-d0c4899
+    text: 'Review loop 2caf i7 (no requirement changes; full suite 5374 passed / 1
+      skipped, log /pm-captures/review-2caf-i7/full-suite-final.log). Verification
+      pass over the head after the i6 fix; one destructive-path gap, the same "a user''s
+      own view is part of the session group" rule the detach (i2), discovery (703c
+      i1, 2caf i4/i5) and QA-status (i6) fixes applied elsewhere. (1) `pm session
+      kill` enumerated the group with `list_grouped_sessions()` (a `base~N` name match),
+      so a user''s own view (`tmux new-session -t base -s myview`, S118/S121/S124)
+      survived the kill: its client stayed attached, the shared windows kept the old
+      `pm _tui` pane alive, the server kept running (so `server_alive()` correctly
+      refused to unlink the socket), and a later `pm session` started a second base
+      with the same name on the same server — two TUIs for one session name. The kill
+      now enumerates `sessions_in_group()` (tmux''s `#{session_group}` plus the `base~N`
+      names) and kills every member, then the base; the group is gone, the server
+      exits and the socket is removed. Tests: `TestSessionKillServerSelection::test_kill_also_tears_down_a_users_view`
+      (verified to fail with the name-prefix list: only the base was killed) and the
+      disposable-server `TestServerIsolationIntegration::test_kill_tears_down_the_whole_group_including_a_view`
+      (real base + `~1` + `myview`; killing all three exits the server). impl.md R3.2/R8
+      and the i4 residual narrowed accordingly; qa.md R8 gained the view bullet. Also
+      verified live on disposable servers (never the live session/server): `list_pm_sessions`
+      with a space-named private session + view + a shared socket + a legacy default-server
+      session reported one row per session (view skipped, `~N` collapsed, shared flagged),
+      and `find_session_server`/`session_socket_for`/`sessions_in_group`/`session_group`
+      agreed with the derived paths. Validation: targeted suites 389 passed; full
+      suite re-run after the edit; every fixture used a disposable socket and a temporary
+      HOME.'
+    created_at: '2026-11-01T06:48:44Z'
+    last_edited: '2026-11-01T06:48:44Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
