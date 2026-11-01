@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T02:14:12.171933+00:00'
+  updated_at: '2026-11-01T02:39:05.926108+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5658,6 +5658,43 @@ prs:
       container; fetch agg-aarch64-unknown-linux-gnu v1.5.0. Captures: /pm-captures/scenarios/11/{story1-2-refusals,story3-1777-start,story4-foreign-server,story5-cross-user,story6-hostile-entries,story7-no-tmux}/.'
     created_at: '2026-11-01T02:14:12Z'
     last_edited: '2026-11-01T02:14:12Z'
+  - id: note-ed81b6c
+    text: 'QA S10 re-run (shared sessions: joining, plain reattach, window sizing,
+      kill scoping) — NEEDS_WORK, one defect found and fixed in this run. (1) BUG
+      (fixed, pm_core/tmux.py::_detach_current_client): one Ctrl-Q could detach *every*
+      client of the session. The precise branch only considers clients whose session''s
+      active window is the TUI window; when none does — e.g. the base session''s current
+      window is a shell window opened in the shared session — it fell back to `detach-client
+      -s <session>`, which drops all clients attached to that session. With two clients
+      on the base session, one Ctrl-Q left both panes at a prompt (reproduced live:
+      2 clients -> 0 after one press; `pre-fix/recording.cast`). The fallback now
+      picks the group''s most recently active single TTY (`detach-client -t`), mirroring
+      the precise branch; one press detaches exactly one client, the TUI pane id/pid
+      and both sessions survive, and the second press detaches the remaining client
+      (`post-fix/recording.cast`). Tests: updated TestDetachCurrentClient::test_falls_back_to_session_detach
+      -> test_falls_back_to_one_group_client (asserts `-t /dev/pts/1`, not `-s`),
+      added test_two_clients_on_the_base_lose_only_one, and made the non-numeric-timestamp
+      fake return an ungrouped session. (2) Captures: every story now has recording.cast
+      + recording.mp4 per the assigned recipes (17 casts): story1 create, story1 list/print-connect/paste,
+      story2 wide-client view + checks, story3 create/list+kill/socket-mode-create/socket-mode-after-attach/inside-S,
+      story4 join, story5 kill-missing+create and kill-created+cwd-pair, story6 pre-fix
+      and post-fix, story7 plain-list/inside-S-list/print-connect+paste. All stories
+      re-verified on the rebuilt fixture with `pm which` = /workspace/pm_core per
+      pane. (3) Story 5''s cwd check is now complete: with the pane''s cwd in projA,
+      both `pm session kill --global` (killed pm-projA-bdd5aa60) and `pm session --global`
+      (recreated/attached it) targeted project A, never P. (4) Socket mode: the private
+      socket is `srw------- 600` at creation (pm and plain tmux both), and becomes
+      `srwx------ 700` when a client attaches (tmux 3.2a chmods on attach; reproduced
+      with plain tmux, same inode), so the literal 0600 holds at the check point pm
+      controls; the shared socket is `srwxrwxrwx` at creation and `srw-rw-rw-` (0666)
+      after the last client detaches, likewise tmux, not pm. (5) Story 4''s join still
+      shows the known pr-ea98f71 heal-path false positive (fresh-HOME joiner prints
+      `TUI pane missing — respawning...` and briefly splits a transient pane into
+      A''s window; recorded in the cast at 0.16 s); A''s client and TUI pane id/pid
+      are unchanged. No second uid exists in the container, so the 0777 permission
+      check was not exercised by a different uid. Captures: /pm-captures/scenarios/10/{story1-global-create,story1-list-connect,story2-sizing,story3-plain-reattach,story4-join,story5-kill-scoping,story6-ctrlq/{pre-fix,post-fix},story7-list-connect}/.'
+    created_at: '2026-11-01T02:39:05Z'
+    last_edited: '2026-11-01T02:39:05Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
