@@ -39201,7 +39201,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-11-01T17:18:19.048861+00:00'
+  updated_at: '2026-11-01T18:26:00.096276+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39876,6 +39876,31 @@ prs:
       the path (accepted limitation, impl.md).'
     created_at: '2026-11-01T17:18:18Z'
     last_edited: '2026-11-01T17:18:18Z'
+  - id: note-0ec0b39
+    text: 'Review-loop e757 i3 (2026-11-01): doc-only, no behaviour change. (a) _live_transcript_owners
+      claimed "every owned name is loop-scoped" while it also adds the legacy shared
+      review-<pr>-i prefix (and the watcher <type>-i prefix); corrected the docstring
+      and the two matching impl.md sentences (design + e757-i1 note) to "every owned
+      family shares a name prefix", and documented that a pane whose session merely
+      finished a turn is still live — the accepted limitation that keeps a step canonical
+      a link when its window is open at sweep time. (b) archive_transcript docstring
+      now states it returns None on failure as well as on nothing-to-archive (that
+      is what makes build_claude_shell_cmd log "could not archive ... replacing it").
+      (c) finalize_transcript docstring now matches the code: target captured once
+      at entry, re-read in the post-copy guard. Verified: full suite 5479 passed /
+      1 skipped (7m11s, markdown installed); post-fix repro still reports all three
+      symptoms fixed; branch merged cleanly with current origin/master c1fcecc58 in
+      a throwaway worktree (no conflicts, no markers). Carried over for the user/QA,
+      unchanged: QA scenario 16 story 3 (R5 "finished transcripts become self-contained
+      copies") conflicts with the accepted live-pane limitation — a live impl window
+      open at sweep time keeps impl-<pr>.jsonl a readable, non-empty symlink; QA raised
+      INPUT_REQUIRED and deferred the liveness-rule choice to review. Review position,
+      unchanged from e757 i1/i2: the code matches the documented design and changing
+      the rule would risk missing a later verdict from a still-live pane; relaxing
+      the scenario text would weaken an acceptance criterion, so the decision stays
+      with the user.'
+    created_at: '2026-11-01T18:26:00Z'
+    last_edited: '2026-11-01T18:26:00Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
