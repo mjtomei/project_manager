@@ -14331,7 +14331,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-11-01T03:42:05.914647+00:00'
+  updated_at: '2026-11-01T03:51:52.924052+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -15540,6 +15540,46 @@ prs:
       offset for the current run.'
     created_at: '2026-11-01T03:42:05Z'
     last_edited: '2026-11-01T03:42:05Z'
+  - id: note-95cfb8f
+    text: 'QA S37 (R12: sync guards for terminal local records, the merge-discovered-after-close
+      path, and the at-lock guard when a closure races the sync round-trip): PASS
+      5/5, no code change, at head 68f709bf9. Sandbox: four throwaway projects, disposable
+      HOME, dedicated PM_TMUX_SOCKET, PYTHONPATH=/workspace over /opt/pm-src, PATH
+      without claude (the real /usr/local/bin/claude stripped too), git-backed fake-github
+      stand-in installed before pm init, no real GitHub. (1) Closed A (--keep-github,
+      stand-in #1 OPEN, closed_at 2026-11-01T03:47:43.791166): sync exits 0; list/show/ts
+      unchanged - closed with the SAME closed_at, branch/workdir/note/description
+      intact, stand-in still OPEN, workdir HEAD and `git status --porcelain` unchanged.
+      OBSERVATION: it prints `No status changes.` rather than the scenario-predicted
+      `Updated 1 PR(s).` - on this head the terminal-record guard short-circuits in
+      the pre-lock scan (old_status in TERMINAL_PR_STATES -> continue), so updated==0
+      and no locked_update runs at all; strictly stronger than count-then-skip in
+      the apply. (2) Same A, stand-in re-seeded MERGED: sync prints `Updated 1 PR(s).`
+      + `  Merged: pr-1158864`; A finalizes merged (merged_at 03:48:33.501401, closed_at
+      dropped), note/description/branch/workdir survive, dependent B unblocks (pm
+      pr ready -> ⏳ pr-f9f0159) while list keeps B pending, HEAD unchanged. (3) Locally
+      merged M with bootstrap SIGNOFF_MERGE signoff evidence (sha=HEAD) + signed_off_at,
+      stand-in OPEN then CLOSED: both rounds print exactly `No status changes.`, no
+      Merged:/Closed: line, ts keeps merged/same merged_at/same signed_off_at/no closed_at,
+      and `snap | diff - before.json` is empty after each round (full record byte-identical,
+      signoff evidence intact); a separate check showed project.yaml mtime unchanged
+      across a skipping sync (no write at all). (4) At-lock race, stand-in OPEN: sync
+      frozen with project.yaml.lock open in its fd table (real `pm edit` + EDITOR=sleep
+      120 holding the lock), close --keep-github wins the lock, the resumed sync exits
+      0 with `Updated 1 PR(s).` and no traceback, and the record stays closed with
+      the close''s closed_at (not rewritten to in_review). (5) Same race with the
+      stand-in MERGED: resumed sync exits 0 with `Updated 1 PR(s).` + `  Merged: pr-1158864`,
+      A finalizes merged (merged_at present, closed_at absent), note/branch/workdir
+      survive, HEAD unchanged. Supporting: tests/test_pr_close.py -k sync_from_github
+      7 passed. Evidence: /pm-captures/scenarios/37/{story1-sync-closed-keeps-open,story2-merge-discovered,story3-local-merge-not-reopened,story4-atlock-close-wins-open,story5-atlock-merge-discovered}
+      (cast + mp4 + driver + manifest, plus final-state and sync.out where applicable).
+      Harness notes: `tmux -L <path>` misparses a slashed socket path (use `tmux -S
+      "$PM_TMUX_SOCKET"`); this container also has a real /usr/local/bin/claude, so
+      CLEAN_PATH must strip /usr/local/bin as well as /home/pm/.local/bin; the STOP-at-lock
+      sync must be CONTed within its 2 s lock timeout (pm startup is ~80 ms, so a
+      foreground close fits).'
+    created_at: '2026-11-01T03:51:52Z'
+    last_edited: '2026-11-01T03:51:52Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
