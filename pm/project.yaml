@@ -39201,7 +39201,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-11-01T21:16:21.601114+00:00'
+  updated_at: '2026-11-01T22:48:31.874386+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39958,6 +39958,27 @@ prs:
       repro still reports all three symptoms fixed. Commit 987bc877d.'
     created_at: '2026-11-01T21:16:21Z'
     last_edited: '2026-11-01T21:16:21Z'
+  - id: note-70efc9b
+    text: 'Review-loop e757 i7 (2026-11-01): one doc-only correction; no behavioural
+      change. tests/test_transcript_archive.py::test_identical_archive_match_is_scoped_to_the_same_stem
+      still described a frozen file archive entry as keyed by mtime+size; review e757
+      i6 replaced that identity with a content hash (size+mtime is only a pre-filter
+      confirmed by filecmp), so the docstring now says the lookup is content-keyed
+      but still scoped to the same stem. Code review found no defects: archive-on-replace
+      (no-clobber, atomic, content/sid-keyed), ownership-checked finalize (readlink
+      captured at entry, guard after the copy before os.replace), loop-scoped iteration
+      names with allow_legacy only for a resumed in-flight iteration, iteration_sessions
+      round-tripped through the breadcrumb, retire-archives-without-deleting, and
+      the e757-i4 rule that bulk sweeps never freeze a canonical are all consistent
+      across every caller. Verified at e166d35e4: full suite 5478 passed / 1 skipped
+      (7m00s, markdown installed); 36/36 archive tests; 387 focused archive/review-loop/breadcrumb/retry/handoff/auto-start/fail-closed
+      tests; post-fix repro (/pm-captures/impl/post-fix/transcript-archive/repro.py
+      --expect fixed) still reports all three symptoms fixed; pre/post-fix captures
+      present and convincing. Carried over for QA, unchanged: archive entry counts
+      are minimums; a canonical stays a live link until a new attempt reuses its path
+      (accepted limitation, impl.md).'
+    created_at: '2026-11-01T22:48:31Z'
+    last_edited: '2026-11-01T22:48:31Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
