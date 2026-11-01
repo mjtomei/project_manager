@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T18:37:43.254791+00:00'
+  updated_at: '2026-11-01T19:29:55.390718+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6632,6 +6632,43 @@ prs:
       host configuration was touched.'
     created_at: '2026-11-01T18:37:43Z'
     last_edited: '2026-11-01T18:37:43Z'
+  - id: note-83e864b
+    text: 'Review loop b48f i10 (no requirement changes; full suite 5446 passed /
+      1 skipped, 422.7 s, log /pm-captures/review-b48f-i10/full-suite-final.log).
+      Verification pass over the head after the b48f i9 fixes; two gaps. (1) `pm session
+      kill`''s socket cleanup still traversed a planted socket directory: with /tmp/pm-sessions
+      a symlink to a directory and a file at the session''s deterministic name inside
+      the link''s target, the not-found branch probed it (`tmux -S` follows the link)
+      and unlinked that file (verified live on a disposable directory: pre-fix it
+      removed the file, post-fix it survives). The same branch also probed a planted
+      symlink at the socket path (the state discovery refuses since b48f i7), and
+      both branches would have touched a socket another user owns. New `session._removable_private_socket()`
+      applies the three checks once (real socket directory via `shared_socket_dir_is_usable()`,
+      no symbolic link at the entry, a socket or plain file owned by this user) and
+      both unlink sites use it, so a hostile entry is neither probed nor removed;
+      the normal states are unchanged (a stale socket we own is removed once no server
+      answers on it, a live one is kept). Tests: `TestSessionKillServerSelection::test_missing_session_does_not_touch_through_a_symlinked_socket_dir`
+      / `::test_missing_session_does_not_probe_a_planted_symlink` / `::test_missing_session_does_not_touch_another_users_socket`,
+      all verified to fail on the pre-fix head (the file was removed and `server_alive`
+      was probed). (2) `qa_status._find_attached_session()`''s priority-2 `list-sessions`
+      parse was space-separated, so a grouped session whose name contains a space
+      (`pm-my repo-abc~1`) was read as `pm-my`: the attached grouped session was never
+      matched and the *base* session''s window was switched instead — which the user''s
+      client does not follow (each session in a group keeps its own current window),
+      so the QA status pane could not bring its window forward. Verified live on a
+      disposable server with a space-named base + `~1` and a real attached client:
+      pre-fix the base was returned, post-fix `pm-my repo-abc~1`. Fields are now `:`-separated
+      (tmux forbids `:` in session names), the same rule the tmux helpers follow (2caf
+      i5/i10). Test: `TestQaStatusSocketRouting::test_finds_a_grouped_session_whose_name_has_a_space`
+      (fails pre-fix). Docs: impl.md R3.2 (the probe/unlink refusal) and R4.4 (the
+      separator) plus the b48f i10 section; qa.md R12 gained the kill-cleanup bullet.
+      Targeted suites 970 passed; `pm/specs/pr-073910f/session_start_smoke.py` re-ran
+      clean on a disposable socket; `pm session list` read-only ("No pm sessions found.",
+      no socket directory created). No live session, server or shared host configuration
+      was touched — every fixture used a disposable socket directory or a temporary
+      HOME.'
+    created_at: '2026-11-01T19:29:55Z'
+    last_edited: '2026-11-01T19:29:55Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
