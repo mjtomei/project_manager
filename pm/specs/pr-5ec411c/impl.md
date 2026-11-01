@@ -177,10 +177,11 @@ bare `effort=high` never claims support the route did not declare.
 
 ### R5 — Unsupported levels are visible, never faked
 - Values outside `EFFORT_LEVELS` stay rejected at set time, as today.
-- A configured level the selected route declares unsupported is a
-  `validate_model_config` warning and a launch/display note.  The launch
-  still passes `--effort` (the CLI accepts it and the dated metadata may be
-  stale), but the setting is never shown as verified.
+- A configured level the selected route declares unsupported is a set-time
+  warning (`pm model set` / `pm pr model set`), a `validate_model_config`
+  warning and a launch/display note.  The launch still passes `--effort`
+  (the CLI accepts it and the dated metadata may be stale), but the setting
+  is never shown as verified.
 - The TUI cycle and `click.Choice` offer all five levels, because a stale
   or missing `supported_efforts` list must not block a level the harness
   accepts (the user's working `xhigh` is the motivating case).  The
@@ -276,7 +277,9 @@ does not fetch a catalog in this PR.
   from the intersection; `high` is `ok`.
 - A route declaring `supported_efforts: []` accepts none of the Claude
   levels: every configured level is `unsupported` (not "unverified").
-- Haiku + `effort: xhigh`: `not_applicable`, `effort=None`, nothing passed.
+- Haiku + `effort: xhigh`: `not_applicable`, `effort=None`, nothing passed;
+  the role table shows `xhigh (n/a)` so requested vs effective stays
+  visible.
 - `PM_EFFORT=xhigh` and `CLAUDE_CODE_EFFORT_LEVEL=high`: PM wins, launches
   `--effort xhigh`, unsets the ambient var, note records the conflict.
 - `CLAUDE_CODE_EFFORT_LEVEL=xhigh` alone: source is the env, effective
