@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T02:21:22.313584+00:00'
+  updated_at: '2026-11-01T03:04:17.554807+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37974,6 +37974,30 @@ prs:
       helper/prompt/verifier work stays dropped.'
     created_at: '2026-11-01T02:21:22Z'
     last_edited: '2026-11-01T02:21:22Z'
+  - id: note-3df3cc6
+    text: 'Review loop 928f i14: one leftover in the kept recipe scope plus two test
+      gaps, no pm_core/ change. (1) Both recording recipes'' produced-files lists
+      and manifest examples never named the render''s in-progress outputs. A render
+      killed while ffmpeg runs reaches no cleanup, so the capture directory holds
+      recording.cast.gif and recording.mp4.partial.mp4 and no recording.mp4 (verified
+      live with each recipe''s own render block and a stub encoder, SIGKILL 1 s in);
+      step 0 already cleared both names and the render notes already said to list
+      a kept partial, but the two lists a worker builds the manifest from named neither.
+      Both lists now name both files. (2) The agg install''s three failure paths (mktemp,
+      chmod, mv) had no case: removing all three guards left 284 passed. Each was
+      probed live first (own message, no temp left, the seeded agg untouched) and
+      is now pinned by test_renderer_install_names_the_step_that_failed (both recipes,
+      new fail_tool knob). (3) test_a_failed_run_releases_its_capture_dir_claim could
+      pass for the wrong reason: drifting the stuck fixture to fail at the readiness
+      wait left the pre-i14 case green (1 passed) while the branch under test never
+      ran; each mode now asserts its branch''s message (same drift: 1 failed). Mutation
+      checks: install guards removed -> exactly the 6 new cases fail; produced-files
+      bullets removed -> exactly the 2 new cases; readiness-timeout claim release
+      removed -> exactly norec. Tests: recipe file 292 passed (was 284); full suite
+      5368 passed, 1 skipped, 121 deselected, 0 failed (447.91 s). Evidence: /pm-captures/review-928f-i14/.
+      The dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-11-01T03:04:17Z'
+    last_edited: '2026-11-01T03:04:17Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
