@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-01T23:21:45.240577+00:00'
+  updated_at: '2026-11-01T23:57:52.744931+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48225,6 +48225,27 @@ prs:
       each has recording.cast + recording.mp4 + manifest).'
     created_at: '2026-11-01T23:21:45Z'
     last_edited: '2026-11-01T23:21:45Z'
+  - id: note-6cf3e21
+    text: 'review-loop 48dd i1: two residual gaps, both fixed with regression tests
+      that fail on the pre-fix tree. (1) A hand-edited non-string apply_error / base_behavior_error
+      / invalidated — and the signoff_return members pm pr show renders (verdict,
+      hop, reviewed_head, reason, applied.merge_sha, the coerced/original verdicts)
+      — printed the literal None or a mapping repr on the sign-off prompt, the return
+      text, the sign-off launch, pm pr signoff integrate and pm pr show; they now
+      render the placeholder the rest of the record uses (an unknown error, reason
+      not recorded). (2) compute_candidate ignored the conflict list the worktree
+      attempt produced (_wconf, an unused variable) when merge-tree and the worktree
+      merge disagreed, so the record and the router coercion message could name a
+      resolvable pm/project.yaml while the attempt had failed on another file; it
+      now records the paths the attempt saw. impl.md R9-14 updated. Full suite: 5743
+      passed, 1 skipped. Noted, not fixed (filed as pr-852dde2): the pre-existing
+      unguarded data.get("project", {}).get(...) readers — including the pr_merge
+      _repo_id line and the review-launch read at pm_core/cli/pr.py:1876 that precedes
+      its own guard — still raise AttributeError for a non-mapping project. Left untouched:
+      the uncommitted R19 additions in pm/specs/pr-5cee3d5/qa.md and the untracked
+      verify-s51-followup.md (QA-session artifacts).'
+    created_at: '2026-11-01T23:57:52Z'
+    last_edited: '2026-11-01T23:57:52Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
