@@ -64,7 +64,10 @@ hits, regardless of how it waits for a background job:
   empty is not an input the next stage can use (a 0-byte cast, gif or webm
   must be named as the stage that wrote nothing, not blamed on the stage
   after it), and the final mp4 check rejects an encoder that reports success
-  and writes nothing;
+  and writes nothing; the publish is checked too — an empty encode is never
+  renamed onto the final name, and a rename that leaves no published mp4 is
+  a failure instead of a render of nothing (in the web-UI finalize it would
+  otherwise run its last ``rm`` and destroy the only copy of the webm);
 - the render steps name their renderer prerequisite: ``agg`` may be missing
   (the image used for QA on 2026-10-27 did not have it, although the bundled
   Dockerfile now installs it), and the render fails loudly, so the recipe
@@ -1894,9 +1897,23 @@ def test_render_names_an_encoder_that_writes_no_mp4(name, tmp_path):
     has the same check and its own case
     (``test_web_ui_transcode_that_writes_nothing_leaves_no_mp4``); this is the
     recording recipes' counterpart.
+
+    There are *two* ``test -s`` checks with that message — ``render_cast``'s
+    own ``[ -s "$part" ]`` (before the partial is renamed, so an empty video
+    is never published even for a moment) and the block's backstop on the
+    published mp4. Either alone makes this case pass, so neither is pinned by
+    its assertions: deleting the inner one leaves the file green because the
+    backstop catches the empty video, and deleting the backstop leaves it
+    green because the inner check catches it (verified: both mutations gave
+    266 passed). The ``mv`` stub below logs its invocation, which tells the
+    two apart — the empty output must never reach the publish at all. The
+    backstop has its own case,
+    ``test_render_names_a_publish_that_left_no_mp4``.
     """
+    mv_log = tmp_path / "mv-invoked"
     r, mp4, gif = _run_render(name, tmp_path, ffmpeg_body=(
-        'for a in "$@"; do last=$a; done\n: > "$last"\nexit 0\n'))
+        'for a in "$@"; do last=$a; done\n: > "$last"\nexit 0\n'),
+        mv_body=f'printf called > "{mv_log}"\nexit 0\n')
 
     assert r.returncode != 0, (
         f"{name}: a render whose encoder wrote no mp4 was reported as a "
@@ -1908,6 +1925,49 @@ def test_render_names_an_encoder_that_writes_no_mp4(name, tmp_path):
     assert not mp4.exists(), (
         f"{name}: the empty mp4 is left behind for the manifest to present as "
         "this run's video")
+    assert not gif.exists()
+    assert not mv_log.exists(), (
+        f"{name}: the encoder's empty output was renamed onto the published "
+        "name, so a render stopped between the rename and the block's final "
+        "check leaves an empty recording.mp4 the manifest presents as this "
+        "run's video")
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_render_names_a_publish_that_left_no_mp4(name, tmp_path):
+    """A rename that reports success but publishes nothing is a failure.
+
+    ``render_cast`` returns 0 once its ``mv`` succeeds, so the block's own
+    ``test -s`` on the published mp4 is the only thing between that return
+    and "this render succeeded": the file can be gone again by the time the
+    block looks (a concurrent cleanup, a tmp cleaner, a rename that crossed a
+    filesystem boundary and left nothing behind). Without that backstop the
+    block exits 0 with no video at all — a completed-looking render of
+    nothing.
+
+    No case pinned it: the encoder-writes-nothing case above is caught by
+    ``render_cast``'s own ``[ -s "$part" ]`` first, and deleting the backstop
+    left the whole file green (verified: 266 passed for both recipes). The
+    ``mv`` stub below reports success without moving anything — the effect
+    the backstop exists for — and leaves the partial in place, so the
+    assertion that it is gone is ``render_fail``'s removal.
+    """
+    r, mp4, gif = _run_render(name, tmp_path, mv_body='exit 0\n')
+    partial = Path(str(mp4) + ".partial.mp4")
+
+    assert r.returncode != 0, (
+        f"{name}: a publish that left no mp4 was reported as a successful "
+        "render")
+    assert "render produced no mp4" in r.stderr, r.stderr
+    assert "ffmpeg wrote no mp4" in r.stderr, (
+        f"{name}: the failure does not name the missing published video: "
+        + r.stderr)
+    assert not mp4.exists(), (
+        f"{name}: the failed publish left recording.mp4 for the manifest to "
+        "present as this run's video")
+    assert not partial.exists(), (
+        f"{name}: the failed publish left the partial behind, so a later "
+        "attempt resumes into it")
     assert not gif.exists()
 
 
@@ -2653,6 +2713,50 @@ def test_web_ui_finalize_names_a_publish_that_failed(tmp_path):
         "files list explains it as an interrupted encode's output")
     assert (capdir / "recording.webm").exists(), (
         "the webm was dropped although nothing was published")
+
+
+def test_web_ui_finalize_names_a_publish_that_left_no_mp4(tmp_path):
+    """A rename that reports success but publishes nothing must not lose the webm.
+
+    The finalize step's last check is the published mp4 itself: the rename
+    reports success, so nothing else notices that the file is not there (a
+    concurrent cleanup, a tmp cleaner, a rename that crossed a filesystem
+    boundary and left nothing). Without that backstop the block runs its final
+    ``rm -f recording.webm`` and exits 0 — a failed publish reported as a
+    successful capture that also destroys the only copy of the driver's video,
+    the same "a false success that destroys the source" shape as the
+    ``-nostdin`` bug (R63). The check was pinned only as *text*
+    (``test_web_ui_clears_a_previous_video``); no case made it fire, so the
+    removal above went unseen by every behavioral case.
+
+    The ``mv`` stub reports success without moving anything — the effect the
+    backstop exists for.
+    """
+    block = _web_ui_finalize_block()
+
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    (capdir / "recording.webm").write_bytes(b"webm")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    _stub_tool(bindir, "ffmpeg",
+               'for a in "$@"; do last=$a; done\nprintf mp4 > "$last"\n')
+    _stub_tool(bindir, "mv", 'exit 0\n')
+    (bindir / "rm").symlink_to("/bin/rm")
+    env = {"CAPDIR": str(capdir), "PATH": str(bindir)}
+    r = subprocess.run(["/bin/bash"], input=block, env=env,
+                       capture_output=True, text=True)
+
+    assert r.returncode != 0, (
+        "a publish that left no mp4 was reported as success, and the step "
+        "then deleted the webm — the only copy of the recording")
+    assert "the published mp4 is not there" in r.stderr, r.stderr
+    assert "ffmpeg failed" not in r.stderr, (
+        "a publish that left nothing is reported as an encoder failure: "
+        + r.stderr)
+    assert not (capdir / "recording.mp4").exists()
+    assert (capdir / "recording.webm").exists(), (
+        "the finalize dropped the webm although it published no mp4")
 
 
 def test_web_ui_transcode_that_writes_nothing_leaves_no_mp4(tmp_path):
