@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-01T19:00:38.015520+00:00'
+  updated_at: '2026-11-01T19:13:52.652251+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48022,6 +48022,25 @@ prs:
       (d) full suite 5738 passed, 1 skipped.'
     created_at: '2026-11-01T19:00:37Z'
     last_edited: '2026-11-01T19:00:37Z'
+  - id: note-f10f690
+    text: 'QA S55 PASS (2026-11-01, head d786e2f1e) — Evidence and provenance honesty
+      at record time and at the merge gate: all five stories held live on throwaway
+      local-backend projects; no code change. Harness facts for the next run: (1)
+      `pm pr signoff integrate --apply` on a CLEAN record that actually merges the
+      base leaves the stored check at the PRE-merge head (a resolved candidate instead
+      re-records at the applied merge), so a SIGNOFF_MERGE cannot be recorded at the
+      new head until another `integrate --record`; build story 3''s fixture so the
+      check is already up to date, or add a re-check. (2) To force a real pm/project.yaml
+      conflict deterministically have BOTH sides run `pm pr note add <pr>` on the
+      same record — a one-sided record addition often merges cleanly in git and produces
+      no resolution, so the candidate-tree requirement never fires. (3) `pm pr show`
+      prints `Candidate tree:` only for a RESOLVED record, under `## Integration`;
+      scrape it before you record. (4) In an interactive pane `echo "<!-- edited -->"`
+      dies on history expansion (`!-: event not found`) — single-quote it. (5) agg
+      is not preinstalled; `curl -L https://github.com/asciinema/agg/releases/latest/download/agg-aarch64-unknown-linux-gnu`
+      (bare binary, not a tarball) into /usr/local/bin works. Captures: /pm-captures/scenarios/55/{signoff-record-refusals,merge-gate-refusals,candidate-and-approval-integrity}.'
+    created_at: '2026-11-01T19:13:52Z'
+    last_edited: '2026-11-01T19:13:52Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
