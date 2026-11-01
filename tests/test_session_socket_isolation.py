@@ -1319,6 +1319,42 @@ class TestFindTuiPaneAcrossServers:
         assert helpers._find_tui_pane() == (None, None)
         assert os.environ["PM_TMUX_SOCKET"] == "/tmp/original.sock"
 
+    def test_cwd_session_with_a_registered_tui_pane_is_resolved(
+            self, monkeypatch):
+        """The everyday `pm tui view` path: a plain shell in the project dir.
+
+        No ambient session, the cwd-derived session is running on its own
+        server, and its registry records the TUI pane.  The lookup must
+        return that pane *and* leave the process addressing the cwd
+        session's server — the branch that makes every session-keyed
+        command work outside a pm pane.
+        """
+        from pm_core.cli import helpers
+        from pm_core import pane_registry
+
+        sock = "/tmp/pm-sessions/pm-cwd"
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: False)
+        monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-cwd")
+        # The real _select_session_socket runs: it must export the cwd
+        # session's socket so the registry probe and the caller's later
+        # tmux calls hit that server.
+        monkeypatch.setattr(helpers.tmux_mod, "find_session_server",
+                            lambda name: (sock, True))
+        monkeypatch.setattr(helpers.tmux_mod, "session_exists",
+                            lambda *a, **kw: True)
+        monkeypatch.setattr(helpers.tmux_mod, "pane_exists",
+                            lambda pane: pane == "%5")
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions", lambda: [])
+        monkeypatch.setattr(
+            pane_registry, "load_registry",
+            lambda name: {"windows": {"@1": {"panes": [
+                {"id": "%5", "role": "tui"}]}}})
+
+        assert helpers._find_tui_pane() == ("%5", "pm-cwd")
+        assert os.environ["PM_TMUX_SOCKET"] == sock
+
     def test_last_resort_finds_an_unregistered_tui_pane(self, monkeypatch):
         """A live ``pm _tui`` pane with no registry entry is still found.
 
@@ -2465,6 +2501,58 @@ class TestPrintConnect:
         assert result.exit_code == 1
         assert "--dir requires --global or --group" in result.output
 
+    def test_dir_with_share_flags_prints_the_shared_socket(
+            self, monkeypatch, tmp_path):
+        """`--dir --global` prints the socket of the session it would join.
+
+        The tag is computed from the *target* directory with the share mode
+        mixed in (get_session_tag), so the command names the owner's shared
+        session rather than a private session for that path.
+        """
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+
+        sock = "/tmp/pm-sessions/pm-shared-abc12345"
+        # Record the value so the group callback's mutation is undone.
+        monkeypatch.setenv("PM_SHARE_MODE", "")
+        seen = {}
+
+        def fake_tag(start_path=None, use_github_name=True):
+            seen["start_path"] = start_path
+            seen["share_mode"] = os.environ.get("PM_SHARE_MODE")
+            return "shared-abc12345"
+
+        monkeypatch.setattr(paths, "get_session_tag", fake_tag)
+        monkeypatch.setattr(session_mod.tmux_mod, "session_socket_for",
+                            lambda name: sock)
+        monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
+                            lambda name: (sock, True))
+
+        result = CliRunner().invoke(
+            session_mod.session,
+            ["--global", "--dir", str(tmp_path), "--print-connect"])
+
+        assert result.exit_code == 0, result.output
+        assert result.output.strip() == f"tmux -S {sock} attach"
+        assert seen["start_path"] == Path(str(tmp_path))
+        assert seen["share_mode"] == "global"
+
+    def test_global_and_group_are_mutually_exclusive(self, monkeypatch):
+        """Nothing is printed for a combination `pm session` would reject."""
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+
+        # Record the value so the group callback's mutation is undone.
+        monkeypatch.setenv("PM_SHARE_MODE", "")
+
+        result = CliRunner().invoke(
+            session_mod.session,
+            ["--global", "--group", "staff", "--print-connect"])
+
+        assert result.exit_code == 1
+        assert "--global and --group are mutually exclusive" in result.output
+        assert "tmux " not in result.output
+
     def test_command_is_shell_quoted(self, monkeypatch, tmp_path):
         """The printed command must paste cleanly for a repo name with a space.
 
@@ -2525,6 +2613,18 @@ class TestSessionListCommand:
 
         assert result.exit_code == 0, result.output
         assert "No pm sessions found." in result.output
+
+    def test_requires_tmux(self, monkeypatch):
+        """Without tmux there is nothing to enumerate: say so, exit 1."""
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: False)
+
+        result = CliRunner().invoke(session_mod.session, ["list"])
+
+        assert result.exit_code == 1
+        assert "tmux is not installed." in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -2984,6 +3084,43 @@ class TestServerIsolationIntegration:
             assert _tmux(sock, "has-session", "-t", base).returncode == 0
             assert _tmux(sock, "has-session",
                          "-t", f"{base}~1").returncode == 0
+        finally:
+            _close(proc, sock)
+
+    def test_detach_through_the_users_own_view(self, short_sock_dir,
+                                               monkeypatch):
+        """R5: a client viewing through a user's own view is a candidate.
+
+        ``tmux new-session -t <base> -s myview`` groups the view with the
+        pm session, so its client sees the same panes and can press the
+        same keys — but its name says nothing about the session.  Ctrl-Q
+        pressed from such a view must detach exactly that client and leave
+        both sessions running (the name-prefix candidate set detached
+        nothing here).
+        """
+        if not subprocess.run(["which", "script"],
+                              capture_output=True).returncode == 0:
+            pytest.skip("`script` not available for attaching a client")
+
+        sock = short_sock_dir / "v.sock"
+        base = _make_server(sock, "pm-iso-v")
+        r = _tmux(sock, "new-session", "-d", "-t", base, "-s", "myview")
+        assert r.returncode == 0, r.stderr
+        proc, _ = _attach_client(sock, "myview")
+        try:
+            pane = _tmux_out(sock, "list-panes", "-t", base,
+                             "-F", "#{pane_id}").split()[0]
+            monkeypatch.setenv("PM_TMUX_SOCKET", str(sock))
+            monkeypatch.setenv("TMUX_PANE", pane)
+
+            assert tmux.detach_current_client() is True
+
+            # The view's client is gone; both sessions still exist.
+            assert _tmux(sock, "list-clients", "-F", "#{client_tty}"
+                         ).stdout.strip() == ""
+            assert _tmux(sock, "has-session", "-t", base).returncode == 0
+            assert _tmux(sock, "has-session",
+                         "-t", "myview").returncode == 0
         finally:
             _close(proc, sock)
 

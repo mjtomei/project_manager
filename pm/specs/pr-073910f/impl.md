@@ -1967,3 +1967,57 @@ authoritative check), and the connect screen's last-resort bare
 Validation on the integrated head: full suite re-run after the edits (see
 the PR note for this iteration); no live session, server or shared host
 configuration was touched — every fixture used a disposable socket.
+
+## Review iteration (2026-11-01, review-loop 2caf i3)
+
+Verification pass over the head after the i2 fixes; no requirement
+changes.  No defect surfaced in the code; this iteration closes coverage
+gaps in the PR's central discovery/connect paths and corrects two
+`qa.md` requirements that no longer matched the implemented behaviour.
+
+1. **The cwd discovery branch's success return had no test.**  Every
+   existing `_find_tui_pane` test either had no cwd session running or a
+   registry without a live TUI pane, so the everyday path — a plain
+   shell in the project directory whose session runs on its own server
+   with a registered TUI pane — was never asserted end to end (it was
+   the only uncovered branch of the new lookup).  New
+   `TestFindTuiPaneAcrossServers::test_cwd_session_with_a_registered_tui_pane_is_resolved`
+   runs the real `_select_session_socket`, asserts the pane and base
+   session are returned and that `PM_TMUX_SOCKET` now names the cwd
+   session's server; verified to be the only test covering that return
+   (coverage line 1525).
+2. **`pm session --print-connect --dir` was untested.**  The `--dir`
+   branch computes the tag from the target directory (with the share mode
+   mixed in) and never ran under test.  New
+   `TestPrintConnect::test_dir_with_share_flags_prints_the_shared_socket`
+   asserts the printed command, that the tag came from the `--dir`
+   directory, and that `PM_SHARE_MODE` was set for the tag computation.
+3. **Two small CLI branches had no coverage:** `--global` + `--group`
+   mutual exclusion (nothing must be printed) and `pm session list`
+   without tmux ("tmux is not installed.", exit 1).  New tests in
+   `TestPrintConnect` and `TestSessionListCommand`.
+4. **The i2 detach fix had only unit coverage.**  New
+   `TestServerIsolationIntegration::test_detach_through_the_users_own_view`
+   builds a real base + `myview` group on a disposable socket, attaches
+   a real client to the view, and asserts one `detach_current_client()`
+   removes exactly that client while both sessions survive — the
+   production shape of R5's view bullet, previously verified only by
+   mocks and manually.
+5. **`qa.md` R3** said the CLIENTS count "covers the whole session
+   group".  Since R5/`sessions_in_group` define the group to include a
+   user's own view, the wording contradicted the deliberate behaviour
+   recorded in the i2 section (only `pm-`-named base/`~N` sessions are
+   counted; QA scenario 9 uses `tmux list-clients` as authoritative).
+   R3 now states exactly that and cross-references R5.
+6. **`qa.md` R9**'s plain-reattach bullet said a plain `pm session`
+   reattaches a shared session "from the project directory".  From a
+   *plain shell* there is no ambient session to adopt, so the command
+   starts the directory's private session (a twin beside the shared one,
+   the fail-safe documented for R5b and observed in QA scenario 10); the
+   `smallest` sizing behaviour applies when the plain `pm session` runs
+   from a shell pane *inside* the shared session (703c i8).  The bullet
+   now says so and states the plain-shell outcome explicitly.
+
+Validation on the integrated head: full suite re-run after the edits (see
+the PR note for this iteration); no live session, server or shared host
+configuration was touched — every fixture used a disposable socket.

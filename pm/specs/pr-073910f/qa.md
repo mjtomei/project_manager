@@ -95,7 +95,10 @@ pane unless stated otherwise.
   **THEN**
   - there is exactly one row per session (base name, not one per grouped
     session);
-  - the client count covers the whole session group;
+  - the client count covers the base session and its `~N` grouped
+    sessions (a client attached through a user's own tmux view of the
+    session — R5 — is not counted; `tmux list-clients` is authoritative
+    there);
   - each row names the socket that hosts it, and the legacy row is marked
     as living on the default server;
   - running the same command from *inside* a pm pane lists the same set —
@@ -238,13 +241,19 @@ pane unless stated otherwise.
 - **GIVEN** a shared session and a private session are both running,
   **WHEN** the user lists sessions, **THEN** exactly the shared row
   carries the shared marker.
-- **GIVEN** a shared session whose owner detached, **WHEN** the owner
-  reattaches with a plain `pm session` (no `--global`/`--group` flag) from
-  the project directory, **THEN** the reattach creates/uses a grouped
-  session whose window sizing is the shared `smallest` (base and grouped
-  both), so the smallest connected client still sees the full layout —
-  the share mode recorded by the session, not the missing process flag,
-  decides this.
+- **GIVEN** a shared session, **WHEN** its owner runs a plain `pm session`
+  (no `--global`/`--group` flag) from a shell pane *inside* that session
+  (the ambient session is adopted, and its recorded share mode is read
+  from the session environment), **THEN** the reattach creates/uses a
+  grouped session whose window sizing is the shared `smallest` (base and
+  grouped both), so the smallest connected client still sees the full
+  layout: the share mode recorded by the session, not the missing process
+  flag, decides this.
+- **GIVEN** the same shared session, **WHEN** the owner runs a plain `pm
+  session` from a *plain shell* outside tmux, **THEN** there is no ambient
+  session to adopt, so it starts the directory's *private* session (a twin
+  beside the shared one) rather than guessing the shared tag; re-joining
+  needs the flag (see R9's join bullet and the README).
 
 ### R10 — Existing (legacy) sessions are preserved, not migrated
 
