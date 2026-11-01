@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T22:03:07.204380+00:00'
+  updated_at: '2026-11-01T22:22:22.045503+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6781,6 +6781,33 @@ prs:
       touched — every fixture used a disposable socket directory or a mocked tmux.'
     created_at: '2026-11-01T22:03:07Z'
     last_edited: '2026-11-01T22:03:07Z'
+  - id: note-9070dbb
+    text: 'Review loop b48f i14 (no requirement changes; full suite 5471 passed /
+      1 skipped, 421.3 s, log /pm-captures/review-b48f-i14/full-suite-final.log).
+      Verification pass over the head after the b48f i13 fixes; one cross-session
+      hazard of the "a name is not a group" class, in the one place i13''s rule had
+      not reached (correction to b48f i13: it said current_or_base_session had been
+      switched to sessions_in_group; only its fallback loops were). (1) current_or_base_session()''s
+      first branch still tested current.startswith(base + "~"). A repo directory may
+      contain "~", so the project x~foo runs the session pm-x~foo-<hash>, which starts
+      with "pm-x~" without being part of pm-x''s group; on the legacy default server
+      (the only server where two unrelated bases coexist) the function returned that
+      session whenever it had an attached client. Verified live on tmux 3.2a on a
+      disposable server: with a client attached to pm-x~foo-12345678, current_or_base_session("pm-x")
+      returned pm-x~foo-12345678 and get_window_id("pm-x") its window @1 instead of
+      pm-x''s @0 — so select_window/new_window''s switch moved the other project''s
+      client, and pane_layout.get_reliable_window_size counted its client in the minimum-size
+      computation. Membership is tmux''s #{session_group} (a grouped session''s group
+      is its base, and a user''s own view resolves through the same group, S118/S121/S124),
+      so the group test alone covers every member and removing the prefix clause drops
+      only false positives. Test: TestCurrentOrBaseSession::test_attached_session_merely_named_like_a_grouped_one_is_ignored
+      (verified to fail on the pre-fix head: it returned pm-x~foo-12345678); test_in_grouped_session
+      now pins the group query. qa.md R5 gained the window-targeting bullet. No live
+      session, server or shared host configuration was touched — the live repro used
+      sleep-held sessions on a disposable socket under /tmp, and the preserved smoke
+      script re-ran clean on a disposable socket.'
+    created_at: '2026-11-01T22:22:21Z'
+    last_edited: '2026-11-01T22:22:21Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
