@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-01T20:57:37.190323+00:00'
+  updated_at: '2026-11-01T22:08:39.257507+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48112,6 +48112,31 @@ prs:
       to a file and run that.'
     created_at: '2026-11-01T20:57:37Z'
     last_edited: '2026-11-01T20:57:37Z'
+  - id: note-eb43f4d
+    text: 'QA scenario 61 (publication serialization + dirty main repo) PASS at 7e183a23
+      — no code change. All three stories held live on a throwaway local-backend project:
+      (1) same-PR race: exactly one merge commit; winner exits 0 with the four expected
+      lines; loser blocks on the per-PR lock, prints nothing while waiting, then prints
+      "PR <id> is already merged." on stderr and exits 1, and never the "Waiting for
+      another merge into this repository to finish..." line. (2) two PRs approved
+      at the same base: one publishes; the loser prints "Waiting for another merge
+      into this repository to finish..." then "Checking master..." then the base-moved
+      refusal on stderr (exit 1); pm pr show shows Invalidated, pm pr list keeps it
+      in [sign_off], its workdir HEAD/status/captures/notes are unchanged, and no
+      partial publication lands. (3) a dirty main repo (M app.txt, ?? scratch-untracked.txt)
+      survives pm pr merge untouched, stash stays empty, and the PR file appears in
+      both the repo and the base tree. Captures: /pm-captures/scenarios/61/{story1-merge-race,story2-two-publications,story3-dirty-main-repo}.
+      Harness facts for the next run: (a) this container default tmux server was started
+      by another session with HOME=<its scratchpad>/s61/home, so panes created by
+      pm session inherit that HOME — export HOME=/home/pm in every QA pane (and before
+      pm pr start) or the projects ~/.pm state and captures split across two homes;
+      (b) window 0s TUI keeps the inherited HOME, harmless for CLI-only stories; (c)
+      use a file barrier to overlap the two merges and write each panes exit code
+      to a file; (d) redirecting merge output to files makes a useless screen recording
+      — do a visible re-run with output on the pane and use the redirected run only
+      for the stdout/stderr split.'
+    created_at: '2026-11-01T22:08:39Z'
+    last_edited: '2026-11-01T22:08:39Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
