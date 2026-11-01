@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-01T19:44:04.458343+00:00'
+  updated_at: '2026-11-01T20:15:45.980039+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25286,6 +25286,20 @@ prs:
       legacy source revision.
     created_at: '2026-11-01T19:44:04.458343+00:00'
     last_edited: '2026-11-01T19:44:04.458343+00:00'
+  - id: note-8b2ac22
+    text: 'Impl done at 0742a4b4 (pushed; full suite 5472 passed/1 skipped). Decisions
+      worth reviewing: (1) --file-prs from a container mounts the project pm dir rw
+      at /pm-project, only when filing is requested; findings use pm -C <registry>,
+      because a bare pm pr add in the clone is lost. (2) Default clone is project.base_branch;
+      --branch overrides. (3) TUI and pm qa launch run `pm -C <root> qa regression
+      <id> --file-prs` in the pane. Not done: no real container run (no pm-dev image
+      in this env; argv verified in tests). Plan docs plan-delivery/plan-regression
+      still describe the corpus port; left for the user. Pre-existing, untouched:
+      discovery reconciles `--plan ux`, but the filing addendum files to `--plan improvements`
+      (no ux plan exists). The TUI was unreachable from the impl container, so the
+      review is not marked; press d.'
+    created_at: '2026-11-01T20:15:45Z'
+    last_edited: '2026-11-01T20:15:45Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
