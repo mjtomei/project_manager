@@ -5233,7 +5233,14 @@ case "$sub" in
             # finish), so step 5 reaches its own cast/status check — the two
             # branches after the claim is taken that no other mode reaches
             # with the session still there to hold the claim.
-            [ "$STUB_MODE" = detachnocast ] || printf '{"version": 2}\n' > "$STUB_CAST"
+            # `emptycast`: the recorder reports success (the status below is
+            # 0) but its cast is 0 bytes — the state the recipes' `test -s`
+            # cast check exists for, and one an existence check cannot see.
+            case "$STUB_MODE" in
+              detachnocast) : ;;
+              emptycast)    : > "$STUB_CAST" ;;
+              *)            printf '{"version": 2}\n' > "$STUB_CAST" ;;
+            esac
             printf 'TUI drawn\n' > "$STATE/pane"
             if [ -n "$STUB_STATUS_FILE" ]; then
                 case "$STUB_MODE" in
@@ -5251,9 +5258,9 @@ case "$sub" in
         oneshot|badstatus|nostatus) ( sleep 0.3; rm -f "$STATE/$s" ) & ;;
         # The CLI scaffold's pane *is* the recording, so its session ends when
         # the one-shot command ends; the tmux recipe's recorder must stay up
-        # until the detach ends it, so `emptystatus` only ends the scaffold's
-        # own `rec` session.
-        emptystatus) [ "$s" = rec ] && ( sleep 0.3; rm -f "$STATE/$s" ) & ;;
+        # until the detach ends it, so `emptystatus`/`emptycast` only end the
+        # scaffold's own `rec` session.
+        emptystatus|emptycast) [ "$s" = rec ] && ( sleep 0.3; rm -f "$STATE/$s" ) & ;;
       esac
       exit 0 ;;
 esac
@@ -5671,6 +5678,28 @@ class TestCaptureFlowExecution:
         assert "137" in r.stderr, (
             "the failure does not say how the recorder ended: " + r.stderr)
 
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_a_zero_byte_cast_is_not_a_recording(self, name, tmp_path):
+        """The cast check is `test -s`, and an existence check cannot tell.
+
+        A recorder can report success — asciinema's own exit status is 0, so
+        the status check below passes — and still leave no usable cast: the
+        header write can fail (a full disk, or a cast path that became
+        unwritable after the recorder started) while the status lands. Both
+        recipes guard that with `test -s`, and nothing exercised the
+        difference: weakening it to `test -e` left the whole file green (305
+        passed, verified by mutation), so a 0-byte cast would have been
+        accepted and the run reported as a finished recording with no replay
+        in it. The same "an artifact that exists but is empty is not an
+        input" rule the cast/gif/webm checks follow.
+        """
+        r, cast = _run_capture_block(name, "emptycast", tmp_path, target=True)
+        assert cast.exists() and cast.stat().st_size == 0, (
+            "the fixture did not produce the 0-byte cast the check is for")
+        assert r.returncode != 0, (
+            f"{name}: a 0-byte cast was reported as a finished recording")
+        assert "asciinema wrote no cast" in r.stderr, r.stderr
+
     def test_cli_missing_recorder_status_fails(self, tmp_path):
         """No status file means the pane died before asciinema returned.
 
@@ -5885,6 +5914,47 @@ class TestCaptureFlowExecution:
             f"{shape}: the refused step took the capture-directory claim")
         assert not (tmp_path / "state" / "pipeclaim").exists(), (
             f"{shape}: the refused step attached the transcript pipe")
+
+    @pytest.mark.parametrize("file_mode,message", [
+        (0o755, "is not a directory"),
+        (0o644, "cannot be written"),
+    ], ids=["executable-file", "plain-file"])
+    def test_step_two_refuses_a_capture_path_that_is_not_a_directory(
+            self, file_mode, message, tmp_path):
+        """Step 2's guards are writability, not "is a directory".
+
+        `<capture-dir>` is normally a directory step 0 created, but this step
+        is pasted on its own when a run re-attaches its transcript, and its
+        guards are ``[ -w ]`` and ``[ -x ]`` — both true for an *executable*
+        regular file. A path naming one passed them, the canonicalising ``cd``
+        failed, and the run went on with the capture-dir claim taken on the
+        file and the transcript pipe attached; the pipe's redirect cannot
+        work, so step 5 reported "transcript.log is empty — the pipe-pane
+        stream never wrote to it" for a path that is not a directory
+        (verified live on tmux 3.2a: step 2 exited 0 with the claim on the
+        file and no transcript written). Every other capture-directory guard
+        refuses such a path before it acts on it — step 0's ``mkdir -p``, the
+        render block's ``[ -d "$cast_dir" ]``, and the web-UI blocks' ``-d``
+        — and this is the one pasted alone. A plain (non-executable) file is
+        refused by the ``-x`` half already; the executable shape is the one
+        that ran on.
+        """
+        capture = tmp_path / "capfile"
+        capture.write_text("not a directory\n")
+        capture.chmod(file_mode)
+        r, _cast = _run_block(_step_two_block(), "ok", tmp_path, target=True,
+                              capture=capture)
+        assert r.returncode != 0, (
+            f"mode {file_mode:o}: step 2 accepted a capture path that is not "
+            "a directory")
+        assert message in r.stderr, r.stderr
+        assert str(capture) in r.stderr, (
+            "the refusal does not name the capture path: " + r.stderr)
+        assert not (tmp_path / "state" / "claim.pm-test").exists(), (
+            f"mode {file_mode:o}: the refused step took the capture-dir claim")
+        assert not (tmp_path / "state" / "pipeclaim").exists(), (
+            f"mode {file_mode:o}: the refused step attached the transcript "
+            "pipe")
 
     def test_step_two_refuses_a_relative_capture_dir(self, tmp_path):
         """Step 2's pipe runs in the pm session's directory, not the worker's.

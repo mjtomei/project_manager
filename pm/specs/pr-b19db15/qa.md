@@ -29,6 +29,13 @@ recording-recipe bugs that any worker following the recipe hits:
   write leaves it empty) takes the torn-down branch and is reported as
   "recorder status is missing or empty", not as `asciinema exited  — …`
   (review loop 928f i18, R79);
+- the cast check is `test -s`, so a recorder that reports success but leaves
+  a 0-byte cast (the header write failed while the status landed) is a
+  failure, not a finished recording; and the tmux recipe's step 2 — pasted on
+  its own to re-attach a transcript — refuses a `<capture-dir>` that is not a
+  directory (an executable file passes `[ -w ]`/`[ -x ]`), instead of taking
+  the claim on it and attaching a pipe that cannot write (review loop 928f
+  i19, R80);
 - the CLI no-TTY scaffold writes the cast where the render reads it;
 - the tmux pm-session poll is bounded and waits on the computed session
   (`tmux has-session -t "=$TARGET"`, exact since R37), not on any `pm-`
@@ -772,6 +779,16 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   the pane was torn down before asciinema's exit status was written, so the
   cast is incomplete", not with `asciinema exited  — …`, which names an exit
   status the file does not hold (review loop 928f i18, R79).
+- The recorder exits 0 but its cast is 0 bytes (the header write failed — a
+  full disk, or a cast path that became unwritable after the recorder
+  started — while the status landed) → both recipes fail with "asciinema
+  wrote no cast"; an existence check would accept it as a finished
+  recording with no replay in it (review loop 928f i19, R80).
+- The tmux recipe's step 2 is pasted alone with a `<capture-dir>` that is a
+  regular file (executable, so both `[ -w ]` and `[ -x ]` pass) → the block
+  refuses with "capture directory … is not a directory — run step 0 …",
+  takes no claim and attaches no pipe; a plain file is refused by the
+  writability guard (review loop 928f i19, R80).
 - A quiet or long one-shot CLI command is still recording → it must not be
   killed at the readiness or stop deadline; the stop bound is raised with
   `RECORDER_STOP_TIMEOUT` for a long command. A *mistyped* value (`2m`,

@@ -368,6 +368,23 @@ esac
         "permissions" >&2
     exit 1
 }
+# ... and it has to be a *directory*, not merely something writable and
+# searchable: both checks above are true for an executable regular file, so a
+# <capture-dir> naming one passed them, the `cd` below failed, and the run
+# went on with the capture-dir claim taken on the file and the transcript pipe
+# attached. The pipe's redirect cannot work, so step 5 then reports
+# "transcript.log is empty — the pipe-pane stream never wrote to it" for a
+# path that is not a directory (verified live on tmux 3.2a: step 2 exited 0
+# with the claim on the file and no transcript written). Every other
+# capture-directory guard refuses such a path before it acts on it — step 0's
+# `mkdir -p`, the render block's `[ -d "$cast_dir" ]`, the web-UI blocks' `-d`
+# — and this is the one pasted on its own. Refuse it here, before the claim,
+# as those do.
+[ -d <capture-dir> ] || {
+    echo "capture directory <capture-dir> is not a directory — run step 0" \
+        "(it creates and clears it), then this step; check the path" >&2
+    exit 1
+}
 # The claim names a *directory*, so compare it canonically rather than as the
 # text a worker typed. Step 0 accepts `~/cap` as well as an absolute path, and
 # a quoted `~` never expands, so one directory spelled two ways passed the
