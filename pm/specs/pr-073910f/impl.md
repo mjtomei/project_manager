@@ -175,7 +175,11 @@ sessions today).
    import `pm_core`, so the argv comes from its local `_tmux_argv()` helper
    (`PM_TMUX_SOCKET`, else a `$TMUX` value under `/tmp/pm-sessions/`) rather
    than `tmux_mod._tmux_cmd()`; the socket-directory literal is duplicated
-   there by design (review-loop d1c0 i2).
+   there by design (review-loop d1c0 i2).  The pane→session step also
+   resolves the pane's session through its tmux session *group* (the same
+   test `tmux.current_or_base_session` applies), so a user's own view of
+   the session — however it is named — is the session whose window gets
+   switched (review-loop 2caf i6).
 5. Do not rely on `display-popup` propagating `PM_TMUX_SOCKET` (existing QA
    note pr-2d0588a); the `$TMUX` resolver in (1) is the contract.
 
@@ -2172,3 +2176,48 @@ re-run after the edits (see the PR note); no live session, server or
 shared host configuration was touched — every fixture used a disposable
 socket and the real-tmux repros used disposable sockets and a temporary
 HOME.
+
+## Review iteration (2026-11-01, review-loop 2caf i6)
+
+Verification pass over the head after the i5 fixes.  One user-visible
+defect: the last name-based pane→session resolution on a path this PR
+changed (the QA status pane's window switch).
+
+1. **The QA status pane could not switch the window of a user viewing
+   through their own view.**  `qa_status._find_attached_session()`
+   (priority 1) read the pane's `#{session_name}` and accepted it only
+   when it was `base` or `base~N`.  tmux names the most recently active
+   session of a shared window, and S118/S121/S124 let a user's own view
+   be named anything, so with the user attached through `tmux
+   new-session -t pm-x -s zview` the pane reported `zview`, the test
+   failed, and the function fell back to the base session.  `select-window
+   -t pm-x:<window>` then switched the *base* session's current window,
+   which the user's client does not follow (each session in a group keeps
+   its own current window — verified live on tmux 3.2a: the base moved to
+   `qa` while `zview` stayed on `main`), so the QA pane silently failed to
+   bring its window forward.  The query now returns
+   `#{session_name}:#{session_group}` in one call (`:` cannot occur in a
+   tmux session name; a name may contain spaces or `|`) and accepts the
+   pane's session when it belongs to `base`'s group.  This is the same
+   test `tmux.current_or_base_session` applies, which the function's
+   docstring already claims to mirror; the module stays standalone (no
+   `pm_core` import).  Verified live on a disposable socket: with a client
+   attached to `zview`, `_find_attached_session("pm-x")` returns `zview`
+   and `_switch_to_window` moves `zview` to `qa` (the base stays on
+   `main`).  Tests: `TestQaStatusSocketRouting::test_switches_the_users_own_view`
+   and `::test_ignores_a_pane_in_another_sessions_group`.
+
+Checked and left alone (deliberate, documented scope): priority 2 keeps
+its `base`/`base~N` name match, exactly like `current_or_base_session`'s
+fallback; `tmux.list_clients_in_group()` (`pm session -d`) and
+`sessions_on_window()`'s default candidate set also stay name-based —
+2caf i2 scoped the view-aware candidate set to the detach path only, and
+those callers predate this PR.  Residuals from i5 (the `|`/space formats
+in `attached_group_active_windows` and `switch_sessions_to_window`) are
+unchanged.
+
+Validation: targeted suites (`test_session_socket_isolation`,
+`test_tmux`, `test_cli_helpers`, `test_shared_sessions`, `test_cli_qa`)
+pass; full suite re-run after the edit (see the PR note); every fixture
+used a disposable socket and a temporary HOME — no live session, server
+or shared host configuration was touched.

@@ -253,6 +253,18 @@ def _find_attached_session(base: str) -> str:
     1. Use $TMUX_PANE to identify which grouped session we're in
     2. Fall back to first attached grouped session
     3. Fall back to base session
+
+    Step 1 resolves the pane's session through its tmux session *group*:
+    tmux reports the most recently active view's name for a pane in a
+    shared window, and a user's own view created with ``tmux new-session
+    -t base -s myview`` (S118/S121/S124) need not be named ``base~N``.  A
+    bare name test missed such a view and switched the *base* session's
+    window instead — which the user's client does not follow (each session
+    in a group keeps its own current window), so the QA status pane could
+    not bring its window forward.  The field separator is ``:`` because
+    tmux rewrites ``:`` in session names to ``_`` (a session name may
+    contain spaces or ``|``).  ``current_or_base_session`` applies the same
+    group test; this module cannot import it (it runs standalone).
     """
     # Priority 1: use $TMUX_PANE to find our actual session
     pane = os.environ.get("TMUX_PANE")
@@ -260,11 +272,13 @@ def _find_attached_session(base: str) -> str:
         try:
             result = subprocess.run(
                 _tmux_argv(
-                    "display-message", "-p", "-t", pane, "#{session_name}"),
+                    "display-message", "-p", "-t", pane,
+                    "#{session_name}:#{session_group}"),
                 capture_output=True, text=True,
             )
-            current = result.stdout.strip()
-            if current and (current == base or current.startswith(base + "~")):
+            current, _, group = result.stdout.strip().partition(":")
+            if current and (current == base or current.startswith(base + "~")
+                            or group == base):
                 # Verify it has attached clients
                 att = subprocess.run(
                     _tmux_argv(

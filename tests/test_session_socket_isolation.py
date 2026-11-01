@@ -288,6 +288,60 @@ class TestQaStatusSocketRouting:
                    for cmd in calls), calls
         assert calls[-1][3:] == ["select-window", "-t", "pm-x:main"]
 
+    @staticmethod
+    def _pane_session_fake(calls, name, group, attached="1"):
+        """Fake subprocess.run for a pane reported as ``name`` in ``group``."""
+        class _Result:
+            def __init__(self, stdout):
+                self.returncode = 0
+                self.stdout = stdout
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            fmt = cmd[-1]
+            if fmt == "#{session_name}:#{session_group}":
+                return _Result(f"{name}:{group}\n")
+            if fmt == "#{session_attached}":
+                return _Result(f"{attached}\n")
+            return _Result("pm-x 1\n")
+
+        return fake_run
+
+    def test_switches_the_users_own_view(self, monkeypatch):
+        """A pane in a shared window reports the *view's* name (S124).
+
+        tmux names the most recently active session of a shared window, so
+        with the user attached through their own view the pane reads
+        ``zview``, not ``pm-x``.  The name test missed it and switched the
+        base session's window instead — which the user's client does not
+        follow (each session in a group keeps its own current window) — so
+        the QA status pane could not bring its window forward.  The
+        session group identifies the view as this session.
+        """
+        qa_status = self._module()
+        monkeypatch.setenv("TMUX_PANE", "%7")
+        monkeypatch.setenv("PM_TMUX_SOCKET", "/tmp/pm-sessions/pm-x")
+        calls: list[list[str]] = []
+
+        monkeypatch.setattr(qa_status.subprocess, "run",
+                            self._pane_session_fake(calls, "zview", "pm-x"))
+        qa_status._switch_to_window("pm-x", "main")
+
+        assert calls[-1][3:] == ["select-window", "-t", "zview:main"]
+
+    def test_ignores_a_pane_in_another_sessions_group(self, monkeypatch):
+        """A view of a *different* session must not be switched."""
+        qa_status = self._module()
+        monkeypatch.setenv("TMUX_PANE", "%7")
+        monkeypatch.setenv("PM_TMUX_SOCKET", "/tmp/pm-sessions/pm-x")
+        calls: list[list[str]] = []
+
+        monkeypatch.setattr(qa_status.subprocess, "run",
+                            self._pane_session_fake(calls, "zview", "pm-other"))
+        qa_status._switch_to_window("pm-x", "main")
+
+        assert calls[-1][3:] == ["select-window", "-t", "pm-x:main"]
+
     def test_falls_back_to_the_pm_socket_named_by_tmux(self, monkeypatch):
         qa_status = self._module()
         monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
