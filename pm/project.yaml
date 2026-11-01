@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T09:36:42.950057+00:00'
+  updated_at: '2026-11-01T10:06:32.180651+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38226,6 +38226,39 @@ prs:
       stays dropped.'
     created_at: '2026-11-01T09:36:42Z'
     last_edited: '2026-11-01T09:36:42Z'
+  - id: note-5086ad0
+    text: 'Review loop 928f i23: one leftover in the kept recipe scope, the PR own
+      class (a guard that proves the path''s form, not that the directory is the one
+      the run used); no pm_core change. R83 made the tmux recipe''s steps 3, 4 and
+      5 and the CLI scaffold''s step 4 refuse a *relative* <capture-dir>, but an absolute
+      path that does not exist (step 0 never ran for it, a typo, a wrong <short-name>)
+      still passed, so each step read or wrote a directory the run never used and
+      every failure named the wrong cause. Verified live in this container on tmux
+      3.2a + asciinema 2.1.0: step 3 exited 1 with "recorder exited before it drew
+      — see the cast and <capture-dir>/recorder-stderr.log" for two files that cannot
+      exist; step 5 detached a *live* recorder, exited 1 with "asciinema wrote no
+      cast", and left a complete cast (status 0) in the real capture directory (the
+      same block with the right path exits 0); the CLI step 4 reported the same for
+      a finished recording and kill-server''ed the scaffold holding it (its keepalive
+      session disappeared). Step 3 now refuses a directory that is missing or cannot
+      be written (-d/-w/-x) before the recorder session is created; the read-only
+      steps (tmux 4 and 5, CLI 4) refuse one that is missing or cannot be searched
+      (-d/-x; mode 600 has no search bit) before any send, detach or tmux call. They
+      do not require -w: their job is to read the evidence, so a directory that became
+      read-only must not refuse a finish that can still be validated. Tests: test_step_three_refuses_a_capture_dir_it_cannot_use
+      (missing/mode 500/mode 600), test_tmux_driving_step_refuses_a_missing_capture_dir,
+      test_tmux_stop_block_refuses_a_capture_dir_it_cannot_read (missing/mode 600)
+      and test_cli_stop_block_refuses_a_capture_dir_it_cannot_read (missing/mode 600)
+      — each asserts its own message, that the wrong-cause message is absent, and
+      that no tmux call was made (the recorder session still exists / no kill-server).
+      Mutation check: all eight cases fail against HEAD''s recipes. Recipe file 327
+      passed (was 319); full suite 5524 passed, 1 skipped, 0 failed (472.99 s; markdown
+      installed into a scratch --target). Evidence: /pm-captures/review-928f-i23/
+      (probe.log, mutation-check.log, recipe-file.log, suite.log, suite-interrupted.log,
+      README.md, scripts/). impl.md R84 + Files table, qa.md. The dropped helper/prompt/verifier
+      work stays dropped.'
+    created_at: '2026-11-01T10:06:32Z'
+    last_edited: '2026-11-01T10:06:32Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

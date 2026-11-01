@@ -129,7 +129,18 @@ hits, regardless of how it waits for a background job:
   "asciinema wrote no cast" / "recorder status is missing or empty", the
   driving step's pane save failing where its message pointed, and the CLI
   stop step killing the scaffold server that held the recording. The
-  web-UI driver block refuses
+  *usability* half is the same rule one shape over: an absolute path that is
+  not there (step 0 never ran for it, a typo, a wrong ``<short-name>``) is a
+  directory the run never used, so the same four steps refuse one before any
+  tmux call — step 3 (which writes the cast, the stderr log and the status)
+  on both permission bits, the read-only steps on ``-d`` and ``-x`` (a mode
+  600 directory has no search bit, so its cast cannot be opened by name).
+  Verified live in this container on tmux 3.2a and asciinema 2.1.0: step 3
+  with a missing directory reported "recorder exited before it drew" for two
+  files that cannot exist, step 5 detached a *live* recorder and then
+  reported "asciinema wrote no cast" with a complete cast (status ``0``) one
+  directory over, and the CLI step 4 reported the same and killed the
+  scaffold server. The web-UI driver block refuses
   a capture directory that is missing or cannot be written or entered — its
   existence and permission checks run before its ``cd``, because a directory
   that exists and cannot be searched failed that ``cd`` and was reported as
@@ -6286,6 +6297,179 @@ class TestCaptureFlowExecution:
         assert r.returncode != 0, (
             "the CLI stop step accepted a relative capture directory")
         assert "must be an absolute path" in r.stderr, r.stderr
+        assert "kill-server" not in (
+            calls.read_text() if calls.exists() else ""), (
+            "the refused stop step killed the scaffold server that holds the "
+            "recording: " + (calls.read_text() if calls.exists() else ""))
+
+    # The absolute-path guard only proves the *form* of <capture-dir>. A
+    # paste-alone step given an absolute path that is not there (step 0 never
+    # ran for it, a typo, a wrong <short-name>) reads or writes a directory
+    # the run never used, and the failure surfaces as a different problem.
+    # These cases pin the usability half on the four paste-alone steps that
+    # resolve the path for themselves.
+    @pytest.mark.parametrize(
+        "shape", ["missing", 0o500, 0o600],
+        ids=["missing", "no-write-bit", "no-search-bit"])
+    def test_step_three_refuses_a_capture_dir_it_cannot_use(
+            self, tmp_path, shape):
+        """Step 3 writes the recording through ``<capture-dir>``.
+
+        The pane command writes the cast, asciinema's stderr log and the
+        status into the directory, and step 3 is pasted on its own when a run
+        restarts its recorder. With a path that is not there, or one that
+        cannot be written, those redirects fail before asciinema runs, the
+        pane exits, and the readiness wait reports "recorder exited before it
+        drew — see the cast and <capture-dir>/recorder-stderr.log", naming
+        two files that cannot exist (verified live in this container on tmux
+        3.2a: step 3 alone with a missing capture directory printed exactly
+        that). Refuse it before the session is created, and make no tmux call
+        at all — the recorder session name is shared with concurrent runs.
+        Mode 500 (no write bit) and mode 600 (write bit, no search bit) are
+        the two unusable shapes; the guard needs both ``-w`` and ``-x``.
+        """
+        capture = tmp_path / "cap"
+        if shape != "missing":
+            if not hasattr(os, "geteuid") or os.geteuid() == 0:
+                pytest.skip("root bypasses the directory permission bits")
+            capture.mkdir()
+            capture.chmod(shape)
+        calls = tmp_path / "tmux-calls"
+        try:
+            r, _cast = _run_block(
+                _step_three_block(), "ok", tmp_path, target=True,
+                capture=capture, env_extra={"STUB_TMUX_LOG": str(calls)})
+        finally:
+            if shape != "missing":
+                capture.chmod(0o700)
+
+        assert r.returncode != 0, (
+            "step 3 started a recorder that writes the cast, its stderr log "
+            "and its status into a capture directory it cannot use")
+        assert "missing or cannot be written" in r.stderr, r.stderr
+        assert "recorder exited before it drew" not in r.stderr, (
+            "the refused step reported the recorder failure its guard "
+            "exists to prevent: " + r.stderr)
+        assert not calls.exists(), (
+            "a step that could not use its capture directory acted on the "
+            "recorder session anyway: "
+            + (calls.read_text() if calls.exists() else ""))
+
+    def test_tmux_driving_step_refuses_a_missing_capture_dir(self, tmp_path):
+        """Step 4's failure path saves the pane into ``<capture-dir>``.
+
+        The save is `capture-pane … > <capture-dir>/recorder-pane.log
+        2>/dev/null || true`, so with a path that is not there it writes
+        nothing while the failure message still points at that file — and a
+        wrong path here is the earliest sign that the worker's capture
+        directory is not the one the run used, which the stop step pasted
+        with the same path then reports as a missing recording. Refuse it
+        before any send, so the block neither drives a TUI nor acts on a
+        recorder it cannot report on.
+        """
+        sends = tmp_path / "sends"
+        calls = tmp_path / "tmux-calls"
+        r, _cast = _run_block(
+            _driving_block(), "ok", tmp_path, target=True,
+            sessions=("pm-recorder",), capture=tmp_path / "missing",
+            env_extra={"STUB_TMUX_LOG": str(calls),
+                       "STUB_PM_SEND_LOG": str(sends)})
+
+        assert r.returncode != 0, (
+            "the driving step accepted a capture directory that does not "
+            "exist, so its failure path would save the pane nowhere")
+        assert "missing or cannot be read" in r.stderr, r.stderr
+        assert not sends.exists(), (
+            "the driving step sent keys before refusing its capture "
+            "directory: " + (sends.read_text() if sends.exists() else ""))
+        assert not calls.exists(), (
+            "a step that could not report on the recorder acted on it "
+            "anyway: " + (calls.read_text() if calls.exists() else ""))
+
+    @pytest.mark.parametrize(
+        "shape", ["missing", 0o600], ids=["missing", "no-search-bit"])
+    def test_tmux_stop_block_refuses_a_capture_dir_it_cannot_read(
+            self, tmp_path, shape):
+        """Step 5 reads the completion evidence, and it detaches the recorder.
+
+        With a path that is not there the checks read a directory the
+        recorder never wrote into while the detach still runs — so a *live*
+        recording is ended and the run reports "asciinema wrote no cast" for
+        a cast that exists one directory over. Verified live in this
+        container on tmux 3.2a and asciinema 2.1.0: step 5 pasted with a
+        missing absolute path detached the recorder, exited 1 with that
+        message, and left a complete cast (2.7 KB, status ``0``) in the
+        real capture directory. Mode 600 is the same state for a reader (no
+        search bit), which is why the guard tests ``-x`` too. Refuse it
+        before the recorder is detached.
+        """
+        capture = tmp_path / "cap"
+        if shape != "missing":
+            if not hasattr(os, "geteuid") or os.geteuid() == 0:
+                pytest.skip("root bypasses the directory permission bits")
+            capture.mkdir()
+            capture.chmod(shape)
+        calls = tmp_path / "tmux-calls"
+        try:
+            r, _cast = _run_block(
+                _stop_block("tmux-screen-recording.md"), "ok", tmp_path,
+                target=True, sessions=("pm-recorder",), capture=capture,
+                env_extra={"STUB_TMUX_LOG": str(calls)})
+        finally:
+            if shape != "missing":
+                capture.chmod(0o700)
+
+        assert r.returncode != 0, (
+            "the stop step accepted a capture directory it cannot read, so "
+            "it would report a finished recording as a missing one")
+        assert "missing or cannot be read" in r.stderr, r.stderr
+        assert "asciinema wrote no cast" not in r.stderr, (
+            "the refused step blamed the recorder for a capture directory "
+            "it could not read: " + r.stderr)
+        assert not calls.exists(), (
+            "a step refused for its capture directory detached the recorder "
+            "and stopped the pipe anyway: "
+            + (calls.read_text() if calls.exists() else ""))
+        assert (tmp_path / "state" / "pm-recorder").exists(), (
+            "the refused stop step ended the recorder it could not check")
+
+    @pytest.mark.parametrize(
+        "shape", ["missing", 0o600], ids=["missing", "no-search-bit"])
+    def test_cli_stop_block_refuses_a_capture_dir_it_cannot_read(
+            self, tmp_path, shape):
+        """The CLI stop step reads the evidence, and it kills the server.
+
+        With a path that is not there (or one that cannot be searched) the
+        checks read a directory the recorder never wrote into, report
+        "asciinema wrote no cast" for a recording that finished, and then
+        ``kill-server`` the scaffold that holds it. Verified live in this
+        container on tmux 3.2a and asciinema 2.1.0: step 4 pasted with a
+        missing absolute path exited 1 with that message and killed the
+        server, while the real capture directory held the cast and status
+        ``0``. Refuse it before the wait or any tmux call.
+        """
+        capture = tmp_path / "cap"
+        target = capture / "run"
+        if shape != "missing":
+            if not hasattr(os, "geteuid") or os.geteuid() == 0:
+                pytest.skip("root bypasses the directory permission bits")
+            target.mkdir(parents=True)
+            target.chmod(shape)
+        calls = tmp_path / "tmux-calls"
+        try:
+            r, _cast = _run_block(
+                _stop_block("cli-recording.md"), "ok", tmp_path,
+                capture=capture, env_extra={"STUB_TMUX_LOG": str(calls)})
+        finally:
+            if shape != "missing":
+                target.chmod(0o700)
+
+        assert r.returncode != 0, (
+            "the CLI stop step accepted a capture directory it cannot read")
+        assert "missing or cannot be read" in r.stderr, r.stderr
+        assert "asciinema wrote no cast" not in r.stderr, (
+            "the refused step blamed the recorder for a capture directory "
+            "it could not read: " + r.stderr)
         assert "kill-server" not in (
             calls.read_text() if calls.exists() else ""), (
             "the refused stop step killed the scaffold server that holds the "

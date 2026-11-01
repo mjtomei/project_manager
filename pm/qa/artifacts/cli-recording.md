@@ -111,7 +111,8 @@ the same state one shape over: `mkdir -p` answers 0 for it, so the creation
 guard passes, the clear cannot remove the previous run's files, and the
 pane's redirect fails before asciinema runs — which step 4 reports as
 "asciinema wrote no cast" for a file that cannot exist. Both blocks refuse it
-where the path is known. A leftover cast is worse: without
+where the path is known, and so does the stop step (step 4), which is pasted
+on its own. A leftover cast is worse: without
 `--overwrite` the recorder aborts on it, and the render step rewrites the
 `.mp4` from whatever cast is on disk, so a run that recorded nothing would
 still produce a fresh-looking video of the *previous* run. The no-TTY
@@ -387,6 +388,20 @@ case "<capture-dir>" in
             "created" >&2
         exit 1 ;;
 esac
+# A path that does not exist (or cannot be searched) is the same hole one
+# shape over: the checks below read a directory the recorder never wrote into,
+# report "asciinema wrote no cast" for a recording that finished, and then
+# `kill-server` the scaffold that holds it (verified live in this container on
+# tmux 3.2a and asciinema 2.1.0: step 4 pasted with a missing absolute path
+# exited 1 with that message and killed the server, while the real capture
+# directory held the cast and status `0`). Refuse it here, before the wait or
+# any tmux call.
+[ -d <capture-dir>/<short-name> ] && [ -x <capture-dir>/<short-name> ] || {
+    echo "capture directory <capture-dir>/<short-name> is missing or cannot" \
+        "be read — this step reads the cast and the recorder's status there;" \
+        "use the path the scaffold created" >&2
+    exit 1
+}
 stop_timeout=${RECORDER_STOP_TIMEOUT:-30}
 # Validate the bound before the arithmetic that uses it. A non-numeric value
 # (`2m`, `1.5h`) makes `$(( … ))` fail and leaves `deadline` empty — and in an

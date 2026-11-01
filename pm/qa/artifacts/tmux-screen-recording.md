@@ -97,8 +97,9 @@ the other half: `mkdir -p` answers 0 for it, so the creation guard passes,
 and every write into it fails as something else — the pipe writes nothing and
 the recorder's own redirects fail before asciinema runs, which step 3 reports
 as "recorder exited before it drew" for a cast and a stderr log that cannot
-exist. Step 0 refuses that directory where the path is known, and so does
-step 2, which is pasted on its own. A leftover cast is worse in the other
+exist. Step 0 refuses that directory where the path is known, and so do the
+steps pasted on their own — 2, 3, 4 and 5 — each before it acts on a session
+or a recorder. A leftover cast is worse in the other
 direction: without `--overwrite`, `asciinema rec` aborts on it ("asciinema:
 <path> already exists, aborting" on 2.1.0) and the recorder dies before it
 draws, so the run fails at the readiness wait — loudly, but for a reason
@@ -520,6 +521,24 @@ case "<capture-dir>" in
             "step 5 does not look; use the path step 0 created" >&2
         exit 1 ;;
 esac
+# ... and it has to be there and usable, not only absolute. This step is
+# pasted on its own when a run restarts its recorder, and the pane command
+# writes the cast, asciinema's stderr log and the status into it. With a path
+# that does not exist (step 0 never ran for it) or one that cannot be written,
+# the pane's redirects fail before asciinema runs, the pane exits, and the
+# readiness wait below reports "recorder exited before it drew — see the cast
+# and <capture-dir>/recorder-stderr.log" — the misdiagnosis step 2's and the
+# render blocks' directory guards exist to prevent (verified live on tmux
+# 3.2a: step 3 alone with a missing capture directory printed exactly that,
+# naming two files that cannot exist). Refuse it here, before the session is
+# created.
+[ -d <capture-dir> ] && [ -w <capture-dir> ] && [ -x <capture-dir> ] || {
+    echo "capture directory <capture-dir> is missing or cannot be written —" \
+        "the recorder's cast, its stderr log and its status all go there;" \
+        "run step 0 (it creates and clears it), then this step, and check" \
+        "the path and its permissions" >&2
+    exit 1
+}
 TARGET=${TARGET:-$(pm session name)}
 if [ -z "$TARGET" ]; then
     echo "TARGET is unset and 'pm session name' printed nothing — run this" \
@@ -614,6 +633,20 @@ case "<capture-dir>" in
             "not land where the message points; use the path step 0 created" >&2
         exit 1 ;;
 esac
+# A path that does not exist is the same hole one shape over, and the save
+# fails silently: `capture-pane … > <capture-dir>/recorder-pane.log
+# 2>/dev/null || true` writes nothing, while the failure message still points
+# at that file. It is also the earliest sign that the worker's capture
+# directory is not the one the run used — the stop step pasted with the same
+# path then reads a directory the recorder never wrote into. Refuse it before
+# any send, so a refused step neither drives a TUI nor acts on a recorder it
+# cannot report on.
+[ -d <capture-dir> ] && [ -x <capture-dir> ] || {
+    echo "capture directory <capture-dir> is missing or cannot be read —" \
+        "this step's failure path saves the recorder pane there; use the" \
+        "path step 0 created" >&2
+    exit 1
+}
 TARGET=${TARGET:-$(pm session name)}
 if [ -z "$TARGET" ]; then
     echo "TARGET is unset and 'pm session name' printed nothing — run this" \
@@ -730,6 +763,21 @@ case "<capture-dir>" in
             "path step 0 created" >&2
         exit 1 ;;
 esac
+# A path that does not exist (or cannot be searched) is the same hole one
+# shape over, and this step's checks are the ones it breaks: they read a
+# directory the recorder never wrote into, while the detach below still runs
+# — so a *live* recording is ended and the run then reports "asciinema wrote
+# no cast" for a cast that exists one directory over (verified live in this
+# container on tmux 3.2a and asciinema 2.1.0: step 5 pasted with a missing
+# absolute path detached the recorder, exited 1 with that message, and left a
+# complete cast (2.7 KB) with status `0` in the real capture directory).
+# Refuse it here, before the recorder is detached.
+[ -d <capture-dir> ] && [ -x <capture-dir> ] || {
+    echo "capture directory <capture-dir> is missing or cannot be read —" \
+        "this step reads the cast, the recorder's status and the transcript" \
+        "there; use the path step 0 created" >&2
+    exit 1
+}
 TARGET=${TARGET:-$(pm session name)}
 if [ -z "$TARGET" ]; then
     echo "TARGET is unset and 'pm session name' printed nothing — run this" \

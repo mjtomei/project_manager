@@ -1120,6 +1120,19 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   writes `app.log` (cleared with the rest in step 1, named by the readiness
   failure and in the manifest), and the block returns in under a second
   (review loop 928f i22, R83).
+- The tmux recipe's step 3, 4 or 5, or the CLI scaffold's step 4, is pasted
+  on its own with an *absolute* `<capture-dir>` that does not exist (step 0
+  never ran for it, a typo, a wrong `<short-name>`) or cannot be searched
+  (mode 600) → the step must stop with "capture directory … is missing or
+  cannot be written" (step 3) / "… is missing or cannot be read" (steps 4
+  and 5, CLI step 4) before it creates a session, sends a key, detaches a
+  recorder, stops a pipe or kills the scaffold server. Without the guard the
+  path's *form* was all that was checked: verified live on tmux 3.2a with
+  asciinema 2.1.0 — step 3 reported "recorder exited before it drew" for a
+  cast and stderr log that cannot exist, step 5 detached a live recorder and
+  then reported "asciinema wrote no cast" while a complete cast (status `0`)
+  sat one directory over, and the CLI step 4 reported the same and killed
+  the scaffold holding the recording (review loop 928f i23, R84).
 
 ## Pass / Fail criteria
 
