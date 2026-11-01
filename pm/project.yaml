@@ -45908,7 +45908,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/267
   gh_pr_number: 267
   created_at: '2026-10-27T19:03:40.643246+00:00'
-  updated_at: '2026-11-01T03:12:15.829904+00:00'
+  updated_at: '2026-11-01T03:21:03.653110+00:00'
   started_at: '2026-10-27T19:04:56.616056+00:00'
   reviewed_at: null
   merged_at: null
@@ -46258,6 +46258,29 @@ prs:
       — the capture in the directory is the between-iterations run.'
     created_at: '2026-11-01T03:12:15Z'
     last_edited: '2026-11-01T03:12:15Z'
+  - id: note-0f53531
+    text: 'QA S28 (incident replay: malformed/all-mode/targetless saved state cannot
+      become whole-backlog authority) PASS on 53dffcd0. Four stories, each driven
+      end-to-end on a throwaway project with three pending PRs (D=pr-db2c6ad, T=pr-9d54ac2
+      --depends-on D, U=pr-8819982) and a running TUI; for each: write $HOME/.pm/autostart-resume.json,
+      sha256 it, `pm tui restart` (plain Ctrl+R, no --breadcrumb), poll `pm log grep
+      --source tui`. (1) Incident shape targets-as-dict -> "targets must be a list
+      of PR ids/records, got dict; auto-start remains off" (also observed on the TUI
+      log line and the L log pane). (2) all_mode:true + valid targets -> "requested
+      all-mode (whole backlog); all-mode autostart has been removed". (3) truncated
+      JSON -> "saved state is unreadable (JSONDecodeError)". (4) legacy {"auto_start":true,"run_id":"legacy-run"}
+      -> "saved auto-start state has no target PRs". Every story: status off / no
+      auto-start targets; --json enabled:false mode:off targets:[] runs:[]; only main+scratch
+      windows (no pr-*/merge-* window); all three PRs still [pending]; original file
+      gone and exactly one autostart-resume.rejected-<UTC>.json whose sha256 equals
+      the pre-restart checksum. Focused tests: tests/test_autostart_fail_closed.py
+      106 passed (incl. test_incident_targets_mapping_is_rejected_not_all_mode, test_all_mode_true_rejected_even_with_valid_targets,
+      test_legacy_targetless_auto_start_rejected). Isolation honored: HOME=/scratch/qa28/home
+      (pm_home != ~/.pm), PM_TMUX_SOCKET=/scratch/qa28/tmux.sock, no inherited TMUX/TMUX_PANE,
+      real host session and shared ~/.pm untouched. Captures: /pm-captures/scenarios/28/{story1-dict-targets,story2-all-mode,story3-truncated,story4-targetless}/
+      (cast+mp4+manifest) and README.md.'
+    created_at: '2026-11-01T03:21:03Z'
+    last_edited: '2026-11-01T03:21:03Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
