@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T21:01:48.021832+00:00'
+  updated_at: '2026-11-01T21:33:00.621313+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38764,6 +38764,25 @@ prs:
       stays dropped.'
     created_at: '2026-11-01T21:01:47Z'
     last_edited: '2026-11-01T21:01:47Z'
+  - id: note-f582053
+    text: 'Review loop 928f i39: three claim-releasing failure paths in the kept tmux-recipe
+      scope handed step 5 the state it accepts; no pm_core change. R105: (1) step
+      2 cleared @pm_capture_rejected with the claim, before the transcript pipe attach,
+      so a failed attach released the claim and left the rejected capture unmarked;
+      (2) the driving step send_failed released the claim without a mark, and the
+      recorder can already have ended cleanly (a detach from outside, hidden by the
+      send failure); (3) step 5 failed-detach branch released the claim without a
+      mark, and the recorder can have ended cleanly in that gap. Each path followed
+      by a step-5 paste exited 0 on the truncated cast (stub harness). Fix: the mark
+      is cleared only after the pipe attaches, and both other paths set it before
+      releasing the claim; the message now says "an earlier step rejected this capture".
+      Tests: test_a_rejection_survives_a_re_record_that_cannot_start, test_a_failed_send_does_not_let_a_repaste_accept_the_capture,
+      test_a_detach_race_does_not_let_a_repaste_accept_the_capture; each fails with
+      its fix removed. Recipe file 380 passed (was 377); related suites 199 passed;
+      full suite 5577 passed, 1 skipped, 0 failed (once, final tree). Evidence: /pm-captures/review-928f-i39/.
+      impl.md R105, qa.md. The dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-11-01T21:33:00Z'
+    last_edited: '2026-11-01T21:33:00Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
