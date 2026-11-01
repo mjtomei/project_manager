@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T01:46:40.680190+00:00'
+  updated_at: '2026-11-01T02:09:00.137876+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5552,6 +5552,57 @@ prs:
       v1.5.0 to render casts.'
     created_at: '2026-11-01T01:23:01Z'
     last_edited: '2026-11-01T01:23:01Z'
+  - id: note-c6d5034
+    text: 'QA S10 (shared sessions: joining, plain reattach, window sizing, kill scoping)
+      PASS 7/7 stories on 45d2079f4, no source changes. (1) `pm session --global`
+      created pm-<shared-tag> on /tmp/pm-sessions/<tag> (world-accessible at creation,
+      `srwxrwxrwx`), printed `Creating tmux session ...` + `Session shared with all
+      users.`, and set `window-size smallest` on the base and the ~1 view; `pm session
+      list` showed the `SESSION CLIENTS SOCKET` header with exactly one row marked
+      `(shared)` and CLIENTS 0 after detach; `--print-connect` printed exactly `tmux
+      -S ... attach` and pasting it attached a client to the same server. (2) With
+      a 120x35 and a 200x50 client on the same shared session the window stayed 120
+      wide (`window-size smallest` on base + ~1; TUI pane 120x34 rendering the full
+      120-col layout, and the wide client sees the same window plus tmux padding),
+      and detaching both left the session and TUI running. (3) A plain `pm session`
+      from a plain shell did NOT reattach to S: it created the private twin on its
+      own socket, `pm session list` then showed both projA rows, and plain `pm session
+      kill` removed only the twin. From a shell pane *inside* S the flag-less `pm
+      session` adopts S (same name/socket, no twin, `window-size smallest` on base
+      + ~1) but the attach is refused by tmux with `sessions should be nested with
+      care, unset $TMUX to force`, surfacing as an unhandled TmuxCommandError traceback
+      and rc 1 (recorded as the observed outcome, not fixed). (4) A joiner with a
+      separate HOME and the same uid attached to S on the same socket (~N view), saw
+      A''s windows, and left A''s client and TUI pane/pid untouched; observed disturbance:
+      the joiner prints `TUI pane missing — respawning...` and briefly splits a transient
+      `pm _tui` pane (%3/pid 7754) into A''s window before reconciling — the same
+      heal-path false positive as pr-ea98f71, whose note was extended with this join-from-fresh-HOME
+      trigger. No second uid exists in the container, so the 0777 permission check
+      was not exercised by a different uid. (5) From a shell pane inside private P,
+      `kill --global` targeted projB''s shared tag (`No session ... found.` rc 1,
+      P untouched), `pm session --global` created/attached projB''s shared session
+      on its own server (P and A''s S untouched), the second `kill --global` removed
+      only that server/socket, and with cwd in projA the same command killed S, never
+      P. (6) ctrl+q sent to the TUI pane detached exactly one client per press (first
+      the most recently active ~1 client), left the TUI pane/pid and both sessions
+      alive, and the second press detached the remaining client. (7) With S (2 clients),
+      P (1) and a legacy default-server L (1) running, `pm session list` from a plain
+      pane and from inside S printed identical rows — exactly one `(shared)`, exactly
+      one `(default server)`, no duplicates, counts per whole group — and `--print-connect`
+      pasted into a plain pane raised S to 3 clients. Harness notes: (a) socket mode
+      drift is tmux 3.2a, not pm — plain tmux also chmods a socket 0600->0700 when
+      a client attaches and 0777->0666 when the last client detaches (same inode),
+      so the scenario''s literal `srw-------`/`srwxrwxrwx` checks only hold at creation;
+      verify pm''s own chmod right after create. (b) Do NOT send shell text into a
+      pane that is still attached to a TUI: a stray keystroke hit the TUI''s `meta`
+      action, which cloned a master workdir and wrote ~/.pm/sessions/<tag>/override,
+      silently making in-project `pm` run master instead of /workspace (wrapper chose
+      via override). Always detach from outside (`tmux -S <sock> detach-client -t
+      <tty>`) and confirm `pane_current_command` is bash plus `pm which` = /workspace
+      before typing. (c) `script ... &` in a non-interactive bash stops with SIGTTIN;
+      run the attach as the pane''s foreground command instead. Captures: /pm-captures/scenarios/10/{story1-global-create,story1-list-connect,story2-sizing,story3-plain-reattach,story4-join,story5-kill-scoping,story6-ctrlq,story7-list-connect}/.'
+    created_at: '2026-11-01T02:09:00Z'
+    last_edited: '2026-11-01T02:09:00Z'
   - id: note-3c52fdf
     text: 'QA scenario 9 (user-created grouped views) PASS on 7d149a3a1: all five
       stories verified live. Harness gotchas for the next run, none a product bug:
@@ -47993,11 +48044,24 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-29T13:39:35.560131+00:00'
-  updated_at: '2026-10-29T13:39:35.560131+00:00'
+  updated_at: '2026-11-01T02:09:05.884860+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-f442172
+    text: 'QA S10 on pr-073910f adds a second trigger for this heal-path false positive:
+      a second user joining an existing shared session with a fresh HOME (`env -u
+      PM_HOST_HOME HOME=<fresh> pm session --global --dir <owner project>`) has an
+      empty ~/.pm/pane-registry, so its process prints `TUI pane missing — respawning...`
+      and briefly splits a transient `pm _tui` pane into the owner''s window (observed
+      pane %3/pid 7754 alongside the owner''s %0/pid 6264 on tmux 3.2a) before it
+      exits and is reconciled. The owner''s client and TUI pane id/pid are unchanged
+      and the pane set returns to the original once the join settles, but the transient
+      split is a visible disturbance of the owner''s window. Captures: /pm-captures/scenarios/10/story4-join/
+      (join-panes-poll.log records the pane-set change).'
+    created_at: '2026-11-01T02:09:05Z'
+    last_edited: '2026-11-01T02:09:05Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
