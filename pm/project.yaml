@@ -14331,7 +14331,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-31T23:54:10.951459+00:00'
+  updated_at: '2026-11-01T00:02:00.074384+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -15313,6 +15313,22 @@ prs:
       JSONL cast instead.'
     created_at: '2026-10-31T23:54:10Z'
     last_edited: '2026-10-31T23:54:10Z'
+  - id: note-feca9f3
+    text: 'QA S27 follow-up (capture fix only, no code change): the assigned tmux-screen-recording
+      capture /pm-captures/scenarios/27/story6-tui-signoff-vs-remove/tui-view/ now
+      includes transcript.log, streamed for the whole story with tmux pipe-pane -t
+      <session>:main.0 "cat >> transcript.log" and closed with tmux pipe-pane -t <session>:main.0,
+      as the recipe specifies; the earlier pass had only point-in-time capture-pane
+      snapshots and no scrollback stream. Story 6 was re-run end to end after adding
+      it: all 12 checks still PASS, recording.cast/recording.mp4 and final-frame.png
+      were re-rendered from the new run, and the transcript carries Feature G, Neighbour
+      of G, pr signoff, the exact "Error: PR <G> was removed while opening the sign-off
+      — not marked sign_off and no sign-off window was opened." line (and no marked
+      as sign_off). The manifest Files section documents it. The other six captures
+      are unchanged (CLI recipe: cast + mp4 + manifest, with the driver transcript
+      as an extra). Verdict unchanged: PASS.'
+    created_at: '2026-11-01T00:01:59Z'
+    last_edited: '2026-11-01T00:01:59Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
