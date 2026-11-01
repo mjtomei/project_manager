@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T02:39:05.926108+00:00'
+  updated_at: '2026-11-01T03:06:26.363904+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5695,6 +5695,84 @@ prs:
       check was not exercised by a different uid. Captures: /pm-captures/scenarios/10/{story1-global-create,story1-list-connect,story2-sizing,story3-plain-reattach,story4-join,story5-kill-scoping,story6-ctrlq/{pre-fix,post-fix},story7-list-connect}/.'
     created_at: '2026-11-01T02:39:05Z'
     last_edited: '2026-11-01T02:39:05Z'
+  - id: note-b7f0f73
+    text: 'QA scenario 12 (post-merge integration — project overrides, workdir clones,
+      frames, regression guard) PASS after one fix. All nine stories driven end-to-end
+      on the integrated head with two private-server sessions (A, B), a workdir clone
+      of A whose git-root hash differs, and a non-pm tmux session O on the default
+      server. Fixtures were built with the venv editable install (pm which = /workspace/pm_core,
+      never /opt/pm-src).
+
+
+      FOUND + FIXED (commit 57dfdca02): the TUI connect popup clipped the socket-addressed
+      command. ConnectScreen''s #connect-container was a fixed 70 cells wide, so `tmux
+      -S /tmp/pm-sessions/pm-<tag> attach` (64 chars for an ordinary session name)
+      lost its last two characters at the border — the popup did not show the command
+      it tells the user to run. This fails scenario 12''s "the Connect modal shows
+      ... exactly the same command" Then and qa.md R4''s "the popup shows the same
+      socket-addressed command". The legacy form (`tmux -S <default socket> attach
+      -t <session>`, 73+ chars) clips more. Fix: container `width: auto; min-width:
+      70; max-width: 100%`, command label `width: auto; max-width: 100%; text-wrap:
+      wrap` — short commands keep the historical 70-cell modal (content 64), a normal
+      socket-addressed command shows in full on one line at 80 cols, and a path too
+      long for the terminal wraps. Tests: TestConnectScreenLayout (3 cases) renders
+      the modal headlessly at 80/60 cols and asserts the command''s box fits the container
+      and the text is complete; the two clipping cases fail with the old fixed-width
+      CSS restored. Full suite 5344 passed / 1 skipped. Captures: /pm-captures/scenarios/12/03-connect-modal/{pre-fix,post-fix}/
+      (transcript + cast + mp4; pre-fix shows "...-56403dbe atta", post-fix the full
+      command).
+
+
+      Verified, no source changes: (1) inside A with the shell in the clone, `pm tui
+      view` prints [Session: <A>, Pane: %0] and `pm tui send ''?''` drives A''s TUI
+      to the Help screen — the ambient session wins over the clone''s differing git-root
+      hash; B byte-identical. (2) From a plain shell in the clone, `pm -C <A/pm> session
+      home` and `PM_PROJECT=<A/pm> pm session home` both print "Home window: pm-home
+      (provider: pr-list)" and make pm-home A''s active window; without the override
+      "Not inside a pm tmux session." rc 1; B unchanged. (3) `pm tui view` from a
+      plain shell with cwd A returns A''s live TUI and leaves it unchanged. (4) `pm
+      tui frames --session <A>` and `--session <A~1>` produce byte-identical output
+      with the base [Session: <A>] header; no `<A>~1-frames.json` exists. (5) `pm
+      tui view/send --session <A>-typo` print "No TUI pane found. Is there a pm tmux
+      session running?" rc 1, leave A/B untouched, write no history file. (6) With
+      A killed but its registry still naming the old TUI pane, `pm qa regression qa12-tui-smoke
+      --session <A>` prints "No TUI pane found in session ''<A>''." rc 1, no "Running
+      regression:" line and no pane/window/Claude launch; B''s registry sha256, windows,
+      panes and TUI unchanged. (7) `pm session --print-connect` prints the identical
+      `tmux -S <A socket> attach` (no -t, no default-server form) from a plain shell
+      and from A''s pane; pasting it into a pane of O attaches (list-clients shows
+      <A>~1) and C-b d returns the pane to its shell; the C modal shows the same command.
+      (8) `pm session list` is identical from a plain shell, A''s pane and O''s pane
+      — A and B once each with their own sockets, no "(default server)" row, no qa12-o;
+      O''s windows/panes unchanged and PM_TMUX_SOCKET unset there; `pm session name`/`mobile`
+      report A from both A''s directory and the clone inside A. (9) The L log pane
+      registers on open and deregisters within 1 s of `kill-pane -t %2`, the window
+      rebalances to a single 80x24 TUI pane that stays live; A''s server carries after-split-window/after-kill-pane
+      and PM_TMUX_SOCKET=<A socket> while B''s is <B socket>; B''s registry hash and
+      panes unchanged (B''s TUI differed only in its own periodic sync indicator,
+      synced -> up to date, i.e. the "no-op" state in tui/widgets.py; every other
+      line identical and an idle re-capture was stable).
+
+
+      Captures: /pm-captures/scenarios/12/ — 01-tui-driving (screen recording of the
+      private-server TUI: Help screen, Connect modal, log pane open/close), 02-cli-discovery
+      (stories 2/3/4/5/8 from a plain shell), 03-in-session (stories 1/7/8 from inside
+      A with cwd = clone), 03-connect-modal pre/post, 04-full-suite/full-suite.log,
+      evidence/summary.md.
+
+
+      Harness notes for the next run: (a) `pm tui send` keys issued within a second
+      of a fresh session start can be dropped — one `L` after a restart printed "Sent
+      keys" but produced no view_log log line; the retry worked, so re-send or let
+      the TUI settle. (b) `tmux new-window -t "<session>:"` picks the next free index,
+      so resolve the new pane with `-P -F ''#{pane_id}''` rather than assuming `:1`
+      (I briefly typed into the pm-home pane and restarted A to recover). (c) A `pipe-pane`
+      set before `pm session kill` dies with the pane — set it after the restart.
+      (d) `pm session mobile` from the clone OUTSIDE any pm session correctly names
+      the clone''s own (not running) session; the ambient fallback only applies inside
+      a pm session, which is what the scenario''s Then states.'
+    created_at: '2026-11-01T03:06:26Z'
+    last_edited: '2026-11-01T03:06:26Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
