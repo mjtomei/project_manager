@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T11:46:31.443538+00:00'
+  updated_at: '2026-11-01T12:23:23.502721+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6382,6 +6382,40 @@ prs:
       to ~/.local/bin. Captures: /pm-captures/scenarios/19/{primary,recording}/.'
     created_at: '2026-11-01T11:46:31Z'
     last_edited: '2026-11-01T11:46:31Z'
+  - id: note-74452c8
+    text: 'Review loop b48f i1 (no requirement changes; full suite 5397 passed / 1
+      skipped, 414 s, log /pm-captures/review-b48f-i1/full-suite-final.log). First
+      review pass over the head after the QA S14-S19 runs and the QA S17 fix (6d6bb9e1d).
+      Three fixes. (1) TUI pane launches and rebalances were keyed by a user''s own
+      view name: pane_ops.get_session_and_window()/_launch_in_plans_window()/_focus_plans_window()
+      used the raw tmux.get_session_name(), which returns the most recently created
+      session of a shared window for a pane (verified on this machine: with pm-base
+      + myview grouped, display-message -t <base pane> ''#{session_name}'' returns
+      myview while ''#{session_group}'' is pm-base). registry_path() strips only the
+      ~N suffix, so a pane launched from a TUI viewed through a view was registered
+      in a phantom myview.json the base registry never reads (duplicate notes panes;
+      heal_registry unaware on restart); ~N was harmless only because its suffix is
+      stripped. New pane_ops._pm_session_for(app) prefers app._session_name (the canonical
+      base _session_for_claim derives from current_session_name()) and falls back
+      to pane_registry.pm_session_name(); get_session_and_window() keeps the viewing
+      session''s current window (get_window_id(raw)) so a new pane still opens where
+      the user looks, while the registry key, dedup, EXIT trap and rebalance use the
+      base; _focus_plans_window() hands select_window() the base so it resolves the
+      attached client''s grouped session instead of switching a view the client does
+      not follow. Tests: TestPaneOpsSessionResolution (4 cases; all fail pre-fix).
+      (2) pm session mobile without tmux raised FileNotFoundError and printed the
+      CLI''s generic "Error: [Errno 2] ... tmux" instead of "tmux is not installed.";
+      it now matches session list/kill. Test: TestSessionMobileServerSelection::test_requires_tmux.
+      (3) pm session kill --dir <non-git dir> fell back to the caller''s cwd session,
+      so a mistyped --dir could kill another project''s session; it now refuses with
+      the same message as --print-connect --dir. Test: TestSessionKillServerSelection::test_dir_without_a_session_tag_is_refused
+      (kills the cwd-named session pre-fix). Also committed the working-tree qa.md
+      requirement bullets left by an earlier session (2caf i5/i1, 8d4e i1), correcting
+      the quoting bullet''s iteration reference from 2caf i8 to 2caf i1. Targeted
+      suites 570 passed; pre-fix evidence /pm-captures/review-b48f-i1/pre-fix-new-tests.log.
+      No live session, server or shared host configuration was touched.'
+    created_at: '2026-11-01T12:23:23Z'
+    last_edited: '2026-11-01T12:23:23Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

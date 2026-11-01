@@ -107,7 +107,11 @@ pane unless stated otherwise.
     as living on the default server;
   - running the same command from *inside* a pm pane lists the same set —
     in particular the current session is not listed a second time as a
-    default-server session.
+    default-server session;
+  - a session whose name contains a space or a `|` (both legal in a repo
+    directory name, and in a tmux session name) is listed with its full
+    name and its own socket — never dropped, truncated or split
+    (review-loop 2caf i5).
 
 ### R4 — Connect commands name the right server
 
@@ -122,6 +126,11 @@ pane unless stated otherwise.
   for the connect command either way, **THEN** the printed command names
   the default server's socket *and* the session (`… attach -t <session>`),
   so it still works when pasted inside another pm pane.
+- **GIVEN** a session (private or legacy) whose name contains a space,
+  **WHEN** the user asks for the connect command from the CLI or the TUI
+  popup, **THEN** the printed command quotes the socket path and the
+  session name so the whole command pastes and runs as one shell command
+  (review-loop 2caf i1).
 
 ### R5 — Grouped sessions keep working on the private server
 
@@ -206,6 +215,12 @@ pane unless stated otherwise.
   with no `--session` from a plain shell, **THEN** it reports no TUI found
   rather than driving the other user's TUI; naming that session
   explicitly with `--session` still reaches it.
+- **GIVEN** a pm session whose repo directory name contains a space (so
+  the session name does too), **WHEN** the user runs `pm tui view` /
+  `pm tui send` / `pm tui frames` from a plain shell in that directory,
+  and again from a shell inside that session's own pane, **THEN** it finds
+  and drives that session's live TUI rather than reporting "No TUI pane
+  found" (review-loop 2caf i5).
 
 ### R8 — Killing a session tears down only that session
 
@@ -303,6 +318,12 @@ pane unless stated otherwise.
   legacy project, **THEN** the legacy session is killed and its
   default-server entry disappears from `pm session list`, while the
   private session and its server are untouched.
+- **GIVEN** a legacy session that disappears while `pm session` is
+  starting in its project (another terminal killed it between the lookup
+  and the create), **WHEN** the start completes, **THEN** the session is
+  created on the project's *private* socket — never as a second session on
+  the default server — and the rollout note is not printed for the session
+  that vanished (review-loop 8d4e i1).
 
 ### R11 — Panes, hooks and popups address their own server
 

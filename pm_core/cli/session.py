@@ -905,7 +905,16 @@ def session_kill(start_dir):
     if start_dir:
         from pm_core.paths import get_session_tag
         tag = get_session_tag(start_path=Path(start_dir))
-        session_name = f"pm-{tag}" if tag else _get_session_name_for_cwd()
+        if not tag:
+            # Never fall back to the caller's cwd: `--dir` names the target,
+            # and killing a different project's session because the given
+            # directory is not a git repo is destructive.  Same refusal as
+            # `pm session --print-connect --dir`.
+            click.echo(
+                f"Cannot determine session from directory '{start_dir}'.",
+                err=True)
+            raise SystemExit(1)
+        session_name = f"pm-{tag}"
     else:
         session_name = _resolve_target_session()
 
@@ -985,6 +994,10 @@ def session_mobile(force: bool | None):
     Mobile mode auto-zooms the active pane on every pane switch,
     making the tool usable on narrow terminals (< 120 cols).
     """
+    if not tmux_mod.has_tmux():
+        click.echo("tmux is not installed.", err=True)
+        raise SystemExit(1)
+
     session_name = _resolve_target_session()
     # Target the server that actually hosts the session (private socket, or
     # the legacy default server).

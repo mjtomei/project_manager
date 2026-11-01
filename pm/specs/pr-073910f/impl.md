@@ -2530,3 +2530,67 @@ server untouched), and `pm session list` read-only ("No pm sessions
 found.").
 No live session, server or shared host configuration was touched — every
 fixture used a disposable socket and a temporary HOME.
+
+## Review iteration (2026-11-01, review-loop b48f i1)
+
+First review pass over the head after the QA S14–S19 runs and the QA S17
+fix (`6d6bb9e1d`).  No requirement changes.  Three fixes: one of the
+"a user's own view is not a session of its own" class the earlier
+iterations closed in discovery/detach/kill/QA-status, and two small
+fail-loudly gaps on CLI surfaces this PR made socket-aware.
+
+1. **TUI pane launches and rebalances were keyed by a view's name.**
+   `pane_ops.get_session_and_window()` used the raw
+   `tmux.get_session_name()` for the registry key, the EXIT-trap session
+   and the window lookup.  tmux reports the most recently created session
+   of a shared window for a pane (verified on this machine: with
+   `pm-base` and `myview` grouped, `display-message -t <base pane>
+   '#{session_name}'` returns `myview` while `'#{session_group}'` is
+   `pm-base`), so while a user's own view exists (S118/S121/S124) — or a
+   `pm-x~N` grouped session was created — the raw name is not the pm
+   session.  `registry_path()` strips only the `~N` suffix, so a pane
+   launched from such a TUI was registered in a phantom `myview.json`;
+   the base registry never saw it (duplicate notes panes, and a TUI
+   restart's `heal_registry` unaware of the live pane).  `pm-x~N` was
+   harmless only because its suffix is stripped.  New
+   `pane_ops._pm_session_for(app)` prefers `app._session_name` — the
+   canonical base that `_session_for_claim` derives from
+   `current_session_name()`, which already resolves the group — and falls
+   back to `pane_registry.pm_session_name()` when the app has no session.
+   `get_session_and_window()` keeps the *viewing* session's current window
+   (`get_window_id(raw)`) so a new pane still opens where the user is
+   looking, while the registry key, `launch_pane`'s dedup, the EXIT trap
+   and `rebalance` all use the base.  `_launch_in_plans_window()` and
+   `_focus_plans_window()` (same raw-name use, same phantom registry)
+   take the base too; `select_window()` can then resolve the attached
+   client's grouped session from the group instead of switching a view
+   the client does not follow.  Tests:
+   `TestPaneOpsSessionResolution` (four cases, all verified to fail on
+   the pre-fix module: the raw `myview` was returned/registered/selected).
+2. **`pm session mobile` without tmux** raised `FileNotFoundError` out of
+   `session_exists` and surfaced as the generic
+   `Error: [Errno 2] No such file or directory: 'tmux'`, unlike
+   `pm session list` / `kill`, which print `tmux is not installed.` and
+   exit 1.  It now does the same (`has_tmux()` guard).  Test:
+   `TestSessionMobileServerSelection::test_requires_tmux`.
+3. **`pm session kill --dir <dir>` fell back to the caller's cwd session**
+   when the given directory has no session tag (not a git repo), so a
+   mistyped `--dir` could kill a *different* project's session.  It now
+   refuses with the same message `pm session --print-connect --dir` uses
+   ("Cannot determine session from directory …").  `--dir` is the only
+   caller of the destructive command that names its target explicitly, so
+   there is no fallback to make.  Test:
+   `TestSessionKillServerSelection::test_dir_without_a_session_tag_is_refused`
+   (verified to kill the cwd-named session on the pre-fix code).
+
+Validation: targeted suites (`test_session_socket_isolation`,
+`test_tmux`, `test_cli_helpers`, `test_shared_sessions`, `test_cli_qa`,
+`test_log_message_force`, `test_plans_window_per_plan`,
+`test_plans_pane`, `test_log_pane_backlog`, `test_tui_imports`,
+`test_tui_own_session_name`, `test_popup_session_code`,
+`test_session_registry`, `test_pm_in_tmux_session`) 570 passed; full
+suite **5397 passed / 1 skipped** (414 s, log
+`/pm-captures/review-b48f-i1/full-suite-final.log`).  No
+live session, server or shared host configuration was touched — every
+fixture used a disposable socket or a temporary HOME, and the one live
+tmux check used a throwaway socket under `/tmp`.

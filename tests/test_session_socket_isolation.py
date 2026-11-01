@@ -2343,6 +2343,23 @@ class TestSessionKillServerSelection:
         assert killed == []
         assert sock.exists()
 
+    def test_dir_without_a_session_tag_is_refused(self, monkeypatch, tmp_path):
+        """``--dir`` names the target; never fall back to the caller's cwd.
+
+        A directory that is not a git repo has no session tag.  The old
+        fallback computed the *caller's* cwd session, so a mistyped
+        ``pm session kill --dir`` could kill a different project's session.
+        """
+        monkeypatch.setattr(
+            "pm_core.paths.get_session_tag",
+            lambda start_path=None, use_github_name=True: None)
+        result, killed = self._invoke(monkeypatch, tmp_path, (None, False),
+                                      args=("kill", "--dir", str(tmp_path)))
+
+        assert result.exit_code == 1
+        assert "Cannot determine session" in result.output
+        assert killed == []
+
     def test_legacy_kill_keeps_a_live_private_socket(self, monkeypatch,
                                                      tmp_path):
         """Killing a default-server session must not unlink another server.
@@ -2648,6 +2665,23 @@ class TestSessionMobileServerSelection:
         assert seen["env"] == sock
         assert "not running" in result.output
 
+    def test_requires_tmux(self, monkeypatch):
+        """Without tmux the status query has nothing to ask: say so, exit 1.
+
+        Previously the query raised ``FileNotFoundError`` out of the command
+        and the CLI's generic handler printed ``Error: [Errno 2] ... 'tmux'``
+        — unlike ``pm session list`` / ``kill``, which name the remedy.
+        """
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: False)
+
+        result = CliRunner().invoke(session_mod.session, ["mobile"])
+
+        assert result.exit_code == 1
+        assert "tmux is not installed." in result.output
+
 
 class TestPickExistingSession:
     def test_prefers_the_first_running_candidate(self, monkeypatch, tmp_path):
@@ -2859,6 +2893,128 @@ class TestTuiQuitRestart:
         pane_ops.restart_app(app)
         detach.assert_not_called()
         kill.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# TUI pane operations key the registry by the pm base, not a view name
+# ---------------------------------------------------------------------------
+
+class TestPaneOpsSessionResolution:
+    """Pane launches are keyed by the pm base session.
+
+    tmux reports the most recently created session of a shared window for a
+    pane, so with a user's own view (``tmux new-session -t pm-x -s myview``,
+    S118/S121/S124) the raw name is the view's.  The registry/pidfile/layout
+    files are keyed by the base, so a pane launched through the raw name
+    landed in a phantom ``myview.json`` registry the TUI never reads.
+    """
+
+    def _app(self, session_name=None):
+        from types import SimpleNamespace
+
+        app = SimpleNamespace(log_message=lambda *a, **k: None)
+        if session_name is not None:
+            app._session_name = session_name
+        return app
+
+    def test_get_session_and_window_resolves_a_users_view(self, monkeypatch):
+        from pm_core.tui import pane_ops
+
+        app = self._app("pm-base")
+        monkeypatch.setattr(pane_ops.tmux_mod, "in_tmux", lambda: True)
+        monkeypatch.setattr(pane_ops.tmux_mod, "get_session_name",
+                            lambda: "myview")
+        seen = []
+
+        def fake_window_id(session):
+            seen.append(session)
+            return "@7"
+
+        monkeypatch.setattr(pane_ops.tmux_mod, "get_window_id",
+                            fake_window_id)
+
+        assert pane_ops.get_session_and_window(app) == ("pm-base", "@7")
+        # The window still comes from the session tmux reports for the pane
+        # (the user's view), so the new pane opens where the user looks.
+        assert seen == ["myview"]
+
+    def test_get_session_and_window_resolves_without_an_app_session(
+            self, monkeypatch):
+        from pm_core.tui import pane_ops
+
+        app = self._app()
+        monkeypatch.setattr(pane_ops.tmux_mod, "in_tmux", lambda: True)
+        monkeypatch.setattr(pane_ops.tmux_mod, "get_session_name",
+                            lambda: "myview")
+        monkeypatch.setattr(pane_ops.pane_registry, "pm_session_name",
+                            lambda name: "pm-base")
+        monkeypatch.setattr(pane_ops.tmux_mod, "get_window_id",
+                            lambda session: "@7")
+
+        assert pane_ops.get_session_and_window(app) == ("pm-base", "@7")
+
+    def test_plan_window_registers_under_the_pm_base(self, monkeypatch):
+        from pm_core.tui import pane_ops
+
+        app = self._app("pm-base")
+        app._root = None
+        monkeypatch.setattr(pane_ops.tmux_mod, "in_tmux", lambda: True)
+        monkeypatch.setattr(pane_ops.tmux_mod, "get_session_name",
+                            lambda: "myview")
+        seen: dict[str, str] = {}
+        state = {"created": False}
+
+        def fake_find(session, name):
+            # First lookup: no window yet; second: the window just created.
+            return {"id": "@9"} if state["created"] else None
+
+        def fake_new_window(session, name, cmd, cwd, switch=False):
+            state["created"] = True
+            seen["session"] = session
+            return "%9"
+
+        monkeypatch.setattr(pane_ops.tmux_mod, "find_window_by_name",
+                            fake_find)
+        monkeypatch.setattr(pane_ops.tmux_mod, "new_window_get_pane",
+                            fake_new_window)
+        monkeypatch.setattr(pane_ops.pane_registry, "load_registry",
+                            lambda session: {"generation": "0"})
+        registered: dict = {}
+
+        def fake_register(session, window, panes):
+            registered.update(session=session, window=window, panes=panes)
+
+        monkeypatch.setattr(pane_ops.pane_layout, "register_and_rebalance",
+                            fake_register)
+        monkeypatch.setattr(pane_ops, "_focus_plans_window",
+                            lambda app, plan_id: None)
+
+        pane_ops._launch_in_plans_window(app, "plan-1", "less", "plan")
+
+        assert seen["session"] == "pm-base"
+        assert registered["session"] == "pm-base"
+
+    def test_focus_plans_window_targets_the_pm_base(self, monkeypatch):
+        """``select_window`` must get a real session name, not a view.
+
+        It resolves the attached client's grouped session from the group;
+        handed a view's name it would switch the view's window, which a
+        client attached to ``pm-x~1`` does not follow.
+        """
+        from pm_core.tui import pane_ops
+
+        app = self._app("pm-base")
+        seen = []
+        monkeypatch.setattr(pane_ops.tmux_mod, "in_tmux", lambda: True)
+        monkeypatch.setattr(pane_ops.tmux_mod, "get_session_name",
+                            lambda: "myview")
+        monkeypatch.setattr(pane_ops.tmux_mod, "select_window",
+                            lambda session, window: seen.append(
+                                (session, window)))
+
+        pane_ops._focus_plans_window(app, "plan-1")
+
+        assert seen == [("pm-base", pane_ops._plans_window_name("plan-1"))]
 
 
 # ---------------------------------------------------------------------------

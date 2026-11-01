@@ -138,13 +138,54 @@ def heal_registry(session: str | None) -> None:
 # Core pane infrastructure
 # ---------------------------------------------------------------------------
 
+def _pm_session_for(app, raw_session: str | None = None) -> str | None:
+    """Return the pm base session this TUI belongs to, or ``None``.
+
+    tmux reports the most recently created session of a shared window for a
+    pane, so while a user's own view of the session exists
+    (``tmux new-session -t pm-x -s myview``, S118/S121/S124) — or a grouped
+    session ``pm-x~N`` was created — the raw ``get_session_name()`` is the
+    view's / grouped session's name.  The pane registry, pidfile and layout
+    files are keyed by the *base* session, so a pane launch or rebalance
+    through the raw name registers it in a phantom registry (``myview.json``)
+    and the TUI never sees its own pane.  ``app._session_name`` is the
+    canonical base name (``_session_for_claim`` derives it from
+    ``current_session_name()``, which resolves the session group); fall back
+    to tmux only when the app has no session yet.
+    """
+    session = getattr(app, "_session_name", None)
+    if isinstance(session, str) and session:
+        return session
+    if raw_session is None:
+        try:
+            raw_session = tmux_mod.get_session_name()
+        except OSError:
+            # tmux missing/unexecutable: no session can be resolved.
+            return None
+    if not raw_session:
+        return None
+    try:
+        return pane_registry.pm_session_name(raw_session)
+    except OSError:
+        # Same degrade as ``pm_core.cli.helpers._pm_session_of``: without a
+        # group query the plain base name is the best answer available.
+        return pane_registry.base_session_name(raw_session)
+
+
 def get_session_and_window(app) -> tuple[str, str] | None:
-    """Get tmux session name and window ID. Returns None if not in tmux."""
+    """Get the pm session name and the viewing window ID.
+
+    The session is the *base* pm session (registry files are keyed by it);
+    the window is the current window of the tmux session that reports the
+    pane (a grouped session or a user's view keeps its own current window,
+    which is the one the user is looking at).  Returns None if not in tmux.
+    """
     if not tmux_mod.in_tmux():
         app.log_message("Not in tmux. Use 'pm session' to start a tmux session.")
         return None
-    session = tmux_mod.get_session_name()
-    window = tmux_mod.get_window_id(session)
+    raw_session = tmux_mod.get_session_name()
+    session = _pm_session_for(app, raw_session) or raw_session
+    window = tmux_mod.get_window_id(raw_session)
     return session, window
 
 
@@ -600,7 +641,10 @@ def _focus_plans_window(app, plan_id: str | None) -> None:
     if not tmux_mod.in_tmux():
         return
     try:
-        session = tmux_mod.get_session_name()
+        # The pm base, not the view/grouped name tmux reports for the pane:
+        # select_window resolves the attached client's session from the
+        # group, which it can only do from a real session name.
+        session = _pm_session_for(app)
         if session:
             tmux_mod.select_window(session, _plans_window_name(plan_id))
     except Exception:
@@ -629,9 +673,11 @@ def _launch_in_plans_window(app, plan_id: str | None, cmd: str, role: str,
         launch_pane(app, cmd, role, fresh=fresh)
         return
     try:
-        session = tmux_mod.get_session_name()
+        # Base session: the registry and the EXIT trap are keyed by it, and
+        # a view name (S118/S121/S124) would create a phantom registry.
+        session = _pm_session_for(app)
     except Exception:
-        _log.exception("_launch_in_plans_window: get_session_name failed")
+        _log.exception("_launch_in_plans_window: session resolution failed")
         launch_pane(app, cmd, role, fresh=fresh)
         return
     if not session:
