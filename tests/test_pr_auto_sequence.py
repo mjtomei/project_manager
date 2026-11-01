@@ -53,6 +53,36 @@ def runner():
     return CliRunner()
 
 
+class TestQaStatusForDamagedFile:
+    """``_qa_status_for`` reads the newest ``qa_status.json`` for the
+    auto-sequence tick.  A valid-JSON non-object file is the same
+    damaged-display-file class the TUI resume scan and the status pane
+    handle: it must read as "no overall", not crash the tick."""
+
+    def test_non_object_status_file_reads_as_no_overall(self, tmp_path):
+        from pm_core.cli.pr import _qa_status_for
+
+        status = tmp_path / "qa_status.json"
+        status.write_text("[]")
+        with patch("pm_core.paths.latest_qa_status_path",
+                   return_value=status):
+            overall, path = _qa_status_for("pr-001")
+        assert overall is None
+        assert path == status
+
+    def test_object_status_file_returns_its_overall(self, tmp_path):
+        import json
+
+        from pm_core.cli.pr import _qa_status_for
+
+        status = tmp_path / "qa_status.json"
+        status.write_text(json.dumps({"overall": "ERROR"}))
+        with patch("pm_core.paths.latest_qa_status_path",
+                   return_value=status):
+            overall, _path = _qa_status_for("pr-001")
+        assert overall == "ERROR"
+
+
 class TestPending:
     def test_pending_invokes_pr_start_background(self, runner, tmp_path):
         pr = _pr("pending")

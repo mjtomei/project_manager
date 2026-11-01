@@ -613,6 +613,13 @@ Review the code changes in this PR for quality, correctness, and architectural f
 _QA_SCENARIOS_PATH = "`$CAP/scenarios/<n>/verdict.md`"
 _QA_SCENARIOS_READER = f"{_QA_SCENARIOS_PATH} for all verdicts"
 
+# Fallback when the PR's newest qa_status.json cannot be used: missing,
+# unreadable, or valid JSON that is not an object (a hand-edited/corrupt
+# file).  Same wording for every cause so the sign-off session always gets
+# the same instruction.
+_QA_STATUS_UNREADABLE = (
+    "\n_qa_status.json unreadable — read the captures dir directly._\n")
+
 
 def _qa_scenarios_pointer() -> str:
     """Where a session reads the QA verdicts an abbreviated listing left out.
@@ -664,8 +671,13 @@ def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
     try:
         data = json.loads(latest.read_text())
     except (OSError, ValueError):
-        return ("\n_qa_status.json unreadable — read the captures dir directly._\n",
-                "")
+        return (_QA_STATUS_UNREADABLE, "")
+    # The file is written as an object by ``qa_loop._write_status_file``, but
+    # a hand-edited/corrupt one can hold any valid JSON; a non-object would
+    # raise AttributeError on ``.get()`` and abort the whole sign-off prompt.
+    # Same fallback as an unreadable file.
+    if not isinstance(data, dict):
+        return (_QA_STATUS_UNREADABLE, "")
     head_lines = [f"Overall QA verdict: **{data.get('overall') or '?'}**"]
     if data.get("error"):
         # Normalise whitespace but keep every character.  The error is

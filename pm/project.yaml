@@ -48690,7 +48690,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-11-01T00:21:13.495063+00:00'
+  updated_at: '2026-11-01T01:26:08.682898+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -49186,6 +49186,49 @@ prs:
       = fresh casts/mp4s/evidence. Verdict: PASS.'
     created_at: '2026-11-01T00:21:13Z'
     last_edited: '2026-11-01T00:21:13Z'
+  - id: note-c61f190
+    text: 'Review 3673 i1: the fail-closed boundary is unchanged at 68bbebee. The
+      head moved since 421e i4 only with QA/spec commits (project.yaml), so there
+      are no new source changes to re-review; I re-audited anyway: fresh-run preflight,
+      initial container launch, queued launch, relaunch, resume re-validation, `pm
+      qa debug` and `pm qa run` all abort with cause+remedy and zero host launches
+      when the runtime is unusable; healthy runtime still launches in-container; explicitly
+      disabled mode still runs on the host; no settings mutation. The only remaining
+      container-mode gates (wrap_claude_cmd, build_exec_cmd, container_is_running,
+      container_preflight_error, the route-setup checks) are fail-closed or display-only.
+
+
+      Three readers of qa_status.json still crashed on a valid-JSON non-object file
+      — the damaged-display-file class R18 covers — so all three are fixed:
+
+      - qa_status._load_status returned whatever json.loads produced, so _render''s
+      .get() raised AttributeError and killed the status pane (observed in QA S17,
+      leaving that window with one pane). It now returns None for a non-dict, the
+      same path as a missing/truncated file ("Waiting for qa_status.json...").
+
+      - prompt_gen._signoff_qa_scenarios_parts had the same .get(); the AttributeError
+      escaped into sign-off prompt generation for the whole PR. It now uses the existing
+      "qa_status.json unreadable — read the captures dir directly" fallback, factored
+      into _QA_STATUS_UNREADABLE.
+
+      - cli/pr._qa_status_for (the auto-sequence tick''s QA-status read) had the same
+      .get(); a non-object file now reads as "no overall", the same as an unreadable
+      one. (The tick''s missing branch for a valid overall: "ERROR" stays filed as
+      pr-7abb052 — a dispatch gap, not this crash.)
+
+
+      None of the three readers launches an agent, so this is robustness on the reporting/evidence
+      surfaces, not a change to the launch boundary.
+
+
+      Tests: test_status_pane_tolerates_a_non_object_status_file, TestSignoffQaStatusFallback,
+      TestQaStatusForDamagedFile. Also committed the interrupted QA session''s uncommitted
+      qa.md edit (R18 + pre-integration status wording), extended with the status-pane
+      / sign-off-prompt / auto-sequence reader case. Spec: impl.md "Review iteration
+      (3673 i1)". Full pytest: 5238 passed, 1 skipped, 0 failed. Still out of scope
+      and already filed: pr-7abb052, pr-7b1dd2e, pr-849a3e6.'
+    created_at: '2026-11-01T01:26:08Z'
+    last_edited: '2026-11-01T01:26:08Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

@@ -1474,6 +1474,25 @@ def test_error_block_wraps_inside_the_pane():
         assert "disable container mode" in joined
 
 
+def test_status_pane_tolerates_a_non_object_status_file(tmp_path):
+    """A valid-JSON non-object qa_status.json must not kill the status pane.
+
+    ``_write_status_file`` always writes an object, but a hand-edited or
+    corrupt file can hold any valid JSON.  ``_render`` would raise
+    AttributeError on ``.get()`` and the pane process would exit (leaving a
+    frozen or one-pane window); it is treated as unreadable instead, exactly
+    like a missing or truncated file.
+    """
+    from pm_core import qa_status
+
+    path = tmp_path / "qa_status.json"
+    path.write_text("[]")
+    loaded = qa_status._load_status(path)
+    assert loaded is None
+    out = qa_status._render(loaded, -1, 24, 80, tick=0)
+    assert "Waiting for qa_status.json" in out
+
+
 def test_status_file_marks_waiting_scenarios(tmp_path):
     """The status file is what the TUI renders from, so a waiting scenario
     must be flagged per row (and at the top level) for the ``(waiting)``

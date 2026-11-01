@@ -346,8 +346,10 @@ No **[UNRESOLVED]** ambiguities.
    - R5 resume preflight + `_fail_run_infrastructure` (the local `_abort`
      stays for the other resume failures).
 3. `pm_core/cli/qa.py`: R6.
-4. Tests (new file `tests/test_container_fail_closed.py` plus additions to
-   `tests/test_container.py`):
+4. Tests (new file `tests/test_container_fail_closed.py`, plus additions to
+   `tests/test_qa_loop.py`, `tests/test_qa_resume.py`,
+   `tests/test_qa_input_required.py`, `tests/test_qa_note_recording.py` and
+   `tests/test_worker_route.py`):
    - `_runtime_status` cause strings (missing binary, timeout, nonzero).
    - P1 regression: `_run_qa_sync` with enabled+unavailable → ERROR,
      `_launch_scenarios_in_tmux` / `_launch_scenario_0` / `_launch_scenarios_in_containers`
@@ -759,3 +761,46 @@ asserts the completed `ERROR` is processed and the snapshot cleared, and
 fails on the pre-fix reset). Focused suites after the change:
 `tests/test_qa_resume.py` 93 passed; full pytest on this workdir: see the
 review-loop commit.
+
+## Review iteration (3673 i1)
+
+Re-audited the fail-closed boundary at `68bbebee` (the head moved only with
+QA/spec commits since 421e i4 — no source changes): fresh-run preflight,
+initial container launch, queued launch, relaunch, resume re-validation,
+`pm qa debug` and `pm qa run` still abort with cause+remedy and zero host
+launches; healthy runtime still launches in-container; explicitly disabled
+mode still runs on the host. No new downgrade path was found, and the only
+container-mode gates in the tree (`wrap_claude_cmd`, `build_exec_cmd`,
+`container_is_running`, `container_preflight_error`, the route-setup checks
+in `check_qa_providers`/`model_settings`) are fail-closed or display-only.
+
+Three remaining readers of `qa_status.json` were not hardened when the
+resume scan was (421e i3), and all three crash on a valid-JSON non-object
+file — the same damaged-display-file class R18 covers:
+
+- **The status pane no longer dies on a non-object status file.**
+  `qa_status._load_status` returned whatever `json.loads` produced, and
+  `_render` then called `.get()` on it: an `AttributeError` killed the pane
+  process (observed in QA S17, which left that window with one pane). It
+  now returns `None` for a non-dict, the same path as a missing or truncated
+  file, so the pane shows "Waiting for qa_status.json..." and keeps
+  refreshing.
+- **The sign-off prompt no longer aborts on a non-object status file.**
+  `prompt_gen._signoff_qa_scenarios_parts` had the same `.get()` on the
+  parsed value; the `AttributeError` escaped into prompt generation for the
+  whole PR. It now uses the existing "qa_status.json unreadable — read the
+  captures dir directly" fallback (factored into `_QA_STATUS_UNREADABLE` so
+  both causes print the same instruction).
+- **The auto-sequence tick no longer crashes on a non-object status file.**
+  `cli/pr._qa_status_for` (the tick's QA-status read) had the same `.get()`;
+  the file now reads as "no overall", the same as an unreadable one. (The
+  tick's *missing branch* for a valid `overall: "ERROR"` stays filed as
+  pr-7abb052 — that is a dispatch gap, not this crash.)
+
+None of the three readers ever launches an agent, so this is robustness on
+the reporting/evidence surfaces, not a change to the launch boundary.
+
+Tests added: `test_status_pane_tolerates_a_non_object_status_file`,
+`TestSignoffQaStatusFallback` (non-object → fallback; object → the overall
+verdict and error are still inlined), and `TestQaStatusForDamagedFile`
+(non-object → no overall; object → its overall).

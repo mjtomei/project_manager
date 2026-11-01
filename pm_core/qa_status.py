@@ -73,9 +73,16 @@ _SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"
 def _load_status(path: Path) -> dict | None:
     """Load qa_status.json, returning None if missing or invalid."""
     try:
-        return json.loads(path.read_text())
+        data = json.loads(path.read_text())
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return None
+    # ``qa_loop._write_status_file`` always writes an object, but a
+    # hand-edited or corrupt file can hold any valid JSON.  A non-dict would
+    # raise AttributeError on ``.get()`` in _render and kill the status pane
+    # (it would stop refreshing, leaving a frozen or one-pane window).
+    # Treat it exactly like an unreadable file: show "Waiting for
+    # qa_status.json..." and keep refreshing.
+    return data if isinstance(data, dict) else None
 
 
 def _truncate(text: str, width: int) -> str:

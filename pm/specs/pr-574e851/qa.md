@@ -72,12 +72,19 @@ keep working alongside the fail-closed boundary.
     status write performed *during* the initial launch keeps the
     not-yet-started scenarios listed as `queued`, for the container **and**
     host launchers (the launch batch no longer narrows the status file).
+- `pm_core/tui/qa_loop_ui.py` `_resume_incomplete_qa` — the restart scan is
+  tolerant of a damaged display file (i3/i4): a valid-but-non-object
+  `qa_status.json` (`[]`, `"x"`) no longer raises and aborts the scan for
+  every PR's snapshot, and a completed run's `overall` survives a transient
+  failure of the second status read, so an `ERROR` run is not re-adopted and
+  re-aggregated.
 - `pm_core/cli/qa.py`: `qa_run` prints `qa_error_detail(state)` (cause +
   remedy) on stderr after the progress line and exits nonzero when the
   result is `ERROR` (a completed PASS/NEEDS_WORK/INPUT_REQUIRED still exits
   0); `qa_debug` resolves container mode and fails closed **before**
-  creating a workdir/clone, and converts any `create_qa_container` failure
-  into a message + exit 1 (only its own container released).
+  creating a workdir/clone, converts any `create_qa_container` failure
+  into a message + exit 1 (only its own container released), and reports a
+  window-creation failure instead of printing "Launched debug session".
 - `pm_core/qa_status.py` `_render` — the QA status dashboard's ERROR block
   wraps each cause/remedy line to the pane width (indent preserved) instead
   of letting a ~190-column fail-closed line wrap on its own and scroll the
@@ -94,7 +101,7 @@ reaches planning, the planner (and Scenario 0) legitimately run on the host —
 container-eligible refiner/worker/scenario agent**, and, for the fresh-run
 preflight abort, zero launches of anything at all.
 
-## Status of the earlier QA runs (2026-10-29)
+## Status of the earlier QA runs (2026-10-29, pre-integration)
 
 The first QA run drove scenarios 1–7 and covered R1–R14: six PASS, one
 NEEDS_WORK (a queued scenario vanished from `qa_status.json` — fixed in
@@ -113,10 +120,21 @@ run's other checks (relaunch inside the same container; lost container fails
 closed with cause in the log, status file and a single QA ERROR note; TUI
 restart does not resume or re-run) passed.
 
-The locked scenarios 1–10 are not re-emitted. New scenarios cover the
-pane-wrap fix, the runtime-cause variants not yet driven end to end (timeout,
-unexecutable runtime), the healthy `pm qa debug` control, and the adjacent
-shared-launcher (review) fail-closed behaviour.
+A third run drove scenarios 11–14 (pane wrap + mid-run cause + restart;
+runtime failure modes through `pm qa run` including timeout/unexecutable
+runtime/retry/concurrency; healthy `pm qa debug` plus its fail-closed and
+disabled controls; the adjacent review-refiner launcher). All four PASSed on
+the then-current head.
+
+**All of these verdicts predate the 2026-10-31 #249 integration and are
+historical — they must not be reused as evidence for the combined head.** The
+locked scenarios 1–14 are not re-emitted. The fresh sequence (15+) re-drives
+the fail-closed boundary against the integrated head, with emphasis on what
+the merge changed or newly touched: #249's container recreation on relaunch
+(see R11), the merged queued-status wiring (both launchers), in-window
+relaunch and resume ownership, plus the i3/i4 restart-scan robustness (R18)
+and the R6b `pm qa debug` window-creation failure, none of which the earlier
+runs exercised on the combined code.
 
 ## Requirements (Given / When / Then)
 
@@ -319,6 +337,31 @@ shared-launcher (review) fail-closed behaviour.
 - **Then** the header stays visible and every error line still fits the
   pane width at each size.
 
+### R18 — A damaged status file does not break its readers
+- **Given** two PRs each with an interrupted QA run, and one of the two QA
+  workdirs has a damaged `qa_status.json` (truncated, or valid JSON that is
+  not an object — the kind of partial write a full disk or a killed process
+  leaves),
+- **When** the user restarts the pm session/TUI and the resume scan runs,
+- **Then** the damaged PR's run is treated as incomplete (not crash the scan),
+  the other PR's run is still resumed with its requested execution mode, and
+  no host agent is launched for either run.
+- **Given** a container-mode run that already completed `ERROR` (the status
+  file holds `overall: "ERROR"` with the cause) and the TUI restarts while
+  that file is briefly unreadable (a concurrent rewrite / partial write),
+- **When** the resume scan processes it,
+- **Then** the run is still treated as completed with the known `ERROR`
+  result — it is not resumed or re-aggregated, and no host agent starts.
+- **Given** a QA workdir whose `qa_status.json` holds valid JSON that is not
+  an object (`[]`),
+- **When** the status pane renders it, the sign-off prompt is generated for
+  that PR, and an auto-sequence tick reads the PR's QA status,
+- **Then** the pane keeps running (it shows "Waiting for qa_status.json..."
+  and refreshes rather than exiting), the sign-off prompt still builds,
+  carrying the "qa_status.json unreadable — read the captures dir directly"
+  fallback, and the tick treats the run as having no result instead of
+  crashing.
+
 ## Setup (cross-cutting)
 
 - Install pm from the PR checkout (`pip install -e .`, or `./install.sh
@@ -401,6 +444,26 @@ infrastructure failures.
   runtime (stub or real inner runtime) and then break it. Directly writing the
   settings file is allowed only as a fallback and must be inside the scratch
   HOME.
+- **Driving the R6b window-creation failure.** Use a runtime stub whose
+  `run`/create step pauses a few seconds; while `pm qa debug` is between the
+  preflight (which already resolved the pm session) and its window creation,
+  a concurrent actor kills the isolated tmux server. The create succeeds, the
+  window cannot be made, and the command must exit 1 without claiming a
+  launch. Killing the whole tmux server is fine here because it is the
+  scratch session on a private socket, never the real host's.
+- **Driving "container gone and unrecreatable" (R11).** Force-remove the
+  scenario container while its window dies, and make recreation impossible by
+  also removing the scenario's host clone (`s-<n>/repo`) or by breaking the
+  runtime. A container that can still be recreated from its clone is
+  expected to recover (#249), not fail.
+- **Driving the R18 damaged status file.** After interrupting a run, write a
+  valid-but-non-object JSON document (e.g. `[]`) into that run's
+  `qa_status.json`; this is the partial-write shape, and the user-visible
+  requirement is that the restart scan still handles the other PR's run.
+- **How to reach a timeout or an unexecutable runtime.** A runtime stub can
+  model all three causes: not on PATH (missing binary), a slow `info` (sleep
+  past the 10s timeout), and a nonzero `info` with a stderr line. Assert the
+  message names the same cause and that no host launch marker is written.
 - **Fake runtime vs real nested runtime.** Either is acceptable for
   establishing state, provided host-launch detection is independent (a
   `claude` marker stub) and the capture manifest states which was used. Real

@@ -961,6 +961,43 @@ class TestPrompt:
         # merge is always a recommendation now (no autonomy/hardcoded gate)
         assert "never merges" in p.lower()
 
+class TestSignoffQaStatusFallback:
+    """A damaged qa_status.json must not abort the sign-off prompt.
+
+    ``_signoff_qa_scenarios_parts`` is inlined into the prompt the sign-off
+    session reads; an unhandled AttributeError here fails prompt generation
+    for the whole PR.  A valid-JSON non-object file is treated like an
+    unreadable one (the fallback tells the session to read the captures).
+    """
+
+    def test_non_object_status_file_uses_the_unreadable_fallback(self,
+                                                                 tmp_path):
+        from pm_core import prompt_gen
+
+        status = tmp_path / "qa_status.json"
+        status.write_text("[]")
+        with patch("pm_core.paths.latest_qa_status_path",
+                   return_value=status):
+            head, listing = prompt_gen._signoff_qa_scenarios_parts("pr-001")
+        assert "unreadable" in head
+        assert listing == ""
+
+    def test_object_status_file_still_inlines_overall_and_error(self,
+                                                               tmp_path):
+        import json
+
+        from pm_core import prompt_gen
+
+        status = tmp_path / "qa_status.json"
+        status.write_text(json.dumps({"overall": "ERROR",
+                                      "error": "container runtime down"}))
+        with patch("pm_core.paths.latest_qa_status_path",
+                   return_value=status):
+            head, _listing = prompt_gen._signoff_qa_scenarios_parts("pr-001")
+        assert "ERROR" in head
+        assert "container runtime down" in head
+
+
 class TestTuiKeybinding:
     def test_signoff_binding_present_and_shown(self):
         from pm_core.tui.app import ProjectManagerApp
