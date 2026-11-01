@@ -1403,6 +1403,10 @@ def create_qa_container(
       - *extra_rw_mounts* (rw): anything else the caller grants, e.g. the
         project registry a regression run files findings into
 
+    *pr_id* also names the captures dir mounted at /pm-captures
+    (``captures/<pr_id>/``).  A regression run passes
+    ``regression/<test-id>/<run-id>`` so only that run's dir is mounted.
+
     The container has no access to the parent repo's git directory.
     If *allowed_push_branch* is set, a push proxy is started so the
     scenario can push fixes to the PR branch.

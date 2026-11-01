@@ -439,10 +439,17 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
     # Created once the session is ready to start (below), so a run that
     # never launched leaves nothing in the evidence store.
     run_captures = captures_base / test_id / run_id
+    # The container's captures key: only this run's directory is mounted
+    # (at /pm-captures, marked with this key), never captures/regression/
+    # as a whole.  A session cannot touch other tests' or earlier runs'
+    # evidence, and a nested regression run started inside the container
+    # (a test of `pm qa regression` itself) gets no mount for its own
+    # captures, since its key differs (fail closed, paths.captures_dir).
+    captures_key = f"regression/{test_id}/{run_id}"
     if use_containers:
         wd_in = container_mod._CONTAINER_WORKDIR
         scratch_in = container_mod._CONTAINER_SCRATCH
-        captures_in = f"{CONTAINER_CAPTURES_MOUNT}/{test_id}/{run_id}"
+        captures_in = CONTAINER_CAPTURES_MOUNT
         registry_in = CONTAINER_REGISTRY_MOUNT
     else:
         wd_in, scratch_in = str(clone_path), str(scratch_path)
@@ -473,10 +480,10 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
         if use_containers:
             cname = container_mod.qa_container_name(
                 f"regression-{test_id}", run_id, 0, session_tag=session_tag)
-            # Captures mount at /pm-captures (captures/regression/ on the
-            # host).  No push proxy: a regression run never pushes.  The
-            # project's pm dir is mounted only when findings are filed, so
-            # filed PRs reach the real registry and nothing else of the
+            # This run's captures dir mounts at /pm-captures (creating it
+            # on the host).  No push proxy: a regression run never pushes.
+            # The project's pm dir is mounted only when findings are filed,
+            # so filed PRs reach the real registry and nothing else of the
             # project is reachable.
             container_mod.create_qa_container(
                 name=cname,
@@ -485,7 +492,7 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
                 scratch_path=scratch_path,
                 allowed_push_branch=None,
                 session_tag=session_tag,
-                pr_id="regression",
+                pr_id=captures_key,
                 extra_rw_mounts=({root: CONTAINER_REGISTRY_MOUNT}
                                  if file_prs else None),
             )
@@ -524,9 +531,17 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
             click.echo(f"Could not build the regression session: {exc}",
                        err=True)
         shutil.rmtree(qa_workdir, ignore_errors=True)
+        # Container creation makes the run's (still empty) captures dir for
+        # its mount; drop it, and the test's dir if this was its first run.
+        # rmdir only removes empty directories, so no evidence is lost.
+        for d in (run_captures, run_captures.parent):
+            try:
+                d.rmdir()
+            except OSError:
+                break
         raise SystemExit(1)
 
-    # In container mode this lands inside the captures/regression/ mount.
+    # In container mode this is the directory mounted at /pm-captures.
     run_captures.mkdir(parents=True, exist_ok=True)
     (run_captures / "prompt.md").write_text(prompt)
 

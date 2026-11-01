@@ -219,10 +219,12 @@ def test_container_run_uses_a_qa_container(project, home):
     assert result.exit_code == 0, result.output
 
     (workdir,) = _qa_workdirs(home)
+    run_id = workdir.name.removeprefix("regression-demo-")
     kw = spies.create.call_args.kwargs
     assert kw["workdir"] == workdir / "s-0" / "repo"
     assert kw["scratch_path"] == workdir / "s-0" / "scratch"
-    assert kw["pr_id"] == "regression"  # mounts captures/regression/
+    # Mounts only this run's captures dir, never captures/regression/.
+    assert kw["pr_id"] == f"regression/demo/{run_id}"
     assert kw["allowed_push_branch"] is None
     assert kw["extra_rw_mounts"] is None
     assert "-qa-regression-demo-" in kw["name"]
@@ -233,7 +235,10 @@ def test_container_run_uses_a_qa_container(project, home):
     prompt = build["prompt"]
     assert "inside a pm QA container" in prompt
     assert "`/scratch/qa-instructions/setup.md`" in prompt
-    assert "/pm-captures/demo/" in prompt
+    assert "\n    /pm-captures\n" in prompt
+    assert "/pm-captures/demo" not in prompt
+    (captures,) = _run_captures(home)
+    assert captures.parent.name == run_id
 
     exec_args = spies.exec_cmd.call_args
     assert exec_args.args[:2] == (kw["name"], "CLAUDE-CMD")
@@ -260,6 +265,54 @@ def test_container_run_fails_closed_when_runtime_unavailable(project, home):
     assert _qa_workdirs(home) == []
     spies.build.assert_not_called()
     spies.execvpe.assert_not_called()
+
+
+def test_container_setup_failure_drops_the_mounted_captures_dir(project,
+                                                               home):
+    """Container creation makes the run's captures dir for its mount; a
+    failure after that leaves no empty run (or test) dir behind, and keeps
+    other runs' evidence."""
+    from pm_core.paths import captures_dir, get_session_tag
+    # The tag the runner uses outside a pm session.
+    tag = get_session_tag(start_path=project.repo)
+    earlier = captures_dir("regression", session_tag=tag) / "other" / "r0"
+    earlier.mkdir(parents=True)
+    (earlier / "manifest.md").write_text("kept")
+
+    def create(**kw):
+        captures_dir(kw["pr_id"], session_tag=kw["session_tag"]).mkdir(
+            parents=True, exist_ok=True)
+        return "cid"
+
+    build = MagicMock(side_effect=RuntimeError("bridge down"))
+    result, spies = _run_regression(
+        project, ["demo"], container_enabled=True,
+        create=MagicMock(side_effect=create),
+        extra_patches=[patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                             build)])
+    assert result.exit_code == 1
+    assert "bridge down" in result.output
+    regression = earlier.parent.parent
+    assert not (regression / "demo").exists()
+    assert (earlier / "manifest.md").read_text() == "kept"
+    spies.execvpe.assert_not_called()
+
+
+def test_nested_run_in_a_regression_container_gets_no_mount(tmp_path, home,
+                                                            monkeypatch):
+    """Inside a regression container, /pm-captures belongs to that run
+    only: a nested regression run's captures fail closed instead of
+    landing in the enclosing run's evidence."""
+    import pm_core.paths as paths
+    mount = tmp_path / "pm-captures"
+    mount.mkdir()
+    monkeypatch.setattr(paths, "CONTAINER_CAPTURES_MOUNT", str(mount))
+    monkeypatch.setenv(paths.CAPTURES_PR_ENV, "regression/outer/r1")
+    # The container's ~/.pm has no captures for the run's own key, so the
+    # run itself resolves to the mount; nothing else does.
+    assert paths.captures_dir("regression/outer/r1", session_tag="t") == mount
+    assert paths.captures_dir("regression", session_tag="t") != mount
+    assert paths.captures_dir("regression/inner/r2", session_tag="t") != mount
 
 
 def test_container_create_failure_launches_nothing(project, home):
@@ -422,6 +475,45 @@ def test_tui_regression_item_with_empty_library_logs(project):
         app.log_message.call_args.args[0])
 
 
+def _command_bar(project, cmd):
+    """Submit *cmd* in the TUI command bar; returns (app, launch_pane,
+    run_command) spies."""
+    from pm_core.tui import pane_ops, pr_view
+    app = MagicMock()
+    app._root = project.root
+    app._plans_visible = False
+    app.run_worker = MagicMock(side_effect=lambda coro, **kw: asyncio.run(coro))
+    with patch.object(pane_ops, "launch_pane") as launch, \
+            patch.object(pr_view, "run_command") as run_cmd, \
+            patch.object(container_mod, "is_container_mode_enabled",
+                         return_value=False):
+        pr_view.handle_command_submitted(app, cmd)
+    return app, launch, run_cmd
+
+
+def test_command_bar_runs_a_regression_in_a_pane(project):
+    """The run is an interactive foreground session: never the command
+    bar's captured 30 s subprocess, which would kill it."""
+    app, launch, run_cmd = _command_bar(
+        project, "qa regression --branch dev demo --file-prs")
+    run_cmd.assert_not_called()
+    launch.assert_called_once_with(
+        app, f"pm -C {project.root} qa regression --branch dev demo "
+             "--file-prs", "qa-item", target_window=None)
+
+
+def test_command_bar_regression_checks_the_test_id_first(project):
+    app, launch, run_cmd = _command_bar(project, "qa regression nope")
+    launch.assert_not_called()
+    run_cmd.assert_not_called()
+    assert "Unknown regression test: nope" in (
+        app.log_message.call_args.args[0])
+
+    app, launch, _ = _command_bar(project, "qa regression --file-prs")
+    launch.assert_not_called()
+    assert "Usage: qa regression" in app.log_message.call_args.args[0]
+
+
 # ---------------------------------------------------------------------------
 # Other surfaces
 # ---------------------------------------------------------------------------
@@ -453,6 +545,10 @@ def test_discovery_prompt_handles_an_empty_library():
     assert "regression library empty, nothing scheduled" in out
     assert "pm qa launch regression:<id> --target-window discovery" in out
     assert "isolated QA" in out
+    # In-flight panes are identified by what they started, not by the
+    # current command (in container mode that is the runtime's exec).
+    assert "#{pane_start_command}" in out
+    assert "qa regression <id>" in out
 
 
 def test_regression_container_argv_mounts_only_scratch_captures_registry(
@@ -481,7 +577,7 @@ def test_regression_container_argv_mounts_only_scratch_captures_registry(
             config=container_mod.ContainerConfig(),
             workdir=clone, scratch_path=scratch,
             allowed_push_branch=None, session_tag="tag",
-            pr_id="regression",
+            pr_id="regression/demo/r1",
             extra_rw_mounts={registry: "/pm-project"},
         )
     args = runtime.call_args_list[0].args
@@ -490,8 +586,11 @@ def test_regression_container_argv_mounts_only_scratch_captures_registry(
     captures = home / ".pm" / "sessions" / "tag" / "captures" / "regression"
     assert f"{clone}:/workspace" in mounts
     assert f"{scratch}:/scratch" in mounts
-    assert f"{captures}:/pm-captures" in mounts
+    # Only this run's captures dir, created for the mount.
+    assert f"{captures / 'demo' / 'r1'}:/pm-captures" in mounts
+    assert (captures / "demo" / "r1").is_dir()
+    assert not any(m.startswith(f"{captures}:") for m in mounts)
     assert f"{registry}:/pm-project" in mounts
-    assert "PM_CAPTURES_PR=regression" in args
+    assert "PM_CAPTURES_PR=regression/demo/r1" in args
     assert not any(_CONTAINER_SOCKET_DIR in m for m in mounts)
     proxy.assert_not_called()

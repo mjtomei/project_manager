@@ -85,18 +85,28 @@ Change:
   addendum. Prompt edits are limited to this targeting replacement.
 - Captures: `paths.captures_dir("regression", session_tag=...)` →
   `~/.pm/sessions/<tag>/captures/regression/<test-id>/<run-id>/` (the
-  documented layout). In container mode `create_qa_container(pr_id="regression")`
-  mounts `captures/regression/` at `/pm-captures` with
-  `PM_CAPTURES_PR=regression`, so the in-container path is
-  `/pm-captures/<test-id>/<run-id>/`. The assembled prompt is saved there as
-  `prompt.md` (mirrors `_write_scenario_capture_file(..., "prompt.md")`).
-  The per-run directory and `prompt.md` are written only once the session
-  command is built (container created), immediately before exec, so a run
+  documented layout). In container mode
+  `create_qa_container(pr_id="regression/<test-id>/<run-id>")` mounts only
+  that run's directory at `/pm-captures` with `PM_CAPTURES_PR` set to the
+  same key, so the in-container path is `/pm-captures` (review fc31 i4). A
+  session cannot reach other tests' or earlier runs' evidence, and a nested
+  regression run inside the container gets no mount for its own captures
+  (the key differs; `captures_dir` fails closed). The assembled prompt is
+  saved there as `prompt.md` (mirrors
+  `_write_scenario_capture_file(..., "prompt.md")`). `prompt.md` is written
+  only once the session command is built (container created), immediately
+  before exec; if setup fails after container creation made the empty run
+  dir, the runner removes it (and the test's dir if it is empty), so a run
   that never launched leaves no evidence of one. Never committed to Git.
 - `pm qa launch regression:<id>` and the TUI regression launch run
   `pm -C <root> qa regression <id> --file-prs` in their pane/window (the TUI
   already launches `pm qa debug --foreground <id>` the same way), so all three
   surfaces share one environment builder and produce identical runs.
+- `qa regression <args>` typed in the TUI command bar also runs in a pane
+  (`pane_ops.launch_regression_command`, same pre-launch check). The command
+  bar's default path is a captured subprocess with a 30 s timeout, which
+  would block the TUI and then SIGKILL the foreground session before its
+  container cleanup trap runs (review fc31 i4).
 - `pm qa standalone <id>` refuses a regression id and points at
   `pm qa regression <id>`, so it is no longer a host/live-session path for
   regression tests. `pm qa run` / `pm qa debug` keep their regression
@@ -108,12 +118,17 @@ Change:
   in the library (pm/qa/regression/ is empty)…" with the authoring commands.
   Unknown id with a non-empty library keeps "Unknown regression test".
 - `pm qa list` regression section shows `(none)` plus the authoring hint.
-- TUI QA pane already renders "Regression Tests (0)" with no items; Enter on
-  an absent item logs "QA item not found". Unchanged.
+- TUI QA pane already renders "Regression Tests (0)" with no items
+  (unchanged). A regression launch for an absent id logs the
+  empty-library / unknown-id message (`regression_launch_problem`).
 - Discovery supervisor prompt: inventory with `2>/dev/null`; an empty
   listing means nothing is scheduled this tick (logged), never a run/PASS; a
   failed `pm qa launch` is recorded as not run. Step 4 describes the
   isolated launch instead of implying the test shares the watcher's session.
+  Step 2 lists `#{pane_start_command}` too: a regression pane's current
+  command is no longer always `claude` (in container mode it is the runtime's
+  `exec`), and its start command names the test (`qa regression <id>`)
+  (review fc31 i4).
 - Docs: `pm_core/docs/qa_library.md` — remove the `[!CAUTION]` callout (PR
   note), rewrite the Regression tests section for the isolated run, update the
   directory table, captures text and the surfaces table. CLI help

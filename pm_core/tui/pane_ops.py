@@ -513,7 +513,8 @@ def launch_watcher_review(app) -> None:
 
 
 async def _launch_regression_item(app, qa_id: str,
-                                  target_window: str | None) -> None:
+                                  target_window: str | None,
+                                  cmd: str | None = None) -> None:
     """Run regression test *qa_id* in a pane, unless it cannot launch.
 
     Same launcher as the CLI and ``pm qa launch``: ``pm qa regression`` runs
@@ -522,6 +523,9 @@ async def _launch_regression_item(app, qa_id: str,
     What would stop it is logged here instead of flashing by in a pane that
     exits at once.  The check runs off the event loop: with container mode
     enabled it asks the runtime (``<runtime> info``, up to 10 s).
+
+    *cmd* replaces the default ``pm qa regression <id> --file-prs`` command
+    (the command bar runs the options the user typed).
     """
     import asyncio
     from pm_core.regression_prompts import (regression_launch_cmd,
@@ -532,8 +536,37 @@ async def _launch_regression_item(app, qa_id: str,
         app.log_message(problem.splitlines()[0])
         _log.warning("regression launch refused: %s", problem)
         return
-    launch_pane(app, regression_launch_cmd(app._root, qa_id),
+    launch_pane(app, cmd or regression_launch_cmd(app._root, qa_id),
                 "qa-item", target_window=target_window)
+
+
+# ``pm qa regression`` options that take a value (the token after one is not
+# the test id).
+_REGRESSION_VALUE_OPTS = ("--branch", "-b", "--session", "-s")
+
+
+def launch_regression_command(app, args: list[str]) -> None:
+    """Run ``qa regression <args>`` typed in the command bar in a pane.
+
+    The command runs the test's interactive session in the foreground, so it
+    needs a pane: the command bar's captured subprocess would block the TUI
+    until its timeout, then kill the session before its container cleanup
+    trap runs.  Same pre-launch check as the QA pane's Enter.
+    """
+    if not app._root:
+        app.log_message("No project root")
+        return
+    test_id = next((a for prev, a in zip([""] + args, args)
+                    if not a.startswith("-")
+                    and prev not in _REGRESSION_VALUE_OPTS), None)
+    if test_id is None:
+        app.log_message(
+            "Usage: qa regression <test-id> [--file-prs] [--branch <b>]")
+        return
+    cmd = (f"pm -C {shlex.quote(str(Path(app._root).resolve()))} "
+           f"qa regression {shlex.join(args)}")
+    app.run_worker(_launch_regression_item(app, test_id, None, cmd=cmd),
+                   exclusive=False)
 
 
 def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:

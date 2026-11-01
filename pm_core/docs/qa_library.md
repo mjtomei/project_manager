@@ -121,8 +121,9 @@ project's setup recipes (`pm/qa/instructions/`) and capture recipes
 (`pm/qa/artifacts/`) into the scratch dir and names them in the prompt.
 
 - **Container mode enabled**: the session runs in a QA container. The
-  clone is at `/workspace`, scratch at `/scratch`, captures at
-  `/pm-captures`. If the container runtime is unusable or the container
+  clone is at `/workspace`, scratch at `/scratch`, and this run's
+  captures dir at `/pm-captures` (only that directory is mounted, not
+  other runs' captures). If the container runtime is unusable or the container
   cannot be created, the run stops with an error. It never falls back
   to the host.
 - **Container mode off**: the session runs on the host in the clone,
@@ -148,7 +149,8 @@ pm qa regression <id> --branch <b>  # clone <b> instead of the base branch
 Pressing Enter on a regression test in the TUI QA pane and
 `pm qa launch regression:<id>` (used by the discovery supervisor) run
 `pm qa regression <id> --file-prs` in a new pane, so every surface
-produces the same isolated run.
+produces the same isolated run. `qa regression <id> …` typed in the TUI
+command bar also runs in a pane, with the options you typed.
 
 Regression tests don't fix bugs themselves and don't mutate the
 project's source. The runner disables the push URL of the clone's

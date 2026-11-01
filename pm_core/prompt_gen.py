@@ -1792,8 +1792,12 @@ launched from this watcher run as additional panes in that same window. List
 panes:
 
 ```
-tmux list-panes -t {session_name or "<session>"}:discovery -F "#{{pane_id}} #{{pane_current_command}}"
+tmux list-panes -t {session_name or "<session>"}:discovery -F "#{{pane_id}} #{{pane_current_command}} #{{pane_start_command}}"
 ```
+
+A regression-test pane's start command contains `qa regression <id>`, naming
+the test. Its current command may be `claude`, `bash` or the container
+runtime (`podman`/`docker`), depending on container mode.
 
 If a regression-test pane is still running, do **not** launch a new test this tick. Note the in-flight
 state in your work-log entry and reconcile after it finishes (next tick or
