@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-01T22:08:39.257507+00:00'
+  updated_at: '2026-11-01T22:29:39.248630+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48137,6 +48137,20 @@ prs:
       for the stdout/stderr split.'
     created_at: '2026-11-01T22:08:39Z'
     last_edited: '2026-11-01T22:08:39Z'
+  - id: note-75b9fea
+    text: 'QA scenario 60 (hand-edited base_branch at the newest edges): found and
+      fixed one residual hand-edited-state leak in 4f33d65a. The TUI auto-start dependent
+      path runs `pm pr start` after every auto-merge; pr_start read project.base_branch
+      raw, so a malformed value built `git show ''{''bad'': True}:pm/project.yaml''`
+      and printed "PR pr-XXX is not committed on {''bad'': True} yet". pr_start now
+      falls back to master (same rule as pm pr merge / the sign-off clone), with a
+      test that fails on the pre-fix tree. Two further raw base_branch reads remain
+      and were NOT changed (same contract, untested paths): the GitHub draft-PR create
+      path in pr_start (~line 1596) and the auto-merge detection in pr_sync (~line
+      3607) — worth guarding in a follow-up. All nine scenario-60 stories otherwise
+      held live.'
+    created_at: '2026-11-01T22:29:39Z'
+    last_edited: '2026-11-01T22:29:39Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
