@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T13:56:07.891607+00:00'
+  updated_at: '2026-11-01T14:25:50.077649+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6473,6 +6473,24 @@ prs:
       socket. No live session, server or shared host configuration was touched.'
     created_at: '2026-11-01T13:56:07Z'
     last_edited: '2026-11-01T13:56:07Z'
+  - id: note-51f6b77
+    text: 'Review loop b48f i5 (no requirement changes; full suite 5410 passed / 1
+      skipped, 427.7 s, log /pm-captures/review-b48f-i5/full-suite-final.log). One
+      cross-server scoping gap in TUI discovery, the same "a server is not a session"
+      class earlier iterations closed inside one server: when a discovery branch identified
+      a session, the fallback scan in _find_tui_pane() filtered list_pm_sessions()
+      rows by name and scanned every match, so a same-named legacy twin on the default
+      server (an older pm binary creates one from a plain shell, where bare tmux follows
+      the default server) could hand its pane id back to `pm tui send` - pane ids
+      are only unique per server and both sessions share the pane-registry key. The
+      scan is now scoped to the server the identified session was found on (keeping
+      the direct scan when list_pm_sessions() does not report it, and the name filter
+      when the ambient socket cannot be resolved). Test: test_scan_stays_on_the_identified_sessions_server,
+      verified to fail on the pre-fix tree at 0d88df775 (returned the twin pane %9).
+      Smoke script re-ran clean; no live session, server or shared host configuration
+      was touched.'
+    created_at: '2026-11-01T14:25:32Z'
+    last_edited: '2026-11-01T14:25:50Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

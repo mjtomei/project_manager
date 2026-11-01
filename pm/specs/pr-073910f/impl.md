@@ -2805,3 +2805,57 @@ Validation: targeted suites (`test_session_socket_isolation`,
 in the PR note for this iteration.  No live session, server or shared
 host configuration was touched — every fixture used a disposable socket
 and a temporary HOME.
+
+## Review iteration (2026-11-01, review-loop b48f i5)
+
+Verification pass over the head after the b48f i4 fixes; no requirement
+changes.  One cross-server scoping gap in `_find_tui_pane()`'s fallback
+scan — the same "a server is not a session" class earlier iterations
+closed inside one server (2caf i4, 703c i6, 3cc7 i1), one level up:
+
+1. **The fallback scan was scoped by session *name*, not by server.**
+   When one of the discovery branches identified a session, the scan
+   filtered `list_pm_sessions()` rows with `info["name"] == identified`
+   and then scanned *every* matching row.  Two servers can host a
+   session with the same name: an older pm binary run from a plain shell
+   (where bare tmux follows the default server) creates a legacy twin of
+   a session this build runs privately — it cannot see the private
+   server — and both sessions share the pane-registry key.  Pane ids are
+   only unique per server, so a stale recorded id can name a live,
+   unrelated pane in the twin, and the scan handed that pane back to
+   `pm tui send` (keys are delivered unscoped): the cross-server
+   confusion this change exists to remove.  The scan is now scoped to
+   `identified_server` — the server the identified session was actually
+   found on — and still scans that server directly when
+   `list_pm_sessions()` does not report it (its socket file was
+   unlinked, or it is a legacy session whose rows carry `socket=None`
+   while the selected server is the default server's explicit path).
+   When the ambient socket cannot be resolved at all (no
+   `PM_TMUX_SOCKET` and no pm socket in `$TMUX`), the name filter
+   remains the only available scoping and is kept.  Test:
+   `TestFindTuiPaneAcrossServers::
+   test_scan_stays_on_the_identified_sessions_server`, verified to fail
+   on the pre-fix tree at `0d88df775` (it returned the twin's `%9`).
+
+Nothing else surfaced.  The socket derivation and default-server
+addressing (R4.3), discovery scoping (7af7 i1–i3, 3cc7 i1, 703c
+i1/i4/i6, 2caf i4/i5, above), the precise detach (R5, 703c i3, 2caf i2),
+the kill/unlink rules (R3.2, R8, 2caf i7, b48f i3), the socket-file and
+socket-directory ownership checks (d1c0 i10/i12, 703c i2, 2caf i8,
+QA S17) and the shared-session share-mode handling (d1c0 i7, 703c i8,
+2caf i11, b48f i2) all match the spec, and every new helper has direct
+coverage.
+
+Validation: targeted suites (`test_session_socket_isolation`,
+`test_tmux`, `test_cli_helpers`, `test_shared_sessions`, `test_cli_qa`,
+`test_tui_imports`, `test_tui_pidfile`, `test_tui_own_session_name`,
+`test_plans_window_per_plan`, `test_plans_pane`, `test_log_pane_backlog`,
+`test_session_registry`, `test_pm_in_tmux_session`,
+`test_log_message_force`, `test_popup_session_code`) 715 passed; full
+suite **5410 passed / 1 skipped** (427.7 s, log
+`/pm-captures/review-b48f-i5/full-suite-final.log`).
+`pm/specs/pr-073910f/session_start_smoke.py` re-ran clean on a disposable
+socket (private server, session env, global env and hooks correct;
+default server untouched).  No live session, server or shared host
+configuration was touched — every fixture used a disposable socket and a
+temporary HOME.

@@ -1534,16 +1534,32 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     # on entry is restored below if nothing is found.
     servers = tmux_mod.list_pm_sessions()
     if identified is not None:
-        servers = [info for info in servers if info["name"] == identified]
-        if not servers and identified_server is not None:
-            # The identified session's server is not reported by the
-            # enumeration above: either this process is attached to it and
-            # its socket file is gone, or the cwd session's socket lives
-            # outside the pm socket directory.  Scan it directly: the
-            # last-resort scan below exists precisely for a live TUI with no
-            # registry entry.
-            servers = [{"name": identified, "socket": identified_server,
-                        "attached": 0, "shared": False}]
+        if identified_server is not None:
+            # Scope by *server*, not by name.  A same-named session on
+            # another server is a different session: a legacy twin (an older
+            # pm binary creates one on the default server, which it cannot
+            # see the private server from) shares the pane-registry key, so
+            # a stale recorded pane id can name a live unrelated pane there
+            # — pane ids are only unique per server.  A name-only filter
+            # would scan that twin and hand its pane to `pm tui send`.
+            servers = [info for info in servers
+                       if info["socket"] == identified_server]
+            if not servers:
+                # The identified session's server is not reported by the
+                # enumeration above: either this process is attached to it
+                # and its socket file is gone, it is a legacy session (whose
+                # rows carry ``socket=None`` while the selected server is
+                # the default server's explicit path), or the cwd session's
+                # socket lives outside the pm socket directory.  Scan it
+                # directly: the last-resort scan below exists precisely for a
+                # live TUI with no registry entry.
+                servers = [{"name": identified, "socket": identified_server,
+                            "attached": 0, "shared": False}]
+        else:
+            # The ambient socket could not be resolved (no PM_TMUX_SOCKET
+            # and no pm socket in $TMUX): fall back to the name, which is
+            # all the identification gives us.
+            servers = [info for info in servers if info["name"] == identified]
     else:
         # No session context at all (a plain shell).  Only this user's
         # servers are eligible: the socket directory is world-writable and

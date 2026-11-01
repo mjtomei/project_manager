@@ -2052,6 +2052,55 @@ class TestFindTuiPaneAcrossServers:
         assert os.environ["PM_TMUX_SOCKET"] == str(
             tmp_path / "pm-target")
 
+    def test_scan_stays_on_the_identified_sessions_server(self, monkeypatch):
+        """A same-named session on another server must not be scanned.
+
+        A legacy twin of a private session (an older pm binary creates one on
+        the default server, which cannot see the private server) shares the
+        pane-registry key, so the recorded TUI pane id may name a live,
+        unrelated pane there: pane ids are only unique per *server*.  A scan
+        filtered by name alone would return that twin's pane to
+        ``pm tui send`` — the cross-server confusion this change exists to
+        remove.  Only the server the identified session was found on is
+        eligible.
+        """
+        from pm_core.cli import helpers
+        from pm_core import pane_registry
+
+        monkeypatch.setenv("PM_TMUX_SOCKET", "/tmp/a")
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: True)
+        monkeypatch.setattr(helpers.tmux_mod, "get_session_name",
+                            lambda: "pm-a~1")
+        monkeypatch.setattr(pane_registry, "pm_session_name",
+                            lambda name: "pm-a")
+        monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-other")
+        # The same session name on two servers: the private one we are in,
+        # and a legacy twin on the default server.
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions", lambda: [
+            {"name": "pm-a", "socket": "/tmp/a", "attached": 0,
+             "shared": False},
+            {"name": "pm-a", "socket": None, "attached": 0, "shared": False},
+        ])
+        monkeypatch.setattr(pane_registry, "load_registry",
+                            lambda name: {"windows": {}})
+        monkeypatch.setattr(helpers.tmux_mod, "_tmux_cmd",
+                            lambda *a, **kw: ["tmux"])
+        default = str(paths.default_socket_path())
+
+        def fake_live():
+            # Only the legacy twin has a live ``pm _tui`` pane, whose id
+            # would match nothing on the private server.
+            if os.environ.get("PM_TMUX_SOCKET") == default:
+                return {}, [("%9", "pm-a")]
+            return {}, []
+
+        monkeypatch.setattr(helpers, "_live_panes_and_tuis", fake_live)
+
+        assert helpers._find_tui_pane() == (None, None)
+        # The failed lookup leaves the process on the server it came in on.
+        assert os.environ["PM_TMUX_SOCKET"] == "/tmp/a"
+
 
 # ---------------------------------------------------------------------------
 # CLI: server selection for a session (private vs legacy)
