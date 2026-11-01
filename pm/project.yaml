@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T03:42:00.326004+00:00'
+  updated_at: '2026-11-01T04:31:10.602999+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5822,6 +5822,39 @@ prs:
       server or shared host configuration was touched.'
     created_at: '2026-11-01T03:42:00Z'
     last_edited: '2026-11-01T03:42:00Z'
+  - id: note-4644db6
+    text: 'Review loop 2caf i2 (no requirement changes; full suite 5358 passed / 1
+      skipped, log /pm-captures/review-2caf-i2/full-suite-final.log). Three user-visible
+      fixes on the surfaces this PR exists to make trustworthy. (1) The TUI connect
+      popup rendered the command through a Textual Label, which parses markup, so
+      a "[" in the socket path (a repo directory named "my[repo]") was silently swallowed:
+      the popup showed a command naming a different session — and, for a missing socket,
+      one that creates a stray server — while the c copy key still copied the right
+      text. The label is now markup=False. Test: TestConnectScreenLayout::test_shows_brackets_in_the_command_verbatim
+      (fails with markup on). (2) Ctrl-Q did nothing — or detached a different client
+      of the same session — when the TUI was viewed through the user''s own grouped
+      view (S118/S121/S124): R5''s candidates were enumerated as base + base~N by
+      name, so a view called "myview" was never a candidate. New tmux.sessions_in_group()
+      enumerates membership through tmux''s #{session_group} (union''d with the base~N
+      names so an old or unqueryable server still yields them), and sessions_on_window()
+      gained an optional members= so only the detach path changes (review-loop/sign-off/watcher/home-window
+      callers untouched). Verified live on a disposable socket: before, detach_current_client()
+      returned False with the view''s client attached and viewing the TUI window;
+      after, it detached exactly that client. Tests: TestSessionsInGroup (view included,
+      ungrouped alone, failed group query keeps base~N, tmux missing) and two TestDetachCurrentClient
+      cases, each verified to fail with the name-prefix candidate set. (3) An exported
+      empty PM_SHARE_MODE hid the ambient session: _ambient_session_for_share_mode
+      compared the recorded mode against the raw value while every other reader tests
+      it for truthiness, so PM_SHARE_MODE= pm session kill in a workdir clone reported
+      "No session found" for a live one (found by the first full-suite run, which
+      ran with the variable set to the empty string). Normalised with "or None"; the
+      kill fixture also unsets the variable. Test: TestResolveTargetSession::test_an_empty_share_mode_counts_as_unset.
+      impl.md R5 step 2 and the qa.md R5 bullets updated to the group-based candidate
+      set, plus a new i2 section. Nothing else surfaced across R1-R8; no live session,
+      server or shared host configuration was touched (every fixture used a disposable
+      socket).'
+    created_at: '2026-11-01T04:31:10Z'
+    last_edited: '2026-11-01T04:31:10Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

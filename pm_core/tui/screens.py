@@ -155,7 +155,12 @@ class ConnectScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         with Vertical(id="connect-container"):
             yield Label("Connect Command", id="connect-title")
-            yield Label(self._command, id="connect-command")
+            # markup=False: the command is a shell string to copy verbatim.
+            # A session tag comes from the repo directory name, so it may
+            # contain square brackets; rendered as markup, `[repo]` was
+            # silently swallowed and the popup showed a command naming a
+            # different session (or creating a stray one).
+            yield Label(self._command, id="connect-command", markup=False)
             yield Label("")
             yield Label("[dim]Press [bold]c[/bold] to copy to clipboard  |  [bold]Esc[/bold] to close[/]", classes="connect-hint")
 

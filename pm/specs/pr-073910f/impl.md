@@ -173,15 +173,20 @@ New `tmux_mod.detach_current_client()`:
 1. Read `$TMUX_PANE`, resolve its window (`pane_window_id`).
 2. Resolve the pm base through `session_group()` (a user's own view of the
    session need not be named `base~N`; see 703c i3), falling back to the
-   `~` split for an ungrouped session.  `list-clients` on the session's
-   server; keep clients whose
-   `client_session` is the base session or a `base~N` grouped session **and**
-   whose session's active window equals the TUI pane's window.
+   `~` split for an ungrouped session.  Enumerate the candidates with
+   `sessions_in_group()` — every session in tmux's session *group*, so the
+   base, its `base~N` views **and a user's own view however it is named**
+   (S118/S121/S124) all count (review-loop 2caf i2; a name-prefix test
+   missed such a view, so Ctrl-Q pressed while viewing the TUI through one
+   detached nothing, or a different client of the same session).
+   `list-clients` on the session's server; keep clients whose
+   `client_session` is in the group **and** whose session's active window
+   equals the TUI pane's window.
 3. Detach the most recently active candidate by TTY
    (`detach-client -t <tty>`). Ties are resolved by `client_created`.
 4. If no candidate matches (no client's session is viewing the TUI's
-   window), fall back to the group's most recently active client — base +
-   `base~N` — and detach that single TTY.  Never `detach-client -s
+   window), fall back to the group's most recently active client and
+   detach that single TTY.  Never `detach-client -s
    <session>`: it detaches *every* client attached to the session, so one
    Ctrl-Q dropped all of them (QA scenario 10, fixed 2026-11-01).  If the
    group has no client either, do nothing.
@@ -1897,3 +1902,68 @@ i10/i12, 703c i2) and the shared-session share-mode handling (d1c0 i7,
 Validation on the integrated head: full suite re-run after the edit (see
 the PR note for this iteration); no live session, server or shared host
 configuration was touched.
+
+## Review iteration (2026-11-01, review-loop 2caf i2)
+
+Verification pass over the head after the i1 consolidation; no requirement
+changes.  Two user-visible defects on the surfaces this PR exists to make
+trustworthy — the command the TUI tells the user to paste, and the quit key:
+
+1. **The connect popup silently mangled the command it displayed.**
+   `ConnectScreen` yielded the command through a Textual `Label`, which
+   renders *markup* by default, so a `[` in the command was parsed as a
+   style tag.  A session tag is derived from the repo directory name, so a
+   repo named `my[repo]` (session `pm-my[repo]-<hash>`) displayed
+   `tmux -S /tmp/pm-sessions/pm-my-repo-<hash> attach` — a command naming a
+   different session, which for a missing socket *creates* a stray server.
+   The copy key (`c`) copied the correct text, so only what the user saw
+   (and would retype or copy with the mouse) was wrong.  The label now
+   renders with `markup=False`.  Test:
+   `TestConnectScreenLayout::test_shows_brackets_in_the_command_verbatim`
+   (verified to fail with markup on: the rendered line lost `[repo]`).
+2. **Ctrl-Q did nothing — or detached the wrong client — in a user's own
+   grouped view.**  R5's candidate set was "base + `base~N`", enumerated
+   by name, so a view created with `tmux new-session -t pm-x -s myview`
+   (S118/S121/S124) was not a candidate even though it shares the windows
+   and its client is the one viewing the TUI.  Verified live on a
+   disposable socket: with a single client attached to `myview` and
+   viewing the TUI window, `detach_current_client()` returned False and
+   the client stayed attached; with a `~1` client also present it
+   detached that client instead.  New
+   `tmux.sessions_in_group()` enumerates membership through tmux's
+   `#{session_group}` (union'd with the `base~N` names so an old or
+   unqueryable server still yields them), and
+   `sessions_on_window(..., members=...)` lets the detach path use it
+   without changing the review-loop/sign-off/watcher/home-window callers.
+   R5 step 2 above now states the group-based candidate set.  Tests:
+   `TestSessionsInGroup` (view included, ungrouped alone, failed group
+   query keeps `base~N`, tmux missing) and
+   `TestDetachCurrentClient::test_detaches_a_client_viewing_through_the_users_own_view`
+   / `::test_view_client_viewing_the_tui_wins_over_other_group_clients`
+   (both verified to fail with the name-prefix candidate set: the first
+   detached nothing, the second detached `/dev/pts/1` instead of the
+   view's client).
+
+3. **An exported empty `PM_SHARE_MODE` hid the ambient session.**
+   `_ambient_session_for_share_mode()` compared the recorded share mode
+   against `os.environ.get("PM_SHARE_MODE")` *raw*, while every other
+   reader tests the variable for truthiness (`_set_share_mode_env` pops it
+   when no flag is given).  With `PM_SHARE_MODE=` exported, `None != ""`,
+   so `pm session kill` / `mobile` in a workdir clone dropped the ambient
+   candidate and reported "No session … found" for a live session.  The
+   comparison now normalises the wanted mode with `or None` (found by the
+   full suite, which ran with the variable set to the empty string).
+   Test: `TestResolveTargetSession::test_an_empty_share_mode_counts_as_unset`
+   (verified to fail without the normalisation); `TestSessionKillServerSelection._invoke`
+   also unsets the variable so the fixture no longer depends on the
+   caller's environment.
+
+Also checked and unchanged: the `pm session list` CLIENTS column still
+counts only `pm-`-named base/`~N` sessions (a view's client is not
+counted; QA scenario 9 recorded this and uses `tmux list-clients` as the
+authoritative check), and the connect screen's last-resort bare
+`tmux attach -t <name>` is still unreachable for a live session.
+
+Validation on the integrated head: full suite re-run after the edits (see
+the PR note for this iteration); no live session, server or shared host
+configuration was touched — every fixture used a disposable socket.

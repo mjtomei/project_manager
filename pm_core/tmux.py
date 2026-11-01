@@ -906,6 +906,44 @@ def list_grouped_sessions(base: str, socket_path: str | None = None) -> list[str
     return grouped
 
 
+def sessions_in_group(base: str, socket_path: str | None = None) -> list[str]:
+    """Return every session in *base*'s tmux session group, by any name.
+
+    ``list_grouped_sessions`` matches ``base~N`` by name, which is what the
+    grouped-session lifecycle needs (naming the next ``~N``, reusing an
+    unattached one).  A user's own view created with ``tmux new-session -t
+    base -s myview`` (S118/S121/S124) is grouped with *base* as well — it
+    shares the windows, so its client sees the same panes and can press
+    the same keys — but its name says nothing about it.  tmux's
+    ``#{session_group}`` is the authoritative membership test, so callers
+    that must act on every client of the session (the TUI quit key)
+    enumerate through here.
+
+    The name-prefix list is unioned in so the answer is complete even when
+    the group query fails (older tmux, or a server that cannot be queried):
+    it never loses the ``~N`` sessions the lifecycle created.
+    """
+    members = {base}
+    try:
+        members.update(
+            list_grouped_sessions(base, socket_path=socket_path))
+        result = _run(
+            _tmux_cmd("list-sessions", "-F",
+                      "#{session_name}|#{session_group}",
+                      socket_path=socket_path),
+            text=True,
+        )
+    except OSError:
+        # tmux missing/unexecutable: the session itself is all we know.
+        return sorted(members)
+    if result.returncode == 0:
+        for line in result.stdout.splitlines():
+            name, sep, group = line.partition("|")
+            if sep and group == base:
+                members.add(name)
+    return sorted(members)
+
+
 def find_unattached_grouped_session(base: str, socket_path: str | None = None) -> str | None:
     """Find the earliest grouped session with no clients attached."""
     for name in list_grouped_sessions(base, socket_path=socket_path):
@@ -1037,15 +1075,22 @@ def attached_group_active_windows(base: str, socket_path: str | None = None) -> 
 
 
 def sessions_on_window(base: str, window_id: str,
-                       socket_path: str | None = None) -> list[str]:
+                       socket_path: str | None = None,
+                       members: list[str] | None = None) -> list[str]:
     """Return all sessions in the group (base + grouped) whose active window matches *window_id*.
 
     Used by the review loop to determine which sessions need to be
     switched to the replacement window after the old one is killed, and by
     ``detach_current_client`` to find the sessions whose clients are
     looking at a given window.
+
+    *members* overrides the candidate sessions (default: base +
+    ``base~N``).  ``detach_current_client`` passes the whole session group
+    from ``sessions_in_group``, which also covers a user's own view of the
+    session.
     """
-    candidates = [base] + list_grouped_sessions(base, socket_path=socket_path)
+    candidates = (list(members) if members is not None
+                  else [base] + list_grouped_sessions(base, socket_path=socket_path))
     _log.info("sessions_on_window: base=%s window_id=%s candidates=%s", base, window_id, candidates)
     result = []
     for name in candidates:
@@ -1206,8 +1251,9 @@ def detach_current_client(socket_path: str | None = None) -> bool:
     precisely instead:
 
     1. Find the current pane's window from ``$TMUX_PANE``.
-    2. Keep clients attached to the base/grouped sessions whose active
-       window is that window.
+    2. Keep clients attached to the sessions in the pm session's tmux
+       *group* (base, ``base~N``, and a user's own view however it is
+       named) whose active window is that window.
     3. Detach the most recently active one by TTY.  When no client views
        that window (the session's current window is a shell/review
        window), fall back to the group's most recently active client —
@@ -1250,16 +1296,21 @@ def _detach_current_client(socket_path: str | None) -> bool:
     # Splitting at ``~`` would then take the view's name for the base and
     # narrow the candidate set to that view's client, so Ctrl-Q could
     # detach a different client of the same session than the one that
-    # pressed it (R5.2 defines the candidates as base + ``base~N``).
+    # pressed it (R5.2 defines the candidates as the whole session group).
     base = (session_group(session, socket_path=socket_path)
             or session.split("~", 1)[0])
-    grouped = list_grouped_sessions(base, socket_path=socket_path)
-    group = {base} | set(grouped)
+    # Every session in the group, whatever it is called.  A user's own view
+    # shares the windows, so its client is a client of this pm session and
+    # must be a candidate: with only the ``base~N`` names, Ctrl-Q pressed
+    # while viewing the TUI through such a view detached nothing (or a
+    # different client of the same session).
+    group = set(sessions_in_group(base, socket_path=socket_path))
     # Clients viewing the TUI's window: the group's sessions whose active
     # window is that window (a grouped session has its own current window,
     # so this is per session, not per client).  With no resolvable pane
     # window, any session in the group counts.
-    viewing = (set(sessions_on_window(base, pane_win, socket_path=socket_path))
+    viewing = (set(sessions_on_window(base, pane_win, socket_path=socket_path,
+                                      members=sorted(group)))
                if pane_win else group)
 
     result = _run(

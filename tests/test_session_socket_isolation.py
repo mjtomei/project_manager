@@ -811,6 +811,132 @@ class TestDetachCurrentClient:
         mock_run.side_effect = fake_run
         assert tmux.detach_current_client() is True
 
+    @patch("pm_core.tmux.subprocess.run")
+    def test_detaches_a_client_viewing_through_the_users_own_view(
+            self, mock_run, monkeypatch):
+        """Ctrl-Q in a user's own view must detach that client.
+
+        A view created with ``tmux new-session -t pm-x -s myview``
+        (S118/S121/S124) shares the TUI window, so its client is the one
+        viewing the TUI — but its name is neither the base nor ``pm-x~N``.
+        Enumerating candidates by name found none and the key did nothing
+        (with other clients attached it detached a *different* client of
+        the same session).  Membership comes from tmux's session group.
+        """
+        monkeypatch.setenv("TMUX_PANE", "%7")
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+
+        def fake_run(cmd, **kwargs):
+            if "list-sessions" in cmd:
+                if any("#{session_group}" in a for a in cmd):
+                    return MagicMock(returncode=0,
+                                     stdout="pm-x|pm-x\nmyview|pm-x\n")
+                return MagicMock(returncode=0, stdout="pm-x\n")
+            if "list-clients" in cmd:
+                return MagicMock(returncode=0,
+                                 stdout="/dev/pts/9|900|90|myview\n")
+            if "detach-client" in cmd:
+                return MagicMock(returncode=0, stdout="")
+            if "#{session_group}" in cmd:
+                return MagicMock(returncode=0, stdout="pm-x\n")
+            if "#{session_name}" in cmd:
+                return MagicMock(returncode=0, stdout="myview\n")
+            return MagicMock(returncode=0, stdout="@1\n")
+
+        mock_run.side_effect = fake_run
+        assert tmux.detach_current_client() is True
+
+        detaches = [c[0][0] for c in mock_run.call_args_list
+                    if "detach-client" in c[0][0]]
+        assert len(detaches) == 1
+        assert detaches[0][-2:] == ["-t", "/dev/pts/9"]
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_view_client_viewing_the_tui_wins_over_other_group_clients(
+            self, mock_run, monkeypatch):
+        """The view's client is chosen when it is the one viewing the TUI."""
+        monkeypatch.setenv("TMUX_PANE", "%7")
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+
+        def fake_run(cmd, **kwargs):
+            if "list-sessions" in cmd:
+                if any("#{session_group}" in a for a in cmd):
+                    return MagicMock(
+                        returncode=0,
+                        stdout="pm-x|pm-x\npm-x~1|pm-x\nmyview|pm-x\n")
+                return MagicMock(returncode=0, stdout="pm-x\npm-x~1\n")
+            if "list-clients" in cmd:
+                # The view's client views the TUI window (@1); the ~1
+                # client is more recently active but views @2.
+                return MagicMock(
+                    returncode=0,
+                    stdout="/dev/pts/9|100|10|myview\n"
+                           "/dev/pts/1|900|90|pm-x~1\n")
+            if "detach-client" in cmd:
+                return MagicMock(returncode=0, stdout="")
+            if "#{session_group}" in cmd:
+                return MagicMock(returncode=0, stdout="pm-x\n")
+            if "#{session_name}" in cmd:
+                return MagicMock(returncode=0, stdout="myview\n")
+            if "#{window_id}" in cmd:
+                target = cmd[cmd.index("-t") + 1]
+                return MagicMock(returncode=0,
+                                 stdout="@1\n" if target in ("%7", "myview")
+                                 else "@2\n")
+            return MagicMock(returncode=0, stdout="0\n")
+
+        mock_run.side_effect = fake_run
+        assert tmux.detach_current_client() is True
+
+        detaches = [c[0][0] for c in mock_run.call_args_list
+                    if "detach-client" in c[0][0]]
+        assert len(detaches) == 1
+        assert detaches[0][-2:] == ["-t", "/dev/pts/9"]
+
+
+# ---------------------------------------------------------------------------
+# tmux: session-group membership
+# ---------------------------------------------------------------------------
+
+class TestSessionsInGroup:
+    @patch("pm_core.tmux.subprocess.run")
+    def test_includes_a_view_named_anything(self, mock_run):
+        def fake_run(cmd, **kwargs):
+            if any("#{session_group}" in a for a in cmd):
+                return MagicMock(
+                    returncode=0,
+                    stdout="pm-x|pm-x\npm-x~1|pm-x\nmyview|pm-x\nother|\n")
+            return MagicMock(returncode=0, stdout="pm-x\npm-x~1\n")
+
+        mock_run.side_effect = fake_run
+        assert tmux.sessions_in_group("pm-x") == ["myview", "pm-x", "pm-x~1"]
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_ungrouped_session_is_alone(self, mock_run):
+        def fake_run(cmd, **kwargs):
+            if any("#{session_group}" in a for a in cmd):
+                return MagicMock(returncode=0, stdout="pm-x|\n")
+            return MagicMock(returncode=0, stdout="pm-x\n")
+
+        mock_run.side_effect = fake_run
+        assert tmux.sessions_in_group("pm-x") == ["pm-x"]
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_group_query_failure_keeps_the_named_group(self, mock_run):
+        """An older/failing server still yields base + ``base~N``."""
+        def fake_run(cmd, **kwargs):
+            if any("#{session_group}" in a for a in cmd):
+                return MagicMock(returncode=1, stdout="")
+            return MagicMock(returncode=0, stdout="pm-x\npm-x~1\n")
+
+        mock_run.side_effect = fake_run
+        assert tmux.sessions_in_group("pm-x") == ["pm-x", "pm-x~1"]
+
+    def test_tmux_missing_returns_the_base(self, monkeypatch):
+        monkeypatch.setattr(tmux, "_run",
+                            MagicMock(side_effect=OSError("no tmux")))
+        assert tmux.sessions_in_group("pm-x") == ["pm-x"]
+
 
 # ---------------------------------------------------------------------------
 # tmux: cross-server discovery
@@ -1657,6 +1783,9 @@ class TestSessionKillServerSelection:
         from pm_core import container, push_proxy
 
         monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        # The candidate list depends on the share mode this process runs
+        # under; the fixture is a plain (private) invocation.
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
         monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: True)
         monkeypatch.setattr(session_mod.tmux_mod, "server_alive",
                             lambda sock: alive)
@@ -1964,6 +2093,31 @@ class TestResolveTargetSession:
                             lambda cands: seen.append(cands) or cands[0])
         assert session_mod._resolve_target_session() == "pm-shared"
         assert seen == [["pm-shared"]]
+
+    def test_an_empty_share_mode_counts_as_unset(self, monkeypatch):
+        """An exported empty ``PM_SHARE_MODE`` must not hide the ambient
+        session.
+
+        Every other reader of the variable tests it for truthiness (and
+        ``_set_share_mode_env`` pops it when no flag is given), so ``""``
+        means "private".  Comparing the raw value against the recorded
+        mode made ``PM_SHARE_MODE= pm session kill`` inside a private
+        session report "no session" instead of killing it.
+        """
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setenv("PM_SHARE_MODE", "")
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: "pm-cwd")
+        monkeypatch.setattr(session_mod, "_known_ambient_session",
+                            lambda: "pm-ambient")
+        monkeypatch.setattr(session_mod, "_ambient_share_mode",
+                            lambda name: None)
+        seen: list[list[str]] = []
+        monkeypatch.setattr(session_mod, "_pick_existing_session",
+                            lambda cands: seen.append(cands) or cands[-1])
+        assert session_mod._resolve_target_session() == "pm-ambient"
+        assert seen == [["pm-cwd", "pm-ambient"]]
 
     def test_never_uses_an_unknown_ambient_session(self, monkeypatch):
         from pm_core.cli import session as session_mod

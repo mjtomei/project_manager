@@ -136,6 +136,11 @@ pane unless stated otherwise.
   presses the quit key, **THEN** exactly one client of *that* pm session
   detaches; the view's name never narrows the candidate set to a single
   client, and no other pm session's client is touched.
+- **GIVEN** the same session viewed through that user's own view, with
+  the *only* attached client on the view and viewing the TUI's window,
+  **WHEN** it presses the quit key, **THEN** that client detaches (a
+  view's client is a member of the pm session's group, not only
+  `base~N`), the TUI keeps running, and no other pm session is touched.
 
 ### R6 — Quitting a TUI never detaches anyone else
 

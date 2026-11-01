@@ -286,14 +286,16 @@ def _ambient_session_for_share_mode(wanted: str | None) -> str | None:
     sharing anything.  The same-name fast path avoids a tmux query in the
     common case.  A session whose environment cannot be read counts as
     private, which is also what every private session is: pm records the
-    variable only for shared sessions.
+    variable only for shared sessions.  An empty ``PM_SHARE_MODE`` counts
+    as unset, like every other reader of the variable (an exported empty
+    value must not turn a private ambient session into a mismatch).
     """
     ambient = _known_ambient_session()
     if not ambient:
         return None
     if ambient == _get_session_name_for_cwd():
         return ambient
-    return ambient if _ambient_share_mode(ambient) == wanted else None
+    return ambient if _ambient_share_mode(ambient) == (wanted or None) else None
 
 
 def _resolve_start_session_name(shared: bool = False) -> str:

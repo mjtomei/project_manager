@@ -692,6 +692,19 @@ class TestConnectScreenLayout:
         assert label <= container
         assert lines == ["tmux -S /tmp/x attach"]
 
+    def test_shows_brackets_in_the_command_verbatim(self):
+        """A repo directory name may contain ``[`` — the popup must show it.
+
+        The command label rendered markup by default, so a ``[repo]`` in
+        the socket path was parsed as a style tag and silently dropped:
+        the popup displayed ``pm-my-repo-abc12345`` for the session
+        ``pm-my[repo]-abc12345``, i.e. a command that attaches to (and, for
+        a missing socket, creates) a different session.
+        """
+        cmd = "tmux -S /tmp/pm-sessions/pm-my[repo]-abc12345 attach"
+        container, label, lines = _render_connect_modal(cmd, 120)
+        assert lines == [cmd]
+
 
 # ---------------------------------------------------------------------------
 # tmux: grant_server_access
