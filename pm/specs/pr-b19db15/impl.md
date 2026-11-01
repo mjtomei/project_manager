@@ -4047,7 +4047,7 @@ R80. **Step 2's capture-directory guard did not check that the path is a
   deselected, 0 failed** (`markdown` was installed into a scratch `--target`
   so `tests/test_markdown_render.py` ran; without it the same run is 5373
   passed with those 12 failing on the missing dep). Evidence:
-  `/pm-captures/review-928f-i19/` (`probe-file-capdir.log`,
+  `/pm-captures/review-928f-i19/` (`probe.log`,
   `mutation-check.log`, `recipe-file.log`, `suite.log`, `README.md`,
   `scripts/`). No `pm_core/` change; the dropped helper/prompt/verifier work
   stays dropped.
