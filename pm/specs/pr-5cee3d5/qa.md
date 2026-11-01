@@ -104,6 +104,24 @@ Reproduction traps (from the prior QA runs — avoid rediscovering them):
   picker). `pm_core/cli/pr.py` is the one code file both sides changed and Git
   merged cleanly — exercise both sides' behaviour together, plus the PR's own
   sign-off code calling into the base's changed tmux/pane-registry helpers.
+- **Newest base (2026-11-01):** the head is `e62c6ede`; the branch contains
+  `master@53bcbd72` (#267 fail-closed autostart, #280 container boundary, #272
+  non-destructive `pm pr close`) merged as `2c2c9e45`, on top of
+  `master@4a74d880` and `master@eaf3372e`. Five files conflicted and were
+  reconciled (`pm_core/autostart_state.py`, `pm_core/cli/pr.py`,
+  `pm_core/home_window/pr_list.py`, `pm_core/prompt_gen.py`,
+  `pm/project.yaml`). New surfaces for scenarios 50+:
+  (a) auto-start acts only on explicit target closures — there is no all-PR
+  mode, and malformed/targetless saved state restores nothing (fail closed);
+  (b) `pm pr close` never deletes the workdir, notes, captures or branch, and
+  a closed PR refuses sign-off/merge with a "reopen it" hint;
+  (c) the home window filters closed/merged PRs;
+  (d) the QA-status prompt distinguishes "malformed" (valid JSON, not an
+  object) from "unreadable" (unparseable);
+  (e) the edit template treats a parse equal to the stored value *verbatim*
+  as unchanged (so a plain stored note is not rebuilt with a new id/created_at),
+  and a note's timestamp suffix may carry a numeric ISO offset (`+00:00`) as
+  well as `Z`.
 - Building the "base already merged by hand" fixture: record the conflicting
   check first (`--record` or a sign-off launch), then in the PR workdir
   `git fetch` and `git merge <base>` by hand keeping both sides' records and
@@ -741,6 +759,32 @@ consumed.
   merge (not a resolved one). WHEN both run. THEN the branch gains one merge
   commit, the loser reports the branch's current integrated state rather than
   a merge failure, and no stale re-check overwrites the applied record.
+
+### R18. The merged base's own behaviours at this PR's surfaces
+GIVEN auto-start enabled with one explicit target (and no all-PR mode).
+WHEN the user starts the session and watches the run.
+THEN only that target's dependency closure is driven, no other PR is
+started, and the runs popup names the target(s) and the merge hold.
+
+GIVEN saved auto-start state that is malformed or targetless (a scalar
+target list, a legacy/all-mode record, a bad `pr_id`).
+WHEN the user starts the session.
+THEN auto-start restores nothing, says why in the visible log, starts no PR,
+and leaves the file in place for a human.
+
+GIVEN a PR in `sign_off` with a workdir, notes, captures and a sign-off
+return.
+WHEN the user closes it.
+THEN the PR stays in the registry as `closed`, its workdir, notes, captures
+and branch all still exist, and `pm pr list` shows it closed; `pm pr merge`
+and a sign-off launch refuse readably with the "reopen it" hint and publish
+nothing.
+
+GIVEN one PR whose `qa_status.json` is valid JSON but not an object and
+another whose is unparseable.
+WHEN a sign-off/review prompt is built for each.
+THEN the first is reported as malformed and the second as unreadable — two
+distinct messages — and the session still launches.
 
 ## Pass / Fail criteria
 
