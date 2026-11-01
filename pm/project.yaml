@@ -52293,3 +52293,190 @@ prs:
     signoff: provider:claude-work-xhigh-249
     merge: provider:deepseek-flash
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-049649a-remove-all-pr-autostart-and-fail-clo-registered-20261027
+- id: pr-8162f0f
+  plan: plan-delivery
+  title: Project-owner guidance for automatic versus human-approved merges
+  branch: pm/pr-8162f0f-project-owner-guidance-for-automatic-versus-human-
+  status: pending
+  depends_on: []
+  description: 'Add project-owner guidance that determines which otherwise-qualified PRs may
+    merge automatically and which must wait for the owner. This is part of plan-delivery D3
+    and a prerequisite of its unattended bug-fix handoff, with D9 qualification and D5/D8
+    onboarding adoption.
+
+
+    User policy example for project-manager: any PR touching containerization, security, or
+    prompts requires human review/approval before merge. Less impactful fixes and feature
+    PRs may auto-merge under the owner''s explicit policy, with a small heads-up. "Feature"
+    or "bug fix" is not by itself a reason to require or bypass approval. Owners of other
+    projects must be able to supply different guidance; do not hard-code this repository''s
+    categories as the universal policy.
+
+
+    Keep the owner-facing guidance simple and inspectable. Evaluate the actual proposed changes,
+    including incidental edits and semantic changes outside obvious path patterns, against
+    the project''s approved guidance. A mixed PR touching a manual-review area waits as a
+    whole. Ambiguous classification or missing guidance preserves the manual gate. Record
+    the decision, relevant rule, affected changes and concise rationale with links to the
+    PR and sign-off report. A title, author claim or agent-generated summary alone cannot
+    grant merge authority.
+
+
+    The decision supplements existing review, QA and fresh revision-bound sign-off; it does
+    not waive any of them. Explicit user holds, spec approval, dependency/manual merge holds
+    and wait_for_merge take precedence. Re-evaluate when the diff, target base, approved guidance
+    or a human override changes; stale approvals must not authorize a different candidate.
+    Policy edits require owner authorization and cannot let the same PR grant itself permission
+    to merge. Keep the configured distinction between explicit auto-merge authority and the
+    default manual workflow, across CLI, TUI, watcher and restart paths.
+
+
+    Create a durable concise heads-up event for an authorized automatic merge, for immediate
+    display or inclusion in the scheduled project brief under the owner''s delivery preference.
+    Identify project, PR/link, actual published outcome, one-line impact and report link.
+    Do not claim a merge happened merely because it was eligible; preserve pending/failed
+    notification state and retry without duplicate publication. Coordinate with the separately
+    filed scheduled-brief feature using existing report/event surfaces rather than inventing
+    a second lifecycle.
+
+
+    Acceptance: in isolated fixtures, show a low-impact approved change auto-merging only
+    after all checks, plus containerization, security, prompt and mixed changes held for the
+    owner; cover an uncertain classification, a stale policy/diff/base, an explicit wait_for_merge
+    override, an attempted self-exemption, restart and a recorded heads-up. Show distinct
+    policies for two projects. Include reusable agent regression scenarios for the actual
+    merge paths, not only mocks of a classification helper.
+
+
+    Registration only: no current policy activation, model reassignment, worker launch, spec
+    approval or merge is authorized by filing this PR. Preserve the paused timer, disabled
+    autostart and individual approvals for the current signed-off PRs.
+
+
+    USER CLARIFICATION: INTERACTIVE GUIDANCE, NOT ANOTHER MANUAL CONFIGURATION TASK. Reuse
+    the existing task-specific prompt-note feature (pm_core/notes.py and the composed prompt
+    sections) as the durable backing. Provide an agent-led getting-started conversation and
+    later feedback flow: ask only what is needed, turn the owner''s examples and corrections
+    into a concise scoped note, show the effective guidance, and maintain it on the owner''s
+    behalf. The owner should not have to hand-author or repeatedly edit prompt notes. Preserve
+    direct edits, provenance and rollback; do not overwrite unrelated sections or leak one
+    project''s preferences into another. Distinguish explicitly authorized feedback from guesses.
+    Updates that broaden merge authority need owner authorization; a report''s content or
+    a worker''s own suggested exemption is not that authorization. Avoid a second competing
+    policy/prompt storage system unless the spec demonstrates why the existing mechanism cannot
+    suffice.
+
+
+    The setup conversation should help the owner express examples of changes they want to
+    inspect versus changes that can merge with a heads-up. Agent-maintained notes express
+    that guidance; examples must cover project-manager containerization/security/prompts and
+    low-impact changes, unclear cases and later owner corrections. Test that unapproved feedback
+    cannot silently widen automatic merge authority.
+
+
+    USER-REQUIRED SPEC REVIEW BEFORE IMPLEMENTATION. Set review_spec=true. When started, prepare
+    the grounded implementation spec and all complete candidate prompts/composed guidance
+    for getting started, interpreting and applying feedback, and the feature''s merge assessment
+    or scheduled brief. Provide representative rendered prompts, example persisted task notes
+    and resulting decisions/briefs, including how corrections change them. Show storage/scope,
+    authority precedence, updates/restarts, and interactions with existing manual gates and
+    #277. Link every artifact from impl.md. Then stop for the user''s explicit spec/prompt
+    approval before product implementation, review or QA. Never self-approve. This filing
+    does not authorize starting the PR or enabling a schedule.
+
+
+
+    2026-10-31 USER DIRECTION: SOFT DEPENDENCIES AND WATCHER-SESSION DECISIONS
+
+
+    Plan/PR dependency edges are soft scheduling rules. CLI commands may consume them and
+    recommend readiness or ordering; watcher sessions decide whether to follow, depart from,
+    or bypass those recommendations. Keep recommendations and reasons in shared durable project/plan/PR
+    context so other watchers and future instantiations can reassess them. No helper result
+    automatically starts, pauses or advances work. Explicit user holds, scope/merge authority,
+    required evidence, resource bounds and concrete operation safety remain separate constraints.
+    This updates planned work only; it does not alter current execution or authorize an alpha
+    test.
+
+
+    Extend owner guidance to work selection and prioritization as well as automatic versus
+    human-approved merges. Capture security importance, project goals and explicit preferences
+    from onboarding and later discussions using the existing agent-maintained task-note backing.
+    Keep source/provenance and owner corrections visible. Distinguish inferred preferences
+    from explicit direction; relative importance is not authorization to start unrelated work,
+    lift a hold or broaden merge permission. Watcher prompts use this guidance when interpreting
+    readiness recommendations or choosing a different order. Do not require the owner to maintain
+    a numeric priority formula. Preserve all existing merge-policy requirements.
+
+
+    Include complete prompt examples for starting implementation before a prerequisite merges
+    while deferring review; waiting on overlapping changes introduced later in a different
+    plan; proceeding with independent work while another PR waits on a human; accepting integration
+    cost for an urgent security fix; and revising a stale dependency or treating unrelated
+    project.yaml edits as independent. Recommendations must be maintained dynamically from
+    observed work, not only from the initial plan or agents volunteering updates. Record decisions
+    and reasons for future sessions without requiring a giant transition table or mandatory
+    scoring formula.
+
+
+    SPEC/PROMPT REVIEW REQUIRED: when this PR is eventually started, prepare the implementation
+    spec and all complete rendered prompts and representative CLI outputs/shared notes, then
+    stop for the user before product implementation or review/QA. Set review_spec=true; never
+    self-approve. No worker, alpha watcher, schedule or policy activation is authorized by
+    this update.
+
+
+
+    2026-10-31 APPROVED D3 MILESTONE RECONCILIATION
+
+
+    D3 in plan-delivery is now a delivery milestone grouping pr-ff9b728, pr-945546e, pr-8162f0f
+    and pr-af9edb9. It is not another PR and must not replace or duplicate these existing
+    implementations. Keep this PR identity, history and owned scope. Shared milestone qualification
+    is documented in plan-delivery; separately owned prerequisites remain separate work. Preserve
+    implementation spec/full-prompt approval before implementation. No start is authorized
+    by this planning update.
+
+    '
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T15:40:06.816122+00:00'
+  updated_at: '2026-11-01T19:52:06.090845+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-201b5666
+    text: 'User clarified Oct31: dependency edges are soft rules; CLI readiness/schedule helpers
+      may recommend actions, but watcher sessions may follow or depart from them. Include
+      dynamic cross-plan updates, shared continuity and worked deviation examples. Planned
+      scope only; spec/full-prompt approval required and no start authorized.'
+    created_at: '2026-10-31T18:35:32.721580+00:00'
+    last_edited: '2026-10-31T18:35:32.721580+00:00'
+  - id: note-591ae4ca
+    text: D3 in plan-delivery is now a delivery milestone grouping pr-ff9b728, pr-945546e,
+      pr-8162f0f and pr-af9edb9. It is not another PR and must not replace or duplicate these
+      existing implementations. Keep this PR identity, history and owned scope. Shared milestone
+      qualification is documented in plan-delivery; separately owned prerequisites remain
+      separate work. Preserve implementation spec/full-prompt approval before implementation.
+      No start is authorized by this planning update.
+    created_at: '2026-10-31T18:43:14.672660+00:00'
+    last_edited: '2026-10-31T18:43:14.672660+00:00'
+  - id: note-a43b6aa
+    text: User authorized starting this PR on work Opus5.5/xhigh on 2026-11-01, all PR roles/helpers/sign-off.
+      First prepare the grounded implementation spec, complete onboarding/feedback/merge-assessment
+      prompts, representative notes and decisions, and stop for explicit owner approval. The
+      planned agent-controlled flow watcher pr-ff9b728 and project watcher pr-945546e are
+      not implemented yet; only legacy monitoring/recovery and programmatic merge gates exist.
+      Make that distinction explicit in the spec. Propose reusable guidance/assessment interfaces
+      and show how existing merge gates and future watchers would consume them; do not implement
+      a replacement watcher as incidental scope. Starting this spec session does not activate
+      owner-guided automatic merges, change current target merge policies or start other PRs.
+      Historical registration-only/no-start notes describe earlier filing, not this new authorization.
+      Preserve the required implementation spec/full-prompt review gate and manual merge approval.
+    created_at: '2026-11-01T19:52:06.090845+00:00'
+    last_edited: '2026-11-01T19:52:06.090845+00:00'
+  review_spec: true
+  model: provider:claude-work-xhigh-249
+  effort: high
