@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T06:43:10.640728+00:00'
+  updated_at: '2026-11-01T08:52:29.468234+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38161,6 +38161,40 @@ prs:
       work stays dropped.'
     created_at: '2026-11-01T06:43:10Z'
     last_edited: '2026-11-01T06:43:10Z'
+  - id: note-8eb4513
+    text: 'Review loop 928f i21: two leftovers in the kept recipe scope, both the
+      PR own class (a completion step pasted a second time acting on a handle it does
+      not have); no pm_core change. (1) The web-UI finalize step publishes recording.mp4
+      and then removes recording.webm, so a second paste has nothing to transcode
+      — and it deleted the published mp4 first and reported "there is no webm to transcode
+      — the driver wrote no video; re-run step 2 and check the driver''s recordVideo
+      option" (verified in this container with the recipe''s own block and real ffmpeg
+      4.4.2: after the first finalize the capture directory held only a 13,917-byte
+      recording.mp4; the second paste left it empty and exited 1 with that message).
+      The no-webm region now looks for the killed driver''s page@<hash>.webm partial
+      first (that failure still drops the earlier attempt''s mp4) and, when there
+      is no partial but a non-empty recording.mp4, reports "this capture is already
+      finalized — … nothing to transcode" and exits 0 without touching it; an mp4
+      with no webm and no partial can only be a finalize''s output, because step 1''s
+      and step 2''s cleanups both remove recording.mp4. (2) The tmux recipe''s step
+      3 was the one step that used $TARGET without re-deriving it; pasted alone with
+      an empty target, the recorder''s `tmux attach -t =` fails ("no mouse target",
+      tmux 3.2a) so the run dies at the readiness check as "recorder exited before
+      it drew" for a target that was never set, and the failure paths'' `-t "=:0.0"`
+      is accepted by a real server and resolves to whatever session it treats as current
+      (verified: pipe-pane and set-option -u both exit 0 on it), so a failed start
+      could stop another run''s transcript pipe and clear its capture-directory claim.
+      Step 3 now re-derives the target and refuses an empty one before any tmux call.
+      Tests: new test_web_ui_finalize_pasted_twice_keeps_the_published_video and test_step_three_rederives_the_target_session,
+      both of which fail against HEAD''s recipes; test_web_ui_finalize_says_when_there_is_no_webm''s
+      no-file shape no longer seeds an earlier mp4 (that state is the new case) while
+      the 0-byte-webm shape keeps it, so the stale rule still holds where the step
+      actually fails. Recipe file 312 passed (was 310); full suite 5509 passed, 1
+      skipped, 0 failed (471.65 s; markdown installed into a scratch --target). Evidence:
+      /pm-captures/review-928f-i21/. impl.md R82 + Files table, qa.md. The dropped
+      helper/prompt/verifier work stays dropped.'
+    created_at: '2026-11-01T08:52:29Z'
+    last_edited: '2026-11-01T08:52:29Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
