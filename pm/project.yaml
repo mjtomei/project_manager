@@ -48690,7 +48690,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-11-01T00:20:31.246438+00:00'
+  updated_at: '2026-11-01T00:21:13.495063+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -49155,6 +49155,37 @@ prs:
       not fixed here.'
     created_at: '2026-11-01T00:20:31Z'
     last_edited: '2026-11-01T00:20:31Z'
+  - id: note-b08f375
+    text: 'QA S20 rerun — PASS after a fixture fix directed by the user (2026-11-01).
+      User decision on the first run''s INPUT_REQUIRED: "Fix the fixture and rerun.
+      Preserve the existing acceptance expectation, including the Running 1 scenario(s)...
+      check; make the isolated retry fixture allow its refiner to finish, then rerun
+      the affected check with fresh real recordings and evidence. Do not waive the
+      clause or substitute only proof that refinement started." Fixture fix (retry
+      only; container launch boundary unchanged): (1) `pm fake-claude config set`
+      with qa_concretize -> REFINED_STEPS so the refiner writes the JSONL transcript
+      + idle_prompt hook and completes after the 15s grace, while every other session
+      type stays on the sleeping host `claude` stub so the worker keeps the run in
+      the scenario phase; (2) a fixture image with python3 (ubuntu:22.04 + python3/pip/git
+      + pm shim + PYTHONPATH=/opt/pm-src) because debian:stable-slim cannot run the
+      bundled fake-claude in-container; (3) `mkdir -p $HOME/.claude` because container.py
+      only mounts the transcript dir when the host ~/.claude exists (without it the
+      hook arrived but the transcript did not and the poller waited forever). Rerun,
+      fresh isolated tree: story 1 unchanged (TUI + CLI runs both fail closed with
+      cause+remedies; distinct PR status files; no QA windows; no containers; host-launch.log
+      absent; 60/60 setting samples read enabled + runtime unavailable; setting still
+      true). Story 2 now satisfies the previously-unmet clause: retry.out shows "Running
+      1 scenario(s)... refiners: ... ; workers: ..." at ~18s with no fail-closed block;
+      own container pm-<tag>-qa-<B>-cli-<B>-s1 Up; qa-<B> and qa-<B>-s1 windows with
+      BOTH s1 panes starting `podman exec -it ...` (pane 0 refiner emitting REFINED_STEPS
+      in-container, pane 1 worker = host claude stub unable to reach the unmounted
+      marker path); Beta status rewritten overall="" window_name=qa-<B>-s1; Alpha
+      status hash + note list identical; mode still enabled; no host launch; timeout
+      60 ends it (rc=124). Captures: /pm-captures/scenarios/20/{summary.md, story1-*,
+      story2-retry} = first run preserved; /pm-captures/scenarios/20/rerun/{story1-tui,story1-cli,story2-retry}
+      = fresh casts/mp4s/evidence. Verdict: PASS.'
+    created_at: '2026-11-01T00:21:13Z'
+    last_edited: '2026-11-01T00:21:13Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
