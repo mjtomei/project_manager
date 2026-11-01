@@ -23,6 +23,12 @@ recording-recipe bugs that any worker following the recipe hits:
   recorder's session handle, check the cast is non-empty, and check
   asciinema's own exit status (a killed recorder leaves a non-empty cast, and
   in the tmux recipe the target session is a witness only while it lives);
+  the status file is read as a *status*, not as a file that exists — a
+  0-byte one (the pane's shell creates it when it opens the redirect and
+  writes the status a moment later, so a kill in that window or a failed
+  write leaves it empty) takes the torn-down branch and is reported as
+  "recorder status is missing or empty", not as `asciinema exited  — …`
+  (review loop 928f i18, R79);
 - the CLI no-TTY scaffold writes the cast where the render reads it;
 - the tmux pm-session poll is bounded and waits on the computed session
   (`tmux has-session -t "=$TARGET"`, exact since R37), not on any `pm-`
@@ -603,7 +609,11 @@ session, stop the recorder, and render the cast,
   previous run's `0` and report a recording that never finished as a finished
   one — seed `recorder.status` with `0` and end the recording without letting
   the pane write one: the run must fail "recorder status is missing", not
-  exit 0 (review loop ebd1 i2, R42);
+  exit 0 (review loop ebd1 i2, R42); a *0-byte* status file is the same state
+  one shape over (the pane's shell created it and was killed, or could not
+  write, before the status landed) and must fail with "recorder status is
+  missing or empty", not report `asciinema exited  — …` (review loop 928f i18,
+  R79);
 - a recorder that is already gone before the detach while the pm session it
   was attaching to still exists (it died mid-scenario) fails the run with
   the "cast is incomplete" message instead of rendering a truncated cast as
@@ -755,6 +765,13 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   mid-scenario (status 128+N) or a pane torn down before asciinema returned
   (no status file) fails the run, while a recording that ended because the
   pm session itself ended exits 0 and passes.
+- The recorder's status file exists but holds nothing (a 0-byte
+  `recorder.status`: the pane's shell opened the redirect and was killed, or
+  could not write, before the status landed — the cast can already be
+  non-empty) → both recipes fail with "recorder status is missing or empty —
+  the pane was torn down before asciinema's exit status was written, so the
+  cast is incomplete", not with `asciinema exited  — …`, which names an exit
+  status the file does not hold (review loop 928f i18, R79).
 - A quiet or long one-shot CLI command is still recording → it must not be
   killed at the readiness or stop deadline; the stop bound is raised with
   `RECORDER_STOP_TIMEOUT` for a long command. A *mistyped* value (`2m`,

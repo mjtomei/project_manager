@@ -736,10 +736,22 @@ test -s <capture-dir>/recording.cast || {
 # killed, in which case the cast stops wherever it stopped. A missing status
 # file means the pane was torn down before asciinema returned, which is the
 # same failure.
-status=$(cat <capture-dir>/recorder.status 2>/dev/null) || {
-    echo "recorder status is missing — the pane was torn down before" \
-        "asciinema exited, so the cast is incomplete, not a finished" \
-        "recording" >&2
+# An *empty* status file is that same failure one shape over: the pane's shell
+# creates the file when it opens the redirect and writes the status a moment
+# later, so a kill in that window (a concurrent capture's step 0 ending this
+# recorder, a supervisor, an OOM kill) or a write that cannot complete (a full
+# disk — the cast can already hold the partial recording, so the check above
+# passes) leaves a 0-byte file. `cat` answers 0 for it, and the comparison
+# below then printed "asciinema exited  — the cast is incomplete", an exit
+# status the file does not hold, for the one state this branch exists to name
+# (verified in this container: the pane command under a write limit leaves a
+# 0-byte recorder.status, and this check prints exactly that message). Read it
+# as "no status", not as an exit status.
+status=$(cat <capture-dir>/recorder.status 2>/dev/null)
+[ -n "$status" ] || {
+    echo "recorder status is missing or empty — the pane was torn down" \
+        "before asciinema's exit status was written, so the cast is" \
+        "incomplete, not a finished recording" >&2
     tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
     tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
     exit 1

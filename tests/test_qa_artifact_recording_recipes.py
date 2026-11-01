@@ -1133,7 +1133,8 @@ class TestRecipes:
             "exit status, so a killed recorder passes on its header-only cast")
         status_path = write.group(1).rstrip('"')
         read = re.search(
-            r"^status=\$\(cat (\S+) 2>/dev/null\) \|\| \{$", block, re.M)
+            r"^status=\$\(cat (\S+) 2>/dev/null\)\n"
+            r"\[ -n \"\$status\" \] \|\| \{$", block, re.M)
         assert read, (
             "cli-recording: step 4 does not read the recorder's exit status")
         assert read.group(1) == status_path, (
@@ -1204,7 +1205,8 @@ class TestRecipes:
             "session also ended passes on its header-only cast")
         status_path = write.group(1).rstrip('"')
         read = re.search(
-            r"^status=\$\(cat (\S+) 2>/dev/null\) \|\| \{$", block, re.M)
+            r"^status=\$\(cat (\S+) 2>/dev/null\)\n"
+            r"\[ -n \"\$status\" \] \|\| \{$", block, re.M)
         assert read, (
             "tmux-screen-recording: step 5 does not read the recorder's exit "
             "status")
@@ -5236,6 +5238,10 @@ case "$sub" in
             if [ -n "$STUB_STATUS_FILE" ]; then
                 case "$STUB_MODE" in
                   nostatus|detachnostatus) : ;;
+                  # `emptystatus`: the pane's shell opened the status file and
+                  # was killed (or could not write) before the status landed —
+                  # a 0-byte file, which is not an exit status.
+                  emptystatus) : > "$STUB_STATUS_FILE" ;;
                   badstatus|midbothbad|detachbothbad) printf '137\n' > "$STUB_STATUS_FILE" ;;
                   *)         printf '0\n' > "$STUB_STATUS_FILE" ;;
                 esac
@@ -5243,6 +5249,11 @@ case "$sub" in
       esac
       case "$STUB_MODE" in
         oneshot|badstatus|nostatus) ( sleep 0.3; rm -f "$STATE/$s" ) & ;;
+        # The CLI scaffold's pane *is* the recording, so its session ends when
+        # the one-shot command ends; the tmux recipe's recorder must stay up
+        # until the detach ends it, so `emptystatus` only ends the scaffold's
+        # own `rec` session.
+        emptystatus) [ "$s" = rec ] && ( sleep 0.3; rm -f "$STATE/$s" ) & ;;
       esac
       exit 0 ;;
 esac
@@ -5709,6 +5720,43 @@ class TestCaptureFlowExecution:
             "finished recording: " + r.stderr)
         assert "recorder status is missing" in r.stderr, (
             f"{name}: the run failed for another reason: " + r.stderr)
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_an_empty_recorder_status_is_not_an_exit_status(self, name,
+                                                            tmp_path):
+        """A 0-byte status file holds no status, so it is not one to report.
+
+        The status file is the completion handle, and the pane's shell writes
+        it as ``echo $? > recorder.status``: the redirect creates (truncates)
+        the file when the shell runs that statement, and the status lands a
+        moment later. A kill in that window (a concurrent capture's step 0
+        ending this recorder, a supervisor, an OOM kill) — or a write that
+        cannot complete, e.g. a full disk — leaves a **0-byte** file. The
+        check read it with ``cat``, which answers 0 for an empty file, so the
+        ``[ "$status" = 0 ]`` comparison fired and the run printed
+        ``asciinema exited  — the cast is incomplete``: an exit status the
+        file does not hold, for exactly the state the missing-file branch
+        exists to name. Verified in this container: the recipe's own pane
+        command under a write limit leaves a 0-byte ``recorder.status``, and
+        the status check on that file prints that message. The empty shape is
+        the "an artifact that exists but is empty is not an input" rule the
+        cast/gif/webm/driver checks already follow.
+
+        Both recipes reach the status check: the tmux recipe's detach ends
+        its recorder, and the CLI's one-shot command ends its session, so the
+        run fails on the status rather than earlier for an unrelated reason.
+        """
+        raw = _scaffold_block(_recipe_text(name))
+        r, _cast = _run_block(raw, "emptystatus", tmp_path, target=True)
+        assert r.returncode != 0, (
+            f"{name}: a recording whose status file holds no status passed")
+        assert "recorder status is missing" in r.stderr, (
+            f"{name}: an empty status file is not reported as a missing "
+            "status, so the worker is told an exit status the file does not "
+            "hold: " + r.stderr)
+        assert "asciinema exited" not in r.stderr, (
+            f"{name}: the failure names an exit status it does not have: "
+            + r.stderr)
 
     def test_tmux_recording_completes(self, tmp_path):
         r, cast = _run_capture_block(
