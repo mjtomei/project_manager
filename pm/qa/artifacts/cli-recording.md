@@ -93,6 +93,37 @@ mkdir -p <capture-dir>/<short-name> || {
         "check the path and its permissions" >&2
     exit 1
 }
+# A recorder whose pane is still running is a capture in progress — this
+# worker's own earlier attempt, or another run on this host's shared
+# `scaffold` socket — and this clear would delete the cast, the status and
+# the transcript that capture's step 4 reads. The scaffold's own guard then
+# refuses with "run step 4 for your own earlier attempt", and step 4 answers
+# "asciinema wrote no cast" for the files this block removed: a recording
+# destroyed by the block that was supposed to prepare the directory for a new
+# one (verified with the stub harness: the preamble exited 0 with the live
+# capture's cast, status and transcript gone, then the scaffold refused).
+# Refuse it here, before the clear; the scaffold repeats the guard for a
+# worker who pastes that block alone. A recorder whose pane has *returned* is
+# a dead leftover and is cleared (it writes nothing, and the next start fails
+# with "duplicate session: rec" while it exists), as step 0 of the tmux
+# recipe and the scaffold's own guard do. `#{pane_dead}` is the handle: 1
+# once the pane's command has returned (`remain-on-exit on` keeps the session
+# after that), and an empty answer — the session went away between the two
+# calls — is read as live, because acting on a recorder this block cannot see
+# is the worse failure. The guard runs after the directory checks above, so a
+# block that is about to refuse its own path still makes no tmux call.
+if tmux -L scaffold has-session -t rec 2>/dev/null; then
+    if [ "$(tmux -L scaffold display-message -p -t rec:0.0 '#{pane_dead}' 2>/dev/null)" != 1 ]; then
+        echo "a recorder is already running on this socket — a CLI capture" \
+            "must not share it: let it finish (run step 4 for your own earlier" \
+            "attempt), or end it with 'tmux -L scaffold kill-server' and" \
+            "re-record. This block did not clear the capture directory (the" \
+            "cast, status and transcript it would have removed are what that" \
+            "recorder's step 4 reads)." >&2
+        exit 1
+    fi
+    tmux -L scaffold kill-session -t rec 2>/dev/null || true
+fi
 rm -f <capture-dir>/<short-name>/recording.cast \
       <capture-dir>/<short-name>/transcript.log \
       <capture-dir>/<short-name>/recording.mp4 \
@@ -116,12 +147,19 @@ on its own. A leftover cast is worse: without
 `--overwrite` the recorder aborts on it, and the render step rewrites the
 `.mp4` from whatever cast is on disk, so a run that recorded nothing would
 still produce a fresh-looking video of the *previous* run. The no-TTY
-scaffold repeats both steps, and also deals with a `rec` session an earlier
-run left behind: a recorder whose pane is still running is refused (it is a
-capture in progress — clearing it would end that recording, and two runs
-sharing one capture directory then read the same cast and status), while one
-whose pane has returned is cleared, because `new-session` fails with
-"duplicate session: rec" while it exists. A duplicate that appears in the
+scaffold repeats both steps, and both it and the preamble above deal with a
+`rec` session an earlier run left behind: a recorder whose pane is still
+running is refused (it is a capture in progress — clearing it would end that
+recording, and two runs sharing one capture directory then read the same cast
+and status), while one whose pane has returned is cleared, because
+`new-session` fails with "duplicate session: rec" while it exists. The
+preamble needs the same guard because it is the paste a worker following the
+recipe top-down makes *before* the scaffold block: without it, a re-paste
+while a recorder is still running (the worker's own earlier attempt, or
+another run on the host-shared socket) deleted that capture's cast, status
+and transcript first, and the scaffold's refusal ("run step 4 for your own
+earlier attempt") was then answered by "asciinema wrote no cast". A duplicate
+that appears in the
 gap before `new-session` is reported as a start failure, instead of spinning
 out its readiness wait against a `rec` session that never writes a cast —
 and that failure does not clear the session it names: this run created

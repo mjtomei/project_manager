@@ -7237,6 +7237,75 @@ class TestCaptureFlowExecution:
         assert str(capture / "run") in r.stderr, (
             "the refusal does not name the capture directory: " + r.stderr)
 
+    def test_cli_preamble_refuses_a_live_recorder_not_cleared(self, tmp_path):
+        """The preamble's clear must not destroy a capture in progress.
+
+        The preamble is the block a worker following the recipe top-down
+        pastes before any form, and the scaffold's live-recorder guard runs
+        only in the *scaffold* block — a later paste. A re-paste while a
+        recorder is still running (the worker's own earlier attempt, or
+        another run on the host-shared socket) therefore cleared that
+        capture's cast, status and transcript first; the scaffold then
+        refused with "run step 4 for your own earlier attempt", and step 4
+        reported "asciinema wrote no cast" for the files the preamble had
+        deleted. Verified with this harness before the fix: the preamble
+        exits 0 with the three files gone, then the scaffold refuses. The
+        preamble now carries the scaffold's guard and refuses before the
+        clear.
+        """
+        calls = tmp_path / "tmux-calls.log"
+        r, cast = _run_block(
+            _cli_preamble_block(), "ok", tmp_path, target=True,
+            sessions=("rec",),
+            files={"recording.cast": '{"version": 2}\n',
+                   "recorder.status": "0\n",
+                   "transcript.log": "pane output\n"},
+            env_extra={"STUB_TMUX_LOG": str(calls)})
+
+        assert r.returncode != 0, (
+            "the preamble cleared a capture directory a live recorder is "
+            "writing into: " + r.stderr)
+        assert "already running" in r.stderr, r.stderr
+        assert cast.read_text() == '{"version": 2}\n', (
+            "the refused preamble cleared the live capture's cast")
+        assert (tmp_path / "cap" / "run" / "recorder.status").read_text() == \
+            "0\n", "the refused preamble cleared the live capture's status"
+        assert (tmp_path / "cap" / "run" / "transcript.log").read_text() == \
+            "pane output\n", (
+                "the refused preamble cleared the live capture's transcript")
+        calls_text = calls.read_text() if calls.exists() else ""
+        assert "kill-session" not in calls_text and \
+            "kill-server" not in calls_text, (
+                "the refused preamble acted on the live recorder: "
+                + calls_text)
+
+    def test_cli_preamble_clears_a_dead_recorder_leftover(self, tmp_path):
+        """A recorder whose pane has returned writes nothing; clear it.
+
+        `remain-on-exit on` keeps the session after its only pane's command
+        returns, and `new-session` then fails with "duplicate session" while
+        it exists — the same leftover step 0 of the tmux recipe and the CLI
+        scaffold clear. The preamble's live-recorder half reads
+        ``#{pane_dead}``, so this state must not be refused, and the run
+        must go on to clear the dead capture's files.
+        """
+        calls = tmp_path / "tmux-calls.log"
+        r, cast = _run_block(
+            _cli_preamble_block(), "ok", tmp_path, target=True,
+            sessions=("rec",), state_files={"dead.rec": ""},
+            files={"recording.cast": '{"version": 2}\n',
+                   "recorder.status": "0\n"},
+            env_extra={"STUB_TMUX_LOG": str(calls)})
+
+        assert r.returncode == 0, (
+            "a dead-pane recorder leftover was refused: " + r.stderr)
+        calls_text = calls.read_text() if calls.exists() else ""
+        assert "kill-session" in calls_text, (
+            "the preamble left a dead recorder session behind, so the next "
+            "`new-session` fails with a duplicate: " + calls_text)
+        assert not cast.exists(), (
+            "the preamble did not clear the dead leftover's cast")
+
     @pytest.mark.parametrize("name", RECIPES)
     def test_a_tilde_capture_dir_is_accepted(self, name, tmp_path):
         """`~/…` is a documented spelling, and only the refusal half had a case.

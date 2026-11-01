@@ -490,7 +490,15 @@ concurrent CLI capture's recorder has to survive the refused block (the
 socket name is shared by every run on the host). The same holds for a path
 the block cannot create: with `<capture-dir>` under a regular file it must
 stop at "could not create …" and leave a concurrent capture's recorder
-(`rec` for the CLI, `pm-recorder` for the tmux recipe) running. S23 also re-checks the stop
+(`rec` for the CLI, `pm-recorder` for the tmux recipe) running. S21/S22 also re-check the
+preamble's live-recorder guard (review loop 928f i41, R107): with a live
+`rec` session and a seeded cast, `recorder.status` and `transcript.log`, the
+preamble — the block pasted before any form — must stop at "a recorder is
+already running" and leave all three files intact and the recorder running;
+pre-fix it exits 0 with the files gone, so the scaffold's "run step 4 for
+your own earlier attempt" remedy then answers "asciinema wrote no cast". A
+dead-pane `rec` leftover (its pane has returned, the session kept by
+`remain-on-exit`) must still be cleared, so the next start is not a duplicate. S23 also re-checks the stop
 step's detach race: after the scenario
 ends the pm session itself, a stop step run while the recorder is winding
 down must pass on the complete cast and `recorder.status` 0 (not report "the
