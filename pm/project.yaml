@@ -50100,6 +50100,465 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-049649a
+  plan: bugs
+  title: Remove all-PR autostart and fail closed on malformed or targetless saved
+    state
+  branch: pm/pr-049649a-remove-all-pr-autostart-and-fail-closed-on-malform
+  status: in_progress
+  depends_on: []
+  description: 'Remove every route to whole-backlog/all-PR autostart. Autostart must
+    require a validated explicit nonempty collection of target PR IDs; only their
+    dependency closures may run. User explicitly requested removing the feature entirely,
+    not just fixing the malformed-state case.
+
+
+    Incident 2026-10-27 18:52 UTC: recovery supplied a targets mapping instead of
+    the required list in ~/.pm/autostart-resume.json, with auto_start=true and all_mode=false.
+    targets_from_breadcrumb fell through to legacy targetless migration and returned
+    all_mode=true. That broadened scope, dropped per-target wait_for_merge gates,
+    merged #254, started unrelated work and created drafts #265/#266. Evidence: /home/matt/.local/state/pm-pr-shepherd/tui-popup-close-crash-20261027T185235Z/
+    (recovery-breadcrumb.json, incident.json, logs). The malformed input was a shepherd
+    error; the product must reject it without expanding authority.
+
+
+    Audit and remove ALL paths: TUI command-bar autostart all; any CLI/API/IPC variants;
+    keybindings; app._auto_start_all and other mode flags; watchers and background
+    drivers; scheduler targetless fallbacks; current and legacy breadcrumb/resume
+    migration; persisted all_mode=true; examples/docs/help and tests relying on whole-backlog
+    mode. Search callers and data flow, not only text occurrences. Preserve explicit
+    multi-target autostart and explicitly selected targets'' dependencies, per-target
+    manual merge holds, model routing and spec gates. Absence, empty targets, wrong
+    types, invalid IDs, malformed records, targetless legacy data, and all-mode requests
+    must fail closed or remain off with an actionable diagnostic; none may become
+    wildcard authority. Preserve/reject malformed evidence safely rather than silently
+    dropping merge gates. Valid legacy single-target data may migrate only to that
+    exact validated target with no broadened merge authority; define the conservative
+    handling explicitly.
+
+
+    Regressions must include command/IPC rejection, valid explicit multi-target and
+    dependency scheduling, empty/missing/dict/string/null targets, malformed records,
+    legacy auto_start/run_id without target, all_mode true, corrupt/truncated JSON,
+    reload/restart and watcher paths. Prove unrelated eligible PRs never start and
+    signed-off PRs held for manual merge never merge. Use isolated fixtures/fake launch
+    and merge callbacks; never test whole-backlog start or merge against a live PM
+    project. Do not merge any product PR or change global provider policy. Keep this
+    bug independent of the separate AutoRunsScreen dismissal crash.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/267
+  gh_pr_number: 267
+  created_at: '2026-10-27T19:03:40.643246+00:00'
+  updated_at: '2026-10-31T18:07:25.345765+00:00'
+  started_at: '2026-10-27T19:04:56.616056+00:00'
+  reviewed_at: '2026-10-29T02:22:47.161757+00:00'
+  merged_at: null
+  notes:
+  - id: note-a2c68b1
+    text: 'QA INPUT_REQUIRED: Malformed saved state is rejected instead of becoming
+      whole-backlog authority (incident reproduction): PASS; Every all-PR entry point
+      is gone and reports why: PASS; Explicit multi-target state survives a merge
+      restart exactly: PASS; Legacy saved state migrates only to its exact validated
+      target: PASS; Malformed saved-state shapes all fail closed with preserved evidence:
+      PASS; The auto-start watcher is observation-only when it has no targets: PASS;
+      Concurrent CLI clients cannot produce wildcard or corrupted state: INPUT_REQUIRED;
+      Saved state from another project never grants authority: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-049649a-fb7eecdb7ab986be)'
+    created_at: '2026-10-28T02:03:38Z'
+    last_edited: '2026-10-28T02:03:38Z'
+  - id: note-recovery-master-20261029
+    text: 'USER AUTHORIZED RECOVERY: restart through implementation to merge the latest
+      batch from origin/master before further review or QA. Preserve all existing
+      dirty source, local PR registry/routing, notes, stashes, QA planner/spec edits,
+      untracked evidence and transcripts; interrupted changes are owned work, not
+      disposable noise. First inspect the saved prior review/QA evidence and current
+      git state. Safely preserve and reconcile that work, fetch origin/master, merge
+      it INTO this existing PR branch, resolve conflicts preserving both master fixes
+      and this PR''s behavior, run relevant checks, commit and push only this PR branch
+      when complete. Do not reset/force-push master or merge the PR into master. Record
+      exact integrated master SHA and validation; do not hand off until integration
+      and needed checks are complete. All pending user decisions remain unwaived;
+      if any blocks implementation, report INPUT_REQUIRED. Keep primary DeepSeek1017/high
+      and explicit work Opus5.5/xhigh signoff override. Native review/QA must follow
+      implementation; prior QA evidence is not a pass for the integrated head.
+
+
+      Incident 2026-10-29 01:06 UTC: #267 QA S10 refiner inherited the REAL tmux session,
+      launched a scratch PR there, then mistakenly killed pm-project_manager-5b29c418
+      as test cleanup. S9/S12 recreated scratch TUIs under that real session and S12
+      polluted shared tmux PATH/PYTHONPATH and shared autostart breadcrumb state.
+      Original transcripts, dirty patches, untracked files and QA results are preserved
+      under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z.
+      This was infrastructure interruption, not an acceptance verdict. NEVER operate
+      on the user''s real tmux session or shared host configuration for test setup/cleanup.
+      Test with an explicit dedicated tmux socket, isolated PM state/config paths,
+      and verified fixture identity; inherited TMUX/TMUX_PANE, global tmux set-environment,
+      shared ~/.pm breadcrumbs and broad cleanup are unsafe. If isolation cannot be
+      established, stop and report INPUT_REQUIRED. #278 is the existing per-session
+      tmux isolation PR; this is concrete incident evidence for its coverage.
+
+      This new implementation handoff must preserve unfinished S9-S12 QA evidence
+      and revise future test setup to avoid the proven ambient targeting/shared state
+      leak; do not relaunch the old fixture workers. No scenario verdict was supplied
+      by recovery.'
+    created_at: '2026-10-29T01:30:33.195814+00:00'
+  - id: note-user-restart-all-20261029
+    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart
+      this PR in implementation and merge latest origin/master INTO this existing
+      PR branch before any new review/QA. User explicitly released old review/QA holds
+      for this restart; preserve all earlier questions, answers, verdicts and evidence
+      and re-evaluate after integration rather than invent answers or waive acceptance.
+      Preserve dirty source, planner/spec edits, local registry/routing, stashes,
+      untracked files and all evidence. The interrupted work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
+      inspect its per-PR backup and original transcripts as needed. Safely reconcile
+      interrupted changes and current master, test, commit and push only this PR branch.
+      Never force-push/reset master or merge the PR into master. Report integrated
+      master SHA and tests; only then hand off to native review/QA. Keep assigned
+      primary/helper model and explicit work Opus5.5/xhigh signoff override. No new
+      dependencies or unrelated work are authorized.
+
+      Test isolation is mandatory: #267 S10 refiner killed the REAL pm-project_manager-5b29c418
+      session after mistaking a test PR launch for ownership of that session. S9/S12
+      inherited ambient tmux context and recreated test TUIs under that real name;
+      S12 changed global tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use
+      an explicit dedicated test tmux socket and isolated state/config, verify fixture
+      ownership; never mutate the user''s real session or shared host configuration
+      as test cleanup. Preserve the failed-run evidence. #278 is the existing per-session
+      tmux-isolation fix. Do not relaunch old QA fixture workers.'
+    created_at: '2026-10-29T01:33:53.678599+00:00'
+    last_edited: '2026-10-29T01:33:53.678599+00:00'
+  - id: note-fc1581d
+    text: 'MASTER INTEGRATION 2026-10-29 (implementation restart): merged origin/master
+      4a74d88085edffcc300cb21f31777a798d647782 (352 commits) INTO this PR branch.
+      Merge commit 314ef61f; QA-isolation doc 924caeb2; final docs fdb1eb3d. No force-push,
+      no reset, PR not merged.
+
+
+      Conflict resolutions (preserving both master fixes and this PR''s behavior):
+
+      1) pm_core/autostart_state.py keeps master''s pr-25f4038 single-manual-policy
+      work (legacy record policy folding, bare-string/legacy single target -> wait_for_merge,
+      saved stop_before_merge marks -> wait targets, migrate_legacy_stop for stale
+      build_status inputs) under this PR''s fail-closed parser: all_mode rejected
+      (truthy or non-boolean), targets must be a list of valid records (dict/string/null/number
+      reject; duplicate ids reject), empty/targetless requests reject, saved stop_before_merge
+      must be a list of valid ids (dict/string/set/padded ids reject), unknown restored
+      ids reject the whole restore. build_status requires an explicit target for mode=targets.
+
+      2) pm_core/tui/auto_start.py consume_breadcrumb is one fail-closed flow: corrupt/non-object/rejected
+      state resets in-memory scope, logs an actionable diagnostic, quarantines the
+      bytes (autostart-resume.rejected-<stamp>.json), and never calls check_and_start.
+      Master''s session-owner check, QA-run adoption, loop-restart ordering and retry
+      fields are preserved (retry fields now type-validated so corrupt records cannot
+      raise on restore). Dead stop-marks helper and all-mode label branch removed;
+      the `all` verb still returns all_mode_removed.
+
+      3) Tests: record-shape conflicts resolved to wait_for_merge; master tests that
+      expected permissive/all-mode behavior (non-list targets, all_mode honored, bare/empty
+      entries kept, string stop set, non-string run_id) updated to the fail-closed
+      contract; targets_from_breadcrumb call sites moved to the BreadcrumbTargets
+      result.
+
+      4) pm/project.yaml: union of both registries (516 unique PRs), preserving this
+      PR''s notes and the provider:claude-work-xhigh-249 signoff override.
+
+
+      Validation on integrated head 924caeb2 (docs-only fdb1eb3d after it): full suite
+      4581 passed, 1 skipped, 0 failed. Focused autostart/parser/multi-target/single-policy/merge-wait/breadcrumb-loop/log-message/signoff-handoff/owed-REQA/launch-retry
+      suites all pass. Spec pm/specs/pr-049649a/impl.md has an Integration section
+      (master SHA + reconciliation); qa.md updated for the single-policy semantics
+      and MANDATORY test isolation: dedicated HOME (so pm_home() is not ~/.pm) + PM_TMUX_SOCKET;
+      never inherit TMUX/TMUX_PANE, never touch the real pm-project_manager-5b29c418
+      session or shared ~/.pm breadcrumbs; stop with INPUT_REQUIRED if isolation cannot
+      be established.
+
+
+      QA evidence: prior S0-S8 results and the interrupted S9-S12 fixtures are preserved
+      (test-session-leak-20261029T012237Z) but are NOT a verdict for this integrated
+      head; native review/QA must re-run on the current head. Do not merge: manual
+      merge gate applies.'
+    created_at: '2026-10-29T02:22:26Z'
+    last_edited: '2026-10-29T02:22:26Z'
+  - id: note-6ce8318
+    text: 'QA PASS: Incident replay — malformed saved state never becomes whole-backlog
+      authority: PASS; Saved merge-gate evidence — valid stop marks become holds,
+      malformed sets fail closed: PASS; Restart lifecycle — downtime completion, plain-restart
+      consumption, and save purity: PASS; Concurrent actors across the shared saved
+      state, command queue and reply files: PASS; Watcher scope follows explicit targets
+      and never inherits rejected state: PASS; Restored target set carries its merge
+      holds — sign-off never auto-merges: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-049649a-92642b9a5777115f)'
+    created_at: '2026-10-29T06:03:04Z'
+    last_edited: '2026-10-29T06:03:04Z'
+  - id: note-3d47f88
+    text: 'User-authorized restart from the main PM session on 2026-10-31 after #249
+      merged as eaf3372e60d1717bd97cc50b5e0b04c6df881fa1. Resume this existing PR
+      in its existing workdir. First integrate current origin/master INTO THIS PR
+      branch, preserving its intended behavior and all earlier review/QA corrections;
+      resolve real code/test conflicts and validate the combined behavior before handing
+      off for a fresh review/QA/sign-off sequence. Do not merge this PR into master
+      or push/reset/delete master or other branches. This is a user-directed implementation
+      return, not a reviewer/sign-off verdict. The read-only integration check found
+      substantive conflicts in: pm/project.yaml, pm_core/tui/auto_start.py, tests/test_qa_loop.py.
+      The prior SIGNOFF_MERGE is historical evidence for its recorded revisions, not
+      approval of a new integration. Retain all original source, dirty files, stashes,
+      drafts, fixtures and captures. Existing uncommitted content may have been intentionally
+      excluded; inspect its provenance instead of automatically committing it. Preserve
+      every PR record and unrelated local metadata during project.yaml reconciliation.
+      Do not weaken acceptance criteria, choose unresolved user policy questions or
+      reuse stale PASS results. Historical captures have been copied intact to the
+      main session captures; overwritten filename collisions are backed up in the
+      host migration record. Main session is pm-project_manager-c5a1006b; keep old
+      restored sessions idle. Assigned models and explicit work-Opus sign-off override
+      remain unchanged. Autostart will use wait_for_merge; no PR merge is authorized
+      by this request.'
+    created_at: '2026-10-31T18:07:25.345765+00:00'
+    last_edited: '2026-10-31T18:07:25.345765+00:00'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    signoff: provider:claude-work-xhigh-249
+    merge: provider:deepseek-flash
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-049649a-remove-all-pr-autostart-and-fail-clo-registered-20261027
+  signed_off_at: '2026-10-29T06:03:05.752461+00:00'
+  integration:
+    checked_at: '2026-10-31T18:03:29.079979+00:00'
+    target_repo: https://github.com/mjtomei/project_manager.git
+    base_branch: master
+    head: e0cdd55bd95b624246f5bc117fefcbac06efdff0
+    base_sha: eaf3372e60d1717bd97cc50b5e0b04c6df881fa1
+    conflicts:
+    - pm/project.yaml
+    - pm_core/tui/auto_start.py
+    - tests/test_qa_loop.py
+    overlap:
+    - pm/project.yaml
+    - pm_core/autostart_state.py
+    - pm_core/tui/app.py
+    - pm_core/tui/auto_start.py
+    - pm_core/tui/screens.py
+    - tests/test_auto_start_qa.py
+    - tests/test_autostart_multi_target.py
+    - tests/test_breadcrumb_review_loop.py
+    - tests/test_log_message_force.py
+    - tests/test_owed_reqa.py
+    - tests/test_qa_background_focus.py
+    - tests/test_qa_loop.py
+    - tests/test_review_launch_retry.py
+    - tests/test_tui_signoff_handoff.py
+    candidate_tree: null
+    merge_base: 4a74d88085edffcc300cb21f31777a798d647782
+    status: conflict
+    pr_id: pr-049649a
+    number: 267
+    workdir_head: e0cdd55bd95b624246f5bc117fefcbac06efdff0
+    remote_head: e0cdd55bd95b624246f5bc117fefcbac06efdff0
+    dirty: " M pm/project.yaml\n M pm/specs/pr-049649a/qa.md\n?? verify-s17-followup.md\n\
+      ?? verify-s18-followup.md\n?? verify-s4-followup.md\n"
+    signoff_sha: e0cdd55bd95b624246f5bc117fefcbac06efdff0
+    base_files_count: 113
+  signoff:
+    verdict: SIGNOFF_MERGE
+    sha: e0cdd55bd95b624246f5bc117fefcbac06efdff0
+    ts: '2026-10-29T06:13:27.551021+00:00'
+    origin: auto-sequence
+    integration:
+      target_repo: https://github.com/mjtomei/project_manager.git
+      base_branch: master
+      base_sha: 4a74d88085edffcc300cb21f31777a798d647782
+      candidate_tree: e99283693f2375209f8ac7eb69f15f03a37dabf9
+      status: up_to_date
+      head: e0cdd55bd95b624246f5bc117fefcbac06efdff0
+- id: pr-f0f4129
+  plan: bugs
+  title: Check base integration before review iterations and QA; return conflicts
+    to implementation
+  branch: pm/pr-f0f4129-check-base-integration-before-review-iterations-an
+  status: in_progress
+  depends_on: []
+  description: 'Sign-off is correctly detecting integration conflicts, but doing so
+    after repeated review and QA wastes completed work. User requested an automated
+    conflict check before starting review, before moving to another review iteration,
+    and before starting QA, returning to implementation for the base merge when necessary.
+
+
+    Check the latest configured base against the current PR HEAD in an isolated candidate,
+    without mutating the product workdir, index, or refs. Cover the supported TUI,
+    CLI/background and resumed native transition paths. If integration conflicts,
+    do not launch the downstream reviewer/planner: record the exact PR HEAD/base pair,
+    conflict paths/reason and intended return stage, then hand off once to implementation
+    to merge/reconcile the base. Implementation completion must be genuine before
+    fresh review starts; an idle notification while background tests or edits are
+    unfinished must not launch a concurrent writer. Preserve completed review outcomes,
+    transcript/evidence history, dirty files, stashes, fixtures, drafts, model routing,
+    spec-review setting and manual merge gates.
+
+
+    Clean integration continues the intended phase; do not turn every clean base advance
+    into an unconditional full review/QA reset. Fetch/probe failures are explicit
+    retryable failures, not proof of a conflict or approval. Sign-off remains the
+    final integrated-candidate authority. Reuse existing integration primitives where
+    appropriate and coordinate with #253/pr-5cee3d5 evidence reuse. This differs from
+    #246/pr-62fdd54, which synchronizes the PR workdir to its own upstream branch
+    before planning.
+
+
+    Make the transition idempotent across repeated polls, controller restart, concurrent
+    PRs, stale callbacks and base movement. Never run implementation/review/QA writers
+    concurrently for this handoff, drop existing evidence, merge the PR, force-push,
+    or change the user''s policies. Avoid an endless return loop for an unchanged
+    unresolved HEAD/base pair.
+
+
+    Acceptance: real Git conflict reproductions at each of the three transition points;
+    clean and unchanged base paths; another review iteration; base moving during handoff;
+    dirty workdirs retained; fetch failures; restart/late callback races and exactly
+    one implementation owner. Reproduce background-test idle handoff and ensure it
+    does not qualify as completed implementation. Test meaningful behavior, and live
+    QA must verify the transition and preserved evidence. Deliver the implementation
+    through ordinary review/QA/work-Opus sign-off with wait_for_merge. User authorized
+    standalone start on 2026-10-28.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/274
+  gh_pr_number: 274
+  created_at: '2026-10-28T13:41:51.469975+00:00'
+  updated_at: '2026-10-31T18:07:25.345765+00:00'
+  started_at: '2026-10-28T13:44:04.216828+00:00'
+  reviewed_at: '2026-10-29T02:03:44.599854+00:00'
+  merged_at: null
+  notes:
+  - id: note-recovery-master-20261029
+    text: 'USER AUTHORIZED RECOVERY: restart through implementation to merge the latest
+      batch from origin/master before further review or QA. Preserve all existing
+      dirty source, local PR registry/routing, notes, stashes, QA planner/spec edits,
+      untracked evidence and transcripts; interrupted changes are owned work, not
+      disposable noise. First inspect the saved prior review/QA evidence and current
+      git state. Safely preserve and reconcile that work, fetch origin/master, merge
+      it INTO this existing PR branch, resolve conflicts preserving both master fixes
+      and this PR''s behavior, run relevant checks, commit and push only this PR branch
+      when complete. Do not reset/force-push master or merge the PR into master. Record
+      exact integrated master SHA and validation; do not hand off until integration
+      and needed checks are complete. All pending user decisions remain unwaived;
+      if any blocks implementation, report INPUT_REQUIRED. Keep primary DeepSeek1017/high
+      and explicit work Opus5.5/xhigh signoff override. Native review/QA must follow
+      implementation; prior QA evidence is not a pass for the integrated head.
+
+
+      Incident 2026-10-29 01:06 UTC: #267 QA S10 refiner inherited the REAL tmux session,
+      launched a scratch PR there, then mistakenly killed pm-project_manager-5b29c418
+      as test cleanup. S9/S12 recreated scratch TUIs under that real session and S12
+      polluted shared tmux PATH/PYTHONPATH and shared autostart breadcrumb state.
+      Original transcripts, dirty patches, untracked files and QA results are preserved
+      under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z.
+      This was infrastructure interruption, not an acceptance verdict. NEVER operate
+      on the user''s real tmux session or shared host configuration for test setup/cleanup.
+      Test with an explicit dedicated tmux socket, isolated PM state/config paths,
+      and verified fixture identity; inherited TMUX/TMUX_PANE, global tmux set-environment,
+      shared ~/.pm breadcrumbs and broad cleanup are unsafe. If isolation cannot be
+      established, stop and report INPUT_REQUIRED. #278 is the existing per-session
+      tmux isolation PR; this is concrete incident evidence for its coverage.'
+    created_at: '2026-10-29T01:30:33.195814+00:00'
+  - id: note-user-restart-all-20261029
+    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart
+      this PR in implementation and merge latest origin/master INTO this existing
+      PR branch before any new review/QA. User explicitly released old review/QA holds
+      for this restart; preserve all earlier questions, answers, verdicts and evidence
+      and re-evaluate after integration rather than invent answers or waive acceptance.
+      Preserve dirty source, planner/spec edits, local registry/routing, stashes,
+      untracked files and all evidence. The interrupted work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
+      inspect its per-PR backup and original transcripts as needed. Safely reconcile
+      interrupted changes and current master, test, commit and push only this PR branch.
+      Never force-push/reset master or merge the PR into master. Report integrated
+      master SHA and tests; only then hand off to native review/QA. Keep assigned
+      primary/helper model and explicit work Opus5.5/xhigh signoff override. No new
+      dependencies or unrelated work are authorized.
+
+      Test isolation is mandatory: #267 S10 refiner killed the REAL pm-project_manager-5b29c418
+      session after mistaking a test PR launch for ownership of that session. S9/S12
+      inherited ambient tmux context and recreated test TUIs under that real name;
+      S12 changed global tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use
+      an explicit dedicated test tmux socket and isolated state/config, verify fixture
+      ownership; never mutate the user''s real session or shared host configuration
+      as test cleanup. Preserve the failed-run evidence. #278 is the existing per-session
+      tmux-isolation fix. Do not relaunch old QA fixture workers.'
+    created_at: '2026-10-29T01:33:53.678599+00:00'
+    last_edited: '2026-10-29T01:33:53.678599+00:00'
+  - id: note-8dc8301
+    text: 'Master integration 2026-10-29 (implementation restart) is complete and
+      pushed. Merge commit f92802e4 merges origin/master 4a74d88085edffcc300cb21f31777a798d647782
+      into the PR branch (note commit 565bf839 on top; branch tip 565bf839). Seven
+      conflicted files resolved keeping both sides: review_loop.py (both verdict constant
+      groups and both ReviewLoopState field groups; master launch-timeout try/except
+      with _LAUNCH_TIMEOUT raised 120s to 360s so the in-subprocess base-gate fetch
+      plus pm pr start relaunch is not mistaken for a loop error; BaseConflictError
+      still handled before the generic failure path so a gate exit 3 is never retried
+      as a launch failure), cli/pr.py (auto-sequence in_review branch keeps the open-base-return
+      refusal ahead of master review-loop launch-owner guard), tui/auto_start.py (QA-loop
+      open-return guard before master owed-REQA starter split), tui/qa_loop_ui.py
+      (start_qa open-return guard before _enter_qa_status; master post-transition
+      clear_return_awaiting stays), tui/review_loop_ui.py and tech_tree.py (both verdict
+      icon/style sets), pm/project.yaml (all 515 master PR entries plus pr-f0f4129;
+      no duplicate ids). Validation on the merged tree: full suite 4563 passed, 1
+      skipped, 0 failed (14 deselected: test_markdown_render needs the markdown package,
+      test_hook_events::test_installer_writes_standalone_receiver needs PM_HOST_HOME
+      unset); PR suites test_base_check + test_tui_base_return + test_review_loop
+      + test_pr_auto_sequence + test_qa_loop + test_pr + test_pane_idle 358 passed;
+      master new suites test_review_launch_retry + test_owed_reqa + test_autostart_multi_target
+      248 passed. All runs used a dedicated TMUX_TMPDIR socket with TMUX/TMUX_PANE
+      unset per the 2026-10-29 test-isolation incident; the host tmux server and shared
+      config were not touched. Preserved: earlier review transcripts and evidence,
+      the leak-run backup, captures (fix unchanged, pre/post-fix captures reused),
+      model routing (deepseek-flash/high primary, claude-work-xhigh signoff), skip_qa
+      and manual merge gates. Prior QA is not a pass for this integrated head: native
+      review then QA must run on 565bf839.'
+    created_at: '2026-10-29T02:01:01Z'
+    last_edited: '2026-10-29T02:01:01Z'
+  - id: note-657fb27
+    text: 'QA NEEDS_WORK: Review is refused and the PR returned to implementation
+      when the base conflicts: PASS; A TUI review loop routes a base conflict instead
+      of recording a failed iteration: NEEDS_WORK; QA is never planned on a conflicting
+      base: PASS; Implementation completion is genuine — rework advances, an idle-but-unfinished
+      turn does not: PASS; Concurrent drivers and a restart still produce exactly
+      one implementation owner: NEEDS_WORK; The base moves during the handoff — supersede,
+      clean resolution, and the cap: PASS; Probe failures are retryable and sign-off
+      keeps ownership: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-f0f4129-dfcfbe175358d2a5)'
+    created_at: '2026-10-29T08:06:12Z'
+    last_edited: '2026-10-29T08:06:12Z'
+  - id: note-09775d4
+    text: 'User-authorized restart from the main PM session on 2026-10-31 after #249
+      merged as eaf3372e60d1717bd97cc50b5e0b04c6df881fa1. Resume this existing PR
+      in its existing workdir. First integrate current origin/master INTO THIS PR
+      branch, preserving its intended behavior and all earlier review/QA corrections;
+      resolve real code/test conflicts and validate the combined behavior before handing
+      off for a fresh review/QA/sign-off sequence. Do not merge this PR into master
+      or push/reset/delete master or other branches. This is a user-directed implementation
+      return, not a reviewer/sign-off verdict. GitHub reports the PR conflicts with
+      current master; reconcile that before resuming the prior review/QA work. Retain
+      all original source, dirty files, stashes, drafts, fixtures and captures. Existing
+      uncommitted content may have been intentionally excluded; inspect its provenance
+      instead of automatically committing it. Preserve every PR record and unrelated
+      local metadata during project.yaml reconciliation. Do not weaken acceptance
+      criteria, choose unresolved user policy questions or reuse stale PASS results.
+      Historical captures have been copied intact to the main session captures; overwritten
+      filename collisions are backed up in the host migration record. Main session
+      is pm-project_manager-c5a1006b; keep old restored sessions idle. Assigned models
+      and explicit work-Opus sign-off override remain unchanged. Autostart will use
+      wait_for_merge; no PR merge is authorized by this request.'
+    created_at: '2026-10-31T18:07:25.345765+00:00'
+    last_edited: '2026-10-31T18:07:25.345765+00:00'
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    signoff: provider:claude-work-xhigh-249
+  session_effort:
+    signoff: high
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f0f4129-check-base-integration-before-review-fb6d03d0
 - id: pr-574e851
   plan: bugs
   title: 'Bug: never fall back to host execution when container mode is enabled'
@@ -50179,13 +50638,13 @@ prs:
     Evidence: /home/matt/.local/state/pm-pr-shepherd/container-disabled-20261028-evidence.json.
 
     '
-  agent_machine: null
+  agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-11-01T03:32:43.651233+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-10-31T18:07:25.345765+00:00'
+  started_at: '2026-10-29T02:02:11.516107+00:00'
+  reviewed_at: '2026-10-30T19:07:01.628917+00:00'
   merged_at: null
   notes:
   - id: note-incident-role-correction-20261029
@@ -50196,6 +50655,60 @@ prs:
       all host-role/shared-state isolation. Test only in isolated settings and tmux
       sockets.'
     created_at: '2026-10-29T02:04:46.761935+00:00'
+  - id: note-d20dc39
+    text: 'QA NEEDS_WORK: Execution-only QA refuses to run on the host when its container
+      runtime is unusable: PASS; `pm qa debug` fails closed before creating anything,
+      and reports container-create failures: PASS; A TUI QA run aborts at the planning
+      handoff and reports a clean ERROR: PASS; A container create/setup failure is
+      an infrastructure ERROR, not a scenario verdict: PASS; A live container-mode
+      run handles a dead window, a lost container, and a queued scenario — from concurrent
+      actors: NEEDS_WORK; A restarted QA run keeps the execution mode it was started
+      with: PASS; Two QA runs at once read the shared container setting and never
+      flip it: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-574e851-8a9eb24ef505406b)'
+    created_at: '2026-10-29T08:17:40Z'
+    last_edited: '2026-10-29T08:17:40Z'
+  - id: note-0ef22e3
+    text: 'QA NEEDS_WORK: A capped container-mode run keeps every queued scenario
+      visible and runs each in its own container: PASS; A live container-mode run
+      relaunches a killed window inside its container but fails closed on a lost container,
+      and the cause survives a restart: NEEDS_WORK; Scripted QA entry points report
+      infrastructure failures with a nonzero exit: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-574e851-b58e9707d424dd1b)'
+    created_at: '2026-10-29T11:03:32Z'
+    last_edited: '2026-10-29T11:03:32Z'
+  - id: note-5833d57
+    text: 'QA PASS: A mid-run container failure is reported in the QA status pane,
+      the PR note, and survives a restart: PASS; Runtime failure modes through `pm
+      qa run`: timeout, unexecutable runtime, exit codes, retry, and concurrent runs:
+      PASS; `pm qa debug` still runs inside its container when healthy, fails closed
+      when creation fails, and runs on the host only when container mode is disabled:
+      PASS; An adjacent container-eligible launcher (the review refiner) still fails
+      closed instead of running on the host: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-574e851-4e69aae2a3c11e6c)'
+    created_at: '2026-10-29T14:21:59Z'
+    last_edited: '2026-10-29T14:21:59Z'
+  - id: note-15f3662
+    text: 'User-authorized restart from the main PM session on 2026-10-31 after #249
+      merged as eaf3372e60d1717bd97cc50b5e0b04c6df881fa1. Resume this existing PR
+      in its existing workdir. First integrate current origin/master INTO THIS PR
+      branch, preserving its intended behavior and all earlier review/QA corrections;
+      resolve real code/test conflicts and validate the combined behavior before handing
+      off for a fresh review/QA/sign-off sequence. Do not merge this PR into master
+      or push/reset/delete master or other branches. This is a user-directed implementation
+      return, not a reviewer/sign-off verdict. The read-only integration check found
+      substantive conflicts in: pm/project.yaml, pm_core/qa_loop.py, pm_core/tui/qa_loop_ui.py.
+      The prior SIGNOFF_MERGE is historical evidence for its recorded revisions, not
+      approval of a new integration. Retain all original source, dirty files, stashes,
+      drafts, fixtures and captures. Existing uncommitted content may have been intentionally
+      excluded; inspect its provenance instead of automatically committing it. Preserve
+      every PR record and unrelated local metadata during project.yaml reconciliation.
+      Do not weaken acceptance criteria, choose unresolved user policy questions or
+      reuse stale PASS results. Historical captures have been copied intact to the
+      main session captures; overwritten filename collisions are backed up in the
+      host migration record. Main session is pm-project_manager-c5a1006b; keep old
+      restored sessions idle. Assigned models and explicit work-Opus sign-off override
+      remain unchanged. Autostart will use wait_for_merge; no PR merge is authorized
+      by this request.'
+    created_at: '2026-10-31T18:07:25.345765+00:00'
+    last_edited: '2026-10-31T18:07:25.345765+00:00'
   - id: note-07b1a0f
     text: 'Impl complete: fail-closed container-mode launches (QA container-eligible
       launchers only).
@@ -50404,30 +50917,6 @@ prs:
       and pm dies with a raw CalledProcessError traceback — filed as pr-e64ecb6).'
     created_at: '2026-10-29T13:47:54Z'
     last_edited: '2026-10-29T13:47:54Z'
-  - id: note-15f3662
-    text: 'User-authorized restart from the main PM session on 2026-10-31 after #249
-      merged as eaf3372e60d1717bd97cc50b5e0b04c6df881fa1. Resume this existing PR
-      in its existing workdir. First integrate current origin/master INTO THIS PR
-      branch, preserving its intended behavior and all earlier review/QA corrections;
-      resolve real code/test conflicts and validate the combined behavior before handing
-      off for a fresh review/QA/sign-off sequence. Do not merge this PR into master
-      or push/reset/delete master or other branches. This is a user-directed implementation
-      return, not a reviewer/sign-off verdict. The read-only integration check found
-      substantive conflicts in: pm/project.yaml, pm_core/qa_loop.py, pm_core/tui/qa_loop_ui.py.
-      The prior SIGNOFF_MERGE is historical evidence for its recorded revisions, not
-      approval of a new integration. Retain all original source, dirty files, stashes,
-      drafts, fixtures and captures. Existing uncommitted content may have been intentionally
-      excluded; inspect its provenance instead of automatically committing it. Preserve
-      every PR record and unrelated local metadata during project.yaml reconciliation.
-      Do not weaken acceptance criteria, choose unresolved user policy questions or
-      reuse stale PASS results. Historical captures have been copied intact to the
-      main session captures; overwritten filename collisions are backed up in the
-      host migration record. Main session is pm-project_manager-c5a1006b; keep old
-      restored sessions idle. Assigned models and explicit work-Opus sign-off override
-      remain unchanged. Autostart will use wait_for_merge; no PR merge is authorized
-      by this request.'
-    created_at: '2026-10-31T18:07:25.345765+00:00'
-    last_edited: '2026-10-31T18:07:25.345765+00:00'
   - id: note-54eb338
     text: 'Integration complete (2026-10-31, user-authorized): merged origin/master@eaf3372e
       (#249, pr-592e4bd) INTO THIS BRANCH as e99193e1, with spec commits fd18db4c/a4b67d27
@@ -50798,6 +51287,358 @@ prs:
   session_effort:
     signoff: high
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-574e851-bug-never-fall-back-to-host-executio-4a74d880
+  signed_off_at: '2026-10-29T14:22:00.898823+00:00'
+  integration:
+    checked_at: '2026-10-31T18:03:30.186796+00:00'
+    target_repo: https://github.com/mjtomei/project_manager.git
+    base_branch: master
+    head: ea9038d098179808506a4554d6c2ae55e6e1d243
+    base_sha: eaf3372e60d1717bd97cc50b5e0b04c6df881fa1
+    conflicts:
+    - pm/project.yaml
+    - pm_core/qa_loop.py
+    - pm_core/tui/qa_loop_ui.py
+    overlap:
+    - pm/project.yaml
+    - pm_core/cli/qa.py
+    - pm_core/container.py
+    - pm_core/qa_loop.py
+    - pm_core/tui/qa_loop_ui.py
+    - tests/test_qa_input_required.py
+    - tests/test_qa_resume.py
+    candidate_tree: null
+    merge_base: 4a74d88085edffcc300cb21f31777a798d647782
+    status: conflict
+    pr_id: pr-574e851
+    number: 280
+    workdir_head: ea9038d098179808506a4554d6c2ae55e6e1d243
+    remote_head: ea9038d098179808506a4554d6c2ae55e6e1d243
+    dirty: ' M pm/specs/pr-574e851/qa.md
+
+      '
+    signoff_sha: ea9038d098179808506a4554d6c2ae55e6e1d243
+    base_files_count: 113
+  signoff:
+    verdict: SIGNOFF_MERGE
+    sha: ea9038d098179808506a4554d6c2ae55e6e1d243
+    ts: '2026-10-29T14:31:03.184067+00:00'
+    origin: auto-sequence
+    integration:
+      target_repo: https://github.com/mjtomei/project_manager.git
+      base_branch: master
+      base_sha: 4a74d88085edffcc300cb21f31777a798d647782
+      candidate_tree: 35fc8d87438ab3d4f6bfc2fd0e6c634f30d77ce1
+      status: up_to_date
+      head: ea9038d098179808506a4554d6c2ae55e6e1d243
+- id: pr-e076433
+  plan: improvements
+  title: Make model routing names and documentation role-neutral
+  branch: pm/pr-e076433-make-model-routing-names-and-documentation-role-ne
+  status: pending
+  depends_on:
+  - pr-592e4bd
+  description: 'Follow-up 1 from followups-pr-592e4bd.md after #249 merged. Routing
+    already works across roles, but module/constant names, diagnostics and examples
+    still describe it as a QA-worker feature. Align names with the actual role-neutral
+    behavior without changing configured routes.
+
+
+    Scope:
+
+    - Rename pm_core/worker_route.py to a role-neutral name such as router_route and
+    update imports, tests, module documentation and route diagnostics together.
+
+    - Rename ROUTED_SESSION_TYPES to describe container placement, such as SCENARIO_CONTAINER_TYPES.
+    It currently identifies qa_concretize/qa_scenario containers needing bridge mounts,
+    not every session type allowed to use providers. Keep placement and routing eligibility
+    distinct.
+
+    - Update pm model show''s worker-routes label, related CLI/TUI route descriptions
+    and README examples to explain role-neutral explicit configuration. Show more
+    than the qa_scenario example where useful; preserve default plain-Claude behavior
+    when no model/provider is configured.
+
+    - Inspect the legacy s0/qa_interactive plain-model qa_scenario fallback in resolve_model_and_provider.
+    Document why it exists and whether it can be retired in favor of qa_interactive
+    -> qa resolution. Do not silently change existing configured s0 behavior: retain
+    compatibility or supply a clear migration preserving the intended model/account.
+    Never inherit a provider accidentally from that legacy fallback.
+
+
+    Acceptance and validation:
+
+    Preserve effective model/provider/account/effort resolution for existing supported
+    configurations, explicit role overrides, helpers, host/container launches and
+    no-configuration defaults. Assert the renamed placement constant does not restrict
+    routing for other roles or mount the bridge into unrelated containers. Cover legacy
+    s0 plain-model inheritance, explicit qa_interactive overrides and provider non-inheritance;
+    document the compatibility decision. Update help/docs and tests, with no new routing
+    policy, broad refactor or live account migration.
+
+
+    Source: item 1 in #249''s followups-pr-592e4bd.md. Depends on merged pr-592e4bd;
+    implement on current master. Originally filed under improvements; the user has
+    now authorized dependency-ordered autostart as recorded in the PR notes.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-31T17:58:55.318981+00:00'
+  updated_at: '2026-10-31T19:04:32.046762+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-336b2798
+    text: 'User authorized autostart Oct31: routing cleanup first on DeepSeek1017/high.
+      Work Opus5.5/xhigh sign-off and wait_for_merge apply. Start from current master
+      in the main PM session; preserve existing routing/account/security intent. No
+      global account migration or PR merge is authorized.'
+    created_at: '2026-10-31T19:04:32.046762+00:00'
+    last_edited: '2026-10-31T19:04:32.046762+00:00'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    signoff: provider:claude-work-xhigh-249
+    merge: provider:deepseek-flash
+  effort: high
+- id: pr-6820cbc
+  plan: improvements
+  title: Share route-bridge and push-proxy lifecycle handling and recover dead bridges
+  branch: pm/pr-6820cbc-share-route-bridge-and-push-proxy-lifecycle-handli
+  status: pending
+  depends_on:
+  - pr-592e4bd
+  - pr-e076433
+  description: 'Follow-up 2 from followups-pr-592e4bd.md after #249 merged. route_bridge.py/worker_route
+    and push_proxy.py separately implement host daemons on private Unix sockets mounted
+    into containers. Review b62f i2 (note-ec55f9e) copied the bridge ownership check
+    into PushProxy. Share the duplicated lifecycle mechanism and repair missing bridge
+    supervision, keeping their payload protocols separate.
+
+
+    Scope:
+
+    - Extract the smallest shared lifecycle support for daemon start/supervision,
+    private directory/socket permissions, socket-inode ownership, stop/restart races
+    and mount wiring. Reuse it in both services instead of maintaining two copies.
+    Keep push proxy JSON/git validation separate from the bridge''s raw TCP transport
+    and retain long-lived stream behavior.
+
+    - Recover a host bridge that dies while its routed containers remain running;
+    currently ensure_host_bridge is primarily called at container create/recreate.
+    Coordinate with the existing push-proxy supervision patterns. Account for Unix-socket
+    replacement versus the inode already bind-mounted into a live container: replacing
+    a path alone is not proof that the running container can reconnect.
+
+    - Preserve exact ownership on concurrent ensure/start/stop, stale socket cleanup,
+    restart and shutdown. One instance must not unlink another instance''s live socket,
+    terminate an unrelated daemon or attach to the wrong account/route. Keep bounded
+    recovery and actionable failure reporting.
+
+    - Preserve isolation: socket 0600/private directory 0700, router socket mounted
+    only where required, existing proxy policy and credential boundaries. Do not enable
+    host networking, host-loopback access or non-loopback listening. Do not relax
+    git/push validation or broaden the proxy''s authority as part of sharing lifecycle
+    code.
+
+
+    Acceptance and validation:
+
+    Use isolated sockets/containers and fixtures to exercise shared start/stop, permissions,
+    stale ownership, simultaneous starters, replacement inode races and death/recovery
+    while a client container remains running. Demonstrate restored traffic from that
+    existing container and preserved streaming behavior, or a truthful explicit blocked
+    outcome when safe recovery is impossible. Verify both payload protocols and push
+    restrictions remain intact, unrelated routes/containers cannot reach the socket,
+    and tests never target live PM infrastructure. Keep this a scoped lifecycle deduplication
+    and recovery change, not a general daemon framework or a qa_loop.py breakup.
+
+
+    Source: item 2 in #249''s followups-pr-592e4bd.md and S104 bridge-lifetime evidence.
+    Depends on merged pr-592e4bd; implement on current master. Originally filed under
+    improvements; the user has now authorized dependency-ordered autostart as recorded
+    in the PR notes.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-31T17:58:56.759159+00:00'
+  updated_at: '2026-10-31T19:04:32.046762+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-691a57df
+    text: 'User authorized autostart Oct31: wait for pr-e076433 to merge before starting
+      work Opus5.5/xhigh bridge/proxy work. Work Opus5.5/xhigh sign-off and wait_for_merge
+      apply. Start from current master in the main PM session; preserve existing routing/account/security
+      intent. No global account migration or PR merge is authorized.'
+    created_at: '2026-10-31T19:04:32.046762+00:00'
+    last_edited: '2026-10-31T19:04:32.046762+00:00'
+  model: provider:claude-work-xhigh-249
+  session_models:
+    impl: provider:claude-work-xhigh-249
+    review: provider:claude-work-xhigh-249
+    qa: provider:claude-work-xhigh-249
+    qa_planning: provider:claude-work-xhigh-249
+    qa_scenario: provider:claude-work-xhigh-249
+    qa_concretize: provider:claude-work-xhigh-249
+    qa_verification: provider:claude-work-xhigh-249
+    qa_finalize: provider:claude-work-xhigh-249
+    qa_interactive: provider:claude-work-xhigh-249
+    signoff: provider:claude-work-xhigh-249
+    merge: provider:claude-work-xhigh-249
+  effort: high
+- id: pr-5ec411c
+  plan: improvements
+  title: Support effective Claude and OpenRouter reasoning controls across configuration
+    and launches
+  branch: pm/pr-5ec411c-support-effective-claude-and-openrouter-reasoning-
+  status: pending
+  depends_on:
+  - pr-e076433
+  description: 'Follow-up 3 from followups-pr-592e4bd.md, expanded by the user''s
+    2026-10-31 clarification: support the effort/reasoning controls that OpenRouter
+    and the actual selected model/provider honor, not only extra Claude CLI labels
+    or an assumed universal numeric slider.
+
+
+    Problem:
+
+    PM hard-codes low/medium/high in EFFORT_LEVELS, while the installed Claude CLI
+    help accepts low/medium/high/xhigh/max. The local work provider uses CLAUDE_CODE_EFFORT_LEVEL=xhigh
+    while PM reports high. Routed models introduce another boundary: a CLI flag or
+    accepted request parameter does not prove the router forwards the requested control
+    or that the chosen upstream provider applies it.
+
+
+    Required behavior:
+
+    - Support native Claude CLI effort levels throughout PM configuration, validation,
+    provider defaults, project/PR/session overrides, helpers, launch arguments, pm
+    model/pr model commands, show output and the TUI effort selector. Validate actual
+    harness/model support and preserve omission for models/paths without effort support,
+    including existing no-effort compatibility behavior. Keep unspecified/default
+    distinct from explicit disable.
+
+    - For OpenRouter routes, support documented named reasoning.effort values, reasoning.max_tokens
+    budgets and reasoning enabled/disabled controls where the chosen model and endpoint
+    support them. Do not hard-code one universal level list for every model. Preserve
+    the distinction between a named effort, a reasoning-token budget and the total
+    output-token limit; reject conflicting/invalid combinations rather than silently
+    replacing one.
+
+    - Consult documented per-model reasoning metadata and endpoint supported parameters:
+    supported_efforts, supports_max_tokens, mandatory/default state, and documented
+    translation behavior. Validate against refreshed authoritative capabilities; handle
+    unknown/stale information honestly instead of inventing support. A numeric 0-100
+    effort parameter is not assumed: support numeric/provider-specific controls only
+    where the actual API documents and honors them, with correct units and range.
+    Preserve explicit zero/off values where valid rather than losing them through
+    truthiness/default handling.
+
+    - Trace and test the complete configured launch path, including the current Claude
+    CLI -> router/transformer -> OpenRouter request conversion. A successful --effort
+    launch is insufficient. Where necessary add explicit request translation/configuration;
+    if a required router capability is absent, surface that limitation and the concrete
+    prerequisite rather than claiming the setting worked.
+
+    - Show requested versus effective/mapped settings, their configuration source
+    and any limits. OpenRouter may map levels onto a smaller native vocabulary or
+    accept but ignore unsupported parameters on some providers. Use parameter-support-aware
+    routing (including require_parameters where appropriate) and explicit diagnostics
+    so unsupported settings cannot silently masquerade as effective effort. Provider
+    support metadata is not proof of identical reasoning behavior; record what is
+    verified versus assumed.
+
+    - Preserve existing model/account routing, precedence and user intent. Make direct
+    effort: xhigh replace the scoped environment workaround only after equivalent
+    behavior is verified; conflicting env/request settings must be visible, not show
+    high while actually running xhigh. Do not change running sessions, accounts or
+    spend policy as part of filing/migration.
+
+
+    Dated research for implementation to re-check:
+
+    - Installed Claude CLI help on 2026-10-31 lists low, medium, high, xhigh and max.
+    PM currently lists only low, medium, high.
+
+    - OpenRouter reasoning documentation describes named effort levels and token budgets;
+    percentages in its conversion examples are allocation ratios, not evidence of
+    a universal 0-100 effort API.
+
+    - GET /api/v1/models on 2026-10-31 reports deepseek/deepseek-v4.1-flash-1017 supported_efforts=[max,
+    high, low, none], default_effort=high, default_enabled=true and mandatory=false.
+    It does not advertise supports_max_tokens for that model. Treat this as dated
+    capability metadata, not proof our current proxy forwards every setting or every
+    upstream provider implements it correctly. Other models expose different options;
+    do not generalize this list to them.
+
+
+    Acceptance and validation:
+
+    Round-trip all supported configuration forms through save/load, overrides, CLI/TUI
+    display and launch. Use safe request-capture fixtures through the real translation
+    path to assert the outbound model/reasoning fields, not just argv. Cover Claude
+    xhigh/max, the DeepSeek 1017 capability set, a token-budget model, mandatory reasoning,
+    unsupported levels, absent/stale metadata, env precedence, enabled/off/default
+    distinctions, provider fallback and a transformer that drops a setting. Unsupported
+    explicit requests must produce an actionable diagnostic rather than a falsely
+    successful setting. Document bounded live conformance checks where needed and
+    authorized; different token counts or a model''s self-report alone are not proof
+    of correct mapping. No global account/config change or paid probe is authorized
+    by this filing.
+
+
+    Primary references (re-check during implementation):
+
+    https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
+
+    https://openrouter.ai/docs/guides/routing/provider-selection
+
+    https://openrouter.ai/api/v1/models
+
+
+    Originally filed under improvements; the user has now authorized dependency-ordered
+    autostart as recorded in the PR notes. This extends #249 follow-up item 3; it
+    is not a change to live effort assignments.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-31T17:58:58.203131+00:00'
+  updated_at: '2026-10-31T19:04:32.046762+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-f2d3bcf6
+    text: 'User authorized autostart Oct31: wait for pr-e076433 to merge before starting
+      DeepSeek1017/high reasoning-controls work. Work Opus5.5/xhigh sign-off and wait_for_merge
+      apply. Start from current master in the main PM session; preserve existing routing/account/security
+      intent. No global account migration or PR merge is authorized.'
+    created_at: '2026-10-31T19:04:32.046762+00:00'
+    last_edited: '2026-10-31T19:04:32.046762+00:00'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    signoff: provider:claude-work-xhigh-249
+    merge: provider:deepseek-flash
+  effort: high
 - id: pr-7abb052
   plan: bugs
   title: 'Bug: auto-sequence reports ''running: qa'' forever after a QA infrastructure
@@ -51452,3 +52293,459 @@ prs:
     signoff: provider:claude-work-xhigh-249
     merge: provider:deepseek-flash
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-049649a-remove-all-pr-autostart-and-fail-clo-registered-20261027
+- id: pr-8162f0f
+  plan: plan-delivery
+  title: Project-owner guidance for automatic versus human-approved merges
+  branch: pm/pr-8162f0f-project-owner-guidance-for-automatic-versus-human-
+  status: pending
+  depends_on: []
+  description: 'Add project-owner guidance that determines which otherwise-qualified PRs may
+    merge automatically and which must wait for the owner. This is part of plan-delivery D3
+    and a prerequisite of its unattended bug-fix handoff, with D9 qualification and D5/D8
+    onboarding adoption.
+
+
+    User policy example for project-manager: any PR touching containerization, security, or
+    prompts requires human review/approval before merge. Less impactful fixes and feature
+    PRs may auto-merge under the owner''s explicit policy, with a small heads-up. "Feature"
+    or "bug fix" is not by itself a reason to require or bypass approval. Owners of other
+    projects must be able to supply different guidance; do not hard-code this repository''s
+    categories as the universal policy.
+
+
+    Keep the owner-facing guidance simple and inspectable. Evaluate the actual proposed changes,
+    including incidental edits and semantic changes outside obvious path patterns, against
+    the project''s approved guidance. A mixed PR touching a manual-review area waits as a
+    whole. Ambiguous classification or missing guidance preserves the manual gate. Record
+    the decision, relevant rule, affected changes and concise rationale with links to the
+    PR and sign-off report. A title, author claim or agent-generated summary alone cannot
+    grant merge authority.
+
+
+    The decision supplements existing review, QA and fresh revision-bound sign-off; it does
+    not waive any of them. Explicit user holds, spec approval, dependency/manual merge holds
+    and wait_for_merge take precedence. Re-evaluate when the diff, target base, approved guidance
+    or a human override changes; stale approvals must not authorize a different candidate.
+    Policy edits require owner authorization and cannot let the same PR grant itself permission
+    to merge. Keep the configured distinction between explicit auto-merge authority and the
+    default manual workflow, across CLI, TUI, watcher and restart paths.
+
+
+    Create a durable concise heads-up event for an authorized automatic merge, for immediate
+    display or inclusion in the scheduled project brief under the owner''s delivery preference.
+    Identify project, PR/link, actual published outcome, one-line impact and report link.
+    Do not claim a merge happened merely because it was eligible; preserve pending/failed
+    notification state and retry without duplicate publication. Coordinate with the separately
+    filed scheduled-brief feature using existing report/event surfaces rather than inventing
+    a second lifecycle.
+
+
+    Acceptance: in isolated fixtures, show a low-impact approved change auto-merging only
+    after all checks, plus containerization, security, prompt and mixed changes held for the
+    owner; cover an uncertain classification, a stale policy/diff/base, an explicit wait_for_merge
+    override, an attempted self-exemption, restart and a recorded heads-up. Show distinct
+    policies for two projects. Include reusable agent regression scenarios for the actual
+    merge paths, not only mocks of a classification helper.
+
+
+    Registration only: no current policy activation, model reassignment, worker launch, spec
+    approval or merge is authorized by filing this PR. Preserve the paused timer, disabled
+    autostart and individual approvals for the current signed-off PRs.
+
+
+    USER CLARIFICATION: INTERACTIVE GUIDANCE, NOT ANOTHER MANUAL CONFIGURATION TASK. Reuse
+    the existing task-specific prompt-note feature (pm_core/notes.py and the composed prompt
+    sections) as the durable backing. Provide an agent-led getting-started conversation and
+    later feedback flow: ask only what is needed, turn the owner''s examples and corrections
+    into a concise scoped note, show the effective guidance, and maintain it on the owner''s
+    behalf. The owner should not have to hand-author or repeatedly edit prompt notes. Preserve
+    direct edits, provenance and rollback; do not overwrite unrelated sections or leak one
+    project''s preferences into another. Distinguish explicitly authorized feedback from guesses.
+    Updates that broaden merge authority need owner authorization; a report''s content or
+    a worker''s own suggested exemption is not that authorization. Avoid a second competing
+    policy/prompt storage system unless the spec demonstrates why the existing mechanism cannot
+    suffice.
+
+
+    The setup conversation should help the owner express examples of changes they want to
+    inspect versus changes that can merge with a heads-up. Agent-maintained notes express
+    that guidance; examples must cover project-manager containerization/security/prompts and
+    low-impact changes, unclear cases and later owner corrections. Test that unapproved feedback
+    cannot silently widen automatic merge authority.
+
+
+    USER-REQUIRED SPEC REVIEW BEFORE IMPLEMENTATION. Set review_spec=true. When started, prepare
+    the grounded implementation spec and all complete candidate prompts/composed guidance
+    for getting started, interpreting and applying feedback, and the feature''s merge assessment
+    or scheduled brief. Provide representative rendered prompts, example persisted task notes
+    and resulting decisions/briefs, including how corrections change them. Show storage/scope,
+    authority precedence, updates/restarts, and interactions with existing manual gates and
+    #277. Link every artifact from impl.md. Then stop for the user''s explicit spec/prompt
+    approval before product implementation, review or QA. Never self-approve. This filing
+    does not authorize starting the PR or enabling a schedule.
+
+
+
+    2026-10-31 USER DIRECTION: SOFT DEPENDENCIES AND WATCHER-SESSION DECISIONS
+
+
+    Plan/PR dependency edges are soft scheduling rules. CLI commands may consume them and
+    recommend readiness or ordering; watcher sessions decide whether to follow, depart from,
+    or bypass those recommendations. Keep recommendations and reasons in shared durable project/plan/PR
+    context so other watchers and future instantiations can reassess them. No helper result
+    automatically starts, pauses or advances work. Explicit user holds, scope/merge authority,
+    required evidence, resource bounds and concrete operation safety remain separate constraints.
+    This updates planned work only; it does not alter current execution or authorize an alpha
+    test.
+
+
+    Extend owner guidance to work selection and prioritization as well as automatic versus
+    human-approved merges. Capture security importance, project goals and explicit preferences
+    from onboarding and later discussions using the existing agent-maintained task-note backing.
+    Keep source/provenance and owner corrections visible. Distinguish inferred preferences
+    from explicit direction; relative importance is not authorization to start unrelated work,
+    lift a hold or broaden merge permission. Watcher prompts use this guidance when interpreting
+    readiness recommendations or choosing a different order. Do not require the owner to maintain
+    a numeric priority formula. Preserve all existing merge-policy requirements.
+
+
+    Include complete prompt examples for starting implementation before a prerequisite merges
+    while deferring review; waiting on overlapping changes introduced later in a different
+    plan; proceeding with independent work while another PR waits on a human; accepting integration
+    cost for an urgent security fix; and revising a stale dependency or treating unrelated
+    project.yaml edits as independent. Recommendations must be maintained dynamically from
+    observed work, not only from the initial plan or agents volunteering updates. Record decisions
+    and reasons for future sessions without requiring a giant transition table or mandatory
+    scoring formula.
+
+
+    SPEC/PROMPT REVIEW REQUIRED: when this PR is eventually started, prepare the implementation
+    spec and all complete rendered prompts and representative CLI outputs/shared notes, then
+    stop for the user before product implementation or review/QA. Set review_spec=true; never
+    self-approve. No worker, alpha watcher, schedule or policy activation is authorized by
+    this update.
+
+
+
+    2026-10-31 APPROVED D3 MILESTONE RECONCILIATION
+
+
+    D3 in plan-delivery is now a delivery milestone grouping pr-ff9b728, pr-945546e, pr-8162f0f
+    and pr-af9edb9. It is not another PR and must not replace or duplicate these existing
+    implementations. Keep this PR identity, history and owned scope. Shared milestone qualification
+    is documented in plan-delivery; separately owned prerequisites remain separate work. Preserve
+    implementation spec/full-prompt approval before implementation. No start is authorized
+    by this planning update.
+
+    '
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T15:40:06.816122+00:00'
+  updated_at: '2026-11-01T19:52:06.090845+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-201b5666
+    text: 'User clarified Oct31: dependency edges are soft rules; CLI readiness/schedule helpers
+      may recommend actions, but watcher sessions may follow or depart from them. Include
+      dynamic cross-plan updates, shared continuity and worked deviation examples. Planned
+      scope only; spec/full-prompt approval required and no start authorized.'
+    created_at: '2026-10-31T18:35:32.721580+00:00'
+    last_edited: '2026-10-31T18:35:32.721580+00:00'
+  - id: note-591ae4ca
+    text: D3 in plan-delivery is now a delivery milestone grouping pr-ff9b728, pr-945546e,
+      pr-8162f0f and pr-af9edb9. It is not another PR and must not replace or duplicate these
+      existing implementations. Keep this PR identity, history and owned scope. Shared milestone
+      qualification is documented in plan-delivery; separately owned prerequisites remain
+      separate work. Preserve implementation spec/full-prompt approval before implementation.
+      No start is authorized by this planning update.
+    created_at: '2026-10-31T18:43:14.672660+00:00'
+    last_edited: '2026-10-31T18:43:14.672660+00:00'
+  - id: note-a43b6aa
+    text: User authorized starting this PR on work Opus5.5/xhigh on 2026-11-01, all PR roles/helpers/sign-off.
+      First prepare the grounded implementation spec, complete onboarding/feedback/merge-assessment
+      prompts, representative notes and decisions, and stop for explicit owner approval. The
+      planned agent-controlled flow watcher pr-ff9b728 and project watcher pr-945546e are
+      not implemented yet; only legacy monitoring/recovery and programmatic merge gates exist.
+      Make that distinction explicit in the spec. Propose reusable guidance/assessment interfaces
+      and show how existing merge gates and future watchers would consume them; do not implement
+      a replacement watcher as incidental scope. Starting this spec session does not activate
+      owner-guided automatic merges, change current target merge policies or start other PRs.
+      Historical registration-only/no-start notes describe earlier filing, not this new authorization.
+      Preserve the required implementation spec/full-prompt review gate and manual merge approval.
+    created_at: '2026-11-01T19:52:06.090845+00:00'
+    last_edited: '2026-11-01T19:52:06.090845+00:00'
+  review_spec: true
+  model: provider:claude-work-xhigh-249
+  effort: high
+- id: pr-2588ead
+  plan: watchers
+  title: Scheduled concise multi-project progress and change briefs
+  branch: pm/pr-2588ead-scheduled-concise-multi-project-progress-and-chang
+  status: pending
+  depends_on: []
+  description: 'Add an owner-configured scheduled brief for the automated delivery flow: a
+    quickly consumed set of line items explaining what changed, where each selected project
+    stands, and any potential issues, blockers or owner decisions. Make this part of plan-delivery
+    D3''s unattended handoff and D9 qualification, and exercise it across D5/D8 adoption projects.
+
+
+    Use a configurable schedule, project selection and existing report/dashboard surface.
+    The brief should be useful in roughly a minute: group short lines by project, show changes
+    since the last successfully published brief, current phase or milestone, merged PRs and
+    their impact, work ready for owner approval, material problems and the next useful action.
+    Put actionable issues and blockers first. Include project identity, PR number/link when
+    available, source/report links, as-of time and the reporting interval so the reader can
+    inspect detail without reading transcripts. Distinguish completed/published work from
+    planned, running, waiting, failed and stale/unavailable observations. Do not invent progress,
+    estimates or acceptance verdicts.
+
+
+    Include the one-line heads-ups from the owner-defined automatic-merge policy; label automatic
+    versus owner-approved merges accurately and show why a PR is waiting for the owner. A
+    notification is informational, never approval. Reuse #277/pr-c3e2f70 INPUT_REQUIRED briefs
+    when available for deeper question/options context, but do not expand or replace that
+    PR''s narrow 5-minute review/QA scope. This overview also covers project progress, merged
+    changes and sign-off approval waits. Reuse project-state watcher observations and existing
+    sign-off reports; neither the broad watcher rewrite nor Radar''s external-feed infrastructure
+    must be required just to generate a useful brief.
+
+
+    Keep summaries compact: batch related updates, avoid repeating unchanged details every
+    interval, retain still-actionable unresolved blockers with their age, and show a terse
+    no-material-change result when appropriate. Persist the successful report boundary and
+    stable event identity so restart, retry or overlapping schedules do not lose or duplicate
+    merge notices; a failed delivery must not advance the boundary. A missed interval may
+    be caught up in one bounded summary. Explicitly identify projects that could not be refreshed
+    rather than silently omitting them.
+
+
+    Owners configure cadence, destination, scope and pause/resume. Publish locally through
+    the existing dashboard/report surface initially; sending to email/chat or other external
+    recipients requires an explicitly configured, authorized destination. Brief generation
+    is read-only with respect to PR workflow: it cannot answer INPUT_REQUIRED, change gates,
+    start work, merge, or override a pause. No schedule or external message is enabled merely
+    by registering this PR.
+
+
+    Acceptance: exercise at least two projects with ordinary progress, automatic and manually
+    approved merges, a manual approval hold, a genuine blocker, an unchanged interval, a stale/unavailable
+    project and links to source evidence. Verify bounded readable output, correct deltas,
+    no lost/duplicate heads-ups after failed delivery/restart, and pause/resume without workflow
+    mutations. Demonstrate actual rendered briefs as well as meaningful data-path tests. Keep
+    this separate from restoring any review-loop stop command; that proposed PR is on hold.
+
+
+    USER CLARIFICATION: INTERACTIVE GUIDANCE, NOT ANOTHER MANUAL CONFIGURATION TASK. Reuse
+    the existing task-specific prompt-note feature (pm_core/notes.py and the composed prompt
+    sections) as the durable backing. Provide an agent-led getting-started conversation and
+    later feedback flow: ask only what is needed, turn the owner''s examples and corrections
+    into a concise scoped note, show the effective guidance, and maintain it on the owner''s
+    behalf. The owner should not have to hand-author or repeatedly edit prompt notes. Preserve
+    direct edits, provenance and rollback; do not overwrite unrelated sections or leak one
+    project''s preferences into another. Distinguish explicitly authorized feedback from guesses.
+    Updates that broaden merge authority need owner authorization; a report''s content or
+    a worker''s own suggested exemption is not that authorization. Avoid a second competing
+    policy/prompt storage system unless the spec demonstrates why the existing mechanism cannot
+    suffice.
+
+
+    Guidance applies to the scheduled owner brief itself: preferred length/detail, organization,
+    topics to emphasize or omit, what counts as material, blocker escalation and cadence/destination
+    preferences. The agent manages the appropriate prompt note through onboarding and subsequent
+    owner feedback. The INPUT_REQUIRED brief (#277) is primarily consumed by the watcher;
+    the owner may read it when assisting the watcher. Keep it distinct from this owner-facing
+    scheduled overview. Test that a preference correction changes subsequent briefs, while
+    preserving source fidelity, required issues and all workflow gates.
+
+
+    USER-REQUIRED SPEC REVIEW BEFORE IMPLEMENTATION. Set review_spec=true. When started, prepare
+    the grounded implementation spec and all complete candidate prompts/composed guidance
+    for getting started, interpreting and applying feedback, and the feature''s merge assessment
+    or scheduled brief. Provide representative rendered prompts, example persisted task notes
+    and resulting decisions/briefs, including how corrections change them. Show storage/scope,
+    authority precedence, updates/restarts, and interactions with existing manual gates and
+    #277. Link every artifact from impl.md. Then stop for the user''s explicit spec/prompt
+    approval before product implementation, review or QA. Never self-approve. This filing
+    does not authorize starting the PR or enabling a schedule.
+
+    '
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T15:40:08.179151+00:00'
+  updated_at: '2026-11-01T20:07:49.728968+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-897bb0e
+    text: 'User authorized starting this scheduled owner-briefs PR on work Opus5.5/xhigh on2026-11-01,
+      all roles/helpers/sign-off. Prepare only the grounded implementation spec, complete
+      onboarding/feedback/brief-generation prompts, representative composed prompts, persisted
+      task-note examples and rendered example briefs, then stop for explicit owner approval
+      before product implementation, review or QA. Never self-approve. Use existing project
+      state, sign-off reports and dashboard surfaces; the new agent flow/project watchers
+      are not yet implemented and are not prerequisites for spec preparation or a useful read-only
+      brief. Do not implement a watcher as incidental scope. Keep this owner-facing scheduled
+      summary distinct from #277/pr-c3e2f70 five-minute INPUT_REQUIRED briefs. Coordinate
+      reusable agent-managed prompt-note guidance with #286/pr-8162f0f, which is currently
+      preparing its spec; avoid a second policy/note store and document interface assumptions
+      for owner review. Starting this session does not enable a new reporting schedule, external
+      delivery, automatic merges, or workflow mutations. Existing hourly PM checks stay as
+      configured. Preserve manual merge and spec approval gates. Historical filing-only/no-start
+      text records the earlier registration; this note is the new explicit start authorization.'
+    created_at: '2026-11-01T20:07:49.728968+00:00'
+    last_edited: '2026-11-01T20:07:49.728968+00:00'
+  review_spec: true
+  model: provider:claude-work-xhigh-249
+  effort: high
+- id: pr-b491378
+  plan: plan-regression
+  title: Periodic whole-PR architecture and spec review after failed QA rounds
+  branch: pm/pr-b491378-periodic-whole-pr-architecture-and-spec-review-aft
+  status: pending
+  depends_on: []
+  description: 'Combine the whole-PR architecture review and implementation-spec re-evaluation
+    proposed as items 4 and 6 in followups-pr-592e4bd.md. Repeated local review/QA fixes can
+    be useful while obscuring a shared architectural cause or an unsuitable specification.
+    Add a periodic step back over the whole PR, preserving the productive fix-and-review loop.
+
+
+    Trigger and configuration:
+
+    - Default to a checkpoint after two completed aggregate QA runs ending NEEDS_WORK since
+    the last completed architecture/spec checkpoint, before starting the next implementation/review
+    cycle. Make the number of failed QA rounds configurable through normal project configuration;
+    the implementation spec must show the setting, its effective value, validation and any
+    override/disable semantics for human review.
+
+    - Count whole completed QA runs, not individual scenario results, review iterations, infrastructure
+    retries, incomplete runs, INPUT_REQUIRED waits or sign-off approval waits. A useful fix
+    still counts as a failed QA round; do not reclassify it to avoid the checkpoint.
+
+    - Persist run identity, counted outcomes and checkpoint completion so reloads, watcher/TUI
+    restart and duplicate handoffs neither lose the count nor launch duplicate checkpoints.
+    Reset the interval only after the checkpoint completes. Interrupted/failed checkpoints
+    resume with their evidence; they do not silently permit advancement. Support an earlier
+    explicit request when the owner or an agent has a grounded reason.
+
+
+    Architecture and spec review:
+
+    - Review the original goal, complete current diff and implementation spec, accumulated
+    review/QA findings, affected interfaces, accepted user decisions and the owning plan.
+    Look beyond the last local patch: duplicated mechanisms, accumulating special cases, repeated
+    symptoms with a common cause, unnecessary complexity, and simpler designs that still meet
+    the actual need.
+
+    - Question the spec itself. Identify ambiguous, outdated, over-constrained or internally
+    conflicting requirements and distinguish them from genuine implementation bugs and necessary
+    safety/acceptance constraints. An existing spec is evidence of intent, not proof that
+    every design choice remains good.
+
+    - Produce a short, evidence-linked assessment: keep the current approach, make concrete
+    current-PR corrections, propose a spec clarification/change, or propose scoped follow-up
+    work. Record what was considered, the reason, expected quality/verification benefit and
+    tradeoffs, and any human question. A justified no-change outcome is valid; no rewrite,
+    refactor or proposal quota.
+
+    - Use existing implementation/review/QA handoffs and plan/PR notes. Reuse shared durable
+    operations compatible with plan-delivery''s agent-driven flow, rather than adding a separate
+    phase engine. Use existing PR filing and deduplication for proposed follow-ups; filing
+    does not authorize starting them.
+
+    - Keep the conservative PR-breakup check distinct: whole-PR design/spec review can conclude
+    that the PR should stay together. It may refer a justified decomposition to pr-4db3696
+    / #165 under existing authority. Size or loop count never forces a split. Preserve useful
+    incidental fixes by default.
+
+
+    Unchanged correctness and authority:
+
+    - Preserve NEEDS_WORK semantics. Finding and fixing a bug still requires another review
+    round; do not add PASS_WITH_FOLLOWUPS, waive findings, weaken QA assertions or skip re-review
+    to reduce loop counts. The checkpoint improves the next round rather than replacing review,
+    QA or sign-off.
+
+    - Recommendations cannot silently rewrite approved scope/specs, override explicit user
+    decisions, change merge policy or clear holds. Present proposed requirement changes for
+    the applicable human approval; retain provenance and unresolved questions. Keep source,
+    dirty files, drafts, fixtures and prior evidence; new evidence must cover the actual changed
+    revisions.
+
+
+    Mandatory implementation spec and full-prompt review:
+
+    Set review_spec: true. In the implementation session, prepare the spec and ALL complete
+    proposed architecture/spec checkpoint prompts plus affected composed handoff/review prompts,
+    with representative rendered context, a before/after diff, example assessments and the
+    configurable trigger behavior. Pause at implementation spec review for the user''s explicit
+    review and approval of the full prompts before proceeding beyond the gate or entering
+    the review loop. Do not self-approve, treat silence as approval or show only changed sentences.
+    Registration does not start this PR.
+
+
+    Validation:
+
+    Show that the default first failed QA round does not trigger the checkpoint, the second
+    triggers exactly once, and another two completed failures trigger it again after checkpoint
+    completion. Exercise another configured threshold, invalid configuration, per-scenario
+    failures, infrastructure retries/INPUT_REQUIRED, restart/duplicate handoffs and interrupted
+    checkpoint recovery. Use representative accumulated evidence for a shared architectural
+    cause, a misleading spec assumption, and productive local fixes that justify no redesign.
+    Confirm proposed scope changes retain human gates, completed code fixes still receive
+    NEEDS_WORK and another review, and no automatic split, acceptance waiver or evidence loss
+    occurs.
+
+
+    Delivery requirement:
+
+    Register this under plan-regression and require it in plan-delivery D3''s acceptance/handoff
+    and D9''s autonomous qualification, at the same importance as conservative PR breakup.
+    D3 must depend on this existing PR when its registry entry is allocated; D9 inherits that
+    edge and qualifies the behavior and quality/overhead. It is a required code-quality safeguard,
+    not optional later polish. Preserve pr-5f4f595''s separate final sign-off review of accumulated
+    proposals and bugs; neither feature replaces the other.
+
+
+    Registration only: pending; do not start implementation, add an autostart target or resume
+    timed checks. #249 is already merged and excluded from breakup or renewed work.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-31T17:52:58.314477+00:00'
+  updated_at: '2026-11-01T20:16:24.561553+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-ea1b20f
+    text: 'User authorized starting this periodic architecture/spec checkpoint PR on work
+      Opus5.5/xhigh on 2026-11-01, all roles/helpers/sign-off, with mandatory implementation
+      spec/full-prompt review. Prepare ONLY the grounded implementation spec and complete
+      proposed checkpoint prompts, affected composed handoff/review prompts, representative
+      rendered contexts, before/after prompt differences, example assessments and configurable
+      trigger behavior. Link all artifacts from impl.md and stop for explicit owner approval
+      before product implementation, review or QA. Never self-approve. Preserve the default
+      of two completed aggregate QA NEEDS_WORK rounds, configurable; individual scenario failures,
+      infrastructure retries and INPUT_REQUIRED do not count as completed failed QA runs.
+      A bug fixed in a round still requires another review. Do not weaken checks or introduce
+      PASS_WITH_FOLLOWUPS. This is required plan-delivery D3/D9 code-quality work alongside
+      conservative PR breakup, using existing durable handoffs and notes. No new watcher or
+      separate phase engine is incidental scope. Keep breakup and sign-off proposal review
+      distinct. #249 is merged and must never be reopened. The owner agreed to spec/prompt
+      preparation now while lifecycle integration is deferred until #241/pr-1139060, #247/pr-1ab9075
+      and #274/pr-f0f4129 are merged and integrated. Examine their relevant interfaces as
+      evidence where available, record assumptions and coordination needs, but do not implement
+      or activate lifecycle hooks early. Starting this session does not enable automatic merges,
+      start other PRs, change the existing hourly schedule or approve any spec. Preserve manual
+      merge gates. Historical filing-only/no-start text describes earlier registration; this
+      note is the new explicit authorization for the spec session.'
+    created_at: '2026-11-01T20:16:24.561553+00:00'
+    last_edited: '2026-11-01T20:16:24.561553+00:00'
+  review_spec: true
+  model: provider:claude-work-xhigh-249
+  effort: high
