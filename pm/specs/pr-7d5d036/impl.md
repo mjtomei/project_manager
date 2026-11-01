@@ -69,7 +69,9 @@ Change:
     non-container QA fallback), with `PM_PROJECT`/`PM_SESSION` scrubbed from
     the session environment so `pm` commands inside the disposable project
     cannot resolve to the user's project.
-  - No pm session is required.
+  - No pm session is required. The old `--session/-s` option is kept,
+    hidden, only so existing invocations still parse: it is ignored with
+    a note on stderr, because a regression run never targets a pm session.
 - Recipes: copy the project's `pm/qa/instructions/*.md` into
   `<scratch>/qa-instructions/` and `pm/qa/artifacts/*.md` into
   `<scratch>/qa-artifacts/` — the directories and convention the QA scenario
@@ -205,7 +207,9 @@ No [UNRESOLVED] items.
   pm project; the captures dir falls back per `captures_dir`; if `None`, exit 1
   rather than giving the session no captures location.
 - E7: Fake-claude configs keyed on `qa_author` used to apply to TUI/headless
-  regression launches; they now use `qa_regression` like the CLI did.
+  regression launches; they now use `qa_regression` like the CLI did. The
+  session-type catalogue comments in `pm_core/fake_claude.py` say so
+  (review fc31 i3), so a fake config picks the right key.
 - E8: `pm qa run`/`pm qa debug` still resolve regression ids; with the library
   empty they report "Instruction not found".
 - E9: Workdir clones from regression runs are left in place, like
