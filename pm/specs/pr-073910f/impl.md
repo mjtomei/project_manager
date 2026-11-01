@@ -269,9 +269,13 @@ must be left untouched:
    existing socket file owned by another UID (shared sessions skip that
    check — the sharing user owns the socket by design).  A *symbolic
    link* at a session's socket path is refused in both modes, before any
-   probe or export: a real socket is never a link, and tmux follows it,
-   so a shared start — which skips the uid check — would otherwise attach
-   to (or bind at) whatever the link names (review-loop b48f i7).  The
+   probe or export: a real socket is never a link, and a tmux *client*
+   follows one when it connects, so a shared start — which skips the uid
+   check — would otherwise attach to, and create the session on, whatever
+   server the link names (review-loop b48f i7).  The start path never
+   binds at the link's target: tmux unlinks the entry and binds at the
+   socket path itself, or fails under the directory's sticky bit (see the
+   b48f i8 correction below).  The
    directory itself must be a real 1777 directory: a sticky bit is
    required, and a symbolic link at `/tmp/pm-sessions` is refused even
    when it resolves to such a directory (review-loop 2caf i8 — its
@@ -1107,8 +1111,11 @@ documentation correction.
    create `pm-<tag>` there.  `Path(socket_path).stat()` resolves a link, so
    a *dangling* symlink raised `OSError`, the check fell back to
    `owner = os.getuid()`, and the squatted path was accepted — tmux would
-   then bind a server socket at the attacker-chosen target path.  The check
-   now uses `lstat()`, i.e. it inspects the directory entry itself: a link
+   then bind a server socket at the attacker-chosen target path *(b48f i8
+   correction: it does not — see the review-loop b48f i8 section; the
+   refusal is still right, for the connect-time reason recorded there)*.
+   The check now uses `lstat()`, i.e. it inspects the directory entry
+   itself: a link
    planted by another user reports *their* uid and is refused.  A real
    socket owned by us behaves exactly as before.  Test:
    `test_refuses_a_symlink_planted_at_the_socket_path` (verified to fail
@@ -2948,7 +2955,11 @@ server's `$TMUX_TMPDIR` resolution), plus one piece of dead code.
    does.  `tmux -S <path>` follows the link, so `pm session --global` (or
    a joiner running `--global --dir`) attached to that server, which then
    receives every keystroke typed into the session; a dangling link would
-   have had pm bind its server socket at the attacker-chosen target.
+   have had pm bind its server socket at the attacker-chosen target
+   *(b48f i8 correction: a tmux client follows the link when it
+   *connects*, which is the hazard — the start path unlinks the entry and
+   binds at the socket path, or fails under the sticky bit; see the
+   review-loop b48f i8 section)*.
    A real socket is never a symlink — tmux binds a socket file — so the
    entry is now refused outright in **both** modes, before any probe or
    export, with a message naming the path (R12's scope sentence already
@@ -3054,3 +3065,61 @@ the same truncated session name.  The fix belongs in `get_session_tag()`
 socket derivation alone would not separate the registries (and would have
 to distinguish a grouped suffix from a `~` in the repo name, which is the
 same ambiguity).
+
+## Review iteration (2026-11-01, review-loop b48f i8)
+
+Verification pass over the head after the b48f i7 follow-up; no
+requirement changes.  One factual correction to the symlink rationale
+and one test gap in the fail-closed socket-directory guard.
+
+1. **The dangling-symlink rationale was wrong about the start path.**
+   R7.3 and the b48f i7 / d1c0 i10 sections said a dangling link planted
+   at a session's socket path "would have pm bind its socket at the
+   attacker-chosen target".  Verified on tmux 3.2a (tmux has unlinked the
+   path before binding for a long time): the hazard is that a tmux
+   *client* follows the link when it connects — `tmux -S <link>
+   new-session` created the session on the linked live server, verified —
+   which is exactly what the both-modes refusal prevents.  The start path
+   never binds at the link's target: tmux unlinks the entry and binds at
+   the socket path itself, and in the threat-model case (another user's
+   link in the sticky 1777 directory) the unlink fails and `new-session`
+   exits with "error connecting to … (Permission denied)" — verified with
+   a root-owned dangling link — so nothing is created anywhere.  R7.3 now
+   says "attach to, and create the session on" instead of "attach to (or
+   bind at)", with correction notes on the two earlier passages.  The
+   refusal is unchanged and still required.
+2. **`paths.shared_socket_dir_is_usable()`'s refusal branch had no
+   test.**  It is the read-path counterpart of `ensure_socket_dir`'s
+   directory refusal (2caf i8): discovery, `--print-connect` and
+   `pm session kill` must not probe through a symlinked (or otherwise
+   non-directory) `/tmp/pm-sessions`, or another user's server there
+   would be adopted (QA scenario 17).  Nothing in the suite asserted it:
+   `TestFindSessionServer`'s symlink test covers the per-*entry* check
+   with a real directory, and the listing/directory tests cover other
+   callers.  Added `TestSharedSocketDirIsUsable` (missing = the normal
+   first-run state, real directory, symlink to a directory, regular
+   file) and
+   `TestFindSessionServer::test_symlinked_socket_dir_is_not_probed`,
+   which plants a *real* socket inside the link's target (so only the
+   directory guard can stop the probe — a plain file would be skipped by
+   the per-entry check too) and asserts the private path is never probed
+   and the default server is the answer.  Verified non-vacuous: with
+   `shared_socket_dir_is_usable()` forced to True the probe list becomes
+   `[<link>/pm-repo-abc, None]`.
+
+Nothing else surfaced.  The socket derivation and default-server
+addressing (R4.3), discovery scoping (7af7 i1–i3, 3cc7 i1, 703c
+i1/i4/i6, 2caf i4/i5, b48f i5/i6), the precise detach (R5, 703c i3, 2caf
+i2), the kill/unlink rules (R3.2, R8, 2caf i7, b48f i3), the socket-file
+and socket-directory ownership checks (d1c0 i10/i12, 703c i2, 2caf i8,
+QA S17, b48f i7, above) and the shared-session share-mode handling (d1c0
+i7, 703c i8, 2caf i11, b48f i2) all match the spec, and every new helper
+has direct coverage.
+
+Validation: targeted suites (`test_session_socket_isolation`,
+`test_tmux`, `test_cli_helpers`, `test_shared_sessions`, `test_cli_qa`)
+439 passed; full suite **5424 passed / 1 skipped** (423 s, log
+`/pm-captures/review-b48f-i8/full-suite-final.log`).  No live session,
+server or shared host configuration was touched — every fixture used a
+disposable socket and a temporary HOME; the tmux behaviour checks above
+used disposable sockets under a scratch directory.

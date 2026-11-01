@@ -483,6 +483,39 @@ class TestDefaultSocketPath:
             assert paths.default_socket_path() == self._expected(Path("/tmp"))
 
 
+class TestSharedSocketDirIsUsable:
+    """The read-path counterpart of ``ensure_socket_dir``'s refusals.
+
+    ``/tmp`` is world-writable, so another local user can plant the
+    well-known path.  A caller that only *resolves* a socket (discovery,
+    ``--print-connect``, ``pm session kill``) must not follow it: the
+    target's owner would decide which servers look like pm sessions.
+    """
+
+    def test_missing_directory_is_the_normal_first_run_state(
+            self, monkeypatch, tmp_path):
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path / "absent")
+        assert paths.shared_socket_dir_is_usable() is True
+
+    def test_real_directory_is_usable(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        assert paths.shared_socket_dir_is_usable() is True
+
+    def test_symlink_to_a_directory_is_not_usable(self, monkeypatch, tmp_path):
+        real = tmp_path / "elsewhere"
+        real.mkdir()
+        link = tmp_path / "pm-sessions"
+        link.symlink_to(real)
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", link)
+        assert paths.shared_socket_dir_is_usable() is False
+
+    def test_regular_file_is_not_usable(self, monkeypatch, tmp_path):
+        entry = tmp_path / "pm-sessions"
+        entry.write_text("")
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", entry)
+        assert paths.shared_socket_dir_is_usable() is False
+
+
 # ---------------------------------------------------------------------------
 # tmux: which server hosts a session (private socket vs legacy default)
 # ---------------------------------------------------------------------------
@@ -547,6 +580,48 @@ class TestFindSessionServer:
             socket_path == str(link))
 
         assert tmux.find_session_server("pm-repo-abc") == (None, False)
+
+    def test_symlinked_socket_dir_is_not_probed(self, monkeypatch, tmp_path):
+        """A symlinked socket *directory* hides its servers from discovery.
+
+        ``/tmp`` is world-writable, so another user can create
+        ``/tmp/pm-sessions`` as a link to a directory they own and run a
+        server there under a pm session's deterministic socket name.
+        ``pm session`` refuses the directory outright
+        (``paths.ensure_socket_dir``, review-loop 2caf i8) and
+        ``pm session list`` will not enumerate it (2caf i10); the
+        single-entry read path must fail closed the same way — probe
+        nothing through the link and fall back to the default server —
+        or discovery would adopt their server and hand its TUI pane to
+        ``pm tui send`` (QA scenario 17).
+        """
+        real = tmp_path / "elsewhere"
+        real.mkdir()
+        # A *real* socket at the deterministic name, so the per-entry check
+        # (which skips non-sockets) would pass and only the directory guard
+        # can stop the probe.
+        planted = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            planted.bind(str(real / "pm-repo-abc"))
+        finally:
+            planted.close()
+        link = tmp_path / "pm-sessions"
+        link.symlink_to(real)
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", link)
+        probed: list[str | None] = []
+
+        def exists(name, socket_path=None, use_env=True):
+            probed.append(socket_path)
+            # Only the explicit default server answers.
+            return socket_path is None and not use_env
+
+        monkeypatch.setattr(tmux, "session_exists", exists)
+
+        sock, private = tmux.find_session_server("pm-repo-abc")
+        # The private path was never probed through the link; the answer
+        # comes from the default server.
+        assert probed == [None]
+        assert (sock, private) == (str(paths.default_socket_path()), False)
 
     @staticmethod
     def _prefix_matching_exists(alive: set[str]):
