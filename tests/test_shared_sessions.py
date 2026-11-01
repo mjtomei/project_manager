@@ -842,6 +842,24 @@ class TestListClientsInGroup:
         clients = tmux.list_clients_in_group("base")
         assert clients == []
 
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.sessions_in_group",
+           return_value=["base", "base~1", "myview"])
+    def test_includes_a_users_own_view(self, _mock_members, mock_run):
+        """A view of the session is part of the group, whatever its name.
+
+        ``pm session --disconnect-others`` detaches these clients to
+        reclaim the shared window size; a view client left attached still
+        constrains it, so enumerating only ``base~N`` by name is not enough
+        (S118/S121/S124).
+        """
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="/dev/pts/0 myview\n/dev/pts/1 unrelated\n",
+        )
+        clients = tmux.list_clients_in_group("base")
+        assert clients == [{"tty": "/dev/pts/0", "session": "myview"}]
+
 
 # ---------------------------------------------------------------------------
 # tmux: detach_client

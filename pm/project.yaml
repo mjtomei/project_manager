@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T13:31:48.539634+00:00'
+  updated_at: '2026-11-01T13:56:07.891607+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6454,6 +6454,25 @@ prs:
       — every fixture used a disposable socket and a temporary HOME.'
     created_at: '2026-11-01T13:31:48Z'
     last_edited: '2026-11-01T13:31:48Z'
+  - id: note-0537316
+    text: 'Review loop b48f i4 (no requirement changes; full suite 5409 passed / 1
+      skipped, 414 s, log /pm-captures/review-b48f-i4/full-suite-final.log). Two view-resolution
+      gaps of the class earlier iterations closed elsewhere — both name or enumerate
+      a session without resolving it through its tmux session group, so a pane in
+      a shared window (tmux reports the most recently created session of that window:
+      pm-base~1 normally, a user''s view when one exists — verified on tmux 3.2a)
+      leaked the grouped/view name. (1) INCIDENTAL BUG, pm qa launch: the QA prompt
+      named the pane''s session, so its "pm tui view -s <session>" and "~/.pm/pane-registry/<session>.json"
+      lines were wrong; with a user view, "pm tui view -s myview" failed outright.
+      Now resolved through pane_registry.pm_session_name (OSError -> base-name degrade).
+      (2) tmux.list_clients_in_group enumerated only base~N, so "pm session --disconnect-others"
+      left a view''s client attached (it still constrains the shared window size);
+      it now uses sessions_in_group. Tests: test_qa_launch_names_the_base_pm_session[pm-base~1]/[myview]
+      and TestListClientsInGroup::test_includes_a_users_own_view, all three failing
+      on the pre-fix tree at 7e9f072da. Smoke script re-ran clean on a disposable
+      socket. No live session, server or shared host configuration was touched.'
+    created_at: '2026-11-01T13:56:07Z'
+    last_edited: '2026-11-01T13:56:07Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

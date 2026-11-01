@@ -1276,7 +1276,14 @@ def get_session_environment(session: str, key: str,
 
 
 def list_clients_in_group(base: str, socket_path: str | None = None) -> list[dict]:
-    """List all clients attached to any session in the group (base + base~*).
+    """List all clients attached to any session in the group.
+
+    The group is ``sessions_in_group``: the base, its ``base~N`` grouped
+    sessions **and a user's own view however it is named** (S118/S121/S124).
+    Enumerating only ``base~N`` by name missed a view's client, so
+    ``pm session --disconnect-others`` left it attached — and a view client
+    still constrains the shared window's size, which is exactly what the
+    flag exists to reclaim.
 
     Returns list of dicts with keys: tty, session.
     """
@@ -1287,7 +1294,7 @@ def list_clients_in_group(base: str, socket_path: str | None = None) -> list[dic
     )
     if result.returncode != 0:
         return []
-    group_sessions = {base} | set(list_grouped_sessions(base, socket_path=socket_path))
+    group_sessions = set(sessions_in_group(base, socket_path=socket_path))
     clients = []
     for line in result.stdout.strip().splitlines():
         parts = line.split(None, 1)

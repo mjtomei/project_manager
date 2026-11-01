@@ -2761,3 +2761,47 @@ socket with `TMUX_TMPDIR` on a scratch dir (private server, session env,
 global env and hooks correct; default server untouched).  No live
 session, server or shared host configuration was touched — every
 fixture used a disposable socket and a temporary HOME.
+
+## Review iteration (2026-11-01, review-loop b48f i4)
+
+Verification pass over the head after the b48f i3 fixes; no requirement
+changes.  Two view-resolution gaps of the class the earlier iterations
+closed elsewhere — both surfaces enumerate or name a session without
+resolving it through its tmux session *group*, so a pane in a shared
+window (tmux reports the most recently created session of that window:
+`pm-base~1` in the normal case, a user's own view when one exists —
+verified on tmux 3.2a) leaks the grouped/view name:
+
+1. **`pm qa launch` named the pane's session in the QA prompt.**
+   `tmux.get_session_name()` returns the grouped session (normally
+   `pm-base~1`, or a user's view `myview`) for a pane in the base
+   session's window.  The generated "Session Context" block tells the QA
+   worker to run `pm tui view -s <session>` and to read
+   `~/.pm/pane-registry/<session>.json`; both are keyed by the base pm
+   session, so the registry path never existed and, with a view, `pm tui
+   view -s myview` failed outright (the explicit-`-s` branch normalises
+   only `~N`).  It now resolves through `pane_registry.pm_session_name`
+   (the same resolution as `_get_current_pm_session`, with the usual
+   `OSError` -> base-name degrade).  Tests:
+   `test_qa_launch_names_the_base_pm_session[pm-base~1]` and `[myview]`.
+
+2. **`list_clients_in_group()` could not see a user's own view.**
+   It built the group as `{base} | list_grouped_sessions(base)`, i.e. only
+   `base~N` by name, so `pm session --disconnect-others` left a client
+   attached through a view (S118/S121/S124) connected — and that client
+   still constrains the shared window's size, which is exactly what the
+   flag exists to reclaim.  It now uses `sessions_in_group()`, the
+   existing "every session in the group, by any name" helper the detach
+   and kill paths already use.  Test:
+   `TestListClientsInGroup::test_includes_a_users_own_view`.
+
+Both new tests fail on the pre-fix tree (verified in a worktree at
+7e9f072da: the prompt named `myview` / `pm-base~1`, and the view's client
+was not listed).  Recorded as an incidental fix on the PR.
+
+Validation: targeted suites (`test_session_socket_isolation`,
+`test_tmux`, `test_cli_helpers`, `test_shared_sessions`, `test_cli_qa`,
+`test_tui_imports`, `test_tui_pidfile`) 676 passed; full suite recorded
+in the PR note for this iteration.  No live session, server or shared
+host configuration was touched — every fixture used a disposable socket
+and a temporary HOME.

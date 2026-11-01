@@ -646,10 +646,26 @@ def qa_launch(item_id: str, target_window: str | None):
         click.echo("pm qa launch requires tmux.", err=True)
         raise SystemExit(1)
 
-    session = tmux_mod.get_session_name()
-    if not session:
+    raw_session = tmux_mod.get_session_name()
+    if not raw_session:
         click.echo("No tmux session detected.", err=True)
         raise SystemExit(1)
+    # tmux reports the most recently created session of a shared window for
+    # a pane, so inside a pm session this is normally the grouped
+    # ``base~1`` (and a user's own view, however it is named, while that
+    # view's client is the most recently active one — S118/S121/S124).
+    # The prompt names the session for ``pm tui view/send -s`` and for the
+    # pane-registry path, and both are keyed by the *base* pm session: a
+    # view name resolved to no registry (and `pm tui view -s <view>`
+    # failed), while ``base~1`` pointed at a registry file that does not
+    # exist.  Same resolution as ``_get_current_pm_session``.
+    from pm_core import pane_registry
+    try:
+        session = pane_registry.pm_session_name(raw_session)
+    except OSError:
+        # tmux vanished between the two probes; the plain base name is the
+        # best answer available (same degrade as helpers._pm_session_of).
+        session = pane_registry.base_session_name(raw_session)
 
     sess_label = os.environ.get("PM_SESSION") or session
     title = item.get("title", qa_id)
