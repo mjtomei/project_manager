@@ -821,16 +821,28 @@ def default_socket_path() -> Path:
     not found (the same as before this change).
     """
     base = os.environ.get("TMUX_TMPDIR")
-    # Mirror tmux's own fallback: it uses $TMUX_TMPDIR only when it is an
-    # absolute path to an existing directory.  A missing or relative value
-    # makes tmux put the default server at /tmp/tmux-<uid>/default
-    # (verified on tmux 3.2a), so computing the value verbatim would look
-    # for legacy sessions where no server ever lives — the session would
-    # be invisible to `pm session`, `pm session kill` and
-    # `pm session list` (review-loop b48f i7).
-    if not base or not os.path.isabs(base) or not os.path.isdir(base):
-        base = "/tmp"
-    return Path(base) / f"tmux-{os.getuid()}" / "default"
+    # Mirror tmux's own resolution (verified on tmux 3.2a): it realpaths
+    # $TMUX_TMPDIR — so a *relative* value is taken against the client's
+    # cwd — and uses the result only when it is an existing directory.  A
+    # missing value, or one that resolves to nothing or to a non-directory,
+    # makes tmux put the default server at /tmp/tmux-<uid>/default; an
+    # existing non-directory makes it refuse to start a default server at
+    # all ("couldn't create directory … Not a directory"), so the /tmp
+    # answer can only ever find a server started before that value was
+    # exported.  Computing the value verbatim would look for legacy
+    # sessions where no server ever lives — the session would be invisible
+    # to `pm session`, `pm session kill` and `pm session list` (review-loop
+    # b48f i7; the relative case corrected in b48f i9).
+    if base:
+        try:
+            resolved = Path(base).resolve()
+        except OSError:
+            # A symlink loop or an unreadable component: treat it like any
+            # other value tmux cannot use.
+            resolved = None
+        if resolved is not None and resolved.is_dir():
+            return resolved / f"tmux-{os.getuid()}" / "default"
+    return Path("/tmp") / f"tmux-{os.getuid()}" / "default"
 
 
 def session_socket_path(session_tag: str) -> Path:

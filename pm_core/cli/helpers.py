@@ -1279,6 +1279,20 @@ def _get_current_pm_session() -> str | None:
     return None
 
 
+def _private_session_context() -> bool:
+    """True when this invocation is not operating on a shared session.
+
+    ``PM_SHARE_MODE`` is set for ``--global``/``--group`` invocations and
+    inherited by the panes of a shared session.  In both cases a socket
+    another user owns at the deterministic path is legitimate — the
+    sharing user owns it, and joining is the documented flow — so an
+    implicit lookup must not require ownership.  Otherwise the session is
+    private, and only a socket this user owns can be its server (see
+    ``tmux.find_session_server``'s *owned_only*).
+    """
+    return not os.environ.get("PM_SHARE_MODE")
+
+
 def _get_pm_session() -> str | None:
     """Get the pm tmux session name if running inside one.
 
@@ -1304,10 +1318,11 @@ def _get_pm_session() -> str | None:
         tag = get_session_tag(start_path=_project_override)
         if tag:
             session = f"pm-{tag}"
-            _select_session_socket(session)
+            _select_session_socket(session,
+                                   owned_only=_private_session_context())
             return session
     session = _get_session_name_for_cwd()
-    _select_session_socket(session)
+    _select_session_socket(session, owned_only=_private_session_context())
     return session
 
 
@@ -1324,18 +1339,27 @@ def _use_tmux_socket(socket_path: str | None) -> None:
     os.environ["PM_TMUX_SOCKET"] = socket_path
 
 
-def _select_session_socket(session_name: str) -> str | None:
+def _select_session_socket(session_name: str, *,
+                           owned_only: bool = False) -> str | None:
     """Point ``PM_TMUX_SOCKET`` at the server hosting *session_name*.
 
     Prefers the session's dedicated private socket, falls back to the
     legacy default server (selected by its explicit path).  Returns the
     socket now in effect, or None when the session is not a pm session or
     was not found — in which case the ambient setting is left untouched.
+
+    *owned_only* (forwarded to :func:`tmux.find_session_server`) is set by
+    implicit lookups — the cwd-derived session, a command that acts on
+    "this project's session" — so a socket another user planted under the
+    deterministic name is not adopted.  An explicit ``-s`` and a
+    shared/joiner context leave it false: reaching another user's
+    ``--global``/``--group`` session is the documented flow there.
     """
     base = pane_registry.base_session_name(session_name)
     if not base.startswith("pm-"):
         return None
-    sock, on_private = tmux_mod.find_session_server(base)
+    sock, on_private = tmux_mod.find_session_server(base,
+                                                    owned_only=owned_only)
     if sock is None:
         return None
     # ``None`` selects the default server by its explicit path: clearing
@@ -1518,7 +1542,8 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
         # reason as the ambient branch above: `list_pm_sessions` enumerates
         # socket files, so a live server whose socket file was removed would
         # otherwise be unreachable by the last-resort scan.
-        cwd_server = _select_session_socket(expected_session)
+        cwd_server = _select_session_socket(
+            expected_session, owned_only=_private_session_context())
         try:
             session_running = tmux_mod.session_exists(expected_session)
         except OSError:
@@ -1566,8 +1591,14 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
         else:
             # The ambient socket could not be resolved (no PM_TMUX_SOCKET
             # and no pm socket in $TMUX): fall back to the name, which is
-            # all the identification gives us.
-            servers = [info for info in servers if info["name"] == identified]
+            # all the identification gives us.  A private context still
+            # restricts the candidates to servers this user owns, so a
+            # socket another user planted under that name is not scanned
+            # (the same rule as the unscoped branch below).
+            servers = [info for info in servers
+                       if info["name"] == identified
+                       and (not _private_session_context()
+                            or _server_owned_by_us(info["socket"]))]
     else:
         # No session context at all (a plain shell).  Only this user's
         # servers are eligible: the socket directory is world-writable and

@@ -343,13 +343,18 @@ pane unless stated otherwise.
   created on the project's *private* socket — never as a second session on
   the default server — and the rollout note is not printed for the session
   that vanished (review-loop 8d4e i1).
-- **GIVEN** `$TMUX_TMPDIR` set to a path that does not exist (or to a
-  relative path), so tmux itself keeps its default server at
-  `/tmp/tmux-<uid>/default`, **WHEN** the user runs `pm session`,
-  `pm session list` or `pm session kill` in a legacy project's directory,
-  **THEN** the legacy session is still found (attached, listed, killed;
-  no duplicate private session) — pm's default-server path mirrors tmux's
-  fallback (review-loop b48f i7).
+- **GIVEN** `$TMUX_TMPDIR` set to a path that does not exist, or to a
+  relative path that does not resolve to a directory, so tmux itself
+  keeps its default server at `/tmp/tmux-<uid>/default`, **WHEN** the
+  user runs `pm session`, `pm session list` or `pm session kill` in a
+  legacy project's directory, **THEN** the legacy session is still found
+  (attached, listed, killed; no duplicate private session) — pm's
+  default-server path mirrors tmux's fallback (review-loop b48f i7).
+- **GIVEN** `$TMUX_TMPDIR` set to an existing *relative* path, which tmux
+  resolves against the client's cwd, **WHEN** the user runs those
+  commands in a legacy project's directory, **THEN** the legacy session
+  is still found at `<resolved>/tmux-<uid>/default` (review-loop b48f
+  i9).
 
 ### R11 — Panes, hooks and popups address their own server
 
@@ -413,8 +418,10 @@ pane unless stated otherwise.
   `pm session --print-connect`, opens the TUI connect popup, or runs
   `pm session kill` for that session, **THEN** the lookup does not follow
   the link or act on the server behind it — it reports no TUI pane / no
-  session, and that server, its session and its clients are untouched
-  (review-loop b48f i7).
+  session (and `pm session --print-connect` refuses with a message
+  naming the link instead of printing a command through it), and that
+  server, its session and its clients are untouched (review-loop b48f
+  i7/i9).
 - **GIVEN** the directory is 1777 and owned by another user,
   **WHEN** the user runs `pm session`,
   **THEN** it proceeds normally.
@@ -423,9 +430,20 @@ pane unless stated otherwise.
   **WHEN** the user runs `pm session` for that session,
   **THEN** it refuses with a message naming the socket and its owner, and
   creates no server.
-- **GIVEN** a symlink planted at a session's socket path, **WHEN** the
-  user runs `pm session list`, **THEN** the entry is skipped (not reported
-  as one of the user's sessions).
+- **GIVEN** a *real* socket at a private session's path owned by another
+  user (a planted server — a real socket is not a symlink, so the entry
+  check passes, and tmux < 3.3 has no `server-access` ACL, so a 0777
+  socket is connectable), **WHEN** the user runs an implicit lookup —
+  `pm tui view` / `pm tui send` with no `--session` from a plain shell in
+  the project, `pm pr start`, `pm meta`, `pm container build`,
+  `pm session home`, `pm session kill`, `pm session mobile`,
+  `pm session --print-connect`, or the TUI connect screen — **THEN** the
+  planted server is not adopted or advertised: the lookup falls through
+  to the default server (or reports no session, or refuses to print a
+  command naming the entry), and the planted server, its session and its
+  clients are untouched.  An explicit `-s` and a `--global`/`--group`
+  context may still reach another user's socket — that is the documented
+  shared-session flow (review-loop b48f i9).
 - **GIVEN** a repository whose tag would make the socket path exceed the
   Unix socket limit, **WHEN** the user starts a session, **THEN** a
   deterministic hashed socket name is used and list/kill still work.

@@ -792,8 +792,14 @@ def show_connect(app) -> None:
         # server actually hosts it, and name the session explicitly for the
         # default server: a bare `tmux attach` follows $TMUX (the wrong
         # server when pasted into another pm pane), and one default server
-        # can host several legacy pm sessions.
-        hosting, on_private = tmux_mod.find_session_server(session)
+        # can host several legacy pm sessions.  The lookup requires a
+        # socket this user owns: the printed command is pasted into a
+        # shell, and a socket another user planted under this session's
+        # deterministic name would attach them to that server (a joiner's
+        # shared session always has PM_TMUX_SOCKET in its environment, so
+        # it never reaches this branch).
+        hosting, on_private = tmux_mod.find_session_server(session,
+                                                           owned_only=True)
         if hosting is not None:
             socket_path = hosting
             target = "" if on_private else f" -t {shlex.quote(session)}"

@@ -470,8 +470,42 @@ class TestDefaultSocketPath:
         monkeypatch.setenv("TMUX_TMPDIR", str(tmp_path / "missing"))
         assert paths.default_socket_path() == self._expected(Path("/tmp"))
 
-    def test_falls_back_for_a_relative_value(self, monkeypatch):
-        monkeypatch.setenv("TMUX_TMPDIR", "relative")
+    def test_falls_back_for_a_missing_relative_value(self, monkeypatch,
+                                                     tmp_path):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("TMUX_TMPDIR", "relative")  # does not exist
+        assert paths.default_socket_path() == self._expected(Path("/tmp"))
+
+    def test_uses_an_existing_relative_value(self, monkeypatch, tmp_path):
+        """tmux realpaths a relative $TMUX_TMPDIR against the client's cwd.
+
+        Verified on tmux 3.2a: from ``/tmp/proj`` with ``TMUX_TMPDIR=reltmp``
+        (an existing directory) the default server binds at
+        ``/tmp/proj/reltmp/tmux-<uid>/default``.  Answering ``/tmp`` there
+        would hide a legacy session from `pm session` (which would then
+        create a duplicate private one), `pm session list` and
+        `pm session kill` — the same failure the missing/relative fallback
+        fixed in b48f i7, one case narrower (review-loop b48f i9).
+        """
+        rel = tmp_path / "reltmp"
+        rel.mkdir()
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("TMUX_TMPDIR", "reltmp")
+        assert (paths.default_socket_path()
+                == self._expected(rel.resolve()))
+
+    def test_falls_back_for_an_existing_non_directory(self, monkeypatch,
+                                                      tmp_path):
+        """A file value makes tmux refuse a default server entirely.
+
+        tmux 3.2a: ``TMUX_TMPDIR=<regular file>`` gives "couldn't create
+        directory … (Not a directory)" and no server starts, so answering
+        ``/tmp/tmux-<uid>/default`` can only find a server started before
+        the value was exported — never one this environment put elsewhere.
+        """
+        entry = tmp_path / "not-a-dir"
+        entry.write_text("")
+        monkeypatch.setenv("TMUX_TMPDIR", str(entry))
         assert paths.default_socket_path() == self._expected(Path("/tmp"))
 
     def test_falls_back_when_unset_or_empty(self, monkeypatch):
@@ -513,6 +547,20 @@ class TestSharedSocketDirIsUsable:
         entry = tmp_path / "pm-sessions"
         entry.write_text("")
         monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", entry)
+        assert paths.shared_socket_dir_is_usable() is False
+
+    def test_an_entry_that_cannot_be_inspected_fails_closed(self, monkeypatch):
+        """An unreadable entry is not assumed usable.
+
+        The helper's contract is "fail closed rather than connect on a
+        guess": a path we cannot ``lstat`` might be a directory, a planted
+        link or a server socket, and only the first is safe to enumerate.
+        """
+        class _Unreadable:
+            def lstat(self):
+                raise PermissionError("denied")
+
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", _Unreadable())
         assert paths.shared_socket_dir_is_usable() is False
 
 
@@ -622,6 +670,98 @@ class TestFindSessionServer:
         # comes from the default server.
         assert probed == [None]
         assert (sock, private) == (str(paths.default_socket_path()), False)
+
+    @staticmethod
+    def _bind_socket(path: Path) -> None:
+        """Create a real AF_UNIX socket file at *path*."""
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            s.bind(str(path))
+        finally:
+            s.close()
+
+    def test_owned_only_skips_a_socket_another_user_owns(
+            self, monkeypatch, tmp_path):
+        """A real socket is not a symlink, so ownership is the evidence.
+
+        ``/tmp/pm-sessions`` is 1777 and the deterministic name is
+        derivable, so another user can run a server there under our
+        session's name; tmux < 3.3 has no ``server-access`` ACL and the
+        attacker can chmod the socket 0777, so a lookup would connect to
+        it and adopt its panes.  Implicit discovery passes
+        ``owned_only=True`` and must fall through to the default server.
+        """
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        sock = tmp_path / "pm-repo-abc"
+        self._bind_socket(sock)
+        real_uid = os.getuid()
+        monkeypatch.setattr(os, "getuid", lambda: real_uid + 1)
+        probed: list[str | None] = []
+
+        def exists(name, socket_path=None, use_env=True):
+            probed.append(socket_path)
+            return socket_path is None and not use_env
+
+        monkeypatch.setattr(tmux, "session_exists", exists)
+
+        assert tmux.find_session_server(
+            "pm-repo-abc", owned_only=True) == (
+                str(paths.default_socket_path()), False)
+        assert probed == [None]
+
+    def test_owned_only_probes_a_socket_we_own(self, monkeypatch, tmp_path):
+        """The normal private case: our server bound a socket we own."""
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        sock = tmp_path / "pm-repo-abc"
+        self._bind_socket(sock)
+        monkeypatch.setattr(
+            tmux, "session_exists",
+            lambda name, socket_path=None, use_env=True:
+            socket_path == str(sock))
+
+        assert tmux.find_session_server("pm-repo-abc", owned_only=True) == (
+            str(sock), True)
+
+    def test_owned_only_does_not_probe_an_absent_entry(self, monkeypatch,
+                                                       tmp_path):
+        """No socket file: our server is not running, so do not probe.
+
+        An attacker could create the entry between the ``lstat`` and the
+        connect; a running private server always has its socket bound, so
+        an absent entry means there is nothing of ours to find.
+        """
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        probed: list[str | None] = []
+
+        def exists(name, socket_path=None, use_env=True):
+            probed.append(socket_path)
+            return False
+
+        monkeypatch.setattr(tmux, "session_exists", exists)
+
+        assert tmux.find_session_server(
+            "pm-repo-abc", owned_only=True) == (None, False)
+        assert probed == [None]
+
+    def test_an_explicit_lookup_still_probes_an_unowned_socket(
+            self, monkeypatch, tmp_path):
+        """Explicit ``-s`` and shared/joiner lookups keep the old rule.
+
+        Joining another user's ``--global``/``--group`` session is
+        documented, and its socket belongs to the sharing user.
+        """
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        sock = tmp_path / "pm-shared-abc"
+        self._bind_socket(sock)
+        real_uid = os.getuid()
+        monkeypatch.setattr(os, "getuid", lambda: real_uid + 1)
+        monkeypatch.setattr(
+            tmux, "session_exists",
+            lambda name, socket_path=None, use_env=True:
+            socket_path == str(sock))
+
+        assert tmux.find_session_server("pm-shared-abc") == (
+            str(sock), True)
 
     @staticmethod
     def _prefix_matching_exists(alive: set[str]):
@@ -1482,13 +1622,21 @@ class TestGetPmSessionSelectsServer:
         monkeypatch.setattr(helpers, "_get_current_pm_session", lambda: None)
         monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
                             lambda: "pm-target")
+        # Implicit lookups require the socket file to be one we own (a
+        # running private server always has it bound); bind a real one.
+        sock = tmp_path / "pm-target"
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            s.bind(str(sock))
+        finally:
+            s.close()
         monkeypatch.setattr(
             helpers.tmux_mod, "session_exists",
             lambda name, socket_path=None, use_env=True:
-            socket_path == str(tmp_path / "pm-target"))
+            socket_path == str(sock))
 
         assert helpers._get_pm_session() == "pm-target"
-        assert os.environ["PM_TMUX_SOCKET"] == str(tmp_path / "pm-target")
+        assert os.environ["PM_TMUX_SOCKET"] == str(sock)
 
     def test_legacy_session_selects_default_server(self, monkeypatch, tmp_path):
         from pm_core.cli import helpers
@@ -1829,7 +1977,7 @@ class TestFindTuiPaneAcrossServers:
         # session's socket so the registry probe and the caller's later
         # tmux calls hit that server.
         monkeypatch.setattr(helpers.tmux_mod, "find_session_server",
-                            lambda name: (sock, True))
+                            lambda name, owned_only=False: (sock, True))
         monkeypatch.setattr(helpers.tmux_mod, "session_exists",
                             lambda *a, **kw: True)
         monkeypatch.setattr(helpers.tmux_mod, "pane_exists",
@@ -1952,7 +2100,7 @@ class TestFindTuiPaneAcrossServers:
         monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
                             lambda: "pm-b")
 
-        def select(name):
+        def select(name, owned_only=False):
             # What the real helper does for a session it finds on its own
             # private socket.
             os.environ["PM_TMUX_SOCKET"] = "/tmp/pm-sessions/pm-b"
@@ -2256,6 +2404,104 @@ class TestFindTuiPaneAcrossServers:
         # The failed lookup leaves the process on the server it came in on.
         assert os.environ["PM_TMUX_SOCKET"] == "/tmp/a"
 
+    def test_cwd_discovery_requires_an_owned_socket(self, monkeypatch):
+        """A plain-shell cwd lookup is implicit: only our socket counts.
+
+        The socket directory is world-writable and a real socket is not a
+        symlink, so another user can plant one under the deterministic
+        name; the cwd branch must ask ``find_session_server`` for an owned
+        socket (review-loop b48f i9).
+        """
+        from pm_core.cli import helpers
+
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: False)
+        monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-repo-abc")
+        seen: list[bool] = []
+
+        def find(name, owned_only=False):
+            seen.append(owned_only)
+            return None, False
+
+        monkeypatch.setattr(helpers.tmux_mod, "find_session_server", find)
+        monkeypatch.setattr(helpers.tmux_mod, "session_exists",
+                            lambda *a, **k: False)
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions", lambda: [])
+
+        assert helpers._find_tui_pane() == (None, None)
+        assert seen == [True]
+
+    def test_shared_context_discovery_may_reach_a_joined_socket(
+            self, monkeypatch):
+        """In a shared context the socket belongs to the sharing user."""
+        from pm_core.cli import helpers
+
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.setenv("PM_SHARE_MODE", "global")
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: False)
+        monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-repo-abc")
+        seen: list[bool] = []
+
+        def find(name, owned_only=False):
+            seen.append(owned_only)
+            return None, False
+
+        monkeypatch.setattr(helpers.tmux_mod, "find_session_server", find)
+        monkeypatch.setattr(helpers.tmux_mod, "session_exists",
+                            lambda *a, **k: False)
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions", lambda: [])
+
+        assert helpers._find_tui_pane() == (None, None)
+        assert seen == [False]
+
+    def test_name_scoped_scan_skips_another_users_socket(self, monkeypatch):
+        """The name-only fallback scan is ownership-filtered when private.
+
+        When the identified session's server cannot be resolved (no
+        ``PM_TMUX_SOCKET`` and no pm socket in ``$TMUX``) the scan falls
+        back to filtering rows by *name*.  A private context must not scan
+        a socket another user planted under that name: pane ids are per
+        server, so the scan could hand its TUI pane to ``pm tui send``
+        (review-loop b48f i9).
+        """
+        from pm_core.cli import helpers
+        from pm_core import pane_registry
+
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.delenv("TMUX", raising=False)
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: True)
+        monkeypatch.setattr(helpers.tmux_mod, "get_session_name",
+                            lambda: "pm-a")
+        monkeypatch.setattr(pane_registry, "pm_session_name",
+                            lambda name: "pm-a")
+        monkeypatch.setattr(pane_registry, "load_registry",
+                            lambda name: {"windows": {}})
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions", lambda: [
+            {"name": "pm-a", "socket": "/tmp/attacker/pm-a",
+             "attached": 0, "shared": False},
+            {"name": "pm-a", "socket": None, "attached": 0,
+             "shared": False},
+        ])
+        # Only the default server (socket None) is ours.
+        monkeypatch.setattr(helpers, "_server_owned_by_us",
+                            lambda sock: sock is None)
+        scanned: list[str | None] = []
+
+        def live():
+            scanned.append(os.environ.get("PM_TMUX_SOCKET"))
+            return {}, []
+
+        monkeypatch.setattr(helpers, "_live_panes_and_tuis", live)
+        monkeypatch.setattr(helpers.tmux_mod, "_tmux_cmd",
+                            lambda *a, **k: ["tmux"])
+
+        assert helpers._find_tui_pane() == (None, None)
+        assert scanned == [str(paths.default_socket_path())]
+
     def test_legacy_ambient_session_scopes_the_scan_to_the_default_server(
             self, monkeypatch):
         """Inside a legacy session the scan must not reach a same-named twin.
@@ -2460,7 +2706,7 @@ class TestResolveSessionSocket:
         monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
         # The refusal must precede any server probe.
         monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
-                            lambda name: (None, False))
+                            lambda name, owned_only=False: (None, False))
 
         with pytest.raises(SystemExit) as exc:
             session_mod._resolve_session_socket("pm-repo-abc", False)
@@ -2487,7 +2733,7 @@ class TestResolveSessionSocket:
         monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", sock_dir)
         monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
         monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
-                            lambda name: (None, False))
+                            lambda name, owned_only=False: (None, False))
 
         with pytest.raises(SystemExit) as exc:
             session_mod._resolve_session_socket("pm-repo-abc", True)
@@ -2503,15 +2749,20 @@ class TestSessionKillServerSelection:
 
     def _invoke(self, monkeypatch, tmp_path, hosting, *, ambient=None,
                 ambient_share_mode=None, hosting_for=None, alive=False,
-                args=("kill",), members=None):
+                args=("kill",), members=None, share_mode=None,
+                seen_owned=None, in_session=None):
         from click.testing import CliRunner
         from pm_core.cli import session as session_mod
         from pm_core import container, push_proxy
 
         monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
         # The candidate list depends on the share mode this process runs
-        # under; the fixture is a plain (private) invocation.
-        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        # under; the fixture is a plain (private) invocation unless a test
+        # asks for a shared one.
+        if share_mode is None:
+            monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        else:
+            monkeypatch.setenv("PM_SHARE_MODE", share_mode)
         monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: True)
         monkeypatch.setattr(session_mod.tmux_mod, "server_alive",
                             lambda sock: alive)
@@ -2519,6 +2770,10 @@ class TestSessionKillServerSelection:
                             lambda: "pm-repo-abc")
         monkeypatch.setattr(session_mod, "_known_ambient_session",
                             lambda: ambient)
+        if in_session is not None:
+            # The pane this process runs in (the target may be it).
+            monkeypatch.setattr(session_mod, "_get_current_pm_session",
+                                lambda: in_session)
         # Never query a real tmux server from a unit test.
         monkeypatch.setattr(session_mod, "_ambient_share_mode",
                             lambda name: ambient_share_mode)
@@ -2526,11 +2781,17 @@ class TestSessionKillServerSelection:
         # the exact-match variant (a bare target would also match a grouped
         # session).  Stub both against the same fixture.
         if hosting_for is None:
-            resolver = lambda name: hosting  # noqa: E731
+            resolver = lambda name, owned_only=False: hosting  # noqa: E731
         else:
             # Per-name hosting, so the cwd session can be absent while the
             # ambient one is live.
-            resolver = lambda name: hosting_for.get(name, (None, False))  # noqa: E731
+            resolver = lambda name, owned_only=False: hosting_for.get(  # noqa: E731
+                name, (None, False))
+
+        if seen_owned is not None:
+            def resolver(name, owned_only=False, _inner=resolver):
+                seen_owned.append(owned_only)
+                return _inner(name, owned_only=owned_only)
         monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
                             resolver)
         monkeypatch.setattr(session_mod.tmux_mod, "find_exact_session_server",
@@ -2563,6 +2824,53 @@ class TestSessionKillServerSelection:
 
         assert result.exit_code == 0, result.output
         assert killed == [("pm-repo-abc~1", sock), ("pm-repo-abc", sock)]
+
+    def test_private_kill_resolves_only_owned_sockets(self, monkeypatch,
+                                                      tmp_path):
+        """A private kill must not target another user's planted socket.
+
+        Both the candidate selection and the exact destructive lookup ask
+        ``find_*_session_server`` to require a socket this user owns: the
+        socket directory is world-writable, and a real socket there is not
+        a symlink, so ownership is the only evidence that the server is
+        ours (review-loop b48f i9).
+        """
+        sock = str(tmp_path / "pm-repo-abc")
+        seen: list[bool] = []
+        result, _ = self._invoke(monkeypatch, tmp_path, (sock, True),
+                                 seen_owned=seen)
+
+        assert result.exit_code == 0, result.output
+        assert seen == [True, True]
+
+    def test_kill_from_inside_the_session_does_not_require_ownership(
+            self, monkeypatch, tmp_path):
+        """A joiner inside a shared session may still kill it implicitly.
+
+        A pane of a grouped session carries no ``PM_SHARE_MODE`` (tmux
+        copies no session environment into a grouped session), so the
+        env-only rule cannot tell the session is shared.  The user is
+        already attached to that server, so its socket need not be theirs
+        (review-loop b48f i9).
+        """
+        sock = str(tmp_path / "pm-repo-abc")
+        seen: list[bool] = []
+        result, _ = self._invoke(monkeypatch, tmp_path, (sock, True),
+                                 in_session="pm-repo-abc", seen_owned=seen)
+
+        assert result.exit_code == 0, result.output
+        assert seen == [False, False]
+
+    def test_shared_kill_may_resolve_the_sharing_users_socket(
+            self, monkeypatch, tmp_path):
+        """``--global``/``--group`` joins are documented: no ownership rule."""
+        sock = str(tmp_path / "pm-repo-abc")
+        seen: list[bool] = []
+        result, _ = self._invoke(monkeypatch, tmp_path, (sock, True),
+                                 share_mode="global", seen_owned=seen)
+
+        assert result.exit_code == 0, result.output
+        assert seen == [False, False]
 
     def test_requires_tmux(self, monkeypatch):
         """Without tmux nothing can be resolved or killed: say so, exit 1."""
@@ -2665,11 +2973,11 @@ class TestSessionKillServerSelection:
         sock.write_text("")
         # Prefix matching resolves the surviving grouped session ...
         monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
-                            lambda name: (str(sock), True))
+                            lambda name, owned_only=False: (str(sock), True))
         # ... but the exact name is gone.
         monkeypatch.setattr(session_mod.tmux_mod,
                             "find_exact_session_server",
-                            lambda name: (None, False))
+                            lambda name, owned_only=False: (None, False))
         killed: list[tuple[str, str | None]] = []
         monkeypatch.setattr(
             session_mod.tmux_mod, "kill_session",
@@ -2712,7 +3020,7 @@ class TestSessionKillServerSelection:
         sock = str(tmp_path / "pm-repo-abc")
         monkeypatch.setattr(session_mod.tmux_mod,
                             "find_exact_session_server",
-                            lambda name: (sock, True))
+                            lambda name, owned_only=False: (sock, True))
         monkeypatch.setattr(
             session_mod.tmux_mod, "sessions_in_group",
             lambda name, socket_path=None: ["myview", f"{name}~1", name])
@@ -3063,7 +3371,7 @@ class TestSessionMobileServerSelection:
         monkeypatch.setattr(session_mod, "_resolve_target_session",
                             lambda: "pm-abc")
         monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
-                            lambda name: (sock, True))
+                            lambda name, owned_only=False: (sock, True))
         monkeypatch.setattr(session_mod.pane_layout, "mobile_flag_path",
                             lambda name: tmp_path / "pm-abc.mobile")
         seen: dict[str, str | None] = {}
@@ -3464,7 +3772,8 @@ class TestPaneOpsSessionResolution:
 # ---------------------------------------------------------------------------
 
 class TestPrintConnect:
-    def _invoke(self, monkeypatch, tmp_path, hosting):
+    def _invoke(self, monkeypatch, tmp_path, hosting, *, args=None,
+                seen_owned=None):
         from click.testing import CliRunner
         from pm_core.cli import session as session_mod
 
@@ -3472,9 +3781,84 @@ class TestPrintConnect:
         # ``shared`` reflects --global/--group; this invocation passes none.
         monkeypatch.setattr(session_mod, "_resolve_start_session_name",
                             lambda shared=False: "pm-repo-abc")
-        monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
-                            lambda name: hosting)
-        return CliRunner().invoke(session_mod.session, ["--print-connect"])
+
+        def find(name, owned_only=False):
+            if seen_owned is not None:
+                seen_owned.append(owned_only)
+            return hosting
+
+        monkeypatch.setattr(session_mod.tmux_mod, "find_session_server", find)
+        return CliRunner().invoke(session_mod.session,
+                                  args or ["--print-connect"])
+
+    def test_private_print_connect_requires_an_owned_socket(
+            self, monkeypatch, tmp_path):
+        """The printed command is pasted: never advertise a planted socket.
+
+        A socket another user owns at this session's deterministic path
+        would attach them to that server, which then sees every key they
+        type (review-loop b48f i9).
+        """
+        sock = str(tmp_path / "pm-repo-abc")
+        seen: list[bool] = []
+        result = self._invoke(monkeypatch, tmp_path, (sock, True),
+                              seen_owned=seen)
+
+        assert result.exit_code == 0, result.output
+        assert seen == [True]
+
+    def test_shared_print_connect_may_name_the_sharing_users_socket(
+            self, monkeypatch, tmp_path):
+        sock = str(tmp_path / "pm-repo-abc")
+        seen: list[bool] = []
+        result = self._invoke(monkeypatch, tmp_path, (sock, True),
+                              args=["--print-connect", "--global"],
+                              seen_owned=seen)
+
+        assert result.exit_code == 0, result.output
+        assert seen == [False]
+
+    def test_refuses_to_print_a_planted_symlink(self, monkeypatch, tmp_path):
+        """A printed command is pasted: never point it through a link.
+
+        tmux follows a symbolic link when a client connects, so with no
+        server of our own the command would attach the user to whatever
+        server the link names (review-loop b48f i7/i9).
+        """
+        (tmp_path / "pm-repo-abc").symlink_to(tmp_path / "attacker-server")
+
+        result = self._invoke(monkeypatch, tmp_path, (None, False))
+
+        assert result.exit_code == 1
+        assert "symbolic link" in result.output
+        assert "tmux -S" not in result.output
+
+    def test_refuses_to_print_a_socket_another_user_owns(
+            self, monkeypatch, tmp_path):
+        """A real socket another user planted is not a connect target."""
+        sock = tmp_path / "pm-repo-abc"
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            s.bind(str(sock))
+        finally:
+            s.close()
+        real_uid = os.getuid()
+        monkeypatch.setattr(os, "getuid", lambda: real_uid + 1)
+
+        result = self._invoke(monkeypatch, tmp_path, (None, False))
+
+        assert result.exit_code == 1
+        assert "owned by uid" in result.output
+        assert "tmux -S" not in result.output
+
+    def test_prints_the_command_for_a_not_yet_started_session(
+            self, monkeypatch, tmp_path):
+        """No entry at all is the normal before-the-first-start state."""
+        result = self._invoke(monkeypatch, tmp_path, (None, False))
+
+        assert result.exit_code == 0, result.output
+        assert result.output.strip() == (
+            f"tmux -S {tmp_path / 'pm-repo-abc'} attach")
 
     def test_private_session_prints_socket_command(self, monkeypatch,
                                                    tmp_path):
@@ -3558,7 +3942,7 @@ class TestPrintConnect:
         monkeypatch.setattr(session_mod.tmux_mod, "session_socket_for",
                             lambda name: sock)
         monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
-                            lambda name: (sock, True))
+                            lambda name, owned_only=False: (sock, True))
 
         result = CliRunner().invoke(
             session_mod.session,
@@ -3601,7 +3985,7 @@ class TestPrintConnect:
         monkeypatch.setattr(session_mod.tmux_mod, "session_socket_for",
                             lambda name: sock)
         monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
-                            lambda name: (sock, True))
+                            lambda name, owned_only=False: (sock, True))
 
         result = CliRunner().invoke(session_mod.session, ["--print-connect"])
 
@@ -3626,7 +4010,7 @@ class TestPrintConnect:
             session_mod.tmux_mod, "session_socket_for",
             lambda name: "/tmp/pm-sessions/pm-my repo-abc12345")
         monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
-                            lambda name: (default, False))
+                            lambda name, owned_only=False: (default, False))
 
         result = CliRunner().invoke(session_mod.session, ["--print-connect"])
 
@@ -3707,8 +4091,8 @@ class TestShowConnect:
 
         monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
         monkeypatch.setattr(pane_ops.tmux_mod, "find_session_server",
-                            lambda name: (str(paths.default_socket_path()),
-                                          False))
+                            lambda name, owned_only=False: (
+                                str(paths.default_socket_path()), False))
         app = MagicMock()
         app._session_name = "pm-x"
 
@@ -3744,7 +4128,7 @@ class TestShowConnect:
 
         monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
         monkeypatch.setattr(pane_ops.tmux_mod, "find_session_server",
-                            lambda name: ("/tmp/pm-sessions/pm-x", True))
+                            lambda name, owned_only=False: ("/tmp/pm-sessions/pm-x", True))
         app = MagicMock()
         app._session_name = "pm-x"
 
@@ -3792,7 +4176,7 @@ class TestShowConnect:
         monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
         default = str(paths.default_socket_path())
         monkeypatch.setattr(pane_ops.tmux_mod, "find_session_server",
-                            lambda name: (default, False))
+                            lambda name, owned_only=False: (default, False))
         app = MagicMock()
         app._session_name = "pm-my repo-abc12345"
 
@@ -4125,7 +4509,7 @@ class TestSessionStartAttachesToLegacySession:
         # session_exists below answers "no".
         lookups: list[str] = []
 
-        def vanished_legacy(name):
+        def vanished_legacy(name, owned_only=False):
             lookups.append(name)
             return (str(default_sock), False) if len(lookups) == 1 \
                 else (None, False)

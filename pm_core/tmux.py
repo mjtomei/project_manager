@@ -228,7 +228,8 @@ def server_alive(socket_path: str) -> bool:
     return result.returncode == 0
 
 
-def find_session_server(session_name: str) -> tuple[str | None, bool]:
+def find_session_server(session_name: str, *,
+                        owned_only: bool = False) -> tuple[str | None, bool]:
     """Return ``(socket_path, is_private)`` for the server hosting a session.
 
     Single source of truth for "which tmux server is this pm session on":
@@ -247,16 +248,32 @@ def find_session_server(session_name: str) -> tuple[str | None, bool]:
     or a planted file): see ``paths.shared_socket_dir_is_usable``.
     ``session_name`` may carry a grouped-session ``~N`` suffix.
 
+    *owned_only* restricts the private probe to a socket the current user
+    owns.  Implicit discovery (the cwd-derived session, a command that
+    acts on "the project's session") passes it: the socket directory is
+    world-writable, a real socket is not a symlink (so the entry-type
+    check above passes), and tmux < 3.3 has no ``server-access`` ACL — an
+    attacker can plant a 0777 socket under a pm session's deterministic
+    name and a victim's lookup would adopt it, driving or creating panes
+    on the attacker's server.  A private session's server binds a socket
+    it owns, so ownership is the evidence.  Explicit ``-s`` lookups and
+    shared/joiner contexts keep the default: joining another user's
+    ``--global``/``--group`` session is a documented flow, and there the
+    socket belongs to the sharing user by design.
+
     Resolution uses tmux's default *prefix* matching, so a base name also
     finds a surviving grouped session ``pm-x~1``.  That is what TUI
     discovery wants (the panes are shared, so `pm tui view -s pm-x` should
     still reach the TUI after the base was killed elsewhere), but it is
     wrong for `pm session kill` — see ``find_exact_session_server``.
     """
-    return _find_session_server(session_name, exact=False)
+    return _find_session_server(session_name, exact=False,
+                                owned_only=owned_only)
 
 
-def find_exact_session_server(session_name: str) -> tuple[str | None, bool]:
+def find_exact_session_server(
+        session_name: str, *,
+        owned_only: bool = False) -> tuple[str | None, bool]:
     """Like ``find_session_server`` but matches the session name exactly.
 
     A bare ``tmux -t <name>`` is resolved by tmux as a *prefix*, so
@@ -267,8 +284,12 @@ def find_exact_session_server(session_name: str) -> tuple[str | None, bool]:
     R8 requires "No session found" there, with the server left alone.
 
     Used only by the destructive path; discovery keeps prefix matching.
+    *owned_only* has the same meaning as in :func:`find_session_server`;
+    ``pm session kill`` passes it for a private kill so the teardown can
+    never target another user's server.
     """
-    return _find_session_server(session_name, exact=True)
+    return _find_session_server(session_name, exact=True,
+                                owned_only=owned_only)
 
 
 def session_socket_for(session_name: str) -> str:
@@ -289,7 +310,8 @@ def session_socket_for(session_name: str) -> str:
     return str(session_socket_path(base.removeprefix("pm-")))
 
 
-def _find_session_server(session_name: str, *, exact: bool) -> tuple[str | None, bool]:
+def _find_session_server(session_name: str, *, exact: bool,
+                         owned_only: bool = False) -> tuple[str | None, bool]:
     from pm_core.paths import (default_socket_path,
                                shared_socket_dir_is_usable)
 
@@ -322,9 +344,22 @@ def _find_session_server(session_name: str, *, exact: bool) -> tuple[str | None,
                 entry = os.lstat(sock)
             except OSError:
                 entry = None
-            if entry is None or stat.S_ISSOCK(entry.st_mode):
-                if session_exists(target, socket_path=sock):
-                    return sock, True
+            # A *real* socket is not a link, so the check above does not
+            # stop a server another user planted: tmux < 3.3 has no
+            # server-access ACL, so a 0777 socket there is connectable, and
+            # the deterministic name is derivable (or visible in the
+            # listing).  Implicit lookups therefore require the socket to
+            # be ours; an absent entry is not probed either, because the
+            # attacker could create it between this lstat and the connect —
+            # and our own running server always has its socket file bound.
+            if owned_only:
+                probe = (entry is not None
+                         and stat.S_ISSOCK(entry.st_mode)
+                         and entry.st_uid == os.getuid())
+            else:
+                probe = entry is None or stat.S_ISSOCK(entry.st_mode)
+            if probe and session_exists(target, socket_path=sock):
+                return sock, True
         if session_exists(target, use_env=False):
             return str(default_socket_path()), False
     except OSError:

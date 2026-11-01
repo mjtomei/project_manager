@@ -267,18 +267,25 @@ must be left untouched:
    sessions keep the existing chmod/`server-access` path.  Because the
    socket directory is world-writable, private sessions refuse to use an
    existing socket file owned by another UID (shared sessions skip that
-   check — the sharing user owns the socket by design).  A *symbolic
-   link* at a session's socket path is refused in both modes, before any
-   probe or export: a real socket is never a link, and a tmux *client*
-   follows one when it connects, so a shared start — which skips the uid
-   check — would otherwise attach to, and create the session on, whatever
-   server the link names (review-loop b48f i7).  The start path never
-   binds at the link's target: tmux unlinks the entry and binds at the
-   socket path itself, or fails under the directory's sticky bit (see the
-   b48f i8 correction below).  The
-   directory itself must be a real 1777 directory: a sticky bit is
-   required, and a symbolic link at `/tmp/pm-sessions` is refused even
-   when it resolves to such a directory (review-loop 2caf i8 — its
+   check — the sharing user owns the socket by design).  Every *implicit*
+   lookup (cwd discovery, `_get_pm_session`, `pm session
+   --print-connect`/`kill`/`mobile`, the TUI connect screen) refuses to
+   adopt or advertise such a socket too — a real socket is not a link, so
+   the entry-type check does not cover it, and tmux < 3.3 has no
+   `server-access` ACL (review-loop b48f i9).  Explicit `-s` lookups and
+   shared/joiner contexts are exempt: reaching another user's
+   `--global`/`--group` socket is the documented sharing flow.  A
+   *symbolic link* at a session's socket path is refused in both modes,
+   before any probe or export: a real socket is never a link, and a tmux
+   *client* follows one when it connects, so a shared start — which skips
+   the uid check — would otherwise attach to, and create the session on,
+   whatever server the link names (review-loop b48f i7).  The start path
+   never binds at the link's target: tmux unlinks the entry and binds at
+   the socket path itself, or fails under the directory's sticky bit (see
+   the b48f i8 correction below).  The directory itself must be a real
+   1777 directory: a sticky bit is required, and a symbolic link at
+   `/tmp/pm-sessions` is refused even when it resolves to such a directory
+   (review-loop 2caf i8 — its
    target's owner can unlink our sockets; the sticky bit does not protect
    a file from the directory's owner).
 
@@ -3123,3 +3130,109 @@ Validation: targeted suites (`test_session_socket_isolation`,
 server or shared host configuration was touched — every fixture used a
 disposable socket and a temporary HOME; the tmux behaviour checks above
 used disposable sockets under a scratch directory.
+
+## Review iteration (2026-11-01, review-loop b48f i9)
+
+Verification pass over the head after the b48f i8 fixes; no requirement
+changes.  One resolution bug in `default_socket_path()`, one cross-user
+hole in the implicit socket lookups (the PR's own residual note about it
+was factually wrong), and two doc/test tidies.
+
+1. **`default_socket_path()` ignored an existing *relative*
+   `$TMUX_TMPDIR`.**  tmux `realpath()`s the value — so a relative value
+   is resolved against the client's cwd — and uses the result when it is
+   an existing directory.  Verified on tmux 3.2a: from `/tmp/proj` with
+   `TMUX_TMPDIR=reltmp` (existing) the default server binds at
+   `/tmp/proj/reltmp/tmux-<uid>/default`.  The b48f i7 check used a
+   *missing* relative path, where `realpath` fails and `/tmp` is right,
+   so its "relative behaves like missing" note was one case too broad.
+   The helper now resolves first (`Path(base).resolve()`; an unreadable
+   value or a symlink loop counts as unusable) and answers `/tmp` only
+   when the result is not a directory.  A legacy session in such an
+   environment was invisible: `pm session` created a duplicate private
+   session beside it (R6.1/R10), `pm session list` omitted it and
+   `pm session kill` reported "No session found".
+   Tests: `TestDefaultSocketPath::test_uses_an_existing_relative_value`
+   (fails on the pre-fix tree at `df064decb`) and the missing-relative
+   case renamed to pin the fallback.
+
+2. **The socket-ownership guard did not cover the read/discovery
+   path.**  `_resolve_session_socket()` refuses a private socket owned by
+   another user, but `tmux._find_session_server()` — the resolver behind
+   every read path — checked only that the entry was a socket (the b48f
+   i7 symlink guard).  `/tmp/pm-sessions` is 1777 and the deterministic
+   name is derivable (or visible in the listing), so another user can run
+   a server there under the session's own name and chmod its socket
+   0777; tmux < 3.3 has no `server-access` ACL, so a victim's lookup
+   connects and adopts it.  Concrete damage: `pm tui view` / `pm tui
+   send` from a plain shell drive the attacker's TUI (the victim's keys
+   go to it); `pm pr start`, `pm meta`, `pm container build` and
+   `pm session home` create windows and run commands on the attacker's
+   server; `pm session kill` tears the planted session down instead of
+   the user's own legacy one.  The residual note above claimed other
+   paths fail closed because "a 0600 socket owned by another user cannot
+   be connected to" — wrong: the attacker owns the socket and chmods it.
+   `find_session_server()` / `find_exact_session_server()` gained
+   `owned_only`: the private probe runs only for a socket this user owns,
+   and an absent entry is not probed either (an attacker could create it
+   between the `lstat` and the connect, and a running private server
+   always has its socket bound).  Implicit lookups pass it —
+   `_select_session_socket` from the cwd branch of `_find_tui_pane` and
+   from `_get_pm_session`, the private start path, the TUI connect screen,
+   and (via `session._owned_only_for_target`) `pm session --print-connect`
+   / `kill` / `mobile`, including candidate selection and the exact
+   destructive lookup.  The gate is `helpers._private_session_context()`
+   (`PM_SHARE_MODE` unset), so `--global`/`--group` invocations and panes
+   of a shared session keep reaching the sharing user's socket (the
+   documented joiner flow); `_owned_only_for_target` additionally exempts
+   the session the process is running inside, because a pane of a
+   *grouped* session carries no `PM_SHARE_MODE` (tmux copies no session
+   environment into a grouped session) and a joiner is already attached to
+   that server.  Explicit `-s` lookups are unchanged.  The name-only
+   fallback scan in `_find_tui_pane` (reached only when the identified
+   session's server cannot be resolved) is ownership-filtered in a
+   private context too, so a same-named planted row is not scanned.
+   `--print-connect` additionally
+   refuses to print a command that would attach through a planted entry
+   when no server of ours was found: a symlink (in both modes — a real
+   socket is never a link) and, in a private context, a socket another
+   user owns; an absent or stale entry still prints the deterministic
+   command (the normal before-the-first-start state).  Tests:
+   `TestFindSessionServer` (owned socket probed, foreign socket skipped,
+   absent entry not probed, explicit lookup still probes), the cwd-branch
+   and `_get_pm_session` wiring, the kill and `--print-connect` wiring
+   for private vs shared contexts, and the two print refusals.  The
+   fixtures bind real AF_UNIX sockets in `tmp_path`; no live session,
+   server or shared host configuration was touched.
+
+   Residual (pre-existing, unchanged): the *shared* start path skips the
+   uid check by design (a joiner does not own the sharing user's socket),
+   so a planted real socket at a shared tag's path is indistinguishable
+   from the owner's; this exposure predates the PR (`shared_socket_path`
+   already used the same world-writable directory) and closing it would
+   break joining.
+
+3. **Doc/tidy.**  qa.md R12 listed the "symlink at a session's socket
+   path -> `pm session list`" story twice (the earlier bullet already
+   covers regular files *and* symlinks); the duplicate is removed.
+   `paths.shared_socket_dir_is_usable()`'s unreadable-entry branch (fail
+   closed) had no test; added one.  qa.md R10/R12 and R7.3 record the
+   `$TMUX_TMPDIR` resolution and the read-path ownership rule.
+
+Validation: targeted suites (`test_session_socket_isolation`,
+`test_tmux`, `test_cli_helpers`, `test_shared_sessions`, `test_cli_qa`)
+457 passed; full suite **5442 passed / 1 skipped** (423 s, log
+`/pm-captures/review-b48f-i9/full-suite-final.log`; +18 tests).  On a
+worktree of the pre-fix head `df064decb`, the new tests that assert the
+fix fail (the relative-`$TMUX_TMPDIR` assertion; the owned-only ones with
+`TypeError: find_session_server() got an unexpected keyword argument
+'owned_only'`; the two print refusals with exit code 0), while the tests
+that pin *unchanged* behaviour (explicit `-s`, a shared context, a kill
+from inside the session, the not-yet-started print) pass on both trees.
+A direct comparison script on the two trees shows the pre-fix
+`default_socket_path()` answering `/tmp/tmux-<uid>/default` for an
+existing relative `$TMUX_TMPDIR` and `find_session_server()` returning
+the planted socket, against the resolved path and `(None, False)` after
+the fix.  `pm/specs/pr-073910f/session_start_smoke.py` re-ran clean on a
+disposable socket.  No live session, server or shared host configuration
+was touched.

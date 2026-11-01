@@ -24,6 +24,7 @@ from pm_core.cli.helpers import (
     _get_current_pm_session,
     _get_session_name_for_cwd,
     _log,
+    _private_session_context,
     _select_session_socket,
     _set_share_mode_env,
     state_root,
@@ -333,6 +334,25 @@ def _resolve_start_session_name(shared: bool = False) -> str:
     return ambient or _get_session_name_for_cwd()
 
 
+def _owned_only_for_target(session_name: str) -> bool:
+    """Whether *session_name* must resolve to a socket this user owns.
+
+    A shared invocation (``--global``/``--group``, or a pane of a shared
+    session that inherited ``PM_SHARE_MODE``) may legitimately name the
+    sharing user's socket, and so may the session this process is running
+    inside: the user is already attached to that server, and a pane of a
+    grouped session carries no ``PM_SHARE_MODE`` to say it is shared (tmux
+    copies no session environment into a grouped session).  Every other
+    target is implicit — the cwd-derived session of a plain shell or a
+    workdir clone — where only a socket this user owns can be its server
+    (see ``tmux.find_session_server``'s *owned_only*).
+    """
+    if not _private_session_context():
+        return False
+    ambient = _get_current_pm_session()
+    return not (ambient and session_name == ambient)
+
+
 def _pick_existing_session(candidates: list[str]) -> str:
     """Return the first candidate session that is actually running.
 
@@ -341,9 +361,13 @@ def _pick_existing_session(candidates: list[str]) -> str:
     looked up on its private socket and then the legacy default server
     (``tmux_mod.find_session_server``), so a different project's ambient
     session is never preferred over the cwd's own live session.
+
+    A planted socket must not make a candidate look alive (which would
+    aim ``kill``/``mobile`` at it): see ``_owned_only_for_target``.
     """
     for name in candidates:
-        if tmux_mod.find_session_server(name)[0]:
+        if tmux_mod.find_session_server(
+                name, owned_only=_owned_only_for_target(name))[0]:
             return name
     return candidates[0]
 
@@ -445,7 +469,11 @@ def _resolve_session_socket(session_name: str,
     os.environ["PM_TMUX_SOCKET"] = socket_path
 
     if not is_shared:
-        hosting_socket, on_private = tmux_mod.find_session_server(session_name)
+        # Private start: the uid check above already refused a socket we do
+        # not own, and this repeats it inside the probe so a file created
+        # between the check and the connect cannot be adopted either.
+        hosting_socket, on_private = tmux_mod.find_session_server(
+            session_name, owned_only=True)
         if hosting_socket is not None and not on_private:
             _log.info("legacy default-server session found: %s", session_name)
             # Address the default server explicitly rather than clearing the
@@ -844,7 +872,41 @@ def session(ctx, share_global, share_group, start_dir, print_connect, disconnect
             session_name = _resolve_start_session_name(
                 bool(share_global or share_group))
         sp = tmux_mod.session_socket_for(session_name)
-        hosting_socket, on_private = tmux_mod.find_session_server(session_name)
+        # A print must not advertise another user's socket: the command is
+        # pasted into a shell, so it would attach the user to a server
+        # someone else planted.  `--global`/`--group` (and a pane of a
+        # shared session, via the inherited PM_SHARE_MODE) and the session
+        # this process runs inside legitimately name another user's socket.
+        owned_only = _owned_only_for_target(session_name)
+        hosting_socket, on_private = tmux_mod.find_session_server(
+            session_name, owned_only=owned_only)
+        # With no server of our own the command names the deterministic
+        # path, so a hostile entry there must be refused rather than
+        # printed: tmux follows a symbolic link on connect (a real socket
+        # is never a link), and in a private context a socket another user
+        # owns is a planted server.  A shared context keeps a foreign
+        # socket — the sharing user's — reachable, and an absent or stale
+        # entry is the normal before-the-first-start state.
+        if hosting_socket is None:
+            try:
+                entry = Path(sp).lstat()
+            except OSError:
+                entry = None
+            if entry is not None and stat.S_ISLNK(entry.st_mode):
+                click.echo(
+                    f"Refusing to print a connect command for "
+                    f"'{session_name}': tmux socket '{sp}' is a symbolic "
+                    "link, not a socket. Remove it if you created it.",
+                    err=True)
+                raise SystemExit(1)
+            if (entry is not None and owned_only
+                    and stat.S_ISSOCK(entry.st_mode)
+                    and entry.st_uid != os.getuid()):
+                click.echo(
+                    f"Refusing to print a connect command for "
+                    f"'{session_name}': tmux socket '{sp}' is owned by uid "
+                    f"{entry.st_uid}, not you.", err=True)
+                raise SystemExit(1)
         # Quote the socket path and the session name: the output is meant to
         # be pasted into a shell, and a tag derived from a repo directory
         # name may contain a space.  shlex.quote leaves ordinary values bare,
@@ -945,7 +1007,14 @@ def session_kill(start_dir):
     # `pm-x~1`.  Treating that as "running" would kill the grouped session
     # (detaching its client) and unlink a live server's socket; R8 requires
     # "No session found" and leaves the server alone.
-    hosting_socket, _on_private = tmux_mod.find_exact_session_server(session_name)
+    # An implicit kill must never resolve to another user's server: the
+    # socket directory is world-writable and a real socket there is not a
+    # symlink, so only ownership distinguishes the user's session from a
+    # planted one.  A shared kill, or the session this process runs
+    # inside, may name the sharing user's socket (see
+    # ``_owned_only_for_target``).
+    hosting_socket, _on_private = tmux_mod.find_exact_session_server(
+        session_name, owned_only=_owned_only_for_target(session_name))
     if hosting_socket is None:
         click.echo(f"No session '{session_name}' found.", err=True)
         # Remove the socket file only when no server answers on it.  A live
@@ -1022,8 +1091,10 @@ def session_mobile(force: bool | None):
 
     session_name = _resolve_target_session()
     # Target the server that actually hosts the session (private socket, or
-    # the legacy default server).
-    _select_session_socket(session_name)
+    # the legacy default server).  An implicit target must resolve to a
+    # socket this user owns (see ``_owned_only_for_target``).
+    _select_session_socket(session_name,
+                           owned_only=_owned_only_for_target(session_name))
 
     if force is not None:
         pane_layout.set_force_mobile(session_name, force)
