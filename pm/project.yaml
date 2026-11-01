@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-01T22:52:37.305391+00:00'
+  updated_at: '2026-11-01T23:20:47.950537+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48169,6 +48169,31 @@ prs:
       the CLI tick drives the same launch-claim path. Captures: /pm-captures/scenarios/62/{close-reopen-resolved-candidate,owed-reqa-close-reopen}/.'
     created_at: '2026-11-01T22:52:37Z'
     last_edited: '2026-11-01T22:52:37Z'
+  - id: note-ebba705
+    text: 'QA S63 (large base deltas / bounded lists): FOUND+FIXED 71595e6d. A newer
+      base''s own summary replaces the earlier one in the carry-forward: `_carry_forward`''s
+      applied-resolution branch merged the stored (bounded) base_behavior_changes/base_files
+      onto a record that had assessed a NEWER base, so a clean base move after an
+      applied resolution re-listed the previous base''s changes under a range that
+      excludes them and lost the real total (a 36-change base rendered as 31 entries,
+      "… 11 more", above a "(1 file(s))" range). Fixed by carrying the base-interaction
+      summary only when the record assessed the same base (the rule _carry_base_interaction
+      already applies to a clean bounce); the applied resolution is still carried
+      as provenance; a record that could not resolve a base keeps its summary. Regression
+      test fails pre-fix. Verified live: 48 records + 2 notes resolve by record id
+      with "… 15 more" (the real remainder), the delta holds every id, the applied
+      branch has each id once, and the carried record keeps base_files_count 36 /
+      overlap / base_behavior_count after the base is inside the branch. Harness facts:
+      (1) PYTHONPATH=/opt/pm-src shadows the clone — export PYTHONPATH=/workspace
+      in EVERY shell or pm silently runs the old code; (2) under git 2.34.1 a second
+      base move that appends to pm/project.yaml CONFLICTS (so the check is RESOLVED,
+      not CLEAN), which is why the scenario''s "36 = 35 + carried status" did not
+      appear: the range starts at the applied base and lists only that range''s changes
+      (35); after the fix both paths agree on 35; (3) `pm pr show` prints the candidate
+      tree twice (short then full) — a sed capture must filter to the 40-char value
+      or report.html gets a two-line tag. Captures: /pm-captures/scenarios/63/.'
+    created_at: '2026-11-01T23:20:47Z'
+    last_edited: '2026-11-01T23:20:47Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
