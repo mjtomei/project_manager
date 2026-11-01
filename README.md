@@ -183,8 +183,10 @@ The effort levels are the ones the Claude Code CLI accepts: `low`, `medium`,
 in the launching environment overrides `--effort` inside Claude Code: pm
 unsets it when it has its own selection (so the reported level is the one
 that runs) and shows the conflict; with no pm setting, the ambient value is
-reported as the source.  A model pm knows does not take effort (Haiku)
-suppresses it entirely.
+reported as the source.  A provider that sets `CLAUDE_CODE_EFFORT_LEVEL` in
+its own `env:` block is your explicit configuration, so pm leaves it in place
+and reports the conflict instead of dropping it.  A model pm knows does not
+take effort (Haiku) suppresses it entirely.
 
 The choice is explicit and per role: any of those roles may be routed to
 a provider. A role with no setting of its own falls back to its parent

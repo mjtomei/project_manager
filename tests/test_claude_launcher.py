@@ -570,6 +570,22 @@ class TestEffortLaunch:
         assert "CLAUDE_CODE_EFFORT_LEVEL" not in cmd
         assert "--effort" not in cmd
 
+    def test_shell_cmd_keeps_a_provider_assigned_level(self, monkeypatch):
+        """A provider's own env entry is explicit configuration: it is
+        transported, not unset, even when pm also passes --effort."""
+        from pm_core import providers
+        monkeypatch.setattr(
+            providers, "load_providers",
+            lambda: {"providers": {"p": {
+                "type": "claude",
+                "env": {"CLAUDE_CODE_EFFORT_LEVEL": "max"}}}})
+        env: dict[str, str] = {}
+        cmd = build_claude_shell_cmd(prompt="x", provider="p", effort="high",
+                                     env_out=env)
+        assert "--effort high" in cmd
+        assert "-u CLAUDE_CODE_EFFORT_LEVEL" not in cmd
+        assert env["CLAUDE_CODE_EFFORT_LEVEL"] == "max"
+
     def test_drop_ambient_effort(self):
         from pm_core.claude_launcher import _drop_ambient_effort
         env = {"CLAUDE_CODE_EFFORT_LEVEL": "xhigh", "A": "1"}

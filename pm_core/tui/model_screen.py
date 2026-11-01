@@ -218,9 +218,9 @@ class ModelSettingsScreen(ModalScreen):
             pointer = "▸ " if self._selected == i + offset else "  "
             lines.append(pointer + escape(line))
         for line in table[1 + len(rows):]:
-            # ``!`` lines are problems/notes (yellow); the effort legend is
-            # informational (dim), not an error.
-            style = "[yellow]" if line.startswith("!") else "[dim]"
+            # ``!`` lines are problems/notes (red, as before); the effort
+            # legend is informational (dim), not an error.
+            style = "[red]" if line.startswith("!") else "[dim]"
             lines.append(style + escape(line) + "[/]")
         if self._project_view:
             if self._provider_cache is None:

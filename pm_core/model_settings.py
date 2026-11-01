@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pm_core.model_config import (
     EFFORT_LEVELS, PR_SESSION_TYPES, SESSION_TYPES, _is_model_value,
     config_block, project_model_config, resolve_model_and_provider,
+    unsupported_effort_problem,
 )
 
 # PR-level keys: the all-role value and the per-role mapping.
@@ -147,11 +148,7 @@ def effort_warning(project_data: dict | None, session_type: str,
     """
     res = resolve_model_and_provider(session_type, project_data=project_data,
                                      pr_entry=pr, use_env=False)
-    if res.effort and res.effort_status == "unsupported":
-        return (f"effort {res.effort!r} is not in the selected route's "
-                f"supported_efforts {list(res.supported_efforts or ())}; "
-                "the router may reject or ignore it")
-    return None
+    return unsupported_effort_problem(res)
 
 
 def check_model_value(value: str) -> str | None:

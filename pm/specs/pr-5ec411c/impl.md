@@ -126,8 +126,9 @@ Rules:
   absent list and never treats a stale list as authoritative.
 - `pm provider add` / `edit` gain `--supported-efforts a,b`,
   `--supported-efforts-source TEXT`, `--supported-efforts-checked-at DATE`,
-  and `--clear supported_efforts ...`.  `pm provider list` / `show` print
-  the list, its source and its age.
+  and `--clear supported_efforts ...`.  `pm provider list` prints the list;
+  `pm provider show` prints the list, its source, its checked-at date and
+  its age (the one-line list line stays readable).
 - No catalog fetch and no paid probe are added in this PR.
 
 ### R3 — Requested vs effective vs verified
@@ -304,10 +305,11 @@ does not fetch a catalog in this PR.
 
 ## Implementation plan (files)
 
-1. `pm_core/model_config.py` — widen `EFFORT_LEVELS`; add `EFFORT_ORDER`,
-   `normalize_effort`, `accepted_efforts`; extend `ModelResolution`;
-   resolve the ambient `CLAUDE_CODE_EFFORT_LEVEL`; compute status/notes;
-   extend `validate_model_config`.
+1. `pm_core/model_config.py` — widen `EFFORT_LEVELS`; add `is_effort_level`,
+   `normalize_ambient_effort`, `accepted_efforts`, `provider_effort_env`
+   and `unsupported_effort_problem`; extend `ModelResolution`; resolve the
+   ambient `CLAUDE_CODE_EFFORT_LEVEL`; compute status/notes (including a
+   provider `env:` assignment of it); extend `validate_model_config`.
 2. `pm_core/providers.py` — `supported_efforts` / source / checked-at on
    `ProviderConfig`, entry validation, and a helper for the intersection.
 3. `pm_core/claude_launcher.py` — unset `CLAUDE_CODE_EFFORT_LEVEL` when PM

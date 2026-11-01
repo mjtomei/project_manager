@@ -419,6 +419,31 @@ def normalize_ambient_effort(value) -> tuple[str | None, str | None]:
     return (level, raw) if level in EFFORT_LEVELS else (None, raw)
 
 
+def _provider_config(provider_name: str | None):
+    """The ProviderConfig of *provider_name*, or None.
+
+    Read raw for display: a missing or invalid entry yields None (the
+    launch itself reports it with its one-line error).  Never raises.
+    """
+    if not provider_name:
+        return None
+    try:
+        from pm_core.providers import get_provider
+        return get_provider(provider_name, strict=True)
+    except Exception:  # a broken entry is reported by the launch itself
+        return None
+
+
+def _accepted_from(cfg) -> tuple[str, ...] | None:
+    """``accepted_efforts`` for an already-loaded ProviderConfig."""
+    if cfg is None:
+        return None
+    declared = getattr(cfg, "supported_efforts", None)
+    if declared is None:
+        return None
+    return tuple(level for level in EFFORT_LEVELS if level in declared)
+
+
 def accepted_efforts(provider_name: str | None) -> tuple[str, ...] | None:
     """The Claude levels a provider declares it accepts, or None.
 
@@ -428,27 +453,35 @@ def accepted_efforts(provider_name: str | None) -> tuple[str, ...] | None:
     ``EFFORT_LEVELS`` in the declaration (e.g. OpenRouter's ``none``) are
     dropped: they are not Claude levels and are never passed to --effort.
     """
-    if not provider_name:
-        return None
-    try:
-        from pm_core.providers import get_provider
-        cfg = get_provider(provider_name, strict=True)
-    except Exception:  # a broken entry is reported by the launch itself
-        return None
-    declared = getattr(cfg, "supported_efforts", None)
-    if declared is None:
-        return None
-    return tuple(level for level in EFFORT_LEVELS if level in declared)
+    return _accepted_from(_provider_config(provider_name))
 
 
-def effort_metadata_age_days(provider_name: str | None) -> int | None:
-    """Age in days of a provider's ``supported_efforts_checked_at``, or None."""
-    if not provider_name:
+def _effort_env_from(cfg) -> str | None:
+    """``provider_effort_env`` for an already-loaded ProviderConfig."""
+    if cfg is None:
         return None
-    try:
-        from pm_core.providers import get_provider
-        cfg = get_provider(provider_name, strict=True)
-    except Exception:
+    if AMBIENT_EFFORT_ENV in cfg.env:
+        value = cfg.env[AMBIENT_EFFORT_ENV]
+    else:
+        value = cfg.alias_models.get(AMBIENT_EFFORT_ENV)
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def provider_effort_env(provider_name: str | None) -> str | None:
+    """The ``CLAUDE_CODE_EFFORT_LEVEL`` a provider's env block assigns.
+
+    ``alias_models`` is the older name for ``env`` and ``env`` wins where
+    both set it, as in ``ProviderConfig._apply_env``.  A null value drops
+    the variable rather than assigning one, so it yields None.  The value
+    is the provider's explicit configuration: the launcher keeps it (it is
+    never unset) and Claude Code applies it instead of ``--effort``.
+    """
+    return _effort_env_from(_provider_config(provider_name))
+
+
+def _metadata_age_from(cfg) -> int | None:
+    """``effort_metadata_age_days`` for an already-loaded ProviderConfig."""
+    if cfg is None:
         return None
     raw = getattr(cfg, "supported_efforts_checked_at", "") or ""
     if not raw:
@@ -461,22 +494,69 @@ def effort_metadata_age_days(provider_name: str | None) -> int | None:
     return (date.today() - checked).days
 
 
+def effort_metadata_age_days(provider_name: str | None) -> int | None:
+    """Age in days of a provider's ``supported_efforts_checked_at``, or None."""
+    return _metadata_age_from(_provider_config(provider_name))
+
+
+def unsupported_effort_problem(resolution: ModelResolution) -> str | None:
+    """Why *resolution*'s effort is declared unsupported, or None.
+
+    Shared by the display (``pm model show``'s notes, the set-time
+    warnings) so the same finding reads the same everywhere.
+    """
+    if not (resolution.effort and resolution.effort_status == "unsupported"):
+        return None
+    return (f"effort {resolution.effort!r} is not in the selected route's "
+            f"supported_efforts {list(resolution.supported_efforts or ())} "
+            "(the router may reject or ignore it)")
+
+
+def _note_provider_effort_env(resolution: ModelResolution,
+                              effort: str | None, cfg=None) -> None:
+    """Note a provider env block that assigns the ambient effort variable.
+
+    The launcher keeps a provider's explicit assignment (it is the user's
+    own configuration) instead of unsetting it, so Claude Code applies
+    that value rather than ``--effort``.  The display must not report pm's
+    level as the one that runs.
+    """
+    assigned = _effort_env_from(cfg)
+    if assigned is None:
+        return
+    level, _raw = normalize_ambient_effort(assigned)
+    if level is None:
+        resolution.effort_notes.append(
+            f"provider {resolution.provider!r} sets {AMBIENT_EFFORT_ENV}="
+            f"{assigned!r}, which is not a Claude effort level pm knows")
+        return
+    if level == effort:
+        return
+    resolution.effort_notes.append(
+        f"provider {resolution.provider!r} sets {AMBIENT_EFFORT_ENV}={level}; "
+        "Claude Code applies it instead of "
+        + (f"--effort {effort}" if effort else "the CLI default"))
+    resolution.effort_status = "overridden"
+
+
 def _apply_effort_verification(resolution: ModelResolution,
                                effort: str | None) -> None:
     """Fill effort status/notes for *effort* on *resolution* in place."""
     notes = resolution.effort_notes
+    cfg = _provider_config(resolution.provider)
     if not effort:
         resolution.effort_status = "none"
         if resolution.provider:
-            accepted = accepted_efforts(resolution.provider)
+            accepted = _accepted_from(cfg)
             resolution.supported_efforts = accepted
             if accepted is not None:
                 notes.append(
                     f"route accepts effort levels {list(accepted)}; none is "
                     "configured")
+        _note_provider_effort_env(resolution, effort, cfg)
         return
 
-    accepted = accepted_efforts(resolution.provider)
+    accepted = _accepted_from(cfg)
     resolution.supported_efforts = accepted
     if accepted is None:
         if resolution.provider:
@@ -490,14 +570,15 @@ def _apply_effort_verification(resolution: ModelResolution,
         resolution.effort_status = "ok"
     else:
         resolution.effort_status = "unsupported"
-        notes.append(
-            f"model declares supported_efforts {list(accepted)}; {effort} is "
-            "not among them (the router may reject or ignore it)")
-    age = effort_metadata_age_days(resolution.provider)
+        problem = unsupported_effort_problem(resolution)
+        if problem:
+            notes.append(problem)
+    age = _metadata_age_from(cfg)
     if age is not None and age > EFFORT_METADATA_STALE_DAYS:
         notes.append(
             f"supported_efforts metadata is {age} days old; refresh it "
             "(pm provider edit <name> --supported-efforts ...)")
+    _note_provider_effort_env(resolution, effort, cfg)
 
 
 def provider_effort(name: str) -> str | None:
@@ -542,12 +623,9 @@ def _route_effort_warnings(project_data: dict | None, roles_levels,
     for st, _level in roles_levels:
         res = resolve_model_and_provider(st, project_data=project_data,
                                          pr_entry=pr_entry, use_env=False)
-        if res.effort and res.effort_status == "unsupported":
-            out.append(
-                f"{prefix}{st}: effort {res.effort!r} is not in the selected "
-                f"route's supported_efforts "
-                f"{list(res.supported_efforts or ())} (the router may reject "
-                "or ignore it)")
+        problem = unsupported_effort_problem(res)
+        if problem:
+            out.append(f"{prefix}{st}: {problem}")
     return out
 
 
@@ -561,6 +639,9 @@ def validate_model_config(project_data: dict | None) -> list[str]:
       (``SESSION_TYPES``);
     - ``session_models`` values are model names (other values are ignored);
     - ``session_effort`` values are valid effort levels (``EFFORT_LEVELS``);
+    - a configured effort the selected route's ``supported_efforts``
+      excludes (a warning: the metadata is dated and the launch still
+      passes the level, see :func:`unsupported_effort_problem`);
     - each PR's ``model`` is a model name;
     - each PR's ``session_models`` is a mapping keyed by the types a PR
       decides (``PR_SESSION_TYPES``), with model-name values (other values

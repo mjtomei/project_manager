@@ -614,7 +614,8 @@ class TestEffortCapability:
         res = resolve_model_and_provider(
             "impl", pr_model=f"provider:{ROUTE}", project_data=data)
         assert (res.effort, res.effort_status) == ("xhigh", "unsupported")
-        assert any("xhigh is not among them" in n for n in res.effort_notes)
+        assert any("is not in the selected route's supported_efforts" in n
+                   for n in res.effort_notes)
 
     def test_non_claude_levels_are_dropped_from_the_intersection(
             self, pm_home_dir):
@@ -676,6 +677,53 @@ class TestEffortCapability:
         problems = "\n".join(validate_model_config(data))
         assert "supported_efforts" in problems and "max" in problems
 
+    def test_empty_supported_efforts_is_unsupported_not_unverified(
+            self, pm_home_dir):
+        """[] declares "accepts none", distinct from "declares nothing"."""
+        _providers(pm_home_dir, **{ROUTE: _router(supported_efforts=[])})
+        data = _project(session_effort={"impl": "high"})
+        res = resolve_model_and_provider(
+            "impl", pr_model=f"provider:{ROUTE}", project_data=data)
+        assert (res.effort_status, res.supported_efforts) == ("unsupported",
+                                                              ())
+
+    def test_provider_env_assignment_overrides_pm_effort_visibly(
+            self, pm_home_dir):
+        """The launcher keeps a provider's own CLAUDE_CODE_EFFORT_LEVEL, so
+        the display must not report pm's --effort as what runs."""
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts=["low", "high", "xhigh"],
+            env={"CLAUDE_CODE_EFFORT_LEVEL": "xhigh"})})
+        data = _project(session_effort={"impl": "high"})
+        res = resolve_model_and_provider(
+            "impl", pr_model=f"provider:{ROUTE}", project_data=data)
+        assert (res.effort, res.effort_status) == ("high", "overridden")
+        assert any("sets CLAUDE_CODE_EFFORT_LEVEL=xhigh" in n
+                   for n in res.effort_notes)
+
+    def test_provider_env_assignment_with_no_pm_effort_is_noted(
+            self, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router(
+            env={"CLAUDE_CODE_EFFORT_LEVEL": "max"})})
+        res = resolve_model_and_provider(
+            "impl", pr_model=f"provider:{ROUTE}", project_data=_project())
+        assert (res.effort, res.effort_status) == (None, "overridden")
+        assert any("sets CLAUDE_CODE_EFFORT_LEVEL=max" in n
+                   for n in res.effort_notes)
+        assert any("instead of the CLI default" in n
+                   for n in res.effort_notes)
+
+    def test_provider_env_assignment_matching_pm_level_is_not_a_conflict(
+            self, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router(
+            env={"CLAUDE_CODE_EFFORT_LEVEL": "high"})})
+        data = _project(session_effort={"impl": "high"})
+        res = resolve_model_and_provider(
+            "impl", pr_model=f"provider:{ROUTE}", project_data=data)
+        assert res.effort_status != "overridden"
+        assert not any("CLAUDE_CODE_EFFORT_LEVEL" in n
+                       for n in res.effort_notes)
+
 
 class TestProviderEffortMetadata:
     def test_add_round_trips_supported_efforts(self, pm_home_dir):
@@ -701,6 +749,14 @@ class TestProviderEffortMetadata:
         assert "accepted Claude levels: high, max" in r.output
         assert "non-Claude levels kept for provenance: none" in r.output
         assert "supported_efforts source: catalog" in r.output
+
+    def test_show_names_an_effort_env_assignment(self, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router(
+            env={"CLAUDE_CODE_EFFORT_LEVEL": "xhigh"})})
+        r = _cli("provider", "show", ROUTE)
+        assert r.exit_code == 0, r.output
+        assert "effort env: CLAUDE_CODE_EFFORT_LEVEL=xhigh" in r.output
+        assert "overrides --effort" in r.output
 
     def test_bad_checked_at_is_an_invalid_entry(self, pm_home_dir):
         _providers(pm_home_dir, **{ROUTE: _router(
@@ -731,7 +787,8 @@ class TestEffortDisplay:
         assert impl.effort_status == "unsupported"
         lines = model_settings.format_rows(rows)
         assert any(l.startswith("impl ") and "xhigh *" in l for l in lines)
-        assert any("xhigh is not among them" in l for l in lines)
+        assert any("is not in the selected route's supported_efforts" in l
+                   for l in lines)
 
     def test_unverified_is_noted_without_the_inline_mark(self, pm_home_dir):
         _providers(pm_home_dir, **{ROUTE: _router()})
@@ -743,6 +800,18 @@ class TestEffortDisplay:
         lines = model_settings.format_rows(rows)
         assert any(l.startswith("impl ") and "high  " in l for l in lines)
         assert any("declares no supported_efforts" in l for l in lines)
+
+    def test_provider_env_conflict_is_marked_and_noted(self, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router(
+            env={"CLAUDE_CODE_EFFORT_LEVEL": "max"})})
+        data = _project(session_models={"impl": f"provider:{ROUTE}"},
+                        session_effort={"impl": "high"})
+        rows = model_settings.role_rows(data, None)
+        impl = next(r for r in rows if r.role == "impl")
+        assert impl.effort_status == "overridden"
+        assert model_settings.effort_cell(impl) == "high *"
+        lines = model_settings.format_rows(rows)
+        assert any("CLAUDE_CODE_EFFORT_LEVEL=max" in l for l in lines)
 
     def test_describe_marks_unsupported(self, pm_home_dir):
         from pm_core.router_route import describe
@@ -772,6 +841,21 @@ class TestEffortRoundTrip:
         monkeypatch.setenv("PM_EFFORT", "xhigh")
         res = resolve_model_and_provider("impl")
         assert (res.effort, res.effort_source) == ("xhigh", "PM_EFFORT")
+
+    def test_model_set_global_round_trips_xhigh(self, project_root,
+                                                pm_home_dir, monkeypatch):
+        written: dict[str, str] = {}
+        monkeypatch.setattr(
+            "pm_core.model_config.get_global_setting_value",
+            lambda name, default="": written.get(name, default))
+        monkeypatch.setattr("pm_core.paths.set_global_setting_value",
+                            lambda name, value: written.__setitem__(name,
+                                                                    value))
+        r = _cli("model", "set", "impl", "opus", "--effort", "xhigh")
+        assert r.exit_code == 0, r.output
+        assert written["effort-impl"] == "xhigh"
+        res = resolve_model_and_provider("impl")
+        assert (res.effort, res.effort_source) == ("xhigh", "global impl")
 
     def test_pr_model_set_round_trips_xhigh(self, project_root, pm_home_dir):
         r = _cli("pr", "model", "set", "pr-001", "opus", "--effort", "xhigh")

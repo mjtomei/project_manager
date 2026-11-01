@@ -394,9 +394,16 @@ def provider_detail_lines(p, *, status: bool = False) -> list[str]:
         if p.supported_efforts_checked_at:
             from pm_core.model_config import effort_metadata_age_days
             age = effort_metadata_age_days(p.name)
-            suffix = f" ({age} days old)" if age is not None else ""
+            suffix = ("" if age is None
+                      else f" ({age} day{'s' if age != 1 else ''} old)")
             lines.append(f"  supported_efforts checked: "
                          f"{p.supported_efforts_checked_at}{suffix}")
+    from pm_core.model_config import (AMBIENT_EFFORT_ENV,
+                                      provider_effort_env)
+    assigned = provider_effort_env(p.name)
+    if assigned:
+        lines.append(f"  effort env: {AMBIENT_EFFORT_ENV}={assigned} "
+                     "(overrides --effort for this provider's sessions)")
     if p.type == "router":
         lines.extend(f"  {line}" for line in _router_detail_lines(p))
     assign, unset = launch_env(p, p.env_vars(), p.model_flag(), environ={})
