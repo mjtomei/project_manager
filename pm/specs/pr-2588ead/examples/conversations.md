@@ -86,14 +86,14 @@ $ pm brief guidance show --name owner --json            # gets block shas (all e
 $ pm brief guidance apply --name owner --scope whole --file /tmp/whole.txt --expect e3b0c442 \
     --quote "Lead with what needs me, I read it on my phone before standup. Keep it to about 25 lines. project-manager first when it's a tie." \
     --summary "initial whole-brief guidance from setup"
-saved r-20261101T2041Z-1a2b · project-manager/pm/notes.txt § Owner Brief › Whole brief (not committed)
+saved r-20261101T2041Z-1a2b · project-manager/pm/notes-brief.txt › Whole brief (not committed)
 $ pm brief guidance apply --name owner --scope project --project 828c8d0a --file /tmp/pm.txt --expect e3b0c442 \
     --quote "Don't list the old stale PRs, just count them. Tell me which plan a merge belongs to." \
     --summary "initial project-manager guidance from setup"
-saved r-20261101T2041Z-2c3d · project-manager/pm/notes.txt § Owner Brief › This project (not committed)
+saved r-20261101T2041Z-2c3d · project-manager/pm/notes-brief.txt › This project (not committed)
 $ pm brief guidance apply --name owner --scope project --project 5e1c0a77 --file /tmp/cosmic.txt --expect e3b0c442 \
     --quote "cosmic merges rarely, so show each one." --summary "initial cosmic_ac guidance from setup"
-saved r-20261101T2042Z-3e4f · cosmic_ac/pm/notes.txt § Owner Brief › This project (not committed)
+saved r-20261101T2042Z-3e4f · cosmic_ac/pm/notes-brief.txt › This project (not committed)
 $ pm brief start --name owner --quote "Looks good, start it."
 brief "owner": schedule active · next brief Mon 2 Nov 2026 08:30 CST
 $ pm brief guidance show --name owner
@@ -154,11 +154,11 @@ $ pm brief guidance show --name owner --json
 $ pm brief guidance apply --name owner --scope whole --file /tmp/whole.txt --expect 7d41a9c0 \
     --quote "Too long, and I had to scroll for the things I need to do. Put everything that needs me in one list at the very top across all projects. Batch merges into one line per project. … 15 is fine. … Yes, one line for omerta is fine." \
     --summary "top Needs-you list; ~15 lines; batch merges; one-line unrefreshed notices"
-saved r-20261102T1514Z-5a6b · project-manager/pm/notes.txt § Owner Brief › Whole brief (not committed)
+saved r-20261102T1514Z-5a6b · project-manager/pm/notes-brief.txt › Whole brief (not committed)
 $ pm brief guidance apply --name owner --scope project --project 5e1c0a77 --file /tmp/cosmic.txt --expect 5b2e81d4 \
     --quote "For cosmic_ac, skip notebook PRs unless they're stuck or waiting on me. … Yes, the ones titled Notebook:. Keep listing cosmic merges one by one." \
     --summary "cosmic_ac: omit Notebook: PRs unless blocked/waiting; keep per-merge lines"
-saved r-20261102T1515Z-7c8d · cosmic_ac/pm/notes.txt § Owner Brief › This project (not committed)
+saved r-20261102T1515Z-7c8d · cosmic_ac/pm/notes-brief.txt › This project (not committed)
 $ pm brief preview --name owner --prepare --rerender 20261102T143000Z-4f1a
 …
 ```

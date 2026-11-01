@@ -20,8 +20,9 @@ from fixtures, and QA (impl §14) captures real ones.
 
 Label legend: `[waiting <age>]`, `[failed <age>]`, `[merged · auto]`,
 `[merged · owner-approved]`, `[merged · path not recorded]`, `[running]`,
-`[planned]`, `[stale]`, `[unavailable <age>]`, `[resolved]`, `[now]`
-(position) and `[guidance]`. `→` starts pm's links. When one line covers
+`[done]`, `[closed]`, `[planned]`, `[stale]`, `[unavailable <age>]`,
+`[resolved]`, `[now]` (position) and `[guidance]`. Ages are floored and shown
+in their two largest units. `→` starts pm's links. When one line covers
 several items, each link carries that item's age.
 
 ---
@@ -47,22 +48,24 @@ As of Sun 1 Nov 2026 14:45 CST · covers Sat 31 Oct 15:45 CDT → Sun 1 Nov 14:4
 1 needs you · 0 merged · 0 blockers · all projects refreshed (project-manager partial: no live status)
 
 project-manager
+  [waiting 37m]  #287 Scheduled concise multi-project progress and change briefs: spec waits for your approval.
+           → #287 · spec
   [stale]  Registry last synced with GitHub on 2 Mar; merges made on GitHub since then may be missing here.
            → pm -C /workspace/pm pr sync
   [stale]  Registry has 2 entries for pr-049649a (#267); showing the one updated 1 Nov 03:21.
            → pm -C /workspace/pm pr show pr-049649a
   [unavailable]  Live run state not checked (no TUI for pm-project_manager-c5a1006b); waits and failures may be missing.
-  [waiting 37m]  #287 Scheduled concise multi-project progress and change briefs: spec waits for your approval.
-           → #287 · spec
   [stale]  42 open PRs have had no recorded activity for 7+ days (35 in review, 5 in QA, 2 in progress; oldest #104).
            → pm pr list -t
   [now]  12 in progress · 36 in review · 7 in QA · 0 at sign-off · 392 pending.
+  [waiting 37m]  Next: review the spec for #287.  → #287
 
 Plain brief (composer not used): preview --plain · Feedback: pm brief feedback
 ```
 
 The plain renderer follows P1's default shape: owner decisions first, then
-issues, then position. Registry data problems are required items, so no
+registry data problems and refresh limits, then other issues, then position
+and the next action. Registry data problems are required items, so no
 guidance can hide them.
 
 ---
@@ -103,6 +106,7 @@ As of **Mon 2 Nov 2026 08:30 CST** · covers Sun 1 Nov 08:30 → Mon 2 Nov 08:30
 - `unavailable · new` Could not refresh: project.yaml not found; no earlier data.
 
 ---
+Guidance not followed: cosmic_ac asks for each merge's one-line impact; #41 and #44 have no recorded impact, so their titles are used.
 Feedback: `pm brief feedback` · Guidance: `pm brief guidance show` · All items: [details](20261102T143000Z-4f1a.html#details)
 ```
 
@@ -115,13 +119,14 @@ Why each part reads as it does:
   merges carry `merge_record`s, so they are labelled auto and owner-approved.
 - **Project order.** cosmic_ac comes first because it has more items waiting on
   the owner (setup guidance: "Order projects by what needs me").
-- **Merge lines.** project-manager's merges name their plan (that project's
-  guidance). Three are batched in one line under the default ">3 batch" rule.
+- **Merge lines.** project-manager's merges name their plan, as that project's
+  guidance asks. The three bugs-plan merges share a line, and the improvements
+  merge has its own.
 - **Bounds.** The brief has 13 lines against a hard cap of 40; about 25 were
   requested.
 
 The HTML page (`20261102T143000Z-4f1a.html`) shows the same lines, with status
-chips and a collapsed **Details** appendix listing all 14 items with ids,
+chips and a collapsed **Details** appendix listing all 13 items with ids,
 `since_source` and every link.
 
 ---
@@ -157,15 +162,16 @@ project-manager
 omerta-core
   [unavailable · new]  Not refreshed: project.yaml not found.
 
+Guidance not followed: cosmic_ac asks for each merge's one-line impact; #41 and #44 have no recorded impact, so their titles are used.
 Feedback: pm brief feedback · Guidance: pm brief guidance show
 ```
 
 What the correction changed, compared with B1:
 
-- A cross-project **Needs you** list now comes first, oldest first.
+- A cross-project **Needs you** list now comes first. It runs oldest first, the order the default shape gives owner decisions.
 - project-manager's merges are one line.
 - omerta-core's notice is shorter.
-- The brief is 11 lines instead of 13.
+- The brief is 10 lines instead of 13.
 
 What did not change:
 
@@ -196,7 +202,7 @@ As of Tue 3 Nov 2026 08:30 CST · covers Mon 2 Nov 08:30 → Tue 3 Nov 08:30 CST
 Needs you
   [waiting]  Still waiting on you: cosmic_ac #46 merge (signed off), project-manager #287 spec approval.
            → #46 (2d 23h) · report · #287 (1d 18h) · spec
-  [failed 1d]  Still failing: cosmic_ac #47 review cannot start.  → #47 · launch log
+  [failed 23h]  Still failing: cosmic_ac #47 review cannot start.  → #47 · launch log
 
 cosmic_ac
   [merged · auto]  #45 Add Planck likelihood wrapper.  → #45 · report
@@ -207,12 +213,12 @@ project-manager
   [now]  No material change.
 
 omerta-core
-  [unavailable 1d]  Not refreshed: project.yaml does not parse (line 112).
+  [unavailable 23h]  Not refreshed: project.yaml does not parse (line 112).
 
 Guidance changes since the last brief
   [guidance]  Whole brief: Needs-you list first, about 15 lines, merges batched, short unrefreshed notices (your feedback, Mon).
   [guidance]  cosmic_ac: "Notebook:" PRs left out unless blocked or waiting on you (your feedback, Mon).
-  [guidance]  project-manager: direct edit in notes.txt adds "Mention when a PR touching containers merges."
+  [guidance]  project-manager: direct edit in notes-brief.txt adds "Mention when a PR touching containers merges."
 
 Undo a change: pm brief guidance rollback <rev> (revs: pm brief guidance history) · Feedback: pm brief feedback
 ```
@@ -233,41 +239,44 @@ Timeline (from `pm brief status`, `state.json` in
 
 | Time (CST) | Event | Boundary | `merge:5e1c0a77:pr-c50d8e2` published? |
 |---|---|---|---|
-| 08:30:00 | tick → prepare run `…143000Z-c3d4` (contains #50 owner merge, #47 resolved) | Tue 08:30 | no |
-| 08:31:52 | draft valid → local delivery fails: `No space left on device` → no receipt, no commit; retry at 08:36:52 | Tue 08:30 | no |
-| 08:36:52 | tick → re-prepare run `…143652Z-e5f6` (same interval start, new as-of) → delivery fails again; retry at 08:51:52 | Tue 08:30 | no |
+| 08:30:00 | tick → prepare run `20261104T143000Z-c3d4` (contains #50 owner merge, #47 resolved) → composer starts | Tue 08:30 | no |
+| 08:31:52 | draft valid → local delivery fails: `No space left on device`. No receipt, no commit. The run stays in flight (`delivery_failed`); retry at 08:36:52 | Tue 08:30 | no |
+| 08:36:55 | retry of the **same run** and draft → fails again; retry at 08:51:55 | Tue 08:30 | no |
 | 08:50 | owner frees disk space | | |
-| 08:51:52 | tick → run `…145152Z-0a1b` → delivered → receipt → commit | **Wed 08:51:52** | **yes (once)** |
+| 08:52:00 | retry of the same run → delivered → receipt → `latest` → commit | **Wed 08:30** | **yes (once)** |
 
-The published brief:
+The composer ran once. No second run was prepared, so there is one brief, with
+one run id and Wednesday's 08:30 facts.
 
 ```text
 Owner brief "owner" · 3 projects
-As of Wed 4 Nov 2026 08:51 CST · covers Tue 3 Nov 08:30 → Wed 4 Nov 08:51 CST (24h 21m; 1 scheduled brief) · run 20261104T145152Z-0a1b
+As of Wed 4 Nov 2026 08:30 CST · covers Tue 3 Nov 08:30 → Wed 4 Nov 08:30 CST (24h; 1 scheduled brief) · run 20261104T143000Z-c3d4
 2 need you · 1 merged (1 owner-approved) · 0 blockers · omerta-core not refreshed
 
 Needs you
   [waiting]  Still waiting on you: cosmic_ac #46 merge (signed off), project-manager #287 spec approval.
            → #46 (3d 23h) · report · #287 (2d 18h) · spec
 
+project-manager
+  [now]  No material change.
+
 cosmic_ac
   [resolved]  #47 HEALPix mask support: review is running again (iteration 1).  → #47
   [merged · owner-approved]  #50 Speed up map smoothing.  → #50 · report
   [now]  1 in progress, 1 in review, 1 in QA, 1 at sign-off, 4 pending; CMB pipeline 8/12 merged.
 
-project-manager
-  [now]  No material change.
-
 omerta-core
-  [unavailable 2d]  Still not refreshed: project.yaml does not parse.
+  [unavailable 1d 23h]  Still not refreshed: project.yaml does not parse.
 
-Delivered on attempt 3; attempts at 08:31 and 08:37 failed: No space left on device.
+Delivered on attempt 3 at 08:52; attempts at 08:31 and 08:36 failed: No space left on device.
 Feedback: pm brief feedback · Guidance: pm brief guidance show
 ```
 
 - **Nothing lost or duplicated.** #50's merge notice appears exactly once,
-  here. The two failed attempts left no brief, no receipt and no boundary
-  change. Thursday's brief (B4) does not repeat it.
+  here. The failed attempts left no receipt and no boundary change, and
+  Thursday's brief (B4) does not repeat it.
+- **Order.** The Needs-you list runs oldest first. With one item each waiting
+  on the owner, the project sections tie, so project-manager comes first.
 - **Delivery failures are visible.** They show in this brief's footer, in
   `pm brief status`, and as a sticky line in the hub TUI log.
 
@@ -277,20 +286,20 @@ Feedback: pm brief feedback · Guidance: pm brief guidance show
 
 ```text
 Owner brief "owner" · 3 projects · no material change
-As of Thu 5 Nov 2026 08:30 CST · covers Wed 4 Nov 08:51 → Thu 5 Nov 08:30 CST (23h 39m; 1 scheduled brief) · run 20261105T143000Z-1e2f
+As of Thu 5 Nov 2026 08:30 CST · covers Wed 4 Nov 08:30 → Thu 5 Nov 08:30 CST (24h; 1 scheduled brief) · run 20261105T143000Z-1e2f
 2 need you · 0 merged · 0 blockers · omerta-core not refreshed
 
 Needs you
   [waiting]  Still waiting on you: cosmic_ac #46 merge (signed off), project-manager #287 spec approval.
            → #46 (4d 23h) · report · #287 (3d 18h) · spec
 
-  [now]  No material change in cosmic_ac or project-manager.
-  [unavailable 3d]  omerta-core still not refreshed: project.yaml does not parse.
+  [now]  No material change in project-manager or cosmic_ac.
+  [unavailable 2d 23h]  omerta-core still not refreshed: project.yaml does not parse.
 
 Feedback: pm brief feedback · Guidance: pm brief guidance show
 ```
 
-This is four lines, and every still-actionable item keeps its age.
+This is three lines, and every still-actionable item keeps its age.
 
 ---
 
@@ -307,7 +316,12 @@ As of Mon 9 Nov 2026 08:30 CST · covers Thu 5 Nov 08:30 → Mon 9 Nov 08:30 CST
 
 Needs you
   [waiting 7d 18h]  project-manager #287: spec still waits for your approval.  → #287 · spec
-  [waiting 1d]  cosmic_ac #48 Notebook: lensing tutorial is signed off and held for your merge.  → #48 · report
+  [waiting 1d 1h]  cosmic_ac #48 Notebook: lensing tutorial is signed off and held for your merge.  → #48 · report
+
+project-manager
+  [merged · owner-approved] [merged · auto]  2 merged: plan-qa #143 Session cleanup for stale containers and push proxies; bugs #217 terminal-status PRs drop their windows.
+           → #143 (owner-approved) · #217 (auto) · reports
+  [now]  No other material change.
 
 cosmic_ac
   [merged · owner-approved] [resolved]  #46 Refactor plotting helpers; its wait for your merge is closed.  → #46 · report
@@ -315,11 +329,6 @@ cosmic_ac
   [merged · auto]  #52 Vectorize mask application.  → #52 · report
   [merged · owner-approved]  #53 Update CAMB to 1.5.8.  → #53 · report
   [now]  1 in progress, 0 in review, 1 in QA, 1 at sign-off, 1 pending; CMB pipeline 10/12 merged.
-
-project-manager
-  [merged · owner-approved] [merged · auto]  2 merged: #143 Session cleanup for stale containers and push proxies; #217 terminal-status PRs drop their windows.
-           → #143 (owner-approved) · #217 (auto) · reports
-  [now]  No other material change.
 
 omerta-core
   [resolved]  Refreshed again (project.yaml fixed Sat); live run state unavailable (no TUI).
@@ -331,9 +340,11 @@ information; #143 is mentioned because its title names containers, but other con
 Feedback: pm brief feedback · Guidance: pm brief guidance show
 ```
 
-- **Bounded.** Four days of events fit in 16 lines. cosmic_ac's guidance asks
-  for one line per merge, and the composer followed it; the whole brief ran a
-  little over the "about 15" soft target, well under the hard cap of 40.
+- **Bounded.** Four days of events fit in 12 composed lines, under the
+  "about 15" soft target, even though cosmic_ac's guidance asks for one line
+  per merge.
+- **Order.** Each project has one item waiting on the owner, so
+  project-manager comes first (tie rule). Its merges name their plans.
 - **Required items stay in.** #48 is a "Notebook:" PR but is waiting on the
   owner, so the cosmic_ac guidance's own exception keeps it in.
 - **Mixed merge modes.** project-manager's mixed-mode merge line carries one
@@ -368,7 +379,7 @@ identical; brief pause/resume touches only `~/.pm/briefs/owner/{config,config-jo
 
 ```text
 Owner brief "owner" · 3 projects
-As of Wed 11 Nov 2026 08:30 CST · covers Mon 9 Nov 08:30 → Wed 11 Nov 08:30 CST (2d; 2 scheduled briefs; 1 skipped while paused) · run 20261111T143000Z-9c0d
+As of Wed 11 Nov 2026 08:30 CST · covers Mon 9 Nov 08:30 → Wed 11 Nov 08:30 CST (2d; 2 scheduled briefs; catch-up — 1 skipped while paused) · run 20261111T143000Z-9c0d
 1 needs you · 1 merged (1 owner-approved) · 0 blockers · all projects refreshed (omerta-core partial)
 
 project-manager
@@ -376,7 +387,7 @@ project-manager
   [now]  No other material change.
 
 cosmic_ac
-  [merged · owner-approved]  #48 Notebook: lensing tutorial.  → #48 · report
+  [merged · owner-approved] [resolved]  #48 Notebook: lensing tutorial; its wait for your merge is closed.  → #48 · report
   [now]  1 in progress, 1 in QA, 1 pending.
 
 omerta-core
@@ -416,37 +427,52 @@ The composer's tmux window survived the TUI restart and published normally. The
 restarted TUI re-armed its timer, and its first tick saw the run still in flight
 and did nothing.
 
-**(b) Crash between delivery and commit** (fault injected in QA: `kill -9` of
-`pm brief publish` right after the `latest.html` rename).
+**(b) Crash between the receipt and the commit** (fault injected in QA:
+`kill -9` of `pm brief publish` right after `receipt.json` is written, before
+`latest` is replaced).
 
 ```text
 $ pm brief status --name owner          # 08:33:05
 boundary: Wed 11 Nov 08:30 CST (run 20261111T143000Z-9c0d)
 in flight: run 20261112T143000Z-3b4c · RECEIPT PRESENT, not committed
 $ pm brief tick                         # next timer tick, 08:33:30
-brief "owner": rolled forward run 20261112T143000Z-3b4c (receipt present); boundary now Thu 12 Nov 08:30 CST
+brief "owner": rolled forward run 20261112T143000Z-3b4c (receipt present; latest updated); boundary now Thu 12 Nov 08:30 CST
 ```
 
 No second brief was produced, and Friday's brief starts at Thu 08:30.
+
+**(c) Crash during delivery, before the receipt** (fault injected after the
+run's `.md` is written, before the `.html`).
+
+```text
+$ pm brief status --name owner          # 08:33:05
+in flight: run 20261112T143000Z-3b4c · stage delivering · no receipt
+$ pm brief tick                         # 08:33:30
+brief "owner": re-publishing run 20261112T143000Z-3b4c (interrupted during delivery) … published; boundary now Thu 12 Nov 08:30 CST
+```
+
+The same run id and files are rewritten, so there is no second brief under a
+new id.
 
 ---
 
 ## B8 — Composer failure: pm's plain brief, Fri 13 Nov 2026 08:30 CST
 
-The composer window exited before publishing (the provider returned an error).
-After 20 minutes without a receipt, the run was abandoned. The next tick
-re-prepared and published pm's plain brief straight away. The plain brief uses
-P1's default shape and **does not apply free-text guidance**, which only the
+The composer window exited at 08:31 before publishing (the provider returned
+an error). The next tick (08:32) found the window gone and published pm's plain
+brief for the **same run**: same input, as of 08:30. The plain brief uses P1's
+default shape and **does not apply free-text guidance**, which only the
 composer can interpret. The footer says so.
 
 ```text
 Owner brief "owner" · 3 projects
-As of Fri 13 Nov 2026 08:51 CST · covers Thu 12 Nov 08:30 → Fri 13 Nov 08:51 CST (24h 21m; 1 scheduled brief) · run 20261113T145104Z-6d7e
+As of Fri 13 Nov 2026 08:30 CST · covers Thu 12 Nov 08:30 → Fri 13 Nov 08:30 CST (24h; 1 scheduled brief) · run 20261113T143000Z-6d7e
 1 needs you · 1 merged (1 auto) · 0 blockers · all projects refreshed (omerta-core partial)
 
 project-manager
   [waiting 11d 18h]  #287 Scheduled concise multi-project progress and change briefs: spec waits for your approval.  → #287 · spec
   [now]  9 in progress · 36 in review · 6 in QA · 0 at sign-off · 389 pending.
+  [waiting 11d 18h]  Next: review the spec for #287.  → #287
 
 cosmic_ac
   [merged · auto]  #54 Add CI job for notebook execution.  → #54 · report
@@ -466,7 +492,7 @@ Feedback: pm brief feedback · Guidance: pm brief guidance show
 This is added above the existing PR table. The rows and columns are unchanged.
 
 ```text
-Owner brief "owner" — as of Fri 13 Nov 2026 08:51 CST · 1 needs you · open latest · history (8)
+Owner brief "owner" — as of Fri 13 Nov 2026 08:30 CST · 1 needs you · open latest · history (8)
 ```
 
 `open latest` links to `briefs/owner/latest.html`. `history` links to

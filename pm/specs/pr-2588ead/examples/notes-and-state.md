@@ -23,26 +23,13 @@ All times after 2026-11-01 are illustrative. The owner's zone is
 
 The setup conversation is in [`conversations.md`](conversations.md) §1.
 
-### 1.1 `project-manager/pm/notes.txt` (hub project)
+### 1.1 `project-manager/pm/notes-brief.txt` (hub project; new file)
 
-The file before setup had only the QA note under `## QA`. Setup changed only
-the new `## Owner Brief` section; the other sections are byte-identical.
+Setup created this file. `pm/notes.txt` (General … Watcher, with its existing
+QA note) is byte-identical before and after. No existing prompt reads
+`notes-brief.txt` (impl §1.0, R10).
 
 ```text
-## General
-
-## Implementation
-
-## Review
-
-## QA
-
-If you need to use the pm tool and are running in a container where it isn't availble, use ./install.sh --local from the pm repo directory.
-
-## Merge
-
-## Watcher
-
 ## Owner Brief
 
 ### Whole brief
@@ -55,21 +42,13 @@ If you need to use the pm tool and are running in a container where it isn't ava
 - For each merge, name its plan. [owner 2026-11-01]
 ```
 
-### 1.2 `cosmic_ac/pm/notes.txt` (fixture)
+In `pm notes`, the editor shows the same text as one more section,
+`## Owner Brief — owner-brief guidance (agent-maintained; edits are kept)`,
+after `## Watcher`. Saving routes it back to this file.
+
+### 1.2 `cosmic_ac/pm/notes-brief.txt` (fixture; new file)
 
 ```text
-## General
-
-## Implementation
-
-## Review
-
-## QA
-
-## Merge
-
-## Watcher
-
 ## Owner Brief
 
 ### This project
@@ -145,18 +124,18 @@ wrapped here):
 ```text
 Effective owner-brief guidance — brief "owner" (hub: project-manager)
 
-Whole brief  ·  project-manager/pm/notes.txt § Owner Brief › Whole brief
+Whole brief  ·  project-manager/pm/notes-brief.txt › Whole brief
   rev r-20261101T2041Z-1a2b · owner-confirmed 2026-11-01 · sha 7d41a9c0
   - Lead with anything that needs me; I read this on my phone before standup. [owner 2026-11-01]
   - Keep the whole brief to about 25 lines. [owner 2026-11-01]
   - Order projects by what needs me; on ties, project-manager first. [owner 2026-11-01]
 
-project-manager  ·  project-manager/pm/notes.txt § Owner Brief › This project
+project-manager  ·  project-manager/pm/notes-brief.txt › This project
   rev r-20261101T2041Z-2c3d · owner-confirmed 2026-11-01 · sha c19e2f77
   - Collapse PRs with no activity for a week into one count line; don't list them. [owner 2026-11-01]
   - For each merge, name its plan. [owner 2026-11-01]
 
-cosmic_ac  ·  cosmic_ac/pm/notes.txt § Owner Brief › This project
+cosmic_ac  ·  cosmic_ac/pm/notes-brief.txt › This project
   rev r-20261101T2042Z-3e4f · owner-confirmed 2026-11-01 · sha 5b2e81d4
   - List every merge on its own line with its one-line impact; this project merges rarely. [owner 2026-11-01]
 
@@ -188,7 +167,7 @@ unchanged.
  ### Whole brief
 -- Lead with anything that needs me; I read this on my phone before standup. [owner 2026-11-01]
 -- Keep the whole brief to about 25 lines. [owner 2026-11-01]
-+- Start with one "Needs you" list across all projects, oldest first, then the projects. [owner 2026-11-02]
++- Start with one "Needs you" list across all projects, then the projects. [owner 2026-11-02]
 +- Keep the whole brief to about 15 lines. [owner 2026-11-02]
 +- Batch each project's merges into one line. [owner 2026-11-02]
 +- Keep notices about projects that could not be refreshed to one short line each. [owner 2026-11-02]
@@ -213,7 +192,7 @@ Under the precedence rule (impl §6.4) the project block wins for its own lines.
 {"rev": "r-20261102T1514Z-5a6b", "section": "Owner Brief", "block": "Whole brief",
  "project": "project-manager", "at": "2026-11-02T15:14:40Z", "authority": "owner-confirmed",
  "before_sha": "7d41a9c0", "after_sha": "a8f3d215",
- "after_text": "- Start with one \"Needs you\" list across all projects, oldest first, then the projects. [owner 2026-11-02]\n- Keep the whole brief to about 15 lines. [owner 2026-11-02]\n- Batch each project's merges into one line. [owner 2026-11-02]\n- Keep notices about projects that could not be refreshed to one short line each. [owner 2026-11-02]\n- Order projects by what needs me; on ties, project-manager first. [owner 2026-11-01]",
+ "after_text": "- Start with one \"Needs you\" list across all projects, then the projects. [owner 2026-11-02]\n- Keep the whole brief to about 15 lines. [owner 2026-11-02]\n- Batch each project's merges into one line. [owner 2026-11-02]\n- Keep notices about projects that could not be refreshed to one short line each. [owner 2026-11-02]\n- Order projects by what needs me; on ties, project-manager first. [owner 2026-11-01]",
  "quote": "Too long, and I had to scroll for the things I need to do. Put everything that needs me in one list at the very top across all projects. Batch merges into one line per project. … 15 is fine. … Yes, one line for omerta is fine.",
  "summary": "top Needs-you list; ~15 lines; batch merges; one-line unrefreshed notices",
  "session": "brief:feedback:owner (claude 91ad…)"}
@@ -238,8 +217,9 @@ just merge without me". That is merge authority, not brief guidance. See
 ## 3. A direct edit (Tue 3 Nov 2026, 07:10 CST)
 
 The owner opened `pm notes` and added one line by hand to project-manager's
-`### This project` block. pm records nothing at edit time. Brief collection is
-read-only, so it does not write the journal.
+`### This project` block, which is saved to `notes-brief.txt`. pm records
+nothing at edit time. Brief collection is read-only, so it does not write the
+journal.
 
 ```text
 ### This project
@@ -251,28 +231,29 @@ read-only, so it does not write the journal.
 `pm brief guidance show` now flags the block:
 
 ```text
-project-manager  ·  project-manager/pm/notes.txt § Owner Brief › This project
+project-manager  ·  project-manager/pm/notes-brief.txt › This project
   rev r-20261101T2041Z-2c3d + DIRECT EDIT (file differs from history; sha 4e7710b9)
   - Collapse PRs with no activity for a week into one count line; don't list them. [owner 2026-11-01]
   - For each merge, name its plan. [owner 2026-11-01]
   - Mention when a PR touching containers merges.   ← direct edit, honoured as the owner's
 ```
 
-The next brief lists it as a required `guidance_change` item,
-`guidance:direct:828c8d0a:This project:4e7710b9`. The composer records that it
-cannot follow the new line yet: the brief input carries no file or area
-information, which #286's decision records may add later. The next
-`guidance apply` or `rollback` on *this block* first appends the record
-below. No change to this block happens in these examples (the 9 Nov rollback
-is on the `Whole brief` block), so through §B6 the edit is honoured but not
-yet in the history:
+The next brief, B2, lists it as a required `guidance_change` item,
+`guidance:direct:828c8d0a:This project:4e7710b9`. The line only matters when a
+project-manager merge is reported. The first time that happens (B5), the
+composer records in `guidance_notes` that it cannot fully follow the line: the
+brief input carries no file or area information, which #286's decision records
+may add later. The next `guidance apply` or `rollback` on *this block* first
+appends the record below. No change to this block happens in these examples
+(the 9 Nov rollback is on the `Whole brief` block), so through §B6 the edit is
+honoured but not yet in the history:
 
 ```json
 {"rev": "r-<time of the next change to this block>", "section": "Owner Brief", "block": "This project",
  "project": "project-manager", "at": "<time of that change>", "authority": "direct-edit",
  "before_sha": "c19e2f77", "after_sha": "4e7710b9",
  "after_text": "- Collapse PRs with no activity for a week into one count line; don't list them. [owner 2026-11-01]\n- For each merge, name its plan. [owner 2026-11-01]\n- Mention when a PR touching containers merges.",
- "quote": "", "summary": "edit made directly in notes.txt (not via pm brief); recorded before the next change",
+ "quote": "", "summary": "edit made directly in notes-brief.txt (not via pm brief); recorded before the next change",
  "session": "detected by guidance apply"}
 ```
 
@@ -353,14 +334,17 @@ and the real snapshot holds every PR in each project.
 
 ### 5.2 Wed 4 Nov after the first failed delivery (08:31:52 CST)
 
-The boundary is still Tuesday's, and `merge:5e1c0a77:pr-c50d8e2` is **not** in
+The draft for run `20261104T143000Z-c3d4` validated, but local delivery
+failed. The run stays in flight and will be retried as the **same run**. The
+boundary is still Tuesday's, and `merge:5e1c0a77:pr-c50d8e2` is **not** in
 `events_published`:
 
 ```json
 {
   "boundary": {"as_of": "2026-11-03T14:30:00Z", "run_id": "20261103T143000Z-8b2c",
                "published_at": "2026-11-03T14:31:57Z"},
-  "in_flight": null,
+  "in_flight": {"run_id": "20261104T143000Z-c3d4", "stage": "delivery_failed",
+                "started_at": "2026-11-04T14:30:00Z", "draft": "draft.json"},
   "last_failure": {"run_id": "20261104T143000Z-c3d4", "at": "2026-11-04T14:31:52Z",
                    "stage": "deliver:local",
                    "error": "OSError: [Errno 28] No space left on device: '/home/matt/.pm/sessions/project_manager-c5a1006b/captures/briefs/owner/.20261104T143000Z-c3d4.html.tmp'"},
@@ -368,36 +352,38 @@ The boundary is still Tuesday's, and `merge:5e1c0a77:pr-c50d8e2` is **not** in
 }
 ```
 
-### 5.3 Wed 4 Nov after the successful third attempt (08:53:10 CST)
+### 5.3 Wed 4 Nov after the successful third attempt (08:52:00 CST)
 
 ```json
 {
-  "boundary": {"as_of": "2026-11-04T14:51:52Z", "run_id": "20261104T145152Z-0a1b",
-               "published_at": "2026-11-04T14:53:10Z"},
-  "events_published": {"…": "…", "merge:5e1c0a77:pr-c50d8e2": "2026-11-04T14:53:10Z",
-                       "resolved:5e1c0a77:pr-c47e5d4:review-launch": "2026-11-04T14:53:10Z"},
+  "boundary": {"as_of": "2026-11-04T14:30:00Z", "run_id": "20261104T143000Z-c3d4",
+               "published_at": "2026-11-04T14:52:00Z"},
+  "events_published": {"…": "…", "merge:5e1c0a77:pr-c50d8e2": "2026-11-04T14:52:00Z",
+                       "resolved:5e1c0a77:pr-c47e5d4:review-launch": "2026-11-04T14:52:00Z"},
+  "in_flight": null,
   "last_failure": null,
   "retry": {"attempts": 0, "next_at": null},
   "delivery_history": [
-    {"run_id": "20261104T143000Z-c3d4", "outcome": "failed", "at": "2026-11-04T14:31:52Z", "error": "No space left on device"},
-    {"run_id": "20261104T143652Z-e5f6", "outcome": "failed", "at": "2026-11-04T14:38:20Z", "error": "No space left on device"},
-    {"run_id": "20261104T145152Z-0a1b", "outcome": "published", "at": "2026-11-04T14:53:10Z"}
+    {"run_id": "20261104T143000Z-c3d4", "attempt": 1, "outcome": "failed", "at": "2026-11-04T14:31:52Z", "error": "No space left on device"},
+    {"run_id": "20261104T143000Z-c3d4", "attempt": 2, "outcome": "failed", "at": "2026-11-04T14:36:55Z", "error": "No space left on device"},
+    {"run_id": "20261104T143000Z-c3d4", "attempt": 3, "outcome": "published", "at": "2026-11-04T14:52:00Z"}
   ]
 }
 ```
 
+The composer ran once. Attempts 2 and 3 re-delivered the same validated draft.
 `delivery_history` keeps the last 20 attempts for `pm brief status` and for
 the renderer's "Delivered on attempt …" footer.
 
-### 5.4 Receipt: `runs/20261104T145152Z-0a1b/receipt.json`
+### 5.4 Receipt: `runs/20261104T143000Z-c3d4/receipt.json`
 
 ```json
-{"run_id": "20261104T145152Z-0a1b", "published_at": "2026-11-04T14:53:10Z",
- "composer": "draft", "draft_attempts": 1,
+{"run_id": "20261104T143000Z-c3d4", "published_at": "2026-11-04T14:52:00Z",
+ "composer": "draft", "draft_attempts": 1, "delivery_attempts": 3,
  "destinations": [{"kind": "local",
-   "files": ["/home/matt/.pm/sessions/project_manager-c5a1006b/captures/briefs/owner/20261104T145152Z-0a1b.html",
-             "/home/matt/.pm/sessions/project_manager-c5a1006b/captures/briefs/owner/20261104T145152Z-0a1b.md"],
-   "latest_updated": true}],
+   "files": ["/home/matt/.pm/sessions/project_manager-c5a1006b/captures/briefs/owner/20261104T143000Z-c3d4.html",
+             "/home/matt/.pm/sessions/project_manager-c5a1006b/captures/briefs/owner/20261104T143000Z-c3d4.md"],
+   "latest_updated": "after receipt (publish step 6)"}],
  "next_state_sha": "1f9c0b44"}
 ```
 
@@ -464,7 +450,7 @@ the project-manager snapshot is abbreviated.
          "facts": {"count": 42, "by_status": {"in_review": 35, "qa": 5, "in_progress": 2}, "threshold_days": 7,
                    "oldest": {"pr": "pr-30888b1", "display": "#104", "updated_at": "2026-03-23T13:13:51Z"}},
          "links": [{"label": "pm pr list -t", "command": "pm -C /home/matt/claude-work/project-manager/pm pr list -t"}]},
-        {"id": "pos:828c8d0a", "kind": "position", "observation": "running", "required": false, "change": "new"}
+        {"id": "pos:828c8d0a", "kind": "position", "observation": "current", "required": false, "change": "new"}
       ]
     },
     {
@@ -499,7 +485,7 @@ the project-manager snapshot is abbreviated.
          "merge": {"mode": "owner", "via": "tui", "detail": "TUI merge action"}, "impact": "",
          "links": [{"label": "#44", "url": "https://github.com/fixture-owner/cosmic_ac/pull/44"},
                    {"label": "report", "url": "http://127.0.0.1:8765/p/5e1c0a77/pr-c44d9e1/report.html"}]},
-        {"id": "pos:5e1c0a77", "kind": "position", "observation": "running", "required": false, "change": "new"}
+        {"id": "pos:5e1c0a77", "kind": "position", "observation": "current", "required": false, "change": "new"}
       ]
     },
     {
@@ -524,7 +510,8 @@ the project-manager snapshot is abbreviated.
 `runs/20261102T143000Z-4f1a/draft.json`, composed under the setup guidance in
 §1. It validates: every required id is referenced, no foreign ids appear, the
 `#` numbers match, and there are 13 lines against a hard cap of 40 (about 25
-was requested).
+was requested). Its `guidance_notes` entry shows up as the brief's "Guidance
+not followed" footer.
 
 ```json
 {
@@ -551,7 +538,7 @@ was requested).
       {"text": "Could not refresh: project.yaml not found; no earlier data.", "items": ["proj:0e7a2b19:unavailable"]}
     ]}
   ],
-  "guidance_notes": []
+  "guidance_notes": ["cosmic_ac asks for each merge's one-line impact; #41 and #44 have no recorded impact, so their titles are used."]
 }
 ```
 
