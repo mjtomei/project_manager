@@ -227,7 +227,7 @@ class ModelSettingsScreen(ModalScreen):
         return lines
 
     def _provider_lines(self) -> list[str]:
-        from pm_core import worker_route
+        from pm_core import router_route
         from pm_core.model_config import ModelResolution
         from pm_core.providers import (
             get_default_provider, invalid_provider_entries, list_providers,
@@ -246,7 +246,7 @@ class ModelSettingsScreen(ModalScreen):
             if p.launcher:
                 desc += f"  command={p.launcher}"
             if p.type == "router":
-                st = worker_route.check_route(
+                st = router_route.check_route(
                     ModelResolution(provider=p.name))
                 desc += "  [OK]" if st.ok else f"  [UNAVAILABLE: {st.problem}]"
             lines.append(escape(desc))

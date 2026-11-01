@@ -49,7 +49,7 @@ def role_rows(data: dict, pr: dict | None = None, *,
     With a PR only the types a PR decides are listed (the watcher is a
     project session).
     """
-    from pm_core import worker_route
+    from pm_core import router_route
     from pm_core.providers import ProviderNotFoundError, get_provider
     if container_mode is None:
         from pm_core.container import is_container_mode_enabled
@@ -69,7 +69,7 @@ def role_rows(data: dict, pr: dict | None = None, *,
             if cfg is not None:
                 model = model or cfg.model_flag()
                 in_container = (container_mode and st in
-                                worker_route.CONTAINER_SESSION_TYPES)
+                                router_route.CONTAINER_SESSION_TYPES)
                 if cfg.type == "router" and cfg.launcher and not in_container:
                     command = cfg.launcher
                 elif cfg.type == "router" and in_container:
