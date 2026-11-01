@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T20:33:07.523024+00:00'
+  updated_at: '2026-11-01T21:01:48.021832+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38732,6 +38732,38 @@ prs:
       dropped.'
     created_at: '2026-11-01T20:33:07Z'
     last_edited: '2026-11-01T20:33:07Z'
+  - id: note-149c2bd
+    text: 'Review loop 928f i38: two leftovers in the kept CLI-recipe scope, no pm_core
+      change. (1) R103: the CLI scaffold start-failure branch ran `tmux -L scaffold
+      kill-server`, and the `-L scaffold` socket name is shared by every CLI capture
+      on the host. The live-recorder guard (R101) and `new-session` are two calls,
+      so a run that takes `rec` in the gap makes this block new-session fail with
+      "duplicate session: rec" — the session it names is the other run recorder —
+      and the kill ended that capture, which then failed as "recorder status is missing",
+      a failure it could not connect to this block. A failed start created nothing
+      of this run (a tmux server exits with its last session), so the branch now only
+      reports; the message says the block did not clear the session, and the step-1
+      prose narrows the shared-socket limitation to the stop step cleanup. The tmux
+      recipe parallel branch already touched only its own handles (the pipe, the claim).
+      Verified live on tmux 3.2a with a private TMUX_TMPDIR (duplicate new-session
+      rc 1; pre-fix kill-server leaves rec gone, post-fix leaves it up) and with the
+      stub harness in the new mode startgap; test_cli_start_failure_does_not_kill_a_concurrent_capture
+      fails against the pre-fix recipe and with only the kill-server line restored.
+      (2) R104: the stop bound 18-digit check counted digits, so a zero-padded value
+      (0000000000000000002 = 2 s) was refused as "too large … the 64-bit deadline
+      arithmetic wraps it", a wrap it cannot have ($(( 100 + 10#0000000000000000005
+      )) answers 105). Leading zeros are now stripped before the length check and
+      the arithmetic (all zeros -> 0, an immediate timeout), and the deadline and
+      both messages use the stripped value; test_cli_stop_accepts_a_zero_padded_bound
+      fails with the strip removed. Tests: recipe file 377 passed (was 375); related
+      suites (test_qa_artifact_web_ui_recording, test_qa_instructions, test_qa_loop,
+      test_markdown_render) 199 passed; full suite 5574 passed, 1 skipped, 0 failed
+      (run once on the final tree). Evidence: /pm-captures/review-928f-i38/ (probe-start-failure.log,
+      mutation-check.log, recipe-file.log, related-suites.log, suite.log, README,
+      scripts). impl.md R103/R104, qa.md. The dropped helper/prompt/verifier work
+      stays dropped.'
+    created_at: '2026-11-01T21:01:47Z'
+    last_edited: '2026-11-01T21:01:47Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
