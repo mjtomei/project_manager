@@ -1487,6 +1487,13 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
 
     repo_url = data["project"]["repo"]
     base_branch = data["project"].get("base_branch", "master")
+    # Hand-edited state: a ``base_branch`` that is not a branch name is not a
+    # ref to read the committed registry from.  It reached ``git show`` as an
+    # argument and was interpolated into "not committed on {'bad': True}",
+    # so it falls back to the default the other readers assume (the same rule
+    # ``pm pr merge`` and the sign-off clone apply).
+    if not (isinstance(base_branch, str) and base_branch):
+        base_branch = "master"
     branch = pr_entry.get("branch") or f"pm/{pr_id}"
 
     # Verify the PR exists in the committed project.yaml on base_branch.

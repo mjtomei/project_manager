@@ -858,3 +858,34 @@ def test_publish_lock_says_it_waits_for_another_publisher(capsys):
     with pr_mod._publish_lock(data):
         pass
     assert "Waiting" not in capsys.readouterr().out
+
+
+def test_pr_start_reads_a_malformed_base_branch_as_the_default(tmp_path,
+                                                               monkeypatch):
+    """``project.base_branch`` is hand-edited state, and ``pm pr start`` read
+    it raw.
+
+    The committed-registry check built ``git show '{'bad': True}:project.yaml'``
+    from the value and reported "PR pr-001 is not committed on {'bad': True}
+    yet" — a nonsense base in a user-facing message (the auto-start dependent
+    path hit it after every successful merge).  A value that is not a branch
+    name is not a base: it falls back to the default the other readers assume.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "master")
+    commit(repo, "shared.txt", "base\n", "init")
+    pm_dir = _state(tmp_path, {"repo": str(repo)}, {})
+
+    def _malform(d):
+        d["project"]["base_branch"] = {"bad": True}
+    store.locked_update(pm_dir, _malform)
+
+    with mock.patch.object(pr_mod, "state_root", return_value=pm_dir), \
+         mock.patch.object(pr_mod, "_get_pm_session", return_value=None):
+        result = CliRunner().invoke(pr_mod.pr, ["start", PR])
+
+    assert result.exit_code == 1, result.output
+    assert "not committed on master yet" in result.output
+    assert "{'bad': True}" not in result.output
+    assert "bad" not in result.output
