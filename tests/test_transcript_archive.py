@@ -618,209 +618,115 @@ def _fake_app(env, loops=None, session=None, prs=None):
     )
 
 
-def test_disable_skips_a_running_review_loop(env):
+def test_disable_leaves_canonical_links_live(env):
+    """A bulk sweep never freezes a canonical transcript.
+
+    The canonical name points at the attempt that is live now, and a
+    reader (the TUI's idle poll, a running loop, a driver waiting on a
+    verdict) may still be polling it after auto-start is off.  A frozen
+    copy would hide whatever the session appends later, which is the
+    failure class this PR exists to prevent (pr-9ee4d64); deciding
+    "finished" from a pane or a window is the guess that got it wrong
+    before (pr-592e4bd S31).  A canonical is replaced, and its session
+    archived, only when a new attempt launches on that path.
+    """
     from pm_core.tui import auto_start
-
-    state = rl.ReviewLoopState(pr_id="pr-abc", loop_id="aaaa", running=True)
-    app = _fake_app(env, loops={"pr-abc": state})
-    tdir = auto_start.get_transcript_dir(app)
-    tdir.mkdir(parents=True)
-    live = _native(env.cwd, _sid(), "STILL RUNNING")
-    p = Path(rl.iteration_transcript(tdir, "pr-abc", "aaaa", 1))
-    _link(p, live)
-    # An idle sibling proves the sweep actually ran over this directory.
-    idle = tdir / "impl-pr-abc.jsonl"
-    _link(idle, _native(env.cwd, _sid(), "IDLE"))
-
-    auto_start._finalize_all_transcripts(app)
-
-    assert p.is_symlink()  # the live collector keeps seeing appends
-    with live.open("a") as f:
-        f.write(_record("NEEDS_WORK") + "\n")
-    assert "NEEDS_WORK" in p.read_text()
-    assert idle.is_file() and not idle.is_symlink()
-
-
-def test_disable_skips_a_legacy_iteration_of_a_running_loop(env):
-    """A loop restored from a pre-upgrade breadcrumb polls the legacy shared
-    iteration name; a bulk sweep must leave that live too."""
-    from pm_core.tui import auto_start
-
-    state = rl.ReviewLoopState(pr_id="pr-abc", loop_id="aaaa", running=True)
-    app = _fake_app(env, loops={"pr-abc": state})
-    tdir = auto_start.get_transcript_dir(app)
-    tdir.mkdir(parents=True)
-    live = _native(env.cwd, _sid(), "LEGACY ITERATION RUNNING")
-    legacy = tdir / "review-pr-abc-i2.jsonl"
-    _link(legacy, live)
-    idle = tdir / "impl-pr-abc.jsonl"
-    _link(idle, _native(env.cwd, _sid(), "IDLE"))
-
-    auto_start._finalize_all_transcripts(app)
-
-    assert legacy.is_symlink()
-    with live.open("a") as f:
-        f.write(_record("NEEDS_WORK") + "\n")
-    assert "NEEDS_WORK" in legacy.read_text()
-    assert idle.is_file() and not idle.is_symlink()
-
-
-def test_disable_skips_a_running_watcher_transcript(env):
-    """`_disable` finalizes before stopping the watcher, so the watcher's
-    in-flight transcript must be treated as live."""
-    from pm_core.tui import auto_start
-
-    class _Manager:
-        def list_watchers(self):
-            return [{"id": "auto-start-abcd", "type": "auto-start",
-                     "running": True}]
 
     app = _fake_app(env)
-    app._watcher_manager = _Manager()
     tdir = auto_start.get_transcript_dir(app)
     tdir.mkdir(parents=True)
-    live = _native(env.cwd, _sid(), "WATCHER ITERATION")
-    p = tdir / "auto-start-i3.jsonl"
-    _link(p, live)
-    idle = tdir / "impl-pr-abc.jsonl"
-    _link(idle, _native(env.cwd, _sid(), "IDLE"))
+    links = {}
+    for name in ("impl-pr-abc.jsonl", "signoff-pr-abc.jsonl",
+                 "merge-pr-abc.jsonl", "review-pr-abc.jsonl"):
+        native = _native(env.cwd, _sid(), name)
+        p = tdir / name
+        _link(p, native)
+        links[p] = native
 
     auto_start._finalize_all_transcripts(app)
 
-    assert p.is_symlink()
-    with live.open("a") as f:
-        f.write(_record("READY") + "\n")
-    assert "READY" in p.read_text()
-    assert idle.is_file() and not idle.is_symlink()
+    for p, native in links.items():
+        assert p.is_symlink(), p
+        with native.open("a") as f:
+            f.write(_record("LATER") + "\n")
+        assert "LATER" in p.read_text()
 
 
-def test_watcher_completion_skips_a_live_review_loop(env):
-    """The auto-start watcher shares its run dir with auto-start review
-    loops; a completing watcher must not freeze a loop still polling."""
+def test_disable_freezes_archive_entries_only(env):
+    """Archived snapshots are frozen (they survive Claude pruning); the
+    canonical link beside them stays live."""
+    from pm_core.tui import auto_start
+
+    app = _fake_app(env)
+    tdir = auto_start.get_transcript_dir(app)
+    tdir.mkdir(parents=True)
+    canon = tdir / "impl-pr-abc.jsonl"
+    _link(canon, _native(env.cwd, _sid(), "LIVE"))
+    archived = tdir / "archive" / "impl-pr-abc.old.jsonl"
+    archived.parent.mkdir()
+    _link(archived, _native(env.cwd, _sid(), "ARCHIVED"))
+
+    auto_start._finalize_all_transcripts(app)
+
+    assert canon.is_symlink()
+    assert archived.is_file() and not archived.is_symlink()
+    assert "ARCHIVED" in archived.read_text()
+
+
+def test_watcher_completion_leaves_canonicals_live(env):
+    """The auto-start watcher shares its run dir with review loops and
+    step windows, so its completion freezes only the archive."""
     from pm_core.tui import watcher_ui
 
-    state = rl.ReviewLoopState(pr_id="pr-abc", loop_id="aaaa", running=True)
-    app = _fake_app(env, loops={"pr-abc": state})
+    app = _fake_app(env)
     tdir = env.run
-    live = _native(env.cwd, _sid(), "LOOP STILL RUNNING")
-    p = Path(rl.iteration_transcript(tdir, "pr-abc", "aaaa", 1))
-    _link(p, live)
-    idle = tdir / "auto-start-i2.jsonl"
-    _link(idle, _native(env.cwd, _sid(), "WATCHER DONE"))
+    p = tdir / "impl-pr-abc.jsonl"
+    _link(p, _native(env.cwd, _sid(), "IMPL"))
+    archived = tdir / "archive" / "impl-pr-abc.old.jsonl"
+    archived.parent.mkdir()
+    _link(archived, _native(env.cwd, _sid(), "ARCHIVED"))
 
     watcher_ui._on_complete_from_thread(
         app, types.SimpleNamespace(_transcript_dir=str(tdir),
                                    latest_verdict="READY", iteration=2))
 
     assert p.is_symlink()
-    with live.open("a") as f:
-        f.write(_record("NEEDS_WORK") + "\n")
-    assert "NEEDS_WORK" in p.read_text()
-    assert idle.is_file() and not idle.is_symlink()
+    assert archived.is_file() and not archived.is_symlink()
 
 
-def test_a_live_signoff_link_follows_the_sweep(env, monkeypatch):
-    """A live sign-off link is kept by a watcher sweep, frozen by a disable.
-
-    The two bulk sweeps differ on purpose (2026-10-31 master integration):
-    a watcher completion runs with auto-start still on, so the sign-off
-    driver may still be polling the link and freezing it would hide the
-    verdict the session appends later; the disable sweep runs because
-    auto-start is off, so the driver stops stepping the PR and the link
-    can be frozen.
-    """
-    from pm_core import tmux as tmux_mod
+def test_both_sweeps_leave_a_signoff_link_live(env):
+    """Neither sweep freezes a sign-off canonical: the driver (auto-start
+    still on) and the TUI's idle poll may still read it."""
     from pm_core.tui import auto_start, watcher_ui
-
-    sid = _sid()
-    app = _fake_app(env, session="pm-x")
-    tdir = env.tmp / "transcripts" / "run"
-    tdir.mkdir(parents=True)
-    live = _native(env.cwd, sid, "ROUTING")
-    p = tdir / "signoff-pr-abc.jsonl"
-    _link(p, live)
-    monkeypatch.setattr(tmux_mod, "live_pane_start_commands",
-                        lambda session: [f"claude --session-id {sid}"])
-
-    watcher_ui._on_complete_from_thread(
-        app, types.SimpleNamespace(_transcript_dir=str(tdir),
-                                   latest_verdict="READY", iteration=1))
-    assert p.is_symlink()  # the driver may still be polling it
-    with live.open("a") as f:
-        f.write(_record("SIGNOFF_MERGE") + "\n")
-    assert "SIGNOFF_MERGE" in p.read_text()
-
-    auto_start._finalize_all_transcripts(app)
-    assert p.is_file() and not p.is_symlink()
-
-
-def test_live_read_transcripts_follow_a_live_pane(env, monkeypatch):
-    """A live pane running the transcript's session keeps it live.
-
-    Step windows are not inferred from a window name alone: a dead or
-    finished pane must not keep the transcript a symlink forever
-    (pr-592e4bd S31 merged this with the pr-9ee4d64 sweep).
-    """
-    from pm_core import tmux as tmux_mod
-    from pm_core.tui import auto_start
-
-    app = _fake_app(env, session="pm-x")
-    tdir = env.tmp / "transcripts" / "run"
-    tdir.mkdir(parents=True)
-    sid = _sid()
-    p = tdir / "impl-pr-abc.jsonl"
-    _link(p, _native(env.cwd, sid, "RUNNING"))
-
-    monkeypatch.setattr(tmux_mod, "live_pane_start_commands",
-                        lambda session: [f"claude --session-id {sid}"])
-    live = auto_start._live_read_transcripts(app, tdir)
-    assert os.path.abspath(p) in live
-
-    # A dead pane is not listed by live_pane_start_commands, so its
-    # transcript is not live.
-    monkeypatch.setattr(tmux_mod, "live_pane_start_commands",
-                        lambda session: [])
-    assert auto_start._live_read_transcripts(app, tdir) == set()
-
-
-def test_live_read_transcripts_ignore_a_stub_app_session(env, monkeypatch):
-    """A stub app's ``_session_name`` is not a real tmux session.
-
-    ``_app_session`` filters a non-string before it can reach tmux, so the
-    pane lookup is skipped and the sweep still runs (with no step-window
-    skips) instead of raising from inside a bulk finalize.
-    """
-    from pm_core import tmux as tmux_mod
-    from pm_core.tui import auto_start
-
-    app = _fake_app(env, session=object())
-    tdir = env.tmp / "transcripts" / "run"
-    tdir.mkdir(parents=True)
-    calls: list = []
-
-    def _live_pane_start_commands(session):
-        calls.append(session)
-        return []
-
-    monkeypatch.setattr(tmux_mod, "live_pane_start_commands",
-                        _live_pane_start_commands)
-    assert auto_start._live_read_transcripts(app, tdir) == set()
-    assert calls == []
-
-
-def test_disable_finalizes_idle_transcripts_and_archives(env):
-    from pm_core.tui import auto_start
 
     app = _fake_app(env)
     tdir = env.tmp / "transcripts" / "run"
     tdir.mkdir(parents=True)
-    canon = tdir / "impl-pr-abc.jsonl"
-    _link(canon, _native(env.cwd, _sid(), "DONE"))
-    archived = tdir / "archive" / "impl-pr-abc.old.jsonl"
-    archived.parent.mkdir()
-    archived.symlink_to(_native(env.cwd, _sid(), "ARCHIVED DONE"))
+    p = tdir / "signoff-pr-abc.jsonl"
+    live = _native(env.cwd, _sid(), "ROUTING")
+    _link(p, live)
 
+    watcher_ui._on_complete_from_thread(
+        app, types.SimpleNamespace(_transcript_dir=str(tdir),
+                                   latest_verdict="READY", iteration=1))
+    assert p.is_symlink()
     auto_start._finalize_all_transcripts(app)
+    assert p.is_symlink()
+    with live.open("a") as f:
+        f.write(_record("SIGNOFF_MERGE") + "\n")
+    assert "SIGNOFF_MERGE" in p.read_text()
 
-    assert canon.is_file() and not canon.is_symlink()
-    assert archived.is_file() and not archived.is_symlink()
+
+def test_cli_watcher_freezes_its_private_dir(env):
+    """The CLI watcher owns its ``watcher-<token>`` dir outright and its
+    process is exiting, so its top-level iteration links are frozen too."""
+    from pm_core.claude_launcher import finalize_transcript_dir
+
+    tdir = env.run / "watcher-abc"
+    tdir.mkdir(parents=True)
+    p = tdir / "auto-start-i1.jsonl"
+    _link(p, _native(env.cwd, _sid(), "WATCHER ITERATION"))
+
+    assert finalize_transcript_dir(tdir) == 1
+    assert p.is_file() and not p.is_symlink()
+    assert "WATCHER ITERATION" in p.read_text()

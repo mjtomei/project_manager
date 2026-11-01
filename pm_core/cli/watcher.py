@@ -70,7 +70,10 @@ def _run_user_watcher_loop(wait: int, max_iterations: int) -> None:
         watcher.state.stop_requested = True
         click.echo("\nStopping watcher loop...")
 
-    # Finalize transcript symlinks (including archived per-attempt sessions).
+    # Freeze every transcript in this watcher's private run dir, including
+    # the archived per-attempt sessions.  Unlike the TUI's shared run dir,
+    # nothing else reads this one and the process is exiting, so the
+    # top-level iteration links can be frozen too.
     from pm_core.claude_launcher import finalize_transcript_dir
     finalize_transcript_dir(tdir)
 

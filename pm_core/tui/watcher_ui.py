@@ -270,20 +270,17 @@ def _on_complete_from_thread(app, state) -> None:
     _log.info("watcher_ui: loop complete -- verdict=%s iterations=%d",
               state.latest_verdict, state.iteration)
 
-    # Finalize transcripts (including archived per-attempt sessions).  The
-    # auto-start watcher shares its run directory with the auto-start review
-    # loops, so a completing watcher must leave a loop that is still polling
-    # live — freezing it would hide the verdict the session appends later
-    # (pr-9ee4d64).
+    # Freeze the archived per-attempt sessions.  The canonical links in
+    # the run dir are left live on purpose: the auto-start watcher shares
+    # that directory with the auto-start review loops and the step windows,
+    # and any of them may still be polling a canonical — a frozen copy
+    # would never show what the session appends later (pr-9ee4d64).  A
+    # canonical is replaced, and its session archived, only when a new
+    # attempt launches on the same path.
     tdir = getattr(state, '_transcript_dir', None)
     if tdir:
-        from pathlib import Path
         from pm_core.claude_launcher import finalize_transcript_dir
-        from pm_core.tui import auto_start
-        finalize_transcript_dir(
-            tdir,
-            skip=auto_start._live_transcript_skip(
-                app, Path(tdir), include_signoff=True))
+        finalize_transcript_dir(tdir, include_top_level=False)
 
 
 # ---------------------------------------------------------------------------

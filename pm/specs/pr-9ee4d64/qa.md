@@ -13,11 +13,12 @@ could freeze a newer loop's *live* transcript into an early copy, so the
 new loop's collector never saw the verdict appended later (the 2026-10-28
 #241 / #248 S11 failure).
 
-The fix (see `impl.md`) makes every attempt an immutable entry under
-`<run>/archive/<stem>.<session-id>.jsonl`, makes finalization
+The fix (see `impl.md`) makes every superseded attempt an immutable entry
+under `<run>/archive/<stem>.<session-id>.jsonl`, makes finalization
 ownership-checked, names review iterations per loop, archives instead of
-deleting on retire, and makes bulk sweeps skip transcripts whose session
-may still be writing. The branch also merges master's native launch-retry /
+deleting on retire, and leaves every canonical link live — a bulk sweep
+never freezes one, so no reader can be cut off from a later verdict. The
+branch also merges master's native launch-retry /
 discovery refactor, so retry, rediscovery and follow-up-verdict polling
 must resolve through the same loop-scoped paths (R10).
 
@@ -82,19 +83,23 @@ watcher), not the helper functions.
   - no canonical file is missing, truncated, or replaced by a copy of a
     different session.
 
-### R5 — Bulk sweeps leave work that is still writing alone
+### R5 — Bulk sweeps never freeze a canonical link
 - **Given** auto-start is on, a review loop is mid-iteration and the
   auto-start watcher is running, and the same run dir holds finished step
   transcripts as links.
 - **When** the user turns auto-start off (clears targets / toggles it off)
   or the watcher loop completes.
 - **Then**
-  - the running loop's transcript remains a live link and the loop still
-    finishes with its verdict;
-  - finished transcripts become self-contained copies (no longer links);
-  - links already inside `archive/` are also frozen, so archived sessions
-    survive Claude transcript pruning;
-  - the sweep removes and truncates nothing.
+  - every canonical transcript in the run dir — the running loop's
+    iteration, impl, sign-off, merge, review — is still a symlink, and a
+    turn appended to its native JSONL afterwards is visible through it,
+    so no reader is ever cut off from a later verdict;
+  - links already inside `archive/` are frozen into self-contained
+    copies, so archived sessions survive Claude transcript pruning;
+  - the sweep removes and truncates nothing;
+  - a canonical link is replaced only when a new attempt launches on the
+    same path, and the outgoing session is then archived under
+    `archive/<stem>.<session-id>.jsonl` (R1).
 
 ### R6 — Restart mid-flight resumes on the same transcript
 - **Given** a review loop or sign-off step is in flight in auto-start run R.
@@ -127,16 +132,14 @@ watcher), not the helper functions.
     lost;
   - every archive entry has a unique name; none was overwritten.
   - Archive entry counts are a **minimum**, never an exact count: the
-    canonical link of each step names the attempt that is live *now*, and
-    the last step to finish is frozen into `archive/` as well when the run
-    ends (auto-start disabling finalizes every canonical link — R5).
-    A run with two returns therefore ends with three `impl-<pr>` and
-    three `signoff-<pr>` entries, and the canonical names are regular
-    files, not links. Measure "the canonical link names the live rework
-    attempt" at the post-return checkpoint while that step is running;
-    after the run ends, assert each pre-return session is *present* in
-    `archive/` (by session id) instead of asserting an entry count or
-    reading the canonical link.
+    canonical link of each step names the attempt that is live *now* and
+    is never frozen by a bulk sweep (R5), so it stays a link after the
+    run ends.  A run with two returns therefore ends with three
+    `impl-<pr>` and three `signoff-<pr>` entries in `archive/`, with the
+    canonical names still links to the last attempt of each step.
+    Assert each pre-return session is *present* in `archive/` (by session
+    id) instead of asserting an entry count, and read the canonical link
+    only to confirm it names the most recent attempt.
 
 ### R8 — CLI drivers keep history too
 - **Given** a user drives a PR with repeated `pm pr auto-sequence` ticks
@@ -147,8 +150,10 @@ watcher), not the helper functions.
   - `pm/transcripts/auto-sequence/<pr>/` keeps the pre-return implementation
     session in `archive/` and the rework session at the canonical name; the
     retired sign-off transcript is archived, not deleted;
-  - the watcher's transcript dir shows its iteration transcripts frozen into
-    self-contained copies on exit, including anything in its `archive/`;
+  - the CLI watcher's private `watcher-<token>` dir shows its iteration
+    transcripts frozen into self-contained copies on exit, including
+    anything in its `archive/` (nothing else reads that dir and the
+    process is exiting, so freezing the top level is safe there);
   - the commands' output/log lines report the archive and finalize actions.
 
 ### R9 — A failed archive never blocks the workflow
@@ -248,12 +253,10 @@ Cross-cutting setup for every scenario:
   wrong type (e.g. `loop_id: 7`) is malformed saved state and is skipped
   whole (fail-closed policy from pr-049649a); a missing, blank or null
   `loop_id` is regenerated at the 8-hex width instead.
-- **A step window whose pane has exited**: step-window liveness is
-  checked on the pane, not the window name, so a disable finalizes the
-  transcript of a dead or finished pane.  A live sign-off pane keeps its
-  transcript for a *watcher-completion* sweep (auto-start still on) but
-  not for the disable sweep (auto-start off — the sign-off driver stops
-  stepping the PR).
+- **A step window whose pane has exited**: the canonical transcript is
+  still left live — a dead pane is not proof that nothing else (a driver,
+  a later restart, an external reader) will poll it, and leaving the link
+  costs nothing (R5).
 - **Archive subdirectory is not current**: sign-off/review readers and
   launch stamps never mistake an archived entry for the live transcript.
 - **Merge finalize has no session id**: the archive copy is still written
@@ -283,8 +286,8 @@ Cross-cutting setup for every scenario:
   after a return (the original bug);
 - a current loop's transcript frozen/replaced by a superseded callback, or
   its later verdict not detected;
-- a running loop/watcher transcript frozen by a disable or a watcher
-  completion;
+- any canonical transcript frozen by a disable or a watcher completion
+  (R5), or a later turn not visible through it;
 - a retired router verdict replayed (PR re-bounces for the same reason), or
   an archived entry read as the current verdict;
 - a launch blocked, window stuck, or crash caused by archive/finalize;

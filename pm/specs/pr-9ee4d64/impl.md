@@ -93,22 +93,31 @@ Required behaviour:
 - Review-loop completion finalizes only the loop's own
   `review-<pr>-<loop_id>-i*` paths, and passes the session id recorded for
   each iteration when available.
-- The bulk sweeps (`_finalize_all_transcripts`, watcher completion) skip
-  transcripts whose session is still live: running review loops
-  (`app._review_loops[pr].running`), running watcher loops
-  (`app._watcher_manager.list_watchers()`), live idle-tracker entries,
-  and impl/review/merge (plus sign-off for a watcher sweep) transcripts
-  whose session a *live* pane of the pm session still runs.  Liveness is
-  checked on the pane, not the window name: a dead or finished pane must
-  not keep a transcript a symlink forever.  A disable must not freeze a
-  collector that is still polling.  This matters because the TUI
-  auto-start watcher and the review loops share one run directory.
-  The disable sweep may freeze a sign-off transcript even while its
-  window is open — auto-start being off means the sign-off driver no
-  longer steps that PR — while a watcher-completion sweep (auto-start
-  still on) keeps it live.
-- `_finalize_all_transcripts` also finalizes symlinks already sitting in
-  `archive/` so archived sessions survive Claude transcript pruning.
+- A **bulk sweep never freezes a canonical transcript**.  Canonical
+  names (`impl-<pr>.jsonl`, `signoff-<pr>.jsonl`, `merge-<pr>.jsonl`,
+  `review-<pr>.jsonl`) point at the attempt that is live *now*; the TUI's
+  idle poll, a running loop, a driver waiting on a verdict or a
+  repo-update window may still be reading one after auto-start is off, and
+  a frozen copy would never show what the session appends next.  Deciding
+  "finished" from a pane or a window is exactly the guess that hid a later
+  MERGED / PASS before (pr-592e4bd S31), so it is not attempted: a
+  canonical is replaced, and the outgoing session archived, only when a
+  new attempt launches on that path (review e757 i4, user decision).
+  Owner-completion finalization is unaffected — a review loop freezing its
+  own loop-scoped iterations and `_finalize_merge` freezing the merge
+  transcript are not guesses; the owner is done and only touches its own
+  paths.
+- The bulk sweeps (`_finalize_all_transcripts`, watcher completion)
+  therefore freeze **only** symlinks already sitting in `archive/`, so
+  superseded sessions survive Claude transcript pruning.  Archive entries
+  are immutable snapshots that nothing polls, so freezing one can never
+  hide a later turn.
+- `finalize_transcript_dir(directory, *, include_top_level=True)` exposes
+  the split.  The CLI watcher passes the default for its private
+  `watcher-<token>` dir: its process is exiting and nothing else reads
+  that directory, so freezing its own iteration links is safe and is the
+  only way those (never-reused) names survive pruning.  Every TUI sweep
+  passes `include_top_level=False`.
 
 ### R3 — Current collectors see later appended verdicts
 
@@ -220,11 +229,12 @@ available in the run dir:
     (atomic; a failed copy leaves the live link untouched; a redirect
     during the copy discards the temp and leaves the new link live);
   - return `True`.
-- Add `finalize_transcript_dir(directory, *, skip=None) -> int`: finalize
-  every top-level `*.jsonl` symlink and every `archive/*.jsonl` symlink.
-  `skip` is an optional predicate on a file name; a name it accepts is
-  left live (its session may still be writing).  Archive entries are
-  never skipped.
+- Add `finalize_transcript_dir(directory, *, include_top_level=True)
+  -> int`: finalize every `archive/*.jsonl` symlink, and the top-level
+  `*.jsonl` symlinks only when `include_top_level` is true.  The TUI
+  sweeps pass `False` — a canonical link may still be polled and must be
+  left live — while the CLI watcher passes the default for its private,
+  exiting-process directory (review e757 i4).
 
 ### `pm_core/review_loop.py`
 
@@ -280,45 +290,26 @@ available in the run dir:
 
 ### `pm_core/tui/auto_start.py`
 
-- `_live_transcript_owners(app)` returns the set of *name prefixes* of
-  the transcripts a loop *structurally* owns: every
-  `review-<pr>-<loop_id>-i*` of a running review loop and every
-  `<watcher-type>-i*` of a running watcher loop.  A running loop also
-  marks the legacy prefix `review-<pr>-i`: a loop restored from a
-  pre-upgrade breadcrumb polls the legacy shared iteration name, and
-  freezing it would hide the verdict it appends later.  Loop-scoped names
-  can never match that prefix (the loop id is hex, so it never starts
-  with `i`).  Every owned family shares a name prefix (loop-scoped
-  iterations, the legacy shared iteration name, watcher iterations), so a
-  prefix is the right key and there are no exact names: step windows are
-  resolved by :func:`_live_read_transcripts` instead (a window name alone
-  cannot tell a live pane from a dead one).
-- `_live_read_transcripts(app, tdir, *, include_signoff=False)` returns
-  the absolute paths a reader still polls: live idle-tracker entries, a
-  running review loop's current iteration transcript (resolved through
-  `resolve_iteration_transcript`, so a resumed legacy loop is covered),
-  and impl/review/merge (plus sign-off when *include_signoff*) transcripts
-  whose session id appears in a live pane's start command
-  (`tmux.live_pane_start_commands`, which lists only non-dead panes).
-  The session is resolved through `_app_session`, so a stub app's
-  non-string `_session_name` never reaches tmux.
-- `_live_transcript_skip(app, tdir=None, *, include_signoff=False)`
-  combines both: a name is live when it matches an owner name/prefix or
-  its absolute path is in `_live_read_transcripts`.
-- `_finalize_all_transcripts`: call
-  `finalize_transcript_dir(tdir, skip=_live_transcript_skip(app, tdir))`
-  (disable sweep, no sign-off keep-alive).
+- `_finalize_all_transcripts` (called only from `_disable`) calls
+  `finalize_transcript_dir(tdir, include_top_level=False)`: it freezes
+  the run dir's `archive/` entries and leaves every canonical link live.
+  The former liveness machinery (`_live_transcript_owners`,
+  `_live_read_transcripts`, `_live_transcript_skip`,
+  `_LAZY_TRACKED_RE`) was deleted with it (review e757 i4): deciding
+  "finished" from a pane or a window is the guess that broke S31, and
+  leaving the canonical live is always safe for a reader.
 
 ### `pm_core/tui/watcher_ui.py`, `pm_core/cli/watcher.py`
 
-- Use `finalize_transcript_dir` (includes `archive/`).
-- The TUI auto-start watcher shares its run directory with the
-  auto-start review loops, so its completion sweep must pass the same
-  `skip` predicate; otherwise a completing watcher freezes a loop that is
-  still polling (the 2026-10-28 failure mode).  It passes the run dir and
-  `include_signoff=True`: the sweep runs while auto-start is still on, so
-  a sign-off the driver is polling must stay live.  The CLI watcher uses
-  a private `watcher-<token>` directory and needs no skip.
+- Both use `finalize_transcript_dir`.  The TUI auto-start watcher shares
+  its run directory with the auto-start review loops and the step
+  windows, so it passes `include_top_level=False`: a completing watcher
+  freezes only the archive, never a canonical a loop, the idle poll or
+  the sign-off driver may still be reading.  The CLI watcher uses a
+  private `watcher-<token>` directory whose process is exiting and which
+  nothing else reads, so it takes the default and freezes its own
+  iteration links too (their names are never reused, so that freeze is
+  the only way they survive pruning).
 
 ## Ambiguities (resolved)
 
@@ -362,8 +353,9 @@ No **[UNRESOLVED]** ambiguities.
   becomes canonical; every session's content stays reachable (archive
   entry or native JSONL).
 - **Bulk finalize while a loop is running** (auto-start disable): the
-  sweep skips live loops/windows, so the collector keeps seeing appends;
-  its own completion callback finalizes later.
+  sweep does not touch canonical links at all, so the collector keeps
+  seeing appends; the loop's own completion callback finalizes its
+  loop-scoped iterations later.
 - **Archive symlink already exists when freezing**: frozen in place if it
   points at the same target; otherwise left untouched (immutable).
 - **Restart mid-iteration**: the resumed loop uses the restored
@@ -380,7 +372,8 @@ No **[UNRESOLVED]** ambiguities.
 
 ## Verification
 
-- New unit tests (37) in `tests/test_transcript_archive.py` covering:
+- New unit tests (34, after the e757-i4 rewrite; 37 before it) in
+  `tests/test_transcript_archive.py` covering:
   archive-on-replace, ownership-checked finalize, loop-scoped naming,
   retire preserving history, live-appends visibility, restart fallback
   (legacy fallback for a live link, loop-scoped preference when both
@@ -394,14 +387,17 @@ No **[UNRESOLVED]** ambiguities.
   absolute, no duplicate entry on re-archive), a dangling link and a
   failed copy left alone by finalize, a redirect before and *during* the
   freeze copy, a fresh loop never launching over a live legacy link,
-  the live-owner skips (running review loop, running watcher, live step
-  windows) for both bulk sweeps, and a stub app's non-string
-  `_session_name` never reaching tmux, and a legacy iteration link left
-  live when no session id was recorded (review d468 i4).  Review e757 i2
-  adds two: a live sign-off link is kept by a watcher-completion sweep
-  and frozen by the disable sweep (the `include_signoff` split merged
-  from master), and losing the no-clobber archive create to a concurrent
-  archiver is reported as success (review e757 i2).  One more
+  and a legacy iteration link left live when no session id was recorded
+  (review d468 i4).  Review e757 i4 replaces the old live-owner/skip
+  tests with the new rule: a bulk sweep (disable and watcher completion)
+  leaves every canonical link live — impl, sign-off, merge, review — and
+  appends to the native JSONL stay visible through it, while `archive/`
+  entries are frozen; the CLI watcher's private dir is frozen whole.
+  `tests/test_autostart_transcript_finalize.py` (master's S31 file) is
+  rewritten to the same rule: a live, a gone and a dead pane's canonical
+  all stay live, and only the archive entry is frozen.  Losing the
+  no-clobber archive create to a concurrent archiver is reported as
+  success (review e757 i2).  One more
   (`test_launches_loop_scoped_transcript_and_records_session`) lives in
   `tests/test_review_loop.py` because it drives `run_review_loop_sync`;
   `tests/test_breadcrumb_review_loop.py` gains an
@@ -468,18 +464,12 @@ Applied on top of the design above; keep them when editing the code.
   only copy of its content) is never removed.  A leftover regular file is
   caught by the missing-`.head` guard in `_step_signoff_locked`, which
   retires and relaunches rather than replaying it.
-- `_live_transcript_owners` snapshots `app._review_loops` before
-  iterating and reaches watchers through `app._watcher_manager`'s locked
-  `list_watchers()`: the watcher-completion sweep calls it from a
-  background thread while the TUI thread adds/removes loops, and
-  iterating a dict being resized raises `RuntimeError`.
-- Legacy iteration coverage (8602 i3): a running loop also marks the
-  legacy `review-<pr>-i` prefix live, so a bulk sweep cannot freeze the
-  iteration that a loop restored from a pre-upgrade breadcrumb is still
-  polling; and loop completion finalizes the legacy
-  `review-<pr>-i<N>.jsonl` of every iteration with a recorded session id
-  (ownership-checked), so an adopted legacy iteration is frozen and
-  archived instead of lingering as a link.
+- Legacy iteration coverage (8602 i3): loop completion finalizes the
+  legacy `review-<pr>-i<N>.jsonl` of every iteration with a recorded
+  session id (ownership-checked), so an adopted legacy iteration is
+  frozen and archived instead of lingering as a link.  (The old
+  live-owner prefix for that name is gone: a bulk sweep no longer freezes
+  canonicals at all — review e757 i4.)
 - `iteration_sessions` is persisted in the TUI breadcrumb (8602 i4) and
   restored by `consume_breadcrumb`, so the 8602-i3 guarantees survive a
   restart: a resumed loop still finalizes each iteration with its
@@ -506,11 +496,10 @@ Applied on top of the design above; keep them when editing the code.
   loop-scoped-over-legacy precedence in `resolve_iteration_transcript`
   (including a dangling loop-scoped link, which is the current attempt
   before Claude writes its native JSONL) is now pinned by tests.
-- The tmux session for a bulk finalize is resolved through
-  `auto_start._app_session` (review d468 i1; now used by
-  `_live_read_transcripts`) instead of the raw `_session_name`: a stub
-  app's attribute may be a non-string, which must never be handed to
-  tmux from inside a bulk finalize.
+- `auto_start._app_session` filters a stub app's non-string
+  `_session_name` before it can reach tmux (review d468 i1).  The bulk
+  sweeps no longer query tmux at all (review e757 i4), but the helper is
+  still the only safe way to read that attribute.
 - `resolve_iteration_transcript` falls back to the legacy iteration name
   only while that path is a symlink (review d468 i2).  A *frozen* legacy
   transcript is a completed iteration of an earlier loop — loop
@@ -562,8 +551,8 @@ Applied on top of the design above; keep them when editing the code.
   values) two loops for one PR could share an iteration path — the exact
   cross-loop freeze this PR removes — so the guarantee is only structural
   up to a collision.  8 hex chars makes that negligible; the value stays
-  opaque and hex-only (never starts with `i`), which the live-owner prefix
-  matching and the legacy-name patterns rely on.  Old breadcrumbs keep
+  opaque and hex-only (never starts with `i`), which the legacy-name
+  patterns rely on.  Old breadcrumbs keep
   their 4-char ids: the value is opaque everywhere.
 - Loop completion finalizes a *legacy* `review-<pr>-i<N>.jsonl` only when a
   session id is recorded for that iteration (review d468 i4).  The legacy
@@ -587,11 +576,7 @@ Applied on top of the design above; keep them when editing the code.
 - Cleanup (review e757 i1), no behaviour change: `run_review_loop_sync`
   reads an iteration's session id through the module's existing
   `_transcript_session_id` helper instead of importing
-  `session_id_from_transcript` into the function, and
-  `_live_transcript_owners` returns just the owner-name *prefixes* — the
-  `exact_names` half of its old tuple was never populated, so the
-  corresponding membership test was dead code.  Every owned family
-  shares a name prefix, which is why a prefix is the right key.  `qa.md`
+  `session_id_from_transcript` into the function.  `qa.md`
   R7 no longer asks for a `merge-<pr>.jsonl` on a clean local merge (none
   is written; assert the merge by PR status).
 - `archive_transcript` reports a lost no-clobber create as success
@@ -603,11 +588,10 @@ Applied on top of the design above; keep them when editing the code.
   happened
   (`test_a_concurrent_archive_is_not_reported_as_a_failure`).
 - The `include_signoff` split between the two bulk sweeps (merged from
-  master) is now pinned by a test (review e757 i2):
-  `test_a_live_signoff_link_follows_the_sweep` shows a watcher
-  completion keeping a live sign-off link (auto-start still on, the
-  driver is still polling) and the disable sweep freezing the same link
-  (auto-start off, the driver stops stepping the PR).
+  master) was pinned by a test in review e757 i2 and **removed in e757
+  i4**: neither sweep freezes a canonical link any more, so both keep a
+  live sign-off link and freeze only the archive
+  (`test_both_sweeps_leave_a_signoff_link_live`).
 
 ## Master integration (2026-10-31, merge of `origin/master` eaf3372e)
 
@@ -620,20 +604,15 @@ The 2026-10-31 user-authorized restart merged current `origin/master`
   ownership-checked, archive-writing version (master's simple
   unlink+copy version is superseded), and master's new
   `pane_runs_transcript` helper is kept alongside it.
-- Master's S31 fix (`_live_read_transcripts`: a disable must not freeze a
-  transcript the idle tracker or a live pane still reads) is combined
-  with this PR's structural owner sweep rather than replacing it:
-  `_live_transcript_skip` now consults both.  Master's review-loop branch
-  of that scan resolves its iteration path through
-  `resolve_iteration_transcript`, so a loop-scoped (or resumed legacy)
-  iteration is covered.
-- `_live_read_transcripts` uses `_app_session` (this PR's d468-i1
-  hardening) instead of the raw `_session_name`.
-- The disable sweep (`_finalize_all_transcripts`) follows master's
-  semantics for sign-off — a live sign-off window's transcript is frozen,
-  because auto-start off means the sign-off driver stops stepping the
-  PR — while the watcher-completion sweep passes
-  `include_signoff=True`, because it runs with auto-start still on.
+- Master's S31 fix (a disable must not freeze a transcript the idle
+  tracker or a live pane still reads) is **superseded in review e757 i4**
+  by a stronger rule: the bulk sweeps never freeze a canonical link, so
+  no reader can lose one.  The liveness scan it added
+  (`_live_read_transcripts` / `_live_transcript_skip` /
+  `_live_transcript_owners`) was deleted with the guess.  S31's
+  regression stays covered: `tests/test_autostart_transcript_finalize.py`
+  keeps a live merge window's link readable across a disable and appends
+  a later MERGED through it.
 - `auto_start._adopt_return_review` (master's S79 fix: adopt the live
   review window a sign-off REVIEW return already launched) now creates
   the adopted link at the *loop-scoped* name for the new loop, not the
@@ -656,9 +635,9 @@ for `test_markdown_render`).  The pre/post-fix repro
 still reports all three symptoms fixed at the integrated HEAD.  Two
 master tests needed adapting to loop-scoped naming: the S79 adoption test
 (`tests/test_return_driver_handoff.py`) now expects the adopted link at
-`review-<pr>-<loop_id>-i1.jsonl`, and the two live-owner unit tests in
-`tests/test_transcript_archive.py` now pin `_live_read_transcripts`
-(live-pane, not window-name, liveness).
+`review-<pr>-<loop_id>-i1.jsonl`.  (The two live-owner unit tests in
+`tests/test_transcript_archive.py` were removed in review e757 i4 with
+the liveness machinery they pinned.)
 
 ## Master integration (2026-11-01, merge of `origin/master` 53bcbd72)
 
@@ -680,31 +659,34 @@ already-in-master #272 and #280) into this branch.  Conflicts were in
   `_generate_loop_id()`'s 8-hex width; a wrong-typed one now makes the
   record malformed and it is skipped (fail-closed policy wins over
   repair).  The `iteration_sessions` restore and its ownership checks are
-  unchanged, and `_live_transcript_owners` / `_live_read_transcripts` /
-  `_finalize_all_transcripts` auto-merged unchanged.
+  unchanged, and `_finalize_all_transcripts` auto-merged unchanged (its
+  body was then simplified in review e757 i4 — see above).
 
 Verified after this integration: full suite **5477 passed / 1 skipped**
 (7m08s), and the post-fix repro still reports all three symptoms fixed.
 
 ## Known limitations (accepted)
 
-- **A live pane keeps its step's transcript live for the whole sweep.**
-  A disable while a live pane still runs a step's session leaves that
-  step's canonical transcript a symlink (never frozen), because an
-  idle-looking pane is not provably done.  It is archived on the next launch that reuses the path
-  (`build_claude_shell_cmd`), so pre-return sessions are still preserved;
-  only a final session whose path is never reused stays a link until
-  Claude prunes it.  Distinguishing idle from running would need the pane
-  idle tracker, which is TUI-only and not available for sign-off/merge.
+- **A canonical transcript is only self-contained once it is superseded.**
+  A bulk sweep never freezes a canonical link (review e757 i4, user
+  decision: only a *new attempt on the same path* changes the link).  So
+  the attempt that is live when the run ends stays a symlink to
+  `~/.claude/projects/<sid>.jsonl`; if Claude prunes that native file the
+  link dangles.  Every superseded attempt is archived on replace and the
+  archive entries are frozen, so history survives; only the final attempt
+  of each step relies on the native file.  Freezing the final attempt
+  would require a definitive end-of-run signal (e.g. process shutdown),
+  not a liveness guess.
 - **`_finalize_merge` passes no session id.**  It has no launch-time
   session id to compare against; `finalize_transcript` still writes the
   sid-keyed archive copy first, so no content is lost if a newer merge
   run owns the path.
-- **A running loop keeps legacy iteration links live for its whole run.**
-  The legacy `review-<pr>-i*` prefix is marked live whenever a loop for
-  that PR runs, because the loop may be polling an adopted pre-upgrade
-  iteration.  A stale legacy link from an earlier loop is therefore
-  frozen by a later sweep (or the loop's completion), not during the run.
+- **A legacy iteration link outlives a finished loop until completion.**
+  A loop restored from a pre-upgrade breadcrumb polls the shared legacy
+  `review-<pr>-i<N>.jsonl`; the loop's own completion freezes it (with the
+  recorded session id) when the loop ends.  A stale legacy link from an
+  earlier loop that this loop never adopts is left for its own loop's
+  completion or a `finalize_transcript_dir` caller to handle.
 - **Finalize's last check and `os.replace` are not atomic together.**  The
   readlink guard runs immediately before the replace, so the unguarded
   window is one `os.replace` call; POSIX has no compare-and-swap for a
@@ -712,3 +694,50 @@ Verified after this integration: full suite **5477 passed / 1 skipped**
   in-process lock.  A redirect landing inside that call would still be
   clobbered; the archive copy of the replaced session is written first,
   so no session content is lost either way.
+
+## Review e757 i4 — the bulk sweeps stop guessing "finished"
+
+User decision (2026-11-01) on the QA S16-story-3 / R5 INPUT_REQUIRED:
+rather than refine the liveness rule, the bulk sweeps no longer freeze
+canonical links at all.  The reasoning: a canonical name points at the
+attempt that is live *now*, so a reader watching it should see that the
+step is still not done; only a *new attempt on the same path* changes the
+link (and archives the outgoing session first).
+
+- `finalize_transcript_dir(directory, *, include_top_level=True)`:
+  `archive/*.jsonl` links are always frozen; top-level `*.jsonl` links
+  only when the caller owns the whole directory.  The `skip` predicate is
+  gone.
+- `auto_start._finalize_all_transcripts` → `include_top_level=False`,
+  and `_live_transcript_owners` / `_live_read_transcripts` /
+  `_live_transcript_skip` / `_LAZY_TRACKED_RE` /
+  `_LAZY_TRACKED_WITH_SIGNOFF_RE` are deleted (147 lines).  The
+  `include_signoff` split disappears with them.
+- `watcher_ui._on_complete_from_thread` → `include_top_level=False`
+  (it shares the auto-start run dir).
+- `cli/watcher.py` keeps the default: its `watcher-<token>` dir is
+  private and its process is exiting, so freezing its own iteration
+  links is safe and is their only path to surviving pruning.
+- Unchanged: archive-on-replace, ownership-checked
+  `finalize_transcript`, loop-completion finalization of its own
+  loop-scoped iterations (+ the ownership-checked legacy name), and
+  `_finalize_merge`.
+- Tests: `tests/test_transcript_archive.py` now has
+  `test_disable_leaves_canonical_links_live`,
+  `test_disable_freezes_archive_entries_only`,
+  `test_watcher_completion_leaves_canonicals_live`,
+  `test_both_sweeps_leave_a_signoff_link_live` and
+  `test_cli_watcher_freezes_its_private_dir` in place of the live-owner
+  tests.  `tests/test_autostart_transcript_finalize.py` (master's S31
+  file) is rewritten to the same rule and still pins the S31 regression:
+  a live merge link shows the later MERGED after a disable, and a gone or
+  dead pane's link stays live too.
+- Verified: full suite **5476 passed / 1 skipped** (7m07s, markdown
+  installed); 889 passed across the archive/review-loop/breadcrumb/
+  retry/handoff/auto-start/watcher/signoff/launcher suites; the post-fix
+  repro still reports all three symptoms fixed.
+
+Trade-off recorded above (Known limitations): only a *superseded* attempt
+is self-contained in the run dir.  The attempt that is live when a run
+ends stays a symlink to `~/.claude/projects`, so pruning can lose it;
+freezing it would need a definitive end-of-run signal, not a guess.

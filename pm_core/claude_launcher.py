@@ -1560,18 +1560,27 @@ def finalize_transcript(transcript_path: Path,
 
 
 def finalize_transcript_dir(directory: str | Path, *,
-                            skip: Callable[[str], bool] | None = None) -> int:
-    """Finalize every transcript symlink in *directory* and its archive.
+                            include_top_level: bool = True) -> int:
+    """Finalize the transcript symlinks a finished owner leaves behind.
 
-    Returns the number of links frozen.  Archives are included so the
-    per-attempt sessions kept by :func:`archive_transcript` also survive
-    Claude transcript pruning.
+    Returns the number of links frozen.  ``archive/*.jsonl`` links are
+    always frozen: each is an immutable snapshot of a superseded attempt
+    (pr-9ee4d64), so no collector polls it and the copy keeps that
+    session alive across Claude transcript pruning.
 
-    *skip* is a predicate on a file name: a transcript whose session may
-    still be writing (a running loop or an existing step window) must be
-    left live, otherwise its collector polls a frozen copy and never sees
-    the verdict appended later (pr-9ee4d64).  Archive entries are never
-    skipped — they are immutable snapshots of superseded attempts.
+    *include_top_level* controls the canonical links in *directory*
+    itself (``impl-<pr>.jsonl``, ``signoff-<pr>.jsonl``, …).  A canonical
+    name points at the attempt that is live *now*, and another reader may
+    still be polling it — the TUI's idle poll, a driver waiting on a
+    verdict — so a bulk sweep must leave those links alone: a frozen copy
+    never shows what the session appends later.  Deciding "finished" from
+    a window or a pane is exactly the guess that hid a later MERGED / PASS
+    before, so it is not attempted here.  Only a caller that definitively
+    owns the whole directory passes True (the CLI watcher's private
+    ``watcher-<token>`` dir, whose process is exiting and which nothing
+    else reads).  Everywhere else a canonical is replaced only when a new
+    attempt launches on the same path, and :func:`archive_transcript`
+    preserves the outgoing session first.
     """
     d = Path(directory)
     if not d.is_dir():
@@ -1584,15 +1593,7 @@ def finalize_transcript_dir(directory: str | Path, *,
         except OSError:
             return []
 
-    links: list[Path] = []
-    for p in _links_in(d):
-        if skip is not None and skip(p.name):
-            # Kept live on purpose: a debug line, because a sweep may skip
-            # many files and the reason (a live collector) is not visible
-            # from the file itself.
-            _log.debug("transcript: %s is still live — not finalized", p)
-            continue
-        links.append(p)
+    links: list[Path] = _links_in(d) if include_top_level else []
     adir = d / TRANSCRIPT_ARCHIVE_DIR
     if adir.is_dir():
         links.extend(_links_in(adir))

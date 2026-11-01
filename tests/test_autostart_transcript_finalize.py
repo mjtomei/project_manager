@@ -1,14 +1,22 @@
-"""Disabling auto-start must not freeze transcripts of still-tracked sessions.
+"""Disabling auto-start must not freeze a transcript anything still reads.
 
-S31 (pr-592e4bd): ``A`` removing the last target disables auto-start, and
+S31 (pr-592e4bd): removing the last target disables auto-start, and
 ``_finalize_all_transcripts`` replaced every transcript symlink in the run
 dir with a copy -- including the post-merge repo-update window's, which the
 idle tracker (``merge:<pr>``) still reads.  The window's later MERGED never
 reached the copy, so the TUI kept reporting INPUT_REQUIRED forever.
 
-Live readers are not only idle-tracker entries: a running review loop polls
-its iteration transcript itself, and merge / impl windows are registered
-lazily on a later poll -- so a live pane running the session also keeps it.
+pr-9ee4d64 removed the guess rather than refining it: a bulk sweep no
+longer freezes *canonical* links at all.  A canonical name
+(``impl-<pr>.jsonl``, ``merge-<pr>.jsonl``, ``signoff-<pr>.jsonl``, …)
+points at the attempt that is live now, and every reader -- the idle
+tracker, a running review loop, the sign-off driver, a repo-update window
+-- keeps seeing the native JSONL grow, because the link is never replaced
+behind their back.  A canonical is replaced, and the outgoing session
+archived under ``archive/<stem>.<sid>.jsonl``, only when a new attempt
+launches on the same path.  Those archive entries are what the sweep
+freezes: they are superseded snapshots that nothing polls, and the copy
+keeps them alive across Claude transcript pruning.
 """
 
 import json
@@ -79,9 +87,10 @@ def test_disable_keeps_live_merge_transcript_so_merged_is_detected(tmp_path):
 
     auto_start._disable(app)
 
-    # The live session's link survives; the untracked finished one is saved.
+    # Every canonical link survives: the live merge window still reads its
+    # own transcript, and the finished sign-off's is left live too.
     assert merge_link.is_symlink()
-    assert not done_link.is_symlink() and "SIGNOFF_MERGE" in done_link.read_text()
+    assert done_link.is_symlink()
     # The user answers in the merge window; Claude ends with MERGED.
     with live.open("a") as f:
         f.write(_user("The checkout is fixed, please finish")
@@ -91,7 +100,9 @@ def test_disable_keeps_live_merge_transcript_so_merged_is_detected(tmp_path):
         ("MERGED", "INPUT_REQUIRED")) == "MERGED"
 
 
-def test_disable_finalizes_transcript_of_a_gone_tracked_pane(tmp_path):
+def test_disable_keeps_a_gone_tracked_panes_transcript_live(tmp_path):
+    """A dead pane is still not a licence to freeze: the driver, a later
+    restart or an external reader may still poll the canonical."""
     app, live, merge_link, _ = _setup(tmp_path)
     tracker = app._pane_idle_tracker
     tracker.register("merge:pr-m", "%24", str(merge_link))
@@ -99,8 +110,10 @@ def test_disable_finalizes_transcript_of_a_gone_tracked_pane(tmp_path):
 
     auto_start._disable(app)
 
-    assert not merge_link.is_symlink()
-    assert "INPUT_REQUIRED" in merge_link.read_text()
+    assert merge_link.is_symlink()
+    with live.open("a") as f:
+        f.write(_assistant("MERGED"))
+    assert "MERGED" in merge_link.read_text()
 
 
 SID_REVIEW = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
@@ -153,15 +166,14 @@ def test_disable_keeps_running_review_loop_and_unregistered_merge_transcripts(
     app._review_loops["pr-m"] = loop
     # The merge window was just opened: not registered in the tracker yet.
     pane("merge-pr-m", SID_MERGE)
-    # The finished sign-off's pane is still open, but nothing reads its
-    # transcript once auto-start is off (the driver only steps driven PRs).
+    # The finished sign-off's pane is still open.
     pane("signoff-pr-m", SID_DONE)
     assert app._pane_idle_tracker.tracked_keys() == []
 
     auto_start._disable(app)
 
     assert review_link.is_symlink() and merge_link.is_symlink()
-    assert not done_link.is_symlink() and "SIGNOFF_MERGE" in done_link.read_text()
+    assert done_link.is_symlink()
     with review.open("a") as f:
         f.write(_assistant("looks good\nPASS"))
     with live.open("a") as f:
@@ -171,14 +183,17 @@ def test_disable_keeps_running_review_loop_and_unregistered_merge_transcripts(
         str(merge_link), ("MERGED", "INPUT_REQUIRED")) == "MERGED"
 
 
-def test_disable_archives_a_finished_review_loop_iteration(tmp_path, tmux_session):
+def test_disable_leaves_a_finished_review_loop_iteration_live(
+        tmp_path, tmux_session):
+    """A finished loop's iteration link stays live: the pane may still be
+    open, and a frozen copy would hide a verdict it appends afterwards."""
     from pm_core.review_loop import ReviewLoopState
     tm, pane = tmux_session
     app, _, _, _ = _setup(tmp_path)
     app._session_name = "sess"
     tdir = auto_start.get_transcript_dir(app)
     review = tmp_path / "claude-projects" / f"{SID_REVIEW}.jsonl"
-    review.write_text(_user("review") + _assistant("PASS"))
+    review.write_text(_user("review"))
     link = tdir / "review-pr-m-i1.jsonl"
     link.symlink_to(review)
     loop = ReviewLoopState(pr_id="pr-m")
@@ -189,17 +204,25 @@ def test_disable_archives_a_finished_review_loop_iteration(tmp_path, tmux_sessio
 
     auto_start._disable(app)
 
-    assert not link.is_symlink() and "PASS" in link.read_text()
+    assert link.is_symlink()
+    with review.open("a") as f:
+        f.write(_assistant("looks good\nPASS"))
+    assert extract_verdict_from_transcript(str(link), ("PASS",)) == "PASS"
 
 
-def test_disable_archives_sessions_whose_pane_is_dead_or_gone(tmp_path, tmux_session):
+def test_disable_freezes_archive_entries_but_leaves_canonicals_live(
+        tmp_path, tmux_session):
     tm, pane = tmux_session
     app, live, merge_link, done_link = _setup(tmp_path)
     app._session_name = "sess"
     dead = tmp_path / "claude-projects" / f"{SID_DEAD}.jsonl"
     dead.write_text(_user("impl") + _assistant("done"))
-    dead_link = auto_start.get_transcript_dir(app) / "impl-pr-m.jsonl"
+    tdir = auto_start.get_transcript_dir(app)
+    dead_link = tdir / "impl-pr-m.jsonl"
     dead_link.symlink_to(dead)
+    archived = tdir / "archive" / f"impl-pr-m.{SID_DONE}.jsonl"
+    archived.parent.mkdir()
+    archived.symlink_to(done_link.resolve())
     tm("set-option", "-g", "remain-on-exit", "on")
     tm("new-window", "-d", "-t", "sess:", "-n", "pr-m",
        f"true; : claude --session-id {SID_DEAD}")
@@ -210,8 +233,10 @@ def test_disable_archives_sessions_whose_pane_is_dead_or_gone(tmp_path, tmux_ses
 
     auto_start._disable(app)
 
-    # Neither the merge session (no pane at all) nor the exited impl
-    # session (dead pane) is live: both are archived as copies.
+    # Canonicals stay live whatever the pane state (alive, dead, absent);
+    # the archived snapshot is frozen so it survives Claude pruning.
     for link in (merge_link, done_link, dead_link):
-        assert not link.is_symlink(), link
+        assert link.is_symlink(), link
     assert "done" in dead_link.read_text()
+    assert archived.is_file() and not archived.is_symlink()
+    assert "SIGNOFF_MERGE" in archived.read_text()

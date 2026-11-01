@@ -838,170 +838,30 @@ def _adopt_live_qa(app) -> None:
         _log.warning("auto_start: QA adoption scan failed", exc_info=True)
 
 
-def _live_transcript_owners(app) -> set[str]:
-    """Name prefixes of the transcripts a loop *structurally* owns.
-
-    A running review loop owns every ``review-<pr>-<loop_id>-i*`` path,
-    plus the legacy shared ``review-<pr>-i*`` name a loop restored from a
-    pre-upgrade breadcrumb may still be polling; a running watcher loop
-    owns its ``<watcher-type>-i*`` paths.  Every owned family shares a
-    name prefix (loop-scoped iterations, the legacy shared iteration
-    name, watcher iterations), so a prefix — not an exact name — is the
-    right key.
-
-    Step windows (impl / review / sign-off / merge) are handled by
-    :func:`_live_read_transcripts` instead: a transcript is live only
-    while a *live* pane still runs that session, so a dead pane does not
-    keep it a symlink forever.  (A pane whose session merely finished a
-    turn is still live, which is why a step window open at sweep time
-    keeps its canonical a link — see the accepted limitation in the
-    spec.)
-    """
-    prefixes: set[str] = set()
-    # Snapshot: this also runs from a watcher's completion callback (a
-    # background thread) while the TUI thread adds/removes loops, and
-    # iterating a dict being resized raises RuntimeError.
-    loops = list((getattr(app, "_review_loops", None) or {}).items())
-    for pr_id, state in loops:
-        if getattr(state, "running", False):
-            prefixes.add(f"review-{pr_id}-{getattr(state, 'loop_id', '')}-i")
-            # A loop restored from a pre-upgrade breadcrumb adopts its
-            # in-flight iteration under the legacy shared name
-            # ``review-<pr>-i<N>.jsonl`` (see
-            # ``review_loop.resolve_iteration_transcript``).  Freezing
-            # that while the loop still polls would hide the verdict it
-            # appends later, so the legacy prefix counts as live for the
-            # whole run of a running loop.  Loop-scoped names can never
-            # match it: the loop id is hex, so it never starts with "i".
-            prefixes.add(f"review-{pr_id}-i")
-    manager = getattr(app, "_watcher_manager", None)
-    if manager is not None:
-        try:
-            for info in manager.list_watchers():
-                if info.get("running") and info.get("type"):
-                    prefixes.add(f"{info['type']}-i")
-        except Exception:
-            _log.debug("auto_start: list_watchers failed", exc_info=True)
-    return prefixes
-
-
-def _live_transcript_skip(app, tdir: Path | None = None, *,
-                          include_signoff: bool = False):
-    """Predicate: True when a transcript's session may still be writing.
-
-    Passed to :func:`pm_core.claude_launcher.finalize_transcript_dir` so a
-    bulk finalize never freezes a collector that is still polling
-    (pr-9ee4d64).  It combines the transcripts a running loop or watcher
-    structurally owns (by name) with the ones a reader still polls — idle
-    tracker entries and live panes (see :func:`_live_read_transcripts`).
-
-    *include_signoff* also keeps a live sign-off window's link.  The
-    auto-start disable sweep leaves it out: once auto-start is off the
-    sign-off driver no longer steps the PR, so its transcript can be
-    frozen.  A watcher completion (auto-start still on) passes it, so a
-    sign-off the driver is still polling is never frozen.
-    """
-    prefixes = _live_transcript_owners(app)
-    live_paths: set[str] = set()
-    if tdir is not None and Path(tdir).is_dir():
-        try:
-            live_paths = _live_read_transcripts(
-                app, Path(tdir), include_signoff=include_signoff)
-        except Exception:
-            _log.debug("auto_start: live-read scan failed", exc_info=True)
-
-    def _live(name: str) -> bool:
-        if any(name.startswith(p) for p in prefixes):
-            return True
-        return bool(tdir is not None and
-                    os.path.abspath(Path(tdir) / name) in live_paths)
-
-    return _live
-
-
-# Transcripts the TUI's idle polling (_poll_impl_idle) keeps reading after
-# auto-start is disabled; it registers them lazily on a later poll.
-_LAZY_TRACKED_RE = re.compile(r"^(?:impl|merge|review)-(?!.*-i\d+\.jsonl$).+\.jsonl$")
-# A watcher-completion sweep runs while auto-start is still on, so a live
-# sign-off window is a collector too (see _live_transcript_skip).
-_LAZY_TRACKED_WITH_SIGNOFF_RE = re.compile(
-    r"^(?:impl|merge|review|signoff)-(?!.*-i\d+\.jsonl$).+\.jsonl$")
-
-
-def _live_read_transcripts(app, tdir: Path, *,
-                           include_signoff: bool = False) -> set[str]:
-    """Paths in *tdir* that a reader still polls after auto-start is off.
-
-    - live idle-tracker entries (impl / merge / non-loop review panes);
-    - a running review loop's current iteration transcript (the loop polls
-      it itself; ``_poll_impl_idle`` skips PRs with running loops);
-    - impl / merge / review transcripts whose session a live pane of the pm
-      session still runs (they are registered lazily on a later poll).
-    Sign-off transcripts are excluded by default: the sign-off driver only
-    steps auto-start-driven PRs, so disabling auto-start retires it.  A
-    watcher-completion sweep passes *include_signoff* — auto-start is still
-    on and the driver keeps polling.
-    """
-    from pm_core import tmux as tmux_mod
-    from pm_core.claude_launcher import _PANE_SESSION_RE, session_id_from_transcript
-    live: set[str] = set()
-    tracker = getattr(app, "_pane_idle_tracker", None)
-    if tracker is not None:
-        for key in tracker.tracked_keys():
-            path = tracker.get_transcript_path(key)
-            if path and not tracker.is_gone(key):
-                live.add(os.path.abspath(path))
-    # Snapshot for the same reason as _live_transcript_owners.
-    loops = list((getattr(app, "_review_loops", None) or {}).items())
-    for pr_id, state in loops:
-        if state.running and getattr(state, "_transcript_dir", None):
-            from pm_core.review_loop import resolve_iteration_transcript
-            try:
-                path = resolve_iteration_transcript(
-                    Path(state._transcript_dir), pr_id,
-                    getattr(state, "loop_id", ""), state.iteration)
-            except Exception:
-                _log.debug("auto_start: iteration transcript resolve failed",
-                           exc_info=True)
-                continue
-            live.add(os.path.abspath(path))
-    # ``_app_session``, not the raw attribute: a stub app's ``_session_name``
-    # may be a non-string, which must not reach tmux.
-    session = _app_session(app)
-    if session:
-        pattern = (_LAZY_TRACKED_WITH_SIGNOFF_RE if include_signoff
-                   else _LAZY_TRACKED_RE)
-        ids: set[str] = set()
-        for cmd in tmux_mod.live_pane_start_commands(session):
-            ids.update(_PANE_SESSION_RE.findall(cmd))
-        try:
-            entries = list(tdir.iterdir())
-        except OSError:
-            entries = []
-        for p in entries:
-            if (pattern.match(p.name) and p.is_symlink()
-                    and session_id_from_transcript(p) in ids):
-                live.add(os.path.abspath(p))
-    return live
-
-
 def _finalize_all_transcripts(app) -> None:
-    """Finalize transcript symlinks in the current run directory.
+    """Freeze the run dir's archived sessions on auto-start disable.
 
-    Skips transcripts whose session may still be writing or still be read
-    — a running review loop, a running watcher loop, an idle-tracker
-    entry, or a live pane running that session — because a copy would
-    freeze them and the collector would never see the verdict appended
-    later (pr-9ee4d64; e.g. a repo-update merge window waiting on
-    INPUT_REQUIRED would never have its later MERGED detected).  Symlinks
-    already in the run archive are finalized too, so superseded attempts
-    survive Claude transcript pruning.
+    Canonical transcripts (``impl-<pr>.jsonl``, ``signoff-<pr>.jsonl``,
+    ``merge-<pr>.jsonl``, ``review-<pr>.jsonl``) are deliberately left as
+    live links.  A canonical points at the attempt that is live *now*, and
+    the TUI keeps reading impl/merge/review transcripts after auto-start
+    is off (``_poll_impl_idle``, a running review loop, a repo-update
+    window waiting on INPUT_REQUIRED).  Freezing one would hide whatever
+    the session appends next — the failure class this PR exists to
+    prevent — and guessing "finished" from a pane or a window is what got
+    it wrong before (pr-592e4bd S31).  The canonical is replaced, and the
+    outgoing session archived, only when a new attempt launches on that
+    path.
+
+    ``archive/`` entries are frozen: they are immutable snapshots of
+    superseded attempts, nobody polls them, and the copy keeps them alive
+    across Claude transcript pruning.
     """
     tdir = get_transcript_dir(app)
     if not tdir or not tdir.is_dir():
         return
     from pm_core.claude_launcher import finalize_transcript_dir
-    finalize_transcript_dir(tdir, skip=_live_transcript_skip(app, tdir))
+    finalize_transcript_dir(tdir, include_top_level=False)
 
 
 def _disable(app) -> None:
