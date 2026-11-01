@@ -239,6 +239,48 @@ class TestAddRemove:
         kwid.assert_not_called()
 
 
+class TestWatcherScopeSync:
+    """The scope push reaches the live watcher, never a stale stopped one.
+
+    Finished watchers stay registered so the TUI can show their final
+    verdict, so a ws start/stop cycle leaves a stopped ``auto-start``
+    instance ahead of the running one.  ``WatcherManager.find_by_type``
+    prefers the running instance (7ba4af77); ``_sync_enabled`` must
+    therefore re-scope the live watcher, or ``autostart add/remove`` would
+    update the dead entry while the running watcher kept its old scope.
+    """
+
+    def _app_with_watchers(self):
+        from pm_core.watcher_manager import WatcherManager
+        from pm_core.watchers.auto_start_watcher import AutoStartWatcher
+
+        app = FakeApp([_pr("t1"), _pr("t2", deps=["t1"])])
+        mgr = WatcherManager()
+        stale = AutoStartWatcher(pm_root="", auto_start_targets=["stale"])
+        live = AutoStartWatcher(pm_root="", auto_start_targets=["stale"])
+        mgr.register(stale)
+        mgr.register(live)
+        stale.state.running = False
+        live.state.running = True
+        app._watcher_manager = mgr
+        return app, stale, live
+
+    def test_add_rescopes_the_running_watcher_not_the_stale_one(self):
+        app, stale, live = self._app_with_watchers()
+        auto_start.add_targets(app, ["t1"])
+        assert live.auto_start_targets == ["t1"]
+        # The stopped instance must not be touched (its prompt is history).
+        assert stale.auto_start_targets == ["stale"]
+
+    def test_remove_rescopes_the_running_watcher(self):
+        app, stale, live = self._app_with_watchers()
+        auto_start.add_targets(app, ["t1", "t2"])
+        assert live.auto_start_targets == ["t1", "t2"]
+        auto_start.remove_targets(app, ["t2"])
+        assert live.auto_start_targets == ["t1"]
+        assert stale.auto_start_targets == ["stale"]
+
+
 class TestKeys:
     def test_O_twice_on_two_prs_keeps_both(self):
         app = FakeApp([_pr("a"), _pr("b")])

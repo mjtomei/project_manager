@@ -34,7 +34,11 @@ to fix the malformed-state branch.
 - `pm_core/tui/auto_start.py:is_all_mode`, `enable_all`,
   `app._auto_start_all`, and every branch that reads them are removed.
 - `_sync_enabled` enables iff `bool(_targets(app))`; an empty collection is
-  OFF. No targetless fallback anywhere.
+  OFF. No targetless fallback anywhere. It also pushes the current target
+  list onto the live auto-start watcher (`w.auto_start_targets`); that push
+  must reach the *running* watcher, never a stale stopped instance still
+  registered for its verdict display (see the 2026-10-31 post-integration
+  fix below).
 
 ### R2 — Remove every entry point to all-PR mode
 
@@ -505,3 +509,46 @@ Conflict resolutions (both sides' behaviour preserved):
   altered or dropped.
 
 Validation on the integrated head: full suite **5291 passed, 1 skipped, 0 failed** (447 s) on the merge commit `1c9841f8` (an earlier focused run of the autostart, breadcrumb/review-loop, QA-loop, log-message, owed-REQA, launch-retry and signoff-handoff suites: 720 passed).
+
+## Post-integration fix — watcher lookup prefers the running instance (7ba4af77)
+
+Sign-off routed the PR back (SIGNOFF_REVIEW) because `7ba4af77` changed
+product code after the last review.  `WatcherManager.find_by_type` used to
+return the first *registered* watcher of a type.  Finished watchers stay
+registered so the TUI can show their final verdict, so after one `ws`
+start/stop cycle the registry held a stopped instance ahead of the running
+one.  Consequences:
+
+- `app._action_watcher_toggle` / `watcher_ui.stop_watcher` saw
+  `running=False` and started a duplicate instead of stopping the live
+  watcher (each "stop" recreated the window and killed the previous pane,
+  verdict KILLED), so the watcher could not be stopped from the TUI.
+- `auto_start._sync_enabled` pushed re-scoped targets onto the stale
+  stopped watcher, leaving the running one on its old scope — directly
+  relevant to R5 (watcher scope must follow explicit targets).
+
+`find_by_type` now prefers a running instance and falls back to the first
+stopped one; every caller (`start_watcher`, `stop_watcher`,
+`_action_watcher_toggle`, `find_state_by_type`/`is_running`,
+`_sync_enabled`) wants exactly that.  `AutoStartWatcher.generate_prompt` /
+`build_launch_cmd` read `self.auto_start_targets` each iteration, so the
+push re-scopes subsequent iterations.
+
+Regression coverage:
+
+- `tests/test_watcher_loop.py::TestWatcherManager::
+  test_find_by_type_prefers_running_over_stale_stopped` — manager-level
+  ordering (added with the fix).
+- `tests/test_autostart_multi_target.py::TestWatcherScopeSync` — a stale
+  stopped watcher registered ahead of a running one; `add_targets` /
+  `remove_targets` (both via `_sync_enabled`) must update the running
+  watcher's `auto_start_targets` and leave the stopped one untouched.
+  Verified to fail against the pre-fix `find_by_type`.
+
+Decision on the optional follow-up: `_disable` does **not** clear a
+stopping watcher's `auto_start_targets`.  A graceful stop sets
+`stop_requested`, and `BaseWatcher.run_sync` breaks before the next
+iteration and aborts the in-flight poll on the same flag, so no further
+prompt is built with the old scope; clearing would be a no-op.  The
+in-flight iteration was already authorized under the old scope, and this
+matches master's pre-existing behaviour.
