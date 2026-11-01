@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T04:31:10.602999+00:00'
+  updated_at: '2026-11-01T04:56:36.820967+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5855,6 +5855,41 @@ prs:
       socket).'
     created_at: '2026-11-01T04:31:10Z'
     last_edited: '2026-11-01T04:31:10Z'
+  - id: note-dd0accb
+    text: 'Review loop 2caf i3 (commit 3a53947c5; no requirement changes; full suite
+      5363 passed / 1 skipped, log /pm-captures/review-2caf-i3/full-suite-final.log).
+      No code defect surfaced; this iteration closes coverage gaps in the central
+      discovery/connect paths and corrects two qa.md requirements that no longer matched
+      the implementation. (1) The cwd discovery branch of _find_tui_pane had no test
+      of its success return (the everyday `pm tui view` from a plain shell in the
+      project dir): every existing test either had no cwd session running or a registry
+      without a live TUI pane. New TestFindTuiPaneAcrossServers::test_cwd_session_with_a_registered_tui_pane_is_resolved
+      runs the real _select_session_socket and asserts the pane/session and that PM_TMUX_SOCKET
+      names the cwd session server (coverage confirms it is the only test reaching
+      that line). (2) `pm session --print-connect --dir` was untested; new TestPrintConnect::test_dir_with_share_flags_prints_the_shared_socket
+      asserts the printed command, that the tag came from the --dir directory, and
+      that the share mode was set for the tag computation. (3) Coverage for --global
+      + --group mutual exclusion (nothing printed) and `pm session list` without tmux.
+      (4) The i2 detach fix had only unit coverage: new TestServerIsolationIntegration::test_detach_through_the_users_own_view
+      builds a real base + myview group on a disposable socket, attaches a real client
+      to the view, and asserts one detach_current_client() removes exactly that client
+      while both sessions survive. (5) qa.md R3 said the CLIENTS count covers "the
+      whole session group"; R5/sessions_in_group define the group to include a user''s
+      own view, so the wording contradicted the deliberate i2 decision (only pm-named
+      base/~N sessions are counted; QA scenario 9 uses tmux list-clients as authoritative).
+      R3 now says exactly that. (6) qa.md R9''s plain-reattach bullet said a plain
+      `pm session` reattaches a shared session "from the project directory": from
+      a plain shell there is no ambient session to adopt, so it starts the directory''s
+      private session (the R5b fail-safe observed in QA scenario 10), while the smallest
+      sizing applies when the plain `pm session` runs from a shell pane inside the
+      shared session (703c i8); both outcomes are now stated. Validation: full suite
+      5363 passed / 1 skipped (scratch pytest<9 + markdown, PATH without the push-proxy
+      git, TMUX/TMUX_PANE/PM_*/PM_HOST_HOME cleared); pm/specs/pr-073910f/session_start_smoke.py
+      re-ran clean on a disposable socket; `pm session list` read-only ("No pm sessions
+      found.", no socket dir created). No live session, server or shared host configuration
+      was touched.'
+    created_at: '2026-11-01T04:56:36Z'
+    last_edited: '2026-11-01T04:56:36Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
