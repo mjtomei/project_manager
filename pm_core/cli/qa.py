@@ -916,11 +916,12 @@ End with a summary of which steps work and which don't, then one of:
               help="tmux window to launch into (split as a new pane). "
                    "If omitted, opens a new window named after the item.")
 def qa_launch(item_id: str, target_window: str | None):
-    """Launch a QA instruction or regression test as a Claude pane.
+    """Launch a QA instruction or regression test in a pane.
 
     Headless equivalent of the TUI's ``launch_qa_item`` — meant for
     watchers that need to spawn QA sessions without going through the TUI
-    process.
+    process.  An instruction gets a Claude pane aimed at this session; a
+    regression test's pane runs ``pm qa regression <id> --file-prs``.
 
     *item_id* has the form ``category:id`` (e.g. ``regression:auth-flow``).
     """
@@ -961,15 +962,16 @@ def qa_launch(item_id: str, target_window: str | None):
         click.echo("No tmux session detected.", err=True)
         raise SystemExit(1)
 
-    sess_label = os.environ.get("PM_SESSION") or session
-    title = item.get("title", qa_id)
-    body = item.get("body", "")
-
     env: dict[str, str] = {}
     if category == "regression":
+        # No session context: the pane runs the isolated launcher, whose
+        # prompt never names this (or any) pm session.
         from pm_core.regression_prompts import regression_launch_cmd
         cmd = regression_launch_cmd(root, qa_id, file_findings=True)
     else:
+        sess_label = os.environ.get("PM_SESSION") or session
+        title = item.get("title", qa_id)
+        body = item.get("body", "")
         full_prompt = f"""\
 ## Session Context
 

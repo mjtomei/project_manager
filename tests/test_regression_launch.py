@@ -473,6 +473,20 @@ def test_qa_launch_runs_the_shared_regression_command(project):
     build.assert_not_called()
 
 
+def test_qa_launch_of_an_instruction_still_targets_this_session(
+        project, monkeypatch):
+    # The instruction path is unchanged: a Claude pane aimed at the session.
+    monkeypatch.delenv("PM_SESSION", raising=False)
+    result, split, build = _invoke_launch(
+        project, ["instructions:setup", "--target-window", "discovery"])
+    assert result.exit_code == 0, result.output
+    prompt = build.call_args.kwargs["prompt"]
+    assert "against tmux session: pm-live" in prompt
+    assert "## QA Instruction: Throwaway project" in prompt
+    assert build.call_args.kwargs["session_type"] == "qa_author"
+    assert split.call_args.args[2] == "CLAUDE"
+
+
 def test_qa_launch_reports_empty_library_before_spawning(project):
     (project.root / "qa" / "regression" / "demo.md").unlink()
     result, split, _ = _invoke_launch(project, ["regression:init-empty"])
