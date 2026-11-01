@@ -553,8 +553,10 @@ Regression coverage:
   `_disable` gates on `watcher_ui.is_running` → `find_state_by_type` →
   `find_by_type`, so before the fix a stale stopped instance made it skip
   the stop and leave the running watcher acting on its old scope.
-  All four stale-shadowing tests were verified to fail against the pre-fix
-  `find_by_type` (the "nothing running" case passes both ways, as it must).
+  All five stale-shadowing tests (one manager-level, two scope-sync, one
+  ws-toggle stop, one `_disable` stop) were re-verified to fail against the
+  pre-fix `find_by_type` in this review iteration; the "nothing running"
+  case passes both ways, as it must.
 
 Decision on the optional follow-up: `_disable` does **not** clear a
 stopping watcher's `auto_start_targets`.  A graceful stop sets

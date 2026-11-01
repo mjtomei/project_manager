@@ -364,8 +364,6 @@ def test_consume_legacy_breadcrumb_preserves_standalone_hold(tmp_path):
     assert auto_start.merge_hold(fresh, "x") == {"targets": ["x"]}
 
 
-
-
 # ---------------------------------------------------------------------------
 # Status / presentation
 # ---------------------------------------------------------------------------
