@@ -5394,7 +5394,7 @@ resolve() {
     for f in "$STATE"/*; do
         [ -e "$f" ] || continue
         b=${f##*/}
-        case "$b" in pane|sends|pipeclaim|claim.*|pipe.*|dead.*|roexit.*) continue ;; esac
+        case "$b" in pane|sends|pipeclaim|claim.*|pipe.*|dead.*|roexit.*|rejected.*) continue ;; esac
         case "$b" in "$t"*) echo "$b"; return 0 ;; esac
     done
     return 1
@@ -5409,7 +5409,7 @@ pane_exit() {
         : > "$STATE/dead.$1"
     else
         rm -f "$STATE/$1" "$STATE/claim.$1" "$STATE/pipe.$1" \
-              "$STATE/dead.$1" "$STATE/roexit.$1"
+              "$STATE/dead.$1" "$STATE/roexit.$1" "$STATE/rejected.$1"
     fi
 }
 case "$sub" in
@@ -5426,12 +5426,13 @@ case "$sub" in
       r=$(resolve "$s") || exit 0
       # A session ending takes its pipe with it.
       rm -f "$STATE/$r" "$STATE/claim.$r" "$STATE/pipe.$r" \
-            "$STATE/dead.$r" "$STATE/roexit.$r"; exit 0 ;;
+            "$STATE/dead.$r" "$STATE/roexit.$r" "$STATE/rejected.$r"; exit 0 ;;
   kill-server)  rm -f "$STATE/rec" "$STATE/pm-recorder" "$STATE/claim.rec" \
                      "$STATE/claim.pm-recorder" "$STATE/pipe.rec" \
                      "$STATE/pipe.pm-recorder" "$STATE/dead.rec" \
                      "$STATE/dead.pm-recorder" "$STATE/roexit.rec" \
-                     "$STATE/roexit.pm-recorder"; exit 0 ;;
+                     "$STATE/roexit.pm-recorder" "$STATE/rejected.rec" \
+                     "$STATE/rejected.pm-recorder"; exit 0 ;;
   pipe-pane)
       s=$(val -t "$@")
       r=$(resolve "${s%%:*}")
@@ -5533,6 +5534,13 @@ case "$sub" in
             [ -n "$r" ] && [ -f "$STATE/claim.$r" ] && {
                 cat "$STATE/claim.$r"; exit 0; }
             exit 1 ;;
+        # The rejection step 5 sets when it refuses a capture (and step 2
+        # clears for a new one): the state a failed paste leaves must not be
+        # read as a finished recording by the next paste.
+        *@pm_capture_rejected*)
+            [ -n "$r" ] && [ -f "$STATE/rejected.$r" ] && {
+                cat "$STATE/rejected.$r"; exit 0; }
+            exit 1 ;;
         # The server's prefix (step 5's detach key is this, not a literal
         # C-b). A real server always answers, C-b by default; STUB_PREFIX
         # models a ~/.tmux.conf that sets another one.
@@ -5554,6 +5562,14 @@ case "$sub" in
       fi
       r=$(resolve "${s%%:*}")
       [ -z "$r" ] && { echo "no such session: $s" >&2; exit 1; }
+      # The rejection mark step 5 sets and step 2 clears, beside the claim.
+      case " $* " in
+        *@pm_capture_rejected*)
+            case " $* " in
+              *" -u "*) rm -f "$STATE/rejected.$r"; exit 0 ;;
+            esac
+            printf '1\n' > "$STATE/rejected.$r"; exit 0 ;;
+      esac
       case " $* " in
         *" -u "*) rm -f "$STATE/claim.$r"; exit 0 ;;
       esac
@@ -5586,7 +5602,7 @@ case "$sub" in
       for f in "$STATE"/*; do
           [ -e "$f" ] || continue
           b=${f##*/}
-          case "$b" in pane|sends|pipeclaim|claim.*|pipe.*) continue ;; esac
+          case "$b" in pane|sends|pipeclaim|claim.*|pipe.*|rejected.*) continue ;; esac
           echo "$b"
       done
       exit 0 ;;
@@ -5713,7 +5729,8 @@ case "$1 $2" in
           fi
       fi
       case "$STUB_MODE" in
-        midadied) rm -f "$STATE/pm-recorder" "$STATE/claim.pm-recorder" ;;
+        midadied) rm -f "$STATE/pm-recorder" "$STATE/claim.pm-recorder" \
+                       "$STATE/rejected.pm-recorder" ;;
         # `remaindied`: the recorder died mid-scenario (asciinema was killed)
         # but the server keeps the session because `remain-on-exit on` is set —
         # a dead pane, no status file, and a `has-session` that still answers.
@@ -5722,7 +5739,8 @@ case "$1 $2" in
             # A session ending takes its session options (the capture-dir
             # claim) with it, as real tmux does.
             rm -f "$STATE/pm-recorder" "$STATE/claim.pm-recorder" \
-                  "$STATE/pm-test" "$STATE/claim.pm-test" ;;
+                  "$STATE/pm-test" "$STATE/claim.pm-test" \
+                  "$STATE/rejected.pm-recorder" "$STATE/rejected.pm-test" ;;
       esac
       exit 0 ;;
 esac
@@ -5732,7 +5750,7 @@ exit 0
 
 def _run_block(raw, mode, tmp_path, target=False, env_extra=None,
                sessions=(), files=None, state_files=None, capture=None,
-               cwd=None, timeout=120):
+               cwd=None, timeout=120, reuse=False):
     """Run one recipe block against stub tmux/pm; return (proc, cast path).
 
     ``raw`` is the block text as a worker pastes it, ``sessions`` the tmux
@@ -5742,21 +5760,28 @@ def _run_block(raw, mode, tmp_path, target=False, env_extra=None,
     overrides the capture directory (a test that wants it unusable passes a
     path that cannot be created). ``cwd`` is the directory the block is pasted
     from — the recipes resolve some paths against it, so a case that depends
-    on the worker's location has to say where that is.
+    on the worker's location has to say where that is. ``reuse`` runs a second
+    block against the state the first one left — the same server, the same
+    session options and the same capture directory — which is how a second
+    paste of a step is modelled; the caller passes ``capture`` and seeds
+    nothing, because the first run's sessions, claim and rejection mark are
+    what the case is about.
     """
     state = tmp_path / "state"
     bindir = tmp_path / "bin"
     if capture is None:
         capture = tmp_path / "cap"
-        capture.mkdir()
-    for d in (state, bindir):
-        d.mkdir()
-    _stub_tool(bindir, "tmux", _STUB_TMUX)
-    _stub_tool(bindir, "pm", _STUB_PM)
-    if target:
-        (state / "pm-test").touch()
-    for s in sessions:
-        (state / s).touch()
+        if not reuse:
+            capture.mkdir()
+    if not reuse:
+        for d in (state, bindir):
+            d.mkdir()
+        _stub_tool(bindir, "tmux", _STUB_TMUX)
+        _stub_tool(bindir, "pm", _STUB_PM)
+        if target:
+            (state / "pm-test").touch()
+        for s in sessions:
+            (state / s).touch()
     for rel, content in (state_files or {}).items():
         (state / rel).write_text(content)
     # The CLI scaffold writes under <capture-dir>/<short-name>/, the tmux
@@ -8045,6 +8070,90 @@ class TestCaptureFlowExecution:
         assert not (tmp_path / "state" / "claim.pm-test").exists(), (
             "the refusal left the claim behind, so the next attempt in this "
             "session is refused by a capture that is no longer running")
+
+    def test_a_rejected_capture_is_not_a_finished_recording_on_a_repaste(
+            self, tmp_path):
+        """The state this step's own refusal leaves must not pass a second paste.
+
+        The early-end refusal above releases the capture-dir claim (R25) and
+        the status it read is 0, so the state it leaves — recorder gone, TUI
+        alive, status 0, claim clear — is exactly the one the re-paste case
+        accepts: the truncated cast the first paste rejected passed the second
+        (verified in this container: after that refusal, the same block exited
+        0 with no message). The rejection mark set on the session is the handle
+        that survives the claim's release; step 2 clears it for a new capture.
+        """
+        cap = tmp_path / "cap"
+        r, _cast = _run_block(
+            _stop_block("tmux-screen-recording.md"), "ok", tmp_path,
+            target=True,
+            state_files={"claim.pm-test": str(cap)},
+            files={"recording.cast": '{"version": 2}\n',
+                   "transcript.log": "pane output\n",
+                   "recorder.status": "0\n"})
+        assert r.returncode != 0, (
+            "the fixture was expected to refuse the capture")
+        assert "still in progress" in r.stderr, r.stderr
+        assert not (tmp_path / "state" / "claim.pm-test").exists(), (
+            "the refusal left its claim behind (R25)")
+        assert (tmp_path / "state" / "rejected.pm-test").exists(), (
+            "the refusal did not mark the capture as rejected, so the state "
+            "it leaves reads as a finished recording")
+
+        r2, _ = _run_block(
+            _stop_block("tmux-screen-recording.md"), "ok", tmp_path,
+            target=True, capture=cap, reuse=True)
+        assert r2.returncode != 0, (
+            "a second paste of step 5 accepted the truncated cast the first "
+            "paste rejected: " + r2.stderr)
+        assert "rejected this capture" in r2.stderr, r2.stderr
+
+    def test_clearing_the_rejection_lets_a_second_paste_accept(self, tmp_path):
+        """The mark's remedy has to work: a complete recording is not lost.
+
+        The one state the in-progress refusal cannot tell apart is a step 5
+        killed after its checks, where the recording is complete. The message
+        names the clear for that case; after it a second paste accepts the
+        cast, so a complete recording is not discarded by the check that
+        exists to protect it.
+        """
+        cap = tmp_path / "cap"
+        r, _cast = _run_block(
+            _stop_block("tmux-screen-recording.md"), "ok", tmp_path,
+            target=True,
+            state_files={"claim.pm-test": str(cap)},
+            files={"recording.cast": '{"version": 2}\n',
+                   "transcript.log": "pane output\n",
+                   "recorder.status": "0\n"})
+        assert r.returncode != 0, (
+            "the fixture was expected to refuse the capture")
+        assert (tmp_path / "state" / "rejected.pm-test").exists(), (
+            "the refusal did not mark the capture as rejected, so there is no "
+            "mark to clear")
+        (tmp_path / "state" / "rejected.pm-test").unlink()
+        r2, _ = _run_block(
+            _stop_block("tmux-screen-recording.md"), "ok", tmp_path,
+            target=True, capture=cap, reuse=True)
+        assert r2.returncode == 0, (
+            "clearing the rejection mark did not let a second paste accept "
+            "the recording, so the documented remedy cannot work: "
+            + r2.stderr)
+
+    def test_step_two_clears_a_previous_rejection(self, tmp_path):
+        """A re-record is not refused by the attempt it replaces.
+
+        Step 5 marks a capture it rejects on the session, and step 2 takes the
+        claim for the new attempt — so the mark has to go with it. Left
+        behind, the re-record's own step 5 would refuse it for a capture that
+        no longer exists, the stale-state shape the claim's release rules out.
+        """
+        r, _cast = _run_block(
+            _step_two_block(), "ok", tmp_path, target=True,
+            state_files={"rejected.pm-test": "1\n"})
+        assert r.returncode == 0, r.stderr
+        assert not (tmp_path / "state" / "rejected.pm-test").exists(), (
+            "step 2 took the claim but left the previous attempt's rejection "
+            "mark, so this capture's step 5 refuses it")
 
     def test_tmux_detach_that_fails_is_not_a_finished_recording(self, tmp_path):
         """The detach itself is the last handle that can race the recorder.

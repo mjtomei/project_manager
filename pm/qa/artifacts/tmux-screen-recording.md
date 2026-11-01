@@ -505,6 +505,11 @@ tmux set-option -t "=$TARGET:0.0" @pm_capture_dir "$claim_dir" || {
     echo "could not claim <capture-dir> on $TARGET — the session went away" >&2
     exit 1
 }
+# This capture is the one step 5 judges, so a rejection an earlier failed run
+# left on the session goes with the claim just taken: without this a re-record
+# would be refused by step 5 for the attempt it replaces (step 5 sets the mark
+# when it rejects a capture; see its clean-status branch).
+tmux set-option -u -t "=$TARGET:0.0" @pm_capture_rejected 2>/dev/null || true
 tmux pipe-pane -t "=$TARGET:0.0" "cat >> <capture-dir>/transcript.log" || {
     echo "could not stream $TARGET:0.0 to <capture-dir>/transcript.log —" \
         "check that pane exists" >&2
@@ -912,9 +917,16 @@ pm tui send a -s "$TARGET" || send_failed   # open the picker
 #    supervisor detaching clients) and leaves a cast that stops where the
 #    scenario was. The capture-directory claim tells a re-paste — which finds
 #    it released — from a recording that ended under a capture still in
-#    progress, which is failed. (Every pipe stop and recorder-session
-#    kill below is best-effort: when the session is already gone the pipe is
-#    gone with it, and `tmux pipe-pane`/`tmux kill-session` would otherwise
+#    progress, which is failed. That refusal releases the claim too, so it
+#    marks the capture as rejected on the session first; without the mark the
+#    state it leaves (recorder gone, TUI alive, status 0, claim clear) is
+#    exactly the one a second paste accepts, and the truncated cast the first
+#    paste rejected passed the second (verified in this container). Step 2
+#    clears the mark when a re-record takes the claim, so it can only mean
+#    "the last capture in this session was rejected". (Every pipe stop and
+#    recorder-session kill below is best-effort: when the session is already
+#    gone the pipe is gone with it, and `tmux pipe-pane`/`tmux kill-session`
+#    would otherwise
 #    print "can't find session: …" on a run that succeeded. Every path that
 #    ends this flow removes the recorder session, the failure checks below
 #    included: with `remain-on-exit on` the session outlives its dead pane, so
@@ -1048,8 +1060,39 @@ if ! tmux has-session -t "=pm-recorder" 2>/dev/null || \
                 "the cast stops where the scenario was and is not a finished" \
                 "recording; re-record the scenario (a claim left by a step 5" \
                 "killed after its checks is the one state this cannot tell" \
-                "apart: 'tmux set-option -u -t =$TARGET:0.0 @pm_capture_dir'" \
-                "and a re-run is then the worker's call)" >&2
+                "apart: clear it and the mark this refusal leaves with 'tmux" \
+                "set-option -u -t =$TARGET:0.0 @pm_capture_dir' and 'tmux" \
+                "set-option -u -t =$TARGET:0.0 @pm_capture_rejected', and a" \
+                "re-run is then the worker's call)" >&2
+            # Mark the rejection before the claim goes. The status is 0 and the
+            # claim is released below, so without a mark the state this branch
+            # leaves — recorder gone, TUI alive, status 0, claim clear — is
+            # exactly the one a re-paste of this block accepts: the truncated
+            # cast the first paste rejected passed the second (verified in this
+            # container: after this refusal, the same block exited 0 with no
+            # message). Step 2 clears the mark when a re-record takes the
+            # claim, so it can only mean "the last capture here was rejected".
+            tmux set-option -t "=$TARGET:0.0" @pm_capture_rejected 1 2>/dev/null || true
+            tmux kill-session -t "=pm-recorder" 2>/dev/null || true
+            tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
+            tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
+            exit 1
+        fi
+        # ... and this step's own rejection must survive its cleanup. The claim
+        # it released was the only handle that told a capture still in progress
+        # from one that finished, so the state left above reads as a re-paste
+        # (recorder gone, TUI alive, status 0, claim clear) and the second paste
+        # accepted the truncated cast the first rejected. The mark set above
+        # decides instead, until step 2 clears it for a new capture.
+        rejected=$(tmux show-options -t "=$TARGET:0.0" -v @pm_capture_rejected 2>/dev/null || true)
+        if [ -n "$rejected" ]; then
+            echo "an earlier paste of this step rejected this capture — its" \
+                "recorder had ended under a capture still in progress, so the" \
+                "cast is incomplete and not a finished recording; re-record" \
+                "the scenario. (If that paste was itself killed after its" \
+                "checks, the recording is complete: clear the mark with" \
+                "'tmux set-option -u -t =$TARGET:0.0 @pm_capture_rejected'" \
+                "and re-run this step.)" >&2
             tmux kill-session -t "=pm-recorder" 2>/dev/null || true
             tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
             tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true

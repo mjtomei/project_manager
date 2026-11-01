@@ -1308,6 +1308,19 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   transcript and the claim set, and the pre-fix step 5 exited 0 on it while
   the fixed step exits 1; the normal path exits 0 and releases the claim
   (review loop 928f i35, R100).
+- Step 5 is pasted a second time after its own early-end refusal → the second
+  paste must **still** fail. The refusal releases the capture-directory claim
+  (R25), and the state it leaves — recorder gone, TUI alive, status 0, claim
+  clear — is exactly the one a re-paste accepts, so the truncated cast the
+  first paste rejected passed the second: the same block exited 0 with no
+  message (verified in this container and live on tmux 3.2a). The refusal now
+  marks the capture as rejected on the session (`@pm_capture_rejected`) and
+  the clean-status branch fails that mark with "an earlier paste of this step
+  rejected this capture"; step 2 clears the mark when a re-record takes the
+  claim. The one state the refusal cannot tell apart — a step 5 killed after
+  its checks, where the recording is complete — keeps its recovery: clear
+  both the claim and the mark, and a second paste exits 0 (verified live;
+  review loop 928f i37, R102).
 
 ## Pass / Fail criteria
 
