@@ -839,7 +839,9 @@ def session_list():
     /tmp/pm-sessions/.  Sessions started by older pm versions still live on
     the default server and are listed as "(default server)".  Grouped
     sessions (~N) are collapsed into their base session; the client count
-    covers the whole group.
+    covers the base session and its ~N grouped sessions (a client attached
+    through a user's own tmux view is not counted — `tmux list-clients` is
+    authoritative there).  A view of a session gets no row of its own.
     """
     if not tmux_mod.has_tmux():
         click.echo("tmux is not installed.", err=True)

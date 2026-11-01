@@ -957,11 +957,11 @@ class TestListPmSessions:
         def fake_run(cmd, **kwargs):
             if str(sock) in cmd:
                 return MagicMock(returncode=0, stdout=(
-                    "pm-repo-abc|0\n"
-                    "pm-repo-abc~1|2\n"
+                    "pm-repo-abc|pm-repo-abc|0\n"
+                    "pm-repo-abc~1|pm-repo-abc|2\n"
                 ))
             if str(paths.default_socket_path()) in cmd:
-                return MagicMock(returncode=0, stdout="pm-legacy-1|1\n")
+                return MagicMock(returncode=0, stdout="pm-legacy-1||1\n")
             return MagicMock(returncode=1, stdout="")
 
         mock_run.side_effect = fake_run
@@ -973,6 +973,41 @@ class TestListPmSessions:
         assert by_name["pm-repo-abc"]["attached"] == 2  # base + grouped
         assert by_name["pm-legacy-1"]["socket"] is None
         assert by_name["pm-legacy-1"]["attached"] == 1
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_skips_a_users_view_of_a_pm_session(self, mock_run, tmp_path):
+        """A view grouped with a pm session is not a session of its own.
+
+        S118/S121/S124 let a user's own view be named anything — including
+        ``pm-laptop``, which looks like a pm session.  Listing it would
+        report a phantom second session on the same socket (R3: one row
+        per session), and its clients are not counted (``tmux
+        list-clients`` is authoritative for a view's client).
+        """
+        sock_dir = tmp_path / "pm-sessions"
+        sock_dir.mkdir()
+        sock = sock_dir / "pm-repo-abc"
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            s.bind(str(sock))
+        finally:
+            s.close()
+
+        def fake_run(cmd, **kwargs):
+            if str(sock) in cmd:
+                return MagicMock(returncode=0, stdout=(
+                    "pm-laptop|pm-repo-abc|1\n"
+                    "pm-repo-abc|pm-repo-abc|0\n"
+                    "pm-repo-abc~1|pm-repo-abc|2\n"
+                ))
+            return MagicMock(returncode=1, stdout="")
+
+        mock_run.side_effect = fake_run
+        with patch.object(paths, "SHARED_SOCKET_DIR", sock_dir):
+            rows = tmux.list_pm_sessions()
+
+        assert [r["name"] for r in rows] == ["pm-repo-abc"]
+        assert rows[0]["attached"] == 2  # base + ~1; the view's client not counted
 
     @patch("pm_core.tmux.subprocess.run")
     def test_skips_dead_socket(self, mock_run, tmp_path):
@@ -1005,7 +1040,7 @@ class TestListPmSessions:
         def fake_run(cmd, **kwargs):
             if str(sock_dir / "pm-evil") in cmd:
                 return MagicMock(returncode=0,
-                                 stdout="pm-evil-session|1\n")
+                                 stdout="pm-evil-session||1\n")
             return MagicMock(returncode=1, stdout="")
 
         mock_run.side_effect = fake_run
@@ -1029,7 +1064,7 @@ class TestListPmSessions:
             if "-S" in cmd:
                 sock = Path(cmd[cmd.index("-S") + 1])
                 return MagicMock(returncode=0,
-                                 stdout=f"{sock.name}|0\n")
+                                 stdout=f"{sock.name}||0\n")
             return MagicMock(returncode=1, stdout="")
 
         mock_run.side_effect = fake_run
@@ -1417,6 +1452,34 @@ class TestFindTuiPaneAcrossServers:
 
         assert helpers._find_tui_pane() == ("%7", "pm-a")
         assert os.environ["PM_TMUX_SOCKET"] == "/tmp/pm-sessions/pm-a"
+
+    def test_last_resort_resolves_a_pane_reported_under_a_view(
+            self, monkeypatch):
+        """A live TUI reported under the user's view name is still ours.
+
+        ``list-panes -a`` may name a shared pane after a view (S118/S121/
+        S124) — here ``zview``, which sorts after ``pm-a`` and is the name
+        the last line carries.  The scan resolves through the session
+        group, so it finds the pane instead of reporting no TUI.
+        """
+        from pm_core.cli import helpers
+        from pm_core import pane_registry
+
+        monkeypatch.setenv("PM_TMUX_SOCKET", "/tmp/pm-sessions/pm-a")
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: True)
+        monkeypatch.setattr(helpers.tmux_mod, "get_session_name",
+                            lambda: "pm-a")
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions", lambda: [])
+        monkeypatch.setattr(helpers.tmux_mod, "session_group",
+                            lambda name: "pm-a" if name == "zview" else "")
+        monkeypatch.setattr(pane_registry, "load_registry",
+                            lambda name: {"windows": {}})
+        monkeypatch.setattr(
+            helpers.subprocess, "run",
+            lambda *a, **kw: MagicMock(
+                returncode=0, stdout="%7 zview pm _tui\n"))
+
+        assert helpers._find_tui_pane() == ("%7", "pm-a")
 
     def test_last_resort_scans_the_cwd_server_without_a_socket_file(
             self, monkeypatch):

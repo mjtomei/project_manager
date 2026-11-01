@@ -1571,12 +1571,14 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     # session on the same server: a server is not a session, and the
     # legacy default server hosts every pre-isolation pm session, so
     # accepting any pm- TUI pane here would hand back another session's
-    # pane (and ``pm tui send`` delivers keys unscoped).
+    # pane (and ``pm tui send`` delivers keys unscoped).  Resolve through
+    # the session group: tmux may report the pane under a user's own view's
+    # name (S118/S121/S124), and a view of this session is not another one.
     for info in servers:
         _use_tmux_socket(info["socket"])
         _, live_tuis = _live_panes_and_tuis()
         for pane_id, tui_session in live_tuis:
-            if pane_registry.base_session_name(tui_session) == info["name"]:
+            if _pm_session_of(tui_session) == info["name"]:
                 return pane_id, info["name"]
 
     # Nothing found: undo the scan's env mutations so the caller keeps the
@@ -1586,6 +1588,28 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     else:
         os.environ["PM_TMUX_SOCKET"] = ambient_socket
     return None, None
+
+
+def _pm_session_of(tmux_session: str) -> str:
+    """Return the base pm session a tmux session name belongs to.
+
+    tmux may report a shared pane under a *view's* name: ``list-panes -a``
+    lists a pane once per session in its group, so the last line (the
+    lexicographically greatest name) wins, and S118/S121/S124 allow a
+    user's own view to be named anything — including a name that sorts
+    after the pm session's, or one that looks like a different pm session.
+    Resolving through the session group is the same answer
+    ``_find_tui_pane``'s in-tmux branch and the detach path use, so a pane
+    reported under a view's name is still recognised as this session's.
+
+    A session that cannot be queried (tmux missing/unexecutable) degrades
+    to its plain base name, the same "no group known" answer every other
+    probe in this module gives.
+    """
+    try:
+        return pane_registry.pm_session_name(tmux_session)
+    except OSError:
+        return pane_registry.base_session_name(tmux_session)
 
 
 def _live_panes_and_tuis() -> tuple[dict[str, str], list[tuple[str, str]]]:
@@ -1602,6 +1626,9 @@ def _live_panes_and_tuis() -> tuple[dict[str, str], list[tuple[str, str]]]:
     own server: a pane id recorded for one session can name an unrelated
     pane on another, so a bare id is not proof that a recorded pane is
     still the TUI.
+
+    The session name is tmux's raw answer (which may be a view's name —
+    compare through ``_pm_session_of``, never with a bare ``~`` strip).
     """
     try:
         result = subprocess.run(
@@ -1650,7 +1677,9 @@ def _find_live_tui_pane(
     server: when the session cannot be found on any server (stale
     registry, wrong ``--session``), the liveness query still runs against
     whatever server this process is attached to, where the recorded id may
-    name an unrelated pane of a different session.
+    name an unrelated pane of a different session.  The comparison goes
+    through the session *group* (``_pm_session_of``), because tmux may
+    report a shared pane under a user's own view's name.
     """
     pane_id, sess = _find_tui_pane(session)
     if not sess:
@@ -1663,9 +1692,9 @@ def _find_live_tui_pane(
     live_panes, live_tuis = _live_panes_and_tuis()
     base = pane_registry.base_session_name(sess)
     if (pane_id and pane_id in live_panes
-            and pane_registry.base_session_name(live_panes[pane_id]) == base):
+            and _pm_session_of(live_panes[pane_id]) == base):
         return pane_id, sess
     for tui_id, tui_sess in live_tuis:
-        if pane_registry.base_session_name(tui_sess) == base:
+        if _pm_session_of(tui_sess) == base:
             return tui_id, sess
     return None, sess

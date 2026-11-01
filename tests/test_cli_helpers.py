@@ -519,6 +519,44 @@ class TestFindLiveTuiPane:
              self._panes('%6 pm-test~1 "pm _tui"\n'):
             assert _find_live_tui_pane("pm-test") == ("%6", "pm-test")
 
+    def test_live_pane_reported_under_the_users_view_is_returned(self):
+        """tmux may name a shared pane after a view, not the pm session.
+
+        ``list-panes -a`` lists a pane once per session in its group, so the
+        last (lexicographically greatest) name wins; a view named ``zview``
+        (S118/S121/S124) therefore makes the recorded pane look like another
+        session's.  The comparison goes through the session group, so the
+        live recorded pane is still returned — a bare ``~`` strip would
+        report "No TUI pane found" for a TUI that is running.
+        """
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        data = self._registry(
+            {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             patch("pm_core.tmux.find_session_server",
+                   return_value=(None, False)), \
+             patch("pm_core.tmux.session_group",
+                   side_effect=lambda name: "pm-test" if name == "zview" else ""), \
+             self._panes("%6 zview bash\n"):
+            assert _find_live_tui_pane("pm-test") == ("%6", "pm-test")
+
+    def test_fallback_finds_a_live_tui_reported_under_the_users_view(self):
+        """The live-pane fallback resolves the view name through its group."""
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        data = self._registry(
+            {"id": "%3", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             patch("pm_core.tmux.find_session_server",
+                   return_value=(None, False)), \
+             patch("pm_core.tmux.session_group",
+                   side_effect=lambda name: "pm-test" if name == "zview" else ""), \
+             self._panes('%8 zview "pm _tui"\n'):
+            assert _find_live_tui_pane("pm-test") == ("%8", "pm-test")
+
     def test_tmux_unavailable_degrades_to_no_live_tui(self):
         from pm_core.cli.helpers import _find_live_tui_pane
 

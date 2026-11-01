@@ -46,9 +46,9 @@ simultaneously.
    read by every tmux call. Multiple writers, many readers.
 5. **`$TMUX`** — inherited by panes, `run-shell` hooks and
    `display-popup` bodies; resolved into `PM_TMUX_SOCKET` at entry.
-6. **The pane registry** (`~/.pm/sessions/<tag>/…`) — one file per
-   session, keyed by the *base* session name; written by the TUI, read by
-   every discovery path.
+6. **The pane registry** (`~/.pm/pane-registry/<session>.json`) — one file
+   per session, keyed by the *base* session name; written by the TUI, read
+   by every discovery path.
 7. **tmux pane ids (`%N`)** — now only unique *within* one server, while
    `pm tui send` delivers keys to a bare pane id.
 8. **Per-server tmux state** — hooks (`set-hook -g`), global environment,
@@ -94,7 +94,10 @@ pane unless stated otherwise.
   **WHEN** the user runs `pm session list` from a plain shell,
   **THEN**
   - there is exactly one row per session (base name, not one per grouped
-    session);
+    session); a user's own view of a session (R5) is not a session of its
+    own and gets no row, whatever it is called — including a name that
+    looks like a pm session (e.g. a view named `pm-laptop` grouped with
+    `pm-x`);
   - the client count covers the base session and its `~N` grouped
     sessions (a client attached through a user's own tmux view of the
     session — R5 — is not counted; `tmux list-clients` is authoritative
@@ -191,6 +194,11 @@ pane unless stated otherwise.
   different session named `pm-laptop` also runs), **WHEN** the user runs
   `pm tui view` / `pm tui send` with no `--session` from inside that view,
   **THEN** it drives A's TUI and never the other session's.
+- **GIVEN** a live TUI pane that is recorded in A's registry but that
+  `tmux list-panes -a` reports under a view's name (the group's
+  lexicographically last member), **WHEN** the user runs `pm tui view -s
+  A` or `pm tui send -s A`, **THEN** it drives that pane rather than
+  reporting "No TUI pane found".
 - **GIVEN** another user's live server socket under `/tmp/pm-sessions`
   (world-accessible `--global`/`--group` socket) while this user has no pm
   session of their own, **WHEN** they run `pm tui view` / `pm tui send`

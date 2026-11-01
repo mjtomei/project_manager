@@ -1367,7 +1367,10 @@ def list_pm_sessions() -> list[dict]:
     Scans the per-session sockets under ``/tmp/pm-sessions/`` plus the
     default server (legacy pre-isolation sessions).  Grouped sessions are
     collapsed into their base session; ``attached`` is the sum of clients
-    across the group.  Unreadable/stale sockets are skipped.
+    across the group.  A user's own view of a session (``tmux new-session
+    -t base -s myview``, S118/S121/S124) is not a session of its own and is
+    not listed, whatever it is called.  Unreadable/stale sockets are
+    skipped.
 
     Each row: ``{"name", "socket", "attached", "shared"}`` where ``socket``
     is None for sessions on the default server and ``shared`` is true when
@@ -1397,7 +1400,7 @@ def list_pm_sessions() -> list[dict]:
         try:
             result = _run(
                 _tmux_cmd("list-sessions", "-F",
-                          "#{session_name}|#{session_attached}",
+                          "#{session_name}|#{session_group}|#{session_attached}",
                           socket_path=cmd_socket),
                 text=True,
             )
@@ -1415,11 +1418,27 @@ def list_pm_sessions() -> list[dict]:
             return
         groups: dict[str, int] = {}
         for line in result.stdout.splitlines():
-            name, sep, attached = line.rpartition("|")
-            if not sep or not name.startswith("pm-"):
+            # rsplit so a session name containing ``|`` is still parsed; the
+            # group is another session's name, so it shares the limitation.
+            parts = line.rsplit("|", 2)
+            if len(parts) != 3:
                 continue
-            base = name.split("~", 1)[0]
-            groups[base] = groups.get(base, 0) + _int_or_zero(attached)
+            name, group, attached = parts
+            if not name.startswith("pm-"):
+                continue
+            own_base = name.split("~", 1)[0]
+            if group and group != own_base and not name.startswith(group + "~"):
+                # A user's own view of another session (S118/S121/S124),
+                # however it is named — including a name that looks like a
+                # pm session (``pm-laptop``).  It shares the windows but is
+                # not a session of its own, so it must not appear as a
+                # second row.  Its clients are deliberately not counted
+                # either (``tmux list-clients`` is authoritative for a
+                # view's client).
+                _log.debug("list_pm_sessions: skipping view %s of %s",
+                           name, group)
+                continue
+            groups[own_base] = groups.get(own_base, 0) + _int_or_zero(attached)
         shared = is_shared(Path(socket_path) if socket_path else None)
         for base, attached in sorted(groups.items()):
             key = (socket_path, base)

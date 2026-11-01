@@ -92,6 +92,10 @@ sessions today).
    every `pm-*` socket in `/tmp/pm-sessions/` plus the default server
    (legacy). It reports base session name, socket, attached client count,
    and marks shared sessions. Stale/foreign sockets are skipped, not fatal.
+   A user's own view of a session (`tmux new-session -t base -s myview`,
+   S118/S121/S124) is not a session of its own: it is skipped whatever its
+   name — including a name that looks like a pm session, e.g. `pm-laptop` —
+   so one session is one row (review-loop 2caf i4).
 4. `pm_core/cli/helpers.py::_find_tui_pane()` (used by every `pm tui`
    subcommand) resolves the server for an explicit `--session`, the current
    pane, the cwd-derived session, and finally scans pm servers for a live
@@ -119,7 +123,12 @@ sessions today).
    prefix test, so a user's own grouped view of a pm session
    (S118/S121/S124, whose name need not be `pm-*`) still identifies that
    session instead of falling through to the unscoped scan
-   (review-loop 703c i1).
+   (review-loop 703c i1).  Every pane→session comparison in the lookup
+   (the recorded-pane liveness check, the live-`pm _tui` fallback and the
+   last-resort scan) resolves the name tmux reports through the session
+   *group* (`_pm_session_of`): `list-panes -a` lists a shared pane once per
+   session in its group, so tmux may report it under a user's own view's
+   name (review-loop 2caf i4).
 5. `pm_core/tmux.py` gains `list_pm_sessions()` and
    `socket_path_from_tmux_env()`; `pm_core/paths.py` gains
    `session_socket_path()` / `ensure_socket_dir()`.
@@ -2021,3 +2030,69 @@ gaps in the PR's central discovery/connect paths and corrects two
 Validation on the integrated head: full suite re-run after the edits (see
 the PR note for this iteration); no live session, server or shared host
 configuration was touched — every fixture used a disposable socket.
+
+## Review iteration (2026-11-01, review-loop 2caf i4)
+
+Verification pass over the head after the i3 coverage work.  Two defects,
+both instances of one rule: **a user's own view of a pm session is not a
+session of its own** (S118/S121/S124).  The detach path (2caf i2) and the
+in-tmux discovery branch (703c i1) already resolve views through the
+session group; these two paths still used the view's name.
+
+1. **`_find_live_tui_pane()` rejected a live recorded TUI pane reported
+   under a view's name.**  `list-panes -a` lists a shared pane once per
+   session in its group, so `_live_panes_and_tuis()`'s
+   `pane_id → session_name` map keeps whichever name tmux emits last
+   (verified: the lexicographically greatest session name wins).  With a
+   view named e.g. `zview` — after the pm base `pm-x` — the recorded pane
+   `%0` looked like `zview`'s, `base_session_name("zview") != "pm-x"`, and
+   the recorded-pane check fell through.  The live-`pm _tui` fallback
+   normally rescues that case, but it also compares names, so a TUI whose
+   `pane_start_command` does not contain `_tui` (the documented
+   hand-started TUI, or a pane respawned with a shell) was reported as
+   "No TUI pane found" although it was running.  Reproduced against a real
+   disposable server (base `pm-x` + view `zview`, pane registered):
+   `_find_live_tui_pane("pm-x")` returned `(None, "pm-x")`; with the fix it
+   returns `("%0", "pm-x")`.  New `_pm_session_of()` resolves a tmux
+   session name through `pane_registry.pm_session_name()` (the group),
+   degrading to the plain base name when tmux cannot be queried, and both
+   comparisons in `_find_live_tui_pane()` use it.
+2. **`_find_tui_pane()`'s last-resort scan had the same comparison**, so a
+   live `pm _tui` pane reported only under the view's name was not found
+   when the base session was killed elsewhere (the case R3.2 keeps prefix
+   matching for).  It now compares through `_pm_session_of()` too.
+3. **`pm session list` showed a phantom session for a pm-named view.**
+   `list_pm_sessions()` grouped rows by `name.split("~")[0]`, so a user's
+   view named `pm-laptop` (grouped with `pm-x`) was listed as a second
+   session on the same socket, violating R3's "one row per session"
+   (verified live on a disposable server).  It now reads
+   `#{session_group}` as well and skips a session whose group is a
+   different base and whose name is not `group~N` — a view, whatever it is
+   called; the view's clients stay uncounted, as R3 says.
+
+Tests: `TestFindLiveTuiPane::test_live_pane_reported_under_the_users_view_is_returned`
+and `::test_fallback_finds_a_live_tui_reported_under_the_users_view`,
+`TestFindTuiPaneAcrossServers::test_last_resort_resolves_a_pane_reported_under_a_view`,
+`TestListPmSessions::test_skips_a_users_view_of_a_pm_session` — all four
+verified to fail with the pre-fix code.  The existing
+`TestListPmSessions` fixtures gained the `#{session_group}` column.
+
+Validation: targeted suites (`test_cli_helpers`, `test_session_socket_isolation`,
+`test_tmux`, `test_shared_sessions`, `test_cli_qa`) 382 passed; full suite
+**5367 passed / 1 skipped** (409 s; log
+`/pm-captures/review-2caf-i4/full-suite-final.log`), and
+`pm/specs/pr-073910f/session_start_smoke.py` re-ran clean on a disposable
+socket (private server, session env, global env and hooks correct; default
+server untouched).  Both defects were also verified end to end against
+disposable real-tmux servers; no live session, server or shared host
+configuration was touched.
+
+Residual (non-blocking): a user's own view that *survives* its base
+session (the base killed while the view's client stays attached) is not
+discoverable from a plain shell — `list_pm_sessions()` reports pm-named
+sessions only, and `find_session_server()` cannot match a non-pm-named
+view by the base name.  From *inside* the view discovery resolves it
+through the group (above), and a direct `tmux -S <socket> attach` still
+reaches it; only the plain-shell auto-discovery of a view-only server is
+absent, and it previously worked only by listing the view under a
+non-session name.  Not a supported R3/R7 shape (a view is not a session).
