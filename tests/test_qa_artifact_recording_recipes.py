@@ -6357,10 +6357,23 @@ def test_every_deadline_is_a_real_bound_and_its_message_agrees(name):
 
     Pin both: every arithmetic bound is a plausible hang detector, and every
     "within Ns" the recipe prints is one of the numbers it actually waits.
+
+    One bound is arithmetic but not a literal: the CLI scaffold's stop bound
+    is ``deadline=$(( $(date +%s) + 10#$stop_timeout ))``, where
+    ``stop_timeout`` falls back to ``${RECORDER_STOP_TIMEOUT:-30}``. The
+    pattern below cannot see that value, so retuning the *default* to 0 or 1 s
+    left the whole file green (266 passed, verified) while a healthy one-shot
+    command that runs a few seconds was killed at the deadline — the exact
+    regression the raisable bound exists to prevent (the recipe records a
+    ``sleep 6`` recording lost to ``RECORDER_STOP_TIMEOUT=1``). Pin the
+    default the same way as the literals.
     """
     text = _recipe_text(name)
     bounds = {int(n) for n in re.findall(
         r"deadline=\$\(\( \$\(date \+%s\) \+ (\d+) \)\)", text)}
+    # The indirect stop bound's fallback is the number it really waits when a
+    # worker does not raise it; a default of 0/1 s stops bounding anything.
+    bounds |= {int(n) for n in re.findall(r"RECORDER_STOP_TIMEOUT:-(\d+)", text)}
     assert bounds, f"{name}: no bounded deadline found"
     for n in sorted(bounds):
         assert n >= 10, (
