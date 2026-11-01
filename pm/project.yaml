@@ -37598,11 +37598,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-14T15:34:14.432857+00:00'
-  updated_at: '2026-10-14T15:34:14.432857+00:00'
+  updated_at: '2026-11-01T23:37:43.555888+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-042c162
+    text: 'Same fix site, second file: pm init also leaves pm/project.yaml.lock out
+      of the ensured pm/.gitignore entries, so the first locked registry write (pm
+      pr add, pm pr note add) leaves "?? pm/project.yaml.lock" in a pm-init project.
+      Seen in pr-7d5d036 QA S2: after pm qa regression --file-prs filed a bug into
+      a disposable project registry via pm -C <pm-dir>, git status in that project
+      showed " M pm/project.yaml" (intended) plus "?? pm/project.yaml.lock". pm own
+      repo ignores it only because pm/.gitignore lists it by hand. Fix: add project.yaml.lock
+      alongside notes.txt/.pm-sessions.json (pm_core/cli/__init__.py ~L156).'
+    created_at: '2026-11-01T23:37:43Z'
+    last_edited: '2026-11-01T23:37:43Z'
 - id: pr-4bde874
   plan: bugs
   title: 'Bug: test_installer_writes_standalone_receiver fails whenever PM_HOST_HOME
