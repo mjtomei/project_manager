@@ -2149,9 +2149,27 @@ def _carry_forward(record: dict, pr_entry: dict) -> dict:
             record["resolution"] = carried
             record["resolution_digest"] = _resolution_digest(carried)
             record["resolved_from"] = carried.get("resolved_from")
+            # The applied resolution stays visible as provenance, but the
+            # base-interaction summary it described is this record's only when
+            # the record assessed the *same* base.  A base that has moved on
+            # since has its own, newer summary — the rule
+            # :func:`_carry_base_interaction` already applies to a clean
+            # bounce.  Merging the old list here listed the earlier base's
+            # changes under the newer range, and because the stored list is
+            # bounded it also lost the real total as soon as the new record
+            # had entries of its own (a 35-change base rendered as 31 entries
+            # under a "(1 file(s))" range, and the merge gate then asked the
+            # agent to weigh five changes it was never shown).
+            old_base = revision_of(old.get("base_sha"))
+            new_base = revision_of(record.get("base_sha"))
+            # A record that could not resolve a base (a transient failure)
+            # cannot prove the base moved, so it keeps the summary it could
+            # not re-assess — the same tolerance ``_carry_failed_check_behavior``
+            # has.  Such a record is never mergeable.
+            same_base = bool(old_base and (not new_base or old_base == new_base))
             old_behavior = _as_list(old.get("base_behavior_changes"))
             own_behavior = _as_list(record.get("base_behavior_changes"))
-            if old_behavior:
+            if old_behavior and same_base:
                 record["base_behavior_changes"] = _dedupe(
                     old_behavior + own_behavior)
                 if not own_behavior:
@@ -2159,7 +2177,7 @@ def _carry_forward(record: dict, pr_entry: dict) -> dict:
                     # ``compact`` recorded so the prompt does not under-report
                     # "… N more" after the carry-forward.
                     _carry_behavior_total(record, old, old_behavior)
-            if old.get("base_behavior_error") \
+            if same_base and old.get("base_behavior_error") \
                     and not record.get("base_behavior_changes") \
                     and not record.get("base_behavior_error"):
                 # A summary the earlier check could not compute is not an
@@ -2167,7 +2185,7 @@ def _carry_forward(record: dict, pr_entry: dict) -> dict:
                 # for it).  The post-apply re-check sees no base diff, so
                 # without carrying it the requirement would silently vanish.
                 record["base_behavior_error"] = old["base_behavior_error"]
-            if not record.get("base_files"):
+            if same_base and not record.get("base_files"):
                 # The re-check sees the base inside HEAD, so its own base diff
                 # is empty.  The base the applied resolution merged is still
                 # the newest one the branch contains: keep what that check

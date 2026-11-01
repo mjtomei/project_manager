@@ -5259,6 +5259,47 @@ def test_a_new_base_does_not_inherit_the_earlier_bases_summary(w):
     assert "base_range_from" not in again
 
 
+def test_a_clean_base_move_past_an_applied_resolution_drops_its_summary(w):
+    """A newer base's own changes replace the earlier base's list.
+
+    ``_carry_forward`` carries an applied resolution forward as provenance,
+    but the base-interaction summary it described belongs to the base that
+    check assessed.  Once the base has moved on, the newer record has its own
+    summary (the same rule ``_carry_base_interaction`` applies to a clean
+    bounce).  Merging the old list in listed the earlier base's changes under
+    the newer range, and — because ``compact`` stores only 30 of them — lost
+    the real total as soon as the new record had entries of its own: a
+    35-change base rendered as 31 entries above a "(1 file(s))" range, so the
+    agent was asked to weigh changes it was never shown.
+    """
+    rec = _metadata_conflict(w)
+    b1 = rec["base_sha"]
+
+    def _bound(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ["base_behavior_changes"] = [f"change {i}" for i in range(30)]
+        integ["base_behavior_count"] = 35
+
+    store.locked_update(w.pm_dir, _bound)
+    commit(w.repo, "pyproject.toml", "[project]\nname = 'p'\n", "base moves on")
+    b2 = git(w.repo, "rev-parse", "HEAD")
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.CLEAN, again
+    assert again["base_behavior_changes"] == [
+        "`pyproject.toml` changed on the base"], again
+    assert "base_behavior_count" not in again, again
+    # The applied resolution is still this record's provenance.
+    assert again["resolution"]["applied_merge_sha"]
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert f"git log --oneline {b1[:12]}..{b2[:12]}" in text
+    assert "(1 file(s))" in text
+    assert "change 0" not in text
+
+
 def test_stamp_signoff_launch_ignores_a_non_string_revision(w):
     """A hand-edited non-string base revision must not crash the launch."""
     transcript = signoff.signoff_transcript(w.tdir, PR)
