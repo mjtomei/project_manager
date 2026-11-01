@@ -132,7 +132,11 @@ class WatcherManager:
             return stopped
 
     def find_state_by_type(self, watcher_type: str) -> WatcherState | None:
-        """Find the first watcher state with the given type."""
+        """Find a watcher state of the given type (running preferred).
+
+        Same lookup as :meth:`find_by_type`, so ``is_running``-style
+        callers never read the stale state of a finished instance.
+        """
         watcher = self.find_by_type(watcher_type)
         return watcher.state if watcher else None
 

@@ -544,6 +544,17 @@ Regression coverage:
   `remove_targets` (both via `_sync_enabled`) must update the running
   watcher's `auto_start_targets` and leave the stopped one untouched.
   Verified to fail against the pre-fix `find_by_type`.
+- `tests/test_watcher_loop.py::TestWatcherUiStop` — the user-visible half:
+  `watcher_ui.stop_watcher` (the `ws` toggle's stop branch) must request a
+  stop on the running instance, not the stale one, and still report "No
+  watcher running" when only a stopped instance is registered.
+- `tests/test_watcher_loop.py::TestDisableStopsLiveWatcher` — turning
+  auto-start off (`clear_targets` → `_disable`) must stop the LIVE watcher:
+  `_disable` gates on `watcher_ui.is_running` → `find_state_by_type` →
+  `find_by_type`, so before the fix a stale stopped instance made it skip
+  the stop and leave the running watcher acting on its old scope.
+  All four stale-shadowing tests were verified to fail against the pre-fix
+  `find_by_type` (the "nothing running" case passes both ways, as it must).
 
 Decision on the optional follow-up: `_disable` does **not** clear a
 stopping watcher's `auto_start_targets`.  A graceful stop sets
