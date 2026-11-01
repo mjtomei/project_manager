@@ -3294,6 +3294,89 @@ class TestSessionStartAttachesToLegacySession:
             _tmux(default_sock, "kill-server")
             Path(default_sock).unlink(missing_ok=True)
 
+    def test_a_vanished_legacy_session_is_created_on_its_private_socket(
+            self, short_sock_dir, tmp_path, monkeypatch, capsys):
+        """R6.1's lookup is a snapshot; the create path must not inherit it.
+
+        The rollout check runs ``find_session_server`` and then, a moment
+        later, asks whether the session is running.  A concurrent
+        ``pm session kill`` (or anything else removing the legacy session)
+        can make the second answer "no" while the process is still pointed
+        at the *default* server.  Creating there would leave a brand-new
+        session outside its own server (R1), and every later ``pm session``
+        would see it as legacy again.  The vanished case re-resolves, so
+        the session is created on its deterministic private socket and no
+        rollout note is printed for a session that does not exist.
+        """
+        from pm_core.cli import session as session_mod
+        from pm_core import hook_install
+
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        for var in ("PM_TMUX_SOCKET", "PM_SHARE_MODE", "TMUX", "TMUX_PANE",
+                    "PM_IN_TMUX_SESSION", "PM_PROJECT"):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", short_sock_dir)
+        default_sock = short_sock_dir / "default"
+        monkeypatch.setattr(paths, "default_socket_path",
+                            lambda: default_sock)
+        monkeypatch.setattr(hook_install, "ensure_hooks_installed",
+                            lambda: None)
+        monkeypatch.setattr(session_mod, "state_root",
+                            MagicMock(side_effect=FileNotFoundError()))
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: "pm-iso-gone")
+        monkeypatch.setattr(session_mod, "_schedule_rebalance",
+                            lambda name: None)
+        # First lookup (inside _resolve_session_socket) sees a legacy
+        # session on the default server; the session is gone by the time
+        # _session_start asks whether it is running, and the re-resolution
+        # finds nothing.  No server is bound for it, so the real
+        # session_exists below answers "no".
+        lookups: list[str] = []
+
+        def vanished_legacy(name):
+            lookups.append(name)
+            return (str(default_sock), False) if len(lookups) == 1 \
+                else (None, False)
+
+        monkeypatch.setattr(tmux, "find_session_server", vanished_legacy)
+
+        created: dict = {}
+        real_create = tmux.create_session
+
+        def fake_create(name, cwd, cmd, socket_path=None, env=None):
+            created.update(name=name, socket_path=socket_path)
+            real_create(name, cwd, "sleep 300", socket_path=socket_path,
+                        env=env)
+
+        monkeypatch.setattr(tmux, "create_session", fake_create)
+        attached: list[tuple[str, str | None]] = []
+        monkeypatch.setattr(
+            tmux, "attach",
+            lambda name, socket_path=None: attached.append(
+                (name, socket_path)))
+
+        private_sock = str(short_sock_dir / "pm-iso-gone")
+        try:
+            session_mod._session_start()
+
+            # The create path ran on the private socket, not the default
+            # server the vanished legacy lookup had selected.
+            assert created == {"name": "pm-iso-gone",
+                               "socket_path": private_sock}
+            assert os.environ["PM_TMUX_SOCKET"] == private_sock
+            assert attached == [("pm-iso-gone~1", private_sock)]
+            # No rollout note for a session that was not attached.
+            assert "started before per-session tmux servers" not in \
+                capsys.readouterr().out
+            # Nothing was created on the default server.
+            assert not default_sock.exists()
+        finally:
+            _tmux(private_sock, "kill-server")
+            Path(private_sock).unlink(missing_ok=True)
+
 
 @pytest.mark.skipif(not tmux.has_tmux(), reason="tmux not installed")
 class TestServerIsolationIntegration:

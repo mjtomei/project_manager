@@ -529,6 +529,20 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # final session name (not from the cwd) so workdir clones and --dir joins
     # resolve the same server as the session they target.
     socket_path, legacy = _resolve_session_socket(session_name, is_shared)
+    session_running = tmux_mod.session_exists(session_name,
+                                              socket_path=socket_path)
+    if legacy and not session_running:
+        # The pre-isolation session disappeared between the rollout lookup
+        # and this check (e.g. a concurrent `pm session kill`).  Re-resolve
+        # rather than carrying on with the default server selected: the
+        # create path below would otherwise leave a brand-new session on
+        # the default server, which R1 says must never happen and which the
+        # next `pm session` would keep treating as legacy.
+        _log.info("legacy session %s vanished; using its private socket",
+                  session_name)
+        socket_path, legacy = _resolve_session_socket(session_name, is_shared)
+        session_running = tmux_mod.session_exists(session_name,
+                                                  socket_path=socket_path)
     if legacy:
         # Avoid the word "shared": in pm that means --global/--group, and
         # this session is private — it is only on the default tmux server
@@ -540,8 +554,9 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
             "again to move it to a private server."
         )
 
-    _log.info("checking if session exists: %s (socket=%s)", session_name, socket_path)
-    if tmux_mod.session_exists(session_name, socket_path=socket_path):
+    _log.info("checking if session exists: %s (socket=%s, running=%s)",
+              session_name, socket_path, session_running)
+    if session_running:
         # Check if the session has the expected panes
         live_panes = tmux_mod.get_pane_indices(session_name)
         registry = pane_registry.load_registry(session_name)

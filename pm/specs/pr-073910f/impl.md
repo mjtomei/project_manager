@@ -2313,3 +2313,55 @@ Validation: targeted suites (`test_session_socket_isolation`,
 pass; full suite re-run after the edit (see the PR note); every fixture
 used a disposable socket and a temporary HOME — no live session, server
 or shared host configuration was touched.
+
+## Review iteration (2026-11-01, review-loop 8d4e i1)
+
+Verification pass over the head after the 2caf i8 fixes; no requirement
+changes.  One rollout-path gap, of the class R1/R6 define:
+
+1. **A vanished legacy session still sent the create path to the default
+   server.**  `_resolve_session_socket()` decides "legacy" from a
+   `find_session_server()` snapshot and exports the *default* server's
+   socket; `_session_start()` then asked, a moment later, whether the
+   session was running.  A concurrent `pm session kill` (or any other
+   removal) between the two probes made that answer "no" while the
+   process was still pointed at the default server, so the create path
+   below created a brand-new session there — outside its own server
+   (R1) — and every later `pm session` saw it as legacy again, making the
+   state self-perpetuating.  The existence check is now taken once; when
+   it says the legacy session is gone, `_session_start()` re-resolves the
+   socket (which then yields the deterministic private path) and re-checks
+   before the rollout note is printed, so the note never describes a
+   session that is not being attached.  Test:
+   `TestSessionStartAttachesToLegacySession::
+   test_a_vanished_legacy_session_is_created_on_its_private_socket`
+   (verified to fail with the old order: it created with
+   `socket_path=None` on the default server and printed the note).
+
+Nothing else surfaced.  The socket derivation and default-server
+addressing (R4.3), discovery scoping (7af7 i1–i3, 3cc7 i1, 703c
+i1/i4/i6, 2caf i4/i5), the precise detach (R5, 703c i3, 2caf i2), the
+kill/unlink rules (R3.2, R8, 2caf i7), the socket-file and
+socket-directory ownership checks (d1c0 i10/i12, 703c i2, 2caf i8) and
+the shared-session share-mode handling (d1c0 i7, 703c i8) all match the
+spec, and every new helper has direct coverage.
+
+Cross-PR residual (recorded on pr-6de8207, not fixed here): a repo
+directory whose name contains `.` or `:` yields a tag tmux rewrites to
+`_` when it creates the session, so the session name no longer matches
+the tag-derived socket: `pm session`'s duplicate convergence cannot find
+the session (`has-session -t` fails on the original name), and `pm session
+kill` / `pm tui … -s <the name list reports>` derive a different socket.
+Pre-existing (master's `create_session` re-raises the duplicate the same
+way) and the same root cause as the `~` case: `get_session_tag()` uses the
+repository directory name unsanitised.
+
+Validation: targeted suites (`test_session_socket_isolation`,
+`test_tmux`, `test_cli_helpers`, `test_shared_sessions`, `test_cli_qa`)
+394 passed; full suite re-run after the edit (see the PR note);
+`pm/specs/pr-073910f/session_start_smoke.py` re-run on a disposable socket
+(private server, session env, global env and hooks correct; default server
+untouched); `pm session list` read-only ("No pm sessions found.", no
+socket directory created).  No live session, server or shared host
+configuration was touched — every fixture used a disposable socket and a
+temporary HOME.
