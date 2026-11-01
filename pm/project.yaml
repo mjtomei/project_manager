@@ -14331,7 +14331,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-11-01T02:16:36.124275+00:00'
+  updated_at: '2026-11-01T02:59:53.548151+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -15421,6 +15421,40 @@ prs:
       Full suite on the final tree: 5284 passed, 1 skipped, 0 failed (423 s, /pm-captures/review-3dcb-i2/full-suite.log).'
     created_at: '2026-11-01T02:16:36Z'
     last_edited: '2026-11-01T02:16:36Z'
+  - id: note-2d04a85
+    text: 'QA S33 (the original bug re-proven; reproduction tests fail on master):
+      PASS, no code change, head 24d7d4201 (base origin/master 89e3c501e). Disposable-HOME
+      sandbox, dedicated PM_TMUX_SOCKET, PYTHONPATH=/workspace, PATH narrowed so no
+      real gh/claude, git-backed fake-github installed before pm init. Story 1 — pm
+      pr close on in_progress A (#1, branch pm/login-feature, dirty workdir): exit
+      0 with Closing GitHub PR #1... / GitHub PR #1 closed. / Closed #1: Add login
+      feature (status: closed) / Kept: registry entry, branch ..., workdir ... / Reopen
+      / Cleanup on stdout and the dependent warning + hint on stderr; show keeps title/closed/branch/workdir/GitHub/description/note;
+      list shows #1 [closed] and B [pending] <- [A]; list --open only B and C; ready
+      only C; stand-in #1 CLOSED with refs/heads/pm/login-feature still resolving;
+      the workdir 54-file sha256 listing and git status --porcelain --ignored are
+      byte-identical; active_pr moved to B (pr-6cd925d). Story 2 — repeat closes by
+      "#1" then by id: both exit 0 with the same lines and no Removed line; one entry,
+      one note (same id/text), closed_at byte-identical, updated_at strictly later,
+      title/description/branch/workdir/depends_on identical, workdir and branch intact.
+      Story 3 — D closed --keep-github prints Leaving GitHub PR #2 unchanged then
+      Closed #2 and the stand-in stays OPEN; E (never started, no gh number, local
+      branch) closed --keep-branch prints no Closing line and no deprecation warning,
+      Kept names its branch and refs/heads/... resolves; help shows --keep-branch
+      Deprecated no-op and --remove Registry-only; F (its workdir was rm -rfed beforehand)
+      closes normally, show still prints the Workdir path and it is still absent.
+      Story 4 — the four reproduction tests: 4 passed on this head; in a detached
+      origin/master worktree with this tests/test_pr_close.py copied in, 4 failed
+      for the bug reasons (close must keep the registry entry / assert None is not
+      None; the recorded gh call is [pr,close,1,--delete-branch] twice; assert wd.is_dir()
+      False). Evidence: /pm-captures/scenarios/33/{story1-close-default,story2-repeat-close,story3-flags,story4-reproduction-tests}
+      (cast + mp4 + driver + manifest; story 4 also master-pytest.log/branch-pytest.log;
+      final-state.txt at the scenario root). Harness note: agg was not installed in
+      this container - fetched the bare aarch64 binary v1.9.0 to /tmp/aggbin/agg;
+      also one tmux -L <sock> new-session immediately after kill-server exited unexpectedly,
+      so create the scaffold server on a fresh socket name.'
+    created_at: '2026-11-01T02:59:53Z'
+    last_edited: '2026-11-01T02:59:53Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
