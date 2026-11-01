@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T16:50:17.565090+00:00'
+  updated_at: '2026-11-01T17:36:35.225699+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38618,6 +38618,37 @@ prs:
       dropped. (2026-11-01T16:47:00Z)'
     created_at: '2026-11-01T16:50:17Z'
     last_edited: '2026-11-01T16:50:17Z'
+  - id: note-cb694dd
+    text: 'Review loop 928f i34: one leftover in the kept recipe scope, the PR own
+      class — the tmux recipe failure branches left a dead pm-recorder session; recipe
+      + tests + specs, no pm_core change. (1) i33 R98 claimed every ending path ends
+      the recorder, but the branches that end after the recorder pane has already
+      returned did not kill the session, and with remain-on-exit on (this project
+      QA notes prescribe it) the session outlives its pane: step 3 readiness loop
+      and settle check (recorder exited before it drew), step 5 mid-scenario branch
+      (recorder exited while the TUI was still running), its failed-detach branch,
+      and the cast/status (missing and non-zero)/transcript checks. Verified with
+      the stub harness: dies, nostatus, remaindied, emptycast, detachnostatus, detachbothbad,
+      detachfail, emptytranscript each with STUB_REMAIN exited 1 and left state/pm-recorder,
+      while success and timeout paths left none. The next capture clears a dead leftover,
+      so no capture was lost, but a failed run left the shared pm-recorder name on
+      the server — the state R96 exists to handle. (2) Each of the eight branches
+      now runs tmux kill-session -t "=pm-recorder" 2>/dev/null || true beside its
+      pipe stop and claim release (failed-detach included, so the rule is uniform);
+      the recorder is known dead in every one (pane_dead, or a send-keys that could
+      not reach the pane), so the kill can only remove a leftover. test_tmux_run_leaves_no_recorder_session_behind
+      gains the eight modes (ids recorder-died-before-drawing, recorder-exited-at-start,
+      recorder-died-mid-scenario, no-cast, no-status, bad-status, detach-failed, no-transcript),
+      each requiring its branch message and the session absence, STUB_REMAIN in every
+      mode. Mutation check: all eight fail against the pre-fix recipe, and deleting
+      any one of the eight new statements fails exactly its own case. Recipe file
+      367 passed (was 359); full suite 5564 passed, 1 skipped, 0 failed (486 s, run
+      once on the final tree). Evidence: /pm-captures/review-928f-i34/ (probe-leftovers.log,
+      mutation-check.log, pre-fix-mutation.log, recipe-file.log, suite.log, README.md,
+      scripts/). impl.md R99, qa.md. The dropped helper/prompt/verifier work stays
+      dropped.'
+    created_at: '2026-11-01T17:36:35Z'
+    last_edited: '2026-11-01T17:36:35Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

@@ -232,11 +232,18 @@ hits, regardless of how it waits for a background job:
 - every ending path ends the recorder it started, and the cleanup is a
   guarantee of its own: the CLI scaffold's ``kill-server`` on its readiness
   timeout, its three stop-path failures and its success, and the tmux
-  recipe's ``kill-session`` in both timeout branches and at the end of a
-  successful run. ``remain-on-exit on`` keeps the session after its pane
-  returns — the state a successful run ends in — so the pane's death does not
-  remove it. Deleting any of those eight statements left the whole file green
-  until the two cleanup cases were added (review loop 928f i33, R98).
+  recipe's ``kill-session`` in both timeout branches, at the end of a
+  successful run, and in every failure branch that ends after the recorder's
+  pane returned (a recorder that died before drawing, died mid-scenario,
+  failed the detach, or finished with no cast, no status or no transcript).
+  ``remain-on-exit on`` keeps the session after its pane returns — the state
+  a successful run ends in, and the state every one of those failure branches
+  ends in — so the pane's death does not remove it. Deleting any of those
+  eight original statements left the whole file green until the two cleanup
+  cases were added (review loop 928f i33, R98); the failure branches were
+  still missed because the cleanup cases covered only the success and timeout
+  paths, so a failed run left a dead ``pm-recorder`` behind until review loop
+  928f i34 (R99) extended the same case to them.
 
 The capture flow's readiness and stop logic is also *executed* against stub
 ``tmux``/``pm`` (``TestCaptureFlowExecution``), because its failure modes are
@@ -6423,25 +6430,37 @@ class TestCaptureFlowExecution:
         ("ok", None),
         ("norec", "did not come up within"),
         ("stuck", "did not exit within"),
-    ], ids=["success", "readiness-timeout", "stop-timeout"])
+        ("dies", "recorder exited before it drew"),
+        ("nostatus", "recorder exited before it drew"),
+        ("remaindied", "recorder exited while the TUI was still running"),
+        ("emptycast", "asciinema wrote no cast"),
+        ("detachnostatus", "recorder status is missing"),
+        ("detachbothbad", "asciinema exited 137"),
+        ("detachfail", "recorder exited before the detach"),
+        ("emptytranscript", "transcript.log is empty"),
+    ], ids=["success", "readiness-timeout", "stop-timeout",
+            "recorder-died-before-drawing", "recorder-exited-at-start",
+            "recorder-died-mid-scenario", "no-cast", "no-status",
+            "bad-status", "detach-failed", "no-transcript"])
     def test_tmux_run_leaves_no_recorder_session_behind(self, mode, message,
                                                         tmp_path):
         """A run that ends must not leave its recorder session on the server.
 
         ``pm-recorder`` is the one name every capture on a server shares, and
         ``remain-on-exit on`` keeps the session after its only pane's command
-        returns — exactly the state a successful run ends in, and the state
-        both timeout branches end in (a recorder that never drew, a detach
-        that never ended it). Step 5's last statement removes it ("already
-        gone if it exited") and step 3's readiness timeout kills the session
-        it started, but no case observed either: deleting the success path's
-        ``kill-session`` or the step-3 timeout's left the whole file green
-        (351 passed, verified by mutation). The run then leaves a dead
-        session the next capture has to clear — the leftover state R96
-        exists to handle, so the cleanup is what keeps it from being left at
-        all. ``STUB_REMAIN`` keeps the success case's session after its pane.
+        returns — exactly the state a successful run ends in, the state both
+        timeout branches end in (a recorder that never drew, a detach that
+        never ended it), and the state every failure branch ends in, because
+        the pane has returned (a recorder that died at startup, died
+        mid-scenario, or finished with no cast, no status or no transcript).
+        Step 5's last statement removes it ("already gone if it exited") and
+        the timeout branches kill the session they started; the *failure*
+        branches originally did not, so a failed run left a dead
+        ``pm-recorder`` for the next capture to clear (the leftover state R96
+        exists to handle). ``STUB_REMAIN`` is what leaves the session after
+        its pane in every mode, so the assertion can see the cleanup.
         """
-        env = {"STUB_REMAIN": "1"} if mode == "ok" else {}
+        env = {"STUB_REMAIN": "1"}
         r, _cast = _run_capture_block(
             "tmux-screen-recording.md", mode, tmp_path, target=True,
             env_extra=env)

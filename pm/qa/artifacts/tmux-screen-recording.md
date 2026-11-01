@@ -705,6 +705,11 @@ while :; do
        [ "$(tmux display-message -p -t "=pm-recorder:0.0" '#{pane_dead}' 2>/dev/null)" = 1 ]; then
         echo "recorder exited before it drew — see the cast and" \
             "<capture-dir>/recorder-stderr.log" >&2
+        # The pane is dead, but with `remain-on-exit on` its session is not:
+        # end it, or this failed run leaves the shared `pm-recorder` name on
+        # the server for the next capture to clear. Best-effort like every
+        # other cleanup here — the session may already be gone.
+        tmux kill-session -t "=pm-recorder" 2>/dev/null || true
         tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
         tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
         exit 1
@@ -748,6 +753,9 @@ if ! tmux has-session -t "=pm-recorder" 2>/dev/null || \
    [ "$(tmux display-message -p -t "=pm-recorder:0.0" '#{pane_dead}' 2>/dev/null)" = 1 ]; then
     echo "recorder exited before it drew — see the cast and" \
         "<capture-dir>/recorder-stderr.log" >&2
+    # Dead pane, but `remain-on-exit on` keeps its session: end it, as the
+    # readiness loop above does, so the failed run leaves no recorder behind.
+    tmux kill-session -t "=pm-recorder" 2>/dev/null || true
     tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
     tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
     exit 1
@@ -871,10 +879,14 @@ pm tui send a -s "$TARGET" || send_failed   # open the picker
 #    recording"). With a clean status the cast, status and transcript checks
 #    below decide, exactly as they do when the session is gone too. A
 #    recorder that ended because the session itself ended is a legitimate
-#    finish — the wait below sees it. (Every pipe stop below is best-effort:
-#    when the session is already gone the pipe is gone with it, and
-#    `tmux pipe-pane` would otherwise print "can't find session: …" on a run
-#    that succeeded.)
+#    finish — the wait below sees it. (Every pipe stop and recorder-session
+#    kill below is best-effort: when the session is already gone the pipe is
+#    gone with it, and `tmux pipe-pane`/`tmux kill-session` would otherwise
+#    print "can't find session: …" on a run that succeeded. Every path that
+#    ends this flow removes the recorder session, the failure checks below
+#    included: with `remain-on-exit on` the session outlives its dead pane, so
+#    a failed run would otherwise leave the shared `pm-recorder` name on the
+#    server for the next capture to clear.)
 #    This step is pasted on its own whenever the scenario is driven
 #    interactively, so re-derive the target session it was given in step 1
 #    rather than acting on an empty one: `tmux has-session -t ''` *succeeds*,
@@ -966,6 +978,10 @@ if ! tmux has-session -t "=pm-recorder" 2>/dev/null || \
         if [ -z "$recorder_status" ] || [ "$recorder_status" != 0 ]; then
             echo "recorder exited while the TUI was still running — the cast" \
                 "is incomplete, not a finished recording" >&2
+            # Nothing is recording (the pane above returned), but
+            # `remain-on-exit on` keeps the session: end it, so this failed
+            # run does not leave the shared `pm-recorder` name behind.
+            tmux kill-session -t "=pm-recorder" 2>/dev/null || true
             tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
             # This run is over and nothing is recording any more, so release
             # the claim step 2 took: a failure must not leave a claim behind
@@ -1013,6 +1029,10 @@ else
         if tmux has-session -t "=$TARGET" 2>/dev/null; then
             echo "recorder exited before the detach — the cast is incomplete," \
                 "not a finished recording" >&2
+            # The send failed because the recorder went away; if
+            # `remain-on-exit on` kept its session, end it here like every
+            # other failure path does.
+            tmux kill-session -t "=pm-recorder" 2>/dev/null || true
             tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
             tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
             exit 1
@@ -1063,6 +1083,11 @@ done
 test -s <capture-dir>/recording.cast || {
     echo "asciinema wrote no cast — see" \
         "<capture-dir>/recorder-stderr.log" >&2
+    # The stop wait above ended because the recorder's pane returned (or its
+    # session went away); with `remain-on-exit on` the session can outlive the
+    # pane, so end it here too rather than leave the shared `pm-recorder` name
+    # behind for the next capture.
+    tmux kill-session -t "=pm-recorder" 2>/dev/null || true
     tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
     tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
     exit 1
@@ -1094,6 +1119,8 @@ status=$(cat <capture-dir>/recorder.status 2>/dev/null)
     echo "recorder status is missing or empty — the pane was torn down" \
         "before asciinema's exit status was written, so the cast is" \
         "incomplete, not a finished recording" >&2
+    # Dead pane, possibly a surviving session (`remain-on-exit on`): end it.
+    tmux kill-session -t "=pm-recorder" 2>/dev/null || true
     tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
     tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
     exit 1
@@ -1101,6 +1128,8 @@ status=$(cat <capture-dir>/recorder.status 2>/dev/null)
 [ "$status" = 0 ] || {
     echo "asciinema exited $status — the cast is incomplete, not a finished" \
         "recording; see <capture-dir>/recorder-stderr.log" >&2
+    # Dead pane, possibly a surviving session (`remain-on-exit on`): end it.
+    tmux kill-session -t "=pm-recorder" 2>/dev/null || true
     tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
     tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
     exit 1
@@ -1112,6 +1141,8 @@ status=$(cat <capture-dir>/recorder.status 2>/dev/null)
 test -s <capture-dir>/transcript.log || {
     echo "transcript.log is empty — the pipe-pane stream never wrote to it," \
         "so this capture has no transcript" >&2
+    # Dead pane, possibly a surviving session (`remain-on-exit on`): end it.
+    tmux kill-session -t "=pm-recorder" 2>/dev/null || true
     tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
     tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
     exit 1

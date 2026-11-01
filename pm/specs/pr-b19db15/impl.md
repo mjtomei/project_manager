@@ -4249,7 +4249,9 @@ R97. **The restart step left the previous attempt's video and manifest
 
 R98. **The cleanup every ending path promises had no case (review loop 928f
    i33).** A test gap in the kept recipe scope: eight "leave nothing behind"
-   statements, none observed.
+   statements, none observed. (The claim below was still one branch class
+   short — the tmux failure branches that end after the recorder's pane
+   returned did not kill the session; see R99.)
 
    - **The gap.** Both recipes end the recorder they started on every path —
      the CLI scaffold's `kill-server` in step 2's readiness timeout, in all
@@ -4281,6 +4283,46 @@ R98. **The cleanup every ending path promises had no case (review loop 928f
      **359 passed** (was 351); full suite **5556 passed, 1 skipped, 0
      failed** (495.39 s, run once on the final tree). Evidence:
      `/pm-captures/review-928f-i33/` (`mutation-check.log`, `recipe-file.log`,
+     `suite.log`, `README.md`, `scripts/`).
+
+R99. **The tmux failure branches left a dead recorder session (review loop
+   928f i34).** R98's "every ending path ends the recorder it started" held
+   for the success and timeout paths, not for the branches that end after the
+   recorder's pane has returned.
+
+   - **The leftover.** With `remain-on-exit on` — which this project's own QA
+     notes prescribe — the session outlives its pane, and the branches that
+     end once the recorder is gone did not remove it: step 3's readiness loop
+     and its settle check ("recorder exited before it drew"), step 5's
+     mid-scenario branch ("recorder exited while the TUI was still running"),
+     its failed-detach branch, and the cast, status (missing and non-zero) and
+     transcript checks. Verified with the stub harness in this container:
+     modes `dies`, `nostatus`, `remaindied`, `emptycast`, `detachnostatus`,
+     `detachbothbad`, `detachfail` and `emptytranscript`, each with
+     `STUB_REMAIN`, exited 1 and left `state/pm-recorder` behind, while the
+     success and timeout paths left none. The next capture clears a dead
+     leftover (step 0, and step 3's dead-pane clear), so no capture was lost —
+     but a failed run left the shared `pm-recorder` name on the server: the
+     state R96 exists to handle and R98 promised not to create.
+   - **Fix.** Each of those eight branches now runs
+     `tmux kill-session -t "=pm-recorder" 2>/dev/null || true` beside its pipe
+     stop and claim release (the failed-detach branch included, so the rule is
+     uniform). The recorder is known dead in every one — the branch condition
+     is the pane's `#{pane_dead}` or a `send-keys` that could not reach the
+     pane — so the kill can only remove a leftover, and step 5's comment now
+     states the rule.
+   - **Coverage.** `test_tmux_run_leaves_no_recorder_session_behind` gains the
+     eight modes (ids `recorder-died-before-drawing`,
+     `recorder-exited-at-start`, `recorder-died-mid-scenario`, `no-cast`,
+     `no-status`, `bad-status`, `detach-failed`, `no-transcript`), each
+     requiring its branch's message and the session's absence, with
+     `STUB_REMAIN` set in every mode. Mutation check: all eight fail against
+     the pre-fix recipe, and deleting any one of the eight new statements
+     fails exactly its own case and nothing else.
+   - **Evidence.** Recipe file **367 passed** (was 359); full suite **5564
+     passed, 1 skipped, 0 failed** (486.29 s, run once on the final tree).
+     Evidence: `/pm-captures/review-928f-i34/` (`probe-leftovers.log`,
+     `mutation-check.log`, `pre-fix-mutation.log`, `recipe-file.log`,
      `suite.log`, `README.md`, `scripts/`).
 
 ## Non-goals

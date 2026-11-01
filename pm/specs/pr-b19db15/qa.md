@@ -1264,6 +1264,16 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   test file green (351 passed, verified by mutation), and the run would then
   leave a dead session the next capture has to clear (review loop 928f i33,
   R98).
+- The same holds for a tmux capture that *fails* after its recorder's pane
+  has returned: a recorder that died before drawing, died mid-scenario,
+  failed the detach, or finished with no cast, no status or no transcript
+  must not leave its `pm-recorder` session behind. On a `remain-on-exit on`
+  host the session outlives the dead pane, and every one of those branches
+  originally exited 1 without killing it (verified with the stub harness:
+  eight modes, each leaving `state/pm-recorder`; review loop 928f i34, R99).
+  The next capture clears such a leftover, so a capture is not lost — but the
+  failed run leaves the shared name on the server, which is exactly the state
+  R96 handles.
 
 ## Pass / Fail criteria
 
