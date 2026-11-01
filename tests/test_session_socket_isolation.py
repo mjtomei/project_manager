@@ -445,6 +445,44 @@ class TestUseEnvFlag:
         assert p.parent.name == f"tmux-{os.getuid()}"
 
 
+class TestDefaultSocketPath:
+    """The default server's path must match where tmux actually puts it.
+
+    tmux uses ``$TMUX_TMPDIR`` only when it is an absolute path to an
+    existing directory; a missing or relative value makes it put the
+    default server at ``/tmp/tmux-<uid>/default`` (verified on tmux 3.2a).
+    Computing the value verbatim would look for legacy pre-isolation
+    sessions where no server ever lives, so `pm session` would start a
+    duplicate private session, and `pm session kill` / `list` would not
+    see the legacy one (review-loop b48f i7).
+    """
+
+    @staticmethod
+    def _expected(base: Path) -> Path:
+        return base / f"tmux-{os.getuid()}" / "default"
+
+    def test_uses_an_existing_absolute_tmux_tmpdir(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("TMUX_TMPDIR", str(tmp_path))
+        assert paths.default_socket_path() == self._expected(tmp_path)
+
+    def test_falls_back_when_the_directory_does_not_exist(
+            self, monkeypatch, tmp_path):
+        monkeypatch.setenv("TMUX_TMPDIR", str(tmp_path / "missing"))
+        assert paths.default_socket_path() == self._expected(Path("/tmp"))
+
+    def test_falls_back_for_a_relative_value(self, monkeypatch):
+        monkeypatch.setenv("TMUX_TMPDIR", "relative")
+        assert paths.default_socket_path() == self._expected(Path("/tmp"))
+
+    def test_falls_back_when_unset_or_empty(self, monkeypatch):
+        for value in (None, ""):
+            if value is None:
+                monkeypatch.delenv("TMUX_TMPDIR", raising=False)
+            else:
+                monkeypatch.setenv("TMUX_TMPDIR", value)
+            assert paths.default_socket_path() == self._expected(Path("/tmp"))
+
+
 # ---------------------------------------------------------------------------
 # tmux: which server hosts a session (private socket vs legacy default)
 # ---------------------------------------------------------------------------
@@ -486,6 +524,28 @@ class TestFindSessionServer:
             raise OSError("no tmux")
 
         monkeypatch.setattr(tmux, "session_exists", boom)
+        assert tmux.find_session_server("pm-repo-abc") == (None, False)
+
+    def test_does_not_probe_a_symlink_at_the_socket_path(
+            self, monkeypatch, tmp_path):
+        """A planted link is skipped, not followed.
+
+        ``/tmp/pm-sessions`` is world-writable, so another user can create
+        the deterministic path as a symlink to a server they run before
+        ours exists; ``tmux -S <link>`` follows it, so probing would adopt
+        their server — and discovery, ``pm session --print-connect`` and
+        ``pm session kill`` all resolve through here.  The listing already
+        skips non-socket entries; this is the single-entry probe
+        (review-loop b48f i7).
+        """
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        link = tmp_path / "pm-repo-abc"
+        link.symlink_to(tmp_path / "attacker-server")
+        monkeypatch.setattr(
+            tmux, "session_exists",
+            lambda name, socket_path=None, use_env=True:
+            socket_path == str(link))
+
         assert tmux.find_session_server("pm-repo-abc") == (None, False)
 
     @staticmethod

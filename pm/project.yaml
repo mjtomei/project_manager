@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T16:24:36.702695+00:00'
+  updated_at: '2026-11-01T16:39:02.861904+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6544,6 +6544,38 @@ prs:
       or shared host configuration was touched.'
     created_at: '2026-11-01T16:24:36Z'
     last_edited: '2026-11-01T16:24:36Z'
+  - id: note-9f6dfc4
+    text: 'Review loop b48f i7, follow-up (same iteration; no requirement changes):
+      an independent review of the change set found two more gaps in the same fail-closed
+      area, both fixed. (3) The read path still probed a symlink at the socket path:
+      _find_session_server() called session_exists(..., socket_path=<deterministic
+      path>) without inspecting the entry, so a link another user plants at /tmp/pm-sessions/pm-<tag>
+      (world-writable) was followed by tmux -S — ''pm tui send/view -s'', ''pm session
+      --print-connect'', the TUI connect popup and ''pm session kill'' would resolve
+      to (and drive or tear down) the attacker''s server. It now lstats the entry
+      and probes only a real socket (or nothing, the normal before-the-first-start
+      state); a link or any other entry is skipped and the lookup falls through to
+      the default server. Test: TestFindSessionServer::test_does_not_probe_a_symlink_at_the_socket_path,
+      verified to fail at 60b8ee116 (returned the link as a private server) and live-checked
+      on a disposable dir (a planted link to a live server yields (None, False) for
+      find_session_server and find_exact_session_server). (4) default_socket_path()
+      did not mirror tmux''s $TMUX_TMPDIR fallback: tmux uses TMUX_TMPDIR only when
+      it is an absolute path to an existing directory (verified on tmux 3.2a: a missing
+      or relative value puts the default server at /tmp/tmux-<uid>/default), while
+      pm computed the value verbatim — so in that environment every legacy probe addressed
+      a path no server uses, ''pm session'' started a duplicate private session beside
+      the running legacy one (R10), and kill/list did not see it. It now falls back
+      to /tmp for a missing, relative or empty value. Tests: TestDefaultSocketPath
+      (4 cases; the missing-dir and relative cases fail at 60b8ee116). impl.md b48f
+      i7 items 3-4 (plus the ''~'' residual now recorded as also reaching the socket
+      derivation, root cause pr-6de8207); qa.md R10 gained the TMUX_TMPDIR bullet
+      and R12 the read-path symlink bullet. Targeted suites 724 passed; full suite
+      5419 passed / 1 skipped (421 s, log /pm-captures/review-b48f-i7/full-suite-final.log;
+      the pre-followup run is full-suite-pre-followup.log). Both start-path smoke
+      scripts re-ran clean on disposable sockets. No live session, server or shared
+      host configuration was touched.'
+    created_at: '2026-11-01T16:39:02Z'
+    last_edited: '2026-11-01T16:39:02Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

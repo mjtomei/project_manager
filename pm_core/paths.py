@@ -820,7 +820,16 @@ def default_socket_path() -> Path:
     unused; pm has no way to guess that name, so those sessions are simply
     not found (the same as before this change).
     """
-    base = os.environ.get("TMUX_TMPDIR") or "/tmp"
+    base = os.environ.get("TMUX_TMPDIR")
+    # Mirror tmux's own fallback: it uses $TMUX_TMPDIR only when it is an
+    # absolute path to an existing directory.  A missing or relative value
+    # makes tmux put the default server at /tmp/tmux-<uid>/default
+    # (verified on tmux 3.2a), so computing the value verbatim would look
+    # for legacy sessions where no server ever lives — the session would
+    # be invisible to `pm session`, `pm session kill` and
+    # `pm session list` (review-loop b48f i7).
+    if not base or not os.path.isabs(base) or not os.path.isdir(base):
+        base = "/tmp"
     return Path(base) / f"tmux-{os.getuid()}" / "default"
 
 

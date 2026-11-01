@@ -2933,8 +2933,9 @@ temporary HOME.
 ## Review iteration (2026-11-01, review-loop b48f i7)
 
 Verification pass over the head after the b48f i6 fix; no requirement
-changes.  One fail-closed gap on the shared-session start path, plus one
-piece of dead code.
+changes.  Three fail-closed gaps in the socket-path/entry handling (the
+shared-session start path, the single-entry read probe, and the default
+server's `$TMUX_TMPDIR` resolution), plus one piece of dead code.
 
 1. **A shared session's start followed a symlink planted at its socket
    path.**  `_resolve_session_socket()` refuses a socket *file* owned by
@@ -2972,6 +2973,43 @@ piece of dead code.
    session is structural).  No behaviour change; the existing listing
    tests cover the output.
 
+An independent review of the change set then surfaced two more gaps in
+the same fail-closed area:
+
+3. **The *read* path still probed a symlink at the socket path.**
+   `_find_session_server()` asked `session_exists(..., socket_path=<the
+   deterministic path>)` without inspecting the entry.  `/tmp/pm-sessions`
+   is 1777, so another user can create that path as a symlink to a server
+   they run before ours exists; `tmux -S <link>` follows it, so
+   `pm tui send/view -s <session>`, `pm session --print-connect`, the TUI
+   connect popup and `pm session kill` all resolved to (and would drive or
+   tear down) the attacker's server.  This is the same hazard the start
+   path now refuses, one function earlier — `list_pm_sessions()` already
+   skipped non-socket entries, but the single-entry probe did not.  It now
+   `lstat`s the entry and probes only a real socket (or nothing, the
+   normal before-the-first-start state); a link or any other entry is
+   skipped, so the lookup falls through to the default server as it does
+   for any absent private session.  Test:
+   `TestFindSessionServer::test_does_not_probe_a_symlink_at_the_socket_path`,
+   verified to fail on the pre-fix tree at `60b8ee116` (returned the
+   symlink as a private server).
+4. **`default_socket_path()` did not mirror tmux's `$TMUX_TMPDIR`
+   fallback.**  tmux uses `$TMUX_TMPDIR` only when it is an absolute path
+   to an *existing* directory; a missing or relative value makes it put
+   the default server at `/tmp/tmux-<uid>/default` (verified on tmux
+   3.2a: with `TMUX_TMPDIR=/tmp/nonexistent` the server landed at
+   `/tmp/tmux-1000/default`, and a relative value behaved the same).
+   `default_socket_path()` computed `<TMUX_TMPDIR>/tmux-<uid>/default`
+   verbatim, so in that environment every legacy-session probe addressed a
+   path no server uses: `pm session` started a duplicate private session
+   beside the running legacy one (R6.1's "no private session alongside
+   it"), and `pm session kill` / `list` did not see it.  Fail-closed, but a
+   regression versus master, which let tmux resolve its own default.  The
+   helper now mirrors the fallback (absolute + `isdir`, else `/tmp`).
+   Tests: `TestDefaultSocketPath` (existing absolute dir, missing dir,
+   relative value, unset/empty); the missing-dir and relative cases fail on
+   the pre-fix tree, the other two describe unchanged behaviour.
+
 Nothing else surfaced.  The socket derivation and default-server
 addressing (R4.3), discovery scoping (7af7 i1–i3, 3cc7 i1, 703c
 i1/i4/i6, 2caf i4/i5, b48f i5/i6), the precise detach (R5, 703c i3, 2caf
@@ -2983,8 +3021,10 @@ direct coverage.
 
 Validation: targeted suites (`test_session_socket_isolation`,
 `test_tmux`, `test_cli_helpers`, `test_shared_sessions`, `test_cli_qa`)
-429 passed; full suite recorded in the PR note for this iteration.  Both
-new tests were verified to fail on the pre-fix tree at `670f2f08c`.
+434 passed; full suite recorded in the PR note for this iteration.  The
+start-path tests (item 1) were verified to fail on the pre-fix tree at
+`670f2f08c`, the read-path and `TMUX_TMPDIR` tests (items 3-4) at
+`60b8ee116`.
 `pm/specs/pr-073910f/session_start_smoke.py` re-ran clean on a disposable
 socket (private server, session env, global env and hooks correct;
 default server untouched).  No live session, server or shared host
@@ -3002,3 +3042,15 @@ fixing it means teaching the shell-side gate (and `_pane-switch`'s own
 session argument) to resolve the group, which is a key-binding change
 outside this PR's scope, so it is left as a known limitation rather than
 changed here.
+
+Also recorded (pre-existing root cause, filed as pr-6de8207): the
+`~`-truncation residual noted in review-loop 0e4c i1 now also reaches the
+socket derivation — `session_socket_for()` strips a grouped `~N` suffix
+with the same first-`~` rule as `base_session_name()`, so two repo
+directories whose names share the prefix before a `~` (`proj~a`,
+`proj~b`) derive the same socket *and* the same registry key, as well as
+the same truncated session name.  The fix belongs in `get_session_tag()`
+(sanitise the tag), where that residual already points; changing the
+socket derivation alone would not separate the registries (and would have
+to distinguish a grouped suffix from a `~` in the repo name, which is the
+same ambiguity).

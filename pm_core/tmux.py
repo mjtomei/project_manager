@@ -308,8 +308,23 @@ def _find_session_server(session_name: str, *, exact: bool) -> tuple[str | None,
         # pre-isolation session legitimately lives.
         if base.startswith("pm-") and shared_socket_dir_is_usable():
             sock = session_socket_for(base)
-            if session_exists(target, socket_path=sock):
-                return sock, True
+            # Probe only a real socket file (or nothing, the normal
+            # before-the-first-start state).  The directory is
+            # world-writable, so another user can plant a symlink — or any
+            # other entry — at the deterministic path before our server
+            # exists, and ``tmux -S <link>`` follows it.  Discovery,
+            # ``--print-connect`` and ``pm session kill`` all resolve
+            # through here, so probing a link would adopt their server
+            # (and hand its TUI pane to ``pm tui send``).  Same rule as
+            # ``list_pm_sessions``' scan; the create path refuses it
+            # outright (review-loop b48f i7).
+            try:
+                entry = os.lstat(sock)
+            except OSError:
+                entry = None
+            if entry is None or stat.S_ISSOCK(entry.st_mode):
+                if session_exists(target, socket_path=sock):
+                    return sock, True
         if session_exists(target, use_env=False):
             return str(default_socket_path()), False
     except OSError:

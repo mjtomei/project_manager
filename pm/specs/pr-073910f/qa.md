@@ -343,6 +343,13 @@ pane unless stated otherwise.
   created on the project's *private* socket — never as a second session on
   the default server — and the rollout note is not printed for the session
   that vanished (review-loop 8d4e i1).
+- **GIVEN** `$TMUX_TMPDIR` set to a path that does not exist (or to a
+  relative path), so tmux itself keeps its default server at
+  `/tmp/tmux-<uid>/default`, **WHEN** the user runs `pm session`,
+  `pm session list` or `pm session kill` in a legacy project's directory,
+  **THEN** the legacy session is still found (attached, listed, killed;
+  no duplicate private session) — pm's default-server path mirrors tmux's
+  fallback (review-loop b48f i7).
 
 ### R11 — Panes, hooks and popups address their own server
 
@@ -399,6 +406,14 @@ pane unless stated otherwise.
   link would otherwise be followed in) — **THEN** it refuses with a
   message naming the socket and saying it is a symbolic link, exports no
   `PM_TMUX_SOCKET`, and neither connects to nor creates a server there
+  (review-loop b48f i7).
+- **GIVEN** that same symlink at a session's socket path pointing at a
+  live server another user runs (with a session of that name), **WHEN**
+  the user runs `pm tui view` / `pm tui send -s <session>`,
+  `pm session --print-connect`, opens the TUI connect popup, or runs
+  `pm session kill` for that session, **THEN** the lookup does not follow
+  the link or act on the server behind it — it reports no TUI pane / no
+  session, and that server, its session and its clients are untouched
   (review-loop b48f i7).
 - **GIVEN** the directory is 1777 and owned by another user,
   **WHEN** the user runs `pm session`,
