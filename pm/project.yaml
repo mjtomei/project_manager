@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T10:54:37.874687+00:00'
+  updated_at: '2026-11-01T11:04:15.979720+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6274,6 +6274,19 @@ prs:
       stayed stable for the rest of the run — not reproduced, not a product finding.'
     created_at: '2026-11-01T10:54:37Z'
     last_edited: '2026-11-01T10:54:37Z'
+  - id: note-02d443f
+    text: 'Refiner 17, live-verified 2026-11-01: with /tmp/pm-sessions a symlink and
+      a server planted at the victim project''s OWN deterministic name (socket <target>/pm-<tag>,
+      session pm-<tag>, live TUI), `pm session list` correctly lists nothing, but
+      `pm tui view` from that project dir drives the planted TUI. The cwd branch of
+      _find_tui_pane -> _select_session_socket -> find_session_server connects through
+      the link before list_pm_sessions'' lstat guard applies (then identified_server
+      is scanned directly). R12''s "not driven" bullet fails for this case. Scenario
+      17 plants the target at the victim tag deliberately, so expect this step to
+      fail until find_session_server/_select_session_socket refuse a non-directory
+      SHARED_SOCKET_DIR.'
+    created_at: '2026-11-01T11:04:15Z'
+    last_edited: '2026-11-01T11:04:15Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
