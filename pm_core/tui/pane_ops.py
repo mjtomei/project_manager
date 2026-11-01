@@ -540,11 +540,6 @@ async def _launch_regression_item(app, qa_id: str,
                 "qa-item", target_window=target_window)
 
 
-# ``pm qa regression`` options that take a value (the token after one is not
-# the test id).
-_REGRESSION_VALUE_OPTS = ("--branch", "-b", "--session", "-s")
-
-
 def launch_regression_command(app, args: list[str]) -> None:
     """Run ``qa regression <args>`` typed in the command bar in a pane.
 
@@ -553,16 +548,26 @@ def launch_regression_command(app, args: list[str]) -> None:
     until its timeout, then kill the session before its container cleanup
     trap runs.  Same pre-launch check as the QA pane's Enter.
     """
+    import click
+    from pm_core.cli.qa import qa_regression
+
     if not app._root:
         app.log_message("No project root")
         return
-    test_id = next((a for prev, a in zip([""] + args, args)
-                    if not a.startswith("-")
-                    and prev not in _REGRESSION_VALUE_OPTS), None)
-    if test_id is None:
+    # Parsed by the command itself, so the test id is the one
+    # `pm qa regression` will run, and a malformed command (no test id, an
+    # unknown option, an option missing its value) is reported here instead
+    # of in a pane that exits at once.  Without a help option: `--help`
+    # would print to the TUI's own stdout.
+    try:
+        ctx = qa_regression.make_context("qa regression", list(args),
+                                         help_option_names=[])
+    except click.UsageError as exc:
         app.log_message(
-            "Usage: qa regression <test-id> [--file-prs] [--branch <b>]")
+            f"qa regression: {exc.format_message()} Usage: qa regression "
+            "<test-id> [--file-prs] [--branch <b>]")
         return
+    test_id = ctx.params["test_id"]
     cmd = (f"pm -C {shlex.quote(str(Path(app._root).resolve()))} "
            f"qa regression {shlex.join(args)}")
     app.run_worker(_launch_regression_item(app, test_id, None, cmd=cmd),

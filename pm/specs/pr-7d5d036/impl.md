@@ -97,7 +97,10 @@ Change:
   only once the session command is built (container created), immediately
   before exec; if setup fails after container creation made the empty run
   dir, the runner removes it (and the test's dir if it is empty), so a run
-  that never launched leaves no evidence of one. Never committed to Git.
+  that never launched leaves no evidence of one. The clone's pm_core
+  override (`qa_loop._setup_clone_override`, written under
+  `~/.pm/sessions/`) is likewise set only as the last setup step (review
+  fc31 i9). Never committed to Git.
 - `pm qa launch regression:<id>` and the TUI regression launch run
   `pm -C <root> qa regression <id> --file-prs` in their pane/window (the TUI
   already launches `pm qa debug --foreground <id>` the same way), so all three
@@ -106,7 +109,11 @@ Change:
   (`pane_ops.launch_regression_command`, same pre-launch check). The command
   bar's default path is a captured subprocess with a 30 s timeout, which
   would block the TUI and then SIGKILL the foreground session before its
-  container cleanup trap runs (review fc31 i4).
+  container cleanup trap runs (review fc31 i4). The typed args are parsed
+  by the `qa_regression` click command itself (no help option, which would
+  print to the TUI's stdout), so the test id matches what the run uses and
+  a malformed command is logged instead of handed to a pane that exits at
+  once (review fc31 i9).
 - `pm qa standalone <id>` refuses a regression id and points at
   `pm qa regression <id>`, so it is no longer a host/live-session path for
   regression tests. `pm qa run` / `pm qa debug` keep their regression

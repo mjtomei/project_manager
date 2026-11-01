@@ -451,7 +451,6 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
         click.echo(f"Could not clone '{base_branch}' for the regression run: "
                    f"{exc}" + (f"\n{detail}" if detail else ""), err=True)
         raise SystemExit(1)
-    qa_loop._setup_clone_override(clone_path)
 
     rev = subprocess.run(["git", "-C", str(clone_path), "rev-parse", "HEAD"],
                          capture_output=True, text=True)
@@ -537,6 +536,10 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
                 session_tag=session_tag, env_out=env,
             )
             run_cwd = str(clone_path)
+        # pm run from the clone uses this pm_core (as in QA scenarios).  Set
+        # last, once the session is ready: it writes under ~/.pm/sessions/,
+        # which a run that never launched must not leave behind.
+        qa_loop._setup_clone_override(clone_path)
     except Exception as exc:
         # Container mode is an execution boundary: report the failure rather
         # than continuing on the host.  Release only this run's container.

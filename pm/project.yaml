@@ -52382,3 +52382,32 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-c414c76
+  plan: bugs
+  title: 'Bug: QA and regression workdirs under ~/.pm/workdirs/qa are never reaped;
+    discovery-scheduled regression runs add a full clone per launch'
+  branch: pm/pr-c414c76-bug-qa-and-regression-workdirs-under-pm-workdirs-q
+  status: pending
+  depends_on: []
+  description: 'Nothing removes ~/.pm/workdirs/qa/<id>-<run>/ (s-N/repo clone + scratch)
+    or the per-clone ~/.pm/sessions/<clone-tag>/override dir that qa_loop._setup_clone_override
+    writes, for QA scenario runs, pm qa debug/standalone or (since pr-7d5d036) pm
+    qa regression runs. Repro: run pm qa regression <id> (or pm qa debug <id>) several
+    times; each leaves a new regression-<id>-<run-id>/s-0/{repo,scratch} and a new
+    sessions/<repo>-<hash>/override, and grep finds no reaper/retention for workdirs/qa.
+    Impact grows with the discovery supervisor: once pr-2680fbf authors regression
+    tests, every scheduled pm qa launch regression:<id> adds a full working-tree checkout
+    plus its disposable project, unattended and unbounded. Captures (captures/regression/<id>/<run-id>/)
+    are the durable evidence; the clone is reproducible from the base-branch sha in
+    prompt.md. Expected: a retention policy (e.g. keep the last N runs per test/PR
+    or runs newer than T, never a running one), applied on new launches or via pm
+    pr cleanup.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-01T22:52:52.821559+00:00'
+  updated_at: '2026-11-01T22:52:52.821559+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

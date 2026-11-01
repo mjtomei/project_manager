@@ -127,6 +127,11 @@ def _run_captures(home: Path) -> list[Path]:
     return sorted((home / ".pm" / "sessions").rglob("prompt.md"))
 
 
+def _clone_overrides(home: Path) -> list[Path]:
+    """The pm_core override files written for run clones."""
+    return sorted((home / ".pm" / "sessions").rglob("override"))
+
+
 # ---------------------------------------------------------------------------
 # pm qa regression
 # ---------------------------------------------------------------------------
@@ -180,6 +185,11 @@ def test_host_run_is_isolated_and_needs_no_pm_session(project, home,
     assert args[:2] == ("bash", ["bash", "-c", "CLAUDE-CMD"])
     assert "PM_PROJECT" not in args[2] and "PM_SESSION" not in args[2]
     spies.create.assert_not_called()
+    # pm run from the clone uses this pm_core, as in QA scenarios.
+    (override,) = _clone_overrides(home)
+    import pm_core
+    assert override.read_text().strip() == str(
+        Path(pm_core.__file__).parent.parent)
     # The user's project is untouched.
     assert _git(project.repo, "status", "--porcelain") == ""
 
@@ -287,6 +297,7 @@ def test_recipe_copy_failure_leaves_no_run(project, home):
     assert "denied" in result.output
     assert _qa_workdirs(home) == []
     assert _run_captures(home) == []
+    assert _clone_overrides(home) == []
     spies.execvpe.assert_not_called()
 
 
@@ -363,6 +374,7 @@ def test_container_create_failure_launches_nothing(project, home):
     # with a prompt, and this run's own workdir/clone is gone.
     assert _run_captures(home) == []
     assert _qa_workdirs(home) == []
+    assert _clone_overrides(home) == []
 
 
 def test_empty_library_is_reported_not_run(project, home):
@@ -589,9 +601,29 @@ def test_command_bar_regression_checks_the_test_id_first(project):
     assert "Unknown regression test: nope" in (
         app.log_message.call_args.args[0])
 
-    app, launch, _ = _command_bar(project, "qa regression --file-prs")
-    launch.assert_not_called()
-    assert "Usage: qa regression" in app.log_message.call_args.args[0]
+    # Malformed commands are reported by the command's own parser, never
+    # handed to a pane that would exit at once.
+    for cmd, why in (
+            ("qa regression --file-prs", "Missing argument 'TEST_ID'"),
+            ("qa regression demo --branch", "'--branch' requires an argument"),
+            ("qa regression demo --bogus", "No such option '--bogus'"),
+            ("qa regression demo extra", "unexpected extra argument"),
+            # No help text printed to the TUI's stdout.
+            ("qa regression --help", "No such option '--help'")):
+        app, launch, run_cmd = _command_bar(project, cmd)
+        launch.assert_not_called()
+        run_cmd.assert_not_called()
+        msg = app.log_message.call_args.args[0]
+        assert why in msg and "Usage: qa regression" in msg, (cmd, msg)
+
+
+def test_command_bar_finds_the_test_id_after_value_options(project):
+    for cmd in ("qa regression -b dev demo", "qa regression --branch=dev demo",
+                "qa regression -s old demo --file-prs"):
+        app, launch, _ = _command_bar(project, cmd)
+        launch.assert_called_once()
+        assert launch.call_args.args[1].startswith(
+            f"pm -C {project.root} qa regression "), cmd
 
 
 # ---------------------------------------------------------------------------
