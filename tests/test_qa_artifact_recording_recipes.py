@@ -140,7 +140,11 @@ hits, regardless of how it waits for a background job:
   files that cannot exist, step 5 detached a *live* recorder and then
   reported "asciinema wrote no cast" with a complete cast (status ``0``) one
   directory over, and the CLI step 4 reported the same and killed the
-  scaffold server. The web-UI driver block refuses
+  scaffold server. Step 3 also asserts the *target session* exactly, like
+  step 2: pasted on its own with only a grouped ``pm-test~1`` on the server,
+  the recorder's exact attach failed, and the step reported "recorder exited
+  before it drew" for a target that was never there, naming a 0-byte stderr
+  log. The web-UI driver block refuses
   a capture directory that is missing or cannot be written or entered — its
   existence and permission checks run before its ``cd``, because a directory
   that exists and cannot be searched failed that ``cd`` and was reported as
@@ -187,7 +191,11 @@ hits, regardless of how it waits for a background job:
   exited — which only the teardown does — and the startup output the readiness
   failure pointed at was written nowhere. The launch redirects to ``app.log``
   and closes the block's stdin, the failure names the log, and step 1 clears a
-  previous run's copy like the rest.
+  previous run's copy like the rest. Closing the app's stdin is the
+  *interactive paste's* half — job control is on there, so a background app
+  that reads the terminal eats the rest of the pasted block — while a
+  ``bash < block`` run already gets ``/dev/null`` from bash itself; the case
+  runs with ``set -m`` so it models the paste.
 
 The capture flow's readiness and stop logic is also *executed* against stub
 ``tmux``/``pm`` (``TestCaptureFlowExecution``), because its failure modes are
@@ -4325,7 +4333,8 @@ def _web_ui_start_block():
 
 
 def _run_web_ui_start(mode, tmp_path, caps_is_file=False, pm_body=None,
-                      mkdir_body=None, capdir_mode=None, app_body=None):
+                      mkdir_body=None, capdir_mode=None, app_body=None,
+                      job_control=False):
     """Run the web-UI recipe's app-start block with stub pm/curl/my-app.
 
     ``caps_is_file`` makes the captures path itself a regular file, so the
@@ -4337,9 +4346,14 @@ def _run_web_ui_start(mode, tmp_path, caps_is_file=False, pm_body=None,
     exists and cannot be written (``mkdir -p`` answers 0 for it); the mode is
     restored before the run returns. ``app_body`` replaces the stub app (which
     otherwise touches ``app-launched`` and exits), for a case that needs the
-    app to print or to stay up after the block returns.
+    app to print or to stay up after the block returns. ``job_control``
+    prepends ``set -m``, which reproduces the interactive paste the recipe is
+    written for: with job control on, an asynchronous command inherits the
+    shell's input instead of being handed ``/dev/null`` by bash (verified).
     """
     block = re.sub(r"\+\s*\d+\s*\)\)", "+ 2 ))", _web_ui_start_block())
+    if job_control:
+        block = "set -m\n" + block
     bindir = tmp_path / "bin"
     caps = tmp_path / "captures"
     bindir.mkdir(parents=True, exist_ok=True)
@@ -4507,6 +4521,33 @@ class TestWebUiStartExecution:
             f"the start block did not return while the app was still running "
             f"({elapsed:.1f}s): a captured/piped step waits for the app, "
             "which only the teardown stops")
+
+    def test_web_ui_start_keeps_the_app_off_the_blocks_stdin(self, tmp_path):
+        """A background app that reads the terminal eats the rest of the paste.
+
+        The launch redirects the app's stdin from ``/dev/null``, and the case
+        the redirect is for is the *interactive* paste: job control is on
+        there, so an asynchronous command inherits the terminal's input, and
+        an app that reads it consumes the rest of the pasted block — the
+        readiness wait and the ``server.pid`` write below never run (verified
+        in this container with job control on: the stub app's stdin read 200
+        bytes of the block's remaining text; with the redirect it reads
+        nothing). A ``bash < block`` run does not need the redirect — with
+        job control off bash itself assigns ``/dev/null`` to an asynchronous
+        command, verified with the redirect removed — so the ``set -m`` here
+        models the paste case the recipe is written for, not that one.
+        """
+        seen = tmp_path / "app-stdin"
+        r, _launched = _run_web_ui_start(
+            "ok", tmp_path, job_control=True,
+            app_body=f'head -c 200 > "{seen}" 2>/dev/null || true\n')
+
+        assert r.returncode == 0, r.stderr
+        assert seen.exists(), "the stub app never ran"
+        captured = seen.read_text()
+        assert captured == "", (
+            "the app inherited the block's stdin and read the rest of the "
+            "pasted block: " + repr(captured[:120]))
 
     def test_web_ui_start_saves_the_apps_startup_output(self, tmp_path):
         """The app's output goes to ``app.log``, where the failure points.
@@ -7545,6 +7586,39 @@ class TestCaptureFlowExecution:
         assert "=pm-test" in calls.read_text(), (
             "the recorder was not started against the re-derived target: "
             + calls.read_text())
+
+    def test_step_three_refuses_a_target_that_is_not_an_exact_session(
+            self, tmp_path):
+        """A recorder restarted against a missing target dies on the attach.
+
+        Step 3 is pasted on its own when a run restarts its recorder, which
+        is why it re-derives ``$TARGET`` and refuses an empty one. A target
+        that is set but not there is the same hole one shape over: with only
+        a grouped ``pm-test~1`` session on the server (pm creates one per
+        extra co-viewing client) the pane command's exact attach cannot land
+        on it, so the recorder records "can't find session: pm-test" and
+        exits before it draws — and the readiness wait reports "recorder
+        exited before it drew — see the cast and
+        <capture-dir>/recorder-stderr.log" for a target that is simply not
+        there, naming a stderr log that is empty (verified live in this
+        container on tmux 3.2a + asciinema 2.1.0: step 3 alone with only
+        ``pm-test~1`` on the server wrote a 0-byte recorder-stderr.log and a
+        168-byte cast holding only the attach error, then exited 1 with that
+        message). Step 2 asserts the same handle before it reads the claim;
+        step 3 has to refuse it before the recorder session is created.
+        """
+        r, _cast = _run_block(_step_three_block(), "ok", tmp_path,
+                              sessions=("pm-test~1",))
+
+        assert r.returncode != 0, (
+            "step 3 started a recorder for a target session that does not "
+            "exist exactly, so its attach could only fail")
+        assert "no session named exactly" in r.stderr, r.stderr
+        assert "recorder exited before it drew" not in r.stderr, (
+            "the refused step blamed the recorder for a missing target: "
+            + r.stderr)
+        assert not (tmp_path / "state" / "pm-recorder").exists(), (
+            "a step with no target session created the recorder anyway")
 
     @pytest.mark.parametrize("name", RECIPES)
     def test_recorder_session_that_never_starts_is_reported(self, name,

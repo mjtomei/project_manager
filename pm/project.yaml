@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T10:06:32.180651+00:00'
+  updated_at: '2026-11-01T10:43:52.640902+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38259,6 +38259,40 @@ prs:
       work stays dropped.'
     created_at: '2026-11-01T10:06:32Z'
     last_edited: '2026-11-01T10:06:32Z'
+  - id: note-b336fab
+    text: 'Review loop 928f i24: two findings in the kept recipe scope; no pm_core
+      change. (1) Step 3 (start the recorder) is pasted on its own when a run restarts
+      its recorder; it re-derived $TARGET and refused an empty one (i21) but never
+      asserted the session exists. With only a grouped pm-test~1 on the server the
+      pane command exact attach cannot land on it, so the recorder records "can not
+      find session: pm-test" and exits, and the readiness wait reports "recorder exited
+      before it drew — see the cast and <capture-dir>/recorder-stderr.log" for a target
+      that was never there — the stderr log it names is the empty one. Verified live
+      in this container on tmux 3.2a + asciinema 2.1.0: pre-fix step 3 alone with
+      only pm-test~1 exited 1 with that message, a 0-byte recorder-stderr.log, recorder.status
+      0 and a 168-byte cast holding only the attach error; post-fix it exits 1 with
+      "there is no session named exactly pm-test ..." and writes nothing; with the
+      exact target present it exits 0 and leaves the recorder running. Step 3 now
+      asserts has-session -t "=$TARGET" before new-session — the same handle step
+      2 applies. (2) The web-UI launch < /dev/null had no case and its comment named
+      the wrong mechanism: a bash < block run already gets /dev/null for an asynchronous
+      command from bash itself when job control is off (verified: the app stdin is
+      /dev/null there with the redirect removed), while the redirect is for the interactive
+      paste the recipe is written for — job control on, the background app inherits
+      the terminal and without the redirect read 200 bytes of the block remaining
+      text and failed the block with no server.pid. The comment now says that, and
+      the produced-files bullet no longer says the log holds the block stdin open.
+      Tests: test_step_three_refuses_a_target_that_is_not_an_exact_session and test_web_ui_start_keeps_the_app_off_the_blocks_stdin;
+      mutation check fails exactly each against HEAD recipes. A 22-mutation sweep
+      of the guards the recipes carry found the < /dev/null gap (the one survivor)
+      and killed every other applicable mutation. Recipe file 329 passed (was 327);
+      full suite 5526 passed, 1 skipped, 0 failed (468.52 s; markdown in a scratch
+      --target). Evidence: /pm-captures/review-928f-i24/ (probe.log, mutation-check.log,
+      mutation-sweep-head.log, recipe-file.log, suite.log, suite-interrupted.log,
+      README.md, scripts/). impl.md R85/R86 + Files table, qa.md. The dropped helper/prompt/verifier
+      work stays dropped.'
+    created_at: '2026-11-01T10:43:52Z'
+    last_edited: '2026-11-01T10:43:52Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

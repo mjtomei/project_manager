@@ -545,6 +545,27 @@ if [ -z "$TARGET" ]; then
         "step with pm on PATH, in the project directory" >&2
     exit 1
 fi
+# ... and the session the pane command attaches to has to exist, exactly. This
+# step is pasted on its own when a run restarts its recorder — the same
+# paste-alone case steps 2, 4 and 5 re-derive `$TARGET` for — and with only a
+# grouped `<base>~N` session on the server (pm creates one per extra co-viewing
+# client) the attach below is exact, so it cannot land on the grouped session:
+# `tmux attach -t =pm-test` answers "can't find session: pm-test", asciinema
+# records that error and exits, and the readiness wait reports "recorder exited
+# before it drew — see the cast and <capture-dir>/recorder-stderr.log" for a
+# target that is simply not there. The stderr log it names is the empty one
+# (verified live in this container on tmux 3.2a + asciinema 2.1.0: step 3 alone
+# with only `pm-test~1` on the server wrote a 0-byte recorder-stderr.log and a
+# 168-byte cast holding only the attach error, then exited 1 with that
+# message). Step 2 asserts the same handle before it reads the claim; refuse it
+# here, before the recorder session is created.
+tmux has-session -t "=$TARGET" 2>/dev/null || {
+    echo "there is no session named exactly $TARGET on this server — the" \
+        "recorder attaches with tmux's '=' (exact), so a grouped session" \
+        "($TARGET~N) or one whose name starts with it cannot stand in; run" \
+        "step 1 first" >&2
+    exit 1
+}
 tmux new-session -d -s pm-recorder -x 200 -y 50 \
     "asciinema rec --quiet <capture-dir>/recording.cast \
         -c 'tmux attach -t =$TARGET' 2> <capture-dir>/recorder-stderr.log; \

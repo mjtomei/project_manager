@@ -1133,6 +1133,26 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   then reported "asciinema wrote no cast" while a complete cast (status `0`)
   sat one directory over, and the CLI step 4 reported the same and killed
   the scaffold holding the recording (review loop 928f i23, R84).
+- The tmux recipe's step 3 is pasted on its own with `$TARGET` set to a
+  session that is not there exactly (only a grouped `pm-test~1` on the
+  server, a typo, a target that ended) → the step must stop with "there is
+  no session named exactly …" before it creates the recorder. Without the
+  assert the recorder started, its exact attach failed, and the step
+  reported "recorder exited before it drew — see the cast and
+  `<capture-dir>/recorder-stderr.log`" for a target that was never there,
+  naming a 0-byte stderr log while the cast held only the attach error
+  (verified live on tmux 3.2a + asciinema 2.1.0; the same step with the
+  exact target present exits 0 and leaves the recorder running) (review loop
+  928f i24, R85).
+- The web-UI start block is pasted into an interactive shell (job control
+  on) with an app that reads its stdin → the app must read nothing and the
+  block must reach its readiness wait and write `server.pid`. Without the
+  launch's `< /dev/null` the app inherits the terminal and eats the rest of
+  the pasted block: verified in this container, its stdin read 200 bytes of
+  the block's remaining text and the block exited 1 with no `server.pid`;
+  with the redirect it reads nothing. (A `bash < block` run already gets
+  `/dev/null` from bash itself, so that is not the case the redirect is
+  for.) (review loop 928f i24, R86).
 
 ## Pass / Fail criteria
 

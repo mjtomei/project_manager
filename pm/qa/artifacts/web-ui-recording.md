@@ -83,10 +83,11 @@ substitutes the per-PR captures directory — `$(pm qa captures-path
   does.
 - `app.log` — the app's own stdout/stderr, written by step 1's launch. It is
   what the readiness failure points at (the app's startup output, or the
-  shell's "command not found" for an `APP_START` that does not exist), and it
-  keeps the app from holding the block's stdout/stdin open. Step 1 clears a
-  previous run's copy, so the log in the directory is always this run's;
-  mention it in the manifest.
+  shell's "command not found" for an `APP_START` that does not exist). The
+  launch sends the app's output there, so the app does not hold the block's
+  stdout open, and its `< /dev/null` keeps the rest of a pasted block out of
+  the app's stdin. Step 1 clears a previous run's copy, so the log in the
+  directory is always this run's; mention it in the manifest.
 - `manifest.md` — frontmatter + prose per the standard recipe format,
   with a `## Files` section listing every file above. A previous run's
   copy is cleared in step 1 like the rest, and again by step 2's
@@ -244,12 +245,19 @@ fi
 # failure below points at: the app's startup output — including the shell's
 # "command not found" for an APP_START that does not exist — is the first
 # thing a failed start has to show, and nothing else writes it down.
-# `< /dev/null` is the other half: when a worker runs the block as
-# `bash < block`, the block's own stdin is that script, and a background
-# child that reads it eats the rest of the block (the finalize step passes
-# ffmpeg `-nostdin` for the same reason). A stale app.log is cleared with
-# the rest in step 1's cleanup, so a refused run does not present the
-# previous run's startup output as this one's.
+# `< /dev/null` is the other half, and it is the *interactive* paste that
+# needs it: job control is on there, so a background command inherits the
+# terminal's input, and an app that reads it eats the rest of the pasted
+# block — the readiness wait and the pid write below then never run (verified
+# in this container with job control on: the app's stdin read 200 bytes of
+# the block's remaining text, and nothing with the redirect). A `bash <
+# block` run does not need it, because with job control off bash itself
+# assigns /dev/null to an asynchronous command (verified: the app's stdin is
+# /dev/null there with the redirect removed). The finalize step's `-nostdin`
+# is the foreground half of the same rule — ffmpeg there does inherit the
+# script. A stale app.log is cleared with the rest in step 1's cleanup, so a
+# refused run does not present the previous run's startup output as this
+# one's.
 APP_START="my-app serve"
 $APP_START --port "$PORT" > "$CAPDIR/app.log" 2>&1 < /dev/null &
 SERVER_PID=$!
