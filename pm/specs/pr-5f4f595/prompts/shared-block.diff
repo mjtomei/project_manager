@@ -1,0 +1,323 @@
+--- before/impl.txt	2026-11-01 21:10:42.348717504 +0000
++++ after/impl.txt	2026-11-01 21:10:42.425778635 +0000
+@@ -48,6 +48,38 @@
+ after your PR merges rather than instantly — that delay is expected, not a
+ reason to use a GitHub comment instead.
+ 
++## Proposals and Follow-up Ideas
++
++If your own work here shows that something outside this PR's scope is worth
++doing — a feature, a refactoring or architecture change, a new or changed QA
++recipe or regression, a plan change, or an investigation — record it. You
++are not asked to search for proposals or to judge anything beyond the work
++in front of you; recording nothing is the normal outcome when nothing you
++observed supports a proposal.
++
++Anything you would change in *this* PR is not a proposal: bugs, fixes,
++suggestions and test gaps follow this prompt's own rules. Do not move them
++here to finish sooner.
++
++Record each one as a note on this PR — the PR's sign-off reviews every
++proposal and bug recorded during the PR:
++
++  pm pr note add pr-5f4f595 'Proposal (<feature|refactor|recipe|regression|plan|investigation>): <the idea>. Observed: <what you saw, citing a file, commit, capture or scenario>. Origin: pr-5f4f595 implementation. Status: proposed.'
++
++Say what you observed and what you only suspect. Search existing work first
++(`pm pr list`, `pm pr list --plan <plan>`, `pm pr show <id>`). If a PR or
++note already covers it, add your observation to that PR
++(`pm pr note add <that-pr> '...'`) and write `Status: linked to <that-pr>`
++in your note here. File a new pending PR (`pm pr add`) only when the work
++clearly stands on its own and nothing matches; name its origin and the
++evidence in its description, and write `Status: filed as <new-pr>`.
++
++Record a bug you notice outside this PR's scope the same way, starting with
++`Bug` instead of `Proposal` (`Status: fixed in <commit>` if you fixed it).
++
++Recording or filing work does not start it and gives you no authority to
++change other PRs, plans or QA recipes.
++
+ ## Tips
+ - This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there. The directory may contain uncommitted implementation work from a previous session.
+ - Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
+--- before/review.txt	2026-11-01 21:10:42.348832769 +0000
++++ after/review.txt	2026-11-01 21:10:42.426036333 +0000
+@@ -71,6 +71,38 @@
+   ```
+   Skim `pm pr list --plan bugs` first to avoid duplicates.
+ 
++## Proposals and Follow-up Ideas
++
++If your own work here shows that something outside this PR's scope is worth
++doing — a feature, a refactoring or architecture change, a new or changed QA
++recipe or regression, a plan change, or an investigation — record it. You
++are not asked to search for proposals or to judge anything beyond the work
++in front of you; recording nothing is the normal outcome when nothing you
++observed supports a proposal.
++
++Anything you would change in *this* PR is not a proposal: bugs, fixes,
++suggestions and test gaps follow this prompt's own rules (anything you would
++change here is NEEDS_WORK). Do not move them here to finish sooner.
++
++Record each one as a note on this PR — the PR's sign-off reviews every
++proposal and bug recorded during the PR:
++
++  pm pr note add pr-5f4f595 'Proposal (<feature|refactor|recipe|regression|plan|investigation>): <the idea>. Observed: <what you saw, citing a file, commit, capture or scenario>. Origin: pr-5f4f595 review. Status: proposed.'
++
++Say what you observed and what you only suspect. Search existing work first
++(`pm pr list`, `pm pr list --plan <plan>`, `pm pr show <id>`). If a PR or
++note already covers it, add your observation to that PR
++(`pm pr note add <that-pr> '...'`) and write `Status: linked to <that-pr>`
++in your note here. File a new pending PR (`pm pr add`) only when the work
++clearly stands on its own and nothing matches; name its origin and the
++evidence in its description, and write `Status: filed as <new-pr>`.
++
++Record a bug you file or fix under Incidental Bugs the same way, starting
++with `Bug` instead of `Proposal`.
++
++Recording or filing work does not start it and gives you no authority to
++change other PRs, plans or QA recipes.
++
+ 
+ ## PR Notes — Handoff Channel
+ 
+--- before/review-loop.txt	2026-11-01 21:10:42.354615677 +0000
++++ after/review-loop.txt	2026-11-01 21:10:42.426282943 +0000
+@@ -71,6 +71,38 @@
+   ```
+   Skim `pm pr list --plan bugs` first to avoid duplicates.
+ 
++## Proposals and Follow-up Ideas
++
++If your own work here shows that something outside this PR's scope is worth
++doing — a feature, a refactoring or architecture change, a new or changed QA
++recipe or regression, a plan change, or an investigation — record it. You
++are not asked to search for proposals or to judge anything beyond the work
++in front of you; recording nothing is the normal outcome when nothing you
++observed supports a proposal.
++
++Anything you would change in *this* PR is not a proposal: bugs, fixes,
++suggestions and test gaps follow this prompt's own rules (anything you would
++change here is NEEDS_WORK). Do not move them here to finish sooner.
++
++Record each one as a note on this PR — the PR's sign-off reviews every
++proposal and bug recorded during the PR:
++
++  pm pr note add pr-5f4f595 'Proposal (<feature|refactor|recipe|regression|plan|investigation>): <the idea>. Observed: <what you saw, citing a file, commit, capture or scenario>. Origin: pr-5f4f595 review iteration 2. Status: proposed.'
++
++Say what you observed and what you only suspect. Search existing work first
++(`pm pr list`, `pm pr list --plan <plan>`, `pm pr show <id>`). If a PR or
++note already covers it, add your observation to that PR
++(`pm pr note add <that-pr> '...'`) and write `Status: linked to <that-pr>`
++in your note here. File a new pending PR (`pm pr add`) only when the work
++clearly stands on its own and nothing matches; name its origin and the
++evidence in its description, and write `Status: filed as <new-pr>`.
++
++Record a bug you file or fix under Incidental Bugs the same way, starting
++with `Bug` instead of `Proposal`.
++
++Recording or filing work does not start it and gives you no authority to
++change other PRs, plans or QA recipes.
++
+ 
+ ## PR Notes — Handoff Channel
+ 
+--- before/qa-planner.txt	2026-11-01 21:10:42.355515332 +0000
++++ after/qa-planner.txt	2026-11-01 21:10:42.427304247 +0000
+@@ -175,6 +175,38 @@
+   ```
+   Skim `pm pr list --plan bugs` first to avoid duplicates.
+ 
++## Proposals and Follow-up Ideas
++
++If your own work here shows that something outside this PR's scope is worth
++doing — a feature, a refactoring or architecture change, a new or changed QA
++recipe or regression, a plan change, or an investigation — record it. You
++are not asked to search for proposals or to judge anything beyond the work
++in front of you; recording nothing is the normal outcome when nothing you
++observed supports a proposal.
++
++Anything you would change in *this* PR is not a proposal: bugs, fixes,
++suggestions and test gaps follow this prompt's own rules (coverage this PR's
++QA needs belongs in your plan). Do not move them here to finish sooner.
++
++Record each one as a note on this PR — the PR's sign-off reviews every
++proposal and bug recorded during the PR:
++
++  pm pr note add pr-5f4f595 'Proposal (<feature|refactor|recipe|regression|plan|investigation>): <the idea>. Observed: <what you saw, citing a file, commit, capture or scenario>. Origin: pr-5f4f595 QA planner. Status: proposed.'
++
++Say what you observed and what you only suspect. Search existing work first
++(`pm pr list`, `pm pr list --plan <plan>`, `pm pr show <id>`). If a PR or
++note already covers it, add your observation to that PR
++(`pm pr note add <that-pr> '...'`) and write `Status: linked to <that-pr>`
++in your note here. File a new pending PR (`pm pr add`) only when the work
++clearly stands on its own and nothing matches; name its origin and the
++evidence in its description, and write `Status: filed as <new-pr>`.
++
++Record a bug you file or fix under Incidental Bugs the same way, starting
++with `Bug` instead of `Proposal`.
++
++Recording or filing work does not start it and gives you no authority to
++change other PRs, plans or QA recipes.
++
+ 
+ ## PR Notes — Handoff Channel
+ 
+--- before/qa-scenario-worktree.txt	2026-11-01 21:10:42.355577028 +0000
++++ after/qa-scenario-worktree.txt	2026-11-01 21:10:42.427489992 +0000
+@@ -146,6 +146,38 @@
+   ```
+   Skim `pm pr list --plan bugs` first to avoid duplicates.
+ 
++## Proposals and Follow-up Ideas
++
++If your own work here shows that something outside this PR's scope is worth
++doing — a feature, a refactoring or architecture change, a new or changed QA
++recipe or regression, a plan change, or an investigation — record it. You
++are not asked to search for proposals or to judge anything beyond the work
++in front of you; recording nothing is the normal outcome when nothing you
++observed supports a proposal.
++
++Anything you would change in *this* PR is not a proposal: bugs, fixes,
++suggestions and test gaps follow this prompt's own rules (a fix you commit
++is NEEDS_WORK). Do not move them here to finish sooner.
++
++Record each one as a bullet in `/pm-captures/scenarios/3/proposals.md`
++(create it if needed). That file is kept with your captures, outside the PR
++branch; the PR's sign-off reads it and decides what to file, so do not file
++PRs or add notes for a proposal from here, and do not commit or push just to
++record one:
++
++  - Proposal (<feature|refactor|recipe|regression|plan|investigation>): <the idea>. Observed: <what you saw, citing a file, commit, capture or scenario>. Origin: pr-5f4f595 QA scenario 3. Status: proposed.
++
++Say what you observed and what you only suspect. Search existing work first
++(`pm pr list`, `pm pr list --plan <plan>`, `pm pr show <id>`). If a PR
++already covers it, write `Status: matches <that-pr>`.
++
++Record a bug you file or fix under Incidental Bugs in the same file,
++starting with `Bug` instead of `Proposal` and naming the PR you filed or
++your fix commit.
++
++Recording or filing work does not start it and gives you no authority to
++change other PRs, plans or QA recipes.
++
+ ## Your Verdict, and When It Is Final
+ 
+ PASS and NEEDS_WORK are final for this run: once you emit one, the QA loop
+--- before/qa-scenario-plain.txt	2026-11-01 21:10:42.355621429 +0000
++++ after/qa-scenario-plain.txt	2026-11-01 21:10:42.427653817 +0000
+@@ -143,6 +143,38 @@
+   ```
+   Skim `pm pr list --plan bugs` first to avoid duplicates.
+ 
++## Proposals and Follow-up Ideas
++
++If your own work here shows that something outside this PR's scope is worth
++doing — a feature, a refactoring or architecture change, a new or changed QA
++recipe or regression, a plan change, or an investigation — record it. You
++are not asked to search for proposals or to judge anything beyond the work
++in front of you; recording nothing is the normal outcome when nothing you
++observed supports a proposal.
++
++Anything you would change in *this* PR is not a proposal: bugs, fixes,
++suggestions and test gaps follow this prompt's own rules (a fix you commit
++is NEEDS_WORK). Do not move them here to finish sooner.
++
++Record each one as a bullet in `/pm-captures/scenarios/3/proposals.md`
++(create it if needed). That file is kept with your captures, outside the PR
++branch; the PR's sign-off reads it and decides what to file, so do not file
++PRs or add notes for a proposal from here, and do not commit or push just to
++record one:
++
++  - Proposal (<feature|refactor|recipe|regression|plan|investigation>): <the idea>. Observed: <what you saw, citing a file, commit, capture or scenario>. Origin: pr-5f4f595 QA scenario 3. Status: proposed.
++
++Say what you observed and what you only suspect. Search existing work first
++(`pm pr list`, `pm pr list --plan <plan>`, `pm pr show <id>`). If a PR
++already covers it, write `Status: matches <that-pr>`.
++
++Record a bug you file or fix under Incidental Bugs in the same file,
++starting with `Bug` instead of `Proposal` and naming the PR you filed or
++your fix commit.
++
++Recording or filing work does not start it and gives you no authority to
++change other PRs, plans or QA recipes.
++
+ ## Your Verdict, and When It Is Final
+ 
+ PASS and NEEDS_WORK are final for this run: once you emit one, the QA loop
+--- before/qa-interactive.txt	2026-11-01 21:10:42.356140537 +0000
++++ after/qa-interactive.txt	2026-11-01 21:10:42.428290334 +0000
+@@ -84,3 +84,35 @@
+ up the next time they clone or pull master. So a cross-PR note may surface
+ after your PR merges rather than instantly — that delay is expected, not a
+ reason to use a GitHub comment instead.
++
++## Proposals and Follow-up Ideas
++
++If your own work here shows that something outside this PR's scope is worth
++doing — a feature, a refactoring or architecture change, a new or changed QA
++recipe or regression, a plan change, or an investigation — record it. You
++are not asked to search for proposals or to judge anything beyond the work
++in front of you; recording nothing is the normal outcome when nothing you
++observed supports a proposal.
++
++Anything you would change in *this* PR is not a proposal: bugs, fixes,
++suggestions and test gaps follow this prompt's own rules. Do not move them
++here to finish sooner.
++
++Record each one as a bullet in
++`$(pm qa captures-path pr-5f4f595)/scenarios/0/proposals.md` (create it if
++needed). That file is kept with your captures, outside the PR branch; the
++PR's sign-off reads it and decides what to file, so do not file PRs or add
++notes for a proposal from here, and do not commit or push just to record
++one:
++
++  - Proposal (<feature|refactor|recipe|regression|plan|investigation>): <the idea>. Observed: <what you saw, citing a file, commit, capture or scenario>. Origin: pr-5f4f595 QA scenario 0 (interactive). Status: proposed.
++
++Say what you observed and what you only suspect. Search existing work first
++(`pm pr list`, `pm pr list --plan <plan>`, `pm pr show <id>`). If a PR
++already covers it, write `Status: matches <that-pr>`.
++
++Record a bug you notice outside this PR's scope the same way, starting with
++`Bug` instead of `Proposal` (`Status: fixed in <commit>` if you fixed it).
++
++Recording or filing work does not start it and gives you no authority to
++change other PRs, plans or QA recipes.
+--- before/qa-standalone.txt	2026-11-01 21:10:42.356389450 +0000
++++ after/qa-standalone.txt	2026-11-01 21:10:42.428665761 +0000
+@@ -45,6 +45,36 @@
+   ```
+   Skim `pm pr list --plan bugs` first to avoid duplicates.
+ 
++## Proposals and Follow-up Ideas
++
++If your own work here shows that something outside this run's check is worth
++doing — a feature, a refactoring or architecture change, a new or changed QA
++recipe or regression, a plan change, or an investigation — record it. You
++are not asked to search for proposals or to judge anything beyond the work
++in front of you; recording nothing is the normal outcome when nothing you
++observed supports a proposal.
++
++Problems this run's instruction asks you to check are findings, not
++proposals: they follow the verdict and Incidental Bugs rules above.
++
++There is no PR for this run, so include each one in your findings, in this
++shape:
++
++  - Proposal (<feature|refactor|recipe|regression|plan|investigation>): <the idea>. Observed: <what you saw, citing a file, commit, capture or scenario>. Origin: standalone QA run of tui-manual-test. Status: proposed.
++
++Say what you observed and what you only suspect. Search existing work first
++(`pm pr list`, `pm pr list --plan <plan>`, `pm pr show <id>`). If a PR
++already covers it, add your observation there
++(`pm pr note add <that-pr> '...'`) and write `Status: linked to <that-pr>`.
++File a new pending PR (`pm pr add`) only when the work clearly stands on its
++own and nothing matches; name this run and the evidence in its description.
++
++Record a bug you file or fix under Incidental Bugs the same way, starting
++with `Bug` instead of `Proposal`.
++
++Recording or filing work does not start it and gives you no authority to
++change other PRs, plans or QA recipes.
++
+ 
+ ## PR Notes — Handoff Channel
+ 

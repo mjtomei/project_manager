@@ -1,0 +1,678 @@
+diff --git a/pm_core/prompt_gen.py b/pm_core/prompt_gen.py
+index 02961443..897f04df 100644
+--- a/pm_core/prompt_gen.py
++++ b/pm_core/prompt_gen.py
+@@ -56,6 +56,126 @@ If you don't, file a separate bug PR so it doesn't get lost:
+ """
+ 
+ 
++# Where each working session records a proposal (see _proposals_block).
++# Sessions running in the PR's own workdir write a PR note there (later
++# prompts merge the workdir's notes, so sign-off sees it even uncommitted);
++# sessions in a throwaway clone write next to their captures, which persist
++# on the host and are read by sign-off; a session with no PR reports them.
++_PROPOSAL_FIELDS = (
++    "Proposal (<feature|refactor|recipe|regression|plan|investigation>): "
++    "<the idea>. Observed: <what you saw, citing a file, commit, capture or "
++    "scenario>. Origin: {origin}. Status: proposed.")
++
++
++def _wrap_paragraphs(text: str, width: int = 76) -> str:
++    """Re-flow prose paragraphs; indented (command/example) lines stay."""
++    import textwrap
++    out = []
++    for para in text.split("\n\n"):
++        if para.startswith((" ", "#")) or "\n " in para:
++            out.append(para)
++        else:
++            # Keep `inline code` on one line: protect its spaces.
++            parts = " ".join(para.split()).split("`")
++            for i in range(1, len(parts), 2):
++                parts[i] = parts[i].replace(" ", "\x00")
++            filled = textwrap.fill("`".join(parts), width=width,
++                                   break_on_hyphens=False,
++                                   break_long_words=False)
++            out.append(filled.replace("\x00", " "))
++    return "\n\n".join(out)
++
++
++def _proposals_block(pr_id: str | None, *, origin: str,
++                     record_in: str = "note", proposals_path: str = "",
++                     incidental_bugs: bool = True,
++                     fix_rule: str = "") -> str:
++    """Shared guidance: any working session may record evidence-backed
++    proposals for work outside its PR's scope.
++
++    *origin* names the session in the recorded line (e.g. ``"pr-x QA
++    scenario 3"``).  *record_in* is ``"note"`` (a PR note in this
++    checkout), ``"captures"`` (a ``proposals.md`` beside the session's
++    captures at *proposals_path* — a throwaway clone's notes would be lost)
++    or ``"report"`` (no PR: report them in the run's findings).  *fix_rule*
++    names the role's own consequence for an in-scope fix.
++    """
++    fields = _PROPOSAL_FIELDS.format(origin=origin)
++    if record_in == "report":
++        in_scope = ("Problems this run's instruction asks you to check are "
++                    "findings, not proposals: they follow the verdict and "
++                    "Incidental Bugs rules above.")
++    else:
++        in_scope = ("Anything you would change in *this* PR is not a "
++                    "proposal: bugs, fixes, suggestions and test gaps follow "
++                    "this prompt's own rules"
++                    + (f" ({fix_rule})" if fix_rule else "")
++                    + ". Do not move them here to finish sooner.")
++    search = ("Say what you observed and what you only suspect. Search "
++              "existing work first (`pm pr list`, `pm pr list --plan "
++              "<plan>`, `pm pr show <id>`).")
++    if record_in == "captures":
++        record = (
++            f"Record each one as a bullet in `{proposals_path}` (create it "
++            "if needed). That file is kept with your captures, outside the "
++            "PR branch; the PR's sign-off reads it and decides what to file, "
++            "so do not file PRs or add notes for a proposal from here, and "
++            "do not commit or push just to record one:\n\n"
++            f"  - {fields}\n\n"
++            + search + " If a PR already covers it, write `Status: matches "
++            "<that-pr>`.")
++    elif record_in == "report":
++        record = (
++            "There is no PR for this run, so include each one in your "
++            "findings, in this shape:\n\n"
++            f"  - {fields}\n\n"
++            + search + " If a PR already covers it, add your observation "
++            "there (`pm pr note add <that-pr> '...'`) and write `Status: "
++            "linked to <that-pr>`. File a new pending PR (`pm pr add`) only "
++            "when the work clearly stands on its own and nothing matches; "
++            "name this run and the evidence in its description.")
++    else:
++        record = (
++            "Record each one as a note on this PR — the PR's sign-off "
++            "reviews every proposal and bug recorded during the PR:\n\n"
++            f"  pm pr note add {pr_id} '{fields}'\n\n"
++            + search + " If a PR or note already covers it, add your "
++            "observation to that PR (`pm pr note add <that-pr> '...'`) and "
++            "write `Status: linked to <that-pr>` in your note here. File a "
++            "new pending PR (`pm pr add`) only when the work clearly stands "
++            "on its own and nothing matches; name its origin and the "
++            "evidence in its description, and write `Status: filed as "
++            "<new-pr>`.")
++    if incidental_bugs and record_in == "captures":
++        bug_line = ("Record a bug you file or fix under Incidental Bugs in "
++                    "the same file, starting with `Bug` instead of "
++                    "`Proposal` and naming the PR you filed or your fix "
++                    "commit.")
++    elif incidental_bugs:
++        bug_line = ("Record a bug you file or fix under Incidental Bugs the "
++                    "same way, starting with `Bug` instead of `Proposal`.")
++    else:
++        bug_line = ("Record a bug you notice outside this PR's scope the "
++                    "same way, starting with `Bug` instead of `Proposal` "
++                    "(`Status: fixed in <commit>` if you fixed it).")
++    body = "\n\n".join([
++        "If your own work here shows that something outside "
++        + ("this PR's scope" if record_in != "report" else "this run's check")
++        + " is worth doing — a feature, a refactoring or architecture "
++        "change, a new or changed QA recipe or regression, a plan change, or "
++        "an investigation — record it. You are not asked to search for "
++        "proposals or to judge anything beyond the work in front of you; "
++        "recording nothing is the normal outcome when nothing you observed "
++        "supports a proposal.",
++        in_scope,
++        record,
++        bug_line,
++        "Recording or filing work does not start it and gives you no "
++        "authority to change other PRs, plans or QA recipes.",
++    ])
++    return "\n## Proposals and Follow-up Ideas\n\n" + _wrap_paragraphs(body) + "\n"
++
++
+ def _pr_notes_handoff_block(pr_id: str | None = None) -> str:
+     """Ungated guidance: use pm PR notes for cross-session/cross-PR handoff.
+ 
+@@ -387,6 +507,8 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) ->
+     bug_fix_block = _bug_fix_flow_block(pr) if _is_bug_pr(pr) else ""
+ 
+     pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
++    proposals_block = _proposals_block(
++        pr_id, origin=f"{pr_id} implementation", incidental_bugs=False)
+ 
+     def _assemble(parts: dict[str, str]) -> str:
+         # Only the enumerations and the PR notes are size-bounded, so only
+@@ -404,7 +526,7 @@ This session is managed by `pm`. Run `pm help` to see available commands.
+ 
+ ## Task
+ {description}
+-{pr_notes_block}{signoff_return_block}{impl_spec_block}{impl_spec_preamble}{bug_fix_block}{pr_notes_handoff_block}
++{pr_notes_block}{signoff_return_block}{impl_spec_block}{impl_spec_preamble}{bug_fix_block}{pr_notes_handoff_block}{proposals_block}
+ ## Tips
+ - This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there. The directory may contain uncommitted implementation work from a previous session.
+ - Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
+@@ -545,6 +667,12 @@ with spec generation enabled.
+     if _is_bug_pr(pr):
+         tail += _bug_fix_review_block(pr)
+     tail += "\n" + _OUT_OF_SCOPE_BUGS_BLOCK
++    review_origin = f"{pr_id} review" + (
++        f" iteration {review_iteration}" if review_loop and review_iteration
++        else "")
++    tail += _proposals_block(
++        pr_id, origin=review_origin,
++        fix_rule="anything you would change here is NEEDS_WORK")
+     tail += "\n" + _pr_notes_handoff_block(pr_id)
+     tail += review_specific_block
+     tail += _beginner_addendum()
+@@ -802,6 +930,44 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
+     return "\n" + "\n".join(lines) + "\n"
+ 
+ 
++def _signoff_identity(pr: dict, pr_id: str) -> tuple[str, str]:
++    """(prompt identity line, report header requirement) for sign-off.
++
++    Uses only the recorded GitHub number/URL; a project without a GitHub PR
++    is identified by its pm id alone, and no link is invented.
++    """
++    num = pr.get("gh_pr_number")
++    num = num if isinstance(num, int) and not isinstance(num, bool) \
++        and num > 0 else None
++    url = pr.get("gh_pr")
++    url = url if isinstance(url, str) \
++        and url.startswith(("https://", "http://")) else None
++    if num and url:
++        return (f"GitHub PR [#{num}]({url}) · pm PR id `{pr_id}`",
++                f"the GitHub PR number as a clickable link — "
++                f"`<a href=\"{url}\">#{num}</a>` — and the pm PR id "
++                f"`{pr_id}`, both prominent above the summary")
++    if num:
++        return (f"GitHub PR #{num} (no URL recorded) · pm PR id `{pr_id}`",
++                f"the GitHub PR number #{num} (no URL is recorded, so do not "
++                f"link it) and the pm PR id `{pr_id}`")
++    return (f"pm PR id `{pr_id}` (no GitHub PR is recorded)",
++            f"the pm PR id `{pr_id}`; no GitHub PR is recorded for it, so do "
++            "not invent a GitHub number or link")
++
++
++def _planning_paths(data: dict) -> list[str]:
++    """``pm/project.yaml`` plus where the registered plan files live."""
++    out = {"pm/project.yaml"}
++    for plan in data.get("plans") or []:
++        f = plan.get("file") if isinstance(plan, dict) else None
++        if not isinstance(f, str) or not f:
++            continue
++        head, _, _ = f.partition("/")
++        out.add(f"pm/{head}" if "/" in f else f"pm/{f}")
++    return sorted(out, key=lambda x: (x != "pm/project.yaml", x))
++
++
+ def generate_signoff_prompt(data: dict, pr_id: str,
+                             session_name: str | None = None) -> str:
+     """Generate a Claude Code prompt for the sign-off step of a PR.
+@@ -856,7 +1022,7 @@ def generate_signoff_prompt(data: dict, pr_id: str,
+     tui_block = tui_section(session_name) if session_name else ""
+     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+     signoff_return_block = _signoff_return_block(pr, for_signoff=True)
+-    impl_spec_block = format_spec_for_prompt(pr, "impl") or ""
++    impl_spec_block = format_spec_for_prompt(pr, "impl", for_signoff=True) or ""
+     # The QA block is split: the overall verdict and the QA error are
+     # pm-generated evidence, inlined whole; only the per-scenario verdict
+     # listing is handed to fit_prompt as a shrinkable enumeration.
+@@ -879,6 +1045,41 @@ def generate_signoff_prompt(data: dict, pr_id: str,
+             "PR's behavior)."
+         )
+ 
++    identity_line, report_identity = _signoff_identity(pr, pr_id)
++    base_ref = base_branch if backend_name == "local" else f"origin/{base_branch}"
++    log_cmd = f"git log --format='%h %ad %s' --date=short {base_ref}..HEAD"
++    planning_paths = _planning_paths(data)
++    try:
++        internal_registry = store.is_internal_pm_dir(store.find_project_root())
++    except FileNotFoundError:
++        internal_registry = True
++    if internal_registry:
++        registry_sources = (
++            "what this branch added to the project registry and plans\n"
++            f"     (new PR entries, and notes on this or other PRs):\n"
++            f"     `git diff {base_ref}...HEAD -- {' '.join(planning_paths)}`;")
++    else:
++        registry_sources = (
++            "this project's registry is not part of the PR branch, so read\n"
++            "     other recorded work with `pm pr list` and\n"
++            "     `pm pr note list <pr-id>`;")
++    plan_file = (f"pm/{plan['file']}" if plan and plan.get("file")
++                 and internal_registry else None)
++    if plan:
++        plan_label = plan_file and f"`{plan_file}`" or plan["id"]
++        if plan.get("name"):
++            plan_label += f" (\"{plan['name']}\")"
++        plan_sources = (f"Read the plan — {plan_label} — and the sibling PRs "
++                        "above.")
++    else:
++        plan_sources = (
++            "This PR is not part of a plan: weigh its result against the\n"
++            "   plans it affects (`pm plan list`) and `pm pr list`.")
++    planning_files = ", ".join(
++        f"`{x}/`" if "." not in x.rsplit("/", 1)[-1] else f"`{x}`"
++        for x in planning_paths if x != "pm/project.yaml") or "the plan files"
++    branch = pr.get("branch", f"pm/{pr_id}")
++
+     # The per-block budgets above bound each block on its own, but their sum
+     # plus this builder's static text (~19 KB) can still exceed the argv
+     # limit when a PR is large in several dimensions at once.  fit_prompt
+@@ -897,8 +1098,12 @@ def generate_signoff_prompt(data: dict, pr_id: str,
+         qa_listing = parts["qa"]
+         prompt = f"""You are performing the **sign-off review** for PR {pr_id}: "{title}"
+ 
++**PR identity:** {identity_line}
++
+ Sign-off is the dedicated lifecycle step between QA and merge. Your job is a
+-PR-level *comprehensive* review and a routing decision.
++PR-level *comprehensive* review, a look back at what made reviewing and
++QAing this PR costly and a look ahead at what should change next, and a
++routing decision.
+ 
+ ## Description
+ {description}
+@@ -944,8 +1149,107 @@ isolated candidate (your worktree and the base branch were not touched):
+      an obvious uncovered edge case. (Per-scenario false-PASS is already caught
+      inline by the scenario quality supervisor; this is the PR-level pass over
+      scenarios it already vetted.)
+-
+-3. **Write the sign-off report (deliverable).** Produce `$CAP/report.html`
++   - **(c) Exploration deliverables.** If this PR's accepted scope is
++     exploration — its deliverable is findings, decisions and proposals for
++     further work rather than a code change — review that deliverable: does
++     it answer the questions its scope set, is each finding grounded in the
++     evidence it cites, and are unresolved questions left explicitly open?
++     Do not certify an unresolved hypothesis as an established result. The
++     exploration document and the evidence it cites are its demonstration
++     (a justified text-only exception in the report headline).
++
++3. **Review every bug and proposal recorded during this PR** — by any
++   session, not only your own ideas. Sessions record them as notes starting
++   `Bug` or `Proposal` (with an origin and evidence), as incidental-bug PRs,
++   as notes on other PRs, and — for QA scenarios — in
++   `$CAP/scenarios/<n>/proposals.md`. Collect them from:
++   - the PR notes above (`pm pr note list {pr_id}` if they were abbreviated);
++   - {registry_sources}
++   - QA: `$CAP/scenarios/<n>/` (verdicts, manifests, `proposals.md`) and the
++     scenario verdicts above;
++   - review and QA fixes: the review-loop and `qa:` commits in
++     `{log_cmd}`.
++   Reconcile them against existing work and the actual code and plan:
++   `pm pr list`, `pm pr list --plan <plan>`, `pm pr show <id>`, the plan
++   file. This checkout's registry can lag the project's main registry, so
++   also search the base's copy (`git show {base_ref}:pm/project.yaml`) and
++   say which registries you searched. Merge reports of the same thing into
++   one item that lists every origin. Give each distinct item one
++   disposition, and say why:
++   - **justified new work** — supported by the evidence, useful, not covered
++     elsewhere, consistent with the user's stated goals, and worth its
++     complexity;
++   - **link/merge with an existing proposal** — name the canonical PR or note;
++   - **already addressed** — name the commit or PR that addressed it;
++   - **unsupported or out of scope** — its premise is wrong or unsupported,
++     it conflicts with an explicit user goal, or its complexity outweighs a
++     concrete benefit (say which);
++   - **needs a human decision** — say what the decision is.
++   Keep valid observations from narrowly scoped sessions even when their
++   suggested fix is wrong. A bug this PR must fix to be accepted is not a
++   disposition: it is an acceptance gap and routes back (step 7).
++
++4. **Look back: what would have made reviewing and QAing this PR cheaper?**
++   Use only what the record shows — the commits above, the PR notes, the
++   sign-off return (if any), every QA run's scenarios, verdicts, flags,
++   re-runs and captures, and the items from step 3. Find where review or QA
++   took repeated work, failed attempts or fragile setup, and recommend a
++   change only where that evidence supports it:
++   - **Code refactorings or architecture changes** that would have made
++     review or QA faster, simpler or more reliable: the repeated difficulty
++     (linked to the iterations, scenarios or notes where it shows), the code
++     or interface involved, the proposed change, the likely benefit and its
++     tradeoffs.
++   - **Missing reusable setup/capture recipes or regressions**: the
++     behaviour, its prerequisites, the assertions that would matter and the
++     evidence it should capture. Check the library first (`pm qa list`,
++     `pm/qa/regression/`, `pm/qa/instructions/`, `pm/qa/artifacts/`), name
++     the closest entries and why they do not fit, and prefer extending one
++     over adding a near-duplicate. Each scenario's
++     `$CAP/scenarios/<n>/scenario.json` records how it was driven — an
++     existing regression, one authored for this PR, or a probe. If a
++     scenario drove a real, repeatable user flow this PR delivers as a probe
++     or with no binding, that is a QA gap, not a future nicety: route
++     {SIGNOFF_REQA} and name the flow in your note so the next QA run binds
++     an existing regression or authors one. A regression authored earlier in
++     this PR should be reused by later runs, not authored again.
++   - **Existing recipes or regressions that caused difficulty** — misleading
++     or stale instructions, brittle setup, unsuitable environment
++     assumptions, redundant steps or excessive effort. Name the entry and
++     the failed attempts or findings that implicate it, and recommend what
++     fits: modify, consolidate, replace, retire or remove it. Say who uses
++     it (regressions that reference it, scenarios that ran it) and what
++     keeps its useful coverage if it is replaced or removed. Adding a recipe
++     is not the only option.
++   Mark each cause **observed** (the record shows it) or **hypothesis**.
++   Quantify time or repeated work only from recorded evidence (timestamps,
++   counts of iterations, runs or re-runs) and cite it; never claim savings
++   the record does not support. Prioritize (high / medium / low). If nothing
++   is justified, say "No justified efficiency recommendation" and why — do
++   not invent one.
++
++5. **Look ahead: "Given the result of this PR, does the plan need to
++   change, and is there any new work worth proposing?"** Answer that
++   question explicitly.
++   {plan_sources}
++   Consider changed goals or assumptions, new evidence, priorities, missing
++   steps, dependencies and sequencing, work that is now obsolete, and
++   follow-up investigations worth running.
++   - For each **plan change**: the plan and section, the adjustment, why this
++     PR's result supports it, and any uncertainty or decision the user must
++     make.
++   - For each **proposed follow-up PR**: its purpose and concrete
++     deliverable, the findings behind it, the plan it belongs to, and its
++     real prerequisites. Search existing work first and point to a matching
++     PR (refining it if needed) instead of proposing a duplicate. A follow-up
++     may be an exploration PR whose deliverable is findings and proposals —
++     it does not need to invent a code change.
++   - Say which items are prerequisites for accepting this PR (acceptance
++     gaps, routed in step 7) and which are later work.
++   If nothing is justified, say "No plan change or new work proposed" and
++   why.
++
++6. **Write the sign-off report (deliverable).** Produce `$CAP/report.html`
+    — the human-facing BDD behaviour report. Evidence files live alongside
+    it; reference them by relative path and make sure the page opens over
+    `file://`.
+@@ -1016,14 +1320,46 @@ isolated candidate (your worktree and the base branch were not touched):
+    **Integration** section in the report: target base revision, result,
+    overlapping files and your semantic assessment.
+ 
++   ### Hard requirement — identity, look-back and look-ahead
++
++   Every report carries these, whatever else you adapt below:
++
++   - **PR identity at the top of the page**:
++     {report_identity}.
++   - **Acceptance status** near the top: one line saying whether anything
++     blocks accepting this PR and which route that takes — kept visibly
++     separate from the optional ideas below, never folded into them.
++   - **Bugs and proposals review** (step 3): one row per distinct item —
++     what it is, every origin that reported it, evidence, disposition, why,
++     and the canonical PR / note / evidence link. Say "None recorded" when
++     there are none.
++   - **Review and QA efficiency** (step 4): refactoring/architecture,
++     missing recipes/regressions, and existing recipes that caused
++     difficulty — each either prioritized recommendations or the explicit
++     "No justified efficiency recommendation".
++   - **Plan feedback and proposed new work** (step 5): the question, your
++     answer, plan changes and proposed follow-up PRs — or the explicit
++     "No plan change or new work proposed".
++   - **Proposed actions** and **Actions taken**, as two separate lists.
++     Proposed actions are not done; give each the exact command or edit
++     that would carry it out (for example the `pm pr add` /
++     `pm pr note add` / `pm pr edit` command or the plan-file change) so
++     the user can authorize it. Actions taken lists what was actually done,
++     with commits and PR/note ids. Never present a finding or a proposal as
++     something already done.
++
++   Recommendations do not waive any assertion, evidence requirement or
++   criterion, and they authorize no work: not starting a follow-up, not
++   deleting or closing entries or recipes, not changing other plans.
++
+    ### Suggested shape — adapt as needed to serve the goal above
+ 
+    These sections are common pieces that tend to convince a reviewer.
+    Skip what isn't load-bearing for this PR, add anything you think the
+    reviewer needs:
+ 
+-   - **Header**: PR display id + title; the routing verdict marker (▲
+-     {SIGNOFF_MERGE} etc., using the `SIGNOFF_VERDICT_ICONS` /
++   - **Header**: the PR identity (see above) and title; the routing
++     verdict marker (▲ {SIGNOFF_MERGE} etc., using the `SIGNOFF_VERDICT_ICONS` /
+      `SIGNOFF_VERDICT_STYLES` tokens from `pm_core/signoff.py` so the
+      visual matches the TUI and `pm pr list`); one-line recommendation;
+      link back to `../index.html` for navigation (the all-PRs dashboard
+@@ -1075,8 +1411,9 @@ isolated candidate (your worktree and the base branch were not touched):
+      * **Spec ambiguities** — resolved (question, answer, who decided)
+        and *unresolved* (flagged for human input). Call out anywhere
+        the resolution changes sibling PRs or future plan items.
+-     * **Open questions, follow-up PRs to file, changed assumptions**
+-       other plan items now depend on.
++     * The required **bugs and proposals review**, **review and QA
++       efficiency** and **plan feedback** sections above — each opened
++       by a one-line summary and collapsed by default.
+ 
+    - **Per-step sections** for Implementation, Review, and QA pairing
+      evidence to each step's acceptance criteria. For a **bug PR** show
+@@ -1146,12 +1483,19 @@ isolated candidate (your worktree and the base branch were not touched):
+    **Link as-is** for `.html` files (already render natively) and for
+    any large binary content.
+ 
+-4. **Route** by picking the verdict below whose definition matches what you
++7. **Route** by picking the verdict below whose definition matches what you
+    found. Each verdict names the lifecycle step whose acceptance criteria it
+    covers; weigh those criteria against the evidence and choose the keyword
+    that fits — read every definition before deciding. End your response with
+    exactly ONE verdict keyword on its own line.
+ 
++   Recommendations and proposals from steps 3–5 never change the route by
++   themselves. An acceptance gap — a correctness bug, missing required
++   behaviour, missing or unconvincing evidence — routes to the earliest
++   affected step below even when you also list longer-term improvements;
++   never relabel it as a follow-up to reach a merge. There is no
++   merge-with-follow-ups verdict.
++
+    - **{SIGNOFF_MERGE}** — all three steps met their criteria: the evidence
+      supports the diff and the QA was rigorous, **and** the PR integrates
+      with the latest base conflict-free with no interaction that needs more
+@@ -1159,7 +1503,8 @@ isolated candidate (your worktree and the base branch were not touched):
+      reviewed HEAD and base revision — sign-off never merges itself; the PR
+      is reported ready_to_merge and the merge decision is made later. If the
+      PR or the base moves before the merge, the merge is refused and
+-     sign-off re-runs.
++     sign-off re-runs — except for the planning follow-ups this session
++     carries forward itself (see "After your verdict").
+    - **{SIGNOFF_IMPL}** — covers the **Implementation** step. Purpose of impl:
+      deliver the PR's required behavior and an implementation spec. Criteria:
+      the diff implements every requirement in the spec/description; an impl
+@@ -1199,21 +1544,78 @@ isolated candidate (your worktree and the base branch were not touched):
+    - **{SIGNOFF_BLOCKED}** — escalate / hold. Use this for genuine ambiguity
+      (CONSERVATIVE BIAS: when truly unsure, BLOCK and escalate rather than
+      merge), something impossible / out-of-scope (note the limitation), or an
+-     assumed-missing feature for which you filed a follow-up PR.
++     assumed-missing feature that needs a PR this one must wait for.
+ 
+ ### Classifying an INPUT_REQUIRED before routing
+ - **Misframed scenario** → note it → **{SIGNOFF_REQA}**.
+ - **Real gap** → note it → **{SIGNOFF_IMPL}**.
+-- **PR description assumed-missing feature** → file a new PR with a blocking `depends_on`
+-  (`pm pr add ...`, then set the dependency), note it → **{SIGNOFF_BLOCKED}**;
++- **PR description assumed-missing feature** → propose a new PR that this
++  PR must depend on (under Proposed actions) → **{SIGNOFF_BLOCKED}**;
+   or, if you judge it in-scope, expand scope and **{SIGNOFF_IMPL}**.
+-- **Nice-to-have** → defer to a new PR (`pm pr add ...`) and **{SIGNOFF_MERGE}**,
+-  or include it via impl if trivial (**{SIGNOFF_IMPL}**).
++- **Nice-to-have** → propose a follow-up PR (under Proposed actions) and
++  **{SIGNOFF_MERGE}**, or include it via impl if trivial (**{SIGNOFF_IMPL}**).
+ - **Impossible / out-of-scope** → note the limitation → **{SIGNOFF_MERGE}** (if
+   the PR still stands on its own) or **{SIGNOFF_BLOCKED}**.
+ 
+-`pm pr add` creates a *pending* PR (no agent session) so you may run it. Do NOT
+-run any command that spawns an agent session (e.g. `pm pr start`).
++### What you may change in this run
++
++Your verdict is bound to the HEAD you reviewed, and pm retires a sign-off
++run whose HEAD moves before it routes. So during this run do **not** commit
++or push, and do not edit code, specs, QA recipes, plans or other PRs. You
++may add a note to this PR when the route you choose needs one (the step you
++route to reads it from this checkout). Everything else you would do — file
++a pending PR, add a dependency, add a note to another PR, change a plan —
++goes under **Proposed actions** in the report, worded so the user can
++authorize it; this session can then carry it out (next section). Do NOT run
++any command that spawns an agent session (e.g. `pm pr start`).
++
++## After your verdict: planning follow-ups in this session
++
++This window stays open after you route {SIGNOFF_MERGE} or {SIGNOFF_BLOCKED}.
++If the user comes back to this session, discusses the PR and asks you to add
++or change proposed follow-up work, you may make those **project planning
++changes** yourself, commit and push them, and carry your verdict forward to
++that commit. No fresh sign-off session, re-review, QA run or separate check
++pass is needed — you know what you changed, so do not re-inspect the
++project or re-run sign-off for it.
++
++Planning changes are only: new *pending* PR entries (`pm pr add ...
++--plan <plan> [--depends-on ...]`), PR notes (`pm pr note add`), the title,
++description, plan and dependencies of *pending* PRs and this PR's own
++dependencies (`pm pr edit`), and plan files ({planning_files}). Make
++registry changes with those commands, never by hand-editing
++`pm/project.yaml`. Planning changes do not include code, tests, QA recipes
++or regressions, specs, this PR's own description or status, other PRs'
++statuses or model settings, or anything that changes what this PR delivers
++or the evidence for it. If the user's request needs any of that, or the
++discussion changes your verdict, say so and stop: that needs new work or a
++fresh sign-off, which the user starts (`pm pr signoff --fresh {pr_id}`). A
++new verdict line in this session does not re-route the PR.
++
++To carry the verdict forward:
++1. Make the edits. `pm pr add` also makes the new PR the project's active
++   PR, so restore the previous one with `pm pr select <id>`. Check that
++   `git status` / `git diff --stat` show only planning files.
++2. Commit with a message starting `signoff-planning:` and push:
++   `git push origin {branch}`.
++3. Run `pm pr signoff integrate {pr_id}` and check that it still reports the
++   base you approved and a mergeable result. If it reports a conflict or a
++   different base, tell the user the merge will need a fresh sign-off, and
++   say so in the report.
++4. Update `$CAP/report.html`: set `pm-signoff-head` to the new HEAD
++   (`git rev-parse HEAD`), keep `pm-signoff-verdict` and `pm-signoff-base`,
++   and add `<meta name="pm-signoff-planning-from" content="<HEAD your verdict
++   reviewed>">` — that reviewed HEAD stays the same across follow-ups. Add
++   the change to **Actions taken** (commit, what was added or changed, and
++   that the user asked for it) and remove what it carried out from
++   **Proposed actions**.
++5. End your reply with the same verdict keyword on its own line.
++
++pm then records your verdict against the new HEAD: it checks that the
++commits since the reviewed HEAD touch only planning files and recomputes the
++merge candidate against the same base. Until the report names the new HEAD,
++the merge is refused and this session is left running. Merging stays the
++user's decision, and new PRs stay pending — filing work never starts it.
+ 
+ IMPORTANT: end your response with exactly one of {SIGNOFF_MERGE}, {SIGNOFF_REQA},
+ {SIGNOFF_REVIEW}, {SIGNOFF_IMPL}, or {SIGNOFF_BLOCKED} on its own line."""
+@@ -2232,6 +2634,9 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
+     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+     signoff_return_block = _signoff_return_block(pr)
+     pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
++    planner_proposals_block = _proposals_block(
++        pr_id, origin=f"{pr_id} QA planner",
++        fix_rule="coverage this PR's QA needs belongs in your plan")
+ 
+     # Include QA spec if already generated, or preamble to generate one
+     qa_spec_block = format_spec_for_prompt(pr, "qa")
+@@ -2416,7 +2821,7 @@ it here. Instead leave a note for the next QA run with
+ next planning pass will pick it up. Only emit fresh scenarios (numbered from
+ {scenario_start}) in this output.
+ 
+-{_OUT_OF_SCOPE_BUGS_BLOCK}
++{_OUT_OF_SCOPE_BUGS_BLOCK}{planner_proposals_block}
+ {pr_notes_handoff_block}
+ {general_notes_block}{qa_specific_block}
+ 
+@@ -2463,6 +2868,11 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
+ 
+     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
+     pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
++    interactive_proposals_block = _proposals_block(
++        pr_id, origin=f"{pr_id} QA scenario 0 (interactive)",
++        record_in="captures",
++        proposals_path=f"$(pm qa captures-path {pr_id})/scenarios/0/proposals.md",
++        incidental_bugs=False)
+ 
+     scratch_line = f"\n- **Scratch dir** (throwaway test projects): {scratch_dir}" if scratch_dir else ""
+     if worktree_mode:
+@@ -2540,7 +2950,7 @@ Help the user with whatever they need:
+ 
+ You do NOT need to produce a verdict.  This session stays open until QA
+ completes — take your time and be thorough.
+-{tui_block}{pr_notes_handoff_block}"""
++{tui_block}{pr_notes_handoff_block}{interactive_proposals_block}"""
+     return prompt.strip()
+ 
+ 
+@@ -2717,6 +3127,15 @@ the fix.
+     # the launcher's file-backed bootstrap instead.
+     steps_text = scenario.steps or ""
+ 
++    # A scenario clone is discarded after the run, so its proposals go beside
++    # its captures (host-durable, read by sign-off), not into a PR note.
++    cap_dir = captures_root or f'$(pm qa captures-path {pr_id})'
++    scenario_proposals_block = _proposals_block(
++        pr_id, origin=f"{pr_id} QA scenario {scenario.index}",
++        record_in="captures",
++        proposals_path=f"{cap_dir}/scenarios/{scenario.index}/proposals.md",
++        fix_rule="a fix you commit is NEEDS_WORK")
++
+     prompt = f"""You are running QA scenario {scenario.index}: "{scenario.title}"
+ 
+ ## Context
+@@ -2778,7 +3197,7 @@ different methodology.
+ ## Execution
+ 
+ {execution_block}
+-{_OUT_OF_SCOPE_BUGS_BLOCK}
++{_OUT_OF_SCOPE_BUGS_BLOCK}{scenario_proposals_block}
+ ## Your Verdict, and When It Is Final
+ 
+ PASS and NEEDS_WORK are final for this run: once you emit one, the QA loop
+@@ -2858,7 +3277,7 @@ You are testing the current state of the codebase.
+    - **PASS** — All checks passed
+    - **NEEDS_WORK** — Issues found (describe them)
+    - **INPUT_REQUIRED** — Need human input
+-{_OUT_OF_SCOPE_BUGS_BLOCK}
++{_OUT_OF_SCOPE_BUGS_BLOCK}{_proposals_block(None, origin=f"standalone QA run of {instruction_id}", record_in="report")}
+ {_pr_notes_handoff_block()}
+ IMPORTANT: Always end your response with the verdict keyword on its own line."""
+     return prompt.strip()
+diff --git a/pm_core/spec_gen.py b/pm_core/spec_gen.py
+index e0094e4b..c117fd1a 100644
+--- a/pm_core/spec_gen.py
++++ b/pm_core/spec_gen.py
+@@ -682,10 +682,13 @@ Use the contracts and scripted responses below — do not devise your own.
+ """
+ 
+ 
+-def format_spec_for_prompt(pr: dict, phase: str) -> str:
++def format_spec_for_prompt(pr: dict, phase: str, *,
++                           for_signoff: bool = False) -> str:
+     """Format a spec for inclusion in a Claude prompt.
+ 
+     Returns a markdown section with the spec, or empty string if no spec.
++    *for_signoff* frames it for the sign-off router, which judges the PR
++    against the spec but never edits it or waits for approval.
+     """
+     spec = get_spec(pr, phase)
+     if not spec:
+@@ -747,6 +750,24 @@ def format_spec_for_prompt(pr: dict, phase: str) -> str:
+             + staleness_note
+         )
+ 
++    if for_signoff:
++        review_note = (
++            "Judge the PR against this spec; do not edit it. If its "
++            "Ambiguities section still has open questions, or it no longer "
++            "matches the code or the PR notes, say so in the report and route "
++            "accordingly: a requirement the code misses goes back to "
++            "implementation, and an open question only the user can settle "
++            "is SIGNOFF_BLOCKED.")
++        return f"""
++## {label}
++
++The following spec guided this PR's implementation, review and QA (`{file_path}`).
++
++{review_note}
++
++{spec}
++"""
++
+     # The spec is instruction text, so it is inlined whole and never
+     # truncated; an over-limit prompt is delivered by the launcher's
+     # file-backed bootstrap rather than by cutting the spec.

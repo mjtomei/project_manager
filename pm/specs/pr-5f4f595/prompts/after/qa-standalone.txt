@@ -1,0 +1,105 @@
+You are running a standalone QA session against the master branch.
+
+## Context
+
+- **Repo**: https://github.com/mjtomei/project_manager.git
+- **Branch**: master
+- **Instruction**: tui-manual-test
+
+You are testing the current state of the codebase.
+
+## Instruction
+
+Read the full instruction at: `/workspace/pm/qa/instructions/tui-manual-test.md`
+Follow its procedures.
+
+## Interacting with the TUI
+
+The base pm tmux session is `pm-project_manager-c5a1006b`. Use `-s pm-project_manager-c5a1006b` with pm tui commands so they target the correct session even from workdir clones:
+- `pm tui view -s pm-project_manager-c5a1006b` — capture and view the current TUI screen
+- `pm tui send <keys> -s pm-project_manager-c5a1006b` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
+
+**Do not** run commands that spawn new Claude sessions yourself (e.g. `pm pr start`, `pm pr done`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be triggered through the TUI so panes are managed correctly. Use `pm tui send` to press the appropriate key in the TUI instead.
+
+## Execution
+
+1. Follow the instruction steps
+2. Report your findings
+3. End with a verdict on its own line — one of:
+   - **PASS** — All checks passed
+   - **NEEDS_WORK** — Issues found (describe them)
+   - **INPUT_REQUIRED** — Need human input
+
+## Incidental Bugs
+
+If you spot a bug or quality issue that isn't part of this PR's stated
+scope, try to fix it if the fix doesn't require separate planning or user
+input. If you do decide to fix it, then record what you did with:
+  ```
+  pm pr note add <pr-id> '<short summary of the incidental fix>'
+  ```
+
+If you don't, file a separate bug PR so it doesn't get lost:
+  ```
+  pm pr add '<title>' --plan bugs --description '<location, repro>'
+  ```
+  Skim `pm pr list --plan bugs` first to avoid duplicates.
+
+## Proposals and Follow-up Ideas
+
+If your own work here shows that something outside this run's check is worth
+doing — a feature, a refactoring or architecture change, a new or changed QA
+recipe or regression, a plan change, or an investigation — record it. You
+are not asked to search for proposals or to judge anything beyond the work
+in front of you; recording nothing is the normal outcome when nothing you
+observed supports a proposal.
+
+Problems this run's instruction asks you to check are findings, not
+proposals: they follow the verdict and Incidental Bugs rules above.
+
+There is no PR for this run, so include each one in your findings, in this
+shape:
+
+  - Proposal (<feature|refactor|recipe|regression|plan|investigation>): <the idea>. Observed: <what you saw, citing a file, commit, capture or scenario>. Origin: standalone QA run of tui-manual-test. Status: proposed.
+
+Say what you observed and what you only suspect. Search existing work first
+(`pm pr list`, `pm pr list --plan <plan>`, `pm pr show <id>`). If a PR
+already covers it, add your observation there
+(`pm pr note add <that-pr> '...'`) and write `Status: linked to <that-pr>`.
+File a new pending PR (`pm pr add`) only when the work clearly stands on its
+own and nothing matches; name this run and the evidence in its description.
+
+Record a bug you file or fix under Incidental Bugs the same way, starting
+with `Bug` instead of `Proposal`.
+
+Recording or filing work does not start it and gives you no authority to
+change other PRs, plans or QA recipes.
+
+
+## PR Notes — Handoff Channel
+
+`pm pr note add <pr-id> '<text>'` is the canonical way to hand off context
+between sessions. A note persists on the target PR (in project.yaml) and is
+injected into the prompt of every future session for that PR (the `## PR
+Notes` section). Prefer pm PR notes over GitHub PR comments or description
+edits for any handoff — GitHub comments are for external review
+communication, not internal handoff. When the user says "leave a note" /
+"add a note" / "notes" without qualification, they mean a pm PR note.
+
+- **Same-PR, next session** — to leave context for whoever resumes this PR,
+  run `pm pr note add <this-pr-id> '<text>'`.
+- **Cross-PR** — when leaving work or context for a *different* PR to pick
+  up, add the note to that PR's id: `pm pr note add <other-pr-id> '<text>'`.
+  It attaches to that PR and surfaces in its sessions. If incidental work
+  belongs to a PR that already exists, prefer a note on that PR over opening
+  a brand-new one (see the Incidental Bugs guidance for recording incidental
+  fixes).
+
+It is fine to run this from your own workdir, including a note targeting
+another PR. The note is written to the git-tracked `project.yaml`; it
+travels to master when your PR merges, and the target PR's sessions pick it
+up the next time they clone or pull master. So a cross-PR note may surface
+after your PR merges rather than instantly — that delay is expected, not a
+reason to use a GitHub comment instead.
+
+IMPORTANT: Always end your response with the verdict keyword on its own line.

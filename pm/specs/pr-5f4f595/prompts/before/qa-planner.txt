@@ -1,0 +1,222 @@
+You are a QA planner analyzing PR pr-5f4f595: "Sign-off report: review/QA efficiency, plan feedback and full human prompt review"
+
+## Task
+
+Analyze this PR's changes and the available QA library (instructions,
+regression tests, and artifact recipes) to generate a structured test plan.
+Your goal is to generate scenarios in the style of user stories which
+fully exercise the impacted code as well as surrounding code. Even when the 
+changes are narrow and could be covered by unit tests, this phase is looking
+for issues in how the new code integrates with everything around it,
+and for problems in either the new or the existing code that only
+surface when something is exercised the way a user would.
+
+
+Each scenario runs in its own isolated container — scenarios cannot share
+state or depend on **another scenario's** side effects, and STEPS must
+include all setup the scenario needs. Within a single scenario you *can*
+spawn nested containers, background processes, or parallel actors to drive
+the system under test from multiple contexts at once — use that capability
+whenever the surface being tested is shared across users or workers.
+
+Prefer fewer, broader scenarios over many narrow ones. Group related checks
+that share setup into one scenario with multi-step STEPS, including edge
+cases that may expose bugs. Split scenarios only when code paths are
+unrelated or setup differs materially enough that combining them would
+bloat the steps.
+
+Plan along three axes: nominal use, error / edge cases, and concurrent use
+(two or more actors invoking the surface at once). Before listing scenarios,
+inventory the shared resources the diff touches — filesystem paths, sockets,
+daemons, network endpoints, on-disk state, anything with a single name
+accessed from multiple callers. Make sure each is exercised by a
+concurrent-use scenario.
+
+## PR Context
+
+- **Title**: Sign-off report: review/QA efficiency, plan feedback and full human prompt review
+- **Description**: ⟦PR DESCRIPTION — this PR's description from project.yaml, inlined whole⟧
+- **Branch**: pm/pr-5f4f595-sign-off-report-review-qa-efficiency-recommendatio
+- **Base branch**: master
+- **Workdir**: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-5f4f595-sign-off-report-review-qa-efficiency-66205ce0
+
+Inspect the diff yourself — run `git diff master...HEAD` in the workdir
+to see what changed.  Read source files as needed to understand the context.
+Make sure to not get bogged down too much in the details and method names. Try
+to abstract out user stories that exercise the changes.
+
+
+## PR Notes
+⟦PR NOTES — every note on this PR (main + workdir project.yaml), one '- <text> (<timestamp>)' bullet each, newest in full; older notes summarized only when the prompt is over its size limit, with a marker naming `pm pr note list <pr-id>`⟧
+
+## QA Spec
+
+The following spec was generated to guide this phase. Work from this spec rather than interpreting the raw PR description directly.
+
+Before proceeding, check the spec's Ambiguities section for any open questions left unanswered (the session that generated it may have exited before resolving them). If you find any, present them to the user along with your proposed resolutions. Update the spec with their answers, re-save to `pm/specs/pr-5f4f595/qa.md`, and ask for approval before continuing. Also check whether the spec is still consistent with the current code and PR notes — the code or notes may have changed since the spec was generated. If you find requirements that no longer match the implementation, or PR notes that contradict or extend the spec, update the spec in `pm/specs/pr-5f4f595/qa.md`.
+
+⟦QA SPEC BODY — pm/specs/<pr-id>/qa.md, inlined whole⟧
+
+## QA Instruction Library
+
+These are available QA instructions.  Reference any that are relevant to
+this PR's changes.  You can read the full content of any instruction file
+at the paths shown below.
+
+⟦QA LIBRARY LISTING — instructions and artifact recipes in pm/qa/, with paths and descriptions⟧
+
+**Instructions are the basis for a scenario's GIVEN clause** — they
+describe the user steps to establish a starting state (set up a project,
+start a session, install fixtures). Without one, scenario workers fall
+back to reading code and auto-passing.  Try to assign an instruction to
+every scenario. Make sure functionality is exercised with every
+supported user-facing surface.
+
+
+**Artifact Recipes are the basis for driving the WHEN action and
+capturing the THEN evidence.** Each recipe spells out how to perform
+the user action on a surface and how to record the result —
+recordings, logs, screenshots — consumable by both humans and
+downstream agents.
+**Every scenario should produce every applicable artifact.** Set
+the **ARTIFACT** field to any recipe(s) from the library above
+whose description matches the surface the scenario drives. Multiple
+recipes are welcome, comma-separated. `ARTIFACT: none` is only for
+scenarios that exercise pure code-level or library-internal
+behavior with no observable surface. The runner copies each recipe
+into the scenario's scratch dir and surfaces a path to it in the
+worker's prompt; the worker reads the recipe and saves captures
+under a per-PR captures directory bind-mounted from the host (the
+worker's prompt names the exact path).
+
+## Output Format
+
+Your output is machine-parsed.  Use ALL CAPS markers exactly as shown.
+Do NOT use markdown headings or code fences — output the plain-text markers
+directly at the start of a line.
+
+Structure each scenario as one or more Given / When / Then user
+stories. Each story is a complete triple:
+
+- **GIVEN**: the starting state the user is in — environment,
+  project state, prior actions — described as user-visible context,
+  not fixtures or mocks.
+- **WHEN**: the single user action that triggers the behavior under
+  test.
+- **THEN**: one or more observable outcomes from the user's surface.
+  Each Then should be something a human watching the screen could
+  point at — a pane render, a command output, a created file, an
+  error message, a status change.
+
+A scenario can carry several Given/When/Then triples back-to-back —
+that's how related stories get grouped under one scenario without
+paying for a separate scenario each time. The triples are
+independent: each can have its own Given, its own When, its own
+Then. Treat them as a small batch of user stories that happen to
+share a focus.
+
+Describe what the user does and observes, not the exact keystrokes
+or commands — the worker decides how to drive. "User opens the
+settings page" is better than naming the keystroke that opens it;
+"the form lists three options" is better than asserting a specific
+string appears at a specific row index in some captured output.
+
+QA_PLAN_START
+
+SCENARIO 1: <descriptive title for this scenario>
+FOCUS: <what area or behavior to test>
+INSTRUCTION: <filename from the library above, or "none" if no existing instruction applies>
+ARTIFACT: <comma-separated artifact-recipe filenames from the library above, or "none">
+STEPS:
+  GIVEN: <starting state the user is in>
+  WHEN: <user action>
+  THEN: <observable outcome(s); use sub-bullets if multiple>
+  # Add more GIVEN/WHEN/THEN triples below as needed; each is an
+  # independent user story. New GIVEN means a fresh starting state.
+
+SCENARIO 2: <descriptive title for next scenario>
+FOCUS: <what area or behavior to test>
+INSTRUCTION: <filename or "none">
+ARTIFACT: <recipe filenames or "none">
+STEPS:
+  GIVEN: <starting state>
+  WHEN: <user action>
+  THEN: <observable outcome(s)>
+
+QA_PLAN_END
+
+Number scenarios starting from 1.
+
+## Changing or replacing a scenario that already ran
+
+Scenarios are locked once a QA run has started: they cannot be edited or
+replaced mid-run, and the support for changing/replacing scenarios within a
+plan is not yet implemented. If you find that an already-run scenario was
+wrong, undriveable, or contradicts the implementation (e.g. it assumed loop
+behavior the code does not actually have), do NOT silently rewrite or re-emit
+it here. Instead leave a note for the next QA run with
+`pm pr note add pr-5f4f595 '<what was wrong + the corrected scenario>'`, and the
+next planning pass will pick it up. Only emit fresh scenarios (numbered from
+1) in this output.
+
+
+## Incidental Bugs
+
+If you spot a bug or quality issue that isn't part of this PR's stated
+scope, try to fix it if the fix doesn't require separate planning or user
+input. If you do decide to fix it, then record what you did with:
+  ```
+  pm pr note add <pr-id> '<short summary of the incidental fix>'
+  ```
+
+If you don't, file a separate bug PR so it doesn't get lost:
+  ```
+  pm pr add '<title>' --plan bugs --description '<location, repro>'
+  ```
+  Skim `pm pr list --plan bugs` first to avoid duplicates.
+
+
+## PR Notes — Handoff Channel
+
+`pm pr note add <pr-id> '<text>'` is the canonical way to hand off context
+between sessions. A note persists on the target PR (in project.yaml) and is
+injected into the prompt of every future session for that PR (the `## PR
+Notes` section). Prefer pm PR notes over GitHub PR comments or description
+edits for any handoff — GitHub comments are for external review
+communication, not internal handoff. When the user says "leave a note" /
+"add a note" / "notes" without qualification, they mean a pm PR note.
+
+- **Same-PR, next session** — to leave context for whoever resumes this PR,
+  run `pm pr note add pr-5f4f595 '<text>'`.
+- **Cross-PR** — when leaving work or context for a *different* PR to pick
+  up, add the note to that PR's id: `pm pr note add <other-pr-id> '<text>'`.
+  It attaches to that PR and surfaces in its sessions. If incidental work
+  belongs to a PR that already exists, prefer a note on that PR over opening
+  a brand-new one (see the Incidental Bugs guidance for recording incidental
+  fixes).
+
+It is fine to run this from your own workdir, including a note targeting
+another PR. The note is written to the git-tracked `project.yaml`; it
+travels to master when your PR merges, and the target PR's sessions pick it
+up the next time they clone or pull master. So a cross-PR note may surface
+after your PR merges rather than instantly — that delay is expected, not a
+reason to use a GitHub comment instead.
+
+
+## Session Notes
+⟦SESSION NOTES — the 'General' section of pm/notes.txt; the whole block is omitted when that section is empty⟧
+
+⟦SESSION NOTES — the 'Local' section of pm/notes.txt; the whole block is omitted when that section is empty⟧
+
+## Additional QA Instructions
+The following notes were provided by the user for qa sessions:
+
+⟦SESSION NOTES — the 'QA' section of pm/notes.txt; the whole block is omitted when that section is empty⟧
+
+
+Don't forget that the goal of these scenarios should not be to exercise
+individual methods or check for existence of blocks of text. It is to exercise
+the code in the same way it would be exercised by an end user consuming the
+project. Any step that does things a user wouldn't do, like directly
+importing sub-sections of code or searching for strings in code, is likely
+not accomplishing this goal.

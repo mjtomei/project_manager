@@ -52299,143 +52299,148 @@ prs:
   branch: pm/pr-8162f0f-project-owner-guidance-for-automatic-versus-human-
   status: pending
   depends_on: []
-  description: 'Add project-owner guidance that determines which otherwise-qualified PRs may
-    merge automatically and which must wait for the owner. This is part of plan-delivery D3
-    and a prerequisite of its unattended bug-fix handoff, with D9 qualification and D5/D8
-    onboarding adoption.
+  description: 'Add project-owner guidance that determines which otherwise-qualified
+    PRs may merge automatically and which must wait for the owner. This is part of
+    plan-delivery D3 and a prerequisite of its unattended bug-fix handoff, with D9
+    qualification and D5/D8 onboarding adoption.
 
 
-    User policy example for project-manager: any PR touching containerization, security, or
-    prompts requires human review/approval before merge. Less impactful fixes and feature
-    PRs may auto-merge under the owner''s explicit policy, with a small heads-up. "Feature"
-    or "bug fix" is not by itself a reason to require or bypass approval. Owners of other
-    projects must be able to supply different guidance; do not hard-code this repository''s
-    categories as the universal policy.
+    User policy example for project-manager: any PR touching containerization, security,
+    or prompts requires human review/approval before merge. Less impactful fixes and
+    feature PRs may auto-merge under the owner''s explicit policy, with a small heads-up.
+    "Feature" or "bug fix" is not by itself a reason to require or bypass approval.
+    Owners of other projects must be able to supply different guidance; do not hard-code
+    this repository''s categories as the universal policy.
 
 
-    Keep the owner-facing guidance simple and inspectable. Evaluate the actual proposed changes,
-    including incidental edits and semantic changes outside obvious path patterns, against
-    the project''s approved guidance. A mixed PR touching a manual-review area waits as a
-    whole. Ambiguous classification or missing guidance preserves the manual gate. Record
-    the decision, relevant rule, affected changes and concise rationale with links to the
-    PR and sign-off report. A title, author claim or agent-generated summary alone cannot
-    grant merge authority.
+    Keep the owner-facing guidance simple and inspectable. Evaluate the actual proposed
+    changes, including incidental edits and semantic changes outside obvious path
+    patterns, against the project''s approved guidance. A mixed PR touching a manual-review
+    area waits as a whole. Ambiguous classification or missing guidance preserves
+    the manual gate. Record the decision, relevant rule, affected changes and concise
+    rationale with links to the PR and sign-off report. A title, author claim or agent-generated
+    summary alone cannot grant merge authority.
 
 
-    The decision supplements existing review, QA and fresh revision-bound sign-off; it does
-    not waive any of them. Explicit user holds, spec approval, dependency/manual merge holds
-    and wait_for_merge take precedence. Re-evaluate when the diff, target base, approved guidance
-    or a human override changes; stale approvals must not authorize a different candidate.
-    Policy edits require owner authorization and cannot let the same PR grant itself permission
-    to merge. Keep the configured distinction between explicit auto-merge authority and the
-    default manual workflow, across CLI, TUI, watcher and restart paths.
+    The decision supplements existing review, QA and fresh revision-bound sign-off;
+    it does not waive any of them. Explicit user holds, spec approval, dependency/manual
+    merge holds and wait_for_merge take precedence. Re-evaluate when the diff, target
+    base, approved guidance or a human override changes; stale approvals must not
+    authorize a different candidate. Policy edits require owner authorization and
+    cannot let the same PR grant itself permission to merge. Keep the configured distinction
+    between explicit auto-merge authority and the default manual workflow, across
+    CLI, TUI, watcher and restart paths.
 
 
-    Create a durable concise heads-up event for an authorized automatic merge, for immediate
-    display or inclusion in the scheduled project brief under the owner''s delivery preference.
-    Identify project, PR/link, actual published outcome, one-line impact and report link.
-    Do not claim a merge happened merely because it was eligible; preserve pending/failed
-    notification state and retry without duplicate publication. Coordinate with the separately
-    filed scheduled-brief feature using existing report/event surfaces rather than inventing
-    a second lifecycle.
+    Create a durable concise heads-up event for an authorized automatic merge, for
+    immediate display or inclusion in the scheduled project brief under the owner''s
+    delivery preference. Identify project, PR/link, actual published outcome, one-line
+    impact and report link. Do not claim a merge happened merely because it was eligible;
+    preserve pending/failed notification state and retry without duplicate publication.
+    Coordinate with the separately filed scheduled-brief feature using existing report/event
+    surfaces rather than inventing a second lifecycle.
 
 
-    Acceptance: in isolated fixtures, show a low-impact approved change auto-merging only
-    after all checks, plus containerization, security, prompt and mixed changes held for the
-    owner; cover an uncertain classification, a stale policy/diff/base, an explicit wait_for_merge
-    override, an attempted self-exemption, restart and a recorded heads-up. Show distinct
-    policies for two projects. Include reusable agent regression scenarios for the actual
-    merge paths, not only mocks of a classification helper.
+    Acceptance: in isolated fixtures, show a low-impact approved change auto-merging
+    only after all checks, plus containerization, security, prompt and mixed changes
+    held for the owner; cover an uncertain classification, a stale policy/diff/base,
+    an explicit wait_for_merge override, an attempted self-exemption, restart and
+    a recorded heads-up. Show distinct policies for two projects. Include reusable
+    agent regression scenarios for the actual merge paths, not only mocks of a classification
+    helper.
 
 
-    Registration only: no current policy activation, model reassignment, worker launch, spec
-    approval or merge is authorized by filing this PR. Preserve the paused timer, disabled
-    autostart and individual approvals for the current signed-off PRs.
+    Registration only: no current policy activation, model reassignment, worker launch,
+    spec approval or merge is authorized by filing this PR. Preserve the paused timer,
+    disabled autostart and individual approvals for the current signed-off PRs.
 
 
-    USER CLARIFICATION: INTERACTIVE GUIDANCE, NOT ANOTHER MANUAL CONFIGURATION TASK. Reuse
-    the existing task-specific prompt-note feature (pm_core/notes.py and the composed prompt
-    sections) as the durable backing. Provide an agent-led getting-started conversation and
-    later feedback flow: ask only what is needed, turn the owner''s examples and corrections
-    into a concise scoped note, show the effective guidance, and maintain it on the owner''s
-    behalf. The owner should not have to hand-author or repeatedly edit prompt notes. Preserve
-    direct edits, provenance and rollback; do not overwrite unrelated sections or leak one
-    project''s preferences into another. Distinguish explicitly authorized feedback from guesses.
-    Updates that broaden merge authority need owner authorization; a report''s content or
-    a worker''s own suggested exemption is not that authorization. Avoid a second competing
-    policy/prompt storage system unless the spec demonstrates why the existing mechanism cannot
+    USER CLARIFICATION: INTERACTIVE GUIDANCE, NOT ANOTHER MANUAL CONFIGURATION TASK.
+    Reuse the existing task-specific prompt-note feature (pm_core/notes.py and the
+    composed prompt sections) as the durable backing. Provide an agent-led getting-started
+    conversation and later feedback flow: ask only what is needed, turn the owner''s
+    examples and corrections into a concise scoped note, show the effective guidance,
+    and maintain it on the owner''s behalf. The owner should not have to hand-author
+    or repeatedly edit prompt notes. Preserve direct edits, provenance and rollback;
+    do not overwrite unrelated sections or leak one project''s preferences into another.
+    Distinguish explicitly authorized feedback from guesses. Updates that broaden
+    merge authority need owner authorization; a report''s content or a worker''s own
+    suggested exemption is not that authorization. Avoid a second competing policy/prompt
+    storage system unless the spec demonstrates why the existing mechanism cannot
     suffice.
 
 
-    The setup conversation should help the owner express examples of changes they want to
-    inspect versus changes that can merge with a heads-up. Agent-maintained notes express
-    that guidance; examples must cover project-manager containerization/security/prompts and
-    low-impact changes, unclear cases and later owner corrections. Test that unapproved feedback
-    cannot silently widen automatic merge authority.
+    The setup conversation should help the owner express examples of changes they
+    want to inspect versus changes that can merge with a heads-up. Agent-maintained
+    notes express that guidance; examples must cover project-manager containerization/security/prompts
+    and low-impact changes, unclear cases and later owner corrections. Test that unapproved
+    feedback cannot silently widen automatic merge authority.
 
 
-    USER-REQUIRED SPEC REVIEW BEFORE IMPLEMENTATION. Set review_spec=true. When started, prepare
-    the grounded implementation spec and all complete candidate prompts/composed guidance
-    for getting started, interpreting and applying feedback, and the feature''s merge assessment
-    or scheduled brief. Provide representative rendered prompts, example persisted task notes
-    and resulting decisions/briefs, including how corrections change them. Show storage/scope,
-    authority precedence, updates/restarts, and interactions with existing manual gates and
-    #277. Link every artifact from impl.md. Then stop for the user''s explicit spec/prompt
-    approval before product implementation, review or QA. Never self-approve. This filing
-    does not authorize starting the PR or enabling a schedule.
+    USER-REQUIRED SPEC REVIEW BEFORE IMPLEMENTATION. Set review_spec=true. When started,
+    prepare the grounded implementation spec and all complete candidate prompts/composed
+    guidance for getting started, interpreting and applying feedback, and the feature''s
+    merge assessment or scheduled brief. Provide representative rendered prompts,
+    example persisted task notes and resulting decisions/briefs, including how corrections
+    change them. Show storage/scope, authority precedence, updates/restarts, and interactions
+    with existing manual gates and #277. Link every artifact from impl.md. Then stop
+    for the user''s explicit spec/prompt approval before product implementation, review
+    or QA. Never self-approve. This filing does not authorize starting the PR or enabling
+    a schedule.
 
 
 
     2026-10-31 USER DIRECTION: SOFT DEPENDENCIES AND WATCHER-SESSION DECISIONS
 
 
-    Plan/PR dependency edges are soft scheduling rules. CLI commands may consume them and
-    recommend readiness or ordering; watcher sessions decide whether to follow, depart from,
-    or bypass those recommendations. Keep recommendations and reasons in shared durable project/plan/PR
-    context so other watchers and future instantiations can reassess them. No helper result
-    automatically starts, pauses or advances work. Explicit user holds, scope/merge authority,
-    required evidence, resource bounds and concrete operation safety remain separate constraints.
-    This updates planned work only; it does not alter current execution or authorize an alpha
-    test.
+    Plan/PR dependency edges are soft scheduling rules. CLI commands may consume them
+    and recommend readiness or ordering; watcher sessions decide whether to follow,
+    depart from, or bypass those recommendations. Keep recommendations and reasons
+    in shared durable project/plan/PR context so other watchers and future instantiations
+    can reassess them. No helper result automatically starts, pauses or advances work.
+    Explicit user holds, scope/merge authority, required evidence, resource bounds
+    and concrete operation safety remain separate constraints. This updates planned
+    work only; it does not alter current execution or authorize an alpha test.
 
 
-    Extend owner guidance to work selection and prioritization as well as automatic versus
-    human-approved merges. Capture security importance, project goals and explicit preferences
-    from onboarding and later discussions using the existing agent-maintained task-note backing.
-    Keep source/provenance and owner corrections visible. Distinguish inferred preferences
-    from explicit direction; relative importance is not authorization to start unrelated work,
-    lift a hold or broaden merge permission. Watcher prompts use this guidance when interpreting
-    readiness recommendations or choosing a different order. Do not require the owner to maintain
-    a numeric priority formula. Preserve all existing merge-policy requirements.
+    Extend owner guidance to work selection and prioritization as well as automatic
+    versus human-approved merges. Capture security importance, project goals and explicit
+    preferences from onboarding and later discussions using the existing agent-maintained
+    task-note backing. Keep source/provenance and owner corrections visible. Distinguish
+    inferred preferences from explicit direction; relative importance is not authorization
+    to start unrelated work, lift a hold or broaden merge permission. Watcher prompts
+    use this guidance when interpreting readiness recommendations or choosing a different
+    order. Do not require the owner to maintain a numeric priority formula. Preserve
+    all existing merge-policy requirements.
 
 
-    Include complete prompt examples for starting implementation before a prerequisite merges
-    while deferring review; waiting on overlapping changes introduced later in a different
-    plan; proceeding with independent work while another PR waits on a human; accepting integration
-    cost for an urgent security fix; and revising a stale dependency or treating unrelated
-    project.yaml edits as independent. Recommendations must be maintained dynamically from
-    observed work, not only from the initial plan or agents volunteering updates. Record decisions
-    and reasons for future sessions without requiring a giant transition table or mandatory
-    scoring formula.
+    Include complete prompt examples for starting implementation before a prerequisite
+    merges while deferring review; waiting on overlapping changes introduced later
+    in a different plan; proceeding with independent work while another PR waits on
+    a human; accepting integration cost for an urgent security fix; and revising a
+    stale dependency or treating unrelated project.yaml edits as independent. Recommendations
+    must be maintained dynamically from observed work, not only from the initial plan
+    or agents volunteering updates. Record decisions and reasons for future sessions
+    without requiring a giant transition table or mandatory scoring formula.
 
 
     SPEC/PROMPT REVIEW REQUIRED: when this PR is eventually started, prepare the implementation
-    spec and all complete rendered prompts and representative CLI outputs/shared notes, then
-    stop for the user before product implementation or review/QA. Set review_spec=true; never
-    self-approve. No worker, alpha watcher, schedule or policy activation is authorized by
-    this update.
+    spec and all complete rendered prompts and representative CLI outputs/shared notes,
+    then stop for the user before product implementation or review/QA. Set review_spec=true;
+    never self-approve. No worker, alpha watcher, schedule or policy activation is
+    authorized by this update.
 
 
 
     2026-10-31 APPROVED D3 MILESTONE RECONCILIATION
 
 
-    D3 in plan-delivery is now a delivery milestone grouping pr-ff9b728, pr-945546e, pr-8162f0f
-    and pr-af9edb9. It is not another PR and must not replace or duplicate these existing
-    implementations. Keep this PR identity, history and owned scope. Shared milestone qualification
-    is documented in plan-delivery; separately owned prerequisites remain separate work. Preserve
-    implementation spec/full-prompt approval before implementation. No start is authorized
-    by this planning update.
+    D3 in plan-delivery is now a delivery milestone grouping pr-ff9b728, pr-945546e,
+    pr-8162f0f and pr-af9edb9. It is not another PR and must not replace or duplicate
+    these existing implementations. Keep this PR identity, history and owned scope.
+    Shared milestone qualification is documented in plan-delivery; separately owned
+    prerequisites remain separate work. Preserve implementation spec/full-prompt approval
+    before implementation. No start is authorized by this planning update.
 
     '
   agent_machine: null
@@ -52448,33 +52453,36 @@ prs:
   merged_at: null
   notes:
   - id: note-201b5666
-    text: 'User clarified Oct31: dependency edges are soft rules; CLI readiness/schedule helpers
-      may recommend actions, but watcher sessions may follow or depart from them. Include
-      dynamic cross-plan updates, shared continuity and worked deviation examples. Planned
-      scope only; spec/full-prompt approval required and no start authorized.'
+    text: 'User clarified Oct31: dependency edges are soft rules; CLI readiness/schedule
+      helpers may recommend actions, but watcher sessions may follow or depart from
+      them. Include dynamic cross-plan updates, shared continuity and worked deviation
+      examples. Planned scope only; spec/full-prompt approval required and no start
+      authorized.'
     created_at: '2026-10-31T18:35:32.721580+00:00'
     last_edited: '2026-10-31T18:35:32.721580+00:00'
   - id: note-591ae4ca
     text: D3 in plan-delivery is now a delivery milestone grouping pr-ff9b728, pr-945546e,
-      pr-8162f0f and pr-af9edb9. It is not another PR and must not replace or duplicate these
-      existing implementations. Keep this PR identity, history and owned scope. Shared milestone
-      qualification is documented in plan-delivery; separately owned prerequisites remain
-      separate work. Preserve implementation spec/full-prompt approval before implementation.
-      No start is authorized by this planning update.
+      pr-8162f0f and pr-af9edb9. It is not another PR and must not replace or duplicate
+      these existing implementations. Keep this PR identity, history and owned scope.
+      Shared milestone qualification is documented in plan-delivery; separately owned
+      prerequisites remain separate work. Preserve implementation spec/full-prompt
+      approval before implementation. No start is authorized by this planning update.
     created_at: '2026-10-31T18:43:14.672660+00:00'
     last_edited: '2026-10-31T18:43:14.672660+00:00'
   - id: note-a43b6aa
-    text: User authorized starting this PR on work Opus5.5/xhigh on 2026-11-01, all PR roles/helpers/sign-off.
-      First prepare the grounded implementation spec, complete onboarding/feedback/merge-assessment
-      prompts, representative notes and decisions, and stop for explicit owner approval. The
-      planned agent-controlled flow watcher pr-ff9b728 and project watcher pr-945546e are
-      not implemented yet; only legacy monitoring/recovery and programmatic merge gates exist.
-      Make that distinction explicit in the spec. Propose reusable guidance/assessment interfaces
-      and show how existing merge gates and future watchers would consume them; do not implement
-      a replacement watcher as incidental scope. Starting this spec session does not activate
-      owner-guided automatic merges, change current target merge policies or start other PRs.
-      Historical registration-only/no-start notes describe earlier filing, not this new authorization.
-      Preserve the required implementation spec/full-prompt review gate and manual merge approval.
+    text: User authorized starting this PR on work Opus5.5/xhigh on 2026-11-01, all
+      PR roles/helpers/sign-off. First prepare the grounded implementation spec, complete
+      onboarding/feedback/merge-assessment prompts, representative notes and decisions,
+      and stop for explicit owner approval. The planned agent-controlled flow watcher
+      pr-ff9b728 and project watcher pr-945546e are not implemented yet; only legacy
+      monitoring/recovery and programmatic merge gates exist. Make that distinction
+      explicit in the spec. Propose reusable guidance/assessment interfaces and show
+      how existing merge gates and future watchers would consume them; do not implement
+      a replacement watcher as incidental scope. Starting this spec session does not
+      activate owner-guided automatic merges, change current target merge policies
+      or start other PRs. Historical registration-only/no-start notes describe earlier
+      filing, not this new authorization. Preserve the required implementation spec/full-prompt
+      review gate and manual merge approval.
     created_at: '2026-11-01T19:52:06.090845+00:00'
     last_edited: '2026-11-01T19:52:06.090845+00:00'
   review_spec: true
@@ -52486,90 +52494,97 @@ prs:
   branch: pm/pr-2588ead-scheduled-concise-multi-project-progress-and-chang
   status: pending
   depends_on: []
-  description: 'Add an owner-configured scheduled brief for the automated delivery flow: a
-    quickly consumed set of line items explaining what changed, where each selected project
-    stands, and any potential issues, blockers or owner decisions. Make this part of plan-delivery
-    D3''s unattended handoff and D9 qualification, and exercise it across D5/D8 adoption projects.
+  description: 'Add an owner-configured scheduled brief for the automated delivery
+    flow: a quickly consumed set of line items explaining what changed, where each
+    selected project stands, and any potential issues, blockers or owner decisions.
+    Make this part of plan-delivery D3''s unattended handoff and D9 qualification,
+    and exercise it across D5/D8 adoption projects.
 
 
     Use a configurable schedule, project selection and existing report/dashboard surface.
-    The brief should be useful in roughly a minute: group short lines by project, show changes
-    since the last successfully published brief, current phase or milestone, merged PRs and
-    their impact, work ready for owner approval, material problems and the next useful action.
-    Put actionable issues and blockers first. Include project identity, PR number/link when
-    available, source/report links, as-of time and the reporting interval so the reader can
-    inspect detail without reading transcripts. Distinguish completed/published work from
-    planned, running, waiting, failed and stale/unavailable observations. Do not invent progress,
-    estimates or acceptance verdicts.
+    The brief should be useful in roughly a minute: group short lines by project,
+    show changes since the last successfully published brief, current phase or milestone,
+    merged PRs and their impact, work ready for owner approval, material problems
+    and the next useful action. Put actionable issues and blockers first. Include
+    project identity, PR number/link when available, source/report links, as-of time
+    and the reporting interval so the reader can inspect detail without reading transcripts.
+    Distinguish completed/published work from planned, running, waiting, failed and
+    stale/unavailable observations. Do not invent progress, estimates or acceptance
+    verdicts.
 
 
-    Include the one-line heads-ups from the owner-defined automatic-merge policy; label automatic
-    versus owner-approved merges accurately and show why a PR is waiting for the owner. A
-    notification is informational, never approval. Reuse #277/pr-c3e2f70 INPUT_REQUIRED briefs
-    when available for deeper question/options context, but do not expand or replace that
-    PR''s narrow 5-minute review/QA scope. This overview also covers project progress, merged
-    changes and sign-off approval waits. Reuse project-state watcher observations and existing
-    sign-off reports; neither the broad watcher rewrite nor Radar''s external-feed infrastructure
-    must be required just to generate a useful brief.
+    Include the one-line heads-ups from the owner-defined automatic-merge policy;
+    label automatic versus owner-approved merges accurately and show why a PR is waiting
+    for the owner. A notification is informational, never approval. Reuse #277/pr-c3e2f70
+    INPUT_REQUIRED briefs when available for deeper question/options context, but
+    do not expand or replace that PR''s narrow 5-minute review/QA scope. This overview
+    also covers project progress, merged changes and sign-off approval waits. Reuse
+    project-state watcher observations and existing sign-off reports; neither the
+    broad watcher rewrite nor Radar''s external-feed infrastructure must be required
+    just to generate a useful brief.
 
 
-    Keep summaries compact: batch related updates, avoid repeating unchanged details every
-    interval, retain still-actionable unresolved blockers with their age, and show a terse
-    no-material-change result when appropriate. Persist the successful report boundary and
-    stable event identity so restart, retry or overlapping schedules do not lose or duplicate
-    merge notices; a failed delivery must not advance the boundary. A missed interval may
-    be caught up in one bounded summary. Explicitly identify projects that could not be refreshed
-    rather than silently omitting them.
+    Keep summaries compact: batch related updates, avoid repeating unchanged details
+    every interval, retain still-actionable unresolved blockers with their age, and
+    show a terse no-material-change result when appropriate. Persist the successful
+    report boundary and stable event identity so restart, retry or overlapping schedules
+    do not lose or duplicate merge notices; a failed delivery must not advance the
+    boundary. A missed interval may be caught up in one bounded summary. Explicitly
+    identify projects that could not be refreshed rather than silently omitting them.
 
 
-    Owners configure cadence, destination, scope and pause/resume. Publish locally through
-    the existing dashboard/report surface initially; sending to email/chat or other external
-    recipients requires an explicitly configured, authorized destination. Brief generation
-    is read-only with respect to PR workflow: it cannot answer INPUT_REQUIRED, change gates,
-    start work, merge, or override a pause. No schedule or external message is enabled merely
-    by registering this PR.
+    Owners configure cadence, destination, scope and pause/resume. Publish locally
+    through the existing dashboard/report surface initially; sending to email/chat
+    or other external recipients requires an explicitly configured, authorized destination.
+    Brief generation is read-only with respect to PR workflow: it cannot answer INPUT_REQUIRED,
+    change gates, start work, merge, or override a pause. No schedule or external
+    message is enabled merely by registering this PR.
 
 
-    Acceptance: exercise at least two projects with ordinary progress, automatic and manually
-    approved merges, a manual approval hold, a genuine blocker, an unchanged interval, a stale/unavailable
-    project and links to source evidence. Verify bounded readable output, correct deltas,
-    no lost/duplicate heads-ups after failed delivery/restart, and pause/resume without workflow
-    mutations. Demonstrate actual rendered briefs as well as meaningful data-path tests. Keep
-    this separate from restoring any review-loop stop command; that proposed PR is on hold.
+    Acceptance: exercise at least two projects with ordinary progress, automatic and
+    manually approved merges, a manual approval hold, a genuine blocker, an unchanged
+    interval, a stale/unavailable project and links to source evidence. Verify bounded
+    readable output, correct deltas, no lost/duplicate heads-ups after failed delivery/restart,
+    and pause/resume without workflow mutations. Demonstrate actual rendered briefs
+    as well as meaningful data-path tests. Keep this separate from restoring any review-loop
+    stop command; that proposed PR is on hold.
 
 
-    USER CLARIFICATION: INTERACTIVE GUIDANCE, NOT ANOTHER MANUAL CONFIGURATION TASK. Reuse
-    the existing task-specific prompt-note feature (pm_core/notes.py and the composed prompt
-    sections) as the durable backing. Provide an agent-led getting-started conversation and
-    later feedback flow: ask only what is needed, turn the owner''s examples and corrections
-    into a concise scoped note, show the effective guidance, and maintain it on the owner''s
-    behalf. The owner should not have to hand-author or repeatedly edit prompt notes. Preserve
-    direct edits, provenance and rollback; do not overwrite unrelated sections or leak one
-    project''s preferences into another. Distinguish explicitly authorized feedback from guesses.
-    Updates that broaden merge authority need owner authorization; a report''s content or
-    a worker''s own suggested exemption is not that authorization. Avoid a second competing
-    policy/prompt storage system unless the spec demonstrates why the existing mechanism cannot
+    USER CLARIFICATION: INTERACTIVE GUIDANCE, NOT ANOTHER MANUAL CONFIGURATION TASK.
+    Reuse the existing task-specific prompt-note feature (pm_core/notes.py and the
+    composed prompt sections) as the durable backing. Provide an agent-led getting-started
+    conversation and later feedback flow: ask only what is needed, turn the owner''s
+    examples and corrections into a concise scoped note, show the effective guidance,
+    and maintain it on the owner''s behalf. The owner should not have to hand-author
+    or repeatedly edit prompt notes. Preserve direct edits, provenance and rollback;
+    do not overwrite unrelated sections or leak one project''s preferences into another.
+    Distinguish explicitly authorized feedback from guesses. Updates that broaden
+    merge authority need owner authorization; a report''s content or a worker''s own
+    suggested exemption is not that authorization. Avoid a second competing policy/prompt
+    storage system unless the spec demonstrates why the existing mechanism cannot
     suffice.
 
 
-    Guidance applies to the scheduled owner brief itself: preferred length/detail, organization,
-    topics to emphasize or omit, what counts as material, blocker escalation and cadence/destination
-    preferences. The agent manages the appropriate prompt note through onboarding and subsequent
-    owner feedback. The INPUT_REQUIRED brief (#277) is primarily consumed by the watcher;
-    the owner may read it when assisting the watcher. Keep it distinct from this owner-facing
-    scheduled overview. Test that a preference correction changes subsequent briefs, while
-    preserving source fidelity, required issues and all workflow gates.
+    Guidance applies to the scheduled owner brief itself: preferred length/detail,
+    organization, topics to emphasize or omit, what counts as material, blocker escalation
+    and cadence/destination preferences. The agent manages the appropriate prompt
+    note through onboarding and subsequent owner feedback. The INPUT_REQUIRED brief
+    (#277) is primarily consumed by the watcher; the owner may read it when assisting
+    the watcher. Keep it distinct from this owner-facing scheduled overview. Test
+    that a preference correction changes subsequent briefs, while preserving source
+    fidelity, required issues and all workflow gates.
 
 
-    USER-REQUIRED SPEC REVIEW BEFORE IMPLEMENTATION. Set review_spec=true. When started, prepare
-    the grounded implementation spec and all complete candidate prompts/composed guidance
-    for getting started, interpreting and applying feedback, and the feature''s merge assessment
-    or scheduled brief. Provide representative rendered prompts, example persisted task notes
-    and resulting decisions/briefs, including how corrections change them. Show storage/scope,
-    authority precedence, updates/restarts, and interactions with existing manual gates and
-    #277. Link every artifact from impl.md. Then stop for the user''s explicit spec/prompt
-    approval before product implementation, review or QA. Never self-approve. This filing
-    does not authorize starting the PR or enabling a schedule.
+    USER-REQUIRED SPEC REVIEW BEFORE IMPLEMENTATION. Set review_spec=true. When started,
+    prepare the grounded implementation spec and all complete candidate prompts/composed
+    guidance for getting started, interpreting and applying feedback, and the feature''s
+    merge assessment or scheduled brief. Provide representative rendered prompts,
+    example persisted task notes and resulting decisions/briefs, including how corrections
+    change them. Show storage/scope, authority precedence, updates/restarts, and interactions
+    with existing manual gates and #277. Link every artifact from impl.md. Then stop
+    for the user''s explicit spec/prompt approval before product implementation, review
+    or QA. Never self-approve. This filing does not authorize starting the PR or enabling
+    a schedule.
 
     '
   agent_machine: null
@@ -52582,21 +52597,23 @@ prs:
   merged_at: null
   notes:
   - id: note-897bb0e
-    text: 'User authorized starting this scheduled owner-briefs PR on work Opus5.5/xhigh on2026-11-01,
-      all roles/helpers/sign-off. Prepare only the grounded implementation spec, complete
-      onboarding/feedback/brief-generation prompts, representative composed prompts, persisted
-      task-note examples and rendered example briefs, then stop for explicit owner approval
-      before product implementation, review or QA. Never self-approve. Use existing project
-      state, sign-off reports and dashboard surfaces; the new agent flow/project watchers
-      are not yet implemented and are not prerequisites for spec preparation or a useful read-only
-      brief. Do not implement a watcher as incidental scope. Keep this owner-facing scheduled
+    text: 'User authorized starting this scheduled owner-briefs PR on work Opus5.5/xhigh
+      on2026-11-01, all roles/helpers/sign-off. Prepare only the grounded implementation
+      spec, complete onboarding/feedback/brief-generation prompts, representative
+      composed prompts, persisted task-note examples and rendered example briefs,
+      then stop for explicit owner approval before product implementation, review
+      or QA. Never self-approve. Use existing project state, sign-off reports and
+      dashboard surfaces; the new agent flow/project watchers are not yet implemented
+      and are not prerequisites for spec preparation or a useful read-only brief.
+      Do not implement a watcher as incidental scope. Keep this owner-facing scheduled
       summary distinct from #277/pr-c3e2f70 five-minute INPUT_REQUIRED briefs. Coordinate
       reusable agent-managed prompt-note guidance with #286/pr-8162f0f, which is currently
-      preparing its spec; avoid a second policy/note store and document interface assumptions
-      for owner review. Starting this session does not enable a new reporting schedule, external
-      delivery, automatic merges, or workflow mutations. Existing hourly PM checks stay as
-      configured. Preserve manual merge and spec approval gates. Historical filing-only/no-start
-      text records the earlier registration; this note is the new explicit start authorization.'
+      preparing its spec; avoid a second policy/note store and document interface
+      assumptions for owner review. Starting this session does not enable a new reporting
+      schedule, external delivery, automatic merges, or workflow mutations. Existing
+      hourly PM checks stay as configured. Preserve manual merge and spec approval
+      gates. Historical filing-only/no-start text records the earlier registration;
+      this note is the new explicit start authorization.'
     created_at: '2026-11-01T20:07:49.728968+00:00'
     last_edited: '2026-11-01T20:07:49.728968+00:00'
   review_spec: true
@@ -52609,110 +52626,116 @@ prs:
   status: pending
   depends_on: []
   description: 'Combine the whole-PR architecture review and implementation-spec re-evaluation
-    proposed as items 4 and 6 in followups-pr-592e4bd.md. Repeated local review/QA fixes can
-    be useful while obscuring a shared architectural cause or an unsuitable specification.
-    Add a periodic step back over the whole PR, preserving the productive fix-and-review loop.
+    proposed as items 4 and 6 in followups-pr-592e4bd.md. Repeated local review/QA
+    fixes can be useful while obscuring a shared architectural cause or an unsuitable
+    specification. Add a periodic step back over the whole PR, preserving the productive
+    fix-and-review loop.
 
 
     Trigger and configuration:
 
-    - Default to a checkpoint after two completed aggregate QA runs ending NEEDS_WORK since
-    the last completed architecture/spec checkpoint, before starting the next implementation/review
-    cycle. Make the number of failed QA rounds configurable through normal project configuration;
-    the implementation spec must show the setting, its effective value, validation and any
-    override/disable semantics for human review.
+    - Default to a checkpoint after two completed aggregate QA runs ending NEEDS_WORK
+    since the last completed architecture/spec checkpoint, before starting the next
+    implementation/review cycle. Make the number of failed QA rounds configurable
+    through normal project configuration; the implementation spec must show the setting,
+    its effective value, validation and any override/disable semantics for human review.
 
-    - Count whole completed QA runs, not individual scenario results, review iterations, infrastructure
-    retries, incomplete runs, INPUT_REQUIRED waits or sign-off approval waits. A useful fix
-    still counts as a failed QA round; do not reclassify it to avoid the checkpoint.
+    - Count whole completed QA runs, not individual scenario results, review iterations,
+    infrastructure retries, incomplete runs, INPUT_REQUIRED waits or sign-off approval
+    waits. A useful fix still counts as a failed QA round; do not reclassify it to
+    avoid the checkpoint.
 
-    - Persist run identity, counted outcomes and checkpoint completion so reloads, watcher/TUI
-    restart and duplicate handoffs neither lose the count nor launch duplicate checkpoints.
-    Reset the interval only after the checkpoint completes. Interrupted/failed checkpoints
-    resume with their evidence; they do not silently permit advancement. Support an earlier
-    explicit request when the owner or an agent has a grounded reason.
+    - Persist run identity, counted outcomes and checkpoint completion so reloads,
+    watcher/TUI restart and duplicate handoffs neither lose the count nor launch duplicate
+    checkpoints. Reset the interval only after the checkpoint completes. Interrupted/failed
+    checkpoints resume with their evidence; they do not silently permit advancement.
+    Support an earlier explicit request when the owner or an agent has a grounded
+    reason.
 
 
     Architecture and spec review:
 
     - Review the original goal, complete current diff and implementation spec, accumulated
-    review/QA findings, affected interfaces, accepted user decisions and the owning plan.
-    Look beyond the last local patch: duplicated mechanisms, accumulating special cases, repeated
-    symptoms with a common cause, unnecessary complexity, and simpler designs that still meet
-    the actual need.
+    review/QA findings, affected interfaces, accepted user decisions and the owning
+    plan. Look beyond the last local patch: duplicated mechanisms, accumulating special
+    cases, repeated symptoms with a common cause, unnecessary complexity, and simpler
+    designs that still meet the actual need.
 
-    - Question the spec itself. Identify ambiguous, outdated, over-constrained or internally
-    conflicting requirements and distinguish them from genuine implementation bugs and necessary
-    safety/acceptance constraints. An existing spec is evidence of intent, not proof that
-    every design choice remains good.
+    - Question the spec itself. Identify ambiguous, outdated, over-constrained or
+    internally conflicting requirements and distinguish them from genuine implementation
+    bugs and necessary safety/acceptance constraints. An existing spec is evidence
+    of intent, not proof that every design choice remains good.
 
-    - Produce a short, evidence-linked assessment: keep the current approach, make concrete
-    current-PR corrections, propose a spec clarification/change, or propose scoped follow-up
-    work. Record what was considered, the reason, expected quality/verification benefit and
-    tradeoffs, and any human question. A justified no-change outcome is valid; no rewrite,
-    refactor or proposal quota.
+    - Produce a short, evidence-linked assessment: keep the current approach, make
+    concrete current-PR corrections, propose a spec clarification/change, or propose
+    scoped follow-up work. Record what was considered, the reason, expected quality/verification
+    benefit and tradeoffs, and any human question. A justified no-change outcome is
+    valid; no rewrite, refactor or proposal quota.
 
-    - Use existing implementation/review/QA handoffs and plan/PR notes. Reuse shared durable
-    operations compatible with plan-delivery''s agent-driven flow, rather than adding a separate
-    phase engine. Use existing PR filing and deduplication for proposed follow-ups; filing
-    does not authorize starting them.
+    - Use existing implementation/review/QA handoffs and plan/PR notes. Reuse shared
+    durable operations compatible with plan-delivery''s agent-driven flow, rather
+    than adding a separate phase engine. Use existing PR filing and deduplication
+    for proposed follow-ups; filing does not authorize starting them.
 
-    - Keep the conservative PR-breakup check distinct: whole-PR design/spec review can conclude
-    that the PR should stay together. It may refer a justified decomposition to pr-4db3696
-    / #165 under existing authority. Size or loop count never forces a split. Preserve useful
-    incidental fixes by default.
+    - Keep the conservative PR-breakup check distinct: whole-PR design/spec review
+    can conclude that the PR should stay together. It may refer a justified decomposition
+    to pr-4db3696 / #165 under existing authority. Size or loop count never forces
+    a split. Preserve useful incidental fixes by default.
 
 
     Unchanged correctness and authority:
 
-    - Preserve NEEDS_WORK semantics. Finding and fixing a bug still requires another review
-    round; do not add PASS_WITH_FOLLOWUPS, waive findings, weaken QA assertions or skip re-review
-    to reduce loop counts. The checkpoint improves the next round rather than replacing review,
-    QA or sign-off.
+    - Preserve NEEDS_WORK semantics. Finding and fixing a bug still requires another
+    review round; do not add PASS_WITH_FOLLOWUPS, waive findings, weaken QA assertions
+    or skip re-review to reduce loop counts. The checkpoint improves the next round
+    rather than replacing review, QA or sign-off.
 
-    - Recommendations cannot silently rewrite approved scope/specs, override explicit user
-    decisions, change merge policy or clear holds. Present proposed requirement changes for
-    the applicable human approval; retain provenance and unresolved questions. Keep source,
-    dirty files, drafts, fixtures and prior evidence; new evidence must cover the actual changed
-    revisions.
+    - Recommendations cannot silently rewrite approved scope/specs, override explicit
+    user decisions, change merge policy or clear holds. Present proposed requirement
+    changes for the applicable human approval; retain provenance and unresolved questions.
+    Keep source, dirty files, drafts, fixtures and prior evidence; new evidence must
+    cover the actual changed revisions.
 
 
     Mandatory implementation spec and full-prompt review:
 
-    Set review_spec: true. In the implementation session, prepare the spec and ALL complete
-    proposed architecture/spec checkpoint prompts plus affected composed handoff/review prompts,
-    with representative rendered context, a before/after diff, example assessments and the
-    configurable trigger behavior. Pause at implementation spec review for the user''s explicit
-    review and approval of the full prompts before proceeding beyond the gate or entering
-    the review loop. Do not self-approve, treat silence as approval or show only changed sentences.
-    Registration does not start this PR.
+    Set review_spec: true. In the implementation session, prepare the spec and ALL
+    complete proposed architecture/spec checkpoint prompts plus affected composed
+    handoff/review prompts, with representative rendered context, a before/after diff,
+    example assessments and the configurable trigger behavior. Pause at implementation
+    spec review for the user''s explicit review and approval of the full prompts before
+    proceeding beyond the gate or entering the review loop. Do not self-approve, treat
+    silence as approval or show only changed sentences. Registration does not start
+    this PR.
 
 
     Validation:
 
-    Show that the default first failed QA round does not trigger the checkpoint, the second
-    triggers exactly once, and another two completed failures trigger it again after checkpoint
-    completion. Exercise another configured threshold, invalid configuration, per-scenario
-    failures, infrastructure retries/INPUT_REQUIRED, restart/duplicate handoffs and interrupted
-    checkpoint recovery. Use representative accumulated evidence for a shared architectural
-    cause, a misleading spec assumption, and productive local fixes that justify no redesign.
-    Confirm proposed scope changes retain human gates, completed code fixes still receive
-    NEEDS_WORK and another review, and no automatic split, acceptance waiver or evidence loss
-    occurs.
+    Show that the default first failed QA round does not trigger the checkpoint, the
+    second triggers exactly once, and another two completed failures trigger it again
+    after checkpoint completion. Exercise another configured threshold, invalid configuration,
+    per-scenario failures, infrastructure retries/INPUT_REQUIRED, restart/duplicate
+    handoffs and interrupted checkpoint recovery. Use representative accumulated evidence
+    for a shared architectural cause, a misleading spec assumption, and productive
+    local fixes that justify no redesign. Confirm proposed scope changes retain human
+    gates, completed code fixes still receive NEEDS_WORK and another review, and no
+    automatic split, acceptance waiver or evidence loss occurs.
 
 
     Delivery requirement:
 
     Register this under plan-regression and require it in plan-delivery D3''s acceptance/handoff
-    and D9''s autonomous qualification, at the same importance as conservative PR breakup.
-    D3 must depend on this existing PR when its registry entry is allocated; D9 inherits that
-    edge and qualifies the behavior and quality/overhead. It is a required code-quality safeguard,
-    not optional later polish. Preserve pr-5f4f595''s separate final sign-off review of accumulated
-    proposals and bugs; neither feature replaces the other.
+    and D9''s autonomous qualification, at the same importance as conservative PR
+    breakup. D3 must depend on this existing PR when its registry entry is allocated;
+    D9 inherits that edge and qualifies the behavior and quality/overhead. It is a
+    required code-quality safeguard, not optional later polish. Preserve pr-5f4f595''s
+    separate final sign-off review of accumulated proposals and bugs; neither feature
+    replaces the other.
 
 
-    Registration only: pending; do not start implementation, add an autostart target or resume
-    timed checks. #249 is already merged and excluded from breakup or renewed work.'
+    Registration only: pending; do not start implementation, add an autostart target
+    or resume timed checks. #249 is already merged and excluded from breakup or renewed
+    work.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
@@ -52723,27 +52746,29 @@ prs:
   merged_at: null
   notes:
   - id: note-ea1b20f
-    text: 'User authorized starting this periodic architecture/spec checkpoint PR on work
-      Opus5.5/xhigh on 2026-11-01, all roles/helpers/sign-off, with mandatory implementation
-      spec/full-prompt review. Prepare ONLY the grounded implementation spec and complete
-      proposed checkpoint prompts, affected composed handoff/review prompts, representative
-      rendered contexts, before/after prompt differences, example assessments and configurable
-      trigger behavior. Link all artifacts from impl.md and stop for explicit owner approval
-      before product implementation, review or QA. Never self-approve. Preserve the default
-      of two completed aggregate QA NEEDS_WORK rounds, configurable; individual scenario failures,
-      infrastructure retries and INPUT_REQUIRED do not count as completed failed QA runs.
-      A bug fixed in a round still requires another review. Do not weaken checks or introduce
-      PASS_WITH_FOLLOWUPS. This is required plan-delivery D3/D9 code-quality work alongside
-      conservative PR breakup, using existing durable handoffs and notes. No new watcher or
-      separate phase engine is incidental scope. Keep breakup and sign-off proposal review
-      distinct. #249 is merged and must never be reopened. The owner agreed to spec/prompt
-      preparation now while lifecycle integration is deferred until #241/pr-1139060, #247/pr-1ab9075
-      and #274/pr-f0f4129 are merged and integrated. Examine their relevant interfaces as
-      evidence where available, record assumptions and coordination needs, but do not implement
-      or activate lifecycle hooks early. Starting this session does not enable automatic merges,
-      start other PRs, change the existing hourly schedule or approve any spec. Preserve manual
-      merge gates. Historical filing-only/no-start text describes earlier registration; this
-      note is the new explicit authorization for the spec session.'
+    text: 'User authorized starting this periodic architecture/spec checkpoint PR
+      on work Opus5.5/xhigh on 2026-11-01, all roles/helpers/sign-off, with mandatory
+      implementation spec/full-prompt review. Prepare ONLY the grounded implementation
+      spec and complete proposed checkpoint prompts, affected composed handoff/review
+      prompts, representative rendered contexts, before/after prompt differences,
+      example assessments and configurable trigger behavior. Link all artifacts from
+      impl.md and stop for explicit owner approval before product implementation,
+      review or QA. Never self-approve. Preserve the default of two completed aggregate
+      QA NEEDS_WORK rounds, configurable; individual scenario failures, infrastructure
+      retries and INPUT_REQUIRED do not count as completed failed QA runs. A bug fixed
+      in a round still requires another review. Do not weaken checks or introduce
+      PASS_WITH_FOLLOWUPS. This is required plan-delivery D3/D9 code-quality work
+      alongside conservative PR breakup, using existing durable handoffs and notes.
+      No new watcher or separate phase engine is incidental scope. Keep breakup and
+      sign-off proposal review distinct. #249 is merged and must never be reopened.
+      The owner agreed to spec/prompt preparation now while lifecycle integration
+      is deferred until #241/pr-1139060, #247/pr-1ab9075 and #274/pr-f0f4129 are merged
+      and integrated. Examine their relevant interfaces as evidence where available,
+      record assumptions and coordination needs, but do not implement or activate
+      lifecycle hooks early. Starting this session does not enable automatic merges,
+      start other PRs, change the existing hourly schedule or approve any spec. Preserve
+      manual merge gates. Historical filing-only/no-start text describes earlier registration;
+      this note is the new explicit authorization for the spec session.'
     created_at: '2026-11-01T20:16:24.561553+00:00'
     last_edited: '2026-11-01T20:16:24.561553+00:00'
   review_spec: true
@@ -52751,319 +52776,360 @@ prs:
   effort: high
 - id: pr-5f4f595
   plan: plan-regression
-  title: 'Sign-off report: review/QA efficiency, plan feedback and full human prompt review'
+  title: 'Sign-off report: review/QA efficiency, plan feedback and full human prompt
+    review'
   branch: pm/pr-5f4f595-sign-off-report-review-qa-efficiency-recommendatio
-  status: pending
+  status: in_progress
   depends_on:
   - pr-8e693f6
   - pr-2680fbf
-  description: 'Update the sign-off report prompt so each report considers what would have
-    reduced the time spent reviewing and QAing the PR, and whether its result warrants changes
-    to the plan or proposed new work, grounded in the actual implementation, review iterations,
-    QA attempts, findings and retained evidence.
+  description: 'Update the sign-off report prompt so each report considers what would
+    have reduced the time spent reviewing and QAing the PR, and whether its result
+    warrants changes to the plan or proposed new work, grounded in the actual implementation,
+    review iterations, QA attempts, findings and retained evidence.
 
 
     Report content:
 
-    - Recommend concrete code refactorings or architecture changes that would have made review
-    and QA faster, simpler or more reliable. Identify the repeated difficulty, affected code
-    or interface, proposed change, likely benefit and tradeoffs. Distinguish observed causes
-    from hypotheses; quantify time or repeated work only when supported by recorded evidence.
+    - Recommend concrete code refactorings or architecture changes that would have
+    made review and QA faster, simpler or more reliable. Identify the repeated difficulty,
+    affected code or interface, proposed change, likely benefit and tradeoffs. Distinguish
+    observed causes from hypotheses; quantify time or repeated work only when supported
+    by recorded evidence.
 
-    - Identify missing reusable setup/capture recipes and agent-driven regression scenarios
-    that should be added. Describe the behavior, prerequisites, meaningful assertions and
-    evidence needed, and check the existing library for a reusable entry before proposing
-    duplicates.
+    - Identify missing reusable setup/capture recipes and agent-driven regression
+    scenarios that should be added. Describe the behavior, prerequisites, meaningful
+    assertions and evidence needed, and check the existing library for a reusable
+    entry before proposing duplicates.
 
-    - Evaluate existing recipes that caused difficulties, including misleading or stale instructions,
-    brittle setup, unsuitable environment assumptions, redundant steps or excessive effort.
-    Recommend modifying, consolidating, replacing, retiring or removing them when appropriate.
-    Name the recipe and supporting failed attempts/findings, explain the change, identify
-    consumers and migration/replacement coverage, and retain useful coverage. Adding more
-    recipes is not the only allowed recommendation.
+    - Evaluate existing recipes that caused difficulties, including misleading or
+    stale instructions, brittle setup, unsuitable environment assumptions, redundant
+    steps or excessive effort. Recommend modifying, consolidating, replacing, retiring
+    or removing them when appropriate. Name the recipe and supporting failed attempts/findings,
+    explain the change, identify consumers and migration/replacement coverage, and
+    retain useful coverage. Adding more recipes is not the only allowed recommendation.
 
-    - Keep recommendations actionable and prioritized, with links to the relevant PR notes,
-    iterations/scenarios, captures and existing follow-up PRs. Explicitly say when no justified
-    recommendation was found instead of inventing one. Separate acceptance-blocking correctness/evidence
-    gaps from optional future efficiency improvements; recommendations do not waive assertions
-    or authorize unrelated changes or recipe deletion.
+    - Keep recommendations actionable and prioritized, with links to the relevant
+    PR notes, iterations/scenarios, captures and existing follow-up PRs. Explicitly
+    say when no justified recommendation was found instead of inventing one. Separate
+    acceptance-blocking correctness/evidence gaps from optional future efficiency
+    improvements; recommendations do not waive assertions or authorize unrelated changes
+    or recipe deletion.
 
 
     Plan feedback and proposed new work (user clarification, 2026-10-26):
 
-    Ask explicitly: "Given the result of this PR, does the plan need to change, and is there
-    any new work worth proposing?"
+    Ask explicitly: "Given the result of this PR, does the plan need to change, and
+    is there any new work worth proposing?"
 
-    - Consider changed goals or assumptions, new evidence, priorities, missing steps, dependencies,
-    sequencing, obsolete work and useful follow-up investigations. Identify the affected plan/section,
-    the proposed adjustment, why the result supports it and any uncertainty or human decision
-    needed.
+    - Consider changed goals or assumptions, new evidence, priorities, missing steps,
+    dependencies, sequencing, obsolete work and useful follow-up investigations. Identify
+    the affected plan/section, the proposed adjustment, why the result supports it
+    and any uncertainty or human decision needed.
 
-    - Describe proposed follow-up PRs with a concrete purpose/deliverable, supporting findings,
-    plan membership and real prerequisites. Search existing work first, link or refine a matching
-    PR rather than duplicate it, and link new proposals/entries back to the originating PR
-    and evidence. Distinguish acceptance-blocking prerequisites from optional later work.
-    State when no justified plan change or new work was found.
+    - Describe proposed follow-up PRs with a concrete purpose/deliverable, supporting
+    findings, plan membership and real prerequisites. Search existing work first,
+    link or refine a matching PR rather than duplicate it, and link new proposals/entries
+    back to the originating PR and evidence. Distinguish acceptance-blocking prerequisites
+    from optional later work. State when no justified plan change or new work was
+    found.
 
-    - Plans need not predefine every PR. An ordinary PR can be scoped to exploration and deliver
-    findings, decisions and proposals for further PRs; it does not need to invent a code change
-    or claim to have solved an open research question. Its accepted scope can be the exploration
-    report itself, with unresolved questions made explicit.
+    - Plans need not predefine every PR. An ordinary PR can be scoped to exploration
+    and deliver findings, decisions and proposals for further PRs; it does not need
+    to invent a code change or claim to have solved an open research question. Its
+    accepted scope can be the exploration report itself, with unresolved questions
+    made explicit.
 
-    - PR is the unit of work for all projects. Mechanical work can use the existing flow unattended;
-    work that needs exploratory judgment is developed by the human and agent together in the
-    same implementation session, then continues through normal review, QA and sign-off with
-    checks appropriate to the deliverable. Do not add software/analysis/research PR types
-    or another lifecycle.
+    - PR is the unit of work for all projects. Mechanical work can use the existing
+    flow unattended; work that needs exploratory judgment is developed by the human
+    and agent together in the same implementation session, then continues through
+    normal review, QA and sign-off with checks appropriate to the deliverable. Do
+    not add software/analysis/research PR types or another lifecycle.
 
-    - PRs already can create PRs. Use existing PM PR creation, notes, dependency and plan-editing
-    operations when authorized. This scope covers shared all-session recommendation guidance
-    and the final sign-off prompt/report review, using existing operations rather than new
-    spawning infrastructure. Recommending or filing work does not itself start it or grant
-    authority to change unrelated plans. Preserve configured human gates and pending user
-    questions.
+    - PRs already can create PRs. Use existing PM PR creation, notes, dependency and
+    plan-editing operations when authorized. This scope covers shared all-session
+    recommendation guidance and the final sign-off prompt/report review, using existing
+    operations rather than new spawning infrastructure. Recommending or filing work
+    does not itself start it or grant authority to change unrelated plans. Preserve
+    configured human gates and pending user questions.
 
 
     Validation of plan feedback:
 
-    Use representative evidence for (1) a result justifying a concrete plan revision, (2)
-    an exploratory PR proposing useful follow-up PRs, (3) a matching existing follow-up that
-    should be reused, and (4) no justified plan change or new work. Show the report''s reasoning
-    and links and preserve the difference between findings, proposed actions and actions already
-    taken through existing tools. Review the exploration''s actual deliverable without certifying
-    unresolved hypotheses. Include this entire addition in the complete prompt shown to the
-    user for manual review.
+    Use representative evidence for (1) a result justifying a concrete plan revision,
+    (2) an exploratory PR proposing useful follow-up PRs, (3) a matching existing
+    follow-up that should be reused, and (4) no justified plan change or new work.
+    Show the report''s reasoning and links and preserve the difference between findings,
+    proposed actions and actions already taken through existing tools. Review the
+    exploration''s actual deliverable without certifying unresolved hypotheses. Include
+    this entire addition in the complete prompt shown to the user for manual review.
 
 
     All-session recommendations and final proposal/bug review (user decision, 2026-10-31):
 
-    - Allow every working session, including individual QA scenarios, to propose useful features,
-    refactorings, recipe improvements or further investigations when supported by its observations.
-    Do not require broad architectural judgment from a narrow scenario or force a suggestion
-    when none is justified. Retain the observation, origin PR/session/scenario and evidence
-    for whole-PR assessment later.
+    - Allow every working session, including individual QA scenarios, to propose useful
+    features, refactorings, recipe improvements or further investigations when supported
+    by its observations. Do not require broad architectural judgment from a narrow
+    scenario or force a suggestion when none is justified. Retain the observation,
+    origin PR/session/scenario and evidence for whole-PR assessment later.
 
-    - Reuse existing PR, notes and plan operations. Search existing work before filing, link
-    a matching entry rather than duplicate it, and distinguish a proposal from implemented
-    work. Shared session guidance and the relevant composed prompts are in scope; no new spawning
-    infrastructure is needed. Proposing or filing work is not authorization to start it.
+    - Reuse existing PR, notes and plan operations. Search existing work before filing,
+    link a matching entry rather than duplicate it, and distinguish a proposal from
+    implemented work. Shared session guidance and the relevant composed prompts are
+    in scope; no new spawning infrastructure is needed. Proposing or filing work is
+    not authorization to start it.
 
-    - At sign-off, review ALL bugs and proposals accumulated during this PR, including other
-    sessions'' filings, rather than only suggestions made by sign-off itself. Check for duplicate/overlapping
-    work, already-fixed findings, unsupported or incorrect premises, conflict with explicit
-    user goals, and complexity disproportionate to a concrete benefit. Ground these judgments
-    in the findings and actual code/plan context; preserve valid observations from narrowly
-    scoped scenarios.
+    - At sign-off, review ALL bugs and proposals accumulated during this PR, including
+    other sessions'' filings, rather than only suggestions made by sign-off itself.
+    Check for duplicate/overlapping work, already-fixed findings, unsupported or incorrect
+    premises, conflict with explicit user goals, and complexity disproportionate to
+    a concrete benefit. Ground these judgments in the findings and actual code/plan
+    context; preserve valid observations from narrowly scoped scenarios.
 
-    - Provide a concise disposition and canonical PR/note/evidence links: justified new work,
-    link/merge with an existing proposal, already addressed, unsupported/out of scope, or
-    needing a human decision. Say why. Report recommendations separately from actions actually
-    taken. Report generation does not itself authorize deleting/closing entries, changing
-    unrelated plans, weakening criteria or starting follow-ups; reconciliation uses existing
-    operations within their authority and preserves history.
+    - Provide a concise disposition and canonical PR/note/evidence links: justified
+    new work, link/merge with an existing proposal, already addressed, unsupported/out
+    of scope, or needing a human decision. Say why. Report recommendations separately
+    from actions actually taken. Report generation does not itself authorize deleting/closing
+    entries, changing unrelated plans, weakening criteria or starting follow-ups;
+    reconciliation uses existing operations within their authority and preserves history.
 
-    - Preserve the existing NEEDS_WORK rules exactly: a bug found and fixed still requires
-    another review round. Useful review/QA loops must not be shortened by relabeling fixes
-    as optional recommendations, adding PASS_WITH_FOLLOWUPS or waiving acceptance requirements.
-    Keep actual acceptance blockers visible alongside longer-term ideas.
+    - Preserve the existing NEEDS_WORK rules exactly: a bug found and fixed still
+    requires another review round. Useful review/QA loops must not be shortened by
+    relabeling fixes as optional recommendations, adding PASS_WITH_FOLLOWUPS or waiving
+    acceptance requirements. Keep actual acceptance blockers visible alongside longer-term
+    ideas.
 
-    - Validate multiple sessions reporting the same bug/proposal, an evidence-backed novel
-    feature, an already-fixed or unsupported proposal, no justified suggestions, and a code
-    fix that still goes through another review round. Include all new shared guidance and
-    the complete final sign-off prompt in the mandatory human prompt review, together with
-    representative consolidated reports.
+    - Validate multiple sessions reporting the same bug/proposal, an evidence-backed
+    novel feature, an already-fixed or unsupported proposal, no justified suggestions,
+    and a code fix that still goes through another review round. Include all new shared
+    guidance and the complete final sign-off prompt in the mandatory human prompt
+    review, together with representative consolidated reports.
 
 
     Required human review of the WHOLE prompt:
 
-    The user has not manually reviewed a recent addition to the sign-off prompt. As part of
-    this PR, inventory and reconcile the current sign-off/report prompt, including that recent
-    addition and all relevant composed sections. Produce a readable complete rendered candidate
-    prompt with representative context, together with a before/after diff and concise explanation
-    of changes. Present the entire candidate to the user for manual review, not only the new
-    retrospective section. Record the user''s explicit review and resolve their feedback before
-    calling this PR accepted or merging it. Do not infer approval from earlier sign-offs,
-    existing prompt text or automated review. This is a requirement for this PR, not a change
-    to spec-review settings or gates on existing PRs.
+    The user has not manually reviewed a recent addition to the sign-off prompt. As
+    part of this PR, inventory and reconcile the current sign-off/report prompt, including
+    that recent addition and all relevant composed sections. Produce a readable complete
+    rendered candidate prompt with representative context, together with a before/after
+    diff and concise explanation of changes. Present the entire candidate to the user
+    for manual review, not only the new retrospective section. Record the user''s
+    explicit review and resolve their feedback before calling this PR accepted or
+    merging it. Do not infer approval from earlier sign-offs, existing prompt text
+    or automated review. This is a requirement for this PR, not a change to spec-review
+    settings or gates on existing PRs.
 
 
     Implementation/validation scope:
 
-    Extend generate_signoff_prompt, shared session recommendation guidance and the report
-    guidance consistently with the existing evidence-based, recommendation-only sign-off contract
-    and current integration/return instructions. Validate the generated prompt and a representative
-    report against retained review/QA evidence, including an example recommending a missing
-    regression, one proposing recipe modification/removal, and a case with no justified efficiency
-    recommendation. Verify that unsupported savings are not asserted, existing behavior/evidence
-    sections and routing requirements remain intact, and the complete prompt is available
-    for the user''s review. Any later implementation of recommended refactorings or recipe
-    changes belongs in explicitly scoped follow-up work.
+    Extend generate_signoff_prompt, shared session recommendation guidance and the
+    report guidance consistently with the existing evidence-based, recommendation-only
+    sign-off contract and current integration/return instructions. Validate the generated
+    prompt and a representative report against retained review/QA evidence, including
+    an example recommending a missing regression, one proposing recipe modification/removal,
+    and a case with no justified efficiency recommendation. Verify that unsupported
+    savings are not asserted, existing behavior/evidence sections and routing requirements
+    remain intact, and the complete prompt is available for the user''s review. Any
+    later implementation of recommended refactorings or recipe changes belongs in
+    explicitly scoped follow-up work.
 
 
-    Required regression dependency (user decision, 2026-10-26): this sign-off feature depends
-    on automatic regression authoring in pr-2680fbf, in addition to the existing report prerequisite
-    pr-8e693f6. User scope revision 2026-11-01: pr-2680fbf now owns regression binding and
-    authoring together and depends on pr-7d5d036 legacy cleanup/existing container-recipe
-    launch integration; pr-06a96fa is consolidated, not a separate prerequisite. Use the implemented
-    authoring flow for missing-regression findings instead of leaving the capability deferred.
-    Validate a recommendation leading through the normal authorized workflow to a durable
-    newly authored regression, execution with independently checked evidence, and later reuse
-    without duplicate authoring. Report generation itself does not authorize unrelated implementation
+    Required regression dependency (user decision, 2026-10-26): this sign-off feature
+    depends on automatic regression authoring in pr-2680fbf, in addition to the existing
+    report prerequisite pr-8e693f6. User scope revision 2026-11-01: pr-2680fbf now
+    owns regression binding and authoring together and depends on pr-7d5d036 legacy
+    cleanup/existing container-recipe launch integration; pr-06a96fa is consolidated,
+    not a separate prerequisite. Use the implemented authoring flow for missing-regression
+    findings instead of leaving the capability deferred. Validate a recommendation
+    leading through the normal authorized workflow to a durable newly authored regression,
+    execution with independently checked evidence, and later reuse without duplicate
+    authoring. Report generation itself does not authorize unrelated implementation
     or recipe deletion. The whole-prompt human review requirement remains mandatory.
 
 
     Related work: plan-regression Phases 10/11 and plan-delivery''s required regression/authoring
-    loop; pr-c77561b deferred historical-corpus porting, pr-51586d2 mocks at authoring, and
-    pr-f4dc8a2 library auditing remain alignment references. Automatic authoring is a prerequisite,
-    not merely an alignment reference.
+    loop; pr-c77561b deferred historical-corpus porting, pr-51586d2 mocks at authoring,
+    and pr-f4dc8a2 library auditing remain alignment references. Automatic authoring
+    is a prerequisite, not merely an alignment reference.
 
 
     Registration only: keep pending; do not add this PR to autostart or start implementation
     as part of filing it.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/289
+  gh_pr_number: 289
   created_at: '2026-10-26T17:35:25.573006+00:00'
-  updated_at: '2026-11-01T20:29:31.277311+00:00'
-  started_at: null
+  updated_at: '2026-11-01T21:11:01.804811+00:00'
+  started_at: '2026-11-01T20:29:44.689340+00:00'
   reviewed_at: null
   merged_at: null
   notes:
   - id: note-0438427
-    text: 'User correction 2026-10-26: automatic regression authoring is required for the
-      new sign-off feature. pr-5f4f595 now depends on pr-2680fbf, preserving pr-2680fbf ->
-      pr-06a96fa -> pr-7d5d036. plan-delivery D3 handoff and D9 qualification require the
-      authoring flow alongside runner/corpus migration. Retain full human review of the new
-      sign-off prompt and recipe modification/removal recommendations. This records dependencies
-      only; no implementation, autostart, account, merge-gate or timed-message changes.'
+    text: 'User correction 2026-10-26: automatic regression authoring is required
+      for the new sign-off feature. pr-5f4f595 now depends on pr-2680fbf, preserving
+      pr-2680fbf -> pr-06a96fa -> pr-7d5d036. plan-delivery D3 handoff and D9 qualification
+      require the authoring flow alongside runner/corpus migration. Retain full human
+      review of the new sign-off prompt and recipe modification/removal recommendations.
+      This records dependencies only; no implementation, autostart, account, merge-gate
+      or timed-message changes.'
     created_at: '2026-10-26T19:11:30.136983+00:00'
     last_edited: '2026-10-26T19:11:30.136983+00:00'
   - id: note-94ae717
-    text: 'User correction 2026-10-26: one PR workflow for all projects; human-agent collaboration
-      happens in implementation when research/exploration needs judgment. Sign-off must ask
-      whether the PR result suggests plan changes or proposed new work. An ordinary exploratory
-      PR may deliver findings and candidate next PRs. PRs already can create other PRs using
-      current PM operations; no new spawning functionality or separate research lifecycle
-      is needed. Full-prompt human review, authoring prerequisite and recipe modification/removal
-      guidance remain required. Pending registration only; no work started.'
+    text: 'User correction 2026-10-26: one PR workflow for all projects; human-agent
+      collaboration happens in implementation when research/exploration needs judgment.
+      Sign-off must ask whether the PR result suggests plan changes or proposed new
+      work. An ordinary exploratory PR may deliver findings and candidate next PRs.
+      PRs already can create other PRs using current PM operations; no new spawning
+      functionality or separate research lifecycle is needed. Full-prompt human review,
+      authoring prerequisite and recipe modification/removal guidance remain required.
+      Pending registration only; no work started.'
     created_at: '2026-10-26T19:30:54.699557+00:00'
     last_edited: '2026-10-26T19:30:54.699557+00:00'
   - id: note-f8db244
-    text: 'User-requested additional sign-off prompt/report change (2026-10-28): include the
-      GitHub PR number and a clickable link to the actual GitHub PR prominently near the top
-      of every GitHub-backed sign-off report, as #273 did (https://github.com/mjtomei/project_manager/pull/273).
-      Keep the local PM PR ID available too, so the report identifies both records. Use the
-      recorded GitHub number/URL; do not invent a link for projects without a GitHub PR. Include
-      this requirement in the complete rendered prompt presented for the already-required
-      human review, and verify it in a representative generated report. This is an addition
-      to pr-5f4f595; it does not authorize starting the PR or change its pending status, dependencies,
-      or human-review requirement.'
+    text: 'User-requested additional sign-off prompt/report change (2026-10-28): include
+      the GitHub PR number and a clickable link to the actual GitHub PR prominently
+      near the top of every GitHub-backed sign-off report, as #273 did (https://github.com/mjtomei/project_manager/pull/273).
+      Keep the local PM PR ID available too, so the report identifies both records.
+      Use the recorded GitHub number/URL; do not invent a link for projects without
+      a GitHub PR. Include this requirement in the complete rendered prompt presented
+      for the already-required human review, and verify it in a representative generated
+      report. This is an addition to pr-5f4f595; it does not authorize starting the
+      PR or change its pending status, dependencies, or human-review requirement.'
     created_at: '2026-10-28T23:27:18Z'
     last_edited: '2026-10-28T23:27:18Z'
   - id: note-15a38f9
     text: 'User decision 2026-10-31: fold feature/refactoring proposals from ALL sessions,
-      including QA scenarios, into this existing sign-off change. Sign-off reviews the accumulated
-      bugs and proposals once more for duplicates, support, usefulness and consistency with
-      user goals. Preserve existing NEEDS_WORK behavior: fixes require another review round.
-      The separate architecture/spec checkpoint is pr-b491378, default two failed QA rounds
-      with configurable interval and mandatory implementation spec/full-prompt review, required
-      by plan-delivery alongside conservative breakup. Keep this PR pending; preserve its
-      regression-authoring dependency, whole-prompt human review and GitHub PR number/link
-      requirement.'
+      including QA scenarios, into this existing sign-off change. Sign-off reviews
+      the accumulated bugs and proposals once more for duplicates, support, usefulness
+      and consistency with user goals. Preserve existing NEEDS_WORK behavior: fixes
+      require another review round. The separate architecture/spec checkpoint is pr-b491378,
+      default two failed QA rounds with configurable interval and mandatory implementation
+      spec/full-prompt review, required by plan-delivery alongside conservative breakup.
+      Keep this PR pending; preserve its regression-authoring dependency, whole-prompt
+      human review and GitHub PR number/link requirement.'
     created_at: '2026-10-31T17:52:59.436278+00:00'
     last_edited: '2026-10-31T17:52:59.436278+00:00'
   - id: note-191e3b6
-    text: 'User-requested addition 2026-11-01 — planning-only updates from an already completed
-      sign-off session. Desired user story: the sign-off session has already recommended merge;
-      the user returns to that SAME session, discusses the PR, and asks it to add or modify
-      proposed follow-up work. The session makes those project planning changes, commits and
-      pushes them, updates the sign-off report, and directly updates its sign-off to cover
-      that new commit. It already knows what it changed: when its changes are limited to project
-      planning, no additional check/revalidation pass, fresh sign-off session, implementation,
-      review or QA cycle is required. This includes pending follow-up PR entries and notes
-      in project.yaml, and planning changes in plan files once sign-off edits those too.
+    text: 'User-requested addition 2026-11-01 — planning-only updates from an already
+      completed sign-off session. Desired user story: the sign-off session has already
+      recommended merge; the user returns to that SAME session, discusses the PR,
+      and asks it to add or modify proposed follow-up work. The session makes those
+      project planning changes, commits and pushes them, updates the sign-off report,
+      and directly updates its sign-off to cover that new commit. It already knows
+      what it changed: when its changes are limited to project planning, no additional
+      check/revalidation pass, fresh sign-off session, implementation, review or QA
+      cycle is required. This includes pending follow-up PR entries and notes in project.yaml,
+      and planning changes in plan files once sign-off edits those too.
 
 
-      The previous commit''s sign-off becoming stale temporarily is acceptable. What matters
-      is that the SAME session can directly carry its existing merge recommendation forward
-      to the planning-only commit it just authored and pushed, updating the report and sign-off
-      revision/provenance together. Do not implement this as a request to inspect the updated
-      project state again or re-run sign-off. This supersedes the assistant''s earlier interpretation
-      that the session should revalidate or re-attest after those planning edits.
+      The previous commit''s sign-off becoming stale temporarily is acceptable. What
+      matters is that the SAME session can directly carry its existing merge recommendation
+      forward to the planning-only commit it just authored and pushed, updating the
+      report and sign-off revision/provenance together. Do not implement this as a
+      request to inspect the updated project state again or re-run sign-off. This
+      supersedes the assistant''s earlier interpretation that the session should revalidate
+      or re-attest after those planning edits.
 
 
-      Include explicit permission and instructions for this workflow in the complete sign-off
-      prompt presented for the required human review, and provide any lifecycle support needed
-      so the automatic stale-HEAD path does not retire/relaunch that session while it performs
-      the authorized planning-only follow-up. Scope this permission to its own project planning
-      changes; it does not extend to product/code changes or changes to the PR''s accepted
-      behavior or evidence. Preserve the existing manual merge gate and keep newly proposed
-      work pending unless separately authorized to start.
+      Include explicit permission and instructions for this workflow in the complete
+      sign-off prompt presented for the required human review, and provide any lifecycle
+      support needed so the automatic stale-HEAD path does not retire/relaunch that
+      session while it performs the authorized planning-only follow-up. Scope this
+      permission to its own project planning changes; it does not extend to product/code
+      changes or changes to the PR''s accepted behavior or evidence. Preserve the
+      existing manual merge gate and keep newly proposed work pending unless separately
+      authorized to start.
 
 
-      Acceptance example: after SIGNOFF_MERGE, the user discusses the PR with the existing
-      sign-off agent; the agent revises/adds pending work in project.yaml and/or plan files,
-      commits and pushes, updates report.html and its recorded sign-off to the new commit,
-      and the PR remains ready for the user''s merge decision without a new session or extra
-      review/check cycle. Include both project.yaml and plan-file examples. Keep this PR pending;
-      adding this note does not authorize starting it.'
+      Acceptance example: after SIGNOFF_MERGE, the user discusses the PR with the
+      existing sign-off agent; the agent revises/adds pending work in project.yaml
+      and/or plan files, commits and pushes, updates report.html and its recorded
+      sign-off to the new commit, and the PR remains ready for the user''s merge decision
+      without a new session or extra review/check cycle. Include both project.yaml
+      and plan-file examples. Keep this PR pending; adding this note does not authorize
+      starting it.'
     created_at: '2026-11-01T14:25:48Z'
     last_edited: '2026-11-01T14:25:48Z'
   - id: note-378533e
-    text: 'OWNER SPEC-REVIEW REQUIREMENT (2026-11-01): Full prompt wording is the primary
-      item for human review. Put an early "Full prompts for approval" section directly in
-      the main implementation spec/review document (pm/specs/<pr-id>/impl.md), containing
-      the complete proposed text of every new or revised prompt and its material role/backend
-      variants. Include unchanged portions of the affected prompts so the owner can read the
-      whole result, and clearly label runtime placeholders. Summaries, diffs, excerpts, omitted
-      blocks, or links to separate prompt files are not substitutes for the full inline text;
-      linked files and examples may supplement it and must agree with it. Architecture, implementation
-      details, and tests support this prompt review rather than displacing it. If this PR
-      changes no prompts, state that explicitly without inventing prompt changes.
+    text: 'OWNER SPEC-REVIEW REQUIREMENT (2026-11-01): Full prompt wording is the
+      primary item for human review. Put an early "Full prompts for approval" section
+      directly in the main implementation spec/review document (pm/specs/<pr-id>/impl.md),
+      containing the complete proposed text of every new or revised prompt and its
+      material role/backend variants. Include unchanged portions of the affected prompts
+      so the owner can read the whole result, and clearly label runtime placeholders.
+      Summaries, diffs, excerpts, omitted blocks, or links to separate prompt files
+      are not substitutes for the full inline text; linked files and examples may
+      supplement it and must agree with it. Architecture, implementation details,
+      and tests support this prompt review rather than displacing it. If this PR changes
+      no prompts, state that explicitly without inventing prompt changes.
 
 
-      This clarifies the review presentation only. Keep implementation spec approval pending,
-      preserve existing unanswered decisions and dependency/manual-merge gates, and do not
-      treat this note as approval of any prompt or design option.'
+      This clarifies the review presentation only. Keep implementation spec approval
+      pending, preserve existing unanswered decisions and dependency/manual-merge
+      gates, and do not treat this note as approval of any prompt or design option.'
     created_at: '2026-11-01T20:20:59Z'
     last_edited: '2026-11-01T20:20:59Z'
   - id: note-7774bff
-    text: 'User explicitly authorized starting this sign-off prompt/report improvement PR
-      on 2026-11-01 with work Opus5.5/xhigh for all roles/helpers/sign-off, for SPEC AND PROMPT
-      PREPARATION ONLY. Prepare a grounded implementation spec and present the complete proposed
-      sign-off prompt and all affected shared recommendation/handoff prompt variants inline
-      in an early Full prompts for approval section of pm/specs/pr-5f4f595/impl.md. Full prompt
-      wording is the primary human review item; not only summaries, changed sentences or links.
-      Include unchanged composed portions, clearly labelled placeholders, before/after differences
-      and representative reports. Preserve all existing notes and the owner''s same-session
-      planning-only follow-up story. Stop for explicit owner spec/prompt approval before product
-      implementation, review or QA; never self-approve.
+    text: 'User explicitly authorized starting this sign-off prompt/report improvement
+      PR on 2026-11-01 with work Opus5.5/xhigh for all roles/helpers/sign-off, for
+      SPEC AND PROMPT PREPARATION ONLY. Prepare a grounded implementation spec and
+      present the complete proposed sign-off prompt and all affected shared recommendation/handoff
+      prompt variants inline in an early Full prompts for approval section of pm/specs/pr-5f4f595/impl.md.
+      Full prompt wording is the primary human review item; not only summaries, changed
+      sentences or links. Include unchanged composed portions, clearly labelled placeholders,
+      before/after differences and representative reports. Preserve all existing notes
+      and the owner''s same-session planning-only follow-up story. Stop for explicit
+      owner spec/prompt approval before product implementation, review or QA; never
+      self-approve.
 
 
       The proposal covers review/QA efficiency, refactoring/architecture recommendations,
-      missing or problematic recipes/regressions including modification/removal, plan feedback
-      and new-work proposals, final deduplication/quality review of accumulated bugs/proposals,
-      the GitHub PR number/link, and user-requested follow-up work added in the same completed
-      sign-off session. For its own planning-only edits the same agent commits/pushes and
-      updates report/sign-off to its new commit directly, without a separate revalidation
-      pass or replacement session. Product/code/accepted-behavior changes are outside that
-      permission. Preserve NEEDS_WORK semantics and manual merge authority; recommendations
-      do not authorize unrelated work.
+      missing or problematic recipes/regressions including modification/removal, plan
+      feedback and new-work proposals, final deduplication/quality review of accumulated
+      bugs/proposals, the GitHub PR number/link, and user-requested follow-up work
+      added in the same completed sign-off session. For its own planning-only edits
+      the same agent commits/pushes and updates report/sign-off to its new commit
+      directly, without a separate revalidation pass or replacement session. Product/code/accepted-behavior
+      changes are outside that permission. Preserve NEEDS_WORK semantics and manual
+      merge authority; recommendations do not authorize unrelated work.
 
 
       Implementation must follow #285/pr-2680fbf''s regression reuse/authoring capability
-      and integration; the existing #226/pr-8e693f6 report prerequisite is merged. Spec preparation
-      may proceed now. Coordinate same-session revision/provenance and stale-signoff lifecycle
-      behavior with #253/pr-5cee3d5''s integration/evidence changes, documenting the shared
-      interfaces and remaining uncertainty before implementing them. Reuse existing mechanisms,
-      not a parallel lifecycle or watcher.
+      and integration; the existing #226/pr-8e693f6 report prerequisite is merged.
+      Spec preparation may proceed now. Coordinate same-session revision/provenance
+      and stale-signoff lifecycle behavior with #253/pr-5cee3d5''s integration/evidence
+      changes, documenting the shared interfaces and remaining uncertainty before
+      implementing them. Reuse existing mechanisms, not a parallel lifecycle or watcher.
 
 
-      This explicit start authorization supersedes historical registration-only/no-start wording
-      for this PR. It does not approve a spec, change other PRs or gates, start other work,
-      or enable automatic merges.'
+      This explicit start authorization supersedes historical registration-only/no-start
+      wording for this PR. It does not approve a spec, change other PRs or gates,
+      start other work, or enable automatic merges.'
     created_at: '2026-11-01T20:29:31.277311+00:00'
     last_edited: '2026-11-01T20:29:31.277311+00:00'
+  - id: note-19dcbca
+    text: 'Spec prep 2026-11-01: pm/specs/pr-5f4f595/impl.md is written and awaiting
+      the owner''s explicit spec and prompt-wording approval; nothing is approved
+      and no product code has changed. Section 1 holds the complete candidate sign-off
+      prompt, its variants, the shared "Proposals and Follow-up Ideas" block and all
+      six affected session prompts as real renders. prompts/prototype.patch (not applied)
+      is the exact code that produced the "after" renders, and prompts/render.py rebuilds
+      them. Section 6 lists the A1-A13 decisions, all PENDING. Implementation also
+      waits for #285/pr-2680fbf to merge. Lifecycle design (R9): the driver holds
+      the sign-off window instead of retiring it while the commits since the reviewed
+      HEAD touch only planning files. It then rebinds the verdict (origin planning-followup)
+      once report.html declares pm-signoff-planning-from. Coordinate the shared record/driver
+      interfaces with #253 (section 8.2).'
+    created_at: '2026-11-01T21:11:01Z'
+    last_edited: '2026-11-01T21:11:01Z'
   review_spec: true
   model: provider:claude-work-xhigh-249
   effort: high
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-5f4f595-sign-off-report-review-qa-efficiency-66205ce0
+  spec_pending:
+    phase: impl
+    requested_at: '2026-11-01T20:29:31.277311+00:00'
+    reason: 'Owner requires complete candidate sign-off and affected shared prompts
+      inline in impl.md as the primary review item. Spec approval and #285/pr-2680fbf
+      merge/integration are required before product implementation/review/QA; coordinate
+      sign-off lifecycle interfaces with #253.'

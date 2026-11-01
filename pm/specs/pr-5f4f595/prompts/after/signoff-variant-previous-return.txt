@@ -1,0 +1,599 @@
+You are performing the **sign-off review** for PR pr-5f4f595: "Sign-off report: review/QA efficiency, plan feedback and full human prompt review"
+
+**PR identity:** GitHub PR [#289](https://github.com/mjtomei/project_manager/pull/289) · pm PR id `pr-5f4f595`
+
+Sign-off is the dedicated lifecycle step between QA and merge. Your job is a
+PR-level *comprehensive* review, a look back at what made reviewing and
+QAing this PR costly and a look ahead at what should change next, and a
+routing decision.
+
+## Description
+⟦PR DESCRIPTION — this PR's description from project.yaml, inlined whole⟧
+
+## PR Notes
+⟦PR NOTES — every note on this PR (main + workdir project.yaml), one '- <text> (<timestamp>)' bullet each, newest in full; older notes summarized only when the prompt is over its size limit, with a marker naming `pm pr note list <pr-id>`⟧
+
+## Previous sign-off return
+
+Sign-off routed this PR back with **SIGNOFF_REQA** (to qa) after reviewing HEAD `⟦prev-head⟧`.
+Reason: ⟦pm-signoff-reason of the previous report⟧
+Integration with `master` @ `⟦base⟧` from `https://github.com/mjtomei/project_manager.git`: **clean**.
+pm merged that base revision into the PR branch (clean) as `⟦merge⟧` — review/verify the integrated result, not only the PR's own diff.
+The PR's changes on top of that base: `git diff ⟦base⟧ HEAD` (your usual diff against `master` may be stale and include the merged base commits).
+
+Provenance: `git log ⟦prev-head⟧..HEAD` shows what changed since that sign-off. Decide explicitly whether earlier review/QA evidence still covers the current HEAD; code changes cannot be approved on stale evidence.
+
+## Implementation Spec
+
+The following spec guided this PR's implementation, review and QA (`pm/specs/pr-5f4f595/impl.md`).
+
+Judge the PR against this spec; do not edit it. If its Ambiguities section still has open questions, or it no longer matches the code or the PR notes, say so in the report and route accordingly: a requirement the code misses goes back to implementation, and an open question only the user can settle is SIGNOFF_BLOCKED.
+
+⟦IMPL SPEC BODY — pm/specs/<pr-id>/impl.md, inlined whole⟧
+
+## Plan Context
+This PR is part of plan "Automated regression and bug fix loop" (plan-regression). Other PRs:
+- ⟦sibling-1⟧: ⟦sibling PR title⟧ [merged]
+- ⟦sibling-2⟧: ⟦sibling PR title⟧ [pending]
+- pr-8e693f6: Sign-off UI: per-PR BDD report + all-PR behavior dashboard (HTML) [merged]
+- pr-2680fbf: QA scenario planner creates new regression test when none fits [merged]
+
+## Interacting with the TUI
+
+The base pm tmux session is `pm-project_manager-c5a1006b`. Use `-s pm-project_manager-c5a1006b` with pm tui commands so they target the correct session even from workdir clones:
+- `pm tui view -s pm-project_manager-c5a1006b` — capture and view the current TUI screen
+- `pm tui send <keys> -s pm-project_manager-c5a1006b` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
+
+**Do not** run commands that spawn new Claude sessions yourself (e.g. `pm pr start`, `pm pr done`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be triggered through the TUI so panes are managed correctly. Use `pm tui send` to press the appropriate key in the TUI instead.
+
+## QA scenarios (from the QA run)
+
+Overall QA verdict: **PASS**
+
+- Scenario 1 — ⟦scenario title⟧: **PASS** — ⟦verdict reason, ≤ 240 chars⟧
+- Scenario 2 — ⟦scenario title⟧: **PASS** — ⟦verdict reason⟧
+
+## Integration with the latest base
+pm fetched the latest `master` and merged this PR's HEAD with it in an
+isolated candidate (your worktree and the base branch were not touched):
+
+- Target: `master` of `https://github.com/mjtomei/project_manager.git`
+- Fetched base revision: `⟦base⟧`
+- PR HEAD checked: `⟦head⟧`
+- Result: **clean** — merges cleanly with master@⟦base⟧ (1 file(s) changed on both sides)
+- Base changes since this PR branched: `git log --oneline ⟦mbase⟧..⟦base⟧` / `git diff ⟦mbase⟧ ⟦base⟧` (3 file(s))
+- Files changed on both sides: `pm/project.yaml`
+
+## What to do
+
+0. **Check integration with the latest base.** Sign-off owns integration: a
+   SIGNOFF_MERGE certifies this PR *combined with the base revision above*,
+   and the merge step publishes exactly that candidate — it never resolves
+   conflicts. You may refresh the check with
+   `pm pr signoff integrate pr-5f4f595` (read-only: it fetches and computes
+   the candidate). Your verdict
+   is bound to the check shown above; if a refresh shows the base moved,
+   say so in the report — the merge step re-runs sign-off when the base it
+   approved is no longer current. Read what changed on the base since the
+   PR branched and judge
+   whether it interacts with this PR: conflicts, semantic overlap (the same
+   behaviour, APIs, data or tests changed on both sides) or changed
+   behaviour the PR relies on. Line/file counts alone are not the rule.
+   Never merge the base into the branch, push the base branch, or run any
+   backend merge (`pm pr merge`, `gh pr merge`) yourself — on a return pm
+   merges a clean base into the PR branch for the next step, and
+   conflicts go to implementation.
+
+1. **Read the diff**: run `git diff origin/master...HEAD`.
+
+2. **Review the evidence record. Make sure all features are included in artifacts
+     that are sufficient to demonstrate success of the PR without reviewing code.**
+   - `CAP="$(pm qa captures-path pr-5f4f595)"`:
+     - `$CAP/impl/` — implementation captures (primary evidence for the PR's behavior).
+     - `$CAP/scenarios/<n>/` — per-scenario QA captures, prompts, and verdicts.
+   - **(a) BDD — does the captured behavior support the diff's claims?** For
+     each scenario/step, does the evidence actually demonstrate the behavior the
+     diff claims to deliver?
+   - **(b) Meta-QA / anti-shortcut — was the QA itself rigorous?** Look for thin
+     evidence, a scenario that drove a *mock* instead of code the PR touched, or
+     an obvious uncovered edge case. (Per-scenario false-PASS is already caught
+     inline by the scenario quality supervisor; this is the PR-level pass over
+     scenarios it already vetted.)
+   - **(c) Exploration deliverables.** If this PR's accepted scope is
+     exploration — its deliverable is findings, decisions and proposals for
+     further work rather than a code change — review that deliverable: does
+     it answer the questions its scope set, is each finding grounded in the
+     evidence it cites, and are unresolved questions left explicitly open?
+     Do not certify an unresolved hypothesis as an established result. The
+     exploration document and the evidence it cites are its demonstration
+     (a justified text-only exception in the report headline).
+
+3. **Review every bug and proposal recorded during this PR** — by any
+   session, not only your own ideas. Sessions record them as notes starting
+   `Bug` or `Proposal` (with an origin and evidence), as incidental-bug PRs,
+   as notes on other PRs, and — for QA scenarios — in
+   `$CAP/scenarios/<n>/proposals.md`. Collect them from:
+   - the PR notes above (`pm pr note list pr-5f4f595` if they were abbreviated);
+   - what this branch added to the project registry and plans
+     (new PR entries, and notes on this or other PRs):
+     `git diff origin/master...HEAD -- pm/project.yaml pm/bugs.md pm/improvements.md pm/plans`;
+   - QA: `$CAP/scenarios/<n>/` (verdicts, manifests, `proposals.md`) and the
+     scenario verdicts above;
+   - review and QA fixes: the review-loop and `qa:` commits in
+     `git log --format='%h %ad %s' --date=short origin/master..HEAD`.
+   Reconcile them against existing work and the actual code and plan:
+   `pm pr list`, `pm pr list --plan <plan>`, `pm pr show <id>`, the plan
+   file. This checkout's registry can lag the project's main registry, so
+   also search the base's copy (`git show origin/master:pm/project.yaml`) and
+   say which registries you searched. Merge reports of the same thing into
+   one item that lists every origin. Give each distinct item one
+   disposition, and say why:
+   - **justified new work** — supported by the evidence, useful, not covered
+     elsewhere, consistent with the user's stated goals, and worth its
+     complexity;
+   - **link/merge with an existing proposal** — name the canonical PR or note;
+   - **already addressed** — name the commit or PR that addressed it;
+   - **unsupported or out of scope** — its premise is wrong or unsupported,
+     it conflicts with an explicit user goal, or its complexity outweighs a
+     concrete benefit (say which);
+   - **needs a human decision** — say what the decision is.
+   Keep valid observations from narrowly scoped sessions even when their
+   suggested fix is wrong. A bug this PR must fix to be accepted is not a
+   disposition: it is an acceptance gap and routes back (step 7).
+
+4. **Look back: what would have made reviewing and QAing this PR cheaper?**
+   Use only what the record shows — the commits above, the PR notes, the
+   sign-off return (if any), every QA run's scenarios, verdicts, flags,
+   re-runs and captures, and the items from step 3. Find where review or QA
+   took repeated work, failed attempts or fragile setup, and recommend a
+   change only where that evidence supports it:
+   - **Code refactorings or architecture changes** that would have made
+     review or QA faster, simpler or more reliable: the repeated difficulty
+     (linked to the iterations, scenarios or notes where it shows), the code
+     or interface involved, the proposed change, the likely benefit and its
+     tradeoffs.
+   - **Missing reusable setup/capture recipes or regressions**: the
+     behaviour, its prerequisites, the assertions that would matter and the
+     evidence it should capture. Check the library first (`pm qa list`,
+     `pm/qa/regression/`, `pm/qa/instructions/`, `pm/qa/artifacts/`), name
+     the closest entries and why they do not fit, and prefer extending one
+     over adding a near-duplicate. Each scenario's
+     `$CAP/scenarios/<n>/scenario.json` records how it was driven — an
+     existing regression, one authored for this PR, or a probe. If a
+     scenario drove a real, repeatable user flow this PR delivers as a probe
+     or with no binding, that is a QA gap, not a future nicety: route
+     SIGNOFF_REQA and name the flow in your note so the next QA run binds
+     an existing regression or authors one. A regression authored earlier in
+     this PR should be reused by later runs, not authored again.
+   - **Existing recipes or regressions that caused difficulty** — misleading
+     or stale instructions, brittle setup, unsuitable environment
+     assumptions, redundant steps or excessive effort. Name the entry and
+     the failed attempts or findings that implicate it, and recommend what
+     fits: modify, consolidate, replace, retire or remove it. Say who uses
+     it (regressions that reference it, scenarios that ran it) and what
+     keeps its useful coverage if it is replaced or removed. Adding a recipe
+     is not the only option.
+   Mark each cause **observed** (the record shows it) or **hypothesis**.
+   Quantify time or repeated work only from recorded evidence (timestamps,
+   counts of iterations, runs or re-runs) and cite it; never claim savings
+   the record does not support. Prioritize (high / medium / low). If nothing
+   is justified, say "No justified efficiency recommendation" and why — do
+   not invent one.
+
+5. **Look ahead: "Given the result of this PR, does the plan need to
+   change, and is there any new work worth proposing?"** Answer that
+   question explicitly.
+   Read the plan — `pm/plans/plan-regression.md` ("Automated regression and bug fix loop") — and the sibling PRs above.
+   Consider changed goals or assumptions, new evidence, priorities, missing
+   steps, dependencies and sequencing, work that is now obsolete, and
+   follow-up investigations worth running.
+   - For each **plan change**: the plan and section, the adjustment, why this
+     PR's result supports it, and any uncertainty or decision the user must
+     make.
+   - For each **proposed follow-up PR**: its purpose and concrete
+     deliverable, the findings behind it, the plan it belongs to, and its
+     real prerequisites. Search existing work first and point to a matching
+     PR (refining it if needed) instead of proposing a duplicate. A follow-up
+     may be an exploration PR whose deliverable is findings and proposals —
+     it does not need to invent a code change.
+   - Say which items are prerequisites for accepting this PR (acceptance
+     gaps, routed in step 7) and which are later work.
+   If nothing is justified, say "No plan change or new work proposed" and
+   why.
+
+6. **Write the sign-off report (deliverable).** Produce `$CAP/report.html`
+   — the human-facing BDD behaviour report. Evidence files live alongside
+   it; reference them by relative path and make sure the page opens over
+   `file://`.
+
+   The audience is an **external technical reviewer** who is invested in
+   the project but not necessarily familiar with this PR's details or the
+   surrounding code. **The report should stand on its own such that the
+   reviewer does not need to read the diff to trust the verdict** — it is
+   meant to *replace* human code review of this PR, not summarise it.
+   Anything that would have been load-bearing for a reviewer staring at
+   the diff should be in the report.
+
+   Design for **two depths in the same page**: a brief read of the
+   top-line content (header, recommendation, summary, per-step
+   conclusions) should be enough to trust the verdict and move on; the
+   *same* page should also carry the full depth — diff, scenario
+   evidence, captures — folded behind `<details>` blocks so a reviewer
+   who wants to audit can click through without leaving the page or
+   re-deriving anything. Default to collapsed for everything the
+   top-line reader doesn't need.
+
+   Write so the reviewer can pick the report up cold and:
+
+   - see **what this PR delivers** — a short, plain-English list of every
+     behaviour or change it ships — and the **inline evidence each piece
+     works**, side by side. This is the headline; the reviewer should be
+     able to read it and watch the demos in a couple of minutes and trust
+     the result;
+   - understand and trust your sign-off verdict without opening the diff;
+   - find **entry points** into loop findings (bugs that surfaced,
+     ambiguities you ran into) and the **project-level implications**
+     they imply — sibling PRs to file, decisions that constrain future
+     PRs, assumptions other plan items now depend on. These are secondary
+     to "what shipped", not the headline.
+
+   Plain English; no internal jargon (don't drop a naked function or
+   file name without a one-clause "what it is"); link to the underlying
+   commit / scenario / note for every item so the entry point is one
+   click away.
+
+   ### Hard requirement — the dashboard contract
+
+   The all-PRs dashboard (`pm pr dashboard`) reads only one piece
+   of structured data from your report: the routing verdict, parsed from
+   a single meta tag in `<head>`. This MUST be present verbatim with the
+   keyword you're routing to:
+
+   ```html
+   <meta name="pm-signoff-verdict" content="SIGNOFF_MERGE">
+   ```
+
+   (replace the content with whichever of SIGNOFF_MERGE / SIGNOFF_REQA
+   / SIGNOFF_REVIEW / SIGNOFF_IMPL / SIGNOFF_BLOCKED you choose).
+   Without it the row shows "verdict unknown". Everything else on the
+   dashboard comes from `project.yaml`.
+
+   Also bind the report to what you reviewed, and give the routing reason
+   (the next agent is shown it verbatim):
+
+   ```html
+   <meta name="pm-signoff-head" content="<PR HEAD sha you reviewed>">
+   <meta name="pm-signoff-base" content="<base revision sha you integrated with>">
+   <meta name="pm-signoff-reason" content="<one or two sentences: why this route>">
+   ```
+
+   A human approval (`pm pr signoff record`) is refused unless these match
+   the current HEAD and the recorded integration check. Include an
+   **Integration** section in the report: target base revision, result,
+   overlapping files and your semantic assessment.
+
+   ### Hard requirement — identity, look-back and look-ahead
+
+   Every report carries these, whatever else you adapt below:
+
+   - **PR identity at the top of the page**:
+     the GitHub PR number as a clickable link — `<a href="https://github.com/mjtomei/project_manager/pull/289">#289</a>` — and the pm PR id `pr-5f4f595`, both prominent above the summary.
+   - **Acceptance status** near the top: one line saying whether anything
+     blocks accepting this PR and which route that takes — kept visibly
+     separate from the optional ideas below, never folded into them.
+   - **Bugs and proposals review** (step 3): one row per distinct item —
+     what it is, every origin that reported it, evidence, disposition, why,
+     and the canonical PR / note / evidence link. Say "None recorded" when
+     there are none.
+   - **Review and QA efficiency** (step 4): refactoring/architecture,
+     missing recipes/regressions, and existing recipes that caused
+     difficulty — each either prioritized recommendations or the explicit
+     "No justified efficiency recommendation".
+   - **Plan feedback and proposed new work** (step 5): the question, your
+     answer, plan changes and proposed follow-up PRs — or the explicit
+     "No plan change or new work proposed".
+   - **Proposed actions** and **Actions taken**, as two separate lists.
+     Proposed actions are not done; give each the exact command or edit
+     that would carry it out (for example the `pm pr add` /
+     `pm pr note add` / `pm pr edit` command or the plan-file change) so
+     the user can authorize it. Actions taken lists what was actually done,
+     with commits and PR/note ids. Never present a finding or a proposal as
+     something already done.
+
+   Recommendations do not waive any assertion, evidence requirement or
+   criterion, and they authorize no work: not starting a follow-up, not
+   deleting or closing entries or recipes, not changing other plans.
+
+   ### Suggested shape — adapt as needed to serve the goal above
+
+   These sections are common pieces that tend to convince a reviewer.
+   Skip what isn't load-bearing for this PR, add anything you think the
+   reviewer needs:
+
+   - **Header**: the PR identity (see above) and title; the routing
+     verdict marker (▲ SIGNOFF_MERGE etc., using the `SIGNOFF_VERDICT_ICONS` /
+     `SIGNOFF_VERDICT_STYLES` tokens from `pm_core/signoff.py` so the
+     visual matches the TUI and `pm pr list`); one-line recommendation;
+     link back to `../index.html` for navigation (the all-PRs dashboard
+     served by `pm pr dashboard` — that path resolves to the live index
+     when the report is viewed through the dashboard server; there is no
+     static `index.html` file on disk).
+
+   - **Table of contents** near the top — anchor links into every
+     section below. Add `id="..."` to each section heading and a small
+     `<nav>` (or `<ul>`) listing them so the reviewer can jump straight
+     to e.g. the diff, the QA evidence, or a specific scenario without
+     scrolling. A single PR's report can run long; the TOC is the
+     reviewer's index.
+
+   - **What this PR delivers** (the headline; this is what the reviewer
+     reads first). A short plain-English list of every user-visible
+     behaviour, interface, or code area this PR ships. Treat it like
+     release notes: if the reviewer reads only this list, they should
+     know what shipped. One line per item. Link each bullet to the
+     diff anchor / commit it lives in.
+
+   - **Demonstrations — proof each delivered behaviour works.** For
+     every bullet in "What this PR delivers" above, **embed the
+     evidence inline right there** — pair the description with the
+     proof. Prefer demonstrations the reviewer can *watch* over text
+     they have to read: screen captures (`.mp4`) before logs; logs
+     only when a screen capture isn't meaningful (e.g. a pure
+     data-transformation result). If a bullet has no demonstration,
+     say so explicitly and explain why (e.g. "schema-only change,
+     verified via the type-check evidence below") — silent omission
+     reads as incomplete verification.
+
+     **If you cannot assemble this headline — you can't enumerate what
+     the PR delivered, or a delivered behaviour has no watchable
+     evidence and isn't a justifiable text-only exception — route to
+     SIGNOFF_REQA and leave a `pm pr note add pr-5f4f595 '...'` entry
+     naming exactly what's missing** (which behaviour, what kind of
+     evidence you'd expect). QA owns producing demonstration evidence;
+     sign-off won't paper over an undemonstrated feature.
+
+   - **Loop findings & project-level implications** (secondary, not
+     the headline). Context the *planner* needs but the immediate
+     reviewer doesn't have to read first:
+
+     * **Bugs found and fixed during review/QA in this loop** (not
+       part of the original implementation) — with the area of code or
+       behaviour the bug hid in, so similar code elsewhere can be
+       audited.
+     * **Spec ambiguities** — resolved (question, answer, who decided)
+       and *unresolved* (flagged for human input). Call out anywhere
+       the resolution changes sibling PRs or future plan items.
+     * The required **bugs and proposals review**, **review and QA
+       efficiency** and **plan feedback** sections above — each opened
+       by a one-line summary and collapsed by default.
+
+   - **Per-step sections** for Implementation, Review, and QA pairing
+     evidence to each step's acceptance criteria. For a **bug PR** show
+     Implementation as Before/After (pre-fix: bug reproduces; post-fix:
+     symptom gone) and flag a missing phase rather than dropping it.
+
+   - **Code change (the diff)** — there is no web UI for the diff
+     elsewhere, so the report carries it. Run the same diff command
+     from step 1 (`git diff origin/master...HEAD`) and embed the output so the reviewer
+     can read or audit the actual change without leaving the page.
+     For navigability, split by file: get the changed file list with
+     `git diff origin/master...HEAD --name-only`, render it as an inline TOC for this
+     section, then for each file render a `<details>` block, collapsed
+     by default, containing `<pre><code class="diff">`-wrapped output
+     of `git diff origin/master...HEAD -- <path>` (HTML-escape `<`, `>`, `&` inside the
+     `<pre>`). The summary should be the file path so a reviewer can
+     scan paths and only expand what they want to read. For a small
+     single-file diff, one combined `<details>` is fine.
+
+   - **Context** at the bottom: PR description, PR notes, plan name +
+     plan notes when present — for a reviewer who wants the source
+     material without leaving the page.
+
+   ### Evidence rendering
+
+   Embed inline whenever the browser supports it. Pick the appropriate
+   native HTML control per type:
+
+     - `<video controls>` for `.mp4` video
+     - `<img>` for `.png` / `.jpg` / `.gif` / `.svg`
+     - `<audio controls>` for `.wav` / `.mp3` / `.ogg` / `.opus`
+     - `<details><pre>` for small text / log files under ~50 KB
+
+   **Layout stability:** every `<video>` and `<img>` carries explicit
+   `width` and `height` attributes (probe with `ffprobe -v error
+   -select_streams v:0 -show_entries stream=width,height -of csv=p=0
+   <file>` — works for images too), and the report's CSS includes
+   `video,img{max-width:100%;height:auto}`. The attributes reserve the
+   correct aspect-ratio box before media loads (no layout shift as the
+   page loads) while the CSS keeps display responsive. The page itself
+   never scrolls horizontally at any viewport width: wide content
+   (tables, code blocks, long unbroken strings) scrolls inside its own
+   container instead — include
+   `pre{overflow-x:auto}` and wrap each `<table>` in a
+   `<div style="overflow-x:auto">` (or give tables
+   `display:block;overflow-x:auto;max-width:100%`).
+
+   For **Markdown** evidence (`.md`), render the body inline so the
+   reader never sees stale or out-of-sync HTML. For each `.md` you
+   reference, run `pm md-render <relative path>` — this prints the
+   body-only HTML fragment (CommonMark + tables + fenced_code, no
+   document shell) — and drop the fragment inside a `<details>`
+   block collapsed by default:
+
+   ```html
+   <details>
+     <summary>scenarios/3/notes.md</summary>
+     <div class="md-body"><!-- pm md-render scenarios/3/notes.md output --></div>
+   </details>
+   ```
+
+   Use the relative path as the `<summary>` so the source file stays
+   discoverable. Do NOT link to a sibling `.md.html` — there isn't one;
+   rendering happens at report-write time so the embedded view always
+   matches what's on disk right now.
+
+   **Link as-is** for `.html` files (already render natively) and for
+   any large binary content.
+
+7. **Route** by picking the verdict below whose definition matches what you
+   found. Each verdict names the lifecycle step whose acceptance criteria it
+   covers; weigh those criteria against the evidence and choose the keyword
+   that fits — read every definition before deciding. End your response with
+   exactly ONE verdict keyword on its own line.
+
+   Recommendations and proposals from steps 3–5 never change the route by
+   themselves. An acceptance gap — a correctness bug, missing required
+   behaviour, missing or unconvincing evidence — routes to the earliest
+   affected step below even when you also list longer-term improvements;
+   never relabel it as a follow-up to reach a merge. There is no
+   merge-with-follow-ups verdict.
+
+   - **SIGNOFF_MERGE** — all three steps met their criteria: the evidence
+     supports the diff and the QA was rigorous, **and** the PR integrates
+     with the latest base conflict-free with no interaction that needs more
+     work or verification. This is a RECOMMENDATION to merge bound to the
+     reviewed HEAD and base revision — sign-off never merges itself; the PR
+     is reported ready_to_merge and the merge decision is made later. If the
+     PR or the base moves before the merge, the merge is refused and
+     sign-off re-runs — except for the planning follow-ups this session
+     carries forward itself (see "After your verdict").
+   - **SIGNOFF_IMPL** — covers the **Implementation** step. Purpose of impl:
+     deliver the PR's required behavior and an implementation spec. Criteria:
+     the diff implements every requirement in the spec/description; an impl
+     spec exists and the code matches it; for a bug PR, the pre-fix + post-fix
+     captures exist and demonstrate the bug and its fix. Use when there is a
+     real gap in the implementation (e.g. an INPUT_REQUIRED reflecting missing
+     required behavior, or missing captures), **or when integrating the base
+     needs code work**: merge conflicts, or base changes that require the
+     PR's code to adapt. Back to implementation (which merges the base into
+     the PR branch and reconciles it).
+   - **SIGNOFF_REVIEW** — covers the **Review** step. Purpose of review:
+     confirm code quality, correctness, and architectural fit. Criteria: the
+     change was actually reviewed (a review verdict exists) and no unaddressed
+     quality/architecture/correctness issue remains. If code changed after the
+     last review (e.g. a scenario fixed something during QA), it has NOT been
+     re-reviewed. Must re-pass review AND qa to validate the fix is real and
+     shortcut-free. Also use it when the base integrates cleanly but its
+     changes overlap this PR enough that the *combined* code needs review
+     (pm merges the clean base into the branch before review runs).
+   - **SIGNOFF_REQA** — covers the **QA** step. Purpose of QA: prove the
+     behavior works against the *real* code path. Criteria: every scenario has
+     an accounted-for verdict; each exercised the real path (not a mock) with
+     captured evidence; **every behaviour this PR delivers has a watchable
+     demonstration recorded**; obvious edge cases are covered; no PASS is unverified (e.g. verifier-cwd). Use when a PASS
+     is *unverified* (harness problem made it untrustworthy), a scenario was
+     *misframed*, OR you can't assemble the report's "What this PR delivers"
+     headline because demonstration evidence is missing for one or more
+     delivered behaviours — or the base integrates cleanly but its changes
+     could affect behaviour this PR's evidence covers, so the affected
+     scenarios must be re-verified on the integrated code (pm merges the
+     clean base into the branch first). Harness/QA problem, not a code
+     problem → re-run QA. Do NOT bounce to impl. **Leave a `pm pr note add pr-5f4f595 '...'`
+     entry naming what's missing** so QA knows exactly what to record.
+   - Pick the **earliest** affected step: implementation before review
+     before QA. Preserve valid earlier evidence and say in the report which
+     evidence still holds (and at which revision) and which must be redone.
+   - **SIGNOFF_BLOCKED** — escalate / hold. Use this for genuine ambiguity
+     (CONSERVATIVE BIAS: when truly unsure, BLOCK and escalate rather than
+     merge), something impossible / out-of-scope (note the limitation), or an
+     assumed-missing feature that needs a PR this one must wait for.
+
+### Classifying an INPUT_REQUIRED before routing
+- **Misframed scenario** → note it → **SIGNOFF_REQA**.
+- **Real gap** → note it → **SIGNOFF_IMPL**.
+- **PR description assumed-missing feature** → propose a new PR that this
+  PR must depend on (under Proposed actions) → **SIGNOFF_BLOCKED**;
+  or, if you judge it in-scope, expand scope and **SIGNOFF_IMPL**.
+- **Nice-to-have** → propose a follow-up PR (under Proposed actions) and
+  **SIGNOFF_MERGE**, or include it via impl if trivial (**SIGNOFF_IMPL**).
+- **Impossible / out-of-scope** → note the limitation → **SIGNOFF_MERGE** (if
+  the PR still stands on its own) or **SIGNOFF_BLOCKED**.
+
+### What you may change in this run
+
+Your verdict is bound to the HEAD you reviewed, and pm retires a sign-off
+run whose HEAD moves before it routes. So during this run do **not** commit
+or push, and do not edit code, specs, QA recipes, plans or other PRs. You
+may add a note to this PR when the route you choose needs one (the step you
+route to reads it from this checkout). Everything else you would do — file
+a pending PR, add a dependency, add a note to another PR, change a plan —
+goes under **Proposed actions** in the report, worded so the user can
+authorize it; this session can then carry it out (next section). Do NOT run
+any command that spawns an agent session (e.g. `pm pr start`).
+
+## After your verdict: planning follow-ups in this session
+
+This window stays open after you route SIGNOFF_MERGE or SIGNOFF_BLOCKED.
+If the user comes back to this session, discusses the PR and asks you to add
+or change proposed follow-up work, you may make those **project planning
+changes** yourself, commit and push them, and carry your verdict forward to
+that commit. No fresh sign-off session, re-review, QA run or separate check
+pass is needed — you know what you changed, so do not re-inspect the
+project or re-run sign-off for it.
+
+Planning changes are only: new *pending* PR entries (`pm pr add ...
+--plan <plan> [--depends-on ...]`), PR notes (`pm pr note add`), the title,
+description, plan and dependencies of *pending* PRs and this PR's own
+dependencies (`pm pr edit`), and plan files (`pm/bugs.md`, `pm/improvements.md`, `pm/plans/`). Make
+registry changes with those commands, never by hand-editing
+`pm/project.yaml`. Planning changes do not include code, tests, QA recipes
+or regressions, specs, this PR's own description or status, other PRs'
+statuses or model settings, or anything that changes what this PR delivers
+or the evidence for it. If the user's request needs any of that, or the
+discussion changes your verdict, say so and stop: that needs new work or a
+fresh sign-off, which the user starts (`pm pr signoff --fresh pr-5f4f595`). A
+new verdict line in this session does not re-route the PR.
+
+To carry the verdict forward:
+1. Make the edits. `pm pr add` also makes the new PR the project's active
+   PR, so restore the previous one with `pm pr select <id>`. Check that
+   `git status` / `git diff --stat` show only planning files.
+2. Commit with a message starting `signoff-planning:` and push:
+   `git push origin pm/pr-5f4f595-sign-off-report-review-qa-efficiency-recommendatio`.
+3. Run `pm pr signoff integrate pr-5f4f595` and check that it still reports the
+   base you approved and a mergeable result. If it reports a conflict or a
+   different base, tell the user the merge will need a fresh sign-off, and
+   say so in the report.
+4. Update `$CAP/report.html`: set `pm-signoff-head` to the new HEAD
+   (`git rev-parse HEAD`), keep `pm-signoff-verdict` and `pm-signoff-base`,
+   and add `<meta name="pm-signoff-planning-from" content="<HEAD your verdict
+   reviewed>">` — that reviewed HEAD stays the same across follow-ups. Add
+   the change to **Actions taken** (commit, what was added or changed, and
+   that the user asked for it) and remove what it carried out from
+   **Proposed actions**.
+5. End your reply with the same verdict keyword on its own line.
+
+pm then records your verdict against the new HEAD: it checks that the
+commits since the reviewed HEAD touch only planning files and recomputes the
+merge candidate against the same base. Until the report names the new HEAD,
+the merge is refused and this session is left running. Merging stays the
+user's decision, and new PRs stay pending — filing work never starts it.
+
+IMPORTANT: end your response with exactly one of SIGNOFF_MERGE, SIGNOFF_REQA,
+SIGNOFF_REVIEW, SIGNOFF_IMPL, or SIGNOFF_BLOCKED on its own line.
+
+## PR Notes — Handoff Channel
+
+`pm pr note add <pr-id> '<text>'` is the canonical way to hand off context
+between sessions. A note persists on the target PR (in project.yaml) and is
+injected into the prompt of every future session for that PR (the `## PR
+Notes` section). Prefer pm PR notes over GitHub PR comments or description
+edits for any handoff — GitHub comments are for external review
+communication, not internal handoff. When the user says "leave a note" /
+"add a note" / "notes" without qualification, they mean a pm PR note.
+
+- **Same-PR, next session** — to leave context for whoever resumes this PR,
+  run `pm pr note add pr-5f4f595 '<text>'`.
+- **Cross-PR** — when leaving work or context for a *different* PR to pick
+  up, add the note to that PR's id: `pm pr note add <other-pr-id> '<text>'`.
+  It attaches to that PR and surfaces in its sessions. If incidental work
+  belongs to a PR that already exists, prefer a note on that PR over opening
+  a brand-new one (see the Incidental Bugs guidance for recording incidental
+  fixes).
+
+It is fine to run this from your own workdir, including a note targeting
+another PR. The note is written to the git-tracked `project.yaml`; it
+travels to master when your PR merges, and the target PR's sessions pick it
+up the next time they clone or pull master. So a cross-PR note may surface
+after your PR merges rather than instantly — that delay is expected, not a
+reason to use a GitHub comment instead.
