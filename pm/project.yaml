@@ -48690,7 +48690,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-11-01T01:26:08.682898+00:00'
+  updated_at: '2026-11-01T02:55:12.414102+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -49229,6 +49229,41 @@ prs:
       and already filed: pr-7abb052, pr-7b1dd2e, pr-849a3e6.'
     created_at: '2026-11-01T01:26:08Z'
     last_edited: '2026-11-01T01:26:08Z'
+  - id: note-746ad6b
+    text: 'QA S23 PASS (head 74b6ef1b) — `pm qa run` under every runtime failure cause,
+      the retry after the runtime is fixed, and the explicitly-disabled control, all
+      driven natively in an isolated scratch HOME/private tmux. Story 1 (docker binary
+      genuinely absent, container mode enabled): rc=1, stdout ends "Result: ERROR"
+      after the one-line "[ERROR] Container mode is enabled but the container runtime
+      is unavailable: container runtime ''docker'' was not found on PATH", stderr
+      carries the full fail-closed message with both remedies, no qa-* window, no
+      container, empty host-launch marker, qa_status overall=ERROR with scenario verdict
+      "". Story 2 (info exits 3): same, cause "''docker info'' exited 3: stub: cannot
+      connect to the docker daemon". Story 3 (info hangs): same, cause "''docker info''
+      timed out after 10s", elapsed 10s; the follow-up `pm container status` also
+      takes ~10s and still reads enabled+unavailable. Story 4 (real nested podman,
+      pm-dev:latest built): rc=0, Result: PASS, stderr empty, container pm-proj-851679fd-qa-pr-440f096-cli-pr-440f096-s1,
+      window qa-pr-440f096-s1 with refiner+worker panes starting `podman exec -it
+      <that container>` and a plain host verifier pane, and the host marker holding
+      ONLY --verdict VERIFIED + --verdict FINALIZE_DONE (no REFINED_STEPS, no PASS).
+      Story 5 (container mode explicitly disabled, runtime absent): rc=0, Result:
+      PASS, no container-mode error, podman ps -a unchanged, refiner+worker panes
+      plain host fake-claude, marker records REFINED_STEPS+PASS+VERIFIED+FINALIZE_DONE,
+      setting stays disabled. tests/test_container_fail_closed.py 27 passed. Captures:
+      /pm-captures/scenarios/23/{summary.md,01-missing-runtime,02-info-nonzero,03-info-timeout,04-healthy-container,05-disabled-host-run}.
+      Fixture notes (not product bugs): (1) the fake planner does not write pm/specs/<pr>/qa.md,
+      so a CLI `pm qa run` stops at the spec gate with INPUT_REQUIRED — story 4 onward
+      used a committed minimal pm/specs/pr-440f096/qa.md (same gap as QA S3); (2)
+      two consecutive `pm qa run` invocations for the same PR in one pm session leave
+      the first run''s qa-<pr>/qa-<pr>-s1 windows open, so the second creates a duplicate-named
+      window and `list-panes -t <session>:qa-<pr>-s1` then reports "can''t find window"
+      — pre-existing window-lifecycle behaviour, unrelated to the fail-closed boundary;
+      story 5 was re-recorded after closing the stale windows; (3) the 10s probe timeout
+      kills the docker stub but orphans the stub''s own child (sleep 60) to PID 1
+      until it exits — subprocess kills only the direct child, cosmetic here. No host-execution
+      path observed anywhere; no code changes made.'
+    created_at: '2026-11-01T02:55:12Z'
+    last_edited: '2026-11-01T02:55:12Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
