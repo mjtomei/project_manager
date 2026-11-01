@@ -27,6 +27,29 @@ import pytest
 from pm_core import paths, tmux
 
 
+def _legacy_default_server(monkeypatch, *names: str) -> str:
+    """Model the user's default tmux server hosting *names*, no private one.
+
+    ``find_session_server`` confirms a prefix match against the exact name
+    or tmux's session *group* (review-loop b48f i16), so the default server
+    is probed twice: once with ``use_env=False`` and once with its explicit
+    socket path.  Both must answer here; a private socket must not.
+    Returns the default socket path.
+    """
+    default_sock = str(paths.default_socket_path())
+    hosted = set(names)
+
+    def exists(name, socket_path=None, use_env=True):
+        if socket_path not in (None, default_sock):
+            return False
+        exact = name.startswith("=")
+        n = name[1:] if exact else name
+        return n in hosted if exact else any(h.startswith(n) for h in hosted)
+
+    monkeypatch.setattr(tmux, "session_exists", exists)
+    return default_sock
+
+
 # ---------------------------------------------------------------------------
 # paths: session_socket_path
 # ---------------------------------------------------------------------------
@@ -747,10 +770,7 @@ class TestFindSessionServer:
 
     def test_falls_back_to_explicit_default_server(self, monkeypatch, tmp_path):
         monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
-        monkeypatch.setattr(
-            tmux, "session_exists",
-            lambda name, socket_path=None, use_env=True:
-            socket_path is None and not use_env)
+        _legacy_default_server(monkeypatch, "pm-legacy")
 
         sock, private = tmux.find_session_server("pm-legacy")
         # Not None: the default server must be addressed by its path,
@@ -822,20 +842,21 @@ class TestFindSessionServer:
         link = tmp_path / "pm-sessions"
         link.symlink_to(real)
         monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", link)
+        default_sock = str(paths.default_socket_path())
         probed: list[str | None] = []
 
         def exists(name, socket_path=None, use_env=True):
             probed.append(socket_path)
             # Only the explicit default server answers.
-            return socket_path is None and not use_env
+            return socket_path in (None, default_sock)
 
         monkeypatch.setattr(tmux, "session_exists", exists)
 
         sock, private = tmux.find_session_server("pm-repo-abc")
         # The private path was never probed through the link; the answer
         # comes from the default server.
-        assert probed == [None]
-        assert (sock, private) == (str(paths.default_socket_path()), False)
+        assert str(link / "pm-repo-abc") not in probed
+        assert (sock, private) == (default_sock, False)
 
     @staticmethod
     def _bind_socket(path: Path) -> None:
@@ -862,18 +883,19 @@ class TestFindSessionServer:
         self._bind_socket(sock)
         real_uid = os.getuid()
         monkeypatch.setattr(os, "getuid", lambda: real_uid + 1)
+        default_sock = str(paths.default_socket_path())
         probed: list[str | None] = []
 
         def exists(name, socket_path=None, use_env=True):
             probed.append(socket_path)
-            return socket_path is None and not use_env
+            return socket_path in (None, default_sock)
 
         monkeypatch.setattr(tmux, "session_exists", exists)
 
         assert tmux.find_session_server(
-            "pm-repo-abc", owned_only=True) == (
-                str(paths.default_socket_path()), False)
-        assert probed == [None]
+            "pm-repo-abc", owned_only=True) == (default_sock, False)
+        # The foreign socket was never contacted; only the default server.
+        assert str(sock) not in probed
 
     def test_owned_only_probes_a_socket_we_own(self, monkeypatch, tmp_path):
         """The normal private case: our server bound a socket we own."""
@@ -941,19 +963,47 @@ class TestFindSessionServer:
             return any(a.startswith(n) for a in alive)
         return exists
 
-    def test_discovery_still_prefix_matches_a_surviving_group(
+    def test_discovery_still_accepts_a_surviving_group_member(
             self, monkeypatch, tmp_path):
-        """Discovery keeps tmux's prefix rule: the group shares the panes.
+        """Discovery keeps the group: its members share the panes.
 
         `pm tui view -s pm-x` should still reach the TUI after the base was
         killed elsewhere, so `find_session_server` must accept ``pm-x~1``
-        for ``pm-x``.
+        for ``pm-x``.  The prefix match is confirmed through tmux's session
+        *group*, which is what tells a grouped session from a different
+        session merely named like one.
         """
         monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        sock = str(tmp_path / "pm-repo-abc")
         monkeypatch.setattr(tmux, "session_exists",
                             self._prefix_matching_exists({"pm-repo-abc~1"}))
-        sock, private = tmux.find_session_server("pm-repo-abc")
-        assert (sock, private) == (str(tmp_path / "pm-repo-abc"), True)
+        monkeypatch.setattr(
+            tmux, "sessions_in_group",
+            lambda base, socket_path=None: ["pm-repo-abc", "pm-repo-abc~1"])
+
+        sock_path, private = tmux.find_session_server("pm-repo-abc")
+        assert (sock_path, private) == (sock, True)
+
+    def test_a_session_merely_named_like_a_grouped_one_is_not_the_base(
+            self, monkeypatch, tmp_path):
+        """A bare target prefix-matches another project's session.
+
+        A repo directory may contain ``~``, so the project ``x~foo`` runs
+        ``pm-repo-abc~foo-<hash>``.  On the legacy default server it starts
+        with ``pm-repo-abc~`` without being in that session's group:
+        treating it as the base made `pm session` attach to it (and inject
+        a TUI into it) and `--print-connect` print a command that attaches
+        there (review-loop b48f i16).
+        """
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        monkeypatch.setattr(
+            tmux, "session_exists",
+            self._prefix_matching_exists({"pm-repo-abc~foo-deadbeef"}))
+        monkeypatch.setattr(
+            tmux, "sessions_in_group",
+            lambda base, socket_path=None: [base])
+
+        assert tmux.find_session_server("pm-repo-abc") == (None, False)
 
     def test_exact_match_rejects_a_surviving_group(self, monkeypatch,
                                                    tmp_path):
@@ -1022,7 +1072,9 @@ class TestFindSessionServer:
         monkeypatch.setattr(tmux, "session_exists", exists)
         sock, private = tmux.find_session_server("work")
         assert (sock, private) == (str(paths.default_socket_path()), False)
-        assert seen == [None]  # no private-socket probe was made
+        # No private-socket probe was made (the group confirmation re-asks
+        # the default server, so it appears twice).
+        assert str(tmp_path / "work") not in seen
 
 
 class TestServerAlive:
@@ -1917,10 +1969,7 @@ class TestGetPmSessionSelectsServer:
         monkeypatch.setattr(helpers, "_get_current_pm_session", lambda: None)
         monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
                             lambda: "pm-legacy")
-        monkeypatch.setattr(
-            helpers.tmux_mod, "session_exists",
-            lambda name, socket_path=None, use_env=True:
-            socket_path is None and not use_env)
+        _legacy_default_server(monkeypatch, "pm-legacy")
 
         assert helpers._get_pm_session() == "pm-legacy"
         assert os.environ["PM_TMUX_SOCKET"] == str(paths.default_socket_path())
@@ -1967,10 +2016,7 @@ class TestSelectSessionSocketReturnValue:
         from pm_core.cli import helpers
 
         monkeypatch.setenv("PM_TMUX_SOCKET", "")
-        monkeypatch.setattr(
-            helpers.tmux_mod, "session_exists",
-            lambda name, socket_path=None, use_env=True:
-            socket_path is None and not use_env)
+        _legacy_default_server(monkeypatch, "pm-legacy")
 
         expected = str(paths.default_socket_path())
         assert helpers._select_session_socket("pm-legacy") == expected
@@ -2858,11 +2904,8 @@ class TestResolveSessionSocket:
         monkeypatch.setenv("PM_TMUX_SOCKET", "")
         monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
 
-        def exists(name, socket_path=None, use_env=True):
-            # No private session; a legacy session exists on default.
-            return socket_path is None and not use_env
-
-        monkeypatch.setattr(session_mod.tmux_mod, "session_exists", exists)
+        # No private session; a legacy session exists on default.
+        _legacy_default_server(monkeypatch, "pm-repo-abc")
 
         sock, legacy = session_mod._resolve_session_socket("pm-repo-abc",
                                                            False)
@@ -3781,10 +3824,7 @@ class TestPickExistingSession:
         from pm_core.cli import session as session_mod
 
         monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
-        monkeypatch.setattr(
-            session_mod.tmux_mod, "session_exists",
-            lambda name, socket_path=None, use_env=True:
-            name == "pm-ambient" and socket_path is None and not use_env)
+        _legacy_default_server(monkeypatch, "pm-ambient")
 
         assert session_mod._pick_existing_session(
             ["pm-cwd", "pm-ambient"]) == "pm-ambient"
@@ -4754,6 +4794,46 @@ def _attach_client(sock, session):
         time.sleep(0.05)
     proc.kill()
     pytest.skip("could not attach a tmux client in this environment")
+
+
+class TestPaneSwitchMobileBase:
+    """The pane-switch hook keys mobile mode by the pm base session.
+
+    The prefix binding passes the session that owns the key press, which is
+    the grouped session the user is attached to — or a user's own view of
+    the session, under any name (S118/S121/S124).  The window and the pane
+    commands must use that session (each group member keeps its own current
+    window), while the mobile flag is keyed by the base: with the raw view
+    name the force-mobile flag was never seen (review-loop b48f i16).
+    """
+
+    def test_mobile_check_resolves_a_users_view_to_the_base(self, monkeypatch):
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setattr(session_mod.pane_registry, "pm_session_name",
+                            lambda name: "pm-base")
+        seen_windows = []
+        monkeypatch.setattr(
+            session_mod.tmux_mod, "get_window_id",
+            lambda session: seen_windows.append(session) or "@7")
+        monkeypatch.setattr(session_mod.tmux_mod, "unzoom_pane",
+                            lambda session, window: None)
+        mobile_checks = []
+        monkeypatch.setattr(
+            session_mod.pane_layout, "is_mobile",
+            lambda session, window: mobile_checks.append(
+                (session, window)) or False)
+        monkeypatch.setattr(
+            session_mod, "subprocess",
+            MagicMock(run=MagicMock(
+                return_value=MagicMock(returncode=0, stdout="%9\n"))))
+
+        session_mod.pane_switch_cmd.callback("myview", "-L")
+
+        # The window is the one the user is looking at (the view's), but
+        # the mobile flag is the base session's.
+        assert seen_windows == ["myview"]
+        assert mobile_checks == [("pm-base", "@7")]
 
 
 def _close(proc, sock):

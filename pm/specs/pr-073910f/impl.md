@@ -3626,3 +3626,79 @@ worktree of the pre-fix head (d13e71dba): the pane-switch gate cases, both
 ownership tests and the cross-server resume test fail there.  No live
 session, server or shared host configuration was touched — every fixture
 used a disposable socket directory, a temporary HOME or a mocked tmux.
+
+## Review iteration (2026-11-01, review-loop b48f i16)
+
+Verification pass over the head after the b48f i15 fixes; no requirement
+changes.  Two gaps: one cross-session hazard of the "a name is not a group"
+class in the central session→server resolver, and the mobile-mode half of the
+i15 pane-switch fix.
+
+1. **`find_session_server()` accepted a session merely *named* like a group
+   member.**  It answered "is this session running here?" with tmux's
+   `has-session -t <base>`, a *prefix* match.  That is what discovery wants
+   for a surviving grouped session (`pm-x~1` after the base was killed
+   elsewhere; R8.1), but it also matches a *different* session whose name
+   starts with `<base>~`: another project on the legacy default server (a
+   repo directory may contain `~`, so the project `x~foo` runs
+   `pm-x~foo-<hash>`) or a hand-made session.  Verified live on tmux 3.2a on
+   a disposable default server (`TMUX_TMPDIR`, temp HOME, disposable socket
+   dir): with only `pm-x-abc12345~foo-deadbeef` running,
+   `has-session -t pm-x-abc12345` returned 0, `find_session_server` returned
+   the default server, and `_resolve_session_socket` returned `(None, True)`
+   — i.e. `pm session` took the legacy-attach path, found "the session"
+   (prefix), concluded its TUI was missing, and would split a `pm _tui` pane
+   into the other project's window (and create `pm-x-abc12345~1` grouped
+   with it).  `pm session --print-connect` advertised
+   `tmux -S <default> attach -t pm-x-abc12345`, which tmux resolves to that
+   session too.  New `_session_or_group_alive()` confirms a prefix match:
+   the exact name (`has-session -t =name`), the base (when a grouped name was
+   asked for), or a session in tmux's session *group*
+   (`sessions_in_group`) — the same membership rule `list_grouped_sessions`
+   and `sessions_in_group` follow (b48f i13/i14).  `_find_session_server`
+   accepts a probe only when that holds, for both the private socket and the
+   default server; `find_exact_session_server` is unchanged (its probe
+   already uses `=name`, so it needs no confirmation).  Verified live
+   post-fix: the unrelated session is not adopted (`find_session_server` →
+   `(None, False)`, `_resolve_session_socket` → the deterministic private
+   socket), while a genuine surviving `pm-x-abc12345~1` is still found
+   (R8.1 preserved).  Tests:
+   `TestFindSessionServer::test_a_session_merely_named_like_a_grouped_one_is_not_the_base`
+   (fails on the pre-fix head: it returned the private socket) and
+   `::test_discovery_still_accepts_a_surviving_group_member`; the class's
+   fixtures now model the exact/group confirmation through a shared
+   `_legacy_default_server()` helper.
+
+2. **`pm _pane-switch` keyed mobile mode by the raw session name.**  The i15
+   gate now routes a user's own grouped view (S118/S121/S124) to pm's
+   mobile-aware switch, but `pane_switch_cmd` passed the view's name to
+   `pane_layout.is_mobile()`, whose force flag is keyed by the pm base
+   session (`mobile_flag_path` → `base_session_name`).  A user driving the
+   session through a view therefore missed `pm session mobile --force` (the
+   width heuristic still worked, so mobile mode looked mostly right).  The
+   other pane hooks (`_pane-opened`, `_window-resized`, `_pane-closed`)
+   already resolve `pane_registry.pm_session_name`; this one now does too,
+   for the mobile check only — the window lookup and `select-pane` targets
+   keep the session that owns the key press, because each group member keeps
+   its own current window.  Test:
+   `TestPaneSwitchMobileBase::test_mobile_check_resolves_a_users_view_to_the_base`
+   (fails on the pre-fix head: `is_mobile` received `myview`).
+
+Residual (pre-existing, unchanged here): other session-addressing commands
+still pass a base name to prefix-matched tmux targets (e.g. `pm pr start`'s
+`session_exists` + `new_window`), so the same contrived state — another
+legacy session named `<base>~…` on the default server — could still aim one
+of them at that session.  The central resolver now refuses to *identify* the
+wrong session, which is what the attach, print-connect and discovery paths
+use; closing the remaining raw targets means an exact-or-group helper at
+every mutation site and is not taken here.
+
+Validation: targeted suites (`test_session_socket_isolation`,
+`test_tmux`, `test_cli_helpers`, `test_shared_sessions`, `test_cli_qa`,
+`test_qa_resume`, `test_pane_layout`, `test_tui_pidfile`, `test_qa_loop`)
+922 passed; full suite 5486 passed / 1 skipped (426.6 s, log
+`/pm-captures/review-b48f-i16/full-suite-final.log`).  The
+fix-asserting tests were checked against a worktree of the pre-fix head
+(9bbe727f7).  No live session, server or shared host configuration was
+touched — every fixture used a disposable socket directory, a temporary
+HOME or a mocked tmux.

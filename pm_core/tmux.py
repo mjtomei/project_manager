@@ -261,11 +261,15 @@ def find_session_server(session_name: str, *,
     ``--global``/``--group`` session is a documented flow, and there the
     socket belongs to the sharing user by design.
 
-    Resolution uses tmux's default *prefix* matching, so a base name also
-    finds a surviving grouped session ``pm-x~1``.  That is what TUI
+    A prefix match is accepted only when the exact session, its base, or a
+    session in tmux's session *group* is really there.  That is what TUI
     discovery wants (the panes are shared, so `pm tui view -s pm-x` should
-    still reach the TUI after the base was killed elsewhere), but it is
-    wrong for `pm session kill` — see ``find_exact_session_server``.
+    still reach the TUI after the base was killed elsewhere), while a
+    *different* session whose name merely starts with ``pm-x~`` — another
+    project on the legacy default server, or a hand-made session — is not
+    the session (review-loop b48f i16; see ``_session_or_group_alive``).
+    Exact matching is the rule for `pm session kill` — see
+    ``find_exact_session_server``.
     """
     return _find_session_server(session_name, exact=False,
                                 owned_only=owned_only)
@@ -308,6 +312,39 @@ def session_socket_for(session_name: str) -> str:
     # truncated onto another session's socket.
     base = base_session_name(session_name)
     return str(session_socket_path(base.removeprefix("pm-")))
+
+
+def _session_or_group_alive(session_name: str, base: str,
+                            socket_path: str) -> bool:
+    """True when *session_name* or a surviving member of its group runs here.
+
+    ``session_exists`` uses tmux's *prefix* target matching.  That is what
+    discovery wants for a surviving grouped session (``pm-x~1`` after the
+    base was killed elsewhere — the windows are shared, so the session is
+    alive; R8.1), but it is also true for a *different* session whose name
+    merely starts with the base: a repo directory may contain ``~``, so on
+    the legacy default server another project's ``pm-x~foo-<hash>`` starts
+    with ``pm-x~``.  Treating that as the base made ``pm session`` attach
+    to the other project's session (and inject a TUI into it) and
+    ``pm session --print-connect`` print a command that attaches there
+    (review-loop b48f i16).  A prefix match is therefore accepted only
+    when the exact name, its base, or a session in tmux's session *group*
+    is really there — the same membership rule ``list_grouped_sessions``
+    and ``sessions_in_group`` follow (b48f i13).
+
+    The caller has already established (with the cheap prefix probe) that
+    *some* session with a related name exists, so the group query here
+    only runs in that case.
+    """
+    if session_exists(f"={session_name}", socket_path=socket_path):
+        return True
+    if session_name != base and session_exists(f"={base}",
+                                               socket_path=socket_path):
+        # A grouped name was asked for and its base is running: the group
+        # (and therefore the session's windows) is alive.
+        return True
+    return any(member != base
+               for member in sessions_in_group(base, socket_path=socket_path))
 
 
 def _find_session_server(session_name: str, *, exact: bool,
@@ -362,10 +399,19 @@ def _find_session_server(session_name: str, *, exact: bool,
                          and entry.st_uid == os.getuid())
             else:
                 probe = entry is None or stat.S_ISSOCK(entry.st_mode)
-            if probe and session_exists(target, socket_path=sock):
+            if (probe and session_exists(target, socket_path=sock)
+                    and (exact or _session_or_group_alive(
+                        session_name, base, sock))):
                 return sock, True
-        if session_exists(target, use_env=False):
-            return str(default_socket_path()), False
+        default_sock = str(default_socket_path())
+        # The prefix probe is what finds a surviving grouped session; the
+        # group check then rejects a *different* session whose name merely
+        # starts with the base (review-loop b48f i16).  ``exact`` needs no
+        # confirmation: the probe already used ``=name``.
+        if (session_exists(target, use_env=False)
+                and (exact or _session_or_group_alive(
+                    session_name, base, default_sock))):
+            return default_sock, False
     except OSError:
         # tmux is not installed or not executable; no server can host it.
         return None, False

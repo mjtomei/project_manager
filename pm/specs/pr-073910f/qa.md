@@ -391,6 +391,16 @@ pane unless stated otherwise.
   commands in a legacy project's directory, **THEN** the legacy session
   is still found at `<resolved>/tmux-<uid>/default` (review-loop b48f
   i9).
+- **GIVEN** the legacy default server hosts only an *unrelated* session
+  whose name merely starts with the target's name plus `~` — a repo
+  directory may contain `~`, so the project `x~foo` runs
+  `pm-x~foo-<hash>` — **WHEN** the user runs `pm session` or
+  `pm session --print-connect` for `pm-x`, **THEN** the unrelated session
+  is not adopted: `pm session` creates/attaches `pm-x` on its own private
+  socket and the printed command names that socket, leaving the other
+  project's session, panes and clients untouched.  A prefix match is
+  confirmed through the exact name or tmux's session *group*, never a
+  bare name prefix (review-loop b48f i16).
 
 ### R11 — Panes, hooks and popups address their own server
 

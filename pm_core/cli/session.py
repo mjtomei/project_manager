@@ -1427,7 +1427,16 @@ def pane_switch_cmd(session: str, direction: str):
     """Internal: switch pane with mobile-aware zoom.
 
     direction is 'next' or a tmux flag like '-U', '-D', '-L', '-R'.
+
+    *session* is the session that owns the key press, which is the grouped
+    session the user is attached to — or a user's own view of the session,
+    under any name (S118/S121/S124).  The window and the pane commands
+    therefore use it as given (each group member keeps its own current
+    window), but the mobile-mode flag is keyed by the pm *base* session, so
+    the check resolves it the way the other pane hooks do (review-loop b48f
+    i16).
     """
+    base = pane_registry.pm_session_name(session)
     window = tmux_mod.get_window_id(session)
 
     # Unzoom first so select-pane can reach other panes
@@ -1445,7 +1454,7 @@ def pane_switch_cmd(session: str, direction: str):
         )
 
     # If mobile, zoom the newly focused pane
-    if pane_layout.is_mobile(session, window):
+    if pane_layout.is_mobile(base, window):
         result = subprocess.run(
             tmux_mod._tmux_cmd("display", "-t", f"{session}:{window}", "-p", "#{pane_id}"),
             capture_output=True, text=True,
