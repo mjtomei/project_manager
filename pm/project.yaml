@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T03:58:59.520303+00:00'
+  updated_at: '2026-11-01T04:36:57.384335+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38021,6 +38021,36 @@ prs:
       pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-11-01T03:58:59Z'
     last_edited: '2026-11-01T03:58:59Z'
+  - id: note-0b4376a
+    text: 'Review loop 928f i16: two guarantees the kept web-UI recipe carries had
+      no case, found by mutating them in this container (test-only; no recipe or pm_core/
+      change). (1) The port pre-check''s "any HTTP answer means taken": every port-taken
+      case answered 200, so adding `-f` to the pre-check left the whole file green
+      (298 passed, verified) — and a live app that 404s at `/` (the shape R23 fixed
+      the readiness poll for) would then be refused with "could not check … exit 22",
+      a cause its port cannot have. Verified live with the recipe''s own step-1 block,
+      real curl 7.81 and a server answering 404 at `/`: the shipped block refuses
+      with "something already answers on …" (rc 1, app not started), the `-f` copy
+      with "could not check … exit 22"; plain curl exits 0 against that server and
+      `curl -f` exits 22. The stub `curl` gained mode `inuse404`, and test_a_port_that_answers_404_is_refused_as_taken
+      pins the reason, the `ss -ltnp` remedy and that the app is not started. (2)
+      The protocol block''s route snapshots carry `-w ''\n[HTTP %{http_code}]\n''`,
+      the only record of what each route answered; dropping it also left the file
+      green (298 passed) and http.log then holds bodies with no status — a reviewer
+      cannot tell a 200 from a 500, and a timed-out route loses the `[HTTP 000]` marker
+      the prose promises. Verified live with the block''s own route loop and real
+      curl: `[HTTP 404]` per route against the 404 server, `[HTTP 000]` beside "Operation
+      timed out" per route against a socket that accepts and never answers, and neither
+      without `-w` (bodies only; the timeout error only). test_web_ui_layer2_route_snapshots_record_the_status
+      runs the block with a logging stub `curl` and requires a status-bearing `-w`
+      call for each route the block snapshots. Mutation checks: each mutation fails
+      exactly its new case (1 failed, 299 passed each); restored, the file is 300
+      passed (was 298); full suite 5376 passed, 1 skipped, 121 deselected, 0 failed
+      (450.88 s). Evidence: /pm-captures/review-928f-i16/ (probe.log, mutation-check.log,
+      recipe-file.log, suite.log, README.md, scripts/). impl.md R77 + Evidence note.
+      The dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-11-01T04:36:57Z'
+    last_edited: '2026-11-01T04:36:57Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
