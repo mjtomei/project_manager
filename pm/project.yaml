@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T17:24:47.060924+00:00'
+  updated_at: '2026-11-01T18:37:43.254791+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6598,6 +6598,40 @@ prs:
       configuration was touched.'
     created_at: '2026-11-01T17:24:46Z'
     last_edited: '2026-11-01T17:24:46Z'
+  - id: note-4b8a8b3
+    text: 'Review loop b48f i9 (no requirement changes; full suite 5442 passed / 1
+      skipped, 423 s, log /pm-captures/review-b48f-i9/full-suite-final.log). Verification
+      pass over the head after the b48f i8 fixes; an independent review surfaced two
+      real defects. (1) default_socket_path() treated every relative $TMUX_TMPDIR
+      as unusable; tmux realpaths the value (a relative one is resolved against the
+      client''s cwd) and uses it when it is an existing directory (verified on tmux
+      3.2a: from /tmp/proj with TMUX_TMPDIR=reltmp the default server binds at /tmp/proj/reltmp/tmux-<uid>/default).
+      With an existing relative value a legacy session was invisible — `pm session`
+      created a duplicate private session beside it, `pm session list` omitted it
+      and `pm session kill` said "No session found"; it now resolves first (unreadable
+      -> /tmp). (2) The socket-ownership guard existed only on `pm session` start;
+      the read/discovery path checked only that the entry was a socket (the b48f i7
+      symlink guard). /tmp/pm-sessions is 1777 and the deterministic name is derivable,
+      so another user can run a server there under the session''s name and chmod the
+      socket 0777 (tmux < 3.3 has no server-access ACL); a victim''s implicit lookup
+      then adopted it — `pm tui view`/`send` drove the attacker''s TUI, `pm pr start`/`meta`/`container
+      build`/`session home` ran on the attacker''s server, and `pm session kill` tore
+      down the planted session instead of the user''s own legacy one. find_session_server()/find_exact_session_server()
+      gained owned_only (the private probe runs only for a socket we own; an absent
+      entry is not probed, closing the lstat/connect race); implicit lookups pass
+      it, gated by PM_SHARE_MODE plus an exemption for the session the process runs
+      inside (a grouped pane carries no PM_SHARE_MODE), so --global/--group joiners
+      still reach the sharing user''s socket; explicit -s is unchanged. --print-connect
+      also refuses to print a command through a planted symlink or (private) a socket
+      another user owns, and the name-only fallback scan in _find_tui_pane is ownership-filtered.
+      Also removed a duplicated qa.md R12 bullet and covered shared_socket_dir_is_usable()''s
+      unreadable-entry branch. Residual: the shared *start* path still skips the uid
+      check by design (pre-existing: shared_socket_path already used the world-writable
+      dir; closing it would break joining). Tests +18 (the fix-asserting ones fail
+      on a worktree of the pre-fix head df064decb); no live session, server or shared
+      host configuration was touched.'
+    created_at: '2026-11-01T18:37:43Z'
+    last_edited: '2026-11-01T18:37:43Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
