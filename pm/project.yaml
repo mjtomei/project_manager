@@ -6168,6 +6168,24 @@ prs:
       - every fixture used a disposable socket and a temporary HOME.'
     created_at: '2026-11-01T09:31:25Z'
     last_edited: '2026-11-01T09:31:25Z'
+  - id: note-fef12d9
+    text: 'Scenario 14 refiner (2026-11-01), verified live on this branch with a throwaway
+      project: (1) A shared session''s tmux server inherits PM_SHARE_MODE=global from
+      the pm session --global process into its global environment, so a shell pane
+      in a grouped session normally sees PM_SHARE_MODE; the QA spec''s premise that
+      grouped panes lack it is not observable. (2) If PM_SHARE_MODE is removed from
+      the pane env, plain pm session kill from the shared grouped shell kills the
+      cwd private twin instead of the session hosting the pane (_pick_existing_session
+      prefers the cwd candidate) - R9''s no-mode-requested rule fails in that case.
+      Natural runs target the shared session correctly. (3) An inside-kill SIGHUPs
+      the issuing pane before pm can print Killed session ... or unlink the socket:
+      the socket file remains stale, pm session list omits the row, and a later pm
+      session rebinds. (4) Plain pm session from a shell pane inside the session creates
+      the grouped session with window-size=smallest but tmux refuses the nested attach
+      (sessions should be nested with care, unset $TMUX to force); no third client
+      attaches. Refined scenario 14 encodes these.'
+    created_at: '2026-11-01T10:21:29Z'
+    last_edited: '2026-11-01T10:21:29Z'
   - id: note-e46fe72
     text: 'QA S15 (awkward session names — spaces and pipes through list, driving,
       connect and the action picker) PASS 4/4 on 0e6dd8c3a, no source changes. All
