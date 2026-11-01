@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-01T20:12:56.028103+00:00'
+  updated_at: '2026-11-01T20:44:21.890632+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48062,6 +48062,28 @@ prs:
       only the survivor.'
     created_at: '2026-11-01T20:12:55Z'
     last_edited: '2026-11-01T20:12:55Z'
+  - id: note-c70a400
+    text: 'QA scenario 57 (R17 owed QA re-run + launch ownership) PASS at e62c6ede
+      — no code change. All six triples held live on a throwaway local-backend fixture:
+      deferral behind a live `pm qa run` then exactly one owed start; TUI-vs-CLI claim
+      collision (CLI won, one launch, one finalize + one verifier pane); restart paints
+      `[qa ↻]` before the start (frames.json frame 1 at .201, `Starting QA for` at
+      .337); a 2020 expired claim and a scalar claim both read as claimable and start
+      with no traceback; an out-of-band `--status in_review` leaves `awaiting` intact
+      and the run starts on the return to qa; container mode with docker absent fails
+      closed (QA ERROR note, no host fallback). Harness facts for the next run: (1)
+      the common setup omits the QA spec — `pm qa run` returns INPUT_REQUIRED "QA
+      spec was not generated during planning" until `pm pr spec <pr> qa` has run once;
+      (2) `pm session` respawns the TUI into the session CURRENT window — select a
+      plain shell window first or a concurrent QA run stale-window cleanup kills the
+      respawned TUI mid-collision; (3) `pm session mobile --no-force` before recording
+      or the TUI latches 80x24 and clips the log pane; (4) `L` opens the log pane
+      as a side split of the CURRENT window, so select window 0 first; (5) the owed
+      run renumbers past consumed scenario indices so its window is -s2/-s4/-s10,
+      not -s1; the one-verifier/one-finalize/one-owed-loop invariant still holds.
+      Captures: /pm-captures/scenarios/57/.'
+    created_at: '2026-11-01T20:44:21Z'
+    last_edited: '2026-11-01T20:44:21Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
