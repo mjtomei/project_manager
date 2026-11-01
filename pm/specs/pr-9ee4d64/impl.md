@@ -288,10 +288,11 @@ available in the run dir:
   pre-upgrade breadcrumb polls the legacy shared iteration name, and
   freezing it would hide the verdict it appends later.  Loop-scoped names
   can never match that prefix (the loop id is hex, so it never starts
-  with `i`).  Every owned name is loop-scoped, so a prefix is the right
-  key and there are no exact names: step windows are resolved by
-  :func:`_live_read_transcripts` instead (a window name alone cannot tell
-  a live session from a finished or dead pane).
+  with `i`).  Every owned family shares a name prefix (loop-scoped
+  iterations, the legacy shared iteration name, watcher iterations), so a
+  prefix is the right key and there are no exact names: step windows are
+  resolved by :func:`_live_read_transcripts` instead (a window name alone
+  cannot tell a live pane from a dead one).
 - `_live_read_transcripts(app, tdir, *, include_signoff=False)` returns
   the absolute paths a reader still polls: live idle-tracker entries, a
   running review loop's current iteration transcript (resolved through
@@ -589,10 +590,10 @@ Applied on top of the design above; keep them when editing the code.
   `session_id_from_transcript` into the function, and
   `_live_transcript_owners` returns just the owner-name *prefixes* — the
   `exact_names` half of its old tuple was never populated, so the
-  corresponding membership test was dead code.  Every owned name is
-  loop-scoped, which is why a prefix is the right key.  `qa.md` R7 no
-  longer asks for a `merge-<pr>.jsonl` on a clean local merge (none is
-  written; assert the merge by PR status).
+  corresponding membership test was dead code.  Every owned family
+  shares a name prefix, which is why a prefix is the right key.  `qa.md`
+  R7 no longer asks for a `merge-<pr>.jsonl` on a clean local merge (none
+  is written; assert the merge by PR status).
 - `archive_transcript` reports a lost no-clobber create as success
   (review e757 i2).  If another archiver creates the entry between the
   existence check and `_move_into_archive`'s create, the session *is*

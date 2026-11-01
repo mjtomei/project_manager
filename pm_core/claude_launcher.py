@@ -1305,9 +1305,12 @@ def archive_transcript(transcript_path: str | Path) -> Path | None:
     Moves the outgoing attempt (symlink or finalized copy) to
     ``<dir>/archive/<stem>.<session-id>.jsonl`` before a new attempt
     reuses the canonical path.  Returns the archive path, or ``None`` when
-    there is nothing to archive.  Archive entries are immutable: an
-    existing entry is never overwritten, and an already-archived session's
-    redundant canonical link is dropped without touching its data.
+    there is nothing to archive *or* archiving failed (an unwritable
+    archive dir, an unreadable path); callers treat ``None`` as "the
+    canonical is not preserved, replace it anyway".  Archive entries are
+    immutable: an existing entry is never overwritten, and an
+    already-archived session's redundant canonical link is dropped without
+    touching its data.
     """
     p = Path(transcript_path)
     try:
@@ -1504,8 +1507,8 @@ def finalize_transcript(transcript_path: Path,
       otherwise the link belongs to another attempt and is left live.  A
       target that carries no session id (not a native UUID-named JSONL)
       cannot be compared, so the link is frozen as usual.
-    * The link is re-read before and immediately before the replacement
-      (the second check runs after the copy); a link redirected in
+    * The link's target is captured once at entry and re-read after the
+      copy, immediately before the replacement; a link redirected in
       between is left untouched.  The microseconds between that last
       check and ``os.replace`` are the one window POSIX symlink semantics
       cannot close.

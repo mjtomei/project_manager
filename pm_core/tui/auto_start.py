@@ -844,13 +844,18 @@ def _live_transcript_owners(app) -> set[str]:
     A running review loop owns every ``review-<pr>-<loop_id>-i*`` path,
     plus the legacy shared ``review-<pr>-i*`` name a loop restored from a
     pre-upgrade breadcrumb may still be polling; a running watcher loop
-    owns its ``<watcher-type>-i*`` paths.  Every owned name is
-    loop-scoped, so a prefix (not an exact name) is the right key.
+    owns its ``<watcher-type>-i*`` paths.  Every owned family shares a
+    name prefix (loop-scoped iterations, the legacy shared iteration
+    name, watcher iterations), so a prefix — not an exact name — is the
+    right key.
 
     Step windows (impl / review / sign-off / merge) are handled by
     :func:`_live_read_transcripts` instead: a transcript is live only
-    while a *live* pane still runs that session, so a dead or finished
-    pane does not keep it a symlink forever.
+    while a *live* pane still runs that session, so a dead pane does not
+    keep it a symlink forever.  (A pane whose session merely finished a
+    turn is still live, which is why a step window open at sweep time
+    keeps its canonical a link — see the accepted limitation in the
+    spec.)
     """
     prefixes: set[str] = set()
     # Snapshot: this also runs from a watcher's completion callback (a
