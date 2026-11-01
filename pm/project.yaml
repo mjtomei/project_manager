@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-01T15:47:31.107519+00:00'
+  updated_at: '2026-11-01T17:01:16.875168+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -47960,6 +47960,28 @@ prs:
       targeted QA before any earlier PASS is reused.'
     created_at: '2026-11-01T15:47:31Z'
     last_edited: '2026-11-01T15:47:31Z'
+  - id: note-b010630
+    text: 'QA scenario 51 (merged-base behaviours in the sign-off flow) PASS at e62c6ede
+      — no code change. All six stories held live on a throwaway local-backend project:
+      (1) fail-closed autostart drives only the target closure (T blocked on D, outside
+      O never started, runs popup "1 target(s)"), (2) all four corrupt saved-state
+      shapes restore nothing, log the exact diagnostic, and the rejected copy is byte-identical
+      to the fixture, (3) pm pr close keeps the registry entry, branch, workdir, note
+      and captures, (4) the home window filters terminal PRs while pm pr list still
+      shows [closed], (5) merge/signoff both refuse a closed PR with exit 1 and publish
+      nothing, (6) sign-off prompts say "malformed" for [] and "unreadable" for unparseable
+      JSON, and the review prompt has no qa_status section. Harness facts for the
+      next run: the fake Claude finishes review within the first scheduler pass, so
+      D is already at review when the runs popup opens (use {"_all": {"hold": N}}
+      if you need to hold implementation); the sign-off prompt is ~360 lines so a
+      49-line pane only shows its tail — read the QA-scenarios lines from tmux capture-pane
+      -S - scrollback. One unexplained one-off: the very first sign-off launch for
+      a PR whose workdir was being cloned printed "unreadable" for a fixture containing
+      []; it did not reproduce on a re-run, on a fresh PR, or in a 20-iteration direct
+      stress of _signoff_qa_scenarios_parts (20/20 malformed), so it is noted rather
+      than filed.'
+    created_at: '2026-11-01T17:01:16Z'
+    last_edited: '2026-11-01T17:01:16Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
