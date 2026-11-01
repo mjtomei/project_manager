@@ -804,7 +804,15 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   itself carries
   `--connect-timeout`/`--max-time` (a stalled transfer would otherwise hang
   the worker), and a failed transfer removes its partial file and stops with
-  "could not download agg".
+  "could not download agg". Two workers sharing one HOME must not break each
+  other's install either: both pass the `agg --version` guard, so the
+  download goes to a per-process `mktemp` file and is renamed into place —
+  an in-place `curl -o ~/.local/bin/agg` leaves the shared path open for
+  writing, and the other worker's install check or render then executes it,
+  fails with ETXTBSY ("Text file busy") and reports "the agg on PATH … does
+  not run" / "agg failed on the cast — is 'agg' installed?" for a binary
+  that is complete (review loop 928f i12, R72). The block must still exit 0,
+  leave the downloaded `agg` in place and leave no `agg.tmp.*` behind.
 - An encoder fails *partway* → the render steps check `agg`'s and `ffmpeg`'s
   own exit statuses, not only the output file: a killed `ffmpeg` leaves a
   non-empty partial mp4 (verified: 267,945 bytes) that `test -s` accepts, so

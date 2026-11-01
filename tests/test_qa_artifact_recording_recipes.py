@@ -1999,7 +1999,7 @@ def test_render_documents_how_to_get_the_renderer(name):
     assert install != -1, (
         f"{name}: the render section never says how to install 'agg', so a "
         "worker whose image lacks it has no remedy for the render failure")
-    assert "chmod +x" in section, (
+    assert 'chmod 755 "$agg_tmp"' in section, (
         f"{name}: the downloaded agg binary is never made executable")
     assert install < section.index("agg --idle-time-limit"), (
         f"{name}: the agg install line comes after the render block")
@@ -2177,7 +2177,8 @@ def _install_block(name):
 
 
 def _run_install_block(name, tmp_path, curl_body=None, agg_present=False,
-                       agg_body=None, local_on_path=True):
+                       agg_body=None, local_on_path=True,
+                       hold_agg_open=False):
     """Run the recipe's own ``agg`` install block against stub tools.
 
     ``agg_present`` seeds an ``agg`` in ``~/.local/bin`` (ahead of the stub
@@ -2185,7 +2186,10 @@ def _run_install_block(name, tmp_path, curl_body=None, agg_present=False,
     case can seed the truncated binary an interrupted download leaves.
     ``curl_body`` replaces the stub ``curl``. ``local_on_path`` puts
     ``~/.local/bin`` on PATH (the image's layout); with it off, the block
-    installs a binary nothing can run.
+    installs a binary nothing can run. ``hold_agg_open`` starts a second
+    process that holds the seeded ``agg`` open for writing for the whole run —
+    the other worker's in-place download — so a case can exercise what happens
+    when this block, or a render, executes a file that is being written.
     Returns ``(proc, agg path, curl-called marker)``.
     """
     block = _install_block(name)
@@ -2200,8 +2204,10 @@ def _run_install_block(name, tmp_path, curl_body=None, agg_present=False,
     bindir.mkdir()
     called = tmp_path / "curl-called"
     # The block's own tools, stubbed to the real ones by absolute path, so the
-    # test's PATH cannot pick up a host `agg` and mask the guard.
-    for tool in ("mkdir", "chmod", "uname", "rm"):
+    # test's PATH cannot pick up a host `agg` and mask the guard. `mktemp` and
+    # `mv` are the atomic install's (temp file + rename) and are required even
+    # when the case never reaches them.
+    for tool in ("mkdir", "chmod", "uname", "rm", "mktemp", "mv"):
         real = shutil.which(tool)
         assert real, f"{tool} is required"
         _stub_tool(bindir, tool, f'exec "{real}" "$@"\n')
@@ -2216,6 +2222,25 @@ printf '#!/bin/sh\\necho downloaded\\n' > "$last"
     bash = shutil.which("bash")
     path = f"{local}:{bindir}" if local_on_path else str(bindir)
     env = dict(os.environ, HOME=str(home), PATH=path)
+    if hold_agg_open:
+        # A second worker's in-place `curl -o ~/.local/bin/agg`, still
+        # running: it holds the shared path open for writing while this
+        # block runs. The seeded file must exist for the holder to open it.
+        assert agg_present, "hold_agg_open needs the seeded agg"
+        ready = tmp_path / "holder-ready"
+        holder = subprocess.Popen(
+            ["bash", "-c", f'exec 3>>"{agg}"; : > "{ready}"; sleep 30'])
+        try:
+            deadline = time.time() + 5
+            while not ready.exists() and time.time() < deadline:
+                time.sleep(0.02)
+            assert ready.exists(), "the concurrent-writer fixture never started"
+            r = subprocess.run([bash], input=block, env=env,
+                               capture_output=True, text=True, timeout=60)
+        finally:
+            holder.kill()
+            holder.wait()
+        return r, agg, called
     r = subprocess.run([bash], input=block, env=env,
                        capture_output=True, text=True, timeout=60)
     return r, agg, called
@@ -2226,16 +2251,19 @@ printf '#!/bin/sh\\necho downloaded\\n' > "$last"
 def test_renderer_install_block_only_runs_when_agg_is_missing(name,
                                                               agg_present,
                                                               tmp_path):
-    """Re-downloading over a working `agg` can destroy it.
+    """A working `agg` is left alone instead of re-downloaded over.
 
-    ``~/.local/bin`` comes first on the image's PATH, and ``curl -o`` writes
-    in place: a transfer that fails partway leaves a truncated binary that
-    shadows the image's working ``agg`` (verified: a dropped transfer replaced
-    a working agg with a 500-byte file). The bundled Dockerfile installs
-    ``agg``, so a worker pasting the remedy block on a current image would
-    take that risk for nothing — the block is guarded on a check a working
-    ``agg`` passes (``agg --version``), matching the prose that says to install
-    it only when that fails.
+    The block's job is to make ``agg`` run, not to replace one that does: a
+    download is a network dependency the render does not need, and an in-place
+    transfer that failed partway would leave a truncated binary that shadows
+    the image's working ``agg`` (verified: a dropped transfer replaced a
+    working agg with a 500-byte file — the block now installs through a temp
+    file and a rename, so its own transfer cannot shadow anything, but the
+    guard still keeps a working binary from depending on the network). The
+    bundled Dockerfile installs ``agg``, so a worker pasting the remedy block
+    on a current image would take that risk for nothing — the block is
+    guarded on a check a working ``agg`` passes (``agg --version``), matching
+    the prose that says to install it only when that fails.
     This runs the recipe's own block both ways against a stub ``curl``.
     """
     r, agg, called = _run_install_block(name, tmp_path, agg_present=agg_present)
@@ -2336,6 +2364,40 @@ def test_renderer_install_is_bounded_and_drops_a_partial_download(name,
         f"{name}: a failed download left a partial agg earlier on PATH than "
         "the image's working binary")
     assert "could not download agg" in r.stderr, r.stderr
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_renderer_install_survives_a_concurrent_in_place_download(name,
+                                                                  tmp_path):
+    """Two workers sharing one HOME must not execute a download in progress.
+
+    QA S22 (2026-10-28) observed the shape with two workers sharing one HOME:
+    both pass the ``agg --version`` guard, both run the install, and with
+    ``curl -o ~/.local/bin/agg`` writing in place one transfer is still open
+    for writing when the other worker's render — or its own post-install
+    check — executes that path. The exec fails with ETXTBSY ("Text file
+    busy"), the block reports "the agg on PATH (...) does not run — remove it
+    and re-run the render", and the render reports "agg failed on the cast —
+    is 'agg' installed?": the wrong cause in both, with a remedy that deletes
+    the binary the other worker just finished installing (verified in this
+    container against the pre-fix block and the pre-fix render block). The
+    download now goes to a private ``mktemp`` file and is renamed into place,
+    so a reader sees either the previous binary or the complete new one.
+    This case holds the shared path open for writing for the whole run; the
+    block must still install and report success, and leave no temp file.
+    """
+    r, agg, called = _run_install_block(
+        name, tmp_path, agg_present=True, hold_agg_open=True)
+
+    assert called.exists(), "the fixture did not run the install"
+    assert r.returncode == 0, (
+        f"{name}: the install failed although the only thing wrong was "
+        "another worker's in-place download holding the shared path open "
+        "(the wrong-cause ETXTBSY failure): " + r.stderr)
+    assert "does not run" not in r.stderr, r.stderr
+    assert agg.read_text() == "#!/bin/sh\necho downloaded\n", agg.read_text()
+    assert not list(agg.parent.glob("agg.tmp.*")), (
+        f"{name}: the install left a temp file beside the installed agg")
 
 
 @pytest.mark.parametrize("name", RECIPES)

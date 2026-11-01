@@ -455,35 +455,66 @@ prober otherwise reads as a bad gif:
 
 ```
 # Install when agg is missing *or* the one on PATH does not run. The bundled
-# Dockerfile installs it, so this block usually does nothing. Re-downloading
-# over a *working* agg is not harmless: `~/.local/bin` comes first on PATH,
-# and `curl -o` writes in place, so a transfer that fails partway leaves a
-# truncated binary that shadows the image's working one (verified: a dropped
-# transfer replaced a working agg with a 500-byte file). A *truncated* agg is
-# the other half of that story, and the reason the guard is not
-# `command -v agg`: it still resolves, so a resolvability guard skips the
-# install, and the render's "agg failed on the cast — is 'agg' installed?"
-# sends the worker back here, where nothing happens — a remedy that cannot
-# work, in a loop. `agg --version` is the handle: a working agg answers 0
-# (verified with agg 1.9.0), while a truncated or wrong-architecture binary
-# fails to execute.
+# Dockerfile installs it, so this block usually does nothing — and a working
+# agg is left alone rather than re-downloaded over: the block's job is to make
+# agg run, not to replace one that does, and an in-place transfer that fails
+# partway would leave a truncated binary earlier on PATH than the image's
+# working one (verified: a dropped transfer replaced a working agg with a
+# 500-byte file). A *truncated* agg is the other half of that story, and the
+# reason the guard is not `command -v agg`: it still resolves, so a
+# resolvability guard skips the install, and the render's "agg failed on the
+# cast — is 'agg' installed?" sends the worker back here, where nothing
+# happens — a remedy that cannot work, in a loop. `agg --version` is the
+# handle: a working agg answers 0 (verified with agg 1.9.0), while a
+# truncated or wrong-architecture binary fails to execute.
 if ! agg --version >/dev/null 2>&1; then
     mkdir -p ~/.local/bin
+    # Download to a private temp file and rename it into place; never write
+    # ~/.local/bin/agg itself. Two workers can share one HOME (QA workers
+    # do), and both pass the guard above, so with `curl -o ~/.local/bin/agg`
+    # one worker's download holds the shared path open for writing while the
+    # other runs it — the render, or this block's own post-install check,
+    # then fails with "Text file busy", reported as "agg failed on the cast —
+    # is 'agg' installed?" / "the agg on PATH (...) does not run": the wrong
+    # cause, with a remedy that removes the binary the other worker just
+    # finished installing (verified: seven concurrent runs, sha256 == the
+    # release, one valid mp4 and one loud wrong-cause failure). A rename
+    # inside one directory is atomic, so a reader sees either the previous
+    # binary or the complete new one, never a download in progress; the
+    # per-process temp name keeps two installers from truncating each other's
+    # download. (An install killed mid-download leaves an `agg.tmp.…` file
+    # behind; it is not on PATH, so it shadows nothing.)
+    agg_tmp=$(mktemp ~/.local/bin/agg.tmp.XXXXXX) || {
+        echo "could not create a temporary file in ~/.local/bin — check the" \
+            "path and its permissions" >&2
+        exit 1
+    }
     # Bound the download like every other request in this recipe: a transfer
     # that stalls would otherwise hang the worker with no deadline, the same
-    # unbounded wait the capture flow bounds everywhere else. `-o` writes in
-    # place, so a failed or timed-out download leaves a partial file behind —
-    # remove it rather than leave a broken `agg` earlier on PATH than the
-    # image's working one.
+    # unbounded wait the capture flow bounds everywhere else. The partial is
+    # the temp file, so a failed or timed-out download leaves nothing on PATH.
     curl -fsSL --connect-timeout 5 --max-time 180 \
         https://github.com/asciinema/agg/releases/latest/download/agg-$(uname -m)-unknown-linux-gnu \
-        -o ~/.local/bin/agg || {
-        rm -f ~/.local/bin/agg
+        -o "$agg_tmp" || {
+        rm -f "$agg_tmp"
         echo "could not download agg — put a release binary on PATH and" \
             "re-run the render" >&2
         exit 1
     }
-    chmod +x ~/.local/bin/agg
+    chmod 755 "$agg_tmp" || {
+        rm -f "$agg_tmp"
+        echo "could not make the downloaded agg executable — check the" \
+            "permissions of ~/.local/bin" >&2
+        exit 1
+    }
+    # Publish in one step: if the rename fails, the previous agg (if any) is
+    # untouched and this download is removed — never a half-installed binary.
+    mv -f "$agg_tmp" ~/.local/bin/agg || {
+        rm -f "$agg_tmp"
+        echo "could not install the downloaded agg at ~/.local/bin/agg —" \
+            "check the path and its permissions" >&2
+        exit 1
+    }
     # The install's job is to make `agg` resolvable, not to leave a file on
     # disk. `~/.local/bin` is on PATH in the image, but where it is not, this
     # block would exit 0 with an `agg` nothing can run: the render then fails
