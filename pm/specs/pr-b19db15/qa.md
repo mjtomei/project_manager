@@ -993,6 +993,21 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   this run's video and the manifest names it when it survives (R66). The
   finalize writes the partial and renames only after a complete encode, as
   both recording recipes' `render_cast` already did.
+- A recording recipe's render is killed while it encodes → the capture
+  directory holds the interrupted encode's `recording.mp4.partial.mp4` and
+  the intermediate `recording.cast.gif`, and **no** `recording.mp4` (no
+  failure path of the block gets to clean up). Neither is this run's video,
+  and the produced-files list and the manifest's `## Files` example name
+  them, so a worker building the manifest from the recipe cannot omit files
+  the directory holds — nor present the partial as the recording (R75).
+- The `agg` install's own steps fail (no temp file from `mktemp`, a `chmod`
+  that fails, a rename that fails) → each stops with its own message,
+  leaves no `agg.tmp.…` behind and does not touch the `agg` that was
+  already there. Without those guards the block reports "could not download
+  agg" for a download that never started, "the agg on PATH … does not run"
+  for a binary that was fine, or "still does not resolve" for an install
+  whose rename failed — each a failure naming a cause the step cannot have
+  (R75).
 
 ## Pass / Fail criteria
 

@@ -24,6 +24,17 @@ substitutes the actual captures directory for `<capture-dir>`):
   player library, works offline. H.264/mp4 plays everywhere including
   iOS Safari (VP8/VP9 webm does not decode on iOS). The `.cast` stays
   as the small, exact-replay/grep source.
+- `recording.mp4.partial.mp4`, `recording.cast.gif` — the render's
+  in-progress outputs. `render_cast` encodes to the partial and renames it
+  onto `recording.mp4` only after a complete encode, and deletes the
+  intermediate gif only after that rename, so they survive only when the
+  render was killed before it published (the worker or its session torn
+  down while `ffmpeg` ran — no failure path of the block gets to clean up).
+  They are never this run's video: the capture preamble and the scaffold
+  clear both names before the next recording, and the render block clears
+  them before it starts, so anything there belongs to the killed render.
+  Mention whichever exists in the manifest's `## Files` section, and do not
+  present the partial as the recording.
 - `transcript.log` — plain-text output of the recorded command, written
   **only** by the `tee` fallback for a host without asciinema (that
   capture has no cast and no video).
@@ -814,6 +825,9 @@ recipe: pm/qa/artifacts/cli-recording.md
 
 - `recording.cast` — <one-line description>
 - `recording.mp4` — <one-line description>
+- `recording.mp4.partial.mp4`, `recording.cast.gif` — the render's in-progress
+  outputs, present only when it was killed before it published (not this
+  run's recording)
 - `<any extra file>` — <one-line description>
 ```
 

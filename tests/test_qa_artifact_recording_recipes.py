@@ -343,6 +343,49 @@ class TestRecipes:
                 "the capture flow writes into the capture directory")
 
     @pytest.mark.parametrize("name", RECIPES)
+    def test_produced_files_list_names_the_render_partials(self, name):
+        """A killed render leaves two files the produced-files list never named.
+
+        ``render_cast`` encodes to ``recording.mp4.partial.mp4`` and renames it
+        onto ``recording.mp4`` only after a complete encode, and deletes the
+        intermediate ``recording.cast.gif`` only after that rename. A render
+        killed while ``ffmpeg`` runs (the worker or its session torn down)
+        reaches no cleanup at all, so both stay in the capture directory —
+        verified in this container with the recipes' own render blocks and a
+        stub encoder: after SIGKILL of the render shell the directory holds
+        ``recording.cast``, ``recording.cast.gif`` and
+        ``recording.mp4.partial.mp4``.
+
+        Step 0 clears both names before the next capture and the render notes
+        tell the worker to label and list a partial it keeps, but the
+        produced-files list and the manifest's ``## Files`` example named
+        neither — so a worker building the manifest from them leaves out
+        files the directory holds, and the partial is the one that looks like
+        this run's video. The web-UI recipe names its equivalent partial for
+        exactly this reason (R62/R66); this is the same list, one render step
+        over. The names are derived from the render block, like the step-0
+        cleanup case: ``$cast.gif`` and ``$mp4.partial.mp4`` are what the
+        block actually writes.
+        """
+        text = _recipe_text(name)
+        cast_rel = re.search(r"^cast=(\S+)$", _render_block(name),
+                             re.M).group(1)
+        intermediate = Path(cast_rel).name + ".gif"          # "$cast.gif"
+        partial = Path(cast_rel).stem + ".mp4.partial.mp4"   # "$mp4.partial.mp4"
+        produced = text.split("## What this recipe produces", 1)[1].split(
+            "## Capture", 1)[0]
+        manifest = text.split("## Manifest format", 1)[1].split(
+            "## Reviewing", 1)[0]
+        for fname in (partial, intermediate):
+            assert fname in produced, (
+                f"{name}: the produced-files list never names {fname}, which a "
+                "render killed mid-encode leaves in the capture directory")
+            assert fname in manifest, (
+                f"{name}: the manifest's `## Files` example does not name "
+                f"{fname}, so a worker copying it leaves out a file the "
+                "capture directory holds")
+
+    @pytest.mark.parametrize("name", RECIPES)
     def test_capture_section_creates_the_capture_dir(self, name):
         """The capture dir must be created before asciinema writes into it.
 
@@ -2196,7 +2239,7 @@ def _install_block(name):
 
 def _run_install_block(name, tmp_path, curl_body=None, agg_present=False,
                        agg_body=None, local_on_path=True,
-                       hold_agg_open=False):
+                       hold_agg_open=False, fail_tool=None):
     """Run the recipe's own ``agg`` install block against stub tools.
 
     ``agg_present`` seeds an ``agg`` in ``~/.local/bin`` (ahead of the stub
@@ -2208,6 +2251,9 @@ def _run_install_block(name, tmp_path, curl_body=None, agg_present=False,
     process that holds the seeded ``agg`` open for writing for the whole run —
     the other worker's in-place download — so a case can exercise what happens
     when this block, or a render, executes a file that is being written.
+    ``fail_tool`` makes one of the install's own tools (``mktemp``, ``chmod``
+    or ``mv``) fail, so a case can drive each step of the temp-file-and-rename
+    install where it breaks.
     Returns ``(proc, agg path, curl-called marker)``.
     """
     block = _install_block(name)
@@ -2228,7 +2274,10 @@ def _run_install_block(name, tmp_path, curl_body=None, agg_present=False,
     for tool in ("mkdir", "chmod", "uname", "rm", "mktemp", "mv"):
         real = shutil.which(tool)
         assert real, f"{tool} is required"
-        _stub_tool(bindir, tool, f'exec "{real}" "$@"\n')
+        if tool == fail_tool:
+            _stub_tool(bindir, tool)          # exit 1: this step breaks
+        else:
+            _stub_tool(bindir, tool, f'exec "{real}" "$@"\n')
     # The stub's PATH is the stub dir itself, so it may only use builtins.
     _stub_tool(bindir, "curl", curl_body or f''': > "{called}"
 for a in "$@"; do last=$a; done
@@ -2447,6 +2496,58 @@ def test_renderer_install_names_an_agg_it_cannot_resolve(name, tmp_path):
     assert "~/.local/bin" in r.stderr and "PATH" in r.stderr, (
         f"{name}: the failure does not name the directory to put on PATH: "
         + r.stderr)
+
+
+@pytest.mark.parametrize("name", RECIPES)
+@pytest.mark.parametrize("fail_tool,message,downloaded", [
+    ("mktemp", "could not create a temporary file", False),
+    ("chmod", "could not make the downloaded agg executable", True),
+    ("mv", "could not install the downloaded agg", True),
+], ids=["no-temp-file", "chmod-fails", "rename-fails"])
+def test_renderer_install_names_the_step_that_failed(name, fail_tool, message,
+                                                     downloaded, tmp_path):
+    """Every step of the temp-file install fails in its own words.
+
+    R72 moved the download to a per-process ``mktemp`` file that is chmodded
+    and renamed into place, and R74 pinned the download branch's
+    ``rm -f "$agg_tmp"``. The install's other three failure paths had no case
+    at all: removing all three guards left the whole file green (284 passed,
+    verified in this container). They are load-bearing, not decoration.
+
+    Without the ``mktemp`` guard the block runs on with an empty ``agg_tmp``
+    and reports "could not download agg" for a download that never started;
+    without the ``chmod`` guard it renames a non-executable file into place
+    and reports "the agg on PATH (…) does not run — remove it", whose remedy
+    deletes a binary that was never the problem; without the rename guard it
+    reports "installed ~/.local/bin/agg but 'agg' still does not resolve" for
+    an install whose rename failed — each a failure naming a cause the step
+    cannot have, the class this PR is about. Each branch also removes only
+    its own temp, so a failed install leaves neither a stray ``agg.tmp.…``
+    nor a damaged binary: the seeded ``agg`` resolves and does not run, so
+    the block is entered (a working one is left alone by design), and the
+    case requires it to come out byte-for-byte unchanged. ``downloaded`` says
+    whether the step under test runs before or after the transfer, so the
+    case also pins that a missing temp file stops the block before it starts
+    a download it cannot write into.
+    """
+    broken = "#!/bin/sh\nexit 126\n"
+    r, agg, called = _run_install_block(
+        name, tmp_path, agg_present=True, agg_body=broken,
+        fail_tool=fail_tool)
+
+    assert called.exists() == downloaded, (
+        f"{name}: the `{fail_tool}` failure came "
+        f"{'after' if downloaded else 'before'} the download, as expected")
+    assert r.returncode != 0, (
+        f"{name}: the install block exited 0 although `{fail_tool}` failed, "
+        "so a failed install is reported as a successful one")
+    assert message in r.stderr, r.stderr
+    assert agg.read_text() == broken, (
+        f"{name}: a failed install overwrote or removed the agg that was "
+        "already there: " + agg.read_text())
+    assert not list(agg.parent.glob("agg.tmp.*")), (
+        f"{name}: the failed `{fail_tool}` path left its temp file in "
+        "~/.local/bin")
 
 
 def test_cli_tee_fallback_writes_the_transcript_into_the_capture_dir():
@@ -5786,19 +5887,20 @@ class TestCaptureFlowExecution:
                 "stop, so a later run in the session can take the claim and "
                 "have its pipe closed by this run's cleanup" % (previous,))
 
-    @pytest.mark.parametrize("mode", [
-        "pipefail",     # step 2 could not attach the transcript pipe
-        "nostart",      # step 3 could not create the recorder session
-        "norec",        # the recorder never drew
-        "dies",         # the recorder exited before drawing
-        "failedattach",  # the attach drew its own error and exited
-        "stuck",        # the recorder never exited at the stop bound
-        "notranscript",  # the pipe wrote nothing
-        "midadied",     # the recorder died mid-scenario
-        "detachfail",   # the recorder vanished before the detach key
-        "midbothbad",   # killed recorder, target session gone too
+    @pytest.mark.parametrize("mode,message", [
+        ("pipefail", "could not stream"),        # step 2 could not attach the pipe
+        ("nostart", "could not start the recorder session"),  # step 3 start failed
+        ("norec", "recorder did not come up"),   # the recorder never drew
+        ("dies", "recorder exited before it drew"),  # it exited before drawing
+        ("failedattach", "recorder exited before it drew"),  # drew its own error
+        ("stuck", "recorder did not exit within"),  # never exited at the bound
+        ("notranscript", "transcript.log is empty"),  # the pipe wrote nothing
+        ("midadied", "recorder exited while the TUI was still running"),
+        ("detachfail", "recorder exited before the detach"),
+        ("midbothbad", "asciinema exited 137"),
     ])
-    def test_a_failed_run_releases_its_capture_dir_claim(self, mode, tmp_path):
+    def test_a_failed_run_releases_its_capture_dir_claim(self, mode, message,
+                                                         tmp_path):
         """A claim must not outlive a *failed* run either.
 
         The claim lives on the pm session, which usually survives a failed
@@ -5813,11 +5915,22 @@ class TestCaptureFlowExecution:
         no case exercised, so deleting it left every test green. A run killed
         outright (SIGKILL) leaves a claim no path can release, which is why
         both refusal messages name the manual clear.
+
+        Each mode also has to *reach* its branch, and the message is how the
+        case knows: if a fixture drifted to an earlier failure, the claim
+        would still be released there and the assertion would pass while the
+        branch under test — the one whose release line this case exists to
+        pin — never ran (the same "fails for the wrong reason" hole the
+        sibling ``test_step_five_failures_release_the_claim`` closes for the
+        two cast/status branches).
         """
         r, _cast = _run_capture_block(
             "tmux-screen-recording.md", mode, tmp_path, target=True)
         assert r.returncode != 0, (
             f"{mode}: the fixture was expected to fail the run")
+        assert message in r.stderr, (
+            f"{mode}: the run failed somewhere other than the branch under "
+            "test, so its claim release is not exercised: " + r.stderr)
         claim = tmp_path / "state" / "claim.pm-test"
         assert not claim.exists(), (
             f"{mode}: the failed run left its capture-dir claim on the "

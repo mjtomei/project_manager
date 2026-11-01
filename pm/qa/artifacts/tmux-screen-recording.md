@@ -26,6 +26,17 @@ names):
   plain `<video controls>` element — native pause / scrub, no player
   library, works offline. The `.cast` stays as the small,
   exact-replay/grep source.
+- `recording.mp4.partial.mp4`, `recording.cast.gif` — the render's
+  in-progress outputs. `render_cast` encodes to the partial and renames it
+  onto `recording.mp4` only after a complete encode, and deletes the
+  intermediate gif only after that rename, so they survive only when the
+  render was killed before it published (the worker or its session torn
+  down while `ffmpeg` ran — no failure path of the block gets to clean up).
+  They are never this run's video: step 0 clears both names before the next
+  capture and the render block clears them before it starts, so anything
+  there belongs to the killed render. Mention whichever exists in the
+  manifest's `## Files` section, and do not present the partial as the
+  recording.
 - `recorder.status`, `recorder-stderr.log` (and `recorder-pane.log` when a
   wait gives up or the driving step's send fails) — the capture flow's
   diagnostics: asciinema's own exit
@@ -1148,6 +1159,9 @@ recipe: pm/qa/artifacts/tmux-screen-recording.md
 - `transcript.log` — <one-line description>
 - `recording.cast` — <one-line description>
 - `recording.mp4` — <one-line description>
+- `recording.mp4.partial.mp4`, `recording.cast.gif` — the render's in-progress
+  outputs, present only when it was killed before it published (not this
+  run's recording)
 - `<any extra file>` — <one-line description>
 ```
 
