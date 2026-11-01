@@ -2653,6 +2653,34 @@ def test_pr_show_renders_the_resolution(w):
     assert ", … 17 more" in r.output
 
 
+def test_pr_show_derives_the_digest_a_record_omits(w):
+    """A record can carry the resolution without its digest.
+
+    Hand-edited state (and a record written by an older pm) can hold the
+    resolution but no ``resolution_digest``.  The merge gate does not trust
+    the stored value alone — it falls back to a digest recomputed from the
+    record — so show names the same value the gate compares instead of
+    dropping the line and leaving the reader without the number sign-off is
+    bound to.
+    """
+    rec = _metadata_conflict(w)
+
+    def _record(d):
+        compacted = integration.compact(rec)
+        compacted.pop("resolution_digest", None)
+        store.get_pr(d, PR)["integration"] = compacted
+    store.locked_update(w.pm_dir, _record)
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    current = store.get_pr(store.load(w.pm_dir), PR)["integration"]
+    assert "resolution_digest" not in current
+    expected = integration._resolution_digest(current["resolution"])
+    assert expected
+    assert f"Resolution digest: {expected[:12]}" in r.output
+
+
 def test_pr_show_prints_the_recorded_signoff_evidence(w):
     """The evidence block is what makes the reuse decision auditable.
 

@@ -970,6 +970,12 @@ def _signoff_gate(app, pr_id: str) -> tuple[str | None, str | None, dict]:
     sha = signoff_mod.head_sha(pr.get("workdir"))
     base_branch = ((data or {}).get("project") or {}).get("base_branch",
                                                          "master")
+    # Hand-edited state: a ``base_branch`` that is not a branch name is not a
+    # ref the approval can be bound to, so it falls back to the default the
+    # other readers assume (otherwise the gate refuses every auto-merge with
+    # "the project merges into {'bad': True}").
+    if not (isinstance(base_branch, str) and base_branch):
+        base_branch = "master"
     return sha, signoff_mod.merge_gate_refusal(pr, sha, base_branch), pr
 
 

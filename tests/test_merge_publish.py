@@ -117,6 +117,29 @@ def test_local_publishes_the_approved_candidate(local):
     assert git(local.wd, "rev-parse", "HEAD") == local.head
 
 
+def test_a_malformed_base_branch_reads_as_the_default(local):
+    """``project.base_branch`` is hand-edited state, and ``pm pr merge`` read
+    it raw.
+
+    The gate interpolated its repr into "the project merges into
+    {'bad': True}" and refused *every* merge with a nonsensical reason — and
+    the same value would have reached ``git fetch`` as an argument.  A value
+    that is not a branch name is not a base: it falls back to the default the
+    other readers assume, so the approved candidate still publishes.
+    """
+    rec = approve(local)
+
+    def _malform(d):
+        d["project"]["base_branch"] = {"bad": True}
+    store.locked_update(local.pm_dir, _malform)
+
+    result, windows, finalized = merge(local)
+    assert result.exit_code == 0, result.output
+    assert "the project merges into" not in result.output
+    assert finalized and windows == []
+    assert git(local.repo, "rev-parse", "master^{tree}") == rec["candidate_tree"]
+
+
 def test_local_publish_does_not_rely_on_main_repo_fetch_head(local):
     """A concurrent fetch in the main repo rewrites its FETCH_HEAD; the
     merge commit is fetched into a private ref instead, removed after."""

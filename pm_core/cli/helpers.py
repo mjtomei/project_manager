@@ -1212,13 +1212,25 @@ def _clone_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
     """
     import shutil
 
+    # Hand-edited state: a ``branch``/``repo``/``base_branch`` that is not a
+    # string is not a ref or a remote (all three are passed to git as
+    # arguments, where a non-string raises ``TypeError`` — from
+    # ``shlex.join`` in the shell-command log before git even runs — so the
+    # clone failed and every window launch that provisions a workdir died
+    # with it).  A missing branch still has no workdir to build; the other
+    # two fall back to the defaults the other readers assume.
     branch = pr_entry.get("branch")
-    if not branch:
+    if not (isinstance(branch, str) and branch):
         _log.warning("Cannot ensure workdir: PR %s has no branch", pr_entry.get("id"))
         return None
 
-    repo_url = data.get("project", {}).get("repo", "")
-    base_branch = data.get("project", {}).get("base_branch", "master")
+    project = data.get("project")
+    project = project if isinstance(project, dict) else {}
+    repo_url = project.get("repo", "")
+    repo_url = repo_url if isinstance(repo_url, str) else ""
+    base_branch = project.get("base_branch", "master")
+    if not (isinstance(base_branch, str) and base_branch):
+        base_branch = "master"
     pr_id = pr_entry["id"]
 
     project_dir = _workdirs_dir(data)

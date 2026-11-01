@@ -126,6 +126,25 @@ def test_tui_gate_checks_the_configured_base_branch(w):
     assert refusal and "'develop'" in refusal
 
 
+def test_a_malformed_base_branch_reads_as_the_default_in_the_gate(w):
+    """The TUI auto-merge gate reads ``project.base_branch`` defensively too.
+
+    A hand-edited value that is not a branch name is not a base the approval
+    can be compared against — it falls back to the default the other readers
+    assume, so a valid approval still passes instead of being refused with
+    "the project merges into {'bad': True}".
+    """
+    from pm_core.tui.review_loop_ui import _signoff_gate
+    integration.check_integration(w.pm_dir, PR)
+    step(w, SIGNOFF_MERGE)
+
+    def _malform(d):
+        d["project"]["base_branch"] = {"bad": True}
+    store.locked_update(w.pm_dir, _malform)
+    app = SimpleNamespace(_root=w.pm_dir, _data=None)
+    assert _signoff_gate(app, PR)[1] is None
+
+
 def test_conflicted_integration_routes_merge_to_impl(w):
     commit(w.wd, "shared.txt", "pr\n", "pr edits shared")
     commit(w.repo, "shared.txt", "base\nmore\n", "base edits shared")

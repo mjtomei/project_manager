@@ -462,6 +462,59 @@ class TestEnsureWorkdir:
             data = {"project": {"name": "test"}}
             assert _ensure_workdir(data, pr_entry, tmp_path) is None
 
+    def test_a_non_string_base_branch_does_not_break_the_clone(self, tmp_path):
+        """``project.base_branch`` is hand-editable state, and the clone
+        passed it straight to ``git clone --branch``.
+
+        A mapping reached ``shlex.join`` in the shell-command log and raised
+        ``TypeError: expected string or bytes-like object``, so the clone
+        failed ("Failed to clone: ...") and the sign-off window never opened.
+        A value that is not a branch name is not a ref: it falls back to the
+        default the other readers assume.
+        """
+        pm_root = tmp_path / "pm"
+        pm_root.mkdir()
+        pr_entry = {"id": "pr-001", "workdir": "/nonexistent",
+                    "branch": "pm/pr-001"}
+        data = {"project": {"name": "test", "repo_id": "abc12345def",
+                            "repo": "https://example.com/repo.git",
+                            "base_branch": {"bad": True}}}
+        calls = {}
+
+        def fake_clone(src, dest, branch=None):
+            dest.mkdir(parents=True, exist_ok=True)
+            calls["clone"] = (src, dest, branch)
+
+        def fake_run_git(*args, cwd=None, check=True, **kw):
+            from types import SimpleNamespace
+            return SimpleNamespace(stdout="abcd1234", returncode=0, stderr="")
+
+        with patch("pm_core.cli.helpers._resolve_repo_dir",
+                   return_value=tmp_path / "nope"), \
+             patch("pm_core.cli.helpers.git_ops.clone", side_effect=fake_clone), \
+             patch("pm_core.cli.helpers.git_ops.checkout_branch"), \
+             patch("pm_core.cli.helpers.git_ops.run_git", side_effect=fake_run_git), \
+             patch("pm_core.cli.helpers.git_ops.is_git_repo", return_value=False), \
+             patch("pm_core.cli.helpers._resolve_repo_id"), \
+             patch("pm_core.cli.helpers.store.locked_update"):
+            result = _ensure_workdir(data, pr_entry, pm_root)
+
+        assert result is not None
+        assert calls["clone"][2] == "master"
+
+    def test_a_non_string_branch_is_not_a_ref_to_clone(self, tmp_path):
+        """The same contract for the PR record's own ``branch``.
+
+        A non-string ``branch`` passed the ``if not branch`` check (a mapping
+        is truthy) and then reached ``git clone``/``branch.replace`` — the
+        same ``TypeError`` out of the shell-command log.
+        """
+        for bad in ({"a": 1}, 5, ["x"]):
+            pr_entry = {"id": "pr-001", "workdir": "/nonexistent",
+                        "branch": bad}
+            data = {"project": {"name": "test"}}
+            assert _ensure_workdir(data, pr_entry, tmp_path) is None
+
     def test_a_workdir_that_is_a_file_is_not_a_checkout(self, tmp_path):
         """A *string* path that is a regular file is not a checkout either.
 

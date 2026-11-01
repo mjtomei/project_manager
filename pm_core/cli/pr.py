@@ -1165,6 +1165,15 @@ def pr_show(pr_id: str):
             click.echo("Applied merge: "
                        + (applied or "not applied to the PR branch"))
             digest = integ.get("resolution_digest")
+            if not digest:
+                # A record can carry the resolution without its digest (a
+                # hand-edited state file, an older pm).  The merge gate does
+                # not trust the stored value alone: it falls back to a digest
+                # recomputed from the record, so show names the same value
+                # the gate compares instead of dropping the line and leaving
+                # the reader without the number sign-off is bound to.
+                digest = integration._resolution_digest(
+                    resolution if isinstance(resolution, dict) else None)
             if isinstance(digest, str) and digest:
                 click.echo(f"Resolution digest: {digest[:12]}")
             diff_path = resolution.get("diff_path")
@@ -3509,8 +3518,17 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
         click.echo(f"PR {pr_id} is already merged.", err=True)
         raise SystemExit(1)
 
-    backend_name = data["project"].get("backend", "vanilla")
-    base_branch = data["project"].get("base_branch", "master")
+    project = data.get("project")
+    project = project if isinstance(project, dict) else {}
+    backend_name = project.get("backend", "vanilla")
+    base_branch = project.get("base_branch", "master")
+    # Hand-edited state: a ``base_branch`` that is not a branch name is not a
+    # ref to compare, fetch or publish against (the gate interpolated its repr
+    # into "the project merges into {'bad': True}", refusing every merge with
+    # a nonsensical reason), so it falls back to the default the other readers
+    # assume.
+    if not (isinstance(base_branch, str) and base_branch):
+        base_branch = "master"
 
     # --no-signoff-check / --propagation-only only RECOVER a merge that is
     # already published (finalize state, update the main repo checkout);
