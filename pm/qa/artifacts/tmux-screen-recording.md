@@ -69,8 +69,9 @@ earlier run left behind. All of them matter, and `<capture-dir>` has to be
 an absolute path (or start with `~/`): tmux runs the transcript pipe's
 command in the pm session's directory, so a relative path writes the
 transcript somewhere these steps never look (step 0 refuses one rather than
-failing later as an empty transcript, and step 2 — the paste-alone
-re-attach — refuses it too). A leftover `pm-recorder`
+failing later as an empty transcript, and every step pasted on its own —
+2, 3, 4 and 5 — refuses it too, because each resolves the path against its
+own shell or the session's directory). A leftover `pm-recorder`
 session makes step 3's `new-session` fail with "duplicate session" — step 3
 reports that as a start failure, so the run stops there instead of passing
 the readiness wait on the *previous* run's attach client. The clear names the
@@ -503,6 +504,22 @@ tmux pipe-pane -t "=$TARGET:0.0" "cat >> <capture-dir>/transcript.log" || {
 #    and `set-option -u -t '=:0.0'` both exit 0 on the current session), so a
 #    failed start could stop another run's transcript pipe and clear its
 #    capture-directory claim — the collision the claim exists to prevent.
+#    The capture directory has to be absolute here too, not only in steps 0
+#    and 2: this step is pasted on its own when a run restarts its recorder,
+#    and the pane command's cast, stderr log and status resolve against the
+#    shell that pasted it — a fresh shell pastes the *stop* step, so a
+#    relative path writes the cast into this shell's directory while step 5
+#    reads another, and the run ends with "asciinema wrote no cast" for a
+#    recording that finished. Refuse it here, before the session is created.
+case "<capture-dir>" in
+    /* | "~"/*) ;;
+    *)  echo "<capture-dir> must be an absolute path (or start with ~/) —" \
+            "the recorder's pane command writes the cast, its stderr log and" \
+            "its status there, and this step is pasted on its own, so a" \
+            "relative path resolves against this shell and writes them where" \
+            "step 5 does not look; use the path step 0 created" >&2
+        exit 1 ;;
+esac
 TARGET=${TARGET:-$(pm session name)}
 if [ -z "$TARGET" ]; then
     echo "TARGET is unset and 'pm session name' printed nothing — run this" \
@@ -582,6 +599,21 @@ fi
 #    so the keys can drive a different TUI than the one being recorded, with
 #    no error at all and a cast that never showed the behaviour. Re-derive
 #    the handle as step 5 does, and refuse an empty one.
+#    The capture directory has to be absolute here too (or start with ~/):
+#    this step is pasted on its own, and its failure path saves the recorder
+#    pane into <capture-dir> — a relative path resolves against whichever
+#    shell pasted it, so the message below named a recorder-pane.log the save
+#    never wrote (verified live: pasted from a directory with no `relcap/`,
+#    the save answered "relcap/recorder-pane.log: No such file or directory"
+#    and the failure still tore the recorder down). Refuse it before any send.
+case "<capture-dir>" in
+    /* | "~"/*) ;;
+    *)  echo "<capture-dir> must be an absolute path (or start with ~/) —" \
+            "this step's failure path saves the recorder pane there, and a" \
+            "relative path resolves against this shell, so the save would" \
+            "not land where the message points; use the path step 0 created" >&2
+        exit 1 ;;
+esac
 TARGET=${TARGET:-$(pm session name)}
 if [ -z "$TARGET" ]; then
     echo "TARGET is unset and 'pm session name' printed nothing — run this" \
@@ -678,6 +710,26 @@ pm tui send a -s "$TARGET" || send_failed   # open the picker
 #    no-op this best-effort cleanup is meant to be — and step 2 writes its
 #    claim with the same exact handle, so no claim can sit on a grouped session
 #    for it to find anyway.
+#    The capture directory has to be absolute here too (or start with ~/):
+#    this step is pasted on its own whenever the scenario is driven
+#    interactively, and it reads the cast, the recorder's status and the
+#    transcript from it — a relative path resolves against whichever shell
+#    pasted it, so a fresh shell (the usual case) read a directory the run
+#    never wrote into and reported a finished recording as "asciinema wrote
+#    no cast" / "recorder status is missing or empty" (verified live: the
+#    cast, status 0 and transcript sat in the recorder's capture directory
+#    while this step, pasted from another directory with the same relative
+#    path, exited 1; the same block with the absolute path exited 0). Refuse
+#    it here, before the recorder is detached.
+case "<capture-dir>" in
+    /* | "~"/*) ;;
+    *)  echo "<capture-dir> must be an absolute path (or start with ~/) —" \
+            "this step reads the cast, the recorder's status and the" \
+            "transcript there, and a relative path resolves against this" \
+            "shell, so a finished recording reads as a missing one; use the" \
+            "path step 0 created" >&2
+        exit 1 ;;
+esac
 TARGET=${TARGET:-$(pm session name)}
 if [ -z "$TARGET" ]; then
     echo "TARGET is unset and 'pm session name' printed nothing — run this" \

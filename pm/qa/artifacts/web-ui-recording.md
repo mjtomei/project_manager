@@ -81,6 +81,12 @@ substitutes the per-PR captures directory — `$(pm qa captures-path
   survives only when a run stopped before the teardown (a failed driver,
   which step 2 says not to finalize) — mention it in the manifest when it
   does.
+- `app.log` — the app's own stdout/stderr, written by step 1's launch. It is
+  what the readiness failure points at (the app's startup output, or the
+  shell's "command not found" for an `APP_START` that does not exist), and it
+  keeps the app from holding the block's stdout/stdin open. Step 1 clears a
+  previous run's copy, so the log in the directory is always this run's;
+  mention it in the manifest.
 - `manifest.md` — frontmatter + prose per the standard recipe format,
   with a `## Files` section listing every file above. A previous run's
   copy is cleared in step 1 like the rest, and again by step 2's
@@ -165,7 +171,11 @@ mkdir -p "$CAPDIR" || {
 # complete encode, so a finalize killed mid-encode leaves the partial and no
 # `recording.mp4` — the name the manifest and the report present.
 # `server.pid` (written below) goes too: a stale one would make the teardown
-# signal whatever process has since reused that pid.
+# signal whatever process has since reused that pid. The app's `app.log`
+# (written below) goes for the same reason one artifact over: the readiness
+# failure points the worker at it, so a start refused before the app runs
+# (a busy port) must not leave the previous run's startup output there to be
+# read as this run's.
 # The previous run's `manifest.md` goes with them: it is the document that
 # says what this capture is (workdir, the app URL, `## Files`), so a run that
 # fails before the worker writes a new one would leave a manifest describing
@@ -175,7 +185,7 @@ mkdir -p "$CAPDIR" || {
 rm -f "$CAPDIR/recording.mp4" "$CAPDIR/recording.mp4.partial.mp4" \
       "$CAPDIR/trace.zip" "$CAPDIR/dom.html" \
       "$CAPDIR/http.log" "$CAPDIR/sse.log" "$CAPDIR/server.pid" \
-      "$CAPDIR/manifest.md" \
+      "$CAPDIR/app.log" "$CAPDIR/manifest.md" \
       "${CAPDIR:?}"/*.webm "${CAPDIR:?}"/*.png
 
 # Fail fast if something is *already* answering on the port. A previous run's
@@ -224,8 +234,24 @@ fi
 
 # Launch the web UI on the chosen port and background it; keep the pid so
 # we can stop it in teardown. Replace APP_START with your app's command.
+# The app's own output goes to app.log, not to this shell's stdout/stderr:
+# the app outlives the block, so a shell whose output is a pipe (a worker
+# capturing the step, `bash < block | tee …`) would otherwise not see EOF
+# until the app exits — the block would never return, and the teardown that
+# ends the app is a later paste (verified in this container: the block piped
+# into `cat` was still running at 10 s with the app asleep, and the capture
+# directory held only server.pid). app.log is also what the readiness
+# failure below points at: the app's startup output — including the shell's
+# "command not found" for an APP_START that does not exist — is the first
+# thing a failed start has to show, and nothing else writes it down.
+# `< /dev/null` is the other half: when a worker runs the block as
+# `bash < block`, the block's own stdin is that script, and a background
+# child that reads it eats the rest of the block (the finalize step passes
+# ffmpeg `-nostdin` for the same reason). A stale app.log is cleared with
+# the rest in step 1's cleanup, so a refused run does not present the
+# previous run's startup output as this one's.
 APP_START="my-app serve"
-$APP_START --port "$PORT" &
+$APP_START --port "$PORT" > "$CAPDIR/app.log" 2>&1 < /dev/null &
 SERVER_PID=$!
 # The app outlives this shell, and every block below is pasted into a fresh
 # one, so `$SERVER_PID` is normally gone by the time the teardown runs: write
@@ -246,7 +272,8 @@ printf '%s\n' "$SERVER_PID" > "$CAPDIR/server.pid"
 deadline=$(( $(date +%s) + 120 ))
 until curl -s --connect-timeout 2 --max-time 5 -o /dev/null "$APP_URL/"; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
-        echo "app did not answer on $APP_URL within 120s — check its startup output" >&2
+        echo "app did not answer on $APP_URL within 120s — its startup" \
+            "output is in $CAPDIR/app.log; check it" >&2
         kill "$SERVER_PID" 2>/dev/null || true
         # The pid is dead now, so the file must go with it: the teardown
         # falls back to it, and a recycled pid would make it signal an
@@ -859,6 +886,8 @@ fencing deep:
       created one).
     - `server.pid` — the app's pid, present only when the run stopped
       before the teardown (the teardown removes it).
+    - `app.log` — the app's own stdout/stderr from step 1 (the startup
+      output a failed readiness check points at).
 
 ## Reviewing
 

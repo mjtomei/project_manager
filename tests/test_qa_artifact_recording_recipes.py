@@ -120,7 +120,15 @@ hits, regardless of how it waits for a background job:
   tmux recipe's step 2 — the paste-alone re-attach — refuses a relative
   ``<capture-dir>`` because its
   claim is canonicalized while the pipe's command runs in the pm session's
-  directory (the transcript lands nowhere the end-of-run check looks), the
+  directory (the transcript lands nowhere the end-of-run check looks), and
+  every other paste-alone step that resolves ``<capture-dir>`` for itself
+  refuses one too: the tmux recipe's steps 3, 4 and 5 and the CLI scaffold's
+  step 4 are each pasted into a fresh shell (the stop step "is usually a
+  fresh one"), so a relative path wrote the cast where the recorder ran and
+  the checks read somewhere else — a finished recording reported as
+  "asciinema wrote no cast" / "recorder status is missing or empty", the
+  driving step's pane save failing where its message pointed, and the CLI
+  stop step killing the scaffold server that held the recording. The
   web-UI driver block refuses
   a capture directory that is missing or cannot be written or entered — its
   existence and permission checks run before its ``cd``, because a directory
@@ -162,7 +170,13 @@ hits, regardless of how it waits for a background job:
   that timed out — which no case exercised; and a retry's
   cleanup takes the manifest with the outputs it presents, so a driver retried
   after an earlier attempt was finalized cannot fail and leave a manifest
-  naming the video the cleanup deleted.
+  naming the video the cleanup deleted; and the web-UI start hands the app its
+  own log: the app outlives the block, so a block whose output is a pipe (a
+  captured step, ``bash < block | tee …``) did not return until the app
+  exited — which only the teardown does — and the startup output the readiness
+  failure pointed at was written nowhere. The launch redirects to ``app.log``
+  and closes the block's stdin, the failure names the log, and step 1 clears a
+  previous run's copy like the rest.
 
 The capture flow's readiness and stop logic is also *executed* against stub
 ``tmux``/``pm`` (``TestCaptureFlowExecution``), because its failure modes are
@@ -4300,7 +4314,7 @@ def _web_ui_start_block():
 
 
 def _run_web_ui_start(mode, tmp_path, caps_is_file=False, pm_body=None,
-                      mkdir_body=None, capdir_mode=None):
+                      mkdir_body=None, capdir_mode=None, app_body=None):
     """Run the web-UI recipe's app-start block with stub pm/curl/my-app.
 
     ``caps_is_file`` makes the captures path itself a regular file, so the
@@ -4310,7 +4324,9 @@ def _run_web_ui_start(mode, tmp_path, caps_is_file=False, pm_body=None,
     block tries to create without creating it. ``capdir_mode`` pre-creates the
     block's own capture directory with that mode, so a case can model one that
     exists and cannot be written (``mkdir -p`` answers 0 for it); the mode is
-    restored before the run returns.
+    restored before the run returns. ``app_body`` replaces the stub app (which
+    otherwise touches ``app-launched`` and exits), for a case that needs the
+    app to print or to stay up after the block returns.
     """
     block = re.sub(r"\+\s*\d+\s*\)\)", "+ 2 ))", _web_ui_start_block())
     bindir = tmp_path / "bin"
@@ -4328,7 +4344,7 @@ def _run_web_ui_start(mode, tmp_path, caps_is_file=False, pm_body=None,
     if mkdir_body is not None:
         _stub_tool(bindir, "mkdir", mkdir_body)
     _stub_tool(bindir, "curl", _STUB_CURL)
-    _stub_tool(bindir, "my-app", f'touch "{launched}"\n')
+    _stub_tool(bindir, "my-app", app_body or f'touch "{launched}"\n')
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}",
                STUB_MODE=mode, STUB_CURL_COUNT=str(tmp_path / "curl-count"),
                STUB_CURL_LOG=str(tmp_path / "curl-log"))
@@ -4439,6 +4455,97 @@ class TestWebUiStartExecution:
         assert r.returncode != 0, (
             "a server that never answers was reported as started")
         assert "did not answer" in r.stderr, r.stderr
+        # The message points the worker at the app's startup output, so that
+        # output has to be a file the worker can read.
+        assert "app.log" in r.stderr, (
+            "the readiness failure does not name the app's startup log: "
+            + r.stderr)
+        assert (_web_ui_capdir(tmp_path) / "app.log").exists(), (
+            "the readiness failure names app.log but the app's output was "
+            "not written there")
+
+    def test_web_ui_start_does_not_wait_for_the_app(self, tmp_path):
+        """The block must return while the app it started is still running.
+
+        The app outlives step 1's shell on purpose, so a block that hands it
+        the shell's stdout/stderr only reaches EOF when the app exits — and
+        the app is stopped by the *teardown*, a later paste. A worker
+        capturing the step (``bash < block | tee …``, or any harness that
+        reads the block's output through a pipe) therefore blocks inside
+        step 1 for as long as the app runs. Verified in this container
+        against the pre-fix block: piped into ``cat`` it was still running at
+        10 s with the app asleep, and the capture directory held only
+        ``server.pid``. The launch writes the app's output to ``app.log``, so
+        the block returns as soon as the server answers.
+        """
+        started = time.time()
+        r, _launched = _run_web_ui_start("ok", tmp_path, app_body=(
+            'echo "app: starting"\n'
+            'exec sleep 6\n'))
+        elapsed = time.time() - started
+        # The stub app is asleep on purpose; stop the one the block started.
+        pidfile = _web_ui_capdir(tmp_path) / "server.pid"
+        if pidfile.exists():
+            try:
+                os.kill(int(pidfile.read_text().strip()), 15)
+            except (ValueError, ProcessLookupError, PermissionError):
+                pass
+
+        assert r.returncode == 0, r.stderr
+        assert elapsed < 3, (
+            f"the start block did not return while the app was still running "
+            f"({elapsed:.1f}s): a captured/piped step waits for the app, "
+            "which only the teardown stops")
+
+    def test_web_ui_start_saves_the_apps_startup_output(self, tmp_path):
+        """The app's output goes to ``app.log``, where the failure points.
+
+        The readiness failure says the app's startup output is in
+        ``$CAPDIR/app.log``; the launch has to put it there. A shell's own
+        "command not found" for an ``APP_START`` that does not exist lands
+        there too, because the redirection applies to the command — the
+        startup output is the first thing a failed start has to show, and
+        nothing else writes it down.
+        """
+        r, _launched = _run_web_ui_start("ok", tmp_path, app_body=(
+            'echo "app: listening on 8000"\n'))
+        log = _web_ui_capdir(tmp_path) / "app.log"
+
+        assert r.returncode == 0, r.stderr
+        deadline = time.time() + 5
+        while time.time() < deadline and (
+                not log.exists() or "listening" not in log.read_text()):
+            time.sleep(0.05)
+        assert log.exists(), (
+            "the start block wrote no app.log, so the readiness failure "
+            "points at a file that does not exist")
+        assert "app: listening on 8000" in log.read_text(), (
+            "the app's startup output did not land in app.log: "
+            + log.read_text())
+
+    def test_a_refused_start_clears_the_previous_app_log(self, tmp_path):
+        """A refused start must not leave the previous run's startup output.
+
+        Step 1 clears the previous run's evidence before it probes the port,
+        and the readiness failure points the worker at ``app.log``. A start
+        refused for a busy port never launches the app, so without the log in
+        that cleanup the worker reads the *previous* run's startup output as
+        this run's — the stale-evidence class the rest of the cleanup exists
+        for.
+        """
+        capdir = _web_ui_capdir(tmp_path)
+        capdir.mkdir(parents=True)
+        (capdir / "app.log").write_text("previous run: listening on 8000\n")
+
+        r, launched = _run_web_ui_start("inuse", tmp_path)
+
+        assert r.returncode != 0, r.stderr
+        assert "already answers" in r.stderr, r.stderr
+        assert not launched.exists(), (
+            "the recipe started the app on a port another server holds")
+        assert not (capdir / "app.log").exists(), (
+            "the refused start left the previous run's app.log in place, and "
+            "the readiness failure points the worker at it")
 
     def test_the_port_pre_check_is_bounded(self, tmp_path):
         """The pre-check's own bounds are what make its exit-28 branch exist.
@@ -4637,7 +4744,7 @@ def test_web_ui_clears_a_previous_video():
         "transcodes the previous run into this run's recording")
     for artifact in ("*.webm", "recording.mp4", "recording.mp4.partial.mp4",
                      "trace.zip", "dom.html", "http.log", "sse.log",
-                     "server.pid", "manifest.md", "*.png"):
+                     "server.pid", "app.log", "manifest.md", "*.png"):
         assert artifact in clear, (
             f"web-ui recipe leaves a previous run's {artifact} in place, so a "
             "failed driver presents the earlier run's evidence as this run's")
@@ -4708,7 +4815,7 @@ def test_web_ui_produced_files_list_names_the_playwright_link():
 
 
 def test_web_ui_produced_files_list_names_the_files_a_failed_run_keeps():
-    """Four files the flow leaves in the capture directory are not listed.
+    """The files the flow leaves in the capture directory were not all listed.
 
     ``server.pid`` is written by step 1 and removed by the teardown, so it is
     present exactly when a run stopped before the teardown — a failed driver,
@@ -4726,10 +4833,13 @@ def test_web_ui_produced_files_list_names_the_files_a_failed_run_keeps():
     a complete encode, so a step killed mid-encode (the shell gone, so no
     cleanup runs) leaves it behind while no mp4 exists — the file the next
     reader must not mistake for this run's video, and therefore one the
-    manifest has to name when it is there. The recipe's manifest section asks
+    manifest has to name when it is there. ``app.log`` is step 1's launch
+    output: the readiness failure points the worker at it, and it is present
+    for the whole run, so both lists have to name it (R83). The recipe's
+    manifest section asks
     for "every file above", and the recording recipes' lists already name
-    their failure evidence (R17), so a worker following this list leaves all
-    four out of ``## Files`` while the capture directory holds them — the same
+    their failure evidence (R17), so a worker following this list leaves them
+    out of ``## Files`` while the capture directory holds them — the same
     "the manifest and the directory disagree" class, one file over.
 
     The manifest's own ``## Files`` example has to name them too, not only the
@@ -4749,7 +4859,7 @@ def test_web_ui_produced_files_list_names_the_files_a_failed_run_keeps():
     # has to name it.
     files = manifest.split("\n    ## Files", 1)[1]
     for fname in ("server.pid", "recording.webm", "page@<hash>.webm",
-                  "recording.mp4.partial.mp4"):
+                  "recording.mp4.partial.mp4", "app.log"):
         assert fname in produced, (
             "the produced-files list never names " + fname + ", which the "
             "flow leaves in the capture directory (a run stopped before the "
@@ -6047,6 +6157,139 @@ class TestCaptureFlowExecution:
             "the refused step took the capture-directory claim")
         assert not (tmp_path / "state" / "pipeclaim").exists(), (
             "the refused step attached the transcript pipe")
+
+    def test_step_three_refuses_a_relative_capture_dir(self, tmp_path):
+        """Step 3 is pasted alone, and the recorder writes through the path.
+
+        Step 3 re-derives ``$TARGET`` because it is pasted on its own when a
+        run restarts its recorder (R82), and the capture directory is the
+        other handle that paste resolves for itself: the pane command writes
+        the cast, asciinema's stderr log and the status through
+        ``<capture-dir>``, and the *stop* step is "usually a fresh shell". A
+        relative path therefore writes the recording into the directory step
+        3 was pasted from while step 5 reads another, and the run ends with
+        "asciinema wrote no cast" for a recording that finished — the exact
+        failure step 0's guard exists to prevent, in the paste a run uses to
+        restart its recorder. Verified live in this container with the
+        recipe's own steps on tmux 3.2a and asciinema 2.1.0: step 3 pasted
+        from ``worker/`` with ``relcap`` wrote a 2,676-byte cast and the
+        stderr log into ``worker/relcap``, and step 5 pasted from another
+        directory with the same relative path exited 1 with "asciinema wrote
+        no cast" while the same block with the absolute path exited 0.
+        Refuse the path before the recorder session is created.
+        """
+        calls = tmp_path / "tmux-calls"
+        block = _step_three_block().replace("<capture-dir>", "relcap")
+        r, _cast = _run_block(
+            block, "ok", tmp_path, target=True, capture=Path("relcap"),
+            cwd=str(tmp_path), env_extra={"STUB_TMUX_LOG": str(calls)})
+
+        assert r.returncode != 0, (
+            "step 3 accepted a relative capture directory, so the recorder "
+            "writes the cast where the stop step does not look")
+        assert "must be an absolute path" in r.stderr, r.stderr
+        assert not calls.exists(), (
+            "a step that could not use its capture directory acted on the "
+            "recorder session anyway: "
+            + (calls.read_text() if calls.exists() else ""))
+
+    def test_tmux_driving_step_refuses_a_relative_capture_dir(self, tmp_path):
+        """Step 4's failure path saves the pane into ``<capture-dir>``.
+
+        The driving step is pasted into a fresh shell for every scenario, and
+        its ``send_failed`` path saves the recorder pane into the capture
+        directory before tearing the recorder down. With a relative path the
+        save resolves against that fresh shell, so it either lands somewhere
+        the message does not name or fails outright while the message still
+        points at ``<capture-dir>/recorder-pane.log`` — verified live in this
+        container: pasted from a directory with no ``relcap/``, the save
+        answered "relcap/recorder-pane.log: No such file or directory" and
+        the failure tore the recorder down anyway. Refuse the path before any
+        send, so the block neither drives a TUI nor acts on the recorder it
+        cannot report on.
+        """
+        sends = tmp_path / "sends"
+        calls = tmp_path / "tmux-calls"
+        block = _driving_block().replace("<capture-dir>", "relcap")
+        r, _cast = _run_block(
+            block, "ok", tmp_path, target=True, sessions=("pm-recorder",),
+            capture=Path("relcap"), cwd=str(tmp_path),
+            env_extra={"STUB_TMUX_LOG": str(calls),
+                       "STUB_PM_SEND_LOG": str(sends)})
+
+        assert r.returncode != 0, (
+            "the driving step accepted a relative capture directory")
+        assert "must be an absolute path" in r.stderr, r.stderr
+        assert not sends.exists(), (
+            "the driving step sent keys before refusing its capture "
+            "directory: " + (sends.read_text() if sends.exists() else ""))
+        assert not calls.exists(), (
+            "a step that could not report on the recorder acted on it "
+            "anyway: " + (calls.read_text() if calls.exists() else ""))
+
+    def test_tmux_stop_block_refuses_a_relative_capture_dir(self, tmp_path):
+        """Step 5 reads the completion evidence from ``<capture-dir>``.
+
+        The stop step is pasted on its own whenever the scenario is driven
+        interactively, and "usually" into a fresh shell, where a relative
+        path resolves against that shell rather than the directory the
+        recorder wrote into. Verified live in this container with the
+        recipe's own step 5 on tmux 3.2a and asciinema 2.1.0: a complete
+        recording (2,695-byte cast, status ``0``, transcript) sat in the
+        capture directory, and step 5 pasted from another directory with the
+        same relative path exited 1 with "asciinema wrote no cast" — a
+        finished recording reported as a missing one, the class this recipe
+        removes everywhere else. Refuse the path before the recorder is
+        detached.
+        """
+        calls = tmp_path / "tmux-calls"
+        block = _stop_block("tmux-screen-recording.md").replace(
+            "<capture-dir>", "relcap")
+        r, _cast = _run_block(
+            block, "ok", tmp_path, target=True, sessions=("pm-recorder",),
+            capture=Path("relcap"), cwd=str(tmp_path),
+            env_extra={"STUB_TMUX_LOG": str(calls)})
+
+        assert r.returncode != 0, (
+            "the stop step accepted a relative capture directory, so it read "
+            "a directory the recorder never wrote into")
+        assert "must be an absolute path" in r.stderr, r.stderr
+        assert not calls.exists(), (
+            "a step refused for its capture directory detached the recorder "
+            "and stopped the pipe anyway: "
+            + (calls.read_text() if calls.exists() else ""))
+        assert (tmp_path / "state" / "pm-recorder").exists(), (
+            "the refused stop step ended the recorder it could not check")
+
+    def test_cli_stop_block_refuses_a_relative_capture_dir(self, tmp_path):
+        """The CLI stop step is a paste of its own, and it kills the server.
+
+        Step 4 is pasted on its own for an interactive recording (step 3 is
+        what drives the shell, so the scaffold cannot run as one paste), and
+        it reads the cast and the recorder's status from ``<capture-dir>``.
+        With a relative path the checks read a directory the recorder never
+        wrote into, report "asciinema wrote no cast" for a recording that
+        finished, and then ``kill-server`` the scaffold that holds it —
+        verified live in this container with the recipe's own scaffold on
+        tmux 3.2a and asciinema 2.1.0: the absolute capture directory held
+        the cast and status ``0`` while step 4 pasted from another directory
+        with a relative path exited 1 with that message and no ``rec``
+        session left. Refuse the path before the wait or any tmux call.
+        """
+        calls = tmp_path / "tmux-calls"
+        block = _stop_block("cli-recording.md").replace("<capture-dir>",
+                                                        "relcap")
+        r, _cast = _run_block(
+            block, "ok", tmp_path, capture=Path("relcap"), cwd=str(tmp_path),
+            env_extra={"STUB_TMUX_LOG": str(calls)})
+
+        assert r.returncode != 0, (
+            "the CLI stop step accepted a relative capture directory")
+        assert "must be an absolute path" in r.stderr, r.stderr
+        assert "kill-server" not in (
+            calls.read_text() if calls.exists() else ""), (
+            "the refused stop step killed the scaffold server that holds the "
+            "recording: " + (calls.read_text() if calls.exists() else ""))
 
     @pytest.mark.parametrize("name", RECIPES)
     @UNWRITABLE_MODES

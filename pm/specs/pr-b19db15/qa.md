@@ -1096,6 +1096,30 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   for a binary that was fine, or "still does not resolve" for an install
   whose rename failed — each a failure naming a cause the step cannot have
   (R75).
+- The tmux recipe's steps 3, 4 or 5, or the CLI scaffold's step 4, is pasted
+  on its own with a *relative* `<capture-dir>` → the step must stop with
+  "must be an absolute path (or start with ~/)" before it creates a session,
+  sends a key, detaches a recorder, stops a pipe or kills the scaffold
+  server. Pasted from a fresh shell (the usual case) the pre-fix steps read
+  or write a directory the run never used: verified live on tmux 3.2a with
+  asciinema 2.1.0 — step 3 wrote a 2,676-byte cast into the pasting shell's
+  `relcap/`, step 5 then exited 1 with "asciinema wrote no cast" while that
+  complete cast (status `0`) sat one directory over, step 4's pane save
+  failed ("relcap/recorder-pane.log: No such file or directory") although
+  its message still named the file, and the CLI step 4 reported "asciinema
+  wrote no cast" and `kill-server`ed the scaffold holding the recording
+  (review loop 928f i22, R83).
+- The web-UI start step is run with its output captured (a worker piping the
+  block, `bash < block | tee …`) → it must return as soon as the app
+  answers. The app outlives the block, so a block that hands it the shell's
+  stdout/stderr does not reach EOF until the app exits — which only the
+  teardown does: verified in this container, the pre-fix block piped into
+  `cat` was still running at 10 s with the app asleep, and the capture
+  directory held only `server.pid`, while the readiness failure told the
+  worker to "check its startup output" that was written nowhere. The launch
+  writes `app.log` (cleared with the rest in step 1, named by the readiness
+  failure and in the manifest), and the block returns in under a second
+  (review loop 928f i22, R83).
 
 ## Pass / Fail criteria
 

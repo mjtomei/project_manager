@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T08:52:29.468234+00:00'
+  updated_at: '2026-11-01T09:36:42.950057+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38195,6 +38195,37 @@ prs:
       helper/prompt/verifier work stays dropped.'
     created_at: '2026-11-01T08:52:29Z'
     last_edited: '2026-11-01T08:52:29Z'
+  - id: note-de099d4
+    text: 'Review loop 928f i22: two leftovers in the kept recipe scope; no pm_core
+      change. (1) Every paste-alone step that resolves <capture-dir> — the tmux recipe
+      steps 3, 4 and 5 and the CLI scaffold step 4 — carried no absolute-path guard,
+      although each is pasted on its own (the stop step "is usually a fresh shell").
+      Verified live in this container on tmux 3.2a + asciinema 2.1.0: step 3 pasted
+      from worker/ with relcap exited 0 and wrote a 2,676-byte cast into worker/relcap;
+      step 5 pasted from another directory with the same relative path exited 1 "asciinema
+      wrote no cast" while that complete cast (status 0) sat one directory over (the
+      same block with the absolute path exited 0); step 4 pane save answered "relcap/recorder-pane.log:
+      No such file or directory" although its message named the file, and the failure
+      tore the recorder down after sending the keys; the CLI step 4 reported "asciinema
+      wrote no cast" and kill-server''ed the scaffold holding the recording. Each
+      step now refuses a relative path before any tmux call (no session, no key, no
+      detach, no pipe stop, no kill-server). (2) The web-UI start step launched the
+      app with the block stdout/stderr/stdin, so a captured or piped step never returned:
+      the block piped into cat was still running at 10 s with the app asleep, and
+      the capture dir held only server.pid while the readiness failure told the worker
+      to check its startup output that nothing wrote down. The launch now writes $CAPDIR/app.log
+      (2>&1, </dev/null), the readiness failure names it, step 1 clears a previous
+      run copy, and the produced-files list and manifest example name it (the same
+      piped block returns in 0.0 s and app.log holds the app line). Tests: four new
+      relative-path cases (each step alone, no tmux call at all) and three web-UI
+      cases, plus the extended never-answers/clear/produced-files cases; mutation
+      check fails exactly the new cases against HEAD recipes (4 + 6 failed). Recipe
+      file 319 passed (was 312); full suite 5516 passed, 1 skipped, 0 failed (466.03
+      s; markdown in a scratch --target). Evidence: /pm-captures/review-928f-i22/.
+      impl.md R83 + Evidence note, qa.md. The dropped helper/prompt/verifier work
+      stays dropped.'
+    created_at: '2026-11-01T09:36:42Z'
+    last_edited: '2026-11-01T09:36:42Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

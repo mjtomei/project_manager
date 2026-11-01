@@ -3574,6 +3574,74 @@ R82. **A completion step pasted a second time, in the two steps the earlier
    a scratch `--target`). Evidence: `/pm-captures/review-928f-i21/`. No
    `pm_core/` change; the dropped helper/prompt/verifier work stays dropped.
 
+R83. **The paste-alone steps never validated `<capture-dir>`, and the web-UI
+   start handed the app the block's own output (review loop 928f i22).** Two
+   leftovers in the kept recipe scope; no `pm_core/` change.
+
+   - **The tmux recipe's steps 3, 4 and 5 and the CLI scaffold's step 4 —
+     every paste-alone step that resolves `<capture-dir>` — carried no
+     absolute-path guard.** Steps 0 and 2 and the render blocks refuse a
+     relative path because each paste resolves it for itself; these four did
+     not, although the recipe says each is pasted on its own (the stop step
+     "is usually a fresh shell"). Verified live in this container on tmux
+     3.2a and asciinema 2.1.0:
+
+     * step 3 pasted from `worker/` with `relcap` exited 0 and wrote a
+       2,676-byte cast and the stderr log into `worker/relcap` — a directory
+       the *stop* step, pasted from a fresh shell, does not read;
+     * step 5 pasted from another directory with the same relative path
+       exited 1 with "asciinema wrote no cast — see
+       relcap/recorder-stderr.log" while the finished recording (2,695-byte
+       cast, status `0`) sat in the directory the recorder wrote into, and
+       the same block with the absolute path exited 0;
+     * step 4 (driving) pasted from a directory with no `relcap/` answered
+       "relcap/recorder-pane.log: No such file or directory" — the save
+       failed, the failure message still pointed at
+       `<capture-dir>/recorder-pane.log`, and the failure tore the recorder
+       down (the keys were sent first);
+     * the CLI step 4 reported "asciinema wrote no cast" and `kill-server`ed
+       the scaffold while the absolute capture directory held the cast and
+       status `0`.
+
+     Each step now refuses a relative path before any tmux call (so a refused
+     step creates no session, sends no keys, detaches no recorder, stops no
+     pipe and kills no server), with the same `/* | "~"/*` case steps 0 and 2
+     use and a message that names the path step 0 created.
+
+   - **The web-UI step 1 launched the app with the block's stdout, stderr and
+     stdin.** The app outlives the block, so a captured or piped step never
+     saw EOF: the block piped into `cat` was still running at 10 s with the
+     app asleep, and the capture directory held only `server.pid` — the
+     startup output the readiness failure told the worker to check was
+     written nowhere. The launch now writes `$CAPDIR/app.log` (`2>&1`, and
+     `< /dev/null` so `bash < block` does not hand the script to a child that
+     reads it), the readiness failure names that file, step 1 clears a
+     previous run's copy with the rest, and the produced-files list and the
+     manifest's `## Files` example name it. With the fix the same piped block
+     returns in 0.0 s and `app.log` holds the app's output.
+
+   Tests: `test_step_three_refuses_a_relative_capture_dir`,
+   `test_tmux_driving_step_refuses_a_relative_capture_dir`,
+   `test_tmux_stop_block_refuses_a_relative_capture_dir` and
+   `test_cli_stop_block_refuses_a_relative_capture_dir` each run the step
+   alone with `relcap` and require the path message plus **no tmux call at
+   all**; `test_web_ui_start_does_not_wait_for_the_app` runs the block with an
+   app that sleeps 6 s and requires the block back in under 3 s;
+   `test_web_ui_start_saves_the_apps_startup_output` requires the app's line
+   in `app.log`; `test_a_refused_start_clears_the_previous_app_log` and the
+   extended `test_a_server_that_never_answers_fails_at_the_deadline`,
+   `test_web_ui_clears_a_previous_video` and
+   `test_web_ui_produced_files_list_names_the_files_a_failed_run_keeps` pin
+   the cleanup, the message and the two file lists. Mutation check: the four
+   new recipe cases fail against `HEAD`'s recipes (4 failed) and the six
+   web-UI cases fail against `HEAD`'s web-UI recipe (6 failed; the one other
+   match, an unrelated `never_answers` case, passes both ways), all green
+   with the fixes. Tests:
+   recipe file **319 passed** (was 312). Full suite: **5516 passed, 1 skipped, 0 failed** (466.03 s; `markdown` installed into a scratch `--target`). Evidence:
+   `/pm-captures/review-928f-i22/` (`probe.log`, `mutation-check.log`,
+   `recipe-file.log`, `suite.log`, `README.md`, `scripts/`). No `pm_core/`
+   change; the dropped helper/prompt/verifier work stays dropped.
+
 ## Non-goals
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
 - **No new helper, prompt block, verifier text, or QA-loop change.** Those
@@ -4128,6 +4196,51 @@ R82. **A completion step pasted a second time, in the two steps the earlier
    `tpad`/`setpts` expression deleted and passes unmodified.
 
 ## Evidence notes
+
+- Review loop 928f i22 (R83) found two leftovers in the kept recipe scope.
+  (1) The tmux recipe's steps 3, 4 and 5 and the CLI scaffold's step 4 —
+  every paste-alone step that resolves `<capture-dir>` — carried no
+  absolute-path guard. Verified live in this container with the recipes' own
+  blocks on tmux 3.2a and asciinema 2.1.0: step 3 pasted from `worker/` with
+  `relcap` exited 0 and wrote a 2,676-byte cast and the stderr log into
+  `worker/relcap`; step 5 pasted from another directory with the same
+  relative path exited 1 with "asciinema wrote no cast" while that complete
+  cast (status `0`) sat one directory over, and the same block with the
+  absolute path exited 0; step 4's pane save answered
+  "relcap/recorder-pane.log: No such file or directory" although its message
+  named the file, and the failure tore the recorder down after sending the
+  keys; the CLI step 4 reported "asciinema wrote no cast" and `kill-server`ed
+  the scaffold while the absolute capture directory held the cast and status
+  `0`. Each step now refuses the path before any tmux call, so a refused
+  step creates no session, sends no key, detaches no recorder, stops no pipe
+  and kills no server. (2) The web-UI start step launched the app with the
+  block's stdout/stderr/stdin: the app outlives the block, so a captured or
+  piped step never reached EOF — the block piped into `cat` was still
+  running at 10 s with the app asleep, and the capture directory held only
+  `server.pid`, while the readiness failure told the worker to check the
+  startup output that nothing wrote down. The launch now writes
+  `$CAPDIR/app.log` (`2>&1`, `< /dev/null`), the readiness failure names it,
+  step 1 clears a previous run's copy, and the produced-files list and the
+  manifest example name it; the same piped block returns in 0.0 s and
+  `app.log` holds the app's output. New cases:
+  `test_step_three_refuses_a_relative_capture_dir`,
+  `test_tmux_driving_step_refuses_a_relative_capture_dir`,
+  `test_tmux_stop_block_refuses_a_relative_capture_dir`,
+  `test_cli_stop_block_refuses_a_relative_capture_dir`,
+  `test_web_ui_start_does_not_wait_for_the_app`,
+  `test_web_ui_start_saves_the_apps_startup_output` and
+  `test_a_refused_start_clears_the_previous_app_log`, plus the extended
+  `test_a_server_that_never_answers_fails_at_the_deadline`,
+  `test_web_ui_clears_a_previous_video` and
+  `test_web_ui_produced_files_list_names_the_files_a_failed_run_keeps`.
+  Mutation check: the four relative-path cases fail against `HEAD`'s
+  recipes (4 failed) and the web-UI cases fail against `HEAD`'s web-UI
+  recipe (6 failed; the one other match, an unrelated `never_answers` case,
+  passes both ways), all green with the fixes. Tests: recipe file **319
+  passed** (was 312). Full suite: **5516 passed, 1 skipped, 0 failed** (466.03 s; `markdown` installed into a scratch `--target`). Evidence:
+  `/pm-captures/review-928f-i22/` (`probe.log`, `mutation-check.log`,
+  `recipe-file.log`, `suite.log`, `README.md`, `scripts/`). No `pm_core/`
+  change; the dropped helper/prompt/verifier work stays dropped.
 
 - Review loop 928f i20 (R81) found one leftover in the kept tmux-recipe scope:
   step 5 refused the run whenever the recorder was gone and the target TUI

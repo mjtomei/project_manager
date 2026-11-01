@@ -62,7 +62,8 @@ the recorder diagnostics:
 # shell pasted them (step 4 is usually a fresh one), so a relative path only
 # works while every paste shares one directory — otherwise the cast is written
 # somewhere the stop step never looks, and it reports "asciinema wrote no
-# cast" for a recording that finished. Stop here instead.
+# cast" for a recording that finished. Stop here instead, and note that step 4
+# repeats this guard: it is pasted on its own for an interactive recording.
 case "<capture-dir>" in
     /* | "~"/*) ;;
     *)  echo "<capture-dir> must be an absolute path (or start with ~/) —" \
@@ -366,6 +367,26 @@ done
 #    status is missing", because the previous run had already destroyed the
 #    pane it was told to wait for (verified live: `sleep 6` recorded, stop
 #    with RECORDER_STOP_TIMEOUT=1, re-run with 60 → the recording was gone).
+#    The capture directory has to be absolute here too (or start with ~/):
+#    this step is pasted on its own for an interactive recording (step 3 is
+#    what drives the shell, so the scaffold cannot run as one paste), and it
+#    reads the cast and the recorder's status from it — a relative path
+#    resolves against whichever shell pasted it, so the usual fresh shell
+#    read a directory the recorder never wrote into and reported a finished
+#    recording as "asciinema wrote no cast", then killed the scaffold server
+#    holding it (verified live: the cast and status 0 sat in the absolute
+#    capture directory while this step, pasted from another directory with a
+#    relative path, exited 1 with that message and no `rec` session left).
+#    Refuse it here, before the wait or any tmux call.
+case "<capture-dir>" in
+    /* | "~"/*) ;;
+    *)  echo "<capture-dir> must be an absolute path (or start with ~/) —" \
+            "this step reads the cast and the recorder's status there, and a" \
+            "relative path resolves against this shell, so a finished" \
+            "recording reads as a missing one; use the path the scaffold" \
+            "created" >&2
+        exit 1 ;;
+esac
 stop_timeout=${RECORDER_STOP_TIMEOUT:-30}
 # Validate the bound before the arithmetic that uses it. A non-numeric value
 # (`2m`, `1.5h`) makes `$(( … ))` fail and leaves `deadline` empty — and in an
