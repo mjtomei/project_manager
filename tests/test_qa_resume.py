@@ -369,6 +369,85 @@ def test_stale_status_keeps_another_clones_snapshot(tmp_path,
     assert _resume_file_path(qa_dir).is_file()
 
 
+class TestCrossServerRunSession:
+    """Every pm session has its own tmux server (pr-073910f).
+
+    A run launched from another clone's session is only reachable when
+    that session is on *this* process's server (a legacy pre-isolation
+    session).  Otherwise its scenario panes live on another server: this
+    TUI must leave the run to the clone that hosts it rather than poll
+    this session for windows that are not here (which would end that
+    run with a bogus result) — review-loop b48f i15.
+    """
+
+    def test_same_server_session_is_not_elsewhere(self, monkeypatch):
+        monkeypatch.setattr("pm_core.tmux.session_exists",
+                            lambda name, *a, **k: True)
+        assert qa_loop.run_session_live_elsewhere("other-clone-cafe") is False
+
+    def test_live_on_another_server_is_elsewhere(self, monkeypatch):
+        monkeypatch.setattr("pm_core.tmux.session_exists",
+                            lambda name, *a, **k: False)
+        monkeypatch.setattr("pm_core.tmux.find_session_server",
+                            lambda name, **k: ("/tmp/pm-sessions/pm-x", True))
+        assert qa_loop.run_session_live_elsewhere("other-clone-cafe") is True
+
+    def test_gone_everywhere_is_not_elsewhere(self, monkeypatch):
+        """Its windows went with the session: the run is resumed here."""
+        monkeypatch.setattr("pm_core.tmux.session_exists",
+                            lambda name, *a, **k: False)
+        monkeypatch.setattr("pm_core.tmux.find_session_server",
+                            lambda name, **k: (None, False))
+        assert qa_loop.run_session_live_elsewhere("other-clone-cafe") is False
+
+    def test_no_recorded_session_is_not_elsewhere(self):
+        assert qa_loop.run_session_live_elsewhere(None) is False
+
+    def test_tmux_missing_is_not_elsewhere(self, monkeypatch):
+        """No tmux: degrade to the old behaviour instead of crashing the scan."""
+        def missing(*a, **k):
+            raise FileNotFoundError(2, "No such file or directory: 'tmux'")
+
+        monkeypatch.setattr("pm_core.tmux.session_exists", missing)
+        assert qa_loop.run_session_live_elsewhere("other-clone-cafe") is False
+
+    def test_foreign_run_live_on_another_server_is_not_resumed(self, tmp_path):
+        app = _make_app(tmp_path)
+        qa_dir = _seed_run(tmp_path, overall="")
+        _retag(qa_dir, "other-clone-cafe1234")
+
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch("pm_core.tmux.session_exists", return_value=False), \
+             patch("pm_core.tmux.find_session_server",
+                   return_value=("/tmp/pm-sessions/pm-other-clone-cafe1234",
+                                 True)), \
+             patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+             patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+            qa_loop_ui._resume_incomplete_qa(app)
+
+        resume_bg.assert_not_called()
+        on_complete.assert_not_called()
+        assert _resume_file_path(qa_dir).is_file()
+        assert "pr-001" not in app._qa_loops
+        assert "pr-001" not in app._resumed_qa_pr_ids
+
+    def test_foreign_run_whose_session_is_gone_is_resumed_here(self, tmp_path):
+        app = _make_app(tmp_path)
+        qa_dir = _seed_run(tmp_path, overall="")
+        _retag(qa_dir, "other-clone-cafe1234")
+
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch("pm_core.tmux.session_exists", return_value=False), \
+             patch("pm_core.tmux.find_session_server",
+                   return_value=(None, False)), \
+             patch.object(qa_loop, "resume_qa_background") as resume_bg:
+            qa_loop_ui._resume_incomplete_qa(app)
+
+        resume_bg.assert_called_once()
+        state = resume_bg.call_args.args[0]
+        assert qa_loop._resume_session(state) == "pm-project_manager-deadbeef"
+
+
 def _retag(qa_dir, tag):
     """Mark a seeded run as launched from another pm session (clone)."""
     f = _resume_file_path(qa_dir)

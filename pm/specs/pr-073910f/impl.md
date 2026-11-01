@@ -3532,3 +3532,97 @@ Validation: targeted suites (`test_tmux`, `test_session_socket_isolation`,
 (421.3 s, log `/pm-captures/review-b48f-i14/full-suite-final.log`).  The
 live repro used `sleep`-held sessions on a disposable socket under
 `/tmp`; no live session, server or shared host configuration was touched.
+
+## Review iteration (2026-11-01, review-loop b48f i15)
+
+Verification pass over the head after the b48f i14 fix; three gaps, all of
+the "a name is not a group / a server is not a session" class the earlier
+iterations closed elsewhere.
+
+1. **The pane-switch binding gate could never match some pm sessions.**
+   `_register_tmux_bindings()` binds prefix+arrows (and `o`) to pm's
+   mobile-aware `pm _pane-switch` only when the session's pane-registry
+   file exists, tested by a shell `if-shell` condition.  That condition
+   stripped the grouped suffix at the **first** `~` and interpolated both
+   the name and the registry path unquoted, so three session shapes always
+   fell through to the plain `select-pane` fallback: a session whose tag
+   contains `~` (a repo directory may — the project `x~foo` runs
+   `pm-x~foo-<hash>`, truncated to `pm-x`), a session whose name contains a
+   space (the unquoted value split the `test` command: verified, the old
+   condition exits with "unexpected operator" even when the file exists),
+   and **every user's own view** of a pm session (S118/S121/S124: the
+   view's name is not the base, so no `<name>.json` exists).  The
+   condition now derives the base from tmux's session group — a grouped
+   `base~N` and a view report `#{session_group}` = base, a lone session
+   reports an empty group and uses `#{session_name}` — and shell-quotes the
+   registry path and the derived name.  A name containing a single quote
+   still breaks the assignment; that fails the condition and keeps the
+   plain fallback, which is the safe direction.
+   Tests: `TestPaneSwitchBindingGate` captures the registered condition and
+   runs it with `/bin/sh` for a lone base, a grouped session, a view, a
+   space in the name, a `~` in the tag, a grouped `~` tag, a registry path
+   containing a space, a non-pm session and another pm session's registry.
+   On the pre-fix head the shape test fails at the user's view (its name
+   has no registry file), and the space and `~` names fail the same test
+   for their own reasons when reached (verified directly with the old
+   condition: the space case exits 2, "unexpected operator"; the `~` case
+   looks for `pm-my.json`); the registry-path-with-a-space test fails the
+   same way.
+
+2. **The "attached session" ownership exemption was keyed on the session
+   *name*, not on the server this process is attached to.**
+   `_owned_only_for_target()` skipped the socket-ownership check whenever
+   the target name equalled the ambient session name.  That is right for a
+   private session (its deterministic socket is ours) and for a shared
+   session joined from another user's pane (the socket belongs to the
+   sharing user), but wrong for a *legacy* pre-isolation session, which
+   runs on the default server and whose deterministic private socket may be
+   absent or **planted by another user**.  Running `pm session kill`,
+   `pm session mobile` or `pm session --print-connect` inside such a
+   legacy session therefore probed (and killed, or advertised for
+   attaching) a socket another user created at that name — the failure
+   b48f i9 closed for every other implicit lookup.  The exemption now
+   applies only when the ambient socket *is* the target session's
+   deterministic socket (`_attached_to_session_socket()`), i.e. the server
+   this process is actually attached to.  A legacy session now falls
+   through to the default server (found, killed or printed correctly), and
+   a planted socket is neither probed nor advertised.
+   Tests: `test_kill_inside_a_legacy_session_requires_ownership` and
+   `test_print_connect_inside_a_legacy_session_requires_ownership` (both
+   fail on the pre-fix head: `owned_only` was `False`);
+   `test_kill_from_inside_the_session_does_not_require_ownership` now
+   models the attached socket it documents.
+
+3. **QA resume drove a run launched from another clone's session in the
+   wrong session.**  `qa_loop._live_other_session()` asks the *current*
+   server whether the run's session (`pm-<session_tag>`, another clone)
+   is alive.  Every pm session now has its own server, so the answer is
+   always "no" and `_resume_session()` falls back to this TUI's own
+   session — where the run's scenario panes do not exist.  The resumed
+   loop then polls this session for windows that are not here (ending that
+   clone's run with a bogus result) or re-launches its scenarios, while
+   the original panes keep running on the other server.  New
+   `qa_loop.run_session_live_elsewhere()` distinguishes "the session is
+   gone (its windows went with it)" from "the session is alive on another
+   server"; `qa_loop_ui._resume_incomplete_qa()` leaves the snapshot to
+   the clone that hosts the run in the latter case (a *completed* run
+   needs no driving and is still processed; a run whose session is gone is
+   still resumed here).  Same-server sessions — a legacy pre-isolation
+   session — keep the previous adoption behaviour.
+   Tests: `TestCrossServerRunSession` (unit cases plus the TUI scan: the
+   pre-fix scan resumes a foreign run whose session is alive elsewhere).
+
+Validation: targeted suites (`test_tmux`, `test_session_socket_isolation`,
+`test_cli_helpers`, `test_shared_sessions`, `test_cli_qa`,
+`test_pane_layout`, `test_tui_pidfile`, `test_qa_resume`, `test_qa_loop`,
+`test_pr_auto_sequence`) 987 passed; full suite 5484 passed / 1 skipped
+(415.6 s, log `/pm-captures/review-b48f-i15/full-suite-final.log`; the
+first run in that directory used a scratch `PYTHONPATH` without
+`markdown`, and its 12 `test_markdown_render` failures are that
+environment trap, kept as `full-suite-markdown-missing.log`).  The
+preserved `pm/specs/pr-073910f/session_start_smoke.py` re-ran clean on a
+disposable socket.  The new fix-asserting tests were checked against a
+worktree of the pre-fix head (d13e71dba): the pane-switch gate cases, both
+ownership tests and the cross-server resume test fail there.  No live
+session, server or shared host configuration was touched — every fixture
+used a disposable socket directory, a temporary HOME or a mocked tmux.

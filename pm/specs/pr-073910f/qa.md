@@ -243,6 +243,22 @@ pane unless stated otherwise.
   server and never the twin's pane, even though both sessions share the
   pane-registry key and both servers can use the same pane id
   (review-loop b48f i6).
+- **GIVEN** a pm session whose repo directory name contains a space or a
+  `~` (so the session name does), or a client attached through a user's
+  own view of that session (any name), **WHEN** the user presses the
+  pane-switch prefix keys (`prefix+o`, prefix+arrows) in it, **THEN** pm's
+  mobile-aware pane switch runs (the pane zooms/unzooms as the session's
+  mobile state requires) rather than the plain tmux `select-pane`
+  fallback: the gate that decides this resolves the base session through
+  tmux's session group and quotes the name (review-loop b48f i15).
+- **GIVEN** a QA run launched from another clone's pm session (recorded in
+  its `qa_resume.json` session tag) whose session is still alive on that
+  clone's own server, **WHEN** this clone's TUI restarts and scans for
+  resumable runs, **THEN** it leaves that run to the clone hosting the
+  session — it does not resume the run in its own session (which would
+  poll windows that are not there and end the other run with a bogus
+  result) — and a run whose session is gone is still resumed here
+  (review-loop b48f i15).
 
 ### R8 — Killing a session tears down only that session
 

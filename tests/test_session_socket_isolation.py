@@ -3122,21 +3122,43 @@ class TestSessionKillServerSelection:
 
     def test_kill_from_inside_the_session_does_not_require_ownership(
             self, monkeypatch, tmp_path):
-        """A joiner inside a shared session may still kill it implicitly.
+        """A process attached to the session's own server may kill it.
 
         A pane of a grouped session carries no ``PM_SHARE_MODE`` (tmux
         copies no session environment into a grouped session), so the
-        env-only rule cannot tell the session is shared.  The user is
-        already attached to that server, so its socket need not be theirs
-        (review-loop b48f i9).
+        env-only rule cannot tell the session is shared.  The server this
+        process is attached to is the one exception to the ownership rule:
+        the user is already on it, so its socket need not be theirs
+        (review-loop b48f i9/i15).
         """
         sock = str(tmp_path / "pm-repo-abc")
+        # Attached to the session's own (private or shared) socket.
+        monkeypatch.setenv("PM_TMUX_SOCKET", sock)
         seen: list[bool] = []
         result, _ = self._invoke(monkeypatch, tmp_path, (sock, True),
                                  in_session="pm-repo-abc", seen_owned=seen)
 
         assert result.exit_code == 0, result.output
         assert seen == [False, False]
+
+    def test_kill_inside_a_legacy_session_requires_ownership(
+            self, monkeypatch, tmp_path):
+        """The exemption is the attached *server*, not "the ambient name".
+
+        A legacy pre-isolation session runs on the default server, whose
+        path is not the session's deterministic private socket: a socket
+        another user planted under that name must not be adopted by
+        ``pm session kill`` just because the process happens to be inside
+        the legacy session (review-loop b48f i15).
+        """
+        sock = str(tmp_path / "pm-repo-abc")
+        monkeypatch.setenv("PM_TMUX_SOCKET", str(paths.default_socket_path()))
+        seen: list[bool] = []
+        result, _ = self._invoke(monkeypatch, tmp_path, (sock, True),
+                                 in_session="pm-repo-abc", seen_owned=seen)
+
+        assert result.exit_code == 0, result.output
+        assert seen == [True, True]
 
     def test_shared_kill_may_resolve_the_sharing_users_socket(
             self, monkeypatch, tmp_path):
@@ -3940,6 +3962,113 @@ class TestSessionIsShared:
         assert opts == []
 
 
+class TestPaneSwitchBindingGate:
+    """pm's mobile-aware pane switch must fire for the pm session itself.
+
+    The gate is a shell test run by tmux's ``if-shell``; tmux expands
+    ``#{session_group}``/``#{session_name}`` before the shell sees it, so
+    substituting them here and running the condition with ``/bin/sh``
+    covers the name shapes that used to miss the registry file: a space in
+    the name (the old value was unquoted), a ``~`` in the tag (the old
+    strip cut at the first ``~``), and a user's own view (whose name is
+    not the base) — review-loop b48f i15.
+    """
+
+    @staticmethod
+    def _condition(monkeypatch, registry_dir):
+        """Return ``(condition, real_run)`` for the registered binding."""
+        from pm_core.cli import session as session_mod
+
+        registry_dir.mkdir(parents=True)
+        monkeypatch.setattr(session_mod.pane_registry, "registry_dir",
+                            lambda: registry_dir)
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        monkeypatch.setattr(session_mod.tmux_mod, "session_is_shared",
+                            lambda *a, **k: False)
+        # Keep the original function: patching the module attribute also
+        # affects the subprocess module this test runs the shell with.
+        real_run = session_mod.subprocess.run
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        monkeypatch.setattr(session_mod.subprocess, "run", fake_run)
+        session_mod._register_tmux_bindings("pm-x")
+        for cmd in calls:
+            if "if-shell" in cmd:
+                return cmd[cmd.index("if-shell") + 1], real_run
+        raise AssertionError("no if-shell binding was registered")
+
+    @staticmethod
+    def _fires(condition, real_run, registry_dir, *, name, group,
+               registry_names):
+        """Run the expanded gate; True when the pm binding would be used."""
+        for registry_name in registry_names:
+            (registry_dir / f"{registry_name}.json").write_text("{}")
+        try:
+            expanded = (condition
+                        .replace("#{session_group}", group)
+                        .replace("#{session_name}", name))
+            return real_run(["sh", "-c", expanded]).returncode == 0
+        finally:
+            for registry_name in registry_names:
+                (registry_dir / f"{registry_name}.json").unlink()
+
+    def test_the_gate_matches_every_pm_session_shape(self, monkeypatch,
+                                                     tmp_path):
+        registry = tmp_path / "pane-registry"
+        condition, real_run = self._condition(monkeypatch, registry)
+
+        cases = [
+            # (session_name, session_group, registry keys that exist)
+            ("pm-x", "", ["pm-x"]),                     # lone base
+            ("pm-x~1", "pm-x", ["pm-x"]),               # grouped session
+            ("myview", "pm-x", ["pm-x"]),               # user's own view
+            ("pm-my repo-abc", "", ["pm-my repo-abc"]),  # space in the name
+            ("pm-my~repo-abc12345", "",
+             ["pm-my~repo-abc12345"]),                   # ~ in the tag
+            ("pm-my~repo-abc12345~2", "pm-my~repo-abc12345",
+             ["pm-my~repo-abc12345"]),                   # grouped ~ tag
+        ]
+        for name, group, registry_names in cases:
+            assert self._fires(condition, real_run, registry,
+                               name=name, group=group,
+                               registry_names=registry_names), (name, group)
+
+    def test_the_gate_quotes_a_registry_path_with_a_space(self, monkeypatch,
+                                                         tmp_path):
+        """A home directory may contain a space; the test must still run."""
+        registry = tmp_path / "pm home" / "pane-registry"
+        condition, real_run = self._condition(monkeypatch, registry)
+
+        assert self._fires(condition, real_run, registry,
+                           name="pm-x", group="", registry_names=["pm-x"])
+
+    def test_the_gate_does_not_fire_for_a_non_pm_session(self, monkeypatch,
+                                                        tmp_path):
+        registry = tmp_path / "pane-registry"
+        condition, real_run = self._condition(monkeypatch, registry)
+
+        assert not self._fires(condition, real_run, registry,
+                               name="unrelated", group="",
+                               registry_names=[])
+        assert not self._fires(condition, real_run, registry,
+                               name="unrelated~1", group="unrelated",
+                               registry_names=[])
+
+    def test_the_gate_does_not_fire_for_a_different_pm_session(
+            self, monkeypatch, tmp_path):
+        """A registry of *another* session on the legacy server is not ours."""
+        registry = tmp_path / "pane-registry"
+        condition, real_run = self._condition(monkeypatch, registry)
+
+        assert not self._fires(condition, real_run, registry,
+                               name="pm-other-abc", group="",
+                               registry_names=["pm-x"])
+
+
 # ---------------------------------------------------------------------------
 # TUI quit/restart use no server-wide tmux operations
 # ---------------------------------------------------------------------------
@@ -4150,6 +4279,29 @@ class TestPrintConnect:
         type (review-loop b48f i9).
         """
         sock = str(tmp_path / "pm-repo-abc")
+        seen: list[bool] = []
+        result = self._invoke(monkeypatch, tmp_path, (sock, True),
+                              seen_owned=seen)
+
+        assert result.exit_code == 0, result.output
+        assert seen == [True]
+
+    def test_print_connect_inside_a_legacy_session_requires_ownership(
+            self, monkeypatch, tmp_path):
+        """Being inside the legacy session does not exempt its private name.
+
+        A legacy pre-isolation session is attached on the default server,
+        not on the session's deterministic private socket, so the printed
+        command must still refuse a socket another user planted there
+        (review-loop b48f i15).
+        """
+        sock = str(tmp_path / "pm-repo-abc")
+        monkeypatch.setenv("PM_TMUX_SOCKET", str(paths.default_socket_path()))
+        # Inside the legacy session: the ambient session *is* the target,
+        # which used to skip the ownership check outright.
+        from pm_core.cli import session as session_mod
+        monkeypatch.setattr(session_mod, "_get_current_pm_session",
+                            lambda: "pm-repo-abc")
         seen: list[bool] = []
         result = self._invoke(monkeypatch, tmp_path, (sock, True),
                               seen_owned=seen)

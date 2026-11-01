@@ -163,7 +163,25 @@ def _register_tmux_bindings(session_name: str) -> None:
     # Conditionally override pane-switch keys: use pm's mobile-aware
     # switch for pm sessions, fall back to default tmux behavior otherwise.
     # Keyed on the pane registry file existing for the current session.
+    #
+    # The registry is keyed by the *base* pm session, and tmux resolves
+    # that through the session group: a grouped ``base~N`` and a user's own
+    # view (any name, S118/S121/S124) report ``#{session_group}`` = base,
+    # while a lone session reports an empty group (use its own name).  The
+    # old test stripped at the first ``~`` and left the value unquoted, so
+    # a session whose tag contains ``~`` (a repo directory may), one whose
+    # name contains a space, and every user view never matched their
+    # registry file — pm's mobile-aware switch was silently replaced by the
+    # plain fallback for exactly those sessions (review-loop b48f i15).
+    # ``#{}`` values are expanded by tmux before the shell runs; the
+    # registry path and the derived name are shell-quoted (a home directory
+    # or a repo directory may contain a space).  A session name containing
+    # a single quote still breaks the assignment, which fails the condition
+    # and so keeps the plain fallback — the safe direction.
     registry_dir = pane_registry.registry_dir()
+    registry_test = (
+        f"g='#{{session_group}}'; s='#{{session_name}}'; "
+        f"test -f {shlex.quote(str(registry_dir))}/\"${{g:-$s}}\".json")
     switch_keys = {
         "o": ("next", "select-pane -t :.+"),
         "Up": ("-U", "select-pane -U"),
@@ -173,8 +191,7 @@ def _register_tmux_bindings(session_name: str) -> None:
     }
     for key, (direction, fallback) in switch_keys.items():
         subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", key,
-                 "if-shell",
-                 f"s='#{{session_name}}'; test -f {registry_dir}/${{s%%~*}}.json",
+                 "if-shell", registry_test,
                  f"run-shell 'pm _pane-switch #{{session_name}} {direction}'",
                  fallback),
                 check=False)
@@ -338,23 +355,51 @@ def _resolve_start_session_name(shared: bool = False) -> str:
     return ambient or _get_session_name_for_cwd()
 
 
+def _attached_to_session_socket(session_name: str) -> bool:
+    """True when this process is attached to *session_name*'s own server.
+
+    The one socket an implicit lookup may adopt without an ownership check
+    is the server this process is already connected to: the user is on it,
+    so a socket there is not one another user handed us.  A shared session
+    joined from another user's pane is exactly that case (the socket
+    belongs to the sharing user by design), and so is a private session
+    (its socket is ours anyway).
+
+    A *legacy* pre-isolation session runs on the default server, whose
+    path never equals the session's deterministic private socket — so the
+    check is not skipped there, and a socket another user planted under
+    that name is not adopted (review-loop b48f i15).
+    """
+    try:
+        # Inside the target session, not merely carrying its socket in the
+        # environment (a pane can outlive the session it was started in).
+        if _get_current_pm_session() != session_name:
+            return False
+        ambient = tmux_mod.resolve_ambient_socket(pm_only=False)
+        return (ambient is not None
+                and ambient == tmux_mod.session_socket_for(session_name))
+    except OSError:
+        return False
+
+
 def _owned_only_for_target(session_name: str) -> bool:
     """Whether *session_name* must resolve to a socket this user owns.
 
     A shared invocation (``--global``/``--group``, or a pane of a shared
     session that inherited ``PM_SHARE_MODE``) may legitimately name the
-    sharing user's socket, and so may the session this process is running
-    inside: the user is already attached to that server, and a pane of a
-    grouped session carries no ``PM_SHARE_MODE`` to say it is shared (tmux
-    copies no session environment into a grouped session).  Every other
-    target is implicit — the cwd-derived session of a plain shell or a
-    workdir clone — where only a socket this user owns can be its server
-    (see ``tmux.find_session_server``'s *owned_only*).
+    sharing user's socket, so it is exempt.  So is the session whose own
+    server this process is attached to (see
+    ``_attached_to_session_socket``): the user is already on it, and a pane
+    of a grouped session carries no ``PM_SHARE_MODE`` to say it is shared
+    (tmux copies no session environment into a grouped session).  Every
+    other target is implicit — the cwd-derived session of a plain shell or
+    a workdir clone, the session a shared pane names, and a *legacy*
+    session on the default server — where only a socket this user owns can
+    be its server (see ``tmux.find_session_server``'s *owned_only*).
     """
     if not _private_session_context():
         return False
-    ambient = _get_current_pm_session()
-    return not (ambient and session_name == ambient)
+    return not _attached_to_session_socket(session_name)
 
 
 def _removable_private_socket(socket_path: str) -> bool:

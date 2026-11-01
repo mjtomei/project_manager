@@ -6185,7 +6185,10 @@ def _resume_session(state: QALoopState) -> str | None:
     its PR arrives by a pull (S41).  Its workers, planner window and any
     relaunch, verifier or finalizer pane belong in that session: looking
     for its qa window in this one skipped the finalizer.  This TUI's
-    session is used when the run's session is gone (its windows with it).
+    session is used when the run's session is gone (its windows with it);
+    a session alive on *another* server never reaches here — the TUI scan
+    leaves that run to the clone hosting it (see
+    :func:`run_session_live_elsewhere`).
     """
     own = get_pm_session()
     run_session = _live_other_session(state.session_tag)
@@ -6198,12 +6201,50 @@ def _resume_session(state: QALoopState) -> str | None:
 
 def _live_other_session(session_tag: str | None) -> str | None:
     """``pm-<session_tag>`` when it is a live tmux session other than this
-    process's pm session (a run launched from another clone), else None."""
+    process's pm session (a run launched from another clone), else None.
+
+    Only a session on *this* process's server can be driven from here; a
+    session on another server is handled by
+    :func:`run_session_live_elsewhere` (the TUI leaves that run alone).
+    """
     if not session_tag or not launched_elsewhere(session_tag):
         return None
     from pm_core import tmux as tmux_mod
     run_session = f"pm-{session_tag}"
     return run_session if tmux_mod.session_exists(f"={run_session}") else None
+
+
+def run_session_live_elsewhere(session_tag: str | None) -> bool:
+    """True when the run's pm session is alive on a server this one cannot drive.
+
+    Every pm session has its own tmux server (pr-073910f), so a run
+    launched from another clone's session is invisible to
+    :func:`_live_other_session`, which asks the *current* server.  The
+    run's scenario panes still exist over there: resuming it here would
+    poll this session for windows that are not here and end the other
+    clone's run with a bogus result, and re-launching them would run the
+    scenarios twice.  The clone whose session hosts the run resumes it
+    when its TUI restarts.
+
+    A session that is gone everywhere is *not* "elsewhere": its windows
+    went with it, so the run is resumed here (see :func:`_resume_session`).
+    """
+    if not session_tag:
+        return False
+    from pm_core import tmux as tmux_mod
+    run_session = f"pm-{session_tag}"
+    try:
+        # Reachable from this process: the same server (a legacy
+        # pre-isolation session, or this TUI's own).
+        if tmux_mod.session_exists(f"={run_session}"):
+            return False
+        socket_path, _on_private = tmux_mod.find_session_server(run_session)
+    except OSError:
+        # tmux missing/unexecutable: nothing can be driven, and the resume
+        # degrades to this TUI's own session as it did before (the same
+        # contract every other probe in this area follows).
+        return False
+    return socket_path is not None
 
 
 def launched_elsewhere(session_tag: str | None) -> bool:
