@@ -39,6 +39,7 @@ from pm_core.tmux import (
     sessions_on_window,
     attached_group_active_windows,
     create_grouped_session,
+    switch_sessions_to_window,
 )
 
 
@@ -50,36 +51,107 @@ class TestAttachedGroupActiveWindows:
     @patch("pm_core.tmux._run")
     def test_single_query_filters_group_and_attachment(self, run):
         run.return_value = MagicMock(returncode=0, stdout=(
-            "1|@1|base|base\n2|@2|base|base~1\n0|@3|base|base~2\n"
-            "1|@4||other\n1|@5||base-extra\n"
-            "|@6|base|base~3\n1||base|base~4\nmalformed\n"
-            "1|@7|base|base~5|with|pipes\n"
-            "1|@8|base|myview\n1|@9|scratch|view2\n"))
+            "1:@1:base:base\n2:@2:base:base~1\n0:@3:base:base~2\n"
+            "1:@4::other\n1:@5::base-extra\n"
+            ":@6:base:base~3\n1::base:base~4\nmalformed\n"
+            "1:@7:base:base~5|with|pipes\n"
+            "1:@8:base:myview\n1:@9:scratch:view2\n"))
         assert attached_group_active_windows("base", socket_path="/socket") == {
             "base": "@1", "base~1": "@2", "base~5|with|pipes": "@7",
             "myview": "@8"}
         run.assert_called_once()
         cmd = run.call_args.args[0]
         assert "list-sessions" in cmd
-        assert "#{session_attached}|#{window_id}|#{session_group}|#{session_name}" in cmd
+        assert "#{session_attached}:#{window_id}:#{session_group}:#{session_name}" in cmd
         assert cmd[cmd.index("-S") + 1] == "/socket"
+
+    @patch("pm_core.tmux._run")
+    def test_group_name_may_contain_the_old_separator(self, run):
+        """The group field repeats the base session's name, which may hold ``|``.
+
+        With a ``|``-separated query a base name containing ``|`` shifted
+        every following field, so the collaborator row was dropped — the
+        same class of defect the other tmux parsers were fixed for.
+        """
+        run.return_value = MagicMock(returncode=0, stdout=(
+            "1:@1:pm-my|repo-abc:pm-my|repo-abc\n"
+            "1:@2:pm-my|repo-abc:pm-my|repo-abc~1\n"
+            "1:@3:pm-my|repo-abc:zview\n"))
+        assert attached_group_active_windows("pm-my|repo-abc") == {
+            "pm-my|repo-abc": "@1", "pm-my|repo-abc~1": "@2",
+            "zview": "@3"}
 
     @patch("pm_core.tmux._run")
     def test_separator_is_printable_so_c_locale_cannot_break_it(self, run):
         # tmux rewrites control characters (e.g. a tab) in format output to
         # "_" when the server runs under LC_ALL=C, so a tab-separated query
-        # silently parsed as zero fields.  The separator must be printable.
-        run.return_value = MagicMock(returncode=0, stdout="1|@1|base|base\n")
+        # silently parsed as zero fields.  The separator must be printable,
+        # and it must be one tmux forbids in session names (``:``).
+        run.return_value = MagicMock(returncode=0, stdout="1:@1:base:base\n")
         assert attached_group_active_windows("base") == {"base": "@1"}
         fmt = next(a for a in run.call_args.args[0] if "session_name" in a)
         assert "\t" not in fmt
-        assert "|" in fmt
+        assert ":" in fmt
 
     @patch("pm_core.tmux._run")
     def test_error_returns_empty_map(self, run):
         run.return_value = MagicMock(returncode=1, stdout="")
         assert attached_group_active_windows("base") == {}
         run.assert_called_once()
+
+
+class TestSwitchSessionsToWindow:
+    @patch("pm_core.tmux.find_window_by_name")
+    @patch("pm_core.tmux._run")
+    def test_session_name_may_contain_a_space(self, run, find_window,
+                                              monkeypatch):
+        """A repo directory name may contain a space, so a session name may.
+
+        The client map used to be space-separated, so ``pm-my repo-abc``
+        was read as ``pm-my``: its client was never found and the
+        ``switch-client`` that moves it to the replacement window was
+        skipped.
+        """
+        # Empty (not absent) so the assertion below is independent of an
+        # ambient pm pane's socket and still records a monkeypatch undo.
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+        find_window.return_value = {"id": "@9", "index": "3"}
+        responses = {
+            "list-clients": MagicMock(
+                returncode=0,
+                stdout="pm-my repo-abc:/dev/pts/1\n"
+                       "pm-other:/dev/pts/2\n"),
+        }
+
+        def fake_run(cmd, **kwargs):
+            for key, result in responses.items():
+                if key in cmd:
+                    return result
+            return MagicMock(returncode=0, stdout="")
+
+        run.side_effect = fake_run
+        switch_sessions_to_window(["pm-my repo-abc"], "pm-my repo-abc",
+                                  "review")
+
+        switch_cmds = [c.args[0] for c in run.call_args_list
+                       if "switch-client" in c.args[0]]
+        assert switch_cmds == [["tmux", "switch-client", "-t",
+                                "pm-my repo-abc", "-c", "/dev/pts/1"]]
+
+    @patch("pm_core.tmux.find_window_by_name")
+    @patch("pm_core.tmux._run")
+    def test_unknown_client_still_selects_the_window(self, run, find_window,
+                                                     monkeypatch):
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+        find_window.return_value = {"id": "@9", "index": "3"}
+        run.return_value = MagicMock(returncode=0, stdout="")
+        switch_sessions_to_window(["pm-x"], "pm-x", "review")
+
+        select_cmds = [c.args[0] for c in run.call_args_list
+                       if "select-window" in c.args[0]]
+        assert select_cmds == [["tmux", "select-window", "-t", "pm-x:3"]]
+        assert not [c for c in run.call_args_list
+                    if "switch-client" in c.args[0]]
 
 
 class TestHasTmux:

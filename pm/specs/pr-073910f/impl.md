@@ -2178,7 +2178,8 @@ field, so the popup picker's collaborator display loses those rows.
 `"#{session_name} #{client_tty}"` with the name first, so the same
 space-name truncation applies to its client map.  Both functions predate
 this PR (their formats are asserted by their own tests); only the
-new/changed parsers are covered by the fix above.
+new/changed parsers are covered by the fix above.  *(Closed in
+review-loop 2caf i10 — see that iteration below.)*
 
 Validation: targeted suites (`test_cli_helpers`, `test_session_socket_isolation`,
 `test_tmux`, `test_shared_sessions`, `test_cli_qa`) 385 passed; full suite
@@ -2365,3 +2366,69 @@ untouched); `pm session list` read-only ("No pm sessions found.", no
 socket directory created).  No live session, server or shared host
 configuration was touched — every fixture used a disposable socket and a
 temporary HOME.
+
+## Review iteration (2026-11-01, review-loop 2caf i10)
+
+Verification pass over the head after the 8d4e i1 fix; no requirement
+changes.  One fail-closed gap in the new listing code, one order-dependent
+test module, and the two tmux parsers the i5 iteration had left as
+residuals:
+
+1. **`list_pm_sessions()` followed a symlinked socket directory.**
+   `/tmp` is world-writable, so another local user can create
+   `/tmp/pm-sessions` as a symlink to a directory they own.  `pm session`
+   refuses that path outright (`paths.ensure_socket_dir`; review-loop 2caf
+   i8), but the *read* path did not: `Path.glob` resolves the link, so
+   `pm session list` enumerated the target directory and reported its
+   servers as pm sessions (verified live: a planted directory's socket was
+   listed), and discovery scanned it.  The target's owner would decide
+   which sessions appear as ours — the same hazard the per-entry `lstat`
+   hardening (d1c0 i12) and the directory refusal (2caf i8) close one
+   level down.  The scan now `lstat`s the directory and skips a path that
+   is not a real directory (a missing directory stays the normal
+   first-run state), logging a warning; the default-server pass is
+   unaffected, so legacy sessions are still listed.  `qa.md` R12 gained
+   the read-path bullet.  Test:
+   `TestListPmSessions::test_does_not_follow_a_symlinked_socket_dir`
+   (verified to fail pre-fix: the planted socket was probed and listed).
+
+2. **This module's tests leaked `PM_TMUX_SOCKET` into later tests.**  The
+   code under test deliberately exports the variable into the process
+   environment (`helpers._use_tmux_socket`), and `monkeypatch.delenv`
+   records *nothing* for a variable that is already absent — so a test
+   that cleared it and then let pm set it left the value behind for the
+   rest of the run.  Demonstrated: `tests/test_tmux.py`'s new
+   `TestSwitchSessionsToWindow` assertions failed only when run after
+   `test_session_socket_isolation.py`, with a stray `-S <tmp socket>` in
+   the command (the same order-dependence the b972 i1 note removed from
+   `test_shared_sessions.py`, from the other side).  A module-local
+   autouse fixture now snapshots and restores `os.environ`; the two new
+   `test_tmux.py` tests also pin the variable to `""` so their exact
+   command assertions do not depend on the caller's environment.
+
+3. **The two residual parsers from 2caf i5 now use `:`-separated
+   fields.**  `attached_group_active_windows()` used a `|` format whose
+   *group* field repeats the base session's name, so a base name
+   containing `|` shifted every following field and the collaborator row
+   was dropped from the popup picker.
+   `switch_sessions_to_window()` parsed
+   `"#{session_name} #{client_tty}"`, so a session name containing a
+   space was truncated, its client was never found, and the
+   `switch-client` that moves it to a replacement window was skipped
+   (sign-off, QA-loop, watcher and merge paths).  Both now use `:`, which
+   tmux forbids in session names (it rewrites `:` and `.` to `_`) while a
+   name may contain `|` or spaces — the rule the i5 fix applied to
+   `_live_panes_and_tuis`, `list_pm_sessions` and `sessions_in_group`.
+   Tests: `TestAttachedGroupActiveWindows::
+   test_group_name_may_contain_the_old_separator` and the new
+   `TestSwitchSessionsToWindow` (`test_session_name_may_contain_a_space`,
+   `test_unknown_client_still_selects_the_window`); the existing
+   `attached_group_active_windows` fixtures moved to the `:` format.
+
+Validation: targeted suites (`test_session_socket_isolation`,
+`test_tmux`, `test_cli_helpers`, `test_shared_sessions`, `test_cli_qa`,
+`test_popup_picker`, `test_qa_background_focus`, `test_signoff`,
+`test_tui_pidfile`) 907 passed; full suite re-run after the edits (see the
+PR note).  Every new test was verified to fail with the pre-fix code.  No
+live session, server or shared host configuration was touched — every
+fixture used a disposable socket and a temporary HOME.

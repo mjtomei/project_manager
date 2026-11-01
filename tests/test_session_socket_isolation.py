@@ -27,6 +27,26 @@ import pytest
 from pm_core import paths, tmux
 
 
+@pytest.fixture(autouse=True)
+def _restore_pm_env():
+    """Restore the process environment after every test in this module.
+
+    The code under test deliberately exports ``PM_TMUX_SOCKET`` into the
+    process environment (``helpers._use_tmux_socket``), and
+    ``monkeypatch.delenv`` records nothing for a variable that is already
+    absent, so a test that cleared the variable and then let pm set it
+    leaked the value into every later test in the run (``tests/test_tmux.py``
+    saw a stray ``-S`` and failed only in a combined run).  Snapshotting the
+    environment is the one form that also covers values pm sets itself.
+    """
+    saved = dict(os.environ)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+
+
 # ---------------------------------------------------------------------------
 # paths: session_socket_path
 # ---------------------------------------------------------------------------
@@ -1177,6 +1197,43 @@ class TestListPmSessions:
         mock_run.side_effect = fake_run
         with patch.object(paths, "SHARED_SOCKET_DIR", sock_dir):
             assert tmux.list_pm_sessions() == []
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_does_not_follow_a_symlinked_socket_dir(self, mock_run, tmp_path):
+        """A symlinked socket directory is refused, not enumerated.
+
+        ``/tmp`` is world-writable, so another local user can create
+        ``/tmp/pm-sessions`` as a link to a directory they own.  ``pm
+        session`` refuses that outright (``ensure_socket_dir``), so the
+        read path must not treat the target's servers as ours either: the
+        listing would show their sessions, and discovery would scan them.
+        """
+        target = tmp_path / "elsewhere"
+        target.mkdir(mode=0o1777)
+        link = tmp_path / "pm-sessions"
+        link.symlink_to(target)
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            s.bind(str(target / "pm-planted"))
+        finally:
+            s.close()
+
+        def fake_run(cmd, **kwargs):
+            if str(target) in " ".join(cmd):
+                return MagicMock(returncode=0,
+                                 stdout="pm-planted:pm-planted:1\n")
+            return MagicMock(returncode=1, stdout="")
+
+        mock_run.side_effect = fake_run
+        with patch.object(paths, "SHARED_SOCKET_DIR", link):
+            rows = tmux.list_pm_sessions()
+
+        # Only the default server was probed; the planted directory's
+        # socket was never connected to.
+        probed = [c[0][0][c[0][0].index("-S") + 1]
+                  for c in mock_run.call_args_list if "-S" in c[0][0]]
+        assert probed == [str(paths.default_socket_path())]
+        assert rows == []
 
     @patch("pm_core.tmux.subprocess.run")
     def test_marks_shared_sockets(self, mock_run, tmp_path):

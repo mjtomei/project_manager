@@ -1051,14 +1051,18 @@ def attached_group_active_windows(base: str, socket_path: str | None = None) -> 
     The separator must be printable: tmux rewrites control characters in
     format output to ``_`` when the server runs under a non-UTF-8 locale
     (``LC_ALL=C``), which silently turned a tab-separated query into one
-    unparsable field.  The session name comes last (``maxsplit=3``) so it
-    may itself contain the separator.  A user's own view grouped with
-    *base* under another name (``tmux new-session -t base -s myview``)
-    belongs to the group too (S121).
+    unparsable field.  ``:`` is used because tmux forbids it in session
+    names (it rewrites ``:`` and ``.`` to ``_``), while a session name —
+    derived from the repo directory name — may contain ``|`` or spaces
+    (a ``|`` in the group field used to shift the fields and drop the
+    row).  The session name comes last (``maxsplit=3``) so it is taken
+    whole.  A user's own view grouped with *base* under another name
+    (``tmux new-session -t base -s myview``) belongs to the group too
+    (S121).
     """
     result = _run(
         _tmux_cmd("list-sessions", "-F",
-                  "#{session_attached}|#{window_id}|#{session_group}|#{session_name}",
+                  "#{session_attached}:#{window_id}:#{session_group}:#{session_name}",
                   socket_path=socket_path),
         text=True,
     )
@@ -1066,7 +1070,7 @@ def attached_group_active_windows(base: str, socket_path: str | None = None) -> 
         return {}
     active = {}
     for line in result.stdout.splitlines():
-        parts = line.split("|", 3)
+        parts = line.split(":", 3)
         if len(parts) != 4:
             continue
         attached, wid, group, name = parts
@@ -1120,6 +1124,12 @@ def switch_sessions_to_window(sessions: list[str], session: str, window_name: st
     ``select-window`` alone does NOT update tmux's client tracking.
     ``switch-client`` to the same session is a visible no-op but
     triggers tmux to recalculate the window size for the correct display.
+
+    Fields are separated by ``:``, which tmux forbids in session names
+    (it rewrites ``:`` and ``.`` to ``_``), while a session name — derived
+    from the repo directory name — may contain a space or ``|``.  The old
+    space-separated query truncated such a name, so its client was never
+    found and never switched to the replacement window.
     """
     _log.info("switch_sessions_to_window: sessions=%s session=%s window_name=%s",
                sessions, session, window_name)
@@ -1135,12 +1145,12 @@ def switch_sessions_to_window(sessions: list[str], session: str, window_name: st
     # Map session names → client TTYs for switch-client.
     client_map: dict[str, str] = {}
     r = _run(
-        _tmux_cmd("list-clients", "-F", "#{session_name} #{client_tty}"),
+        _tmux_cmd("list-clients", "-F", "#{session_name}:#{client_tty}"),
         text=True,
     )
     if r.returncode == 0:
         for line in r.stdout.strip().splitlines():
-            parts = line.split(None, 1)
+            parts = line.split(":", 1)
             if len(parts) == 2:
                 client_map[parts[0]] = parts[1]
     _log.info("switch_sessions_to_window: client_map=%s", client_map)
@@ -1373,7 +1383,9 @@ def list_pm_sessions() -> list[dict]:
     across the group.  A user's own view of a session (``tmux new-session
     -t base -s myview``, S118/S121/S124) is not a session of its own and is
     not listed, whatever it is called.  Unreadable/stale sockets are
-    skipped.
+    skipped, and so is a socket directory that is not a real directory
+    (a symlink or a file planted in world-writable ``/tmp`` — ``pm
+    session`` refuses the same path, so its contents are never ours).
 
     Each row: ``{"name", "socket", "attached", "shared"}`` where ``socket``
     is None for sessions on the default server and ``shared`` is true when
@@ -1453,10 +1465,26 @@ def list_pm_sessions() -> list[dict]:
             rows.append({"name": base, "socket": socket_path,
                          "attached": attached, "shared": shared})
 
+    # The socket directory itself must be a real directory.  /tmp is
+    # world-writable, so another local user can create /tmp/pm-sessions as
+    # a symlink to a directory they own; `pm session` refuses that outright
+    # (paths.ensure_socket_dir, review-loop 2caf i8), and the read path
+    # must not enumerate it either — the target's owner would decide which
+    # servers appear as pm sessions, and discovery would scan them.  A
+    # missing directory is the normal first-run state: nothing to scan.
     try:
-        sockets = sorted(SHARED_SOCKET_DIR.glob("pm-*"))
+        dir_mode = SHARED_SOCKET_DIR.lstat().st_mode
     except OSError:
+        dir_mode = None
+    if dir_mode is not None and not stat.S_ISDIR(dir_mode):
+        _log.warning("list_pm_sessions: %s is not a real directory; "
+                     "not scanning it", SHARED_SOCKET_DIR)
         sockets = []
+    else:
+        try:
+            sockets = sorted(SHARED_SOCKET_DIR.glob("pm-*"))
+        except OSError:
+            sockets = []
     for sock in sockets:
         # lstat, not is_socket(): the socket directory is world-writable, so
         # a symlink another user plants there must not be followed — it

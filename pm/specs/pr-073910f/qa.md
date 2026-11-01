@@ -329,6 +329,12 @@ pane unless stated otherwise.
   creates no server or socket anywhere through the link — the link's
   target owner could otherwise unlink (and replace) every socket pm binds
   there, sticky bit or not.
+- **GIVEN** that same symlinked `/tmp/pm-sessions` holds a running server
+  in its target directory, **WHEN** the user runs `pm session list` (or
+  `pm tui view` with no `--session` from a plain shell), **THEN** the
+  target's sessions are not listed or driven — the read path refuses the
+  link exactly like `pm session` does — while any legacy session on the
+  default server is still listed.
 - **GIVEN** a regular file or a symlink planted at a session's socket
   path, **WHEN** the user runs `pm session list`, **THEN** the entry is
   skipped (not reported as one of the user's sessions) and nothing is
