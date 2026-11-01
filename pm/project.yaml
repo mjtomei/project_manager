@@ -48690,7 +48690,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-11-01T00:04:30.419836+00:00'
+  updated_at: '2026-11-01T00:20:31.246438+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -49126,6 +49126,35 @@ prs:
       dir with nested_podman: true) takes ~3.5 min.'
     created_at: '2026-11-01T00:04:30Z'
     last_edited: '2026-11-01T00:04:30Z'
+  - id: note-cd76e3d
+    text: 'QA S21 PASS (head 475375c7; verdict commit fb0de6fa) — adjacent container-eligible
+      launcher (review / sign-off) verified end to end in an isolated fixture (scratch
+      HOME, private tmux socket, fake-claude backend, host-launch marker wrapper,
+      podman stand-in that exits 125). Story 1: `pm pr review --fresh` with the runtime
+      unreachable exits 1, stderr "Failed to create container ''pm-<tag>-review-<pr>''.
+      Is podman running? Disable container mode with ''pm container disable'' to run
+      without containers.", no review window, empty host-launch marker, status stays
+      in_review; the in_progress->in_review variant prints "PR ... marked as in_review."
+      before the same fail-closed error. Story 2 (healthy podman, pm-dev built): rc
+      0, "Opened review window ''review-<pr>''", pane start command is `podman exec
+      -it pm-<tag>-review-<pr> ...`, `podman top` lists `python3 /opt/pm-src/bin/fake-claude
+      --verdict PASS`, marker empty. Story 3: `pm pr signoff --fresh` with the runtime
+      unreachable exits 1, stdout "PR ... marked as sign_off." + the integration line,
+      the same cause+remedy on stderr, no signoff window, no report.html (only integration.json),
+      marker empty. Marker control (container mode disabled) records "HOST LAUNCH
+      ...", so the empty marker is real evidence. Captures: /pm-captures/scenarios/21/{summary.md,story1-review-runtime-down,story1b-host-launch-control,story1c-review-transition,story2-review-healthy,story3-signoff-runtime-down}.
+      tests/test_container_fail_closed.py: 27 passed. SCENARIO FIX NEEDED (not a code
+      bug): story 1''s Then expects out.txt to contain "PR ... marked as in_review",
+      but the scenario''s own bootstrap puts PR A at in_review, so the CLI prints
+      "PR ... is already in_review"; story1c covers the transition wording (same class
+      as S20''s "Running 1 scenario(s)..." clause). Incidental bug filed as pr-849a3e6:
+      with the configured runtime binary MISSING (e.g. runtime=docker, not installed)
+      remove_container() raises FileNotFoundError before the create-failure guard,
+      so review/sign-off die with Click''s raw "Error: [Errno 2] No such file or directory:
+      ''docker''" — still fail-closed (rc 1, no host launch) but without cause+remedy;
+      not fixed here.'
+    created_at: '2026-11-01T00:20:31Z'
+    last_edited: '2026-11-01T00:20:31Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
