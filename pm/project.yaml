@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T05:12:45.920134+00:00'
+  updated_at: '2026-11-01T05:54:19.704889+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38072,6 +38072,37 @@ prs:
       impl.md R78. The dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-11-01T05:12:45Z'
     last_edited: '2026-11-01T05:12:45Z'
+  - id: note-1ede96e
+    text: 'Review loop 928f i18: one leftover in the kept recipe scope, the PR own
+      class (a handle that cannot tell "no status" from "a status"). Both recording
+      recipes read asciinema''s own exit status with `status=$(cat … 2>/dev/null)
+      || { … "recorder status is missing" … }`, so only a *missing* file took the
+      torn-down branch. The pane''s shell writes it as `echo $? > recorder.status`:
+      the redirect creates (truncates) the file when the shell runs that statement
+      and the status lands a moment later, so a kill in that window (a concurrent
+      capture''s step 0 ending this recorder, a supervisor, an OOM kill) or a write
+      that cannot complete (a full disk — the cast can already hold the recording,
+      so the cast check above passes) leaves a 0-byte file. `cat` answers 0 for it,
+      so `[ "$status" = 0 ]` fired and the run printed "asciinema exited  — the cast
+      is incomplete, not a finished recording" — an exit status the file does not
+      hold, for exactly the state the missing branch exists to name. Verified in this
+      container with the recipes'' own pane command and status check extracted verbatim:
+      a healthy recording writes a 141-byte cast; the same status write under `ulimit
+      -f 0` (the full-disk shape) leaves a 0-byte recorder.status; HEAD''s check prints
+      the blank-status message in both recipes; the fixed check prints "recorder status
+      is missing or empty — the pane was torn down before asciinema''s exit status
+      was written, so the cast is incomplete". The check now requires a non-empty
+      value. New case test_an_empty_recorder_status_is_not_an_exit_status (both recipes;
+      stub mode `emptystatus`), the two status-read text assertions updated to the
+      new form. Mutation check: the pre-fix form fails exactly the two new cases (2
+      failed, 303 deselected); restored, the recipe file is 305 passed (was 303).
+      Full suite: 5369 passed, 1 skipped, 121 deselected, with the 12 test_markdown_render
+      failures being this container''s missing markdown dep (13 passed with it; 5381
+      passed, 0 failed). Evidence: /pm-captures/review-928f-i18/ (probe.log, mutation-check.log,
+      recipe-file.log, suite.log, README.md, scripts/). impl.md R79 + Evidence note,
+      qa.md. No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-11-01T05:54:19Z'
+    last_edited: '2026-11-01T05:54:19Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
