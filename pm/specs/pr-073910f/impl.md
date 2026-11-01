@@ -266,13 +266,17 @@ must be left untouched:
 3. Private sockets are created by tmux with mode 0600 (verified); shared
    sessions keep the existing chmod/`server-access` path.  Because the
    socket directory is world-writable, private sessions refuse to use an
-   existing socket file owned by another UID (shared sessions skip this
-   check — the sharing user owns the socket by design).  The directory
-   itself must be a real 1777 directory: a sticky bit is required, and a
-   symbolic link at `/tmp/pm-sessions` is refused even when it resolves to
-   such a directory (review-loop 2caf i8 — its target's owner can unlink
-   our sockets; the sticky bit does not protect a file from the directory's
-   owner).
+   existing socket file owned by another UID (shared sessions skip that
+   check — the sharing user owns the socket by design).  A *symbolic
+   link* at a session's socket path is refused in both modes, before any
+   probe or export: a real socket is never a link, and tmux follows it,
+   so a shared start — which skips the uid check — would otherwise attach
+   to (or bind at) whatever the link names (review-loop b48f i7).  The
+   directory itself must be a real 1777 directory: a sticky bit is
+   required, and a symbolic link at `/tmp/pm-sessions` is refused even
+   when it resolves to such a directory (review-loop 2caf i8 — its
+   target's owner can unlink our sockets; the sticky bit does not protect
+   a file from the directory's owner).
 
 ### R8 — Destructive and concurrent session operations are exact and convergent
 
@@ -2925,3 +2929,76 @@ socket (private server, session env, global env and hooks correct;
 default server untouched).  No live session, server or shared host
 configuration was touched — every fixture used a disposable socket and a
 temporary HOME.
+
+## Review iteration (2026-11-01, review-loop b48f i7)
+
+Verification pass over the head after the b48f i6 fix; no requirement
+changes.  One fail-closed gap on the shared-session start path, plus one
+piece of dead code.
+
+1. **A shared session's start followed a symlink planted at its socket
+   path.**  `_resolve_session_socket()` refuses a socket *file* owned by
+   another user, but only for private sessions — the check is skipped for
+   `--global`/`--group` because a joiner does not own the sharing user's
+   socket, and a uid check would refuse the joiner.  That left the shared
+   path with no guard at all on the directory *entry*: `/tmp/pm-sessions`
+   is world-writable, so another local user can create
+   `pm-<shared-tag>` as a symlink to a server they run before pm ever
+   does.  `tmux -S <path>` follows the link, so `pm session --global` (or
+   a joiner running `--global --dir`) attached to that server, which then
+   receives every keystroke typed into the session; a dangling link would
+   have had pm bind its server socket at the attacker-chosen target.
+   A real socket is never a symlink — tmux binds a socket file — so the
+   entry is now refused outright in **both** modes, before any probe or
+   export, with a message naming the path (R12's scope sentence already
+   required "symlinks planted at a session's socket path … must fail
+   closed").  The private ownership check now reuses the same `lstat`
+   result, so its dangling-link rationale still holds.
+   Tests: `TestResolveSessionSocket::
+   test_refuses_a_symlink_at_a_shared_socket_path` (new; fails on the
+   pre-fix tree with "DID NOT RAISE" and, without the guard, exports the
+   path and probes the link) and
+   `::test_refuses_a_symlink_planted_at_the_socket_path`, rewritten to
+   exercise the new guard rather than the uid check (it no longer fakes
+   `getuid`, and asserts nothing is exported; also fails pre-fix).  The
+   "socket owned by another user" test still covers the ownership check
+   itself.
+
+2. **`list_pm_sessions()` carried an unreachable de-duplication set.**
+   `seen` keyed on `(socket_path, base)` could never hit: `groups` is a
+   dict keyed by base within one `collect()` call, `glob("pm-*")` yields
+   each socket path once, and the default server is collected once with
+   `socket_path=None`.  Removed (the comment records why one row per
+   session is structural).  No behaviour change; the existing listing
+   tests cover the output.
+
+Nothing else surfaced.  The socket derivation and default-server
+addressing (R4.3), discovery scoping (7af7 i1–i3, 3cc7 i1, 703c
+i1/i4/i6, 2caf i4/i5, b48f i5/i6), the precise detach (R5, 703c i3, 2caf
+i2), the kill/unlink rules (R3.2, R8, 2caf i7, b48f i3), the socket-file
+and socket-directory ownership checks (d1c0 i10/i12, 703c i2, 2caf i8,
+QA S17, above) and the shared-session share-mode handling (d1c0 i7, 703c
+i8, 2caf i11, b48f i2) all match the spec, and every new helper has
+direct coverage.
+
+Validation: targeted suites (`test_session_socket_isolation`,
+`test_tmux`, `test_cli_helpers`, `test_shared_sessions`, `test_cli_qa`)
+429 passed; full suite recorded in the PR note for this iteration.  Both
+new tests were verified to fail on the pre-fix tree at `670f2f08c`.
+`pm/specs/pr-073910f/session_start_smoke.py` re-ran clean on a disposable
+socket (private server, session env, global env and hooks correct;
+default server untouched).  No live session, server or shared host
+configuration was touched — every fixture used a disposable socket and a
+temporary HOME.
+
+Residual (pre-existing, non-blocking, unchanged here): the prefix
+pane-switch bindings (`prefix` + arrow / `o`) are gated by an `if-shell`
+test on `~/.pm/pane-registry/<#{session_name}>.json`.  A user's own view
+(S118/S121/S124) has no registry file of its own, so the gate falls back
+to tmux's plain `select-pane` and pm's mobile-aware zoom is not applied
+when the user drives the session through such a view.  The key still
+switches panes correctly, and this predates the per-session-server work;
+fixing it means teaching the shell-side gate (and `_pane-switch`'s own
+session argument) to resolve the group, which is a key-binding change
+outside this PR's scope, so it is left as a known limitation rather than
+changed here.

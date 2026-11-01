@@ -1496,7 +1496,6 @@ def list_pm_sessions() -> list[dict]:
             return False
 
     rows: list[dict] = []
-    seen: set[tuple[str | None, str]] = set()
 
     def collect(socket_path: str | None) -> None:
         """Collect one server; ``socket_path=None`` means the default one."""
@@ -1548,11 +1547,10 @@ def list_pm_sessions() -> list[dict]:
                 continue
             groups[own_base] = groups.get(own_base, 0) + _int_or_zero(attached)
         shared = is_shared(Path(socket_path) if socket_path else None)
+        # One row per session: ``groups`` is already keyed by base name,
+        # and each server (and the default server, ``socket_path=None``)
+        # is collected exactly once.
         for base, attached in sorted(groups.items()):
-            key = (socket_path, base)
-            if key in seen:
-                continue
-            seen.add(key)
             rows.append({"name": base, "socket": socket_path,
                          "attached": attached, "shared": shared})
 

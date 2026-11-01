@@ -2306,25 +2306,61 @@ class TestResolveSessionSocket:
 
     def test_refuses_a_symlink_planted_at_the_socket_path(self, monkeypatch,
                                                           tmp_path):
-        """A dangling symlink must be refused, not followed.
+        """A symlink at the socket path is refused, not followed.
 
-        ``stat()`` follows the link, so a link to a path that does not exist
-        yet raises ``OSError`` and the check would treat the socket as ours;
-        tmux would then create a server socket at the attacker-chosen
-        target.  The ownership check inspects the directory entry itself.
+        ``/tmp/pm-sessions`` is world-writable, so another user can create
+        the link before pm runs; tmux connects through it to whatever
+        server it points at (and a dangling link would have pm bind a
+        server socket at the attacker-chosen path).  A real socket is
+        never a symlink, so the entry is refused whatever its owner —
+        including the private case, where the link is owned by the *same*
+        uid only if this user made it.
         """
         from pm_core.cli import session as session_mod
 
         sock_dir = tmp_path / "pm-sessions"
         sock_dir.mkdir()
         (sock_dir / "pm-repo-abc").symlink_to(tmp_path / "attacker-chosen")
-        real_uid = os.getuid()
         monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", sock_dir)
-        monkeypatch.setattr(session_mod.os, "getuid", lambda: real_uid + 1)
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        # The refusal must precede any server probe.
+        monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
+                            lambda name: (None, False))
 
-        with pytest.raises(SystemExit):
+        with pytest.raises(SystemExit) as exc:
             session_mod._resolve_session_socket("pm-repo-abc", False)
+        assert exc.value.code == 1
+        assert "PM_TMUX_SOCKET" not in os.environ
         assert not (tmp_path / "attacker-chosen").exists()
+
+    def test_refuses_a_symlink_at_a_shared_socket_path(self, monkeypatch,
+                                                       tmp_path, capsys):
+        """A shared start must not connect through a planted symlink.
+
+        The ownership check is private-only — a joiner does not own the
+        sharing user's socket — so a link at a shared session's path used
+        to be followed: ``pm session --global`` (or a joiner) would attach
+        to the attacker's server, which then sees every key typed into the
+        session.  A real socket is never a symlink, so both modes refuse
+        it.
+        """
+        from pm_core.cli import session as session_mod
+
+        sock_dir = tmp_path / "pm-sessions"
+        sock_dir.mkdir()
+        (sock_dir / "pm-repo-abc").symlink_to(tmp_path / "attacker-server")
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", sock_dir)
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
+                            lambda name: (None, False))
+
+        with pytest.raises(SystemExit) as exc:
+            session_mod._resolve_session_socket("pm-repo-abc", True)
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "symbolic link" in err
+        assert "pm-repo-abc" in err
+        assert "PM_TMUX_SOCKET" not in os.environ
 
 
 class TestSessionKillServerSelection:

@@ -392,6 +392,14 @@ pane unless stated otherwise.
   path, **WHEN** the user runs `pm session list`, **THEN** the entry is
   skipped (not reported as one of the user's sessions) and nothing is
   followed or crashed on.
+- **GIVEN** a symlink planted at a session's socket path (pointing at a
+  server another user runs, or dangling), **WHEN** the user runs
+  `pm session` for that session — private *or* `--global`/`--group` (the
+  ownership check is private-only, so a shared start is the case the
+  link would otherwise be followed in) — **THEN** it refuses with a
+  message naming the socket and saying it is a symbolic link, exports no
+  `PM_TMUX_SOCKET`, and neither connects to nor creates a server there
+  (review-loop b48f i7).
 - **GIVEN** the directory is 1777 and owned by another user,
   **WHEN** the user runs `pm session`,
   **THEN** it proceeds normally.

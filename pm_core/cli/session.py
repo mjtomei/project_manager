@@ -7,6 +7,7 @@ pane/window management commands and session registry commands.
 import functools
 import os
 import shlex
+import stat
 import subprocess
 from pathlib import Path
 
@@ -404,6 +405,26 @@ def _resolve_session_socket(session_name: str,
             "your sockets.", err=True)
         raise SystemExit(1)
     socket_path = tmux_mod.session_socket_for(session_name)
+    # The socket directory is world-writable, so another user can plant
+    # something at our deterministic socket path.  Inspect the directory
+    # entry itself (``lstat``), never a symlink's target, for both checks
+    # below.
+    try:
+        entry = Path(socket_path).lstat()
+    except OSError:
+        entry = None
+    # A symbolic link is never a server pm created — tmux binds a real
+    # socket file at this path — so it was planted, and connecting through
+    # it would attach this process to whatever server it points at (a
+    # world-writable /tmp lets another user create the link first).  This
+    # check applies to shared sessions too: the ownership check below is
+    # private-only because a joiner does not own the owner's socket, so
+    # without this a *shared* start would follow the link.
+    if entry is not None and stat.S_ISLNK(entry.st_mode):
+        click.echo(
+            f"Refusing to use tmux socket '{socket_path}': it is a symbolic "
+            "link, not a socket. Remove it if you created it.", err=True)
+        raise SystemExit(1)
     # Private servers live in a world-writable directory; refuse to connect
     # to a socket another user planted at our path.  Shared sessions are
     # owned by the sharing user by design, so this check is private-only.
@@ -411,15 +432,10 @@ def _resolve_session_socket(session_name: str,
     # socket we do not own even though the legacy path would not connect to
     # it (a squatted socket is a hostile condition, not something to route
     # around silently).
-    # ``lstat`` inspects the directory entry itself, not a symlink target:
-    # with ``stat`` a dangling link planted by another user reads as "owned
-    # by nobody" (OSError, treated as ours) and tmux would then create a
-    # server socket at the attacker-chosen path.
+    # The ownership comes from the same ``lstat`` result, so a dangling
+    # link planted by another user is never mistaken for our own socket.
     if not is_shared:
-        try:
-            owner = Path(socket_path).lstat().st_uid
-        except OSError:
-            owner = os.getuid()
+        owner = entry.st_uid if entry is not None else os.getuid()
         if owner != os.getuid():
             click.echo(
                 f"Refusing to use tmux socket '{socket_path}': owned by "

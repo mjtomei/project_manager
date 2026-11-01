@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T14:56:45.901344+00:00'
+  updated_at: '2026-11-01T16:24:36.702695+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6513,6 +6513,37 @@ prs:
       was touched.'
     created_at: '2026-11-01T14:56:45Z'
     last_edited: '2026-11-01T14:56:45Z'
+  - id: note-3924a50
+    text: 'Review loop b48f i7 (no requirement changes; full suite 5414 passed / 1
+      skipped, 422.5 s, log /pm-captures/review-b48f-i7/full-suite-final.log). One
+      fail-closed gap on the shared-session start path plus one dead-code removal.
+      (1) _resolve_session_socket refused a socket file owned by another user only
+      for private sessions (the check is skipped for --global/--group because a joiner
+      does not own the sharing user''s socket), so a shared start had no guard on
+      the directory entry at all: /tmp/pm-sessions is world-writable, so another local
+      user can plant pm-<shared-tag> as a symlink to a server they run, and tmux -S
+      follows it — pm session --global (or a joiner running --global --dir) would
+      attach to that server and send it every keystroke, and a dangling link would
+      have had pm bind its socket at the attacker-chosen target. A real socket is
+      never a symlink (tmux binds a socket file), so the entry is now refused outright
+      in both modes, before any probe or export, with a message naming the path; the
+      private ownership check reuses the same lstat result. qa.md R12''s scope sentence
+      already required symlinks at a session''s socket path to fail closed. Tests:
+      test_refuses_a_symlink_at_a_shared_socket_path (new) and the private variant
+      rewritten to exercise the new guard (no getuid fake; asserts nothing is exported);
+      both verified to fail on the pre-fix tree at 670f2f08c with ''DID NOT RAISE''.
+      (2) list_pm_sessions'' seen de-dup set was unreachable (groups is a dict keyed
+      by base per server, glob yields each path once, the default server is collected
+      once with socket_path=None) — removed, no behaviour change. impl.md has the
+      iteration section (R7.3 now records the symlink rule) and a residual: the prefix
+      pane-switch bindings key their if-shell gate on the raw session name, so mobile
+      zoom is skipped for a user''s own view (pre-existing; a key-binding change out
+      of scope). Validation: targeted suites 719 passed; both start-path smoke scripts
+      (private and shared) re-ran clean on disposable sockets; a disposable-socket
+      list check confirmed base+~1+myview collapses to one row. No live session, server
+      or shared host configuration was touched.'
+    created_at: '2026-11-01T16:24:36Z'
+    last_edited: '2026-11-01T16:24:36Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
