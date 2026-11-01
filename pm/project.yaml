@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T05:52:06.271307+00:00'
+  updated_at: '2026-11-01T06:13:20.356755+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5965,6 +5965,38 @@ prs:
       socket and a temporary HOME.'
     created_at: '2026-11-01T05:52:06Z'
     last_edited: '2026-11-01T05:52:06Z'
+  - id: note-ecd8159
+    text: 'Review loop 2caf i6 (no requirement changes; full suite 5372 passed / 1
+      skipped, 417.5 s, log /pm-captures/review-2caf-i6/full-suite-final.log). Verification
+      pass over the head after the i5 fixes; one user-visible defect, the last name-based
+      pane->session resolution on a path this PR changed. (1) The QA status pane could
+      not switch the window of a user viewing through their own view: qa_status._find_attached_session()
+      (priority 1) read the pane''s #{session_name} and accepted it only when it was
+      base or base~N, so with the user attached through `tmux new-session -t pm-x
+      -s zview` (S118/S121/S124) the pane reported zview, the test failed and the
+      function fell back to the base session. `select-window` on the base does not
+      move the user''s client (each session in a group keeps its own current window;
+      verified live on tmux 3.2a: the base moved to qa while zview stayed on main),
+      so the QA pane silently failed to bring its window forward. The query now returns
+      #{session_name}:#{session_group} in one call (":" cannot occur in a tmux session
+      name; a name may contain spaces or "|") and accepts the pane''s session when
+      it belongs to base''s group - the same test tmux.current_or_base_session applies,
+      which the function''s docstring already claims to mirror; the module stays standalone
+      (no pm_core import). Verified live on a disposable socket: with a client attached
+      to zview, _find_attached_session("pm-x") returns zview and _switch_to_window
+      moves zview to qa (the base stays on main). Tests: TestQaStatusSocketRouting::test_switches_the_users_own_view
+      and ::test_ignores_a_pane_in_another_sessions_group. Checked and left alone
+      (deliberate, documented scope): priority 2 keeps its base/base~N name match,
+      exactly like current_or_base_session''s fallback; tmux.list_clients_in_group
+      (pm session -d) and sessions_on_window''s default candidate set stay name-based
+      - 2caf i2 scoped the view-aware candidate set to the detach path only, and those
+      callers predate this PR. Residuals from i5 (the |/space formats in attached_group_active_windows
+      and switch_sessions_to_window) unchanged. Validation: targeted suites (test_session_socket_isolation,
+      test_tmux, test_cli_helpers, test_shared_sessions, test_cli_qa) pass; full suite
+      re-run after the edit; every fixture used a disposable socket and a temporary
+      HOME - no live session, server or shared host configuration was touched.'
+    created_at: '2026-11-01T06:13:20Z'
+    last_edited: '2026-11-01T06:13:20Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
