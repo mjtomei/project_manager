@@ -321,7 +321,7 @@ class TestQaStatusSocketRouting:
 
         class _Result:
             returncode = 0
-            stdout = "pm-x 1\n"
+            stdout = "pm-x:1\n"
 
         def fake_run(cmd, **kwargs):
             calls.append(cmd)
@@ -350,7 +350,7 @@ class TestQaStatusSocketRouting:
                 return _Result(f"{name}:{group}\n")
             if fmt == "#{session_attached}":
                 return _Result(f"{attached}\n")
-            return _Result("pm-x 1\n")
+            return _Result("pm-x:1\n")
 
         return fake_run
 
@@ -388,6 +388,42 @@ class TestQaStatusSocketRouting:
         qa_status._switch_to_window("pm-x", "main")
 
         assert calls[-1][3:] == ["select-window", "-t", "pm-x:main"]
+
+    def test_finds_a_grouped_session_whose_name_has_a_space(
+            self, monkeypatch):
+        """A repo directory name may contain a space, so a session name may.
+
+        Priority 2 parsed the session list space-separated, so
+        ``pm-my repo-abc~1`` was read as ``pm-my``: the attached grouped
+        session was never found and the *base* session's window was
+        switched instead — which the user's client does not follow (each
+        session in a group keeps its own current window), so the QA status
+        pane could not bring its window forward.  ``:`` separates the
+        fields because tmux forbids it in session names, while a session
+        name may contain a space or ``|``.
+        """
+        qa_status = self._module()
+        monkeypatch.delenv("TMUX_PANE", raising=False)
+        monkeypatch.setenv("PM_TMUX_SOCKET", "/tmp/pm-sessions/pm-x")
+        calls: list[list[str]] = []
+
+        class _Result:
+            def __init__(self, stdout, returncode=0):
+                self.returncode = returncode
+                self.stdout = stdout
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[-1] == "#{session_name}:#{session_attached}":
+                return _Result("pm-my repo-abc:0\n"
+                               "pm-my repo-abc~1:1\n")
+            return _Result("", returncode=1)
+
+        monkeypatch.setattr(qa_status.subprocess, "run", fake_run)
+        qa_status._switch_to_window("pm-my repo-abc", "qa")
+
+        assert calls[-1][3:] == ["select-window",
+                                 "-t", "pm-my repo-abc~1:qa"]
 
     def test_falls_back_to_the_pm_socket_named_by_tmux(self, monkeypatch):
         qa_status = self._module()
@@ -2750,7 +2786,7 @@ class TestSessionKillServerSelection:
     def _invoke(self, monkeypatch, tmp_path, hosting, *, ambient=None,
                 ambient_share_mode=None, hosting_for=None, alive=False,
                 args=("kill",), members=None, share_mode=None,
-                seen_owned=None, in_session=None):
+                seen_owned=None, in_session=None, alive_probes=None):
         from click.testing import CliRunner
         from pm_core.cli import session as session_mod
         from pm_core import container, push_proxy
@@ -2764,8 +2800,15 @@ class TestSessionKillServerSelection:
         else:
             monkeypatch.setenv("PM_SHARE_MODE", share_mode)
         monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: True)
-        monkeypatch.setattr(session_mod.tmux_mod, "server_alive",
-                            lambda sock: alive)
+        # Record every server_alive probe (the destructive path must not
+        # probe through a planted link or another user's socket).
+        probes = alive_probes if alive_probes is not None else []
+
+        def _alive(sock):
+            probes.append(sock)
+            return alive
+
+        monkeypatch.setattr(session_mod.tmux_mod, "server_alive", _alive)
         monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
                             lambda: "pm-repo-abc")
         monkeypatch.setattr(session_mod, "_known_ambient_session",
@@ -3065,6 +3108,76 @@ class TestSessionKillServerSelection:
 
         assert result.exit_code == 1
         assert killed == []
+        assert sock.exists()
+
+    def test_missing_session_does_not_touch_through_a_symlinked_socket_dir(
+            self, monkeypatch, tmp_path):
+        """A planted socket *directory* link is never traversed.
+
+        ``/tmp`` is world-writable, so another user can create
+        ``/tmp/pm-sessions`` as a symlink to a directory they own.  The
+        create path and every read path refuse that state (review-loop
+        2caf i8/i10, QA S17), but the destructive path's cleanup still
+        probed (``tmux -S`` follows the link) and unlinked whatever sat at
+        the deterministic name in the link's target.  Neither is ours to
+        do.
+        """
+        target = tmp_path / "target"
+        target.mkdir()
+        link = tmp_path / "pm-sessions"
+        link.symlink_to(target, target_is_directory=True)
+        victim = target / "pm-repo-abc"
+        victim.write_text("not a socket\n")
+        probes: list[str] = []
+        result, killed = self._invoke(monkeypatch, link, (None, False),
+                                      alive_probes=probes)
+
+        assert result.exit_code == 1
+        assert "No session" in result.output
+        assert killed == []
+        assert victim.exists()
+        assert probes == []
+
+    def test_missing_session_does_not_probe_a_planted_symlink(
+            self, monkeypatch, tmp_path):
+        """A link at the socket path is not followed by the kill path.
+
+        ``find_exact_session_server`` skips a planted link, but the
+        not-found branch then asked ``server_alive`` about the same path,
+        and ``tmux -S <link>`` follows it on connect — a probe of a server
+        pm refuses to adopt (review-loop b48f i7/i9).  The entry is
+        inspected with ``lstat`` instead, and the link is left alone.
+        """
+        link = tmp_path / "pm-repo-abc"
+        link.symlink_to(tmp_path / "elsewhere")
+        probes: list[str] = []
+        result, killed = self._invoke(monkeypatch, tmp_path, (None, False),
+                                      alive_probes=probes)
+
+        assert result.exit_code == 1
+        assert killed == []
+        assert probes == []
+        assert link.is_symlink()
+
+    def test_missing_session_does_not_touch_another_users_socket(
+            self, monkeypatch, tmp_path):
+        """A socket another user planted under our session's name is theirs.
+
+        The directory is 1777 and the deterministic name is derivable, so
+        a planted server is indistinguishable by name; ownership is the
+        evidence (``find_session_server``'s *owned_only*).  The cleanup
+        must not probe or remove it either.
+        """
+        sock = tmp_path / "pm-repo-abc"
+        sock.write_text("")
+        monkeypatch.setattr(os, "getuid", lambda: os.stat(sock).st_uid + 1)
+        probes: list[str] = []
+        result, killed = self._invoke(monkeypatch, tmp_path, (None, False),
+                                      alive_probes=probes)
+
+        assert result.exit_code == 1
+        assert killed == []
+        assert probes == []
         assert sock.exists()
 
     def test_dir_without_a_session_tag_is_refused(self, monkeypatch, tmp_path):

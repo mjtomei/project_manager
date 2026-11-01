@@ -353,6 +353,47 @@ def _owned_only_for_target(session_name: str) -> bool:
     return not (ambient and session_name == ambient)
 
 
+def _removable_private_socket(socket_path: str) -> bool:
+    """True when pm may probe or remove the file at *socket_path*.
+
+    ``pm session kill`` is the only code that deletes a socket file, and
+    the socket directory is world-writable, so the destructive path
+    applies the same fail-closed checks as the rest of the socket
+    handling (review-loop 2caf i8/i10, b48f i7/i9):
+
+    - the directory must be a real directory.  ``/tmp`` is world-writable,
+      so another user can plant ``/tmp/pm-sessions`` as a symlink to a
+      directory they own; a path below it is in a directory pm does not
+      trust, and both probing (``tmux -S`` follows the link) and unlinking
+      there would act inside it — the create path and every read path
+      refuse that state (``paths.shared_socket_dir_is_usable``).
+    - the entry itself must not be a symbolic link.  A real socket is
+      never one, and ``tmux -S`` follows a link on connect, so probing one
+      would reach a server pm never adopted (``find_session_server``
+      skips links for the same reason).
+    - the entry must be a socket (or a plain file) this user owns.  Another
+      local user can plant a server under the session's deterministic name
+      in the 1777 directory, and a stale foreign entry is not ours to
+      remove (``owned_only`` in ``find_session_server``).
+
+    The normal states pass: a stale socket we own (removed once no server
+    answers on it) and a live one (kept).  An absent entry returns False:
+    there is nothing to remove, and creating one between this check and
+    the unlink is exactly the race the ownership requirement closes.
+    """
+    from pm_core.paths import shared_socket_dir_is_usable
+
+    if not shared_socket_dir_is_usable():
+        return False
+    try:
+        entry = Path(socket_path).lstat()
+    except OSError:
+        return False
+    if stat.S_ISLNK(entry.st_mode) or entry.st_uid != os.getuid():
+        return False
+    return stat.S_ISSOCK(entry.st_mode) or stat.S_ISREG(entry.st_mode)
+
+
 def _pick_existing_session(candidates: list[str]) -> str:
     """Return the first candidate session that is actually running.
 
@@ -1020,7 +1061,12 @@ def session_kill(start_dir):
         # Remove the socket file only when no server answers on it.  A live
         # server can still host grouped sessions after its base session was
         # killed elsewhere; unlinking its socket would strand those clients.
-        if not tmux_mod.server_alive(socket_path):
+        # ``_removable_private_socket`` refuses the hostile states (a
+        # planted directory link, a planted symlink, another user's
+        # socket): probing or deleting through one would act on a path pm
+        # does not trust.
+        if (_removable_private_socket(socket_path)
+                and not tmux_mod.server_alive(socket_path)):
             try:
                 Path(socket_path).unlink(missing_ok=True)
             except OSError:
@@ -1067,8 +1113,10 @@ def session_kill(start_dir):
     # server alive (a session that is not part of this group — a stray or
     # hand-made one — or a kill-session that failed), and unlinking a live
     # server's socket strands every client attached to it.  This is the
-    # same rule the not-found branch above follows.
-    if Path(socket_path).exists() and not tmux_mod.server_alive(socket_path):
+    # same rule the not-found branch above follows, including the refusal
+    # to probe or delete through a planted directory link or symlink.
+    if (_removable_private_socket(socket_path)
+            and not tmux_mod.server_alive(socket_path)):
         try:
             Path(socket_path).unlink(missing_ok=True)
         except OSError:

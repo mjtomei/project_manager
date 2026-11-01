@@ -291,19 +291,24 @@ def _find_attached_session(base: str) -> str:
         except Exception:
             pass
 
-    # Priority 2: first attached grouped session
+    # Priority 2: first attached grouped session.  ``:`` separates the
+    # fields: tmux rewrites ``:`` in session names to ``_``, while a session
+    # name — derived from the repo directory name — may contain a space or
+    # ``|``.  With a space-separated query ``pm-my repo-abc~1`` was read as
+    # ``pm-my``, so the attached grouped session was never found and the
+    # base's window was switched instead (which the user's client does not
+    # follow); the same parser rule the tmux helpers use.
     try:
         result = subprocess.run(
             _tmux_argv(
-                "list-sessions", "-F", "#{session_name} #{session_attached}"),
+                "list-sessions", "-F", "#{session_name}:#{session_attached}"),
             capture_output=True, text=True,
         )
         for line in result.stdout.strip().splitlines():
-            parts = line.rsplit(" ", 1)
-            if len(parts) == 2:
-                name, attached = parts
-                if (name == base or name.startswith(base + "~")) and attached != "0":
-                    return name
+            name, _, attached = line.rpartition(":")
+            if name and (name == base or name.startswith(base + "~")) \
+                    and attached != "0":
+                return name
     except Exception:
         pass
     return base

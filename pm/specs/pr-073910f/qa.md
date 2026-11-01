@@ -400,6 +400,12 @@ pane unless stated otherwise.
   target's sessions are not listed or driven — the read path refuses the
   link exactly like `pm session` does — while any legacy session on the
   default server is still listed.
+- **GIVEN** that same symlinked `/tmp/pm-sessions` and a file or server at
+  a session's deterministic name inside the link's target, **WHEN** the
+  user runs `pm session kill` for that session, **THEN** it reports no
+  session, does not probe (`tmux -S` follows the link) and does not
+  remove anything inside the target, and the target's file or server is
+  left untouched (review-loop b48f i10).
 - **GIVEN** a regular file or a symlink planted at a session's socket
   path, **WHEN** the user runs `pm session list`, **THEN** the entry is
   skipped (not reported as one of the user's sessions) and nothing is

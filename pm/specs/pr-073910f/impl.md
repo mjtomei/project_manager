@@ -81,7 +81,13 @@ sessions today).
    answers on it** (`server_alive()`; tmux leaves the file behind after
    `kill-server` / last-session exit — verified — but a live server can
    outlive its base session, and unlinking its socket would strand the
-   clients still attached to it).  Session selection
+   clients still attached to it).  The probe and the unlink are refused
+   outright for the hostile states the rest of the socket handling
+   refuses: a symbolic link (or any non-directory) at the socket
+   directory, a symbolic link at the socket path, and a socket another
+   user owns — a planted directory link would otherwise have
+   `server_alive()` (and the unlink) act on a path inside a directory pm
+   does not trust (review-loop b48f i10).  Session selection
    tries the cwd-derived name first and the ambient session second, choosing
    the first that is actually running — so a workdir clone kills the session
    hosting it, while a different project's ambient session is never preferred
@@ -181,7 +187,10 @@ sessions today).
    resolves the pane's session through its tmux session *group* (the same
    test `tmux.current_or_base_session` applies), so a user's own view of
    the session — however it is named — is the session whose window gets
-   switched (review-loop 2caf i6).
+   switched (review-loop 2caf i6).  The fallback session list is
+   `:`-separated for the same reason the tmux helpers are: a session name
+   — derived from the repo directory name — may contain a space or `|`,
+   while tmux forbids `:` in names (review-loop b48f i10).
 5. Do not rely on `display-popup` propagating `PM_TMUX_SOCKET` (existing QA
    note pr-2d0588a); the `$TMUX` resolver in (1) is the contract.
 
@@ -3236,3 +3245,62 @@ the planted socket, against the resolved path and `(None, False)` after
 the fix.  `pm/specs/pr-073910f/session_start_smoke.py` re-ran clean on a
 disposable socket.  No live session, server or shared host configuration
 was touched.
+
+## Review iteration (2026-11-01, review-loop b48f i10)
+
+Verification pass over the head after the b48f i9 fixes; no requirement
+changes.  Two gaps: the destructive path's socket cleanup still traversed
+a planted socket directory, and the QA status pane's fallback session
+list truncated a session name containing a space.
+
+1. **`pm session kill` probed and unlinked through a planted socket
+   directory.**  The b48f i9 rule is that the socket directory must be a
+   real directory (a link or a file planted in world-writable `/tmp` is
+   refused by the create path and by every read path), but the kill's
+   cleanup still ran `server_alive(socket_path)` — `tmux -S` follows the
+   link — and then `Path(socket_path).unlink()`, which deletes a file
+   *inside* the link's target.  Verified live on a disposable directory
+   standing in for `/tmp/pm-sessions`: a file at the deterministic name
+   inside the link's target, `pm session kill` reported "No session
+   found" and removed that file.
+   The same branch also probed a planted *symlink at the socket path*
+   (the b48f i7 rule discovery follows), and both branches would have
+   touched a socket another user owns.  New
+   `session._removable_private_socket()` applies the three checks once
+   (real socket directory via `shared_socket_dir_is_usable()`, no
+   symbolic link at the entry, the entry is a socket or plain file owned
+   by this user); both unlink sites use it, so a hostile entry is neither
+   probed nor removed.  The normal states are unchanged: a stale socket
+   we own is removed once no server answers on it, and a live one is
+   kept.  Tests:
+   `TestSessionKillServerSelection::test_missing_session_does_not_touch_through_a_symlinked_socket_dir`,
+   `::test_missing_session_does_not_probe_a_planted_symlink` and
+   `::test_missing_session_does_not_touch_another_users_socket` (all
+   verified to fail on the pre-fix head: the file was removed and
+   `server_alive` was probed).
+
+2. **The QA status pane could not find a grouped session whose name
+   contains a space.**  `qa_status._find_attached_session()`'s priority 2
+   parsed `list-sessions` with a space separator, so
+   `pm-my repo-abc~1 1` was read as `pm-my`: the attached grouped session
+   was never matched and the *base* session's window was switched
+   instead — which the user's client does not follow (each session in a
+   group keeps its own current window), so the status pane silently
+   failed to bring its window forward.  This is the parser class the tmux
+   helpers were fixed for (2caf i5/i10): the fields are now
+   `:`-separated, which tmux forbids in session names.  Test:
+   `TestQaStatusSocketRouting::test_finds_a_grouped_session_whose_name_has_a_space`
+   (verified to fail on the pre-fix head: it returned the base name).
+
+Validation: targeted suites (`test_session_socket_isolation`,
+`test_tmux`, `test_cli_helpers`, `test_shared_sessions`, `test_cli_qa`,
+`test_qa_background_focus`, `test_qa_resume`) 571 passed; full suite
+**5446 passed / 1 skipped** (422.7 s, log
+`/pm-captures/review-b48f-i10/full-suite-final.log`; +4 tests).  The kill
+cleanup was verified end to end against a disposable symlinked socket
+directory (the pre-fix tree removed the file inside the link's target;
+the fixed tree leaves it and probes nothing), and the normal kill path
+against a real disposable server (group killed, server exits, socket
+file removed); the planted-link and qa_status cases are unit-level.  No
+live session, server or shared host configuration was touched — every
+fixture used a disposable socket directory or a temporary HOME.
