@@ -2092,8 +2092,11 @@ def _render_ffmpeg_argv(name, tmp_path, ffprobe_body=None):
 @pytest.mark.parametrize("dims,upscaled", [
     ((640, 480), True),
     ((2048, 1152), True),
+    ((2000, 1200), False),
+    ((3000, 1000), False),
     ((3000, 2000), False),
-], ids=["small", "at-the-ios-budget", "past-the-ios-budget"])
+], ids=["small", "at-the-ios-budget", "past-the-height-budget",
+        "past-the-width-budget", "past-both-budgets"])
 def test_render_chooses_its_scale_filter_by_the_gifs_size(name, tmp_path, dims,
                                                           upscaled):
     """The 2x upscale is bounded by the iOS hardware-decode budget.
@@ -2111,6 +2114,21 @@ def test_render_chooses_its_scale_filter_by_the_gifs_size(name, tmp_path, dims,
     level 5.1 — the unplayable-on-iOS artifact the guard exists to prevent.
     The at-the-budget case pins the comparison as inclusive: exactly
     2048x1152 doubles to 4096x2304, which is still decodable.
+
+    The guard is *two* bounds — ``gw * 2 <= 4096`` and ``gh * 2 <= 2304`` —
+    and the original three cases moved them together: every gif past the
+    budget was past both, so dropping either half alone left the whole file
+    green (280 passed, verified in this container). A tall gif that fits the
+    width budget (2000x1200, the shape a long terminal pane produces) then
+    doubled to 4000x2400, and a wide one that fits the height budget
+    (3000x1000) doubled to 6000x2000 — each over level 5.1's frame-size
+    limit in the dimension the surviving half does not measure, and still
+    labelled 5.1. Verified with the recipe's own block
+    and real ffprobe/ffmpeg 4.4.2 on real GIFs: the shipped block encodes
+    2000x1200 and 3000x1000, the block with the height bound deleted encodes
+    4000x2400, and the one with the width bound deleted encodes 6000x2000.
+    The two separating cases pin one half each; the both-past case pins the
+    guard as a whole.
     """
     w, h = dims
     argv = _render_ffmpeg_argv(name, tmp_path, ffprobe_body=(
@@ -2343,10 +2361,13 @@ def test_renderer_install_is_bounded_and_drops_a_partial_download(name,
     Every other request is bounded — the readiness polls per attempt, the
     Layer 2 route snapshots with ``--connect-timeout``/``--max-time`` —
     because one that accepts the connection and never answers hangs the
-    worker. ``curl -o`` with no deadline is that wait one step earlier, and
-    ``-o`` writes in place, so a transfer that dies mid-body leaves a partial
-    file that would shadow the image's working ``agg`` on PATH. It has to be
-    removed and the failure named.
+    worker. ``curl`` with no deadline is that wait one step earlier, and a
+    transfer that dies mid-body leaves a partial file behind. Since R72 the
+    download goes to a per-process temp file rather than in place, so the
+    partial can no longer shadow the image's working ``agg`` on PATH — but it
+    is still this block's litter, and the block's own failure path is the
+    only thing that removes it (deleting that ``rm -f "$agg_tmp"`` left the
+    whole file green, verified). It has to be removed and the failure named.
     """
     block = _install_block(name)
     assert "--connect-timeout" in block and "--max-time" in block, (
@@ -2363,6 +2384,9 @@ def test_renderer_install_is_bounded_and_drops_a_partial_download(name,
     assert not agg.exists(), (
         f"{name}: a failed download left a partial agg earlier on PATH than "
         "the image's working binary")
+    assert not list(agg.parent.glob("agg.tmp.*")), (
+        f"{name}: a failed download left its temp file behind in "
+        "~/.local/bin — the block's failure path is what removes it")
     assert "could not download agg" in r.stderr, r.stderr
 
 

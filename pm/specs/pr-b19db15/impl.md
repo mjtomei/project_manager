@@ -3116,6 +3116,59 @@ R72. **A second worker's in-place `agg` download broke the first worker's
    `/pm-captures/review-928f-i12/`. No `pm_core/` change; the dropped
    helper/prompt/verifier work stays dropped.
 
+R73. **The size guard's two bounds had no case of their own (review loop 928f
+   i13).** R71 pinned the 2x upscale against the iOS decode budget, but its
+   cases move both bounds together: `[ "$((gw * 2))" -le 4096 ]` and
+   `[ "$((gh * 2))" -le 2304 ]` answer the same for 640x480, 2048x1152 and
+   3000x2000, so removing *either* half alone left the recipe file green
+   (**280 passed**, verified in this container) — only removing both failed
+   the past-the-budget case. The surviving half does not measure the other
+   dimension: with the height bound gone a tall gif that fits the width
+   budget (2000x1200) is doubled to 4000x2400, and with the width bound gone
+   a wide one that fits the height budget (3000x1000) is doubled to
+   6000x2000 — each over H.264 level 5.1's frame-size limit in the dimension
+   nothing checks, and still labelled 5.1: the artifact iPhone/iPad hardware
+   decoders silently refuse. Verified with the
+   recipes' own render blocks and real ffprobe/ffmpeg 4.4.2 on a real
+   2000x1200 gif: the shipped block encodes 2000x1200 (native), the block
+   with the height bound removed encodes 4000x2400.
+   `test_render_chooses_its_scale_filter_by_the_gifs_size` now runs two
+   separating sizes — 2000x1200 (fits the width, past the height) and
+   3000x1000 (fits the height, past the width) — beside the existing
+   both-past 3000x2000, so each half is pinned by its own case and the guard
+   as a whole by the both-past one. Mutation check: removing the height bound
+   fails exactly the two `past-the-height-budget` cases, removing the width
+   bound exactly the two `past-the-width-budget` cases, and removing the
+   whole guard six. Tests: recipe file **284 passed** (was 280); full suite
+   (`env -u PM_HOST_HOME PATH=/usr/bin:/bin pytest tests/ -q --deselect
+   tests/test_merge_publish.py --deselect tests/test_signoff_integration.py`)
+   **5360 passed, 1 skipped, 121 deselected, 0 failed**. Evidence: `/pm-captures/review-928f-i13/`. No recipe or
+   `pm_core/` change; the dropped helper/prompt/verifier work stays dropped.
+
+R74. **The failed download's temp-file removal had no case (review loop 928f
+   i13).** R72 moved the `agg` download to a per-process `mktemp` file and
+   made each failure path remove it, and
+   `test_renderer_install_is_bounded_and_drops_a_partial_download` says "It
+   has to be removed" — but it asserted only that the shared `agg` was never
+   written. Deleting the `rm -f "$agg_tmp"` from the download-failure branch
+   left all 15 install cases green (verified in this container), and a
+   transfer that died mid-body then left an `agg.tmp.…` file in
+   `~/.local/bin`: the block's own failure path is the only thing that
+   removes it, because the partial is no longer on PATH for anything else to
+   notice. The case's docstring also still described the pre-R72 in-place
+   download ("`-o` writes in place, so a transfer that dies mid-body leaves a
+   partial file that would shadow the image's working `agg` on PATH"). The
+   case now asserts no `agg.tmp.*` remains beside the install and the
+   docstring describes the temp-file shape. Mutation check: deleting the
+   `rm -f "$agg_tmp"` fails exactly the two
+   `test_renderer_install_is_bounded_and_drops_a_partial_download` cases
+   (2 failed, 13 passed), and restored all 15 install cases pass. Tests:
+   recipe file **284 passed** (unchanged — the assertion joins an existing
+   case); full suite
+   **5360 passed, 1 skipped, 121 deselected, 0 failed**. Evidence: `/pm-captures/review-928f-i13/`. No recipe
+   change; no `pm_core/` change; the dropped helper/prompt/verifier work
+   stays dropped.
+
 ## Non-goals
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
 - **No new helper, prompt block, verifier text, or QA-loop change.** Those
@@ -3670,6 +3723,50 @@ R72. **A second worker's in-place `agg` download broke the first worker's
    `tpad`/`setpts` expression deleted and passes unmodified.
 
 ## Evidence notes
+
+- Review loop 928f i13 (R73, R74) found two guards the kept recipes carry
+  with no case, by mutating them in this container; no recipe or `pm_core/`
+  change. (A) The render block's size guard is two bounds —
+  `gw * 2 <= 4096` and `gh * 2 <= 2304` — and R71's cases moved them
+  together: with `[ "$((gh * 2))" -le 2304 ]` removed, or separately the
+  width half, `tests/test_qa_artifact_recording_recipes.py` still reported
+  **280 passed**, because every past-the-budget case (3000x2000) exceeded
+  both 4096 and 2304 at once, so the surviving half refused it either way.
+  The behaviour itself was correct, and was verified live rather than
+  assumed: both recipes' render blocks were extracted verbatim and run in
+  this container with real ffprobe/ffmpeg 4.4.2 and a stub `agg` that copies
+  a real GIF — a 2000x1200 gif (fits the width budget) is published at
+  **2000x1200** by the shipped block and at **4000x2400** with the height
+  bound deleted, and a 3000x1000 gif (fits the height budget) at
+  **3000x1000** and at **6000x2000** with the width bound deleted. Both
+  breaks are silent (rc 0 both ways) and both land over level 5.1's
+  frame-size limit in the dimension nothing checks — and are still labelled
+  level 5.1 (`level=51`). The parametrization gained
+  `((2000, 1200), False)` (`past-the-height-budget`) and
+  `((3000, 1000), False)` (`past-the-width-budget`) beside the existing
+  both-past case, and the docstring records why one case per bound is
+  needed. Mutation check: the height bound removed fails exactly the two
+  `past-the-height-budget` cases (2 failed, 8 passed), the width bound
+  removed exactly the two `past-the-width-budget` cases, and the whole
+  guard removed six; restored, 10 pass. (B) R72's failed download removes
+  its `mktemp` file, and
+  `test_renderer_install_is_bounded_and_drops_a_partial_download` said "It
+  has to be removed" while asserting only that the shared `agg` was never
+  written: deleting the `rm -f "$agg_tmp"` left all 15 install cases green,
+  and a failed transfer then left `agg.tmp.…` in `~/.local/bin` — the
+  block's own failure path is the only thing that removes it, since the
+  partial is no longer on PATH for anything else to notice. The case now
+  asserts no `agg.tmp.*` remains, and its docstring describes the
+  temp-file shape rather than R72's in-place download. Mutation check:
+  deleting the `rm` fails exactly the two cases (2 failed, 13 passed);
+  restored, 15 pass. Tests: recipe file **284 passed** (was 280); full
+  suite `env -u PM_HOST_HOME PATH=/usr/bin:/bin pytest tests/ -q
+  --deselect tests/test_merge_publish.py --deselect
+  tests/test_signoff_integration.py` -> **5360 passed, 1 skipped, 121 deselected, 0 failed**. Evidence:
+  `/pm-captures/review-928f-i13/` (`probe-size-guard.log`,
+  `before-after.log`, `mutation-check.log`, `recipe-file.log`, `suite.log`,
+  `README.md`, `scripts/`). The dropped helper/prompt/verifier work stays
+  dropped.
 
 - Review loop 928f i10 (R70) reproduced the unpinned publish checks in this
   container with the recipes' own render/finalize blocks extracted verbatim
