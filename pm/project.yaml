@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T11:36:28.436610+00:00'
+  updated_at: '2026-11-01T11:46:31.443538+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6359,6 +6359,29 @@ prs:
       sleep ~0.5 s between them.'
     created_at: '2026-11-01T11:36:28Z'
     last_edited: '2026-11-01T11:36:28Z'
+  - id: note-02274bf
+    text: 'QA scenario 19 (QA status window follows a client attached through a user
+      view — 2caf i6) PASS. Drove a fake-driven QA run holding at INPUT_REQUIRED with
+      two scenario windows, created the grouped view zview (tmux new-session -t <base>
+      -s zview), attached two real clients (base on main/TUI, zview on the dashboard),
+      focused the status pane, pressed j then Enter. zview switched to the scenario
+      window (qa-pr-72beeaf-s3, active=1) and rendered REFINED_STEPS_START..END +
+      worker INPUT_REQUIRED; the base client stayed on main showing the TUI; exactly
+      two clients before and after; the status pane kept rendering and k moved the
+      highlight back; pm session list showed one row (no zview row); pm pr show stayed
+      qa and both scenario windows survived. The fix path is genuinely exercised:
+      the status pane TMUX_PANE resolves to #{session_name}:#{session_group} = zview:pm-<tag>,
+      which the pre-2caf-i6 bare-name test rejected. Harness notes for the next run:
+      (1) the QA run numbered the scenario windows s3/s4, not the s1/s2 the scenario
+      text names (index 0 is Interactive Session) — match on titles/verdicts, not
+      window names; (2) an earlier interrupted attempt in this container left a stale
+      ~/.pm/workdirs/qa/pr-<id>-<hash> with different titles plus dead /tmp/tmux-1000
+      sockets — check which qa_status.json the live status pane command line points
+      at before trusting the dashboard; (3) agg is not installed in this image — curl
+      the bare aarch64-unknown-linux-gnu binary from asciinema/agg releases (v1.9.0)
+      to ~/.local/bin. Captures: /pm-captures/scenarios/19/{primary,recording}/.'
+    created_at: '2026-11-01T11:46:31Z'
+    last_edited: '2026-11-01T11:46:31Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
