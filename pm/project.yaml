@@ -48690,7 +48690,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-11-01T02:55:12.414102+00:00'
+  updated_at: '2026-11-01T03:32:43.651233+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -49264,6 +49264,39 @@ prs:
       path observed anywhere; no code changes made.'
     created_at: '2026-11-01T02:55:12Z'
     last_edited: '2026-11-01T02:55:12Z'
+  - id: note-dcd0932
+    text: 'QA S24 PASS (fail-closed around an already-allocated container; head 3c63d163).
+      Three stories, each driven through `pm qa run` in an isolated fixture (scratch
+      HOME + private tmux socket + real podman), captures in /pm-captures/scenarios/24/.
+      (1) Create failure (configured image pm-dev:s24-missing absent, runtime info
+      OK): rc=1, stdout [ERROR] Container launch failed + "Result: ERROR", stderr
+      missing-image cause + both remedies; qa_status overall=ERROR, scenario 1 verdict
+      "" and waiting_for_input []; no qa-<pr>-s1 window while the qa-<pr> status pane
+      shows header + ERROR + cause; marker 0 bytes; podman ps -a identical before/after;
+      workdir s-1/repo+s-1/scratch preserved; log "Failed to create container for
+      scenario 1 — aborting the QA run (no host fallback)"; no PR note; container
+      mode still enabled. (2) Allocated container, window cannot be created (pm-dev:latest,
+      a podman shim that sleeps 4 s after `run`, a second actor polling podman ps
+      -a every 50 ms and killing the private session on first sight of the scenario
+      container): rc=1, same banner, cause "scenario 1: could not create the scenario
+      window" + both remedies; qa_status overall=ERROR carrying that cause, scenario
+      1 "", waiting_for_input []; the created s1 container is released (baseline unchanged);
+      log "Failed to create window for scenario 1 — aborting the QA run (no host fallback)";
+      marker 0 bytes; no PR note; session gone. (3) Healthy control: container up,
+      panes 0/1 are `podman exec -it <cname> bash -c ... fake-claude --verdict REFINED_STEPS`
+      / `--verdict PASS`, pane 2 is a host `fake-claude --verdict VERIFIED`; podman
+      top lists both in-container agents; marker has only VERIFIED/FINALIZE_DONE (live,
+      no REFINED_STEPS/PASS); Result: PASS, rc=0, empty stderr; qa_status overall=PASS,
+      scenario 1 PASS; mode still enabled. No product defect found, no code change.
+      FIXTURE NOTE for future runs of this scenario: `pm session` creates a grouped
+      session (<session>~1) for the attached view and tmux keeps a group''s windows
+      alive while any member exists, so killing only the base session leaves the scenario
+      window creatable — the first story-2 attempt reached Result: PASS for that reason.
+      Drop the ~N group member before the run so kill-session really removes the session.
+      Also delete any stale $QA_DIR/run.rc before a sampled run: it short-circuits
+      the "wait for N panes" loop and snapshots too early.'
+    created_at: '2026-11-01T03:32:43Z'
+    last_edited: '2026-11-01T03:32:43Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
