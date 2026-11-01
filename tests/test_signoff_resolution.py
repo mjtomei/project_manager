@@ -6884,3 +6884,86 @@ def test_pr_show_renders_a_malformed_integration_as_placeholders(w):
     assert "Base sha:" not in r.output
     assert "Target:" not in r.output
     assert "None" not in r.output
+
+
+def test_a_hand_edited_reason_is_a_placeholder_on_every_surface():
+    """A non-string ``apply_error``/``base_behavior_error``/``invalidated`` is
+    not a reason to print.
+
+    ``project.yaml`` is hand-editable state, and a reader must not render a
+    value the record does not hold: the prompt, the return text and ``pm pr
+    show``'s evidence block used to print the literal mapping repr (or
+    ``None``) where the record carried no reason at all.
+    """
+    bad = {"why": True}
+    pr = {"id": PR, "status": "in_progress",
+          "integration": {"status": integration.CLEAN, "head": "a" * 40,
+                          "base_sha": "b" * 40, "base_branch": "master",
+                          "base_behavior_error": bad},
+          "signoff": {"verdict": SIGNOFF_MERGE, "sha": "a" * 40,
+                      "invalidated": bad}}
+
+    block = prompt_gen._signoff_integration_block(pr, PR)
+    assert "unknown error" in block
+    assert "{'why': True}" not in block
+
+    lines = "\n".join(pr_mod._signoff_evidence_lines(pr["signoff"]))
+    assert "Invalidated: reason not recorded" in lines
+    assert "{'why': True}" not in lines
+
+    ret = {"verdict": SIGNOFF_REVIEW, "hop": "review",
+           "reviewed_head": "a" * 40, "reason": "rework", "apply_error": bad,
+           "integration": {"status": "clean", "head": "a" * 40,
+                           "base_branch": "master", "base_sha": "b" * 40,
+                           "target_repo": "repo",
+                           "base_behavior_error": bad}}
+    text = signoff.format_signoff_return(dict(pr, signoff_return=ret))
+    assert "an unknown error" in text
+    assert "{'why': True}" not in text
+
+
+def test_a_worktree_disagreement_reports_the_real_conflicts(w, monkeypatch):
+    """The record names the paths the resolution attempt actually saw.
+
+    ``merge-tree`` and the worktree merge can disagree (a merge driver or
+    attribute changes the result).  Reporting the in-memory list would tell
+    the agent a resolvable ``project.yaml`` conflicted while the attempt had
+    failed on another file, so the record must name the real conflict.
+    """
+    pr = pr_entry(w)
+    git(w.repo, "checkout", "-q", "-b", "other-base")
+    base = commit(w.repo, "base.txt", "base\n", "other base")
+    # Force the merge-tree path: this host's git may be < 2.38, where the
+    # worktree merge's own list is already the one reported.
+    monkeypatch.setattr(integration, "_git_version", lambda: (2, 40))
+    monkeypatch.setattr(integration, "_merge_tree",
+                        lambda *a, **k: (None, ["pm/project.yaml"], None))
+    monkeypatch.setattr(integration, "_worktree_merge",
+                        lambda *a, **k: (None, ["pm_core/cli/pr.py"], None, None))
+
+    rec = integration.compute_candidate(str(w.wd), w.head, base, pr=pr)
+    assert rec["status"] == integration.CONFLICT
+    assert rec["conflicts"] == ["pm_core/cli/pr.py"]
+
+
+def test_pr_show_renders_a_malformed_signoff_return_as_placeholders(w):
+    """``pm pr show``'s ``## Sign-off``/``## Sign-off return`` readers."""
+    def _malformed(d):
+        pr = store.get_pr(d, PR)
+        pr["signoff"] = {"verdict": SIGNOFF_MERGE, "sha": "a" * 40,
+                         "invalidated": {"why": True}}
+        pr["signoff_return"] = {
+            "verdict": {"v": 1}, "hop": ["h"], "reviewed_head": {"r": 1},
+            "reason": None, "apply_error": {"e": 1},
+            "applied": {"merge_sha": {"m": 1}}}
+    store.locked_update(w.pm_dir, _malformed)
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert "Invalidated: reason not recorded" in r.output
+    assert "## Sign-off return" in r.output
+    # No member is rendered with a value the record does not hold.
+    for fragment in ("{'why': True}", "{'v': 1}", "['h']", "{'r': 1}",
+                     "{'e': 1}", "{'m': 1}"):
+        assert fragment not in r.output

@@ -822,8 +822,18 @@ tests):
     `integration.resolution_conflicts_text` instead of the literal `None`.
     The absent `target_repo` / `base_branch` / `head` in the prompt block and
     the return text's `Reason:`/hop/status render their `?` /
-    "not recorded" placeholders the same way. An unhashable
-    `base_behavior_changes` member is carried, not dropped: the carry-forward
+    "not recorded" placeholders the same way. The same rule covers the
+    record's *reasons*: a non-string `apply_error` / `base_behavior_error` /
+    `invalidated`, and the `signoff_return` fields `pm pr show` prints
+    (`verdict`, `hop`, `reviewed_head`, `reason`, the coerced/original
+    verdicts, `applied.merge_sha`), render a placeholder ("an unknown error",
+    "reason not recorded") rather than the literal `None` or a mapping's repr
+    — on the sign-off prompt, the return text, the sign-off launch and both
+    CLI listings. A merge-tree/worktree disagreement about which paths
+    conflict records the paths the *attempt* saw (the in-memory list could
+    name a resolvable `project.yaml` while the attempt failed elsewhere).
+    An unhashable `base_behavior_changes` member is carried, not dropped: the
+    carry-forward
     de-duplicates order-preservingly and skips only the de-duplication for a
     value `dict.fromkeys` would have raised on (which took every integration
     check down, so the launch recorded nothing and the merge gate lost the

@@ -996,7 +996,11 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
                     print("  applied to the PR branch as "
                           f"{applied_merge[:12]}")
                 if rec.get("apply_error"):
-                    print(f"  not applied: {rec['apply_error']}")
+                    # Hand-edited state: a non-string reason is not a reason to
+                    # print (the literal None / a mapping's repr).
+                    why = integration._text(rec.get("apply_error"),
+                                            "an unknown error")
+                    print(f"  not applied: {why}")
             data = store.load(root)
         except Exception as e:  # never block the sign-off launch on it
             _log.warning("sign-off integration check for %s: %s", pr_id, e)
@@ -1716,8 +1720,9 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
             # behaviour-neutral: tell the routed step to assess it itself.
             lines.append(
                 "pm could not summarise the base's behaviour-relevant changes "
-                f"({integ['base_behavior_error']}); assess the base diff "
-                "yourself before relying on the previous evidence.")
+                f"({_text(integ.get('base_behavior_error'), 'unknown error')}); "
+                "assess the base diff yourself before relying on the previous "
+                "evidence.")
         if behavior:
             shown = behavior[:10]
             # The record's real total, not just this list's: ``compact`` keeps
@@ -1772,7 +1777,7 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                 "integration check re-checks the branch's current revision.")
         else:
             lines.append(f"pm did not merge the base into the branch: "
-                         f"{rec['apply_error']}.")
+                         f"{_text(rec.get('apply_error'), 'an unknown error')}.")
     if not for_signoff and integ.get("status") == integration.CONFLICT:
         # Object name only: it becomes a `git merge <rev>` command.
         base_rev = (integration._sha_like(integ.get("base_sha")) or "")[:12]

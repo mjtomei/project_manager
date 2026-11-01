@@ -888,7 +888,11 @@ def _signoff_evidence_lines(record) -> list[str]:
     lines.append(f"Verdict: {verdict}"
                  + (f" ({', '.join(details)})" if details else ""))
     if rec.get("invalidated"):
-        lines.append(f"Invalidated: {rec['invalidated']}")
+        # Hand-edited state: only text is a reason to print (the literal None
+        # or a mapping's repr names nothing the record holds).
+        lines.append("Invalidated: "
+                     + integration._text(rec.get("invalidated"),
+                                         "reason not recorded"))
     sha = integration.revision_of(rec.get("sha"))
     if sha:
         lines.append(f"Approved head: {sha[:12]}")
@@ -1074,15 +1078,20 @@ def pr_show(pr_id: str):
             ("Original verdict", "original_verdict"),
             ("Coerced reason", "coerced_reason"),
         ):
-            val = ret.get(key)
+            # Hand-edited state: only text is a value this reader can print (a
+            # mapping/list would render its repr), so it reads as absent — the
+            # same contract every other reader of the record follows.
+            val = integration._text(ret.get(key), "")
             if val:
                 click.echo(f"{label}: {val}")
         applied = ret.get("applied")
         applied = applied if isinstance(applied, dict) else {}
-        if applied.get("merge_sha"):
-            click.echo(f"Applied merge: {applied['merge_sha']}")
-        if ret.get("apply_error"):
-            click.echo(f"Apply error: {ret['apply_error']}")
+        applied_merge = integration._text(applied.get("merge_sha"), "")
+        if applied_merge:
+            click.echo(f"Applied merge: {applied_merge}")
+        apply_error = integration._text(ret.get("apply_error"), "")
+        if apply_error:
+            click.echo(f"Apply error: {apply_error}")
         ret_integ = ret.get("integration")
         ret_integ = ret_integ if isinstance(ret_integ, dict) else {}
         if ret_integ:
@@ -2631,7 +2640,10 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
     if applied_merge:
         click.echo(f"  applied to the PR branch as {applied_merge[:12]}")
     if rec.get("apply_error"):
-        click.echo(f"  not applied: {rec['apply_error']}", err=True)
+        # Hand-edited state: a non-string reason is not a reason to print.
+        click.echo("  not applied: "
+                   f"{integration._text(rec.get('apply_error'), 'an unknown error')}",
+                   err=True)
         if apply_:
             # `--apply` asked for the merge; a resolved candidate that could
             # not be applied has not done what was asked, even though the

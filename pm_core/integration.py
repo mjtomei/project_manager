@@ -1501,7 +1501,7 @@ def compute_candidate(workdir: str, head: str, base_sha: str,
     if _git_version() >= (2, 38):
         tree, conflicts, err = _merge_tree(workdir, head, base_sha)
         if not err and conflicts and resolve and _all_resolvable(conflicts):
-            wtree, _wconf, werr, resolution = _worktree_merge(
+            wtree, wconf, werr, resolution = _worktree_merge(
                 workdir, head, base_sha, resolve=True)
             if werr:
                 resolution = dict(resolution or {})
@@ -1511,6 +1511,14 @@ def compute_candidate(workdir: str, head: str, base_sha: str,
                 tree = None
             else:
                 tree = wtree
+                if tree is None and wconf:
+                    # ``merge-tree`` and the worktree merge disagreed about
+                    # which paths conflict (a merge driver or attribute can
+                    # change the result).  The record must name the paths the
+                    # *actual* attempt saw — reporting the in-memory list would
+                    # tell the agent a resolvable ``project.yaml`` conflicted
+                    # while the resolution had failed elsewhere.
+                    conflicts = wconf
     else:
         tree, conflicts, err, resolution = _worktree_merge(
             workdir, head, base_sha, resolve=resolve)

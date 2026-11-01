@@ -1036,7 +1036,7 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
             # the agent must not read it as already integrated.  A failed
             # attempt (``unresolved``) is listed below instead — it was never
             # applied and is not a candidate.
-            why = rec.get("apply_error") or "it has not been applied yet"
+            why = _text(rec.get("apply_error"), "it has not been applied yet")
             lines.append(f"- **Not applied**: {why}. A "
                          f"{SIGNOFF_MERGE} is blocked until the resolution is "
                          "applied to the branch (clean the workdir and re-run "
@@ -1082,9 +1082,11 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
         # the reuse/checks statement (pm enforces it at record and merge time).
         lines.append("")
         lines.append("**pm could not summarise the base's behaviour-relevant "
-                     f"changes** ({rec['base_behavior_error']}). Assess the "
-                     "base diff yourself; a MERGE must still state the evidence "
-                     "you are reusing or the targeted checks you ran.")
+                     "changes** "
+                     f"({_text(rec.get('base_behavior_error'), 'unknown error')}). "
+                     "Assess the base diff yourself; a MERGE must still state "
+                     "the evidence you are reusing or the targeted checks you "
+                     "ran.")
     evidence = _evidence_revision_lines(pr_id)
     if evidence:
         lines.append("")
