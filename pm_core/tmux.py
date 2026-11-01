@@ -1250,19 +1250,28 @@ def _detach_current_client(socket_path: str | None) -> bool:
                   socket_path=socket_path),
         text=True,
     )
-    candidates: list[tuple[int, int, str]] = []
+    clients: list[tuple[int, int, str, str]] = []
     if result.returncode == 0:
         for line in result.stdout.splitlines():
             parts = line.split("|", 3)
             if len(parts) != 4:
                 continue
             tty, activity, created, client_session = parts
-            if client_session not in viewing:
-                continue
-            candidates.append((_int_or_zero(activity),
-                               _int_or_zero(created), tty))
+            clients.append((_int_or_zero(activity), _int_or_zero(created),
+                            tty, client_session))
 
-    if candidates:
+    # Prefer a client actually viewing the TUI's window; if none does (the
+    # session's current window is a shell/review window, or the window id
+    # went stale), fall back to the group's most recently active client.
+    # Either way detach exactly one TTY: ``detach-client -s <session>``
+    # detaches *every* client attached to that session, so two clients on
+    # the base session lost both on one Ctrl-Q.
+    for scope in (viewing, group):
+        candidates = [(activity, created, tty)
+                      for activity, created, tty, client_session in clients
+                      if client_session in scope]
+        if not candidates:
+            continue
         tty = max(candidates)[2]
         detached = _run(_tmux_cmd("detach-client", "-t", tty,
                                   socket_path=socket_path), text=True)
@@ -1277,24 +1286,6 @@ def _detach_current_client(socket_path: str | None) -> bool:
         _log.warning("detach_current_client: detach of %s failed: %s",
                      tty, detached.stderr)
         return False
-
-    # No client currently views the TUI's window (e.g. a stale window id).
-    # Detach the client attached to the group's session instead of using
-    # the server-wide default.
-    for name in [session, *grouped]:
-        att = _run(
-            _tmux_cmd("display-message", "-t", name, "-p",
-                      "#{session_attached}", socket_path=socket_path),
-            text=True,
-        )
-        if att.returncode == 0 and att.stdout.strip() not in ("", "0"):
-            detached = _run(_tmux_cmd("detach-client", "-s", name,
-                                      socket_path=socket_path), text=True)
-            if detached.returncode == 0:
-                _log.info("detach_current_client: detached client of %s", name)
-                return True
-            _log.warning("detach_current_client: detach of %s failed: %s",
-                         name, detached.stderr)
 
     _log.info("detach_current_client: no attached client for %s", session)
     return False

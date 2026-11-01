@@ -577,13 +577,14 @@ class TestDetachCurrentClient:
         assert detaches[0][-1] == "/dev/pts/1"
 
     @patch("pm_core.tmux.subprocess.run")
-    def test_falls_back_to_session_detach(self, mock_run, monkeypatch):
-        """No client views the TUI window: detach by session, not server-wide.
+    def test_falls_back_to_one_group_client(self, mock_run, monkeypatch):
+        """No client views the TUI window: detach one group client by TTY.
 
         The client is attached to a grouped session whose active window is
         a *different* window (e.g. a review window), so the precise
-        per-window match finds nothing and the session-level fallback has
-        to fire.
+        per-window match finds nothing and the group fallback has to fire.
+        It must still name a single client: ``detach-client -s <session>``
+        would drop every client of that session.
         """
         monkeypatch.setenv("TMUX_PANE", "%7")
         monkeypatch.setenv("PM_TMUX_SOCKET", "")
@@ -617,7 +618,50 @@ class TestDetachCurrentClient:
         detaches = [c[0][0] for c in mock_run.call_args_list
                     if "detach-client" in c[0][0]]
         assert len(detaches) == 1
-        assert detaches[0][-2:] == ["-s", "pm-x~1"]
+        assert detaches[0][-2:] == ["-t", "/dev/pts/1"]
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_two_clients_on_the_base_lose_only_one(self, mock_run,
+                                                   monkeypatch):
+        """One Ctrl-Q must never detach two clients of the same session.
+
+        Both clients are attached to the base session while the base's
+        current window is a shell window (so neither "views the TUI
+        window").  The old fallback ran ``detach-client -s pm-x``, which
+        drops *every* client of that session — both lost their terminal on
+        one Ctrl-Q.  The fallback must pick one TTY.
+        """
+        monkeypatch.setenv("TMUX_PANE", "%7")
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+
+        def fake_run(cmd, **kwargs):
+            if "list-sessions" in cmd:
+                return MagicMock(returncode=0, stdout="pm-x\n")
+            if "list-clients" in cmd:
+                return MagicMock(
+                    returncode=0,
+                    stdout="/dev/pts/1|100|10|pm-x\n"
+                           "/dev/pts/2|200|20|pm-x\n")
+            if "detach-client" in cmd:
+                return MagicMock(returncode=0, stdout="")
+            if "#{window_id}" in cmd:
+                # The TUI pane lives in @1; the base session's current
+                # window is the shell window @5.
+                target = cmd[cmd.index("-t") + 1]
+                return MagicMock(returncode=0,
+                                 stdout="@1\n" if target == "%7" else "@5\n")
+            if "#{session_name}" in cmd:
+                return MagicMock(returncode=0, stdout="pm-x\n")
+            return MagicMock(returncode=1, stdout="")
+
+        mock_run.side_effect = fake_run
+        assert tmux.detach_current_client() is True
+
+        detaches = [c[0][0] for c in mock_run.call_args_list
+                    if "detach-client" in c[0][0]]
+        assert len(detaches) == 1
+        assert detaches[0][-2:] == ["-t", "/dev/pts/2"]
+        assert "-s" not in detaches[0]
 
     @patch("pm_core.tmux.subprocess.run")
     def test_failed_detach_is_not_reported_as_success(self, mock_run,
@@ -729,6 +773,8 @@ class TestDetachCurrentClient:
                 return MagicMock(returncode=0,
                                  stdout="/dev/pts/1|abc||pm-x\n")
             if "detach-client" in cmd:
+                return MagicMock(returncode=0, stdout="")
+            if "#{session_group}" in cmd:
                 return MagicMock(returncode=0, stdout="")
             if "#{session_name}" in cmd:
                 return MagicMock(returncode=0, stdout="pm-x\n")
