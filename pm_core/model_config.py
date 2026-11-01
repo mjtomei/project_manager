@@ -46,7 +46,7 @@ does not inherit.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pm_core.paths import configure_logger, get_global_setting_value
 
@@ -92,15 +92,27 @@ _FALLBACK_TYPES: dict[str, str] = {
     "signoff": "review",
 }
 
-# Valid effort levels for the Claude CLI --effort flag.
-# Only Sonnet and Opus support effort; Haiku does not.
-EFFORT_LEVELS = ("low", "medium", "high")
+# Valid effort levels for the Claude CLI --effort flag.  This is the set the
+# installed harness accepts (claude --help, 2.1.316: low, medium, high,
+# xhigh, max).  ``None`` means "pass no --effort" and is distinct from any
+# level.  A model or route may accept only a subset; see
+# :func:`accepted_efforts` and ``ModelResolution.effort_status``.
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+
+# The ambient Claude Code variable that overrides --effort for a session.
+# ``auto``/``unset`` (and blank) mean "no override".
+AMBIENT_EFFORT_ENV = "CLAUDE_CODE_EFFORT_LEVEL"
 
 # Models that do NOT support the --effort flag
 _NO_EFFORT_MODELS = {
     "haiku",
     "claude-haiku-4-5-20251001",
 }
+
+# supported_efforts metadata older than this is reported as stale.  It is
+# still used (the alternative -- refusing a working route -- is worse), but
+# never presented as fresh.
+EFFORT_METADATA_STALE_DAYS = 30
 
 DEFAULT_SESSION_EFFORT: dict[str, str] = {
     # Empty — use Claude CLI defaults unless explicitly configured via
@@ -116,7 +128,21 @@ class ModelResolution:
     Either ``model`` or ``provider`` will be set, not both.
     - model: a concrete model identifier to pass via --model
     - provider: a provider name to pass via the provider system
-    - effort: effort level to pass via --effort (low, medium, high)
+    - effort: effort level to pass via --effort (low, medium, high, xhigh,
+      max), or None to pass nothing (the CLI default)
+
+    ``effort_requested`` is the level a setting selected before suppression
+    (Haiku, an ambient override), so display can distinguish "nothing was
+    configured" from "configured but not applicable".  ``effort_status``
+    says how far PM can verify the level:
+
+    - ``none``: nothing selected; the CLI default applies
+    - ``cli``: a plain Claude model; the CLI/model decides
+    - ``ok``: the selected route declares the level supported
+    - ``unverified``: routed, but the route declares no supported_efforts
+    - ``unsupported``: the route declares the level unsupported
+    - ``not_applicable``: the model does not take effort (Haiku)
+    - ``overridden``: CLAUDE_CODE_EFFORT_LEVEL decides the session
     """
     model: str | None = None
     provider: str | None = None
@@ -126,6 +152,12 @@ class ModelResolution:
     # when nothing did (the CLI default).
     source: str | None = None
     effort_source: str | None = None
+    effort_requested: str | None = None
+    effort_status: str = "none"
+    effort_notes: list[str] = field(default_factory=list)
+    # The Claude levels the selected route declares it accepts, or None
+    # when it declares none.
+    supported_efforts: tuple[str, ...] | None = None
 
 
 def resolve_model(
@@ -157,6 +189,7 @@ def resolve_model_and_provider(
     pr_model: str | None = None,
     project_data: dict | None = None,
     pr_entry: dict | None = None,
+    use_env: bool = True,
 ) -> ModelResolution:
     """Resolve model and/or provider for a session type.
 
@@ -167,7 +200,10 @@ def resolve_model_and_provider(
     (bare names like ``sonnet`` are resolved by the CLI itself).
 
     *pr_entry* is the PR the session belongs to: its model override (unless
-    *pr_model* is given) and its effort settings apply.
+    *pr_model* is given) and its effort settings apply.  *use_env* False
+    ignores ``PM_MODEL`` / ``PM_EFFORT`` / ``CLAUDE_CODE_EFFORT_LEVEL``, so
+    configuration checks see the configured settings rather than the
+    caller's environment.
     """
     def _resolve_value(value: str) -> ModelResolution:
         if value.startswith(_PROVIDER_PREFIX):
@@ -187,7 +223,7 @@ def resolve_model_and_provider(
 
     # --- Model / provider resolution ---
     # 1. PM_MODEL env var
-    if (env_model := os.environ.get("PM_MODEL")):
+    if use_env and (env_model := os.environ.get("PM_MODEL")):
         resolution = _resolve_value(env_model)
         resolution.source = "PM_MODEL"
     # 2. PR-level override
@@ -232,16 +268,22 @@ def resolve_model_and_provider(
     legacy = None
     if (session_type == "qa_interactive"
             and not resolution.model and not resolution.provider):
-        legacy = _legacy_s0_resolution(project_data)
+        legacy = _legacy_s0_resolution(project_data, use_env=use_env)
         if legacy is not None:
             resolution.model = legacy.model
             resolution.source = f"{legacy.source} (s0 legacy)"
 
     # --- Effort resolution ---
+    notes: list[str] = []
     effort, effort_source = None, None
-    # 1. PM_EFFORT env var
-    if (env_effort := os.environ.get("PM_EFFORT")):
-        effort, effort_source = env_effort, "PM_EFFORT"
+    # 1. PM_EFFORT env var.  Validated here: an invalid value must never
+    #    reach --effort (validate_model_config reports configured ones).
+    if use_env and (env_effort := os.environ.get("PM_EFFORT")):
+        if is_effort_level(env_effort):
+            effort, effort_source = env_effort, "PM_EFFORT"
+        else:
+            notes.append(f"ignoring invalid PM_EFFORT={env_effort!r} "
+                         f"(valid: {list(EFFORT_LEVELS)})")
     # 2. The PR's role / PR-wide effort
     if not effort and pr_entry is not None:
         effort, role = _pr_override(pr_entry, "session_effort", "effort",
@@ -256,41 +298,80 @@ def resolve_model_and_provider(
         effort_map = config_block(project_model_config(project_data),
                                   "session_effort")
         for st in type_chain:
-            # A blank or non-string level counts as absent, as for models
-            # (validate_model_config reports it).
-            if _is_model_value(effort_map.get(st)):
+            # A blank, non-string or unknown level counts as absent, as for
+            # models (validate_model_config reports it).
+            if is_effort_level(effort_map.get(st)):
                 effort, effort_source = effort_map[st], f"project {st}"
                 break
     # 5. Global setting (~/.pm/settings/effort-<type>)
     if not effort:
         for st in type_chain:
-            effort = get_global_setting_value(f"effort-{st}") or None
-            if effort:
-                effort_source = f"global {st}"
+            level = get_global_setting_value(f"effort-{st}") or None
+            if level and is_effort_level(level):
+                effort, effort_source = level, f"global {st}"
                 break
     # 6. Built-in default
     if not effort:
         for st in type_chain:
-            effort = DEFAULT_SESSION_EFFORT.get(st)
-            if effort:
-                effort_source = "built-in"
+            level = DEFAULT_SESSION_EFFORT.get(st)
+            if level and is_effort_level(level):
+                effort, effort_source = level, "built-in"
                 break
     if not effort and legacy is not None and legacy.effort:
         effort, effort_source = legacy.effort, legacy.effort_source
-    resolution.effort = effort
-    resolution.effort_source = effort_source if effort else None
+
+    # 7. The ambient Claude Code variable.  It overrides --effort inside the
+    #    CLI, so pm must not report a different level than the one the
+    #    session will use.  When pm has its own selection, pm wins and the
+    #    launch unsets this variable (claude_launcher); with no pm
+    #    selection, the ambient value is the session's level.
+    ambient_level, ambient_raw = normalize_ambient_effort(
+        os.environ.get(AMBIENT_EFFORT_ENV) if use_env else None)
+    if ambient_raw is not None and ambient_level is None:
+        notes.append(f"ignoring invalid {AMBIENT_EFFORT_ENV}={ambient_raw!r} "
+                     f"(valid: {list(EFFORT_LEVELS)})")
+    elif ambient_level is not None:
+        if effort:
+            if ambient_level != effort:
+                notes.append(
+                    f"{AMBIENT_EFFORT_ENV}={ambient_level} would override "
+                    f"--effort for the session; pm unsets it so {effort} "
+                    "applies")
+        else:
+            effort, effort_source = ambient_level, AMBIENT_EFFORT_ENV
+            notes.append(
+                f"{AMBIENT_EFFORT_ENV}={ambient_level} selected the effort "
+                "for this session (pm passes it as --effort)")
 
     # Suppress effort for models that don't support it (e.g. Haiku)
-    if resolution.effort and resolution.model in _NO_EFFORT_MODELS:
+    resolution.effort_requested = effort
+    if effort and resolution.model in _NO_EFFORT_MODELS:
         _log.debug("Suppressing effort=%s for model %s (not supported)",
-                   resolution.effort, resolution.model)
-        resolution.effort = None
-        resolution.effort_source = None
+                   effort, resolution.model)
+        notes.append(f"effort={effort} suppressed: {resolution.model} does "
+                     "not support the --effort flag")
+        if ambient_level is not None:
+            notes.append(
+                f"{AMBIENT_EFFORT_ENV}={ambient_level} remains in the "
+                "environment; pm passes no --effort for this model")
+        effort, effort_source = None, None
+        resolution.effort_status = "not_applicable"
+
+    resolution.effort = effort
+    resolution.effort_source = effort_source if effort else None
+    resolution.effort_notes = notes
+    if resolution.effort_status != "not_applicable":
+        _apply_effort_verification(resolution, effort)
+        if effort and effort_source == AMBIENT_EFFORT_ENV:
+            # The source, not the level's support, is the headline; the
+            # verification notes (if any) are still in effort_notes.
+            resolution.effort_status = "overridden"
 
     return resolution
 
 
-def _legacy_s0_resolution(project_data: dict | None) -> ModelResolution | None:
+def _legacy_s0_resolution(project_data: dict | None,
+                          *, use_env: bool = True) -> ModelResolution | None:
     """The pre-``qa_interactive`` ``qa_scenario`` setting Scenario 0 keeps.
 
     Scenario 0 used to run as ``qa_scenario``, so a project or global
@@ -313,8 +394,110 @@ def _legacy_s0_resolution(project_data: dict | None) -> ModelResolution | None:
     (and the TUI) label an inherited value ``(s0 legacy)``.
     """
     legacy = resolve_model_and_provider("qa_scenario",
-                                        project_data=project_data)
+                                        project_data=project_data,
+                                        use_env=use_env)
     return legacy if legacy.model and not legacy.provider else None
+
+
+def is_effort_level(value) -> bool:
+    """Whether *value* is one of the levels the harness accepts."""
+    return isinstance(value, str) and value in EFFORT_LEVELS
+
+
+def normalize_ambient_effort(value) -> tuple[str | None, str | None]:
+    """``(level, raw)`` for a ``CLAUDE_CODE_EFFORT_LEVEL`` value.
+
+    ``auto``/``unset``/blank mean "no override" and yield ``(None, None)``.
+    An unrecognised value yields ``(None, raw)`` so callers can report it.
+    """
+    if value is None:
+        return None, None
+    raw = value.strip()
+    if not raw or raw.lower() in ("auto", "unset"):
+        return None, None
+    level = raw.lower()
+    return (level, raw) if level in EFFORT_LEVELS else (None, raw)
+
+
+def accepted_efforts(provider_name: str | None) -> tuple[str, ...] | None:
+    """The Claude levels a provider declares it accepts, or None.
+
+    ``None`` means the route declares no ``supported_efforts`` (PM cannot
+    verify it), which is distinct from an empty tuple (a route that
+    declares it accepts none of the Claude levels).  Values outside
+    ``EFFORT_LEVELS`` in the declaration (e.g. OpenRouter's ``none``) are
+    dropped: they are not Claude levels and are never passed to --effort.
+    """
+    if not provider_name:
+        return None
+    try:
+        from pm_core.providers import get_provider
+        cfg = get_provider(provider_name, strict=True)
+    except Exception:  # a broken entry is reported by the launch itself
+        return None
+    declared = getattr(cfg, "supported_efforts", None)
+    if declared is None:
+        return None
+    return tuple(level for level in EFFORT_LEVELS if level in declared)
+
+
+def effort_metadata_age_days(provider_name: str | None) -> int | None:
+    """Age in days of a provider's ``supported_efforts_checked_at``, or None."""
+    if not provider_name:
+        return None
+    try:
+        from pm_core.providers import get_provider
+        cfg = get_provider(provider_name, strict=True)
+    except Exception:
+        return None
+    raw = getattr(cfg, "supported_efforts_checked_at", "") or ""
+    if not raw:
+        return None
+    try:
+        from datetime import date
+        checked = date.fromisoformat(str(raw))
+    except ValueError:
+        return None
+    return (date.today() - checked).days
+
+
+def _apply_effort_verification(resolution: ModelResolution,
+                               effort: str | None) -> None:
+    """Fill effort status/notes for *effort* on *resolution* in place."""
+    notes = resolution.effort_notes
+    if not effort:
+        resolution.effort_status = "none"
+        if resolution.provider:
+            accepted = accepted_efforts(resolution.provider)
+            resolution.supported_efforts = accepted
+            if accepted is not None:
+                notes.append(
+                    f"route accepts effort levels {list(accepted)}; none is "
+                    "configured")
+        return
+
+    accepted = accepted_efforts(resolution.provider)
+    resolution.supported_efforts = accepted
+    if accepted is None:
+        if resolution.provider:
+            resolution.effort_status = "unverified"
+            notes.append(
+                f"route {resolution.provider!r} declares no "
+                "supported_efforts; the level cannot be verified")
+        else:
+            resolution.effort_status = "cli"
+    elif effort in accepted:
+        resolution.effort_status = "ok"
+    else:
+        resolution.effort_status = "unsupported"
+        notes.append(
+            f"model declares supported_efforts {list(accepted)}; {effort} is "
+            "not among them (the router may reject or ignore it)")
+    age = effort_metadata_age_days(resolution.provider)
+    if age is not None and age > EFFORT_METADATA_STALE_DAYS:
+        notes.append(
+            f"supported_efforts metadata is {age} days old; refresh it "
+            "(pm provider edit <name> --supported-efforts ...)")
 
 
 def provider_effort(name: str) -> str | None:
@@ -343,6 +526,29 @@ def get_model_config_summary(project_data: dict | None = None) -> dict[str, str]
         else:
             result[st] = "(default)"
     return result
+
+
+def _route_effort_warnings(project_data: dict | None, roles_levels,
+                           *, pr_entry: dict | None = None,
+                           prefix: str = "") -> list[str]:
+    """Warnings for explicit (role, level) settings the route rejects.
+
+    Configuration-only (``use_env=False``): the caller's environment is not
+    part of what project.yaml declares.  A warning, not an error: the
+    metadata is dated and the launch still passes the level (see
+    ``ModelResolution.effort_status``).
+    """
+    out = []
+    for st, _level in roles_levels:
+        res = resolve_model_and_provider(st, project_data=project_data,
+                                         pr_entry=pr_entry, use_env=False)
+        if res.effort and res.effort_status == "unsupported":
+            out.append(
+                f"{prefix}{st}: effort {res.effort!r} is not in the selected "
+                f"route's supported_efforts "
+                f"{list(res.supported_efforts or ())} (the router may reject "
+                "or ignore it)")
+    return out
 
 
 def validate_model_config(project_data: dict | None) -> list[str]:
@@ -395,6 +601,10 @@ def validate_model_config(project_data: dict | None) -> list[str]:
                     f"model_config.session_effort[{st!r}]: invalid effort "
                     f"{level!r}. Valid levels: {list(EFFORT_LEVELS)}"
                 )
+        errors.extend(_route_effort_warnings(
+            project_data,
+            [(st, level) for st, level in effort_entries.items()
+             if st in SESSION_TYPES and is_effort_level(level)]))
     # A PR's role exceptions are ignored the same way, so a typo would
     # leave that role on the PR-wide model.
     for pr in project_data.get("prs") or []:
@@ -431,6 +641,11 @@ def validate_model_config(project_data: dict | None) -> list[str]:
                         errors.append(f"{where}[{st!r}]: invalid effort "
                                       f"{level!r} (ignored). Valid levels: "
                                       f"{list(EFFORT_LEVELS)}")
+                errors.extend(_route_effort_warnings(
+                    project_data,
+                    [(st, level) for st, level in efforts.items()
+                     if st in PR_SESSION_TYPES and is_effort_level(level)],
+                    pr_entry=pr, prefix=f"prs[{pr.get('id')}] "))
         if pr.get("session_models") is None:
             continue
         where = f"prs[{pr.get('id')}].session_models"
@@ -474,7 +689,7 @@ def _pr_override(pr_entry: dict, role_key: str, all_key: str,
     # must neither drop the PR-wide value for that role nor raise at every
     # launch of it.  So does an unknown effort level (validate_model_config
     # reports it).
-    usable = ((lambda v: v in EFFORT_LEVELS) if role_key == "session_effort"
+    usable = ((lambda v: is_effort_level(v)) if role_key == "session_effort"
               else _is_model_value)
     entries = pr_entry.get(role_key)
     if session_type and isinstance(entries, dict):

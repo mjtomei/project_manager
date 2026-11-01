@@ -544,3 +544,81 @@ class TestWriteEnvFile:
             assert "rm -f" in prefix
         finally:
             os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
+# Effort level vocabulary and the ambient CLAUDE_CODE_EFFORT_LEVEL override
+# ---------------------------------------------------------------------------
+
+class TestEffortLaunch:
+    def test_shell_cmd_passes_new_levels(self):
+        for level in ("low", "medium", "high", "xhigh", "max"):
+            cmd = build_claude_shell_cmd(prompt="x", effort=level)
+            assert f"--effort {level}" in cmd
+
+    def test_shell_cmd_unsets_ambient_effort_when_pm_sets_one(
+            self, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "xhigh")
+        cmd = build_claude_shell_cmd(prompt="x", effort="high")
+        assert "--effort high" in cmd
+        assert "-u CLAUDE_CODE_EFFORT_LEVEL" in cmd
+
+    def test_shell_cmd_leaves_ambient_effort_alone_without_a_pm_level(
+            self, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "xhigh")
+        cmd = build_claude_shell_cmd(prompt="x")
+        assert "CLAUDE_CODE_EFFORT_LEVEL" not in cmd
+        assert "--effort" not in cmd
+
+    def test_drop_ambient_effort(self):
+        from pm_core.claude_launcher import _drop_ambient_effort
+        env = {"CLAUDE_CODE_EFFORT_LEVEL": "xhigh", "A": "1"}
+        out = _drop_ambient_effort(env, "high")
+        assert "CLAUDE_CODE_EFFORT_LEVEL" not in out and out["A"] == "1"
+        assert _drop_ambient_effort(env, None) is env
+        # A provider that assigns the variable is explicit configuration.
+        assert _drop_ambient_effort(
+            env, "high", {"CLAUDE_CODE_EFFORT_LEVEL": "xhigh"}) is env
+
+    def test_launch_claude_drops_ambient_effort(self, monkeypatch, tmp_path):
+        import pm_core.claude_launcher as launcher
+        seen = {}
+
+        class Result:
+            returncode = 0
+
+        def fake_run(cmd, **kwargs):
+            seen["cmd"] = cmd
+            seen["env"] = kwargs.get("env")
+            return Result()
+
+        monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "xhigh")
+        monkeypatch.setattr(launcher, "find_claude", lambda: "/bin/claude")
+        monkeypatch.setattr(launcher, "prepare_workspace", lambda cwd: None)
+        monkeypatch.setattr(launcher, "_skip_permissions", lambda: False)
+        monkeypatch.setattr(launcher.subprocess, "run", fake_run)
+        rc = launcher.launch_claude(
+            "x", "k", tmp_path, cwd=str(tmp_path), effort="high")
+        assert rc == 0
+        assert "--effort" in seen["cmd"] and "high" in seen["cmd"]
+        assert "CLAUDE_CODE_EFFORT_LEVEL" not in (seen["env"] or {})
+
+    def test_launch_claude_print_drops_ambient_effort(self, monkeypatch,
+                                                      tmp_path):
+        import pm_core.claude_launcher as launcher
+        seen = {}
+
+        class Result:
+            returncode = 0
+            stdout = "ok"
+
+        def fake_run(cmd, **kwargs):
+            seen["env"] = kwargs.get("env")
+            return Result()
+
+        monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "xhigh")
+        monkeypatch.setattr(launcher, "find_claude", lambda: "/bin/claude")
+        monkeypatch.setattr(launcher, "_skip_permissions", lambda: False)
+        monkeypatch.setattr(launcher.subprocess, "run", fake_run)
+        launcher.launch_claude_print("x", cwd=str(tmp_path), effort="max")
+        assert "CLAUDE_CODE_EFFORT_LEVEL" not in (seen["env"] or {})

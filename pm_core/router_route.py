@@ -239,6 +239,13 @@ def bridge_host_argv(sock: Path, host: str, port: int) -> list[str]:
 def describe(resolution, *, container: bool = False) -> str:
     """One-line, credential-free description of where a session runs."""
     effort = getattr(resolution, "effort", None) or "(default)"
+    # Never let a bare level read as verified when it is known not to be.
+    # ``unverified`` (the route declares no capability metadata) stays out
+    # of this inline marker to keep route lines readable; it is reported in
+    # the effort notes of ``pm model show`` / ``pm pr model show``.
+    status = getattr(resolution, "effort_status", "none")
+    if status in ("unsupported", "overridden"):
+        effort = f"{effort} ({status})"
     try:
         cfg = router_for(resolution)
     except ProviderEntryError:

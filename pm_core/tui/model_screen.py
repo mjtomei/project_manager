@@ -67,7 +67,7 @@ def model_choices(data: dict) -> list[str]:
 
 
 def next_effort(current: str | None) -> str | None:
-    """The effort after *current* in (none, low, medium, high)."""
+    """The effort after *current* in (none, low, medium, high, xhigh, max)."""
     try:
         i = _EFFORT_CYCLE.index(current)
     except ValueError:
@@ -218,7 +218,10 @@ class ModelSettingsScreen(ModalScreen):
             pointer = "▸ " if self._selected == i + offset else "  "
             lines.append(pointer + escape(line))
         for line in table[1 + len(rows):]:
-            lines.append("[red]" + escape(line) + "[/]")
+            # ``!`` lines are problems/notes (yellow); the effort legend is
+            # informational (dim), not an error.
+            style = "[yellow]" if line.startswith("!") else "[dim]"
+            lines.append(style + escape(line) + "[/]")
         if self._project_view:
             if self._provider_cache is None:
                 self._provider_cache = self._provider_lines()
@@ -243,6 +246,8 @@ class ModelSettingsScreen(ModalScreen):
                 desc += f"  model={p.model}"
             if p.effort:
                 desc += f"  effort={p.effort}"
+            if p.supported_efforts is not None:
+                desc += f"  supported_efforts={','.join(p.supported_efforts)}"
             if p.launcher:
                 desc += f"  command={p.launcher}"
             if p.type == "router":

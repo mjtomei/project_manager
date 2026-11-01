@@ -32,14 +32,19 @@ def provider_list():
             click.echo(f"  {p.name}{marker}  [built-in]")
         elif p.type == "router":
             effort = f"  effort={p.effort}" if p.effort else ""
+            supported = (f"  supported_efforts={','.join(p.supported_efforts)}"
+                         if p.supported_efforts is not None else "")
             click.echo(f"  {p.name}{marker}  type=router  api_base={p.api_base}"
-                       f"  model={p.model or '(unset)'}{effort}")
+                       f"  model={p.model or '(unset)'}{effort}{supported}")
             for line in _router_detail_lines(p):
                 click.echo(f"    {line}")
         else:
             model_str = f"  model={p.model}" if p.model else ""
             if p.effort:
                 model_str += f"  effort={p.effort}"
+            if p.supported_efforts is not None:
+                model_str += (f"  supported_efforts="
+                              f"{','.join(p.supported_efforts)}")
             click.echo(f"  {p.name}{marker}  type={p.type}  api_base={p.api_base}{model_str}")
             if p.capabilities:
                 click.echo(f"    capabilities: {', '.join(p.capabilities)}")
@@ -132,6 +137,15 @@ _FIELD_OPTIONS = [
                  type=click.Choice(list(EFFORT_LEVELS)),
                  help="Default effort for sessions on this provider (a PR's "
                       "own effort setting wins)"),
+    click.option("--supported-efforts", default=None,
+                 help="Comma-separated effort levels this provider's model/"
+                      "route accepts (low,medium,high,xhigh,max); used to "
+                      "verify effort settings (never sent to --effort)"),
+    click.option("--supported-efforts-source", default=None,
+                 help="Where the supported-efforts list came from"),
+    click.option("--supported-efforts-checked-at", default=None,
+                 help="ISO date (YYYY-MM-DD) the supported-efforts list was "
+                      "checked"),
     click.option("--capabilities", default=None,
                  help="Comma-separated capability tags"),
     click.option("--launcher", default=None,
@@ -159,7 +173,8 @@ _FIELD_OPTIONS = [
 _LIST_FIELDS = {"capabilities", "unset_env", "probe_models"}
 _CLEARABLE = ("api_key", "model", "effort", "capabilities", "launcher",
               "remedy", "classifier_model", "env", "unset_env",
-              "probe_models", "alias_models",
+              "probe_models", "alias_models", "supported_efforts",
+              "supported_efforts_source", "supported_efforts_checked_at",
               # retired keys pm ignores (providers.RETIRED_PROVIDER_KEYS)
               "credentials_file", "refresh_command")
 
@@ -173,9 +188,14 @@ def _field_options(f):
 def _apply_fields(entry: dict, opts: dict) -> None:
     """Write the given option values into a providers.yaml *entry*."""
     for key in ("api_base", "api_key", "model", "effort", "launcher",
-                "remedy", "classifier_model"):
+                "remedy", "classifier_model", "supported_efforts_source",
+                "supported_efforts_checked_at"):
         if opts.get(key) is not None:
             entry[key] = opts[key]
+    if opts.get("supported_efforts") is not None:
+        entry["supported_efforts"] = [
+            e.strip() for e in opts["supported_efforts"].split(",")
+            if e.strip()]
     if opts.get("capabilities") is not None:
         entry["capabilities"] = [c.strip() for c in
                                  opts["capabilities"].split(",") if c.strip()]
@@ -360,6 +380,23 @@ def provider_detail_lines(p, *, status: bool = False) -> list[str]:
                          ("probe_models", ", ".join(p.probe_models))):
         if value:
             lines.append(f"  {label}: {value}")
+    if p.supported_efforts is not None:
+        from pm_core.model_config import EFFORT_LEVELS
+        usable = [e for e in EFFORT_LEVELS if e in p.supported_efforts]
+        ignored = [e for e in p.supported_efforts if e not in EFFORT_LEVELS]
+        lines.append(f"  accepted Claude levels: {', '.join(usable) or '(none)'}")
+        if ignored:
+            lines.append(f"  non-Claude levels kept for provenance: "
+                         f"{', '.join(ignored)}")
+        if p.supported_efforts_source:
+            lines.append(f"  supported_efforts source: "
+                         f"{p.supported_efforts_source}")
+        if p.supported_efforts_checked_at:
+            from pm_core.model_config import effort_metadata_age_days
+            age = effort_metadata_age_days(p.name)
+            suffix = f" ({age} days old)" if age is not None else ""
+            lines.append(f"  supported_efforts checked: "
+                         f"{p.supported_efforts_checked_at}{suffix}")
     if p.type == "router":
         lines.extend(f"  {line}" for line in _router_detail_lines(p))
     assign, unset = launch_env(p, p.env_vars(), p.model_flag(), environ={})

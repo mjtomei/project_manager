@@ -28,7 +28,8 @@ def pm_home_dir(tmp_path, monkeypatch):
     home.mkdir()
     for mod in ("pm_core.providers", "pm_core.router_route"):
         monkeypatch.setattr(f"{mod}.pm_home", lambda: home)
-    for var in ("PM_PROVIDER", "PM_MODEL", "PM_EFFORT"):
+    for var in ("PM_PROVIDER", "PM_MODEL", "PM_EFFORT",
+                "CLAUDE_CODE_EFFORT_LEVEL"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr("pm_core.model_config.get_global_setting_value",
                         lambda name, default="": default)
@@ -97,14 +98,14 @@ class TestEffortOrder:
     def test_invalid_pr_effort_is_ignored_and_reported(self, pm_home_dir):
         data = _project(session_effort={"impl": "medium"})
         pr = {"id": "pr-1", "effort": "turbo",
-              "session_effort": {"impl": "max", "bogus": "low"}}
+              "session_effort": {"impl": "ultra", "bogus": "low"}}
         data["prs"] = [pr]
         res = resolve_model_and_provider("impl", pr_entry=pr,
                                          project_data=data)
         assert (res.effort, res.effort_source) == ("medium", "project impl")
         problems = "\n".join(validate_model_config(data))
         assert "prs[pr-1].effort: invalid effort 'turbo'" in problems
-        assert "session_effort['impl']: invalid effort 'max'" in problems
+        assert "session_effort['impl']: invalid effort 'ultra'" in problems
         assert "unknown session type 'bogus'" in problems
 
     def test_pr_role_model_source(self, pm_home_dir):
@@ -175,7 +176,7 @@ class TestProviderEnv:
         ({"env": {"A": 1}}, "'env' must map"),
         ({"unset_env": "A"}, "'unset_env' must be a list"),
         ({"probe_models": [1]}, "'probe_models' must be a list"),
-        ({"effort": "max"}, "unknown effort"),
+        ({"effort": "ultra"}, "unknown effort"),
         ({"classifier_model": 3}, "'classifier_model' must be a string"),
     ])
     def test_bad_new_fields_are_invalid_entries(self, entry, problem):
@@ -207,7 +208,7 @@ class TestEdits:
         with pytest.raises(ValueError, match="unknown session type"):
             model_settings.set_pr_value({}, "model", "opus", ["watcher"])
         with pytest.raises(ValueError, match="invalid effort"):
-            model_settings.set_pr_value({}, "effort", "max")
+            model_settings.set_pr_value({}, "effort", "ultra")
 
     def test_set_project_value_and_cleanup(self):
         data = _project()
@@ -453,8 +454,9 @@ async def test_tui_refuses_a_busy_project_file(project_root, pm_home_dir,
 
 def test_effort_cycle():
     from pm_core.tui.model_screen import next_effort
-    assert [next_effort(x) for x in (None, "low", "medium", "high", "bad")] == [
-        "low", "medium", "high", None, "low"]
+    assert [next_effort(x) for x in
+            (None, "low", "medium", "high", "xhigh", "max", "bad")] == [
+        "low", "medium", "high", "xhigh", "max", None, "low"]
 
 
 @async_test
@@ -564,3 +566,218 @@ def test_badge_ignores_blank_entries():
         {"id": "p", "session_models": {"signoff": None, "impl": "opus"}})
     assert model_settings.has_pr_override({"id": "p", "effort": "high"})
     assert model_settings.has_pr_override({"id": "p", "session_models": "x"})
+
+
+# ---------------------------------------------------------------------------
+# Effort vocabulary and route capability metadata
+# ---------------------------------------------------------------------------
+
+class TestEffortCapability:
+    def test_native_levels_are_accepted(self, pm_home_dir):
+        from pm_core.model_config import EFFORT_LEVELS
+        assert EFFORT_LEVELS == ("low", "medium", "high", "xhigh", "max")
+        data = _project(session_effort={"impl": "xhigh", "review": "max"})
+        assert resolve_model_and_provider("impl", project_data=data).effort \
+            == "xhigh"
+        assert resolve_model_and_provider("review", project_data=data).effort \
+            == "max"
+
+    def test_plain_model_status_is_cli(self, pm_home_dir):
+        data = _project(session_effort={"impl": "xhigh"})
+        res = resolve_model_and_provider("impl", pr_model="opus",
+                                         project_data=data)
+        assert (res.effort, res.effort_status) == ("xhigh", "cli")
+
+    def test_route_without_metadata_is_unverified(self, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router()})
+        data = _project(session_effort={"impl": "high"})
+        res = resolve_model_and_provider(
+            "impl", pr_model=f"provider:{ROUTE}", project_data=data)
+        assert res.effort_status == "unverified"
+        assert any("declares no supported_efforts" in n
+                   for n in res.effort_notes)
+
+    def test_route_supported_level_is_ok(self, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts=["max", "high", "low"])})
+        data = _project(session_effort={"impl": "high"})
+        res = resolve_model_and_provider(
+            "impl", pr_model=f"provider:{ROUTE}", project_data=data)
+        assert res.effort_status == "ok"
+        assert res.supported_efforts == ("low", "high", "max")
+
+    def test_route_unsupported_level_still_launches_but_is_marked(
+            self, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts=["max", "high", "low"])})
+        data = _project(session_effort={"impl": "xhigh"})
+        res = resolve_model_and_provider(
+            "impl", pr_model=f"provider:{ROUTE}", project_data=data)
+        assert (res.effort, res.effort_status) == ("xhigh", "unsupported")
+        assert any("xhigh is not among them" in n for n in res.effort_notes)
+
+    def test_non_claude_levels_are_dropped_from_the_intersection(
+            self, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts=["none", "high"])})
+        data = _project(session_effort={"impl": "high"})
+        res = resolve_model_and_provider(
+            "impl", pr_model=f"provider:{ROUTE}", project_data=data)
+        assert res.supported_efforts == ("high",)
+
+    def test_haiku_is_not_applicable(self, pm_home_dir):
+        data = _project(session_effort={"impl": "xhigh"})
+        res = resolve_model_and_provider("impl", pr_model="haiku",
+                                         project_data=data)
+        assert (res.effort, res.effort_status, res.effort_requested) == \
+            (None, "not_applicable", "xhigh")
+
+    def test_stale_metadata_is_noted(self, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts=["high"],
+            supported_efforts_checked_at="2020-01-01")})
+        data = _project(session_effort={"impl": "high"})
+        res = resolve_model_and_provider(
+            "impl", pr_model=f"provider:{ROUTE}", project_data=data)
+        assert res.effort_status == "ok"
+        assert any("days old" in n for n in res.effort_notes)
+
+    def test_pm_setting_wins_over_ambient_env(self, pm_home_dir, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "xhigh")
+        data = _project(session_effort={"impl": "high"})
+        res = resolve_model_and_provider("impl", project_data=data)
+        assert (res.effort, res.effort_source) == ("high", "project impl")
+        assert any("pm unsets it" in n for n in res.effort_notes)
+
+    def test_ambient_env_is_the_source_with_no_pm_setting(
+            self, pm_home_dir, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "xhigh")
+        res = resolve_model_and_provider("impl")
+        assert (res.effort, res.effort_source, res.effort_status) == \
+            ("xhigh", "CLAUDE_CODE_EFFORT_LEVEL", "overridden")
+
+    def test_ambient_auto_is_absent(self, pm_home_dir, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "auto")
+        res = resolve_model_and_provider("impl")
+        assert (res.effort, res.effort_status) == (None, "none")
+
+    def test_invalid_pm_effort_is_ignored_and_noted(self, pm_home_dir,
+                                                    monkeypatch):
+        monkeypatch.setenv("PM_EFFORT", "turbo")
+        res = resolve_model_and_provider("impl")
+        assert res.effort is None
+        assert any("invalid PM_EFFORT" in n for n in res.effort_notes)
+
+    def test_validate_warns_on_unsupported_route_level(self, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts=["low"])})
+        data = _project(session_models={"impl": f"provider:{ROUTE}"},
+                        session_effort={"impl": "max"})
+        problems = "\n".join(validate_model_config(data))
+        assert "supported_efforts" in problems and "max" in problems
+
+
+class TestProviderEffortMetadata:
+    def test_add_round_trips_supported_efforts(self, pm_home_dir):
+        r = _cli("provider", "add", ROUTE, "--type", "router",
+                 "--api-base", "http://127.0.0.1:1", "--model", "rt/big",
+                 "--supported-efforts", "low,high,max",
+                 "--supported-efforts-source", "GET /models",
+                 "--supported-efforts-checked-at", "2026-10-31")
+        assert r.exit_code == 0, r.output
+        from pm_core.providers import get_provider
+        p = get_provider(ROUTE, strict=True)
+        assert p.supported_efforts == ["low", "high", "max"]
+        assert p.supported_efforts_source == "GET /models"
+        assert p.supported_efforts_checked_at == "2026-10-31"
+
+    def test_show_names_accepted_levels_and_provenance(self, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts=["none", "high", "max"],
+            supported_efforts_source="catalog",
+            supported_efforts_checked_at="2026-10-31")})
+        r = _cli("provider", "show", ROUTE)
+        assert r.exit_code == 0, r.output
+        assert "accepted Claude levels: high, max" in r.output
+        assert "non-Claude levels kept for provenance: none" in r.output
+        assert "supported_efforts source: catalog" in r.output
+
+    def test_bad_checked_at_is_an_invalid_entry(self, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts_checked_at="yesterday")})
+        from pm_core.providers import invalid_provider_entries
+        assert ROUTE in invalid_provider_entries()
+
+    def test_clear_removes_the_metadata(self, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts=["high"], supported_efforts_source="x")})
+        r = _cli("provider", "edit", ROUTE, "--clear", "supported_efforts",
+                 "--clear", "supported_efforts_source")
+        assert r.exit_code == 0, r.output
+        entry = yaml.safe_load((pm_home_dir / "providers.yaml").read_text())[
+            "providers"][ROUTE]
+        assert "supported_efforts" not in entry
+        assert "supported_efforts_source" not in entry
+
+
+class TestEffortDisplay:
+    def test_unsupported_level_is_marked_and_noted(self, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router(
+            supported_efforts=["low", "high"])})
+        data = _project(session_models={"impl": f"provider:{ROUTE}"},
+                        session_effort={"impl": "xhigh"})
+        rows = model_settings.role_rows(data, None)
+        impl = next(r for r in rows if r.role == "impl")
+        assert impl.effort_status == "unsupported"
+        lines = model_settings.format_rows(rows)
+        assert any(l.startswith("impl ") and "xhigh *" in l for l in lines)
+        assert any("xhigh is not among them" in l for l in lines)
+
+    def test_unverified_is_noted_without_the_inline_mark(self, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router()})
+        data = _project(session_models={"impl": f"provider:{ROUTE}"},
+                        session_effort={"impl": "high"})
+        rows = model_settings.role_rows(data, None)
+        impl = next(r for r in rows if r.role == "impl")
+        assert impl.effort_status == "unverified"
+        lines = model_settings.format_rows(rows)
+        assert any(l.startswith("impl ") and "high  " in l for l in lines)
+        assert any("declares no supported_efforts" in l for l in lines)
+
+    def test_describe_marks_unsupported(self, pm_home_dir):
+        from pm_core.router_route import describe
+        from pm_core.model_config import ModelResolution
+        _providers(pm_home_dir, **{ROUTE: _router()})
+        res = ModelResolution(provider=ROUTE, effort="xhigh",
+                              effort_status="unsupported")
+        assert describe(res) == (f"route={ROUTE} model=rt/big "
+                                 "effort=xhigh (unsupported) via=host")
+
+    def test_describe_leaves_verified_level_bare(self, pm_home_dir):
+        from pm_core.router_route import describe
+        from pm_core.model_config import ModelResolution
+        _providers(pm_home_dir, **{ROUTE: _router()})
+        res = ModelResolution(provider=ROUTE, effort="high",
+                              effort_status="ok")
+        assert describe(res) == (f"route={ROUTE} model=rt/big "
+                                 "effort=high via=host")
+
+
+class TestEffortRoundTrip:
+    def test_validate_accepts_the_new_levels(self, pm_home_dir):
+        data = _project(session_effort={"impl": "xhigh", "review": "max"})
+        assert validate_model_config(data) == []
+
+    def test_pm_effort_xhigh(self, pm_home_dir, monkeypatch):
+        monkeypatch.setenv("PM_EFFORT", "xhigh")
+        res = resolve_model_and_provider("impl")
+        assert (res.effort, res.effort_source) == ("xhigh", "PM_EFFORT")
+
+    def test_pr_model_set_round_trips_xhigh(self, project_root, pm_home_dir):
+        r = _cli("pr", "model", "set", "pr-001", "opus", "--effort", "xhigh")
+        assert r.exit_code == 0, r.output
+        pr = store.get_pr(store.load(project_root), "pr-001")
+        assert pr["effort"] == "xhigh"
+        r = _cli("pr", "model", "show", "pr-001")
+        assert r.exit_code == 0, r.output
+        assert "xhigh" in r.output

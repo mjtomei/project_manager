@@ -280,6 +280,9 @@ class ProviderConfig:
     runs; a PR's own effort setting wins, see model_config) and ``env``
     (extra variables; for a router a null value drops one of its
     defaults).  ``alias_models`` is the older name for ``env``.
+    ``supported_efforts`` is optional, dated capability metadata: the
+    effort levels this provider's model accepts (see
+    model_config.accepted_efforts).  It is never passed to ``--effort``.
     """
     name: str
     type: str = "claude"  # "claude", "local", "openai", or "router"
@@ -296,6 +299,13 @@ class ProviderConfig:
     probe_models: list[str] = field(default_factory=list)
     # every type
     effort: str = ""
+    # Optional per-model capability metadata: the effort levels this
+    # provider's model/route accepts (see model_config.accepted_efforts).
+    # None means "not declared"; [] means "declares it accepts none".
+    # Provenance is kept so a dated list is shown as dated.
+    supported_efforts: list[str] | None = None
+    supported_efforts_source: str = ""
+    supported_efforts_checked_at: str = ""
     env: dict[str, str | None] = field(default_factory=dict)
 
     def _apply_env(self, env: dict[str, str]) -> dict[str, str]:
@@ -404,7 +414,9 @@ def _resolve_env_ref(value: str) -> str:
 
 
 _PROVIDER_STR_FIELDS = ("type", "api_base", "api_key", "model", "launcher",
-                        "remedy", "classifier_model", "effort")
+                        "remedy", "classifier_model", "effort",
+                        "supported_efforts_source",
+                        "supported_efforts_checked_at")
 # Keys earlier pm versions read (credential expiry checks and refresh).
 # Credentials are managed outside pm, so an entry that still has them works
 # as before; pm ignores them and 'pm provider list/show' says so.
@@ -418,7 +430,8 @@ def retired_keys(entry) -> list[str]:
     return [k for k in RETIRED_PROVIDER_KEYS if entry.get(k) is not None]
 
 
-_PROVIDER_LIST_FIELDS = ("capabilities", "unset_env", "probe_models")
+_PROVIDER_LIST_FIELDS = ("capabilities", "unset_env", "probe_models",
+                         "supported_efforts")
 
 
 def _entry_problem(entry) -> str | None:
@@ -438,6 +451,17 @@ def _entry_problem(entry) -> str | None:
                 isinstance(value, list)
                 and all(isinstance(c, str) for c in value)):
             return f"{key!r} must be a list of names"
+    efforts = entry.get("supported_efforts")
+    if efforts is not None and any(not c.strip() for c in efforts):
+        return "'supported_efforts' entries must be non-empty names"
+    checked = entry.get("supported_efforts_checked_at")
+    if checked:
+        from datetime import date
+        try:
+            date.fromisoformat(checked)
+        except ValueError:
+            return ("'supported_efforts_checked_at' must be an ISO date "
+                    "(YYYY-MM-DD)")
     aliases = entry.get("alias_models")
     if aliases is not None and not (
             isinstance(aliases, dict)
@@ -485,6 +509,12 @@ def _config_to_provider(name: str, entry: dict) -> ProviderConfig:
                    if entry.get("unset_env") is not None else None),
         probe_models=list(entry.get("probe_models") or []),
         effort=entry.get("effort") or "",
+        supported_efforts=(list(entry["supported_efforts"])
+                           if entry.get("supported_efforts") is not None
+                           else None),
+        supported_efforts_source=entry.get("supported_efforts_source") or "",
+        supported_efforts_checked_at=(
+            entry.get("supported_efforts_checked_at") or ""),
         env=dict(entry.get("env") or {}),
     )
 

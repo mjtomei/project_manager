@@ -177,6 +177,15 @@ merge, watcher) runs Claude Code with a model and effort chosen per role:
 Effort follows the same order, with the selected provider's own `effort`
 between the PR's setting and the project's.
 
+The effort levels are the ones the Claude Code CLI accepts: `low`, `medium`,
+`high`, `xhigh` and `max`.  Leaving a role unset passes no `--effort` at all
+(the CLI default), which is distinct from any level.  `CLAUDE_CODE_EFFORT_LEVEL`
+in the launching environment overrides `--effort` inside Claude Code: pm
+unsets it when it has its own selection (so the reported level is the one
+that runs) and shows the conflict; with no pm setting, the ambient value is
+reported as the source.  A model pm knows does not take effort (Haiku)
+suppresses it entirely.
+
 The choice is explicit and per role: any of those roles may be routed to
 a provider. A role with no setting of its own falls back to its parent
 (the QA sub-roles follow `qa`, `signoff` follows `review`), and with
@@ -210,6 +219,12 @@ providers:
     api_base: http://127.0.0.1:<port>
     model: <model name as the router expects it>
     effort: high                    # optional default effort
+    # Optional, dated capability metadata: the effort levels this model/route
+    # accepts.  Values outside the Claude vocabulary (e.g. OpenRouter's
+    # "none") are kept for provenance and never sent to --effort.
+    supported_efforts: [low, medium, high, xhigh, max]
+    supported_efforts_source: "GET /api/v1/models 2026-10-31"
+    supported_efforts_checked_at: "2026-10-31"
     classifier_model: <model>       # optional: auto-mode permission classifier
     launcher: <executable>          # optional: run instead of claude (host)
     remedy: <text>                  # optional: shown when a check finds it down
@@ -228,6 +243,15 @@ pm pr model set pr-001 provider:my-router               # one PR, every role
 pm pr model set pr-001 opus --role signoff --effort high
 pm pr model show pr-001             # per role: model, effort, command, why
 ```
+
+`supported_efforts` is advisory and dated, not a guarantee.  When a role's
+effort is not in the selected route's declared list, `pm model show`,
+`pm pr model show` and the TUI mark it `*` and print the reason (the launch
+still passes the level, because the list may be stale).  A route that
+declares no list shows the effort as unverified rather than supported.
+pm only ever sends the levels Claude Code itself accepts; whether the router
+maps `output_config.effort` to an upstream provider's reasoning control is
+the router's job and cannot be verified by pm.
 
 In the TUI, `o` opens the same view for the selected PR. Enter picks a
 model or provider, `e` cycles the effort, and `p` switches to the

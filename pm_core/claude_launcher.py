@@ -306,6 +306,26 @@ def _resolve_provider(provider: str | None = None, model: str | None = None):
 SESSION_REGISTRY = ".pm-sessions.json"
 
 
+def _drop_ambient_effort(run_env: dict | None, effort: str | None,
+                         provider_env: dict | None = None) -> dict | None:
+    """*run_env* with ``CLAUDE_CODE_EFFORT_LEVEL`` removed when pm sets effort.
+
+    The variable overrides ``--effort`` inside the Claude CLI (2.1.316), so
+    an inherited value would make the session run a different level than pm
+    reports.  A value the provider itself assigns is explicit configuration
+    and is kept.  Returns *run_env* unchanged when nothing needs removing.
+    """
+    if not effort or (provider_env
+                      and "CLAUDE_CODE_EFFORT_LEVEL" in provider_env):
+        return run_env
+    base = os.environ if run_env is None else run_env
+    if "CLAUDE_CODE_EFFORT_LEVEL" not in base:
+        return run_env
+    env = dict(base)
+    env.pop("CLAUDE_CODE_EFFORT_LEVEL", None)
+    return env
+
+
 def _registry_path(pm_root: Path) -> Path:
     return pm_root / SESSION_REGISTRY
 
@@ -665,7 +685,8 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
     Args:
         provider: Name of the LLM provider to use. See providers.py.
         model: Explicit model ID to pass via --model (overrides provider model).
-        effort: Effort level to pass via --effort (low, medium, high).
+        effort: Effort level to pass via --effort (low, medium, high,
+            xhigh, max).
     """
     import uuid
 
@@ -677,7 +698,8 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
         raise FileNotFoundError("claude CLI not found. Install it first.")
 
     # Resolve provider for env vars and model flag (explicit model wins)
-    _, model_flag, run_env = _resolve_provider(provider, model)
+    provider_env, model_flag, run_env = _resolve_provider(provider, model)
+    run_env = _drop_ambient_effort(run_env, effort, provider_env)
 
     # Try to resume existing session, or generate new session ID
     session_id = None
@@ -802,7 +824,8 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
         raise FileNotFoundError("claude CLI not found. Install it first.")
 
     # Resolve provider (explicit model wins over the provider's)
-    _, effective_model, run_env = _resolve_provider(provider, model)
+    provider_env, effective_model, run_env = _resolve_provider(provider, model)
+    run_env = _drop_ambient_effort(run_env, effort, provider_env)
     cleanup_path: str | None = None
     if fc_config is not None:
         cmd = [_FAKE_CLAUDE_BIN]
@@ -916,7 +939,8 @@ def build_claude_shell_cmd(
             Resolves via providers.yaml config. When set, injects the
             appropriate environment variables and --model flag for the
             provider. None uses the default resolution order.
-        effort: Effort level to pass via ``--effort`` flag (low, medium, high).
+        effort: Effort level to pass via ``--effort`` flag (low, medium,
+            high, xhigh, max).
         write_dir: Host filesystem path where the prompt file should be
             written.  Defaults to ``cwd``.  When ``cwd`` is a
             container-internal path (e.g. ``/workspace``) that does not
@@ -980,6 +1004,19 @@ def build_claude_shell_cmd(
     # this session's model or account (providers.launch_env).
     provider_env, unset = launch_env(provider_cfg, provider_env,
                                      effective_model)
+    if effort:
+        # CLAUDE_CODE_EFFORT_LEVEL overrides --effort inside the CLI
+        # (claude 2.1.316).  pm's own selection is authoritative, so the
+        # ambient value is removed from the session.  A provider that
+        # assigns it explicitly is the user's own configuration: leave it
+        # and say so, rather than silently dropping a configured variable.
+        if "CLAUDE_CODE_EFFORT_LEVEL" in provider_env:
+            _log.warning(
+                "provider %r assigns CLAUDE_CODE_EFFORT_LEVEL; it overrides "
+                "--effort %s for this session",
+                provider or "<default>", effort)
+        else:
+            unset = (*unset, "CLAUDE_CODE_EFFORT_LEVEL")
     if provider_env:
         if env_out is not None:
             env_out.update(provider_env)

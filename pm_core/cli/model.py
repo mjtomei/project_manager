@@ -44,6 +44,8 @@ def model_show():
         click.echo("Effective config per session type:")
         click.echo(f"  {'type':15s}  {'model':40s} {'effort':8s}")
         click.echo(f"  {'─'*15}  {'─'*40} {'─'*8}")
+        effort_notes: list[str] = []
+        seen_notes: set[str] = set()
         for st in SESSION_TYPES:
             res = resolve_model_and_provider(st, project_data=data)
             if res.provider:
@@ -53,8 +55,22 @@ def model_show():
             else:
                 model_str = "(default)"
             effort_str = res.effort or "(default)"
+            if res.effort_status in ("unsupported", "overridden"):
+                effort_str += " *"
+            elif res.effort_status == "not_applicable":
+                effort_str += " (n/a)"
             click.echo(f"  {st:15s}  {model_str:40s} {effort_str:8s}")
+            for note in res.effort_notes:
+                if note in seen_notes:
+                    continue
+                seen_notes.add(note)
+                effort_notes.append(f"  ! {st}: {note}")
         click.echo()
+        if effort_notes:
+            click.echo("Effort notes (* = not verified; see the notes):")
+            for line in effort_notes:
+                click.echo(line)
+            click.echo()
 
     # Show project-level overrides if any
     if not resolvable:
@@ -133,7 +149,8 @@ def model_show():
             res = resolve_model_and_provider(
                 st, pr_model=pr_model, project_data=data, pr_entry=pr)
             if res.provider:
-                key = describe(st, dataclasses.replace(res, effort=None))
+                key = describe(st, dataclasses.replace(
+                    res, effort=None, effort_status="none", effort_notes=[]))
                 routes.setdefault(key, []).append((st, res))
         for items in routes.values():
             types = [st for st, _ in items]

@@ -16,7 +16,7 @@ launcher path and api_base only.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pm_core.model_config import (
     EFFORT_LEVELS, PR_SESSION_TYPES, SESSION_TYPES, _is_model_value,
@@ -40,6 +40,8 @@ class RoleRow:
     source: str         # setting that chose ``value`` ("(CLI default)")
     effort_source: str
     problem: str = ""   # provider not configured / invalid entry
+    effort_status: str = "none"       # model_config status vocabulary
+    effort_notes: list[str] = field(default_factory=list)
 
 
 def role_rows(data: dict, pr: dict | None = None, *,
@@ -79,8 +81,26 @@ def role_rows(data: dict, pr: dict | None = None, *,
             effort=res.effort or "(default)", command=command, route=route,
             source=res.source or "(CLI default)",
             effort_source=res.effort_source or "(CLI default)",
-            problem=problem))
+            problem=problem,
+            effort_status=res.effort_status,
+            effort_notes=list(res.effort_notes)))
     return rows
+
+
+# Statuses whose effort is not verified; the display marks them so a bare
+# level never reads as confirmed.  ``unverified`` (no capability metadata)
+# is reported in the notes instead of the column, so route tables stay
+# readable.
+_UNVERIFIED_EFFORT_STATUSES = ("unsupported", "overridden")
+
+
+def effort_cell(row: RoleRow) -> str:
+    """The effort column for *row*, marked when it is not verified."""
+    if row.effort_status in _UNVERIFIED_EFFORT_STATUSES:
+        return f"{row.effort} *"
+    if row.effort_status == "not_applicable":
+        return f"{row.effort} (n/a)"
+    return row.effort
 
 
 def format_rows(rows: list[RoleRow]) -> list[str]:
@@ -89,7 +109,7 @@ def format_rows(rows: list[RoleRow]) -> list[str]:
     table = [head] + [
         (r.role, r.value + (f" [{r.model}]" if r.value.startswith("provider:")
                             and r.model != "(default)" else ""),
-         r.effort, r.command,
+         effort_cell(r), r.command,
          f"model: {r.source}; effort: {r.effort_source}")
         for r in rows]
     widths = [max(len(row[i]) for row in table) for i in range(4)]
@@ -97,9 +117,19 @@ def format_rows(rows: list[RoleRow]) -> list[str]:
     for row in table:
         lines.append("  ".join(row[i].ljust(widths[i]) for i in range(4))
                      + "  " + row[4])
+    if any(r.effort_status in _UNVERIFIED_EFFORT_STATUSES for r in rows):
+        lines.append("* effort not verified (see the notes below)")
+    seen_notes: set[str] = set()
     for r in rows:
         if r.problem:
             lines.append(f"! {r.role}: {r.problem}")
+        for note in r.effort_notes:
+            # One note per distinct finding: a route-wide fact repeats for
+            # every role it decides.
+            if note in seen_notes:
+                continue
+            seen_notes.add(note)
+            lines.append(f"! {r.role}: {note}")
     return lines
 
 
