@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-01T17:01:16.875168+00:00'
+  updated_at: '2026-11-01T17:30:03.109954+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -47982,6 +47982,24 @@ prs:
       than filed.'
     created_at: '2026-11-01T17:01:16Z'
     last_edited: '2026-11-01T17:01:16Z'
+  - id: note-3b4dcb7
+    text: 'QA scenario 52 (R6 refusals + R7 behavioural follow-up) PASS at 807ad8dd
+      — no code change. All eight triples held live. Harness facts for the next run:
+      (1) Triple 2 needs the branch workdir to contain the victim record, but `pm
+      pr start` clones master before the victim is added; fast-forward the branch
+      first (`cd $WD && git fetch origin && git merge --ff-only origin/master`), then
+      `pm pr close <victim> --remove` and commit. (2) Triple 8: never run `pm session`
+      from a tty inside the recording pane — it attaches and hangs the script; use
+      `pm session </dev/null >/dev/null 2>&1 || true`. The container default tmux
+      server is shared with parallel QA scenarios and can carry another scenario HOME,
+      so run the pm session under a private TMUX_TMPDIR and a unique `tmux -L` socket;
+      otherwise the fake-claude transcript lands under a different HOME, the signoff
+      transcript symlink is broken, and the driver never sees SIGNOFF_MERGE. (3) Triple
+      7 exercised all three malformed variants (a) status: 123, (b) plans: ["just-a-hand-edited-string"],
+      (c) duplicate note id note-1 — each refused with its specific message and no
+      delta file. Captures: /pm-captures/scenarios/52/{r6-refusals,r7-resolve-and-record,driver-coercion}.'
+    created_at: '2026-11-01T17:30:03Z'
+    last_edited: '2026-11-01T17:30:03Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
