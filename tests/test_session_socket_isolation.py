@@ -27,26 +27,6 @@ import pytest
 from pm_core import paths, tmux
 
 
-@pytest.fixture(autouse=True)
-def _restore_pm_env():
-    """Restore the process environment after every test in this module.
-
-    The code under test deliberately exports ``PM_TMUX_SOCKET`` into the
-    process environment (``helpers._use_tmux_socket``), and
-    ``monkeypatch.delenv`` records nothing for a variable that is already
-    absent, so a test that cleared the variable and then let pm set it
-    leaked the value into every later test in the run (``tests/test_tmux.py``
-    saw a stray ``-S`` and failed only in a combined run).  Snapshotting the
-    environment is the one form that also covers values pm sets itself.
-    """
-    saved = dict(os.environ)
-    try:
-        yield
-    finally:
-        os.environ.clear()
-        os.environ.update(saved)
-
-
 # ---------------------------------------------------------------------------
 # paths: session_socket_path
 # ---------------------------------------------------------------------------
@@ -2454,6 +2434,53 @@ class TestResolveTargetSession:
                             lambda cands: seen.append(cands) or cands[-1])
         assert session_mod._resolve_target_session() == "pm-ambient"
         assert seen == [["pm-cwd", "pm-ambient"]]
+
+    def test_no_flag_targets_a_shared_ambient_session(self, monkeypatch):
+        """A plain ``pm session kill``/``mobile`` inside a shared session
+        targets that session.
+
+        A grouped session (``base~N``) does not inherit the base session's
+        environment (tmux copies no session environment into a grouped
+        session), so a shell pane the user opens in the view they are
+        attached to has no ``PM_SHARE_MODE``.  Treating "no mode
+        requested" as "private wanted" rejected the ambient session and
+        the command reported "No session found" for the session it was
+        running in — while a plain ``pm session`` (see
+        ``_resolve_start_session_name``) does adopt a shared ambient
+        session.
+        """
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: "pm-private-tag")
+        monkeypatch.setattr(session_mod, "_known_ambient_session",
+                            lambda: "pm-shared-tag")
+        monkeypatch.setattr(session_mod, "_ambient_share_mode",
+                            lambda name: "global")
+        seen: list[list[str]] = []
+        monkeypatch.setattr(session_mod, "_pick_existing_session",
+                            lambda cands: seen.append(cands) or cands[-1])
+        assert session_mod._resolve_target_session() == "pm-shared-tag"
+        assert seen == [["pm-private-tag", "pm-shared-tag"]]
+
+    def test_a_requested_share_mode_still_rejects_a_mismatched_ambient(
+            self, monkeypatch):
+        """The guard still applies when a mode *is* requested."""
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setenv("PM_SHARE_MODE", "group:staff")
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: "pm-shared")
+        monkeypatch.setattr(session_mod, "_known_ambient_session",
+                            lambda: "pm-global")
+        monkeypatch.setattr(session_mod, "_ambient_share_mode",
+                            lambda name: "global")
+        seen: list[list[str]] = []
+        monkeypatch.setattr(session_mod, "_pick_existing_session",
+                            lambda cands: seen.append(cands) or cands[0])
+        assert session_mod._resolve_target_session() == "pm-shared"
+        assert seen == [["pm-shared"]]
 
     def test_never_uses_an_unknown_ambient_session(self, monkeypatch):
         from pm_core.cli import session as session_mod

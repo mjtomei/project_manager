@@ -2432,3 +2432,101 @@ Validation: targeted suites (`test_session_socket_isolation`,
 PR note).  Every new test was verified to fail with the pre-fix code.  No
 live session, server or shared host configuration was touched — every
 fixture used a disposable socket and a temporary HOME.
+
+## Review iteration (2026-11-01, review-loop 2caf i11)
+
+Verification pass over the head after the 2caf i10 fixes; no requirement
+changes.  Two gaps, both left by the 703c i8 shared-session consistency
+fix: the per-window half of its window-size gate, and the ambient-session
+adoption for the commands it did not touch.
+
+1. **`set_shared_window_size()` still gated on the process environment.**
+   The 703c i8 fix taught `_register_tmux_bindings()` to ask the session
+   for its share mode, but the per-window option kept the old
+   `os.environ.get("PM_SHARE_MODE")` test.  That variable is absent in
+   exactly the contexts that respawn a shared session's TUI:
+   - a `run-shell` command from a *global* hook sees only the server's
+     global environment — verified on tmux 3.2a: a global
+     `after-kill-pane` hook knows `#{session_name}` but not the session's
+     variables — so `pm _pane-closed` (`pane_layout._respawn_tui`)
+     ran without it; and
+   - a plain `pm session` that adopted an already-shared ambient session
+     clears it in its own environment (`_set_share_mode_env(False,
+     None)`, the 703c i8 case), so its `_respawn_tui` path lost the
+     option too.
+   A window recreated in either path kept tmux's default
+   `window-size=latest`, which overrides the session-level `smallest`
+   (the helper's own docstring says so), so the smallest connected client
+   saw a clipped layout.  New `tmux.session_is_shared()` is the single
+   definition — process variable when set, else the session's own
+   environment — `set_shared_window_size()` uses it (and gained the
+   `socket_path` pass-through its callers already have in effect), and
+   `cli/session._session_is_shared()` now delegates to it so the bindings
+   gate and the window option cannot drift apart.
+   Tests: `TestSetSharedWindowSize` (process flag short-circuits the
+   session query; session environment consulted when the process has
+   none; private session is a no-op; `-S` forwarded to both queries).
+   Run against the pre-fix module: the session-environment case fails
+   with no `set-window-option` issued and the socket case fails on the
+   missing pass-through; the other two describe behavior that is
+   unchanged.
+
+2. **`pm session kill` / `mobile` could not find a shared session from a
+   shell pane in its grouped session.**  `_ambient_session_for_share_mode`
+   treated "no `--global`/`--group` requested" as "private wanted", so an
+   ambient session whose recorded mode was `global` was rejected.  A
+   grouped session (`base~N`) does not inherit the base session's
+   environment (tmux copies no session environment into a grouped
+   session — verified on tmux 3.2a), so the shell pane the user opens in
+   the view they are attached to has no `PM_SHARE_MODE`, and the command
+   reported "No session found" for the very session hosting it.  A plain
+   `pm session` already adopts a shared ambient session whatever its mode
+   (`_resolve_start_session_name`), so the two commands now agree: no mode
+   requested means "the session I am in".  A *requested* mode still
+   rejects a mismatched ambient (the guard R9 depends on).
+   Tests: `TestResolveTargetSession::
+   test_no_flag_targets_a_shared_ambient_session` (fails with the old
+   comparison: only the cwd candidate is offered) and
+   `::test_a_requested_share_mode_still_rejects_a_mismatched_ambient`.
+   `qa.md` R9 gained the two corresponding bullets.
+
+3. **The suite could still leak `PM_TMUX_SOCKET` across tests.**
+   `tests/test_review_launch_retry.py::test_old_window_then_container_
+   failure_retries_the_same_command` stubs the process-wide
+   `subprocess.run`, so every `session_exists` probe succeeds and
+   `_select_session_socket` exports the cwd-derived socket
+   (`/tmp/pm-sessions/pm-project_manager-eab0d61a` when pytest runs in
+   `/workspace`); nothing restored it.  The new `test_tmux.py` command
+   assertion failed only in a full run (the same class the 2caf i10 note
+   fixed inside `test_session_socket_isolation.py`, which is why that
+   module carried its own snapshot fixture).  A new autouse
+   `_restore_environment` in `tests/conftest.py` snapshots and restores
+   the process environment around every test, so the class is closed
+   suite-wide instead of one module at a time; the module-local copy in
+   `test_session_socket_isolation.py` is removed.  The `test_tmux.py`
+   cases also pin `PM_TMUX_SOCKET` to `""`, so their exact command
+   assertions stay independent of a caller that runs the suite inside a
+   pm pane.
+
+Residual (pre-existing, unchanged here): a grouped session (`base~N`)
+does not inherit the base session's environment at all, so a shell pane
+the user opens in `~N` carries none of the session's variables.  The
+layout paths now fall back to the base session's environment, and the
+share-mode-dependent commands resolve the ambient session without it;
+commands run in such a pane that key files by `get_session_tag()`
+(e.g. `paths.session_dir()` with no tag) still compute the private tag.
+
+Validation: targeted suites (`test_session_socket_isolation`,
+`test_tmux`, `test_shared_sessions`, `test_cli_helpers`, `test_cli_qa`)
+404 passed; full suite **5389 passed / 1 skipped** (419 s, log
+`/pm-captures/review-2caf-i11/full-suite-final.log`; the run before the
+conftest fixture failed exactly one case — the order-dependent
+`test_tmux.py` assertion described in item 3).  The three behaviour tests
+fail against the pre-fix module (checked in a worktree); the other new
+cases describe behavior that is unchanged.
+`pm/specs/pr-073910f/session_start_smoke.py` re-ran clean on a disposable
+socket (private server, session env, global env and hooks correct; default
+server untouched), and `pm session list` read-only ("No pm sessions
+found.").
+No live session, server or shared host configuration was touched — every
+fixture used a disposable socket and a temporary HOME.

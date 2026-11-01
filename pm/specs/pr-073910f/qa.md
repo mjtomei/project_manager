@@ -270,6 +270,19 @@ pane unless stated otherwise.
   session to adopt, so it starts the directory's *private* session (a twin
   beside the shared one) rather than guessing the shared tag; re-joining
   needs the flag (see R9's join bullet and the README).
+- **GIVEN** a shared session whose owner is attached through a grouped
+  session (`~1`) and opens a shell pane *in that grouped session* (whose
+  session environment carries no `PM_SHARE_MODE` — tmux copies no session
+  environment into a grouped session), **WHEN** the owner runs a plain
+  `pm session kill` (no `--global`/`--group`) from that pane, **THEN** it
+  kills that shared session (no mode requested means "the session I am
+  in", whatever mode it was created with) and touches no other session.
+- **GIVEN** a shared session whose TUI pane was killed so that its window
+  was recreated by the `after-kill-pane` hook (`pm _pane-closed` — a
+  `run-shell` command sees only the server's global environment, so no
+  `PM_SHARE_MODE`), **WHEN** the TUI is respawned, **THEN** the new window
+  carries `window-size=smallest` (read from the session environment), so
+  the smallest connected client still sees the full layout.
 
 ### R10 — Existing (legacy) sessions are preserved, not migrated
 

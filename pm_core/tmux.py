@@ -815,7 +815,38 @@ def set_session_option(session: str, option: str, value: str, socket_path: str |
     )
 
 
-def set_shared_window_size(session: str, window: str) -> None:
+def session_is_shared(session: str, socket_path: str | None = None) -> bool:
+    """True when *session* was created as a shared (``--global``/``--group``) session.
+
+    ``PM_SHARE_MODE`` in the process environment is authoritative when it
+    is set: panes created in the base session have it, and so do the
+    subprocesses they start.  The session's own environment is the
+    fallback, and it is what makes the remaining contexts correct:
+
+    - a plain ``pm session`` that adopts an already-shared ambient session
+      clears the variable in its own environment (``_set_share_mode_env``)
+      yet still operates on the shared session;
+    - ``run-shell`` commands run from a *global* hook (``pm _pane-closed``,
+      ``pm _window-resized``) see only the server's global environment —
+      verified on tmux 3.2a: the hook knows ``#{session_name}`` but not the
+      session's variables — so ``PM_SHARE_MODE`` is absent there;
+    - a shell pane the user opens in a grouped session (``base~N``) does
+      not inherit the base session's environment (tmux copies no session
+      environment into a grouped session).
+
+    An empty value counts as unset, like every other reader of the
+    variable.  A session that cannot be queried (no such session, tmux
+    missing) counts as private, which is also what a private session is:
+    pm records the variable only for shared sessions.
+    """
+    if os.environ.get("PM_SHARE_MODE"):
+        return True
+    return bool(get_session_environment(session, "PM_SHARE_MODE",
+                                        socket_path=socket_path))
+
+
+def set_shared_window_size(session: str, window: str,
+                           socket_path: str | None = None) -> None:
     """For shared sessions, set per-window window-size to smallest.
 
     New tmux windows inherit ``window-size=latest`` by default, which
@@ -823,13 +854,19 @@ def set_shared_window_size(session: str, window: str) -> None:
     explicitly sets ``window-size=smallest`` on the window so that it
     fits the smallest connected client in multi-user sessions.
 
-    No-op when ``PM_SHARE_MODE`` is not set (i.e. non-shared sessions).
+    Shared-ness comes from :func:`session_is_shared`, not from the
+    process environment alone: the respawn paths that need this option
+    most are exactly the ones whose environment lacks ``PM_SHARE_MODE``
+    (the global ``after-kill-pane`` hook that respawns a killed TUI, and a
+    plain ``pm session`` that adopted a shared ambient session).  With the
+    env-only test those windows kept ``window-size=latest``, so the
+    smallest client saw a clipped layout.  No-op for a private session.
     """
-    if os.environ.get("PM_SHARE_MODE"):
+    if session_is_shared(session, socket_path=socket_path):
         _run(
             _tmux_cmd(
                 "set-window-option", "-t", f"{session}:{window}",
-                "window-size", "smallest",
+                "window-size", "smallest", socket_path=socket_path,
             ),
         )
 

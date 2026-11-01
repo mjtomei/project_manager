@@ -40,6 +40,7 @@ from pm_core.tmux import (
     attached_group_active_windows,
     create_grouped_session,
     switch_sessions_to_window,
+    set_shared_window_size,
 )
 
 
@@ -152,6 +153,73 @@ class TestSwitchSessionsToWindow:
         assert select_cmds == [["tmux", "select-window", "-t", "pm-x:3"]]
         assert not [c for c in run.call_args_list
                     if "switch-client" in c.args[0]]
+
+
+class TestSetSharedWindowSize:
+    """The per-window ``smallest`` option must not depend on the env alone.
+
+    ``PM_SHARE_MODE`` is absent exactly where a shared session's new
+    windows need the option most: the global ``after-kill-pane`` hook that
+    respawns a killed TUI (a ``run-shell`` command sees only the server's
+    global environment) and a plain ``pm session`` that adopted a shared
+    ambient session (``_set_share_mode_env`` clears the variable).  With
+    the env-only test those windows kept tmux's default
+    ``window-size=latest``, which overrides the session's ``smallest``, so
+    the smallest connected client saw a clipped layout.
+    """
+
+    SET = ["tmux", "set-window-option", "-t", "pm-x:@1",
+           "window-size", "smallest"]
+
+    @staticmethod
+    def _set_calls(run):
+        return [c.args[0] for c in run.call_args_list
+                if "set-window-option" in c.args[0]]
+
+    @patch("pm_core.tmux._run")
+    def test_process_flag_short_circuits_the_session_lookup(
+            self, run, monkeypatch):
+        monkeypatch.setenv("PM_SHARE_MODE", "global")
+        # Empty (not absent) so the exact command below does not depend on
+        # the caller's environment — e.g. the suite running inside a pm pane.
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+        with patch("pm_core.tmux.get_session_environment",
+                   side_effect=AssertionError("must not query the session")):
+            set_shared_window_size("pm-x", "@1")
+        assert self._set_calls(run) == [self.SET]
+
+    @patch("pm_core.tmux._run")
+    def test_reads_the_session_environment_when_the_process_has_none(
+            self, run, monkeypatch):
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+        run.return_value = MagicMock(returncode=0,
+                                     stdout="PM_SHARE_MODE=global\n")
+        set_shared_window_size("pm-x", "@1")
+
+        cmds = [c.args[0] for c in run.call_args_list]
+        assert ["tmux", "show-environment", "-t", "pm-x",
+                "PM_SHARE_MODE"] in cmds
+        assert self._set_calls(run) == [self.SET]
+
+    @patch("pm_core.tmux._run")
+    def test_private_session_is_a_no_op(self, run, monkeypatch):
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+        run.return_value = MagicMock(returncode=1, stdout="")
+        set_shared_window_size("pm-x", "@1")
+        assert self._set_calls(run) == []
+
+    @patch("pm_core.tmux._run")
+    def test_socket_is_forwarded_to_both_queries(self, run, monkeypatch):
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        run.return_value = MagicMock(returncode=0,
+                                     stdout="PM_SHARE_MODE=global\n")
+        set_shared_window_size("pm-x", "@1", socket_path="/tmp/s.sock")
+        cmds = [c.args[0] for c in run.call_args_list]
+        assert cmds
+        for cmd in cmds:
+            assert cmd[cmd.index("-S") + 1] == "/tmp/s.sock"
 
 
 class TestHasTmux:

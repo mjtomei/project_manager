@@ -123,13 +123,12 @@ def _session_is_shared(session_name: str) -> bool:
     reattach creates would keep tmux's default ``window-size`` and the
     smallest connected client would see a clipped layout.
 
-    The session environment is authoritative for an existing session; the
-    process variable is the only signal for one that does not exist yet
-    (the create path sets it before this is ever consulted).
+    The resolution lives in :func:`pm_core.tmux.session_is_shared` so the
+    same rule serves the other consumers (``set_shared_window_size``,
+    which the hook and reattach respawn paths reach with no
+    ``PM_SHARE_MODE`` in the environment).
     """
-    if os.environ.get("PM_SHARE_MODE"):
-        return True
-    return bool(tmux_mod.get_session_environment(session_name, "PM_SHARE_MODE"))
+    return tmux_mod.session_is_shared(session_name)
 
 
 def _register_tmux_bindings(session_name: str) -> None:
@@ -276,7 +275,7 @@ def _ambient_share_mode(ambient: str) -> str | None:
 
 
 def _ambient_session_for_share_mode(wanted: str | None) -> str | None:
-    """Return the ambient session only when it has the *wanted* share mode.
+    """Return the ambient session when it has the *wanted* share mode.
 
     Share mode is mixed into the session tag, so a shared session and a
     private one for the same repo are different sessions on different
@@ -289,13 +288,23 @@ def _ambient_session_for_share_mode(wanted: str | None) -> str | None:
     variable only for shared sessions.  An empty ``PM_SHARE_MODE`` counts
     as unset, like every other reader of the variable (an exported empty
     value must not turn a private ambient session into a mismatch).
+
+    With *no* mode requested (no ``--global``/``--group`` on the command)
+    the ambient session is returned whatever mode it was created with:
+    the user is acting on "the session" and the ambient one is it.  This
+    is the rule ``_resolve_start_session_name`` already follows for a
+    plain ``pm session`` (it adopts a shared ambient session), and without
+    it ``pm session kill`` / ``mobile`` run from a shell pane in a grouped
+    session ``base~N`` — whose session environment carries no
+    ``PM_SHARE_MODE`` — could not find the very session hosting them.
     """
+    wanted = wanted or None
     ambient = _known_ambient_session()
     if not ambient:
         return None
-    if ambient == _get_session_name_for_cwd():
+    if wanted is None or ambient == _get_session_name_for_cwd():
         return ambient
-    return ambient if _ambient_share_mode(ambient) == (wanted or None) else None
+    return ambient if _ambient_share_mode(ambient) == wanted else None
 
 
 def _resolve_start_session_name(shared: bool = False) -> str:
@@ -344,10 +353,12 @@ def _resolve_target_session() -> str:
     Prefers the cwd-derived session and falls back to the session this
     process is running inside (workdir clones hash to their own tag, so
     the cwd name is usually absent while the ambient one is live).  A
-    foreign HOME's inherited session is never a candidate (R5b), and the
-    ambient fallback must have the share mode this command is running
-    under: ``pm session kill --global`` from inside a private session has
-    no shared session to act on, and must not kill the private one.
+    foreign HOME's inherited session is never a candidate (R5b).  When a
+    share mode *is* requested it must match: ``pm session kill --global``
+    from inside a private session has no shared session to act on, and
+    must not kill the private one.  With no mode requested the ambient
+    session is the session the user is in, whatever mode it was created
+    with (``_ambient_session_for_share_mode``).
     """
     candidates = [_get_session_name_for_cwd()]
     ambient = _ambient_session_for_share_mode(os.environ.get("PM_SHARE_MODE"))
