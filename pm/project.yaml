@@ -25140,7 +25140,7 @@ prs:
   title: Retire legacy regression scenarios and reuse the container/recipe launch
     path
   branch: pm/pr-7d5d036-bug-pm-tui-test-hardcodes-testing-against-the-pm-t
-  status: pending
+  status: in_progress
   depends_on:
   - pr-abcf70f
   - pr-9603d04
@@ -25196,12 +25196,12 @@ prs:
     remains required.
 
     '
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/284
+  gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
   updated_at: '2026-11-01T19:44:04.458343+00:00'
-  started_at: null
+  started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
   notes:
@@ -25289,6 +25289,7 @@ prs:
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7d5d036-bug-pm-tui-test-hardcodes-testing-ag-c7b9ae91
 - id: pr-f4dc8a2
   plan: plan-regression
   title: 'QA library auditor: scan a project and propose regression-test fills (with
@@ -33271,11 +33272,24 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T23:10:18.419956+00:00'
-  updated_at: '2026-05-26T00:28:05.814378+00:00'
+  updated_at: '2026-11-01T20:07:26.901069+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-508f8ed
+    text: 'pr-7d5d036 retired all 20 legacy pm/qa/regression/*.md scenarios instead
+      of porting them (user direction 2026-11-01). Inventory with paths, titles, blob
+      SHAs and recovery commands: pm/qa/retired-regressions.md. Recover from c1fcecc58b09695602043094b44c8d96ca66bfe0
+      (master; last revision with the files), e.g. git checkout c1fcecc5 -- pm/qa/regression/.
+      This is an intentional coverage gap: nothing was ported or re-run. A port should
+      restyle onto the shared setup/capture recipes, because regression runs are now
+      isolated: pm qa regression clones the project into a QA workdir, runs in a QA
+      container when container mode is on, and the test drives a disposable project
+      built from pm/qa/instructions/. The restored monolithic text assumes it drives
+      a live tmux session.'
+    created_at: '2026-11-01T20:07:26Z'
+    last_edited: '2026-11-01T20:07:26Z'
 - id: pr-6412997
   plan: bugs
   title: 'Bug: TUI input lag + dropped/garbled keystrokes when the event loop is blocked
