@@ -123,7 +123,10 @@ sharing one capture directory then read the same cast and status), while one
 whose pane has returned is cleared, because `new-session` fails with
 "duplicate session: rec" while it exists. A duplicate that appears in the
 gap before `new-session` is reported as a start failure, instead of spinning
-out its readiness wait against a `rec` session that never writes a cast.
+out its readiness wait against a `rec` session that never writes a cast —
+and that failure does not clear the session it names: this run created
+nothing, and the session belongs to the capture that took the shared name
+after the guard passed.
 This recipe's readiness signal is the cast file, not the pane's
 content (a quiet command draws nothing), so — unlike the tmux recipe's
 pane-content wait — it cannot pass on the previous run's recorder; it would
@@ -205,11 +208,14 @@ where the CLI runs.
 #    `kill-server`: killing the server and reconnecting immediately races its
 #    exit ("server exited unexpectedly"). The socket *name* is shared by
 #    every run on this host, so two CLI captures must not run at once: the
-#    second run refuses while the first recorder is alive, and either run's
-#    failure path kills the server under the other. A recorder that has
-#    already ended is a dead leftover and is cleared, so a second run that
-#    starts in the gap before the first run's step 4 has read its files can
-#    still replace them — run captures one after the other.
+#    second run refuses while the first recorder is alive, and a start that
+#    loses the name in the gap is reported without touching that session
+#    (this run created nothing of its own). A run whose recorder has already
+#    ended can still have its stop step's cleanup tear the server down under
+#    a capture that started after it, so run captures one after the other. A
+#    recorder that has already ended is a dead leftover and is cleared, so a
+#    second run that starts in the gap before the first run's step 4 has read
+#    its files can still replace them.
 #    That shared name is why the guard comes *after* the absolute-path guard
 #    and the `mkdir` below: a block that is about to refuse its own input must
 #    not end a concurrent capture's recorder on its way out.
@@ -343,9 +349,17 @@ tmux -L scaffold new-session -d -s rec -x 100 -y 30 \
     # duplicate session left by a concurrent run, a bad option): the pane
     # command never ran, so step 4 would report "asciinema wrote no cast" and
     # point at a stderr log that was never written. Say what actually
-    # happened instead.
-    echo "could not start the recorder session — see tmux's error above" >&2
-    tmux -L scaffold kill-server 2>/dev/null
+    # happened instead — and do not tear the server down here. A failed
+    # `new-session` created nothing of this run's, so the only `rec` session
+    # a `kill-server` could reach is another capture's. The duplicate case is
+    # exactly that: a run that took the shared name in the gap after the guard
+    # above passed, whose recorder a `kill-server` would end — failing that
+    # run for a reason it cannot see. There is nothing of this run's to clean
+    # up either: a tmux server exits with its last session, and this run has
+    # none.
+    echo "could not start the recorder session — see tmux's error above;" \
+        "if it names a duplicate session, another capture on this socket owns" \
+        "it — this block did not clear it (run captures one after the other)" >&2
     exit 1
 }
 
@@ -477,6 +491,15 @@ case $stop_timeout in
             "RECORDER_STOP_TIMEOUT=120" >&2
         exit 1 ;;
 esac
+# Drop leading zeros before the length check below and before the arithmetic:
+# `10#` reads `000…2` as the number 2, so a padded value is not a long one —
+# counting its digits refused a bound of 2 s as "too large … the 64-bit
+# deadline arithmetic wraps it", a cause it cannot have (verified in this
+# container: `$(( 100 + 10#0000000000000000005 ))` answers 105). The stripped
+# value is what the deadline and the messages below use. All zeros strip to
+# nothing, which is the bound 0 — an immediate timeout, not an error.
+stop_timeout=${stop_timeout#"${stop_timeout%%[!0]*}"}
+stop_timeout=${stop_timeout:-0}
 # A *whole* number can still stop bounding: bash arithmetic is 64-bit, so a
 # value this long can wrap, and the wrap can land on a deadline far in the
 # future — the unbounded wait this validation exists to remove, reintroduced by

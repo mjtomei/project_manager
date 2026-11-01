@@ -809,7 +809,10 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   18 digits (verified with `99999999999999999999`, which left the shipped
   block still waiting at 8 s) must fail with "RECORDER_STOP_TIMEOUT is too
   large" and leave the recording running for the corrected retry (review
-  loop 928f i25, R87).
+  loop 928f i25, R87). Padding is not a wrap: leading zeros are stripped
+  before that length check, so `0000000000000000002` is the bound 2 s — it
+  must time out "within 2s" rather than being refused as too large (review
+  loop 928f i38, R104).
 - The TUI dies mid-scenario (a crash, not the scenario quitting pm) → the
   driving step's own `pm tui send` fails and step 5's both-gone branch cannot
   tell that from a legitimate finish, so the capture is re-run rather than
@@ -1024,7 +1027,13 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   server gone or refusing, a duplicate session from a concurrent run, a bad
   option) → the run stops with "could not start the recorder session — see
   tmux's error above", not with the recorder-death messages that point at a
-  cast and a `recorder-stderr.log` that were never written.
+  cast and a `recorder-stderr.log` that were never written. The CLI scaffold
+  does not tear the shared `scaffold` server down on that path: a duplicate
+  means another capture took the `rec` name in the gap after the
+  live-recorder guard passed, so the kill could only end that run's recorder
+  (the message says the block did not clear it, and the tmux recipe's
+  parallel branch never touched the shared session either) — review loop 928f
+  i38, R103.
 - The web-UI driver block runs with `CAPDIR` *set but missing* → it stops
   with "capture directory … does not exist" instead of `cd` silently staying
   put and creating `node_modules` in the worker's cwd (where the resolution

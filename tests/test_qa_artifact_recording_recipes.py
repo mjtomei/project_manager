@@ -5652,6 +5652,17 @@ case "$sub" in
           exit 1
       fi
       s=$(val -s "$@")
+      # `startgap`: a concurrent capture took the shared name in the gap
+      # after this block's live-recorder guard passed (that guard saw no
+      # session), so `new-session` fails with "duplicate session: rec" and the
+      # session it names is that other run's recorder. The block created
+      # nothing of its own, so its failure path must not tear the server
+      # down: the only `rec` a `kill-server` could reach is the winner's.
+      if [ "$STUB_MODE" = startgap ]; then
+          touch "$STATE/$s"
+          echo "duplicate session: $s" >&2
+          exit 1
+      fi
       touch "$STATE/$s"
       # `remain-on-exit on` is a server-wide window option in the user's
       # ~/.tmux.conf, so every pane this server creates inherits it.
@@ -6273,6 +6284,33 @@ class TestCaptureFlowExecution:
         assert (tmp_path / "state" / "rec").exists(), (
             "an overflowing bound killed the recording the corrected value "
             "was meant to be applied to")
+
+    def test_cli_stop_accepts_a_zero_padded_bound(self, tmp_path):
+        """Padding is not a wrap: a zero-padded bound is the number it spells.
+
+        The length check exists for the 64-bit wrap above, but it counted
+        *digits*, so ``RECORDER_STOP_TIMEOUT=0000000000000000002`` — the
+        number 2, written with padding — was refused with "too large … the
+        64-bit deadline arithmetic wraps it", a cause it cannot have: `10#`
+        reads it as 2 and the deadline is two seconds away (verified in this
+        container: `$(( 100 + 10#0000000000000000005 ))` answers 105). A
+        worker re-running with a padded value would be sent to change a
+        number that is already valid.
+        """
+        r, _cast = _run_block(
+            _stop_block("cli-recording.md"), "stuck", tmp_path,
+            sessions=("rec",),
+            files={"recording.cast": '{"version": 2}\n'},
+            env_extra={"RECORDER_STOP_TIMEOUT": "0000000000000000002"},
+            timeout=20)
+        assert r.returncode != 0, r.stderr
+        assert "is too large" not in r.stderr, (
+            "a zero-padded bound is refused as unrepresentable: " + r.stderr)
+        assert "recorder did not exit within 2s" in r.stderr, (
+            "the padded bound was not applied as the two seconds it spells, "
+            "or the message did not use the stripped value: " + r.stderr)
+        assert (tmp_path / "state" / "rec").exists(), (
+            "a padded bound killed the recording the retry needs")
 
     def test_cli_stop_refuses_a_non_numeric_timeout(self, tmp_path):
         """A mistyped RECORDER_STOP_TIMEOUT must fail, not remove the bound.
@@ -8986,6 +9024,39 @@ class TestCaptureFlowExecution:
             "refusing a capture directory it never validated, so a worker "
             "pasting an unsubstituted path kills a concurrent capture's "
             "recorder: " + calls_text)
+
+    def test_cli_start_failure_does_not_kill_a_concurrent_capture(self,
+                                                                 tmp_path):
+        """A start that lost the shared name must not end the run that won it.
+
+        The ``-L scaffold`` socket *name* is shared by every CLI capture on
+        the host, so the live-recorder guard refuses a second run while the
+        first recorder's pane runs. The guard and ``new-session`` are separate
+        calls: a run that takes the name in the gap makes this block's
+        ``new-session`` fail with "duplicate session: rec", and the session it
+        names is that other run's recorder. The failure path used to
+        ``kill-server``, so a block that never created a session ended a
+        capture it never touched — that run then failed as "recorder status is
+        missing", a failure it could not connect to this block. A failed start
+        has nothing of this run's to tear down, and the server exits with its
+        last session anyway.
+        """
+        calls = tmp_path / "tmux-calls"
+        r, _cast = _run_block(
+            _scaffold_block(_recipe_text("cli-recording.md")), "startgap",
+            tmp_path, env_extra={"STUB_TMUX_LOG": str(calls)})
+        assert r.returncode != 0, r.stderr
+        assert "could not start the recorder session" in r.stderr, r.stderr
+        assert "did not clear it" in r.stderr, (
+            "the start failure does not say whether it touched the session "
+            "it names: " + r.stderr)
+        assert (tmp_path / "state" / "rec").exists(), (
+            "the failed start tore the server down and with it the recorder "
+            "of the capture that won the shared `rec` name")
+        calls_text = calls.read_text() if calls.exists() else ""
+        assert "kill-server" not in calls_text, (
+            "the failed start killed the shared `scaffold` server, ending the "
+            "concurrent capture that owns `rec`: " + calls_text)
 
 
 @pytest.mark.parametrize("name,marker,probe_bound", [
