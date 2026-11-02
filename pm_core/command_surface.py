@@ -1,15 +1,17 @@
 """Single source of truth for pm's command-bar / CLI / TUI equivalents.
 
-Three surfaces document the same actions:
+Three surfaces render the tables below verbatim, so a new mode or
+keybinding cannot be documented in one place and missed in another — the
+failure this PR fixes (``pr qa fresh`` existed in the command bar but was
+absent from ``pm pr qa --help``):
 
-* ``pm <command> --help`` (Click),
+* ``pm pr qa --help`` (the QA modes table),
 * the TUI ``?`` HelpScreen, and
 * ``pm tui keys``.
 
-They all render from the tables below so a new mode or keybinding cannot be
-documented in one place and missed in another — the failure this PR fixes
-(``pr qa fresh`` existed in the command bar but was absent from
-``pm pr qa --help``).
+``pm pr start/review/merge/signoff --help`` carry hand-written equivalent
+blocks (their prose differs), and the same forms appear in their docstrings
+— update those next to this table.
 
 This module must not import from :mod:`pm_core.cli` or :mod:`pm_core.tui`:
 both sides import it.
@@ -69,7 +71,7 @@ COMMAND_BAR_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
      "e / Enter", "edit PR details"),
     ("autostart add|remove|list|status|clear …",
      "pm autostart …",
-     "O / A / a", "auto-start targets and runs"),
+     "O add / A toggle / a runs", "auto-start targets and runs"),
     ("plan add <name>",
      "pm plan add <name>",
      "p then a", "add a plan"),

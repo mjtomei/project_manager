@@ -76,6 +76,20 @@ def test_typed_command_echo_keeps_brackets(tmp_path):
     assert Content.from_markup(logs[0]).plain == f"> {cmd}"
 
 
+def test_uppercase_bracket_text_keeps_brackets(tmp_path):
+    """rich's own ``escape()`` only escapes ``[`` before a lowercase
+    letter, ``#``, ``@`` or ``/``.
+
+    ``[OK]`` therefore passed through unescaped and the markup parser
+    dropped it; the shared helper escapes every ``[``.
+    """
+    app, logs = _app(tmp_path)
+    result = SimpleNamespace(returncode=1, stdout="", stderr="[OK] done\n")
+    with patch.object(pr_view, "_run_shell", return_value=result):
+        pr_view._run_command_sync(app, ["pr", "list"])
+    assert _plain(logs)[-1] == "Error: [OK] done"
+
+
 def test_command_exception_keeps_brackets(tmp_path):
     app, logs = _app(tmp_path)
 

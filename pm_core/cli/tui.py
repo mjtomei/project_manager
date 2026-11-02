@@ -281,10 +281,9 @@ PR Actions:
   t                Start QA                    (z t: fresh, zz t: loop)
   e                Edit selected PR
   Y                Cleanup PR workdir
+  y                Cleanup, then: ys start, yd review, yt QA
   V                Review oldest pending spec
   o                Models: PR/project model, effort, command
-  O                Add selected PR as auto-start target, wait for merge
-  A                Toggle selected PR as auto-merge target
 
 Views:
   p                Toggle plans view
@@ -292,7 +291,7 @@ Views:
   n                Open notes
   c                Launch Claude session
   L                View TUI log
-  w                Focus watcher window
+  w                Watcher prefix: ww list, wf focus, ws start/stop, wr review
   ?                Show help
 
 Auto-start (multiple targets; also `pm autostart --help`):

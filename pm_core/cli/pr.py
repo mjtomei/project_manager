@@ -3182,8 +3182,9 @@ def pr_sync_github():
     backend_name = data["project"].get("backend", "vanilla")
     if backend_name != "github":
         click.echo(f"This command only works with the GitHub backend "
-                   f"(this project uses '{backend_name}'). Use "
-                   f"'pm pr sync' instead.", err=True)
+                   f"(this project uses '{backend_name}'). Merge a "
+                   f"signed-off PR with 'pm pr merge <pr-id>' instead.",
+                   err=True)
         raise SystemExit(1)
 
     # Use the shared sync function
@@ -3234,8 +3235,8 @@ def pr_import_github(gh_state: str):
     backend_name = data["project"].get("backend", "vanilla")
     if backend_name != "github":
         click.echo(f"This command only works with the GitHub backend "
-                   f"(this project uses '{backend_name}'). Use "
-                   f"'pm plan import' instead.", err=True)
+                   f"(this project uses '{backend_name}'). Create PRs in "
+                   f"this project with 'pm pr add <title>' instead.", err=True)
         raise SystemExit(1)
 
     from pm_core import gh_ops

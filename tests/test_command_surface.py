@@ -207,6 +207,46 @@ def test_tui_keys_matches_the_shared_table():
         assert token in out
 
 
+def test_tui_keys_documents_prefix_keys_as_prefixes():
+    """`w` and `y` are prefixes, not direct bindings.
+
+    `w` alone only arms the watcher prefix (`wf` focuses); saying
+    "w — Focus watcher window" would send an operator pressing `w` to a
+    hint line instead of the action.
+    """
+    out = CliRunner().invoke(cli, ["tui", "keys"]).output
+    assert "Focus watcher window" not in out
+    for token in ("Watcher prefix:", "wf focus", "ww list", "wr review"):
+        assert token in out
+    assert "ys start" in out and "yd review" in out and "yt QA" in out
+
+
+def test_non_github_backend_remedies_name_a_working_command(tmp_path,
+                                                            monkeypatch):
+    """A wrong-backend refusal must not point at another GitHub-only command.
+
+    `pm pr sync` and `pm plan import` are not substitutes: the first
+    refuses for the same reason and the second bootstraps a plan from an
+    existing repo.
+    """
+    from unittest import mock
+
+    from pm_core.cli import pr as pr_mod
+
+    (tmp_path / "project.yaml").write_text(
+        "project:\n  backend: vanilla\n  base_branch: master\nprs: []\n")
+    with mock.patch.object(pr_mod, "state_root", return_value=tmp_path):
+        sync = CliRunner().invoke(pr_mod.pr, ["sync-github"])
+        imp = CliRunner().invoke(pr_mod.pr, ["import-github"])
+
+    assert sync.exit_code == 1, sync.output
+    assert "pm pr merge <pr-id>" in sync.output
+    assert "pm pr sync' instead" not in sync.output
+    assert imp.exit_code == 1, imp.output
+    assert "pm pr add <title>" in imp.output
+    assert "pm plan import" not in imp.output
+
+
 @pytest.mark.parametrize("args,expected", [
     ([], (None, None)),
     (["pr-001"], (None, "pr-001")),

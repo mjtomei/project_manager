@@ -320,3 +320,16 @@ the routed form and `--fresh` so help is complete.
   `pm/plans/plan-regression.md` now matches the no-`--fresh`-on-CLI
   resolution.
 
+- Review-loop i3: corrected inaccuracies the sweep itself had introduced
+  or missed. `w` is a prefix, not a direct binding — both
+  `pm tui keys` and the `?` HelpScreen now say `w` opens the watcher
+  prefix (`ww` list, `wf` focus, `ws` start/stop, `wr` review) instead of
+  claiming `w` focuses the watcher, and the undocumented `y` cleanup-then
+  prefix (`ys`/`yd`/`yt`) is listed. The duplicated `O`/`A` rows in
+  `pm tui keys`' PR Actions block were dropped (the dedicated Auto-start
+  block already documents them). `pm pr sync-github` and
+  `pm pr import-github` no longer point at commands that cannot help on a
+  non-GitHub backend: they name `pm pr merge <pr-id>` and
+  `pm pr add <title>`. The shared table's autostart TUI column now says
+  which key does which verb (`O` add / `A` toggle / `a` runs). Dead
+  assignment removed from the command-bar QA error path.

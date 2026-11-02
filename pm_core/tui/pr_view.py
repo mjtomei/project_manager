@@ -7,8 +7,6 @@ access app state and call app methods (log_message, _load_state, etc.).
 import shlex
 import sys
 
-from rich.markup import escape
-
 from pm_core.paths import configure_logger
 from pm_core import command_surface, store
 from pm_core.tui._shell import _run_shell, _run_shell_async
@@ -804,7 +802,6 @@ def handle_command_submitted(app, cmd: str) -> None:
             # brackets; escape them all or Textual eats them as markup and
             # the corrective hint disappears exactly when it is needed.
             app.log_message(command_surface.escape_markup(f"QA: {e}"))
-            qa_mode = qa_pr_id = None
             app._inflight_pr_action = None
             if app._plans_visible:
                 app.query_one("#plans-pane", PlansPane).focus()
@@ -890,7 +887,7 @@ def run_command(app, cmd: str, working_message: str | None = None,
         # Run sync for quick commands
         # The typed command is text too: "pr note add … 'creds[work]'" lost
         # "[work]", and a "[/…]" in it refused the whole line.
-        app.log_message(f"> {escape(cmd)}")
+        app.log_message(f"> {command_surface.escape_markup(cmd)}")
         _run_command_sync(app, parts)
         if action_key:
             app._inflight_pr_action = None
@@ -913,13 +910,14 @@ def _run_command_sync(app, parts: list[str]) -> None:
         # The command's output is text, not markup: a path such as
         # ".../creds[work]/..." in a route remedy lost its "[work]" (S53).
         if result.stdout.strip():
-            app.log_message(escape(result.stdout.strip().split("\n")[-1]))
+            app.log_message(command_surface.escape_markup(
+                result.stdout.strip().split("\n")[-1]))
         if result.returncode != 0 and result.stderr.strip():
-            app.log_message(
-                f"Error: {escape(result.stderr.strip().split(chr(10))[-1])}")
+            last_err = result.stderr.strip().split(chr(10))[-1]
+            app.log_message(f"Error: {command_surface.escape_markup(last_err)}")
     except Exception as e:
         _log.exception("command failed: %s", parts)
-        app.log_message(f"Error: {escape(str(e))}")
+        app.log_message(f"Error: {command_surface.escape_markup(str(e))}")
 
     # Reload state
     app._load_state()
@@ -963,12 +961,13 @@ async def _run_command_async(app, cmd: str, parts: list[str], working_message: s
                    proc.returncode, stdout_text[:200], stderr_text[:200])
 
         if stdout_text.strip():
-            app.log_message(escape(stdout_text.strip().split("\n")[-1]))
+            app.log_message(command_surface.escape_markup(
+                stdout_text.strip().split("\n")[-1]))
         elif proc.returncode == 0:
             app.log_message(f"✓ {working_message} done")
         if proc.returncode != 0 and stderr_text.strip():
-            app.log_message(
-                f"Error: {escape(stderr_text.strip().split(chr(10))[-1])}")
+            last_err = stderr_text.strip().split(chr(10))[-1]
+            app.log_message(f"Error: {command_surface.escape_markup(last_err)}")
 
     except asyncio.TimeoutError:
         spinner_running = False
@@ -977,7 +976,7 @@ async def _run_command_async(app, cmd: str, parts: list[str], working_message: s
     except Exception as e:
         spinner_running = False
         _log.exception("command failed: %s", cmd)
-        app.log_message(f"Error: {escape(str(e))}")
+        app.log_message(f"Error: {command_surface.escape_markup(str(e))}")
     finally:
         if action_key:
             app._inflight_pr_action = None
