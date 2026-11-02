@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T09:23:16.851340+00:00'
+  updated_at: '2026-11-02T09:37:28.823367+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7671,6 +7671,23 @@ prs:
       That is for the master-integration step, not review.'
     created_at: '2026-11-02T09:23:16Z'
     last_edited: '2026-11-02T09:23:16Z'
+  - id: note-e05f912
+    text: 'Review loop 68bd i4 (commit 2f51eda9; no requirement changes; full suite
+      5564 passed / 1 skipped, 431 s, log /pm-captures/review-68bd-i4/full-suite.log).
+      Checked i3''s change, and it holds: _mark_tmux_socket reads paths.SHARED_SOCKET_DIR
+      when it runs, and the $TMUX parse copy is kept for the logger reason. Two duplication
+      cleanups, no behaviour change in the normal states. (1) tmux.list_pm_sessions
+      had its own copy of the socket-directory check. It now calls paths.shared_socket_dir_is_usable,
+      the rule find_session_server and pm session kill already use. One edge differs:
+      an lstat error other than "missing" (EACCES) now skips the scan instead of trying
+      a glob that fails anyway. (2) pm session kill had the same stale-socket unlink
+      block in its not-found branch and after the kill. It is now one helper, _remove_stale_socket.
+      A mutation check (no-op helper, dir check skipped) fails 6 tests in test_session_socket_isolation.py,
+      so both paths are covered. Not addressed (unchanged from 54bf i1): a trial merge
+      with origin/master 5b352d16 conflicts in qa_loop_ui._resume_incomplete_qa. That
+      is for the master-integration step, not review.'
+    created_at: '2026-11-02T09:37:28Z'
+    last_edited: '2026-11-02T09:37:28Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
