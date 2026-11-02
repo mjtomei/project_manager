@@ -4932,6 +4932,51 @@ class TestWebUiStartExecution:
             "the failed start left a dead app's pid in server.pid, so the "
             "teardown could signal a recycled pid")
 
+    def test_a_failed_start_stops_the_app_it_started(self, tmp_path):
+        """The readiness failure has to end the app, not only report it.
+
+        The app outlives the block's shell, so a failed start that leaves it
+        running keeps the port: the *next* run's pre-check then refuses with
+        "something already answers" — a failure the worker cannot connect to
+        this block, and the one the refusal message's ``ss -ltnp`` remedy is
+        for. The kill was pinned only as text
+        (``test_readiness_waits_are_bounded`` matches the line in a window),
+        and every execution case started a stub app that had already exited
+        by the deadline, so the kill was a no-op there: moving it below the
+        ``exit 1`` left the whole file green (396 passed, verified). This
+        case keeps the app up, traps ``TERM`` and requires the marker the
+        trap writes, so an unreachable or missing kill fails it.
+        """
+        marker = tmp_path / "app-terminated"
+        pidfile = tmp_path / "app-pid"
+        app_body = (
+            f"trap 'printf terminated > \"{marker}\"; exit 0' TERM\n"
+            f"printf '%s\\n' $$ > \"{pidfile}\"\n"
+            "while :; do sleep 0.1; done\n")
+        r, _launched = _run_web_ui_start("never", tmp_path, app_body=app_body)
+        pid = None
+        if pidfile.exists():
+            try:
+                pid = int(pidfile.read_text().strip())
+            except ValueError:
+                pid = None
+        try:
+            assert r.returncode != 0, r.stderr
+            deadline = time.time() + 10
+            while not marker.exists() and time.time() < deadline:
+                time.sleep(0.05)
+            assert marker.exists(), (
+                "the readiness failure left the app it started running, so it "
+                "keeps the port and the next run's pre-check refuses with "
+                "'something already answers' for a cause the worker cannot "
+                "connect to this block: " + r.stderr)
+        finally:
+            if pid is not None:
+                try:
+                    os.kill(pid, 9)
+                except ProcessLookupError:
+                    pass
+
     def test_an_unusable_capture_dir_stops_the_start(self, tmp_path):
         """The capture dir cannot be created, and the block still exits 0.
 
