@@ -5173,7 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-11-02T21:44:34.473429+00:00'
+  updated_at: '2026-11-02T22:49:11.454898+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5570,6 +5570,37 @@ prs:
       empty, sha same); back on master it re-links. No code changes; no new bugs found.'
     created_at: '2026-11-02T21:44:34Z'
     last_edited: '2026-11-02T21:44:34Z'
+  - id: note-90e80b5
+    text: 'QA S26 run 2026-11-02 at 2150a33d: PASS 8/8 live (isolated HOME, private
+      tmux socket, fake-claude, fzf 0.60.3, textual 2.0.1 for story 4; captures /pm-captures/scenarios/26/story1-8).
+      (1) TUI d/t/s/i on A/B/C each re-linked the original clone; windows review-A,
+      qa-A, impl-B, signoff-C with panes in the clones; QA scripted PASS with scenario
+      clones origin = A clone; one clone per PR; clone HEAD/porcelain/stash/fixture
+      identical; records updated. Surface line is "QA PASS for pr-3e39908 — press
+      i to sign off" (scenario Then said "QA finished for A: PASS"); A needs a pm/specs/<pr>/qa.md
+      for the fake planner or QA stops at INPUT_REQUIRED. (2) Two-clone review: ambiguity
+      line + listing, no window/clone, D->in_review; after mv the re-link opens review-D.
+      (3) QA ERROR in <0.5 s naming the ambiguity; sign-off ambiguity message; no
+      windows/clones; D2->qa->sign_off; only .workdir-D2.lock. (4) textual 2.0.1:
+      modal on A, Down/Up move the row, e -> "pr-3e39908: effort for (all roles) ->
+      low (new launches use it)", effort: low recorded; note-add reload under the
+      modal -> "model settings: tree reload failed" + NoMatches #tech-tree (known
+      pr-3199f44), TUI survives; A workdir stays stale, no re-link/lock until d re-links
+      and opens review-A. (5) popup picker/M from C window: picker d re-links B and
+      "Switched to existing review window", picker s opens impl-B, "pm> pr start B"
+      selects the existing impl window; C clone yaml/porcelain unchanged; one B clone.
+      Observation: the popup re-link line is in the cwd-keyed popup log (~/.pm/debug/pm-pr-88c7ea1-...-af700eeb.log),
+      not the TUI session log. (6) popup "pr start S" with 2 clones exits non-zero,
+      shows the listing + "Not creating another workdir" + "Press q/Esc/Enter to close..."
+      and holds; picker d shows "already in_review" + the ambiguity listing, rc-0
+      popup closes at once (50 ms frame/raw stream), existing review-S untouched.
+      (7) separate project G/H: f/F/x/PageDown/PageUp/R + 8 s idle leave project.yaml
+      sha, locks and listing unchanged, no re-link; deliberate Left changes only active_pr.
+      (8) id-less pm -C pr review from inside E clone auto-selects F (pr-8d624c5 observation),
+      then after pm pr cd E re-links it auto-selects E; review-E panes in E clone;
+      one E clone. No new issues in this PR scope.'
+    created_at: '2026-11-02T22:49:11Z'
+    last_edited: '2026-11-02T22:49:11Z'
   model: provider:claude-main-xhigh-pm
   effort: high
 - id: pr-0778fbe
