@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-01T23:57:52.744931+00:00'
+  updated_at: '2026-11-02T00:26:10.826076+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48246,6 +48246,27 @@ prs:
       verify-s51-followup.md (QA-session artifacts).'
     created_at: '2026-11-01T23:57:52Z'
     last_edited: '2026-11-01T23:57:52Z'
+  - id: note-ddf7a35
+    text: 'review-loop 48dd i2: closed the remaining hand-edited-reason leaks in the
+      pm-generated messages that *embed* a record member (i1 closed the surfaces that
+      print one directly). Fixed, each rendering the placeholder the rest of the record
+      uses: (1) `merge_gate_refusal` printed the repr of a non-string `invalidated`,
+      bound `status` and bound `base_branch` in the message `pm pr merge` shows; (2)
+      `effective_verdict` embedded a non-string `apply_error` in the coercion reason,
+      which is stored as `coerced_reason` and printed by `pm pr show` and the return
+      text; (3) `approval_justification_problem` embedded a non-string `base_behavior_error`;
+      (4) `stale_reason` returned the str() of a non-string `invalidated` (runs popup
+      / driver log); (5) the sign-off prompt Result: line printed a non-string `status`;
+      (6) `pm pr merge`''s "target repository changed" printed a non-string bound
+      `target_repo`. Two regression tests (gate/router/prompt reasons; publish refusal)
+      fail on the pre-fix tree. impl.md R9-14 updated. Full suite: 5745 passed, 1
+      skipped. The resolver / sign-off / merge-gate logic was re-reviewed and found
+      sound. Not fixed (pre-existing, filed as pr-852dde2): the unguarded data.get("project",
+      {}).get(...) readers for a non-mapping top-level `project`. Left untouched:
+      the uncommitted R19 additions in pm/specs/pr-5cee3d5/qa.md and the untracked
+      verify-s51-followup.md.'
+    created_at: '2026-11-02T00:26:10Z'
+    last_edited: '2026-11-02T00:26:10Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
