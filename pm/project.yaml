@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T02:54:13.382020+00:00'
+  updated_at: '2026-11-02T03:02:18.804947+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25474,6 +25474,17 @@ prs:
       as an instruction).'
     created_at: '2026-11-02T02:54:13Z'
     last_edited: '2026-11-02T02:54:13Z'
+  - id: note-f7dd4f1
+    text: 'QA S10 (2026-11-02): PASS at ce57b4d9, all 7 host-mode CLI stories held
+      live with no fix. Cross-device /scratch clone copies (links 1); a same-device
+      /tmp clone hardlinks (links 2, same inodes); the standalone pm repo clones the
+      code checkout; error paths exit 1 and leave no workdir. For a future "clone
+      has no pm-repo files" Then: a clone of a repo without an in-repo pm/ still gets
+      an empty untracked pm/prompts/ dir. The generic claude launcher (build_claude_shell_cmd)
+      writes the prompt file there and rm -f s it after; it is not pm-repo content.
+      Captures in /pm-captures/scenarios/10/.'
+    created_at: '2026-11-02T03:02:18Z'
+    last_edited: '2026-11-02T03:02:18Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
