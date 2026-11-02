@@ -8126,6 +8126,22 @@ prs:
       Captures: /pm-captures/scenarios/42 (README.md).'
     created_at: '2026-11-02T14:53:43Z'
     last_edited: '2026-11-02T14:53:43Z'
+  - id: note-47f5ba6
+    text: 'QA S43 refiner (2026-11-02, 24efdc86, tmux 3.2a): all 3 stories held live,
+      2 race rounds. Fixture: projects in /scratch/q43 (outside /workspace); legacy
+      L1/L2 made with PYTHONPATH=/opt/pm-src pm session from harness shells started
+      via env -u TMUX -u TMUX_PANE -u PM_TMUX_SOCKET with EDITOR exported (master
+      forwards it). Master has no auto notes pane: press n in the TUI, then any key
+      on the splash. Use distinct PR titles per project (same title = same id). A
+      shell window inside a legacy session inherits PYTHONPATH=/opt/pm-src from the
+      default server, so export PYTHONPATH=<workdir> there. The respawned L1 TUI also
+      runs the old build (server env). Detach the story-1 pm session client (C-b d)
+      before story 2, else L1 counts 3 clients; L1 then reuses ~2. A live TUI does
+      not rewrite a deleted registry (heal runs only at mount), and adopt re-adds
+      only the TUI, so notes entries stay dropped. tmux 3.2a leaves /tmp/tmux-1000/default
+      after the server exits (tmux behaviour, not a pm socket).'
+    created_at: '2026-11-02T14:34:33Z'
+    last_edited: '2026-11-02T14:34:33Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
