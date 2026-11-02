@@ -2,9 +2,22 @@
 
 Surfaces under test: `pm pr history <pr> [--json]` (CLI), the History row /
 `H` shortcut in the PR actions popup (`prefix+P`, `pm _popup-picker`), and the
-durable per-PR journal `~/.pm/history/<pr>.jsonl` that review loops, QA runs,
-sign-off, merge and the runtime mirror write to. Implementation details are in
-`pm/specs/pr-8020495/impl.md`.
+durable per-PR journal that review loops, QA runs, sign-off, merge and the
+runtime mirror write to. Since the 2026-11-02 merge of origin/master@c1fcecc5
+the journal is per pm session, like the runtime mirror:
+`~/.pm/history/<pm-session>/<pr>.jsonl` (plus `<pr>.1.jsonl` after
+rotation), `~/.pm/history/<pr>.jsonl` only for a process outside any pm
+session; the owner-lock dir `~/.pm/history/owners` stays shared by every
+session. `--json` reports the file it read as `journal.path`.
+Implementation details are in `pm/specs/pr-8020495/impl.md`.
+
+*Re-synced 2026-11-01 (head 0223290e) with master behaviour the branch now
+builds on: review launch retries/backoff, the launch lease and the
+auto-start re-arm cooldown (#259), held QA runs (#271), wait-for-merge as
+the only manual merge hold (#261 removed stop-before-merge), the merged-PR
+picker notice row, and master's follow-up baseline (pr-8efa789), which makes
+the review INPUT_REQUIRED hold last until the user acts even with
+fake-claude.*
 
 ## 1. Requirements
 
@@ -39,12 +52,17 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   "review input required" hold is listed with no due time / no remaining
   countdown, the iteration shows a `waiting_human` phase counted as waiting
   (not execution) time, and `Waiting for:` begins with `human:`.
-  *Live-test caveat:* fake-claude re-emits its idle hook every 2 s, so the
-  review loop re-reads INPUT_REQUIRED and coerces it to NEEDS_WORK within
-  ~0.2–2.2 s; the hold is only catchable by polling `pm pr history --json`
-  every ~0.25 s, and the iteration then ends `done NEEDS_WORK`. Durable
-  human holds are exercised through merge INPUT_REQUIRED, QA
-  INPUT_REQUIRED and sign-off BLOCKED (R11/R12).
+  *Live test:* master's follow-up waiter ignores the verdict that prompted
+  it (pr-8efa789), so fake-claude's repeated idle hook on the same
+  INPUT_REQUIRED turn no longer ends the wait (the old "coerced to
+  NEEDS_WORK within ~2 s" caveat is obsolete). The hold lasts until the
+  user acts: stopping the loop (`z d`) ends the iteration
+  `cancelled INPUT_REQUIRED` and the hold `cancelled`. Closing the review
+  window, or typing into the fake pane (which makes the fake exit), ends the
+  iteration `vanished KILLED` with the hold `cancelled`. Fake-claude cannot
+  write a follow-up verdict, so the `released` path is unit-tested only.
+  While the hold lasts the popup badge is `hold: …` and the lease
+  keepalive keeps the loop owning its launch.
 - **R5 — QA run with overlapping scenarios.** Given a QA run with 3
   scenarios launched together, when the user views history, then the QA run
   attempt has a planner child (label `qa planner`) and three scenario
@@ -84,8 +102,10 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   working QA scenario row shows no countdown either.
 - **R9 — merged / closed PRs.** Given a PR that ran actions and was then
   merged (runtime state cleaned up, panes closed), when the user opens the
-  actions popup, then only the History row is offered (not "No actions
-  available"), and `pm pr history` still shows every attempt; any journaled
+  actions popup, then it shows the PR's title row, master's notice row
+  ("No actions — PR is merged.", or `closed`) and the History row with its
+  badge. The header advertises and accepts only `H`, with no `z` chords,
+  and History opens the pager. `pm pr history` still shows every attempt; any journaled
   hold still open shows as `released (PR merged)` — also when the TUI
   that armed it has exited or was killed before the history is read (never
   `lost (owner process exited)` on a merged/closed PR). A stale
@@ -102,27 +122,115 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   across `pm tui restart --breadcrumb` keeps its attempt id, first reads
   `interrupted` (>Ns) and then `done <verdict>` flagged `(adopted)` in text
   and `"adopted": true` in JSON.
-- **R11 — merge holds.** Given an auto-start / auto-sequence
-  stop-before-merge hold (the PR signed off and waiting for the user to
-  press `g`), then an indefinite hold is listed (no countdown) and
-  `Waiting for: human: …`; when the merge completes, the hold is released.
+- **R11 — merge holds.** Master (#261) removed stop-before-merge;
+  wait-for-merge is the only manual merge hold. It is the default policy
+  for new auto-start targets (`O` in the TUI,
+  `pm autostart add <pr> [--wait-for-merge]`; `--stop-before-merge` is a
+  deprecated alias). Given a wait-for-merge target whose closure PR has
+  signed off and waits for the user to press `g`, then an indefinite hold
+  "manual merge hold (wait-for-merge: <targets>)" (id `merge-hold:<pr>`)
+  is listed with no countdown, and `Waiting for: human: …`. The hold
+  is released (`released at …`) when a merge attempt starts or the PR
+  merges, and also when auto-start stops holding the PR: the target is
+  removed (`pm autostart remove`), all targets are cleared
+  (`pm autostart clear`), or the target's policy changes to
+  `--auto-merge`. Removing one of two wait targets that both hold the PR
+  keeps the hold. A new sign-off router run ends it `superseded`. Sign-off
+  launches and merges journal an unconditional merge-hold clear. On a PR
+  that was never held these clears add no Recent-timers row. A
+  `pm tui restart --breadcrumb` that restores the target leaves the old
+  TUI's hold `lost (owner process exited)` at most until the new TUI
+  re-evaluates the PR. Its re-arm then shows the hold active again and the
+  old entry `re-armed`. A PR a restored target still holds never reads as
+  having only a lost hold.
   *Live-test caveat:* merge INPUT_REQUIRED is not drivable with
   fake-claude (merge sessions emit no verdicts), and a clean `g` merge
-  journals no merge attempt; use the stop-before-merge hold. A merge
+  journals no merge attempt; use the wait-for-merge hold. A merge
   completed by a Claude conflict-resolution window (MERGED verdict
   detected by the TUI) ends `done MERGED`, not `vanished` (impl E9);
   fake-claude cannot emit MERGED either, so this is unit-tested only.
 - **R12 — derived holds.** Given a PR with a spec awaiting approval, QA
   ended INPUT_REQUIRED while status is `qa`, or sign-off BLOCKED, then a
   corresponding hold is shown without countdown even though nothing was
-  journaled.
+  journaled. The derived QA hold appears only once the run is over. A
+  held run (R17) journals its own hold, and the PR never lists both. A
+  review loop ended `HOLD` at a permission/trust prompt (runtime
+  `review-loop` `failed` + `HOLD`) is also a derived hold: the iteration
+  ends `failed HOLD` with no retry backoff and no re-arm cooldown. This
+  is live-inducible the way pr-e040aeb's QA spec does it: clear the fake
+  config for review, put a `claude` stand-in on the session PATH that
+  prints the workspace-trust dialog and blocks, and run
+  `pm set trust-prompt-grace-seconds 10`.
+
+### Retries and holds added by master
+
+- **R16 — review launch retries.** Given a review iteration whose window
+  launch fails, then the iteration attempt stays one row. Inject the
+  failure the user-level way from `pm/specs/pr-e040aeb/qa.md` ("Failure
+  injection"):
+  - a `podman` shim early on the session PATH that answers `info` with
+    exit 0 and fails `run`/`create`, plus `pm container enable`;
+    `pm container disable` repairs it mid-backoff;
+  - or the PR workdir moved aside, which fails with "review window … not
+    found after launch".
+
+  Do not rely on a missing fake-claude binary. The review window's diff
+  pane survives the dead agent pane, so it is not guaranteed to fail the
+  launch cleanly. An
+  auth symptom (`pm container set image unauthorized:latest` with a shim
+  `image inspect` exiting 1) fails after one attempt, with no backoff timer
+  and no re-arm. The retried iteration row reads as follows. It shows a `launching` phase
+  "launch attempt k/3" per try, and between tries a `backoff` phase
+  (wait time) that owns a `fires` timer "review launch retry backoff
+  (iteration N, attempt k/3)" with expected "relaunch the review window".
+  The timer reads about 5 s before attempt 2 and 10 s before attempt 3, with
+  armed/due/remaining falling, and is then listed `fired`. A launch that
+  succeeds on a retry continues the same iteration to its verdict. After
+  three failures the iteration ends `failed LAUNCH_FAILED` and so does the
+  loop. A manual loop (`zz d`) stops there. An auto-start target instead
+  gets a `fires` timer "review launch re-arm cooldown (auto-start)"
+  (60 s, expected "auto-start pass re-arms the review loop"), listed
+  `fired` when it runs. The re-armed loop is a new loop attempt. A stop
+  (`z d`) during a backoff ends the iteration `cancelled` and its retry
+  timer `cancelled`, not `fired`. Closing the PR (`pm pr close`) during
+  a backoff ends the iteration `cancelled CLOSED` and the loop
+  `cancelled`. A loop that has to wait for another loop's launch lease
+  (seen at most briefly during a supersede) shows a `queued` phase
+  "waiting for another loop's launch lease". The re-arm cooldown lives in
+  the TUI process, so after a TUI restart it reads
+  `lost (owner process exited)`.
+- **R17 — held QA run.** Given a QA run in which one scenario returned
+  INPUT_REQUIRED, then that scenario's attempt stays open in a
+  `waiting_human` phase ("INPUT_REQUIRED; waiting for input in the worker
+  pane") counted as wait, while the other scenarios finish. When the run
+  aggregates to INPUT_REQUIRED it does not end. The run attempt moves to
+  `waiting_human` ("held at INPUT_REQUIRED; waiting for input in
+  scenario(s) N"), an indefinite hold "QA INPUT_REQUIRED hold
+  (scenario(s) N)" (id `qa-input-hold:<loop_id>`, expected "human answers
+  in the worker pane; its follow-up verdict reopens the run") is listed
+  with no countdown, and `Waiting for:` begins `human:`. When the
+  waiting worker's pane goes away (the user closes it; the fake cannot
+  write a follow-up turn), the run reopens: the hold is `released`, the
+  run goes back to `agent` ("collecting the follow-up after the
+  INPUT_REQUIRED wait"), the scenario is relaunched as `qa sN retry 1`
+  (relaunch backoff timer) and the run ends with the new verdict. Stopping
+  QA while held ends the hold `cancelled` and the waiting scenario
+  `cancelled`. Moving the PR out of `qa` while held ends the hold within
+  a few seconds; the run is then over and the scenario ends
+  `done INPUT_REQUIRED`. A held run resumed after a TUI restart is a new
+  run attempt `(resumed)` whose waiting scenario starts in
+  `waiting_human`. The new run re-arms the same hold id, so the old entry
+  reads `re-armed`, not `lost`.
 
 ### Cancellation / restart
 
 - **R13 — cancel.** Given a running review loop, when the user stops it
   from the TUI, then the loop attempt (and its open iteration) end
   `cancelled`, and any grace timer it owned is shown resolved
-  (`cancelled`/`cancelled (owner ended)`), not active.
+  (`cancelled`/`cancelled (owner ended)`), not active. A stop during the
+  review INPUT_REQUIRED hold (R4) ends the iteration
+  `cancelled INPUT_REQUIRED` and the hold `cancelled`. A stop during a
+  launch backoff is covered in R16.
 - **R14 — TUI restart.** Given a review loop or QA run in progress, when the
   user restarts the TUI in place (Ctrl+R / `pm tui restart`), then
   pre-restart open attempts are shown `interrupted` (owner exited / tui-mount)
@@ -170,6 +278,20 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   `~/.pm/history/` starts empty. A dummy `claude` on PATH may be needed.
 - `pm pr history` is run from a separate tmux pane/window of the test
   session (or from the shell with the test project as cwd).
+- Gotchas collected from earlier runs:
+  - `pm push` then `git merge pm/sync-…` before TUI `s`, or start refuses
+    with "not committed on master yet".
+  - The scratch bin dir needs a `pm` wrapper, a `fake-claude` symlink and
+    a dummy `claude`, or TUI-launched panes die with 127.
+  - Install `fzf` and `less`, or the popup falls back to a numbered list
+    and print-and-dismiss.
+  - The interactive Scenario 0 pane takes `qa_scenario` scripted slot 0,
+    so put a filler entry first.
+  - Auto-start targets are TUI-process state: a plain restart loses them,
+    and `pm tui restart --breadcrumb` keeps them. `pm autostart status
+    --json` exposes `targets`/`runs` at the top level.
+  - Distinct PR titles per project avoid the pr-c64eb04 id collision,
+    unless a step tests it on purpose (E16).
 - Controlled clocks: production timing has no clock override at the user
   surface; timing assertions are made by comparing the JSON's
   `generated_at` with `armed_at`/`due_at`/`remaining_s` across repeated
@@ -229,7 +351,8 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   every attempt started is present with its own id, and concurrent
   `pm pr history --json` readers always get valid JSON.
 - **E8 — rotation.** Given a journal near 4 MB, further writes rotate it to
-  `<pr>.1.jsonl`; history still shows attempts from both generations.
+  `<pr>.1.jsonl` in the same session directory
+  (`~/.pm/history/<pm-session>/`); history still shows attempts from both generations.
   A reader racing a rotation never drops the generation just rotated
   (d88abd95): attempt counts read by concurrent pollers never dip.
 - **E9 — superseded loop.** Given a review loop restarted while one is
@@ -268,9 +391,13 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   file, `pm pr history` (text and `--json`) prints honest empty history and
   exits 0; loops are unaffected. The same holds for a read-only
   `~/.pm/history` that has no `owners/` subdirectory (the liveness probe
-  falls back to the pid check, never tracebacks).
-- **E16 — two projects, one HOME.** `~/.pm/history`, `~/.pm/runtime`
-  and `~/.pm/workdirs/qa` are per-HOME. Given two project TUIs in one
+  falls back to the pid check, never tracebacks). The same holds when only
+  the session's subdirectory `~/.pm/history/<pm-session>` is a regular
+  file or read-only.
+- **E16 — two projects, one HOME.** Journals (`~/.pm/history/<pm-session>/`)
+  and the runtime mirror (`~/.pm/runtime/<pm-session>/`) are per pm
+  session; the owner locks (`~/.pm/history/owners`) and
+  `~/.pm/workdirs/qa` are per HOME. Given two project TUIs in one
   HOME, a restart (mount sweep) in one project never ends the other
   project's live runtime-mirrored attempts (runtime entries carry an
   owner; the sweep skips entries of other live owners), a TUI never
@@ -278,8 +405,29 @@ sign-off, merge and the runtime mirror write to. Implementation details are in
   still be resumed by its own respawned TUI), and a gate that already read
   `elapsed` before its owner died stays `elapsed` (owners heartbeat their
   lock once a second). Two projects with identically titled PRs share one
-  PR id and journal — a known defect filed as pr-c64eb04, out of scope;
-  use distinct titles.
+  PR id (pr-c64eb04, still open). Each project's journal is now its own
+  session's file, so each project's `pm pr history <id>` shows only that
+  project's attempts. QA workdirs still collide, which is out of scope, so
+  drive same-id PRs only through review loops.
+- **E18 — which journal a reader reads.** A reader resolves the pm
+  session the same way the writers do:
+  - inside the session's tmux (any pane, any cwd, including a PR workdir
+    or the popup), by its own session;
+  - outside tmux, from the project root or a subdirectory of it, by the
+    project's session;
+  - with `-C <project>`/`PM_PROJECT`, by that project's session.
+
+  All of these show the same attempts as the TUI wrote, and `--json`
+  `journal.path` is `~/.pm/history/<pm-session>/<pr>.jsonl`.
+  `qa-run-bg` (spawned with the project root as cwd) and CLI drivers
+  started from the project root write into that same journal. A plain
+  shell in a PR workdir outside tmux, without `-C`, resolves the
+  workdir clone's own session tag, which nobody runs (the same rule as
+  master's runtime mirror). Its read is an honest empty history whose
+  `journal.path` names that other directory, never a traceback or a
+  partial mix. Journals written in the flat pre-merge layout
+  (`~/.pm/history/<pr>.jsonl`) are not migrated, because the branch never
+  shipped.
 - **E17 — many past owners.** Every TUI restart / CLI run is a journal
   owner; only owners with an open attempt or uncleared timer are probed,
   so `pm pr history` stays fast (≈ the same latency) on a PR whose journal
@@ -313,14 +461,18 @@ invalid JSON lines in the journal after concurrent writes.
   tolerance-based comparisons of live JSON output (see Setup). Date
   display (E5) is local time, so a reader can be put on "another day" by
   running `pm pr history` with a `TZ` whose local midnight falls between
-  the attempts and now (e.g. a POSIX offset like `TZ='<X>-09:58'`), or
-  with libfaketime (`faketime '+80 days'`) for the other-year form.
-- *"Retries"* — QA scenario relaunches, sign-off relaunches, superseded
-  review loops and repeated runs of the same action (impl spec A1). There is
-  no review-loop retry/backoff in production code.
-- *Approval waits* — spec approval, review/merge INPUT_REQUIRED, QA
-  INPUT_REQUIRED, sign-off BLOCKED, auto-merge hold (impl spec R7/A2). Past
-  spec-approval durations are not journaled and are not expected.
+  the attempts and now (e.g. a POSIX offset like `TZ='<QQQ>-09:58'`; the
+  name needs at least 3 characters), or with libfaketime
+  (`faketime '+365 days'`) for the other-year form.
+- *"Retries"* — QA scenario relaunches, review launch retries inside one
+  iteration (master #259, R16: `backoff` phases of the same iteration
+  attempt), the auto-start re-arm of an exhausted review loop (a new loop
+  attempt after the cooldown timer), sign-off relaunches, superseded
+  review loops and repeated runs of the same action (impl spec A1).
+- *Approval waits* — spec approval, review/merge INPUT_REQUIRED, held QA
+  run (R17), QA INPUT_REQUIRED after a run, review HOLD, sign-off BLOCKED,
+  wait-for-merge hold (impl spec R7/A2). Past spec-approval durations are
+  not journaled and are not expected.
 - *Even Realities interface* — not built yet; exposure is verified only via
   the shared action catalog driving the terminal popup.
 - *Agent idle vs execution* — idle time inside an agent turn counts as
