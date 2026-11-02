@@ -326,6 +326,81 @@ def test_qa_already_running_names_the_restart_command():
     assert "pr qa fresh pr-001" in held and "zz t" in held
 
 
+def test_command_bar_qa_resolves_a_github_display_id(tmp_path):
+    """`pm pr qa` prints `#N` for a GitHub PR; the command bar must accept it.
+
+    The QA branch used ``store.get_pr`` (internal id only), so the exact
+    command the CLI prints failed with "PR not found: #42".  It now resolves
+    the same identifiers as the CLI: ``pr-001``, ``42``, ``#42``.
+    """
+    from types import SimpleNamespace
+    from unittest import mock
+
+    from pm_core.tui import pr_view, qa_loop_ui
+
+    (tmp_path / "project.yaml").write_text(
+        "project:\n  backend: github\n  base_branch: master\n"
+        "prs:\n- id: pr-001\n  title: T\n  status: in_review\n"
+        "  gh_pr_number: 42\n")
+    logs = []
+    app = SimpleNamespace(
+        _root=tmp_path, _inflight_pr_action=None, _plans_visible=False,
+        log_message=lambda msg, **kw: logs.append(msg),
+        query_one=lambda *a, **k: mock.Mock())
+
+    with mock.patch.object(qa_loop_ui, "focus_or_start_qa") as focus:
+        pr_view.handle_command_submitted(app, "pr qa #42")
+
+    focus.assert_called_once_with(app, "pr-001")
+    assert not logs, logs
+
+
+def test_review_loop_stop_remedy_names_the_loop_command():
+    """`pm pr review` opens a one-shot review, not a loop.
+
+    The remedy must name the command-bar `review-loop` form (TUI `zz d`);
+    pairing a plain review with `zz d` would send the operator to a
+    different action than the one named.
+    """
+    from types import SimpleNamespace
+
+    from pm_core.tui import review_loop_ui
+
+    logs = []
+    app = SimpleNamespace(_review_loops={},
+                          log_message=lambda msg, **kw: logs.append(msg))
+    review_loop_ui._stop_loop(app, "pr-001")
+    assert "review-loop pr-001" in logs[-1]
+    assert "zz d" in logs[-1]
+    assert "one-shot" in logs[-1]
+
+
+def test_watcher_already_running_does_not_promise_watcher_stop():
+    """`pm watcher stop` only prints guidance; it stops nothing.
+
+    A remedy that says "stop it with `pm watcher stop`" is a dead end, so
+    the message points at it for guidance and names the real TUI route.
+    """
+    from types import SimpleNamespace
+    from unittest import mock
+
+    from pm_core.tui import watcher_ui
+
+    logs = []
+    manager = mock.Mock()
+    manager.find_by_type.return_value = SimpleNamespace(
+        state=SimpleNamespace(running=True))
+    app = SimpleNamespace(_watcher_manager=manager,
+                          log_message=lambda msg, **kw: logs.append(msg))
+
+    with mock.patch("pm_core.tmux.in_tmux", return_value=True):
+        watcher_ui.start_watcher(app, watcher_type="auto-start")
+
+    assert "already running" in logs[-1]
+    assert "see `pm watcher stop`" in logs[-1]
+    assert "stop it with `pm watcher stop" not in logs[-1]
+
+
 def test_require_pr_names_the_listing_command(capsys):
     with pytest.raises(SystemExit):
         _require_pr({"prs": [{"id": "pr-001"}]}, "pr-999")

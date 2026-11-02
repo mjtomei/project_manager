@@ -4,7 +4,7 @@ Provides ``pm watcher`` as a command group with subcommands:
 
 - ``pm watcher`` (bare) — runs a blocking watcher loop (legacy behavior)
 - ``pm watcher start [TYPE]`` — start a watcher by type
-- ``pm watcher stop [TYPE]`` — stop a running watcher
+- ``pm watcher stop [TYPE]`` — explain how to stop a running watcher
 - ``pm watcher list`` — list all registered watcher types and status
 
 Internal mode (``pm watcher --iteration N``) creates a single tmux
@@ -110,7 +110,7 @@ def watcher_cmd(ctx, iteration: int | None, loop_id: str | None,
     \b
     Subcommands:
       start [TYPE]   Start a watcher (default: auto-start)
-      stop [TYPE]    Stop a running watcher
+      stop [TYPE]    Explain how to stop a running watcher
       list           List watcher types and status
 
     \b
@@ -286,10 +286,18 @@ def _run_regression_loop(wait: int | None) -> None:
 @watcher_cmd.command("stop")
 @click.argument("watcher_type", default="auto-start")
 def watcher_stop(watcher_type: str):
-    """Stop a running watcher (for TUI-managed watchers, use the TUI)."""
+    # "Explain", not "stop": this command only prints how to stop one.  A
+    # TUI-managed watcher is stopped from the TUI (`w` then `s`), and a
+    # CLI-started watcher with Ctrl+C in its terminal.
+    """Explain how to stop a running watcher.
+
+    It cannot stop one itself: a TUI-managed watcher is stopped from the
+    TUI (`w` then `s`), and a CLI-started watcher with Ctrl+C in its
+    terminal.
+    """
     click.echo(
-        f"To stop a watcher running in the TUI, press 'ws' in the TUI.\n"
-        f"For CLI-started watchers, use Ctrl+C in the terminal."
+        f"To stop the auto-start watcher running in the TUI, press 'ws'.\n"
+        f"For a watcher started from the CLI, use Ctrl+C in its terminal."
     )
 
 

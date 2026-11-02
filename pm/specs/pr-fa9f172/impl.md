@@ -57,7 +57,9 @@ adds a short equivalents table:
 - `pr review`: CLI + command bar `pr review [--fresh] <id>`; TUI `d` /
   `z d` (fresh) / `zz d` (loop).
 - `pr merge`: CLI + command bar `pr merge <id>`; TUI `g` / `G` (companion).
-  State explicitly that merge has **no** `--fresh`: it starts no session.
+  State explicitly that merge has **no** `--fresh`: there is no session to
+  restart, so each run re-evaluates the gate (and `pm pr merge` is the
+  retry).
 - `pr signoff` group: CLI `pm pr signoff [--fresh] [--background] <id>`
   (the hidden `run` subcommand is the routed form) and subcommands
   `record` / `integrate`; TUI `i`.
@@ -183,7 +185,8 @@ plan).
 **1. Does `--fresh` belong on `pm pr qa` / `pm pr merge`? [RESOLVED]**
 The task text says "accept `--fresh` everywhere", but the PR note says not
 to invent semantics. `pm pr qa` is a diagnostic that never launches QA, and
-`pm pr merge` starts no session, so `--fresh` has no behavior to select.
+`pm pr merge` has no resumable session to restart, so `--fresh` has no
+behavior to select.
 Resolution: `--fresh` is accepted where it already means "restart this
 session" (`pr start`, `pr review`, `pr signoff`) and in the **command bar**
 for `pr qa`, where `fresh` genuinely restarts the run. `pm pr qa --help`
@@ -333,3 +336,18 @@ the routed form and `--fresh` so help is complete.
   `pm pr add <title>`. The shared table's autostart TUI column now says
   which key does which verb (`O` add / `A` toggle / `a` runs). Dead
   assignment removed from the command-bar QA error path.
+
+- Review-loop i4: fixed remedies that named a command which does not do the
+  action they claim. The command bar's QA branch resolves the same PR
+  identifiers as the CLI (`pr-001`, `42`, `#42`) instead of only the
+  internal id, so the `pr qa #N` command the CLI prints works for a
+  GitHub-backed PR (the spec's numeric-id edge case). `pm pr merge --help`
+  no longer claims a merge starts no Claude session (it launches the
+  post-merge repo-update window); it says there is no resumable session,
+  so each run re-evaluates the gate. The review-loop "no loop running"
+  remedy names the command-bar `review-loop <id>` form (TUI `zz d`), not
+  plain `pm pr review`, which opens a one-shot review. The watcher
+  already-running remedy no longer says `pm watcher stop` stops it (that
+  command only prints guidance); it names `ws` and points at `pm watcher
+  stop` for guidance. `pm watcher stop`'s own help now says "Explain how
+  to stop a running watcher" instead of promising the action.

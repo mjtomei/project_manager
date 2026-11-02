@@ -35,7 +35,7 @@ class StatusBar(Static):
             "error": "[red]sync error[/red]",
         }
         sync_display = sync_icons.get(sync_state, f"[red]{sync_state}[/red]")
-        from rich.markup import escape
+        from pm_core.command_surface import escape_markup as escape
         safe_repo = escape(repo)
         pr_info = f"[bold]{pr_count}[/bold] PRs" if pr_count else ""
         filter_display = f"    [dim]filter:[/dim] [italic]{filter_text}[/italic]" if filter_text else ""
@@ -72,7 +72,7 @@ class SessionBar(Static):
                 try:
                     content = override_file.read_text().strip()
                     if content:
-                        from rich.markup import escape
+                        from pm_core.command_surface import escape_markup as escape
                         parts.append(f"[dim]override:[/dim] [cyan]{escape(content)}[/cyan]")
                 except OSError:
                     pass

@@ -9,7 +9,7 @@ Keybinding variants (set up by app.action_start_qa_on_pr):
   zz t   — start/stop QA loop
 """
 
-from rich.markup import escape
+from pm_core.command_surface import escape_markup as escape
 
 from pm_core.paths import configure_logger, get_global_setting_value
 from pm_core import store
@@ -45,7 +45,7 @@ def _qa_running_remedy(pr_id: str) -> str:
     """Corrective sentence for a QA start refused because a run exists."""
     return (f"QA already running for {pr_id} — restart with "
             f"`pr qa fresh {pr_id}` (TUI: select the PR, press z t); "
-            f"stop the loop with `pr qa loop {pr_id}` (TUI: zz t).")
+            f"stop a running loop with `pr qa loop {pr_id}` (TUI: zz t).")
 
 
 def _qa_held_remedy(pr_id: str) -> str:

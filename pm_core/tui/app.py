@@ -26,7 +26,7 @@ from textual.containers import Container, Vertical
 from textual.timer import Timer
 
 from pm_core import store, guide, tui_pidfile
-from rich.markup import escape
+from pm_core.command_surface import escape_markup as escape
 
 from pm_core import tmux as tmux_mod
 from pm_core.tui.tech_tree import TechTree, PRSelected

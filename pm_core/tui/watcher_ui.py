@@ -195,7 +195,11 @@ def start_watcher(app, transcript_dir: str | None = None,
     manager = app._watcher_manager
     existing = manager.find_by_type(watcher_type)
     if existing and existing.state.running:
-        app.log_message(f"Watcher '{watcher_type}' is already running — stop it with `pm watcher stop {watcher_type}`.")
+        # `pm watcher stop` only prints how to stop one, so point at it as
+        # guidance rather than claiming it stops the watcher.
+        app.log_message(
+            f"Watcher '{watcher_type}' is already running — see `pm watcher "
+            f"stop` for how to stop it.")
         return
 
     # Create and register a new watcher instance

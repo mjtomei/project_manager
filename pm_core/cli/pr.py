@@ -2951,9 +2951,9 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
       TUI          g      merge
                    G      merge with a companion shell pane
 
-    Merge starts no Claude session, so there is no --fresh option: a merge
-    either passes the sign-off gate or is refused (and the PR returns to
-    sign-off).
+    There is no --fresh option: each run re-evaluates the sign-off gate
+    against the current PR HEAD and either merges or is refused (returning
+    the PR to sign-off). Re-run `pm pr merge` to retry.
     """
     if resolve_window is None:
         resolve_window = _resolve_window_default()

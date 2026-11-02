@@ -1803,7 +1803,7 @@ async def _start_pr_quiet(app, pr_id: str, fresh: bool = False) -> None:
                   else f"exit {proc.returncode}")
         if _start_failures_shown(app).get(pr_id) != reason:
             _start_failures_shown(app)[pr_id] = reason
-            from rich.markup import escape
+            from pm_core.command_surface import escape_markup as escape
             app.log_message(f"[red]Auto-start: pm pr start {pr_id} "
                             f"failed[/]: {escape(reason)}",
                             force=True, hold=CONFIRM_HOLD_SECONDS)

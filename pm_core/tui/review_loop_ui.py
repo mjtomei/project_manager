@@ -15,7 +15,7 @@ import os
 import time
 
 from pm_core.paths import configure_logger
-from rich.markup import escape
+from pm_core.command_surface import escape_markup as escape
 
 from pm_core import store
 from pm_core.autostart_state import held_by_text
@@ -303,7 +303,10 @@ def _stop_loop(app, pr_id: str) -> None:
     """Request graceful stop of a running loop."""
     loop = app._review_loops.get(pr_id)
     if not loop or not loop.running:
-        app.log_message(f"No review loop running for {pr_id} — start one with `pr review {pr_id}` (TUI: zz d).")
+        app.log_message(
+            f"No review loop running for {pr_id} — start one with "
+            f"`review-loop {pr_id}` in the command bar (TUI: zz d); a plain "
+            f"`pm pr review {pr_id}` opens a one-shot review, not a loop.")
         return
 
     _log.info("review_loop_ui: stopping loop for %s", pr_id)

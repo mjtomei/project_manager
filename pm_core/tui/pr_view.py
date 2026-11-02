@@ -822,7 +822,12 @@ def handle_command_submitted(app, cmd: str) -> None:
                     app.log_message(f"Error: {e}")
                     qa_data = None
                 if qa_data is not None:
-                    qa_pr = _store.get_pr(qa_data, qa_pr_id)
+                    # Resolve the same identifiers the CLI accepts (`pr-001`,
+                    # `42`, `#42`): `pm pr qa` prints the display id, which is
+                    # `#N` for a GitHub-backed PR, and `store.get_pr` matches
+                    # only the internal id.
+                    from pm_core.cli.helpers import _resolve_pr_id
+                    qa_pr = _resolve_pr_id(qa_data, qa_pr_id)
                     if qa_pr:
                         if qa_mode == "fresh":
                             qa_loop_ui.fresh_start_qa(app, qa_pr["id"])
