@@ -320,7 +320,7 @@ def _resolve_matches(data: dict, pr_entry: dict, root: Path | None,
         # Double-checked: a concurrent caller may have re-linked or cloned
         # and persisted while we waited for the lock.
         fresh = stored_workdir(root, pr_id)
-        if fresh and fresh != recorded and Path(fresh).exists():
+        if fresh and Path(fresh).exists():
             pr_entry["workdir"] = fresh
             res.status, res.path = RECORDED, fresh
             return res
@@ -351,7 +351,7 @@ def _resolve_matches(data: dict, pr_entry: dict, root: Path | None,
 
     found = res.candidates[0]
     if persist and root is not None:
-        found = _persist(root, pr_id, recorded, found)
+        found = _persist(root, pr_id, found)
     pr_entry["workdir"] = found
     res.path = found
     res.status = RECOVERED if found == res.candidates[0] else RECORDED
@@ -371,12 +371,12 @@ def stored_workdir(root: Path, pr_id: str) -> str | None:
     return (pr or {}).get("workdir") or None
 
 
-def _persist(root: Path, pr_id: str, recorded: str | None, found: str) -> str:
+def _persist(root: Path, pr_id: str, found: str) -> str:
     """Compare-and-set the recovered path; return the path now in effect.
 
     Written only while the on-disk record is still empty or still points at
-    a missing path; an existing path another writer recorded meanwhile wins
-    and is returned instead.
+    a missing path; a record that exists by now — another writer's, or the
+    stale path itself reappearing (a remount) — wins and is returned instead.
     """
     winner = found
 
@@ -386,7 +386,7 @@ def _persist(root: Path, pr_id: str, recorded: str | None, found: str) -> str:
         if pr is None:
             return
         cur = pr.get("workdir")
-        if cur and cur != recorded and Path(cur).exists():
+        if cur and Path(cur).exists():
             winner = cur
             return
         pr["workdir"] = found

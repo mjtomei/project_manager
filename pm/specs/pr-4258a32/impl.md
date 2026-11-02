@@ -237,6 +237,9 @@ parent (it belongs to another HOME/machine), not `qa/`, not other projects.
 - **PR without `branch`**: no discovery; `missing`.
 - **Concurrent callers**: second caller waits on the per-PR lock, then adopts
   the persisted record from the first.
+- **Stale path reappears** (a remount) after the fast-path check: the
+  under-lock re-read and the compare-and-set both keep any record that
+  exists by then — never overwritten with the discovered clone.
 - **Workdirs dir absent** (fresh machine): no listing error, no `mkdir`,
   `missing`.
 - **Pre-existing `_clone_workdir` name collision** (an existing

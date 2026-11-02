@@ -242,8 +242,7 @@ class TestRecovery:
     def test_persist_is_compare_and_set(self, env, tmp_path):
         clone = env.clone(f"{SLUG}-10e74920")
         # On-disk record still the stale path: the recovered path is written.
-        assert workdirs._persist(env.root, PR_ID, env.stale,
-                                 str(clone)) == str(clone)
+        assert workdirs._persist(env.root, PR_ID, str(clone)) == str(clone)
         assert env.fresh()[1]["workdir"] == str(clone)
         # Another writer recorded an existing path meanwhile: it wins and is
         # not overwritten.
@@ -251,9 +250,32 @@ class TestRecovery:
         other.mkdir()
         store.locked_update(env.root, lambda d: store.get_pr(d, PR_ID)
                             .__setitem__("workdir", str(other)))
-        assert workdirs._persist(env.root, PR_ID, env.stale,
-                                 str(clone)) == str(other)
+        assert workdirs._persist(env.root, PR_ID, str(clone)) == str(other)
         assert env.fresh()[1]["workdir"] == str(other)
+
+    def test_stale_path_reappearing_before_the_write_wins(self, env,
+                                                          tmp_path):
+        # The recorded path was missing when resolution started, then came
+        # back (a remount) before the record was written: it now exists, so
+        # it is kept — re-checked under the lock, and again in the write.
+        clone = env.clone(f"{SLUG}-10e74920")
+        gone = tmp_path / "remounted" / "wd"
+        store.locked_update(env.root, lambda d: store.get_pr(d, PR_ID)
+                            .__setitem__("workdir", str(gone)))
+        data, pr = env.fresh()
+        gone.mkdir(parents=True)
+        assert workdirs._persist(env.root, PR_ID, str(clone)) == str(gone)
+        assert env.fresh()[1]["workdir"] == str(gone)
+        with mock.patch.object(workdirs, "_persist") as persist:
+            res = workdirs._resolve_matches(
+                data, pr, env.root,
+                workdirs.WorkdirResolution(
+                    PR_ID, workdirs.MISSING, recorded=str(gone),
+                    branch=BRANCH, project_dir=str(env.project_dir)),
+                persist=True, reread=True)
+        persist.assert_not_called()
+        assert (res.status, res.path) == (workdirs.RECORDED, str(gone))
+        assert pr["workdir"] == str(gone)
 
     def test_record_persisted_by_a_concurrent_caller_wins(self, env, tmp_path):
         env.clone(f"{SLUG}-10e74920")
