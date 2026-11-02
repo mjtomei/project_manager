@@ -1112,28 +1112,26 @@ def _workdirs_dir(data: dict) -> Path:
 
     Uses <name>-<repo_id[:8]> to avoid collisions between projects
     with the same name. repo_id is the root commit hash of the target
-    repo, cached in project.yaml on first pr start.
+    repo, cached in project.yaml on first pr start.  See
+    :func:`pm_core.workdirs.project_workdirs_dir`.
     """
-    project = data.get("project", {})
-    name = project.get("name", "unknown")
-    repo_id = project.get("repo_id")
-    from pm_core.paths import workdirs_base
-    base = workdirs_base()
-    if repo_id:
-        return base / f"{name}-{repo_id[:8]}"
-    return base / name
+    from pm_core.workdirs import project_workdirs_dir
+    return project_workdirs_dir(data)
 
 
 def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
     """Ensure the PR's workdir exists locally, cloning if necessary.
 
     When a PR was started on a different machine the recorded workdir path
-    won't exist.  This helper recreates it by cloning the repo and checking
-    out the PR branch, mirroring the logic in ``pr_start``.
+    won't exist.  An existing clone of the PR branch in this project's
+    workdirs dir is re-linked (:func:`pm_core.workdirs.resolve_workdir`);
+    only when there is none does this recreate it by cloning the repo and
+    checking out the PR branch, mirroring the logic in ``pr_start``.
 
-    Returns the workdir path (str) on success, or *None* on failure.
-    Updates *pr_entry["workdir"]* and persists the change when a new
-    clone is created.
+    Returns the workdir path (str) on success, or *None* on failure —
+    including when several verified clones exist (reported, not cloned).
+    Updates *pr_entry["workdir"]* and persists the change when a clone is
+    re-linked or created.
 
     Provisioning is serialized per-PR with an exclusive file lock: two
     commands that both find the workdir missing (e.g. two ``pm pr signoff``
@@ -1142,7 +1140,7 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
     crashing its git ops with a traceback.  The lock makes the loser wait, then
     adopt the winner's freshly-persisted workdir instead of re-cloning.
     """
-    import fcntl
+    from pm_core import workdirs
 
     workdir = pr_entry.get("workdir")
     if workdir and Path(workdir).exists():
@@ -1152,10 +1150,7 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
     project_dir = _workdirs_dir(data)
     project_dir.mkdir(parents=True, exist_ok=True)
 
-    lock_path = project_dir / f".workdir-{pr_id}.lock"
-    lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
-    try:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+    with workdirs.workdir_lock(project_dir, pr_id):
         # Double-checked: another caller may have created and persisted the
         # workdir while we waited for the lock.  Re-read the authoritative
         # on-disk record and adopt it if it now exists.
@@ -1167,10 +1162,19 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
         if fresh_wd and Path(fresh_wd).exists():
             pr_entry["workdir"] = fresh_wd
             return fresh_wd
+        # The record is stale, but the PR's clone may still be here (started
+        # under another HOME/machine, record rewritten): re-link it instead
+        # of cloning a second one.  Two verified clones are reported, and a
+        # clone would only add a third.
+        found = workdirs.resolve_workdir(data, pr_entry, root,
+                                         project_dir=project_dir, locked=True)
+        if found.path:
+            click.echo(found.describe())
+            return found.path
+        if found.status == workdirs.AMBIGUOUS:
+            click.echo(found.describe(), err=True)
+            return None
         return _clone_workdir(data, pr_entry, root)
-    finally:
-        fcntl.flock(lock_fd, fcntl.LOCK_UN)
-        os.close(lock_fd)
 
 
 def _clone_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:

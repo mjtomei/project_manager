@@ -27,6 +27,7 @@ from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core import pane_registry
 from pm_core import spec_gen
+from pm_core import workdirs as workdirs_mod
 from pm_core.backend import get_backend
 from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_session, launch_claude, finalize_transcript
 
@@ -505,9 +506,17 @@ def pr_cd(identifier: str):
     if not pr_entry:
         click.echo(f"PR '{identifier}' not found.", err=True)
         raise SystemExit(1)
-    workdir = pr_entry.get("workdir")
+    # A stale record is recovered from this project's workdirs dir when the
+    # PR's clone is still there (pm_core.workdirs).
+    found = workdirs_mod.resolve_workdir(data, pr_entry, root,
+                                         project_dir=_workdirs_dir(data))
+    if found.status in (workdirs_mod.RECOVERED, workdirs_mod.AMBIGUOUS):
+        click.echo(found.describe(), err=found.path is None)
+    workdir = found.path
     if not workdir or not Path(workdir).is_dir():
-        click.echo(f"Workdir for {pr_entry['id']} does not exist: {workdir}", err=True)
+        if found.status != workdirs_mod.AMBIGUOUS:
+            click.echo(f"Workdir for {pr_entry['id']} does not exist: "
+                       f"{pr_entry.get('workdir')}", err=True)
         raise SystemExit(1)
     shell = os.environ.get("SHELL", "/bin/sh")
     click.echo(f"Entering workdir for {pr_entry['id']} ({pr_entry.get('title', '???')})")
@@ -944,13 +953,33 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         )
         raise SystemExit(1)
 
+    # A stale workdir record (started under another HOME/machine, record
+    # rewritten) is recovered from this project's workdirs dir before a
+    # second clone is made (pm_core.workdirs).  Looked up at most once, and
+    # only when no --workdir was given and the recorded path is missing.
+    recovery = None
+
+    def _recover():
+        nonlocal recovery
+        if recovery is None:
+            recovery = workdirs_mod.resolve_workdir(
+                data, pr_entry, root, project_dir=_workdirs_dir(data))
+            if recovery.status in (workdirs_mod.RECOVERED,
+                                   workdirs_mod.AMBIGUOUS):
+                click.echo(recovery.describe(), err=recovery.path is None)
+        return recovery
+
     if pr_entry.get("status") == "in_progress":
         # If already in_progress, reuse existing workdir if available
         existing_workdir = pr_entry.get("workdir")
         if existing_workdir and Path(existing_workdir).exists():
             click.echo(f"PR {pr_id} is already in_progress, reusing existing workdir.")
             workdir = existing_workdir  # Set workdir so it gets used below
-        else:
+        elif not workdir and _recover().path:
+            click.echo(f"PR {pr_id} is already in_progress, reusing its "
+                       f"recovered workdir.")
+            workdir = recovery.path
+        elif recovery is None or recovery.status != workdirs_mod.AMBIGUOUS:
             # Workdir was deleted — fall through to create a new one
             click.echo(f"PR {pr_id} workdir missing, creating a new one.")
 
@@ -1048,6 +1077,13 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         existing_workdir = pr_entry.get("workdir")
         if existing_workdir and Path(existing_workdir).exists():
             work_path = Path(existing_workdir)
+        elif _recover().path:
+            work_path = Path(recovery.path)
+        elif recovery.status == workdirs_mod.AMBIGUOUS:
+            # The PR's clone exists but can't be chosen safely; another
+            # clone would only add one more to choose from.
+            click.echo(f"Not creating another workdir for {pr_id}.", err=True)
+            raise SystemExit(1)
         else:
             # Need to clone first, then figure out the final path
             # Clone to a temp location under the project dir
