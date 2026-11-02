@@ -1161,16 +1161,22 @@ def list_grouped_sessions(base: str, socket_path: str | None = None) -> list[str
     """List pm grouped sessions of *base* (``base~<number>``), sorted.
 
     pm names its grouped sessions ``<base>~<N>``
-    (``next_grouped_session_name`` is the only producer), so only a name
-    whose suffix after the last ``~`` is a number is a grouped session of
-    *base*.  A *different* session whose name merely starts with ``base~``
-    is not one, and treating it as one is a cross-session hazard: a repo
-    directory may contain ``~``, so the project ``x~foo`` runs session
-    ``pm-x~foo-<hash>`` on the legacy default server, and the old name
-    prefix made ``pm session kill``/detach/attach for ``pm-x`` act on that
-    other project's session (review-loop b48f i13).  A user's own *view*
-    of the session is grouped with it too, but its name says nothing about
-    that; the authoritative membership test is tmux's session group, which
+    (``next_grouped_session_name`` is the only producer, and it is always
+    given the base), so only a name whose *whole* remainder after
+    ``base~`` is a number is a grouped session of *base*.  A *different*
+    session whose name merely starts with ``base~`` is not one, and
+    treating it as one is a cross-session hazard: a repo directory may
+    contain ``~``, so the project ``x~foo`` runs session ``pm-x~foo-<hash>``
+    on the legacy default server, and the old name prefix made ``pm session
+    kill``/detach/attach for ``pm-x`` act on that other project's session
+    (review-loop b48f i13).  Testing only the part after the *last* ``~``
+    still let that project's own grouped sessions in: ``pm-x~foo-<hash>~1``
+    ends in a number, so ``pm session`` could attach to it as an unattached
+    ``pm-x`` view, ``pm session kill pm-x`` killed it, Ctrl-Q's group
+    fallback could detach its client, and discovery accepted the other
+    project as ``pm-x`` (review-loop b48f i19).  A user's own *view* of the
+    session is grouped with it too, but its name says nothing about that;
+    the authoritative membership test is tmux's session group, which
     ``sessions_in_group`` queries.
     """
     result = _run(
@@ -1183,7 +1189,12 @@ def list_grouped_sessions(base: str, socket_path: str | None = None) -> list[str
     prefix = base + "~"
     grouped = []
     for line in result.stdout.strip().splitlines():
-        if line.startswith(prefix) and _grouped_suffix(line) is not None:
+        if not line.startswith(prefix):
+            continue
+        # The whole remainder must be the number, not just the part after
+        # the last ``~`` (ASCII digits only, see ``_grouped_suffix``).
+        rest = line[len(prefix):]
+        if rest.isascii() and rest.isdigit():
             grouped.append(line)
     # The suffix is the part after the *last* ``~``: the base name is
     # derived from the repo directory and may itself contain ``~``

@@ -5563,3 +5563,80 @@ class TestServerIsolationIntegration:
         finally:
             _close(None, sock_a)
             _close(None, sock_b)
+
+
+@pytest.mark.skipif(not tmux.has_tmux(), reason="tmux not installed")
+class TestAnotherProjectsGroupedSessionIsNotOurs:
+    """A grouped session of *another* project is not one of ours.
+
+    A repo directory may contain ``~``, so on the legacy default server one
+    project's session can start with another's name plus ``~``
+    (``pm-x-abc12345~foo-deadbeef``).  b48f i13/i16 kept that session out of
+    ``pm-x-abc12345``'s group, but ``list_grouped_sessions`` tested only the
+    part after the *last* ``~`` — so as soon as pm attached to the other
+    project (creating ``…~foo-deadbeef~1``) that grouped session counted as
+    ``pm-x-abc12345~N``: ``pm session`` could reuse it as an unattached
+    view of ``pm-x-abc12345`` (attaching the user to the other project),
+    ``pm session kill`` enumerated it, Ctrl-Q's group fallback could detach
+    its client, and once it was the other project's only survivor
+    discovery accepted it as ``pm-x-abc12345`` (review-loop b48f i19).
+    Real tmux on a disposable server standing in for the default one.
+    """
+
+    OURS = "pm-x-abc12345"
+    OTHER = "pm-x-abc12345~foo-deadbeef"
+
+    def _legacy_server(self, short_sock_dir, monkeypatch, *, ours: bool):
+        sock = short_sock_dir / "legacy.sock"
+        # No private server for OURS, and the "default server" is this one.
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR",
+                            short_sock_dir / "pm-sessions")
+        monkeypatch.setattr(paths, "default_socket_path", lambda: sock)
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.delenv("TMUX", raising=False)
+        _tmux_out(sock, "new-session", "-d", "-s", self.OTHER, "sleep 300")
+        _tmux_out(sock, "new-session", "-d", "-t", self.OTHER,
+                  "-s", f"{self.OTHER}~1")
+        if ours:
+            _tmux_out(sock, "new-session", "-d", "-s", self.OURS,
+                      "sleep 300")
+        return str(sock)
+
+    def test_discovery_does_not_adopt_the_other_project(
+            self, short_sock_dir, monkeypatch):
+        sock = self._legacy_server(short_sock_dir, monkeypatch, ours=False)
+        try:
+            assert tmux.list_grouped_sessions(self.OURS,
+                                              socket_path=sock) == []
+            # ``pm session`` reuses an unattached grouped session: it must
+            # never pick the other project's.
+            assert tmux.find_unattached_grouped_session(
+                self.OURS, socket_path=sock) is None
+            # The other project's own group is untouched by the fix.
+            assert tmux.list_grouped_sessions(
+                self.OTHER, socket_path=sock) == [f"{self.OTHER}~1"]
+            # While both of its sessions run, the bare ``pm-x-abc12345``
+            # target is ambiguous to tmux.  Once its base is killed
+            # elsewhere, the prefix probe hits its surviving ``~1`` alone,
+            # and only the group confirmation stands between discovery and
+            # the other project's session.
+            _tmux_out(sock, "kill-session", "-t", f"={self.OTHER}")
+            assert tmux.find_session_server(self.OURS) == (None, False)
+            # A surviving member still finds its own project (R8.1).
+            assert tmux.find_session_server(self.OTHER) == (sock, False)
+        finally:
+            _tmux(sock, "kill-server")
+            Path(sock).unlink(missing_ok=True)
+
+    def test_our_group_excludes_the_other_projects_view(
+            self, short_sock_dir, monkeypatch):
+        """``pm session kill`` and Ctrl-Q enumerate this group."""
+        sock = self._legacy_server(short_sock_dir, monkeypatch, ours=True)
+        try:
+            assert tmux.sessions_in_group(self.OURS, socket_path=sock) == [
+                self.OURS]
+            assert tmux.next_grouped_session_name(
+                self.OURS, socket_path=sock) == f"{self.OURS}~1"
+        finally:
+            _tmux(sock, "kill-server")
+            Path(sock).unlink(missing_ok=True)

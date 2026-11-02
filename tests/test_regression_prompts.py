@@ -80,3 +80,32 @@ def test_awkward_session_name_is_shell_quoted_in_the_examples():
     assert "cat ~/.pm/pane-registry/'pm-my repo'.json" in out
     # The prose line is a description, not a command: unchanged.
     assert "You are testing against tmux session: pm-my repo" in out
+
+
+def test_discovery_prompt_quotes_the_session_window_target(monkeypatch):
+    """The discovery watcher's ``tmux list-panes -t`` example is a command.
+
+    Same rule as the examples above: a session name with a space (it comes
+    from the repo directory) split the ``session:window`` target into two
+    arguments.  The whole target is one shell word; an ordinary name stays
+    bare and no name keeps the placeholder (review-loop b48f i19).
+    """
+    from pm_core import prompt_gen
+
+    def no_project():
+        raise FileNotFoundError
+
+    monkeypatch.setattr(prompt_gen.store, "find_project_root", no_project)
+
+    def target_line(session_name):
+        out = prompt_gen.generate_discovery_supervisor_prompt(
+            {}, session_name=session_name)
+        return next(line for line in out.splitlines()
+                    if line.startswith("tmux list-panes -t "))
+
+    assert target_line("pm-my repo-abc").startswith(
+        "tmux list-panes -t 'pm-my repo-abc:discovery' -F")
+    assert target_line("pm-repo-abc").startswith(
+        "tmux list-panes -t pm-repo-abc:discovery -F")
+    assert target_line(None).startswith(
+        "tmux list-panes -t <session>:discovery -F")

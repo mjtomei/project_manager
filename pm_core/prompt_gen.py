@@ -1697,6 +1697,12 @@ def generate_discovery_supervisor_prompt(data: dict, session_name: str | None = 
     base_branch = data.get("project", {}).get("base_branch", "master")
 
     tui_block = tui_section(session_name) if session_name else ""
+    # Copyable ``tmux list-panes`` target: the session name comes from the
+    # repo directory and may contain a space, so quote the whole
+    # ``session:window`` target as one shell word, as ``tui_section`` does
+    # for its ``-s`` examples (shlex.quote leaves ordinary names bare).
+    discovery_target = (shlex.quote(f"{session_name}:discovery")
+                        if session_name else "<session>:discovery")
 
     general_notes_block = ""
     watcher_specific_block = ""
@@ -1756,7 +1762,7 @@ launched from this watcher run as additional panes in that same window. List
 panes:
 
 ```
-tmux list-panes -t {session_name or "<session>"}:discovery -F "#{{pane_id}} #{{pane_current_command}}"
+tmux list-panes -t {discovery_target} -F "#{{pane_id}} #{{pane_current_command}}"
 ```
 
 If a regression-test pane is still running, do **not** launch a new test this tick. Note the in-flight

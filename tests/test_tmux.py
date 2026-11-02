@@ -933,6 +933,26 @@ class TestListGroupedSessions:
         assert list_grouped_sessions("pm-x") == ["pm-x~1"]
 
     @patch("pm_core.tmux.subprocess.run")
+    def test_another_projects_grouped_session_is_not_ours(self, mock_run):
+        """The whole remainder after ``base~`` must be the number.
+
+        A project whose directory makes its session start with ``pm-x~``
+        has grouped sessions of its own (``pm-x~foo-12345678~1``, created
+        whenever pm attaches to it).  Testing only the part after the last
+        ``~`` made that one a grouped session of ``pm-x`` (review-loop b48f
+        i19).
+        """
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=(
+                "pm-x\npm-x~1\npm-x~foo-12345678\npm-x~foo-12345678~1\n"
+                "pm-x~foo-12345678~2\n"
+            )
+        )
+        assert list_grouped_sessions("pm-x") == ["pm-x~1"]
+        assert list_grouped_sessions("pm-x~foo-12345678") == [
+            "pm-x~foo-12345678~1", "pm-x~foo-12345678~2"]
+
+    @patch("pm_core.tmux.subprocess.run")
     def test_non_ascii_digit_suffix_does_not_crash(self, mock_run):
         """``²`` is ``isdigit()`` but ``int()`` raises: it is not grouped."""
         mock_run.return_value = MagicMock(

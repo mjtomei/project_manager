@@ -3845,3 +3845,59 @@ path in the central resolver is a change to the security-sensitive
 resolution this iteration did not take.  No live session, server or shared
 host configuration was touched — every fixture used a disposable socket
 directory, a temporary HOME or a mocked tmux.
+
+## Review iteration (2026-11-02, review-loop b48f i19)
+
+Verification pass over the head after the b48f i18 fixes; one
+cross-session hazard of the "a name is not a group" class in the
+grouped-session enumerator every lifecycle path shares, and one prompt
+example i18's quoting sweep missed.  No requirement changes.
+
+1. **`list_grouped_sessions()` accepted another project's grouped
+   session.**  i13 restricted it to pm's `<base>~<N>` names, but the test
+   looked only at the part after the *last* `~` (`_grouped_suffix`).  The
+   i13/i16 fixtures had another project whose session merely starts with
+   the base (`pm-x-abc12345~foo-deadbeef` next to `pm-x-abc12345` on the
+   legacy default server); as soon as pm attaches to that project it
+   creates `pm-x-abc12345~foo-deadbeef~1`, which ends in a number and so
+   counted as a `pm-x-abc12345` grouped session.  Verified live on tmux
+   3.2a (disposable socket standing in for the default server): pre-fix,
+   `list_grouped_sessions` and `sessions_in_group` returned it,
+   `find_unattached_grouped_session('pm-x-abc12345')` returned it (so
+   `pm session` for `pm-x-abc12345` would attach the user to the *other*
+   project's session as "an unattached view"), and once that project's
+   base was killed elsewhere `find_session_server('pm-x-abc12345')`
+   adopted the default server through its surviving `~1` (while both of
+   its sessions run, the bare prefix target is ambiguous to tmux, which is
+   why i16's live check did not see it).  `sessions_in_group` feeds
+   `pm session kill` (it would kill that session), Ctrl-Q's group fallback
+   (it could detach that client — the incident class this PR exists to
+   remove), `--disconnect-others`, the layout sizing and the shared
+   window-size option.  The enumerator now requires the *whole* remainder
+   after `base~` to be ASCII digits — pm's only producer
+   (`next_grouped_session_name`) is always given the base, so its names
+   are exactly `<base>~<N>` — the same rule `qa_status._is_grouped_of`
+   already applied.  Tests:
+   `tests/test_tmux.py::TestListGroupedSessions::test_another_projects_grouped_session_is_not_ours`
+   and the live
+   `TestAnotherProjectsGroupedSessionIsNotOurs` (two cases: no reuse and
+   no discovery, with the other project's own group and surviving-member
+   discovery intact; and `sessions_in_group`/`next_grouped_session_name`
+   for a legacy base running beside it).  All three fail on the pre-fix
+   head (a worktree of 33311ad9 with the new tests copied in).
+
+2. **The discovery watcher prompt's `tmux list-panes -t` example was
+   unquoted.**  i18 quoted the copyable `-s` examples, but
+   `generate_discovery_supervisor_prompt` still printed
+   `tmux list-panes -t <session>:discovery`, so a session name with a
+   space split the target into two arguments.  The whole `session:window`
+   target is now one `shlex.quote`d word (ordinary names stay bare; no
+   name keeps the `<session>` placeholder).  Test:
+   `tests/test_regression_prompts.py::test_discovery_prompt_quotes_the_session_window_target`
+   (fails on the pre-fix head).
+
+The i16 residual (other commands passing a base name to prefix-matched
+tmux targets) and the i18 residual (a legacy shared session whose
+72–78-character tag kept the unhashed socket path) are unchanged.  No live
+session, server or shared host configuration was touched — every fixture
+used a disposable socket, a temporary HOME or a mocked tmux.
