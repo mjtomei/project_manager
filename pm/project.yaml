@@ -51473,7 +51473,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-28T02:46:55.100157+00:00'
-  updated_at: '2026-11-02T05:17:28.631004+00:00'
+  updated_at: '2026-11-02T06:03:00.036805+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -51515,6 +51515,18 @@ prs:
       the single providers Error line.'
     created_at: '2026-11-02T05:17:28Z'
     last_edited: '2026-11-02T05:17:28Z'
+  - id: note-893d994
+    text: 'QA scenario 5 (textual 2.0.1 floor): Esc in the model popup crashed the
+      TUI at the declared floor. In 2.0.1 App.query_one searches only the active screen''s
+      DOM, so with the ModalScreen pushed #command-bar was unreachable and App.on_key
+      raised NoMatches; a background reload could hit _command_bar_in_use the same
+      way. Fixed in ff85d13a with ProjectManagerApp._command_bar() (None when unreachable)
+      at all six query sites, plus a regression test. Verified: full 2.0.1 suite 5461
+      passed/1 skipped (neutral HOME), test_view_focus_command_bar 8/8 at 2.0.1 and
+      8.2.8, and the live TUI closes the popup cleanly on Esc on both. Pre-fix/post-fix
+      captures: /pm-captures/scenarios/5/{pre-fix,post-fix}/.'
+    created_at: '2026-11-02T06:02:59Z'
+    last_edited: '2026-11-02T06:02:59Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
