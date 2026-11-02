@@ -53607,3 +53607,30 @@ prs:
   effort: high
   session_models:
     signoff: provider:claude-work-xhigh-249
+- id: pr-bda8833
+  plan: bugs
+  title: 'Bug: hiding a plan with x moves the TUI cursor but leaves active_pr on the
+    hidden PR'
+  branch: pm/pr-bda8833-bug-hiding-a-plan-with-x-moves-the-tui-cursor-but-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/pr_view.py hide_plan() -> TechTree._recompute()
+    clamps/moves selected_index when the selected PR''s plan collapses, but no PRSelected
+    is posted, so pr_view.persist_active_pr is never called. Repro (seen in pr-6aa74c6
+    QA scenario 4 at 87a42088; hide_plan/_recompute are unchanged from master merge
+    base c1fcecc5): put the TUI cursor on the only PR of a plan (e.g. pr-146d1ae in
+    plan "Spec review"), press x. The log says "Hidden: <plan>", the double-bordered
+    cursor box jumps to another PR (pr-65f889c), but `pm pr list` still marks the
+    hidden PR with * (checked 2 s later). Effect: CLI commands that default to the
+    active PR and a TUI restart target the hidden PR rather than the PR under the
+    cursor. Expected: when hiding moves the cursor, persist the new cursor PR the
+    same way keyboard navigation does (persist_active_pr).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T04:00:50.977706+00:00'
+  updated_at: '2026-11-02T04:00:50.977706+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
