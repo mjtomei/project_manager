@@ -738,12 +738,9 @@ def handle_command_submitted(app, cmd: str) -> None:
             break
     if _as_cmd == "autostart" or _as_cmd.startswith("autostart "):
         from pm_core.tui import auto_start as _auto_start
-        try:
-            _as_args = shlex.split(_as_cmd)[1:]
-        except ValueError as e:
-            app.log_message(f"Auto-start: bad command: {e}")
-        else:
-            _auto_start.handle_command(app, _as_args)
+        # Cannot raise: the line already parsed above, and the alias
+        # rewrite only touches its quote-free first word(s).
+        _auto_start.handle_command(app, shlex.split(_as_cmd)[1:])
         # Unconditional: focus() targets the tree's own (base) screen, so
         # when ``autostart status`` pushed the runs popup this doesn't
         # steal focus from it — it makes Esc return to the tree instead

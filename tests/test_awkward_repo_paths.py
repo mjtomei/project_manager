@@ -36,7 +36,6 @@ import pytest
 from pm_core import paths
 from pm_core import tmux as tmux_mod
 from pm_core.paths import tmux_safe_name
-from pm_core.wrapper import _tmux_safe_name as wrapper_tmux_safe_name
 
 TMUX = shutil.which("tmux")
 
@@ -71,11 +70,6 @@ class TestTmuxSafeName:
         for n in AWKWARD:
             assert tmux_safe_name(tmux_safe_name(n)) == tmux_safe_name(n)
 
-    def test_wrapper_copy_matches(self):
-        """The wrapper's override lookup must use the same tag pm meta wrote."""
-        for n in AWKWARD + [tmux_safe_name(n) for n in AWKWARD]:
-            assert wrapper_tmux_safe_name(n) == tmux_safe_name(n)
-
     def test_session_tag_of_a_dollar_home_repo_is_tmux_safe(self, tmp_path):
         repo = tmp_path / "it's my `touch PWNED` $HOME repo"
         repo.mkdir()
@@ -94,9 +88,10 @@ class TestTmuxSafeName:
                                           share_mode):
         """The wrapper finds pm_root and a pm meta override by this tag.
 
-        Both are written under ``paths.get_session_tag``, which mixes the
-        share mode in; a shared session's panes carry PM_SHARE_MODE, so the
-        wrapper's own derivation has to mix it in the same way.
+        Both are written under ``paths.get_session_tag``, which makes the
+        repo name tmux-safe and mixes the share mode in; a shared session's
+        panes carry PM_SHARE_MODE.  The wrapper's own hand copy once left
+        the share mode out (review-loop 68bd i1); it now delegates.
         """
         from pm_core import wrapper
         repo = tmp_path / "next.js"
@@ -110,10 +105,12 @@ class TestTmuxSafeName:
         paths._session_tag_cache.clear()
         try:
             expected = paths.get_session_tag()
+            paths._session_tag_cache.clear()
+            actual = wrapper._get_session_tag()
         finally:
             paths._session_tag_cache.clear()
         assert expected.startswith("next_js-")
-        assert wrapper._get_session_tag() == expected
+        assert actual == expected
 
 
 @pytest.mark.skipif(not TMUX, reason="tmux not installed")

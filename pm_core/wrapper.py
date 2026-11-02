@@ -7,53 +7,25 @@ enables testing changes in PR workdirs without reinstalling.
 The wrapper also checks ~/.pm/sessions/ for session overrides, allowing
 pm meta sessions to redirect the installation to their working directory.
 """
-import hashlib
 import os
 import sys
 from pathlib import Path
 
 
 def _get_session_tag() -> str | None:
-    """Generate session tag from current git repository."""
-    from pm_core.git_ops import get_git_root, get_github_repo_name
+    """Session tag for the current git repository.
 
-    git_root = get_git_root()
-    if not git_root:
-        return None
-
-    repo_name = get_github_repo_name(git_root) or git_root.name
-    # Mix in the share mode exactly as ``paths.get_session_tag`` does: a
-    # shared session's panes carry PM_SHARE_MODE, and its pm_root (and a
-    # ``pm meta`` override) are written under the share-mode tag.
-    hash_input = str(git_root)
-    share_mode = os.environ.get("PM_SHARE_MODE")
-    if share_mode:
-        hash_input += "\0" + share_mode
-    path_hash = hashlib.md5(hash_input.encode()).hexdigest()[:8]
-
-    return _tmux_safe_name(f"{repo_name}-{path_hash}")
-
-
-def _tmux_safe_name(name: str) -> str:
-    """Inline copy of ``pm_core.paths.tmux_safe_name`` (see there).
-
-    The tag must match the one ``pm meta`` wrote its override under, and
-    that one comes from ``paths.get_session_tag``.  Kept inline for the
-    same reason as ``_PM_SOCKET_DIR``: this runs before the chosen pm_core
-    is imported.
+    Delegates to ``paths.get_session_tag``: the override and pm_root
+    lookups must use exactly the tag ``pm session`` and ``pm meta`` wrote
+    them under (tmux-safe repo name, share-mode hash and all).  Importing
+    it here is no earlier than before: ``git_ops`` already imports
+    ``pm_core.paths`` from the same copy, and ``_run_cli`` purges both
+    once another pm_core is chosen.  A hand copy here drifted once
+    (review-loop 68bd i1: it left PM_SHARE_MODE out of the hash).
     """
-    chars = [
-        "_" if (c in "#.:\\" or ord(c) < 0x20 or c == "\x7f"
-                or 0xDC80 <= ord(c) <= 0xDCFF)
-        else c
-        for c in name
-    ]
-    for i in range(len(chars) - 2, -1, -1):
-        if chars[i] == "$" and (chars[i + 1].isascii()
-                                and (chars[i + 1].isalpha()
-                                     or chars[i + 1] in "_{")):
-            chars[i] = "_"
-    return "".join(chars)
+    from pm_core.paths import get_session_tag
+
+    return get_session_tag()
 
 
 def _find_active_override() -> str | None:
@@ -165,16 +137,14 @@ def _ipc_session_tag(argv: list[str]) -> str | None:
     if len(pos) < 2:
         return None
     session = pos[1]
-    # Only a *numeric* ``~N`` is a grouped suffix (paths.base_session_name):
-    # a session name derived from a repo directory may contain ``~``
-    # itself, and splitting at the first one would resolve another
-    # session's tag.  ASCII digits only, like the shared definition: some
-    # non-ASCII characters (``²``) satisfy ``isdigit`` but are not a
-    # grouped suffix pm ever writes.  Kept inline for the same reason as
-    # ``_PM_SOCKET_DIR`` — this runs before pm_core is imported.
-    base, sep, suffix = session.rpartition("~")
-    if not (sep and suffix.isascii() and suffix.isdigit()):
-        base = session
+    # Only a *numeric* ``~N`` is a grouped suffix: a session name derived
+    # from a repo directory may contain ``~`` itself, and splitting at the
+    # first one would resolve another session's tag.  The shared
+    # definition is used, not a copy: ``main`` has already imported
+    # ``pm_core.paths`` (through ``_find_active_override``) by now.
+    from pm_core.paths import base_session_name
+
+    base = base_session_name(session)
     if base.startswith("pm-"):
         return base[3:]
     return None

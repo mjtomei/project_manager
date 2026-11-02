@@ -402,9 +402,9 @@ class TestWrapperMarksTmuxSocket:
 
 
 class TestWrapperIpcSessionTag:
-    """The wrapper resolves the IPC tag before pm_core is imported.
+    """The wrapper resolves the IPC tag from the tmux session name in argv.
 
-    It repeats the grouped-suffix rule inline, so pin it: only a numeric
+    Pin the grouped-suffix rule there: only a numeric
     ``~N`` is a grouped suffix, and a tag containing ``~`` (a repo
     directory may) is not truncated to its prefix — which would resolve a
     *different* session's ``~/.pm/sessions/<tag>/`` config.
