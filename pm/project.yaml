@@ -40317,7 +40317,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T19:44:05.339825+00:00'
+  updated_at: '2026-11-02T19:49:58.724879+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42130,6 +42130,42 @@ prs:
       released 2.6 s after close, retry backoff fired, run done PASS.'
     created_at: '2026-11-02T19:44:05Z'
     last_edited: '2026-11-02T19:44:05Z'
+  - id: note-9537251
+    text: 'QA S74 refiner (2026-11-02, head ad033bbb): all 4 stories held live in
+      an env -i sandbox (evidence /pm-captures/pr-8020495/s74-refiner). Plan corrections:
+      Q must be started first (CLI pm pr start Q, which journals nothing and leaves
+      Q at ''No recorded action history'') because pm pr review refuses a pending
+      PR and the popup only shows a PR with an open window; ''pr select alpha'' then
+      one send-keys ''Enter z z d'' put the loop on P. user''s/zzzz match nothing,
+      so ]/[ log ''No match results to cycle''. A plain command-bar review reads ~4
+      s ''agent turn finished'' + runtime review=idle (no ''(last'') before done NEEDS_WORK.
+      z d both stops the held loop and opens a fresh plain review (give the fake a
+      2nd slot NEEDS_WORK delay 1); the stopped loop reads ''cancelled INPUT_REQUIRED''.
+      Supersede: second loop takes fake slot 1 (config set resets the cursor); A i1
+      reads superseded/''parent run ended first'' <=1 s then cancelled KILLED; A and
+      B graces share the purpose text, tell them apart by timer id.'
+    created_at: '2026-11-02T19:21:43Z'
+    last_edited: '2026-11-02T19:21:43Z'
+  - id: note-8f9394d
+    text: 'QA S74 (2026-11-02) INPUT_REQUIRED on ad033bbb (app = master@c3bac6ce merge
+      2a0a7419), no code edits. Three live runs in env -i sandbox /scratch/s74 (h1/h2/h3,
+      torn down); captures + per-Then README in /pm-captures/scenarios/74 (main run
+      h3 = story1-4/, run2/, run1/, scripts/). Main run held every Then (story1 33/34
+      checks, story2 24/24, story3 22/22, story4 17/17) except one wording gap: after
+      the 2-iteration loop ends, ~2 s (until the next 5 s impl-idle tick re-tracks
+      start) read Waiting for: nothing (no open attempts or timers) / no action running
+      / runtime: review-loop=done PASS (no start=idle). The Waiting-for Then allows
+      that gap, the runtime-line Then omits the bare form (S70 plan listed it: done
+      PASS -> start=idle, review-loop=done PASS). JSON shows it in 3/3 runs, the 2
+      s text reader caught it in run1 (+46.77 s) and h3 (+44.78 s). Also tick-quantised:
+      the fresh review z d opens reads 0s only if z d lands just after a 5 s grid
+      tick (h3: z d +0.058 s after tick -> 0s; run2 untimed, z d 1.3 s before a tick
+      -> 5s), so a plan should accept 0s or 5s or time z d with tickphase.py --wait.
+      ] [ with no results log one "No match results to cycle" line (command log drops
+      a repeat; screen shows it after each). Q review row first read 2.8-3.1 s after
+      the command-bar submit (spec: about 2 s).'
+    created_at: '2026-11-02T19:49:58Z'
+    last_edited: '2026-11-02T19:49:58Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
