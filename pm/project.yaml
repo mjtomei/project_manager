@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T10:08:10.109927+00:00'
+  updated_at: '2026-11-02T10:10:56.470490+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39974,6 +39974,22 @@ prs:
       Traceback.'
     created_at: '2026-11-02T10:08:09Z'
     last_edited: '2026-11-02T10:08:09Z'
+  - id: note-6a7b8d9
+    text: 'S60 refiner (2026-11-02, 3a3dc599): all 4 stories ran live, every Then
+      held. Container prereqs: sudo apt-get install -y fzf less faketime. Without
+      fzf the popup is a numbered picker that ignores Esc. Without less, H prints
+      and waits "Press q/Esc/Enter to close..." and cannot be word-compared. Adopted
+      text is "signoff router (adopted)  done SIGNOFF_MERGE". C story: re-run pm fake-claude
+      config set (signoff [SIGNOFF_REVIEW d30, SIGNOFF_BLOCKED d30]) before pm autostart
+      add C; config set resets cursors. Router 1 REVIEW -> throttle "released at"
+      (not re-armed). Router 2 arms the same id; BLOCKED -> "cancelled (owner ended)"
+      plus derived hold "sign-off BLOCKED (needs a human decision) (signoff) [project.yaml
+      signoff record]", badge [hold: sign-off BLOCKED (needs a hum...], autostart
+      status paused/sign_off. Bucket reads by command START time: a stamp written
+      after the CLI returns misfiles the in-flight read. End-date rule needs a TZ
+      whose midnight falls inside B qa attempt.'
+    created_at: '2026-11-02T10:10:56Z'
+    last_edited: '2026-11-02T10:10:56Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
