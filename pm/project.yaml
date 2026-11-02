@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T19:28:44.269338+00:00'
+  updated_at: '2026-11-02T19:36:32.318737+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8477,6 +8477,59 @@ prs:
       review window only switches on `d`, so close it with C-b & and press `d` again.'
     created_at: '2026-11-02T18:48:58Z'
     last_edited: '2026-11-02T18:48:58Z'
+  - id: note-11a2a65
+    text: 'QA S50 (concurrent pane closes across pm windows, TUI kill x pm session
+      attach, stuck respawn lock) NEEDS_WORK: one defect found on 7f5bcd51 and fixed
+      in 664df2458 (pane_layout._respawn_unlisted_tui); full suite 5627 passed / 1
+      skipped (438.8 s, /pm-captures/scenarios/50/run/suite/full-suite.log).
+
+
+      Story 2 reproduced the refiner''s zero-TUI race. With T4''s `pm session` Enter
+      0.60-0.65 s before the `y` that kills the TUI, 2 of 4 pre-fix rounds ended with
+      no TUI. The attach''s _schedule_rebalance -> rebalance -> _reconcile_registry
+      (no respawn lock) dropped the dead TUI entry at +0.06 s, before the hook even
+      read the registry (+0.07). So the hook''s snapshot listed no TUI, its reconcile
+      removed nothing, and it never respawned. In all 8 post-fix rounds where the
+      race hit, the entry was gone before any hook started, so the refiner''s fix
+      idea (respawn when the hook''s snapshot listed a TUI) would have caught none
+      of them.
+
+
+      Fix: under the lock, after its reconciles, the hook checks the registry again.
+      If it lists no TUI and _running_tui_pane() finds none, the hook starts one.
+      It uses the window the snapshot listed the TUI in, else main, else the first
+      window, as pm session does. This runs only when the lock was really taken, so
+      two hooks past a stuck holder cannot both start one. A remain-on-exit dead TUI
+      is still listed, so it is left alone. New log line: "handle_any_pane_closed:
+      no TUI is running and none is registered (its entry was already reconciled);
+      respawning in window @W".
+
+
+      Post-fix, 20/20 rounds held every Then (0.00-0.03 x4, 0.15-0.55 x4, 0.60-0.65
+      x12). There was always one TUI, and the poller never counted 2. The TUI was
+      in /tmp/q50/A, listed once, at 99/100. 8 rounds went through the new path. Rounds
+      at 0.01-0.03 were attach wins, with the hook starting none. B''s driver landed
+      680/680 keys, and B''s panes, pids, registry and pidfile were byte-identical.
+      Stories 1 and 3 held on the fix: closes took 0.11-0.27 s; burst 1 froze clients
+      10.22-10.38 s with 3 still-held lines and 1 respawn; burst 2 returned 3.07-3.17
+      s after the 3.0 s release.
+
+
+      New tests in tests/test_tui_respawn_race.py (5 fail pre-fix). The S124 fixture
+      in tests/test_tui_own_session_name.py registered a pm session with no TUI, and
+      the new rule started one there, so it now registers its kept pane as the TUI
+      (every real pm session has one).
+
+
+      Observation, not a defect: in 2 of 5 story-1 bursts the notes entry was reconciled
+      by a concurrent R1/R2 hook before its own EXIT trap ran ("unregister_pane: %N
+      not found"). Every hook reconciles every window, so this is a timing race with
+      the same registry outcome either way.
+
+
+      Captures: /pm-captures/scenarios/50/run (README.md).'
+    created_at: '2026-11-02T19:36:32Z'
+    last_edited: '2026-11-02T19:36:32Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
