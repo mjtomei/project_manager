@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T13:49:27.064688+00:00'
+  updated_at: '2026-11-02T14:26:00.265523+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40159,6 +40159,34 @@ prs:
       right.'
     created_at: '2026-11-02T13:49:26Z'
     last_edited: '2026-11-02T13:49:26Z'
+  - id: note-b8a0289
+    text: 'S65 refiner (2026-11-02, fa5fb2e0 code): all 6 stories live (/pm-captures/pr-8020495/s65-refiner,
+      drivers in scripts/, back-to-back reader r3). 92b59c3c/79de8949 hold: first
+      planner-deadline read 59m59s in 3 runs, 0 "1h00m" reads, max remaining 3599.99
+      over 15k reads. Draft fix: after z z t the journaled hold stays active until
+      the run ends (~5 s), then ~0.9 s of no hold + "Waiting for: nothing" before
+      the derived hold (armed at the runtime write, ~1 s after the cancel). Restart
+      lost gap 1.1 s incl. one 80 ms resumed-parent-without-child read; release after
+      window kill seen at +4.7 s; leave-qa release exactly 60 s after arm.'
+    created_at: '2026-11-02T14:02:28Z'
+    last_edited: '2026-11-02T14:02:28Z'
+  - id: note-270d16e
+    text: 'QA S65 (2026-11-02) PASS on e03f1fb22 (app f5d778bf3), no code edits: all
+      6 stories live in one env -i sandbox (/scratch/s65.hxDu, Q=pr-9becfa4, cap 2;
+      captures + README per-Then table in /pm-captures/scenarios/65, drivers in scripts/).
+      92b59c3c/79de8949 re-check held: first planner-deadline read 59m59s after all
+      3 arms in both R1 and the back-to-back R3, max remaining 3599.94, 0 "1h00m"
+      and 0 remaining>duration in 10,811 reads. Hold 2m45s after t (W=s1), wall 96.45/sum
+      177.87 fixed across 787 hold reads while elapsed grew; restart gap 1.34 s (14
+      "nothing" reads + one resumed-parent read; journal parent->hold 27 ms); close->release
+      +4.69 s, handed-back 5.35 s then vanished, backoff max 4.95; z z t: journaled
+      hold active to run end, then 0.81 s no-hold gap, then derived only; story 5
+      0 derived/0 human: in 1991 pre-hold reads; leave-qa release 60.08 s after arm.
+      R1/R2 agree 275/275, all err.log + tui-stderr empty, 0 Traceback. Obs: "Fresh
+      QA start" is logged but replaced on screen in the same second by "Planning QA
+      scenarios..."; runtime qa stays idle ~0.8 s after a left-qa run ends.'
+    created_at: '2026-11-02T14:26:00Z'
+    last_edited: '2026-11-02T14:26:00Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
