@@ -51452,3 +51452,146 @@ prs:
     signoff: provider:claude-work-xhigh-249
     merge: provider:deepseek-flash
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-049649a-remove-all-pr-autostart-and-fail-clo-registered-20261027
+- id: pr-3d3b3ce
+  plan: bugs
+  title: 'Bug: pm provider test --live inlines a router provider''s secret env values
+    in the probe''s bash -c / podman exec argv'
+  branch: pm/pr-3d3b3ce-bug-pm-provider-test-live-inlines-a-router-provide
+  status: in_progress
+  depends_on: []
+  description: 'Found at #249 (pr-592e4bd) sign-off 2026-10-29 on HEAD 1987cb9c. worker_route._probe_shell_cmd
+    builds ''env -u ... NAME=value ... claude -p ...'' and live_probe passes it as
+    a bash -c argument (host) or inside ''podman exec ... bash -c'' (container). Every
+    value of the router provider''s env_vars() is inlined, including values pm itself
+    classifies as secret (providers.is_secret_env_var: KEY/TOKEN/SECRET/PASSWORD/CREDENTIAL/AUTH/HEADER),
+    e.g. a router entry with env: {ANTHROPIC_CUSTOM_HEADERS: ''x-team-token: ...''}
+    (R10 allows env on every provider type). The value is not logged or written to
+    disk, but it is readable in /proc/<pid>/cmdline (ps) by other users on the host
+    for the probe''s lifetime (up to 180 s). Every pane launch already avoids this
+    (#268 private env file; container -e NAME by name). Repro: providers.yaml with
+    that entry, then python -c ''from pm_core import worker_route; from pm_core.providers
+    import get_provider; print(worker_route._probe_shell_cmd(get_provider("acme",
+    strict=True), "sid", container=False))'' prints the header value. Evidence: /pm-captures/signoff/2026-10-29/probe-inline.txt.
+    Fix: pass the assignments through subprocess env= (host) and ''podman exec -e
+    NAME'' with the value in the runtime''s env (as container._run_runtime(env=...)
+    does), keep only env -u names in the argv; add a regression next to tests/test_worker_route.py::_probe_shell_cmd
+    tests.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/293
+  gh_pr_number: 293
+  created_at: '2026-10-29T14:01:10.973333+00:00'
+  updated_at: '2026-11-02T03:34:44.184884+00:00'
+  started_at: '2026-11-02T01:59:27.402561+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-a6d3aaa
+    text: 'User authorized starting this existing security bug on 2026-11-02, MAIN-account
+      Opus 5.5/xhigh for implementation, review, QA, helpers and sign-off. Its source
+      was renamed by merged #282: use pm_core/router_route.py and tests/test_router_route.py,
+      not obsolete worker_route names. Confirm the current live-probe path still embeds
+      provider env values in bash -c / podman exec argv, then keep those values out
+      of process arguments through the existing protected environment transport. Cover
+      host and container probes, inherited/unset variables, model/effort routing and
+      failure cleanup without widening credentials or permissions. Use synthetic canary
+      secrets in isolated fixtures; never print, copy into logs, or expose real credentials.
+      Ordinary launches already use protected transport; reuse appropriate abstractions
+      without rewriting launch lifecycle or relaxing fail-closed behavior.
+
+
+      #283 changes reasoning/bridge configuration, not these probe functions; coordinate
+      with its current interfaces and integrate newly merged master changes as needed.
+      No additional review/QA scheduling prerequisite was identified. Complete genuine
+      implementation and let PM advance to fresh review/QA. Preserve the manual wait-for-merge
+      gate; starting this PR does not authorize a merge.
+
+
+      Begin from current master and keep the implementation scoped to this PR. Use
+      isolated containers/test projects/tmux servers; do not drive the user''s live
+      PM session, alter shared host PM settings or affect unrelated work. Preserve
+      existing source, records, evidence and drafts. Leave lifecycle handoff to PM;
+      do not launch your own review/QA or send TUI keys to advance. No force-push,
+      master/other-branch reset/deletion, automatic spec approval or PR merge is authorized.
+      Current main-account routing supersedes older account notes.'
+    created_at: '2026-11-02T01:59:09Z'
+    last_edited: '2026-11-02T01:59:09Z'
+  - id: note-d13161b
+    text: 'Impl done 2026-11-02 at 2f7bb3fa (fix + tests + spec pm/specs/pr-3d3b3ce/impl.md,
+      no unresolved items). _probe_shell_cmd(cfg, sid, container=, env_out=) now emits
+      only ''env -u NAME'' names; live_probe passes the values via subprocess env=
+      (host) and ''podman exec -e NAME'' with the value in the runtime''s env (container),
+      the _run_runtime/build_exec_cmd convention. No env file, so a failed probe leaves
+      nothing to clean; model pins, unset list and fail-closed setup checks unchanged;
+      the probe still passes no --effort (as before). Regression: tests/test_router_route.py::TestProbeEnvTransport
+      (8 tests, synthetic canary in ANTHROPIC_CUSTOM_HEADERS; fail pre-fix on the
+      canary in argv). Captures under $CAP/impl/: pre-fix/provider-test-live (real
+      ''pm provider test acme [--container] --live'' in an isolated HOME, nested podman
+      python:3-slim, fake router, /proc cmdline observer: 4 processes leaked the canary),
+      pre-fix/failing-tests, post-fix/provider-test-live (0 leaks, Live: OK host+container,
+      router still got the header), post-fix/failure-path, post-fix/tests. Full suite
+      5441 passed / 12 failed, all test_markdown_render.py (no markdown module in
+      the impl container). Trial merge onto #283 pr-5ec411c@21da65cd is clean, test_router_route
+      247 passed. Ready for PM to advance to review/QA.'
+    created_at: '2026-11-02T02:21:30Z'
+    last_edited: '2026-11-02T02:21:30Z'
+  - id: note-6eec9d6
+    text: 'QA S2 refiner (container --live, verified live 2026-11-02): pm provider
+      add --env ACME_EMPTY= works from the CLI (no providers.yaml hand edit). The
+      forwarder URL uses the router port, so api_base http://127.0.0.1:P gives the
+      SAME in-container ANTHROPIC_BASE_URL; use api_base http://localhost:P to tell
+      them apart. HOME inside podman exec is /workspace, so a stub claude must write
+      transcript/hook/records under /home/pm/.claude and /home/pm/.pm/hooks. Keep
+      the isolated HOME short (<= ~60 chars): otherwise the bridge falls back to /tmp/pm-route-<uid>-<sha(route)>
+      shared by every isolated HOME, and a bridge left over from an earlier run (old
+      port) gets reused. Teardown: kill only the bridge whose argv names the printed
+      socket (pgrep -f "[r]oute_bridge.py host <sock>"). A plain pgrep -f matches
+      the calling shell, and the agent route forwarder is also a route_bridge.py process.'
+    created_at: '2026-11-02T02:48:53Z'
+    last_edited: '2026-11-02T02:48:53Z'
+  - id: note-5f3f571
+    text: 'QA S5 refiner (live at 21bc398d): routed impl pane from TUI `s` held every
+      Then. Recipe: private PM_TMUX_SOCKET, PYTHONPATH=/workspace, a `claude` stand-in
+      first on PATH (pm pr start needs one on PATH or it only prints the prompt; with
+      a router launcher it is never run), TEST_DIR needs a commit before `s`. Pane
+      start cmd = `cd <workdir> && sh -c ''set -a; . ~/.pm/run/env-XXXX.sh; set +a;
+      rm -f …; env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_AUTO_MODE_MODEL
+      <launcher> --model … --effort medium --session-id …''`; ~/.pm/run empty after
+      launch. Probe and pane records agree on all 12 route vars + header hash; pane
+      alone adds --effort (A5). Pass the canary to an observer via a file, not argv
+      (its own argv otherwise holds it); never kill by a pattern your tool shell argv
+      contains.'
+    created_at: '2026-11-02T03:34:44Z'
+    last_edited: '2026-11-02T03:34:44Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3d3b3ce-bug-pm-provider-test-live-inlines-a--0eb88069
+  model: provider:claude-main-xhigh-pm
+  effort: high
+- id: pr-0ebbc91
+  plan: bugs
+  title: 'Bug: pm provider test --live crashes with a raw ValueError traceback when
+    a provider env name contains "="'
+  branch: pm/pr-0ebbc91-bug-pm-provider-test-live-crashes-with-a-raw-value
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/router_route.py live_probe (subprocess.run with
+    env=, ~line 575) and provider config loading in pm_core/cli/provider.py. Repro
+    (QA S3 of pr-3d3b3ce, branch 21bc398d, isolated HOME): hand-edit ~/.pm/providers.yaml
+    so a router provider env has an entry whose name contains "=" (e.g. "BAD=TOKEN:
+    <value>"). pm provider show lists it as BAD=TOKEN=<redacted> and status OK; pm
+    provider test <name> --live prints "Preflight (host): OK" and then a full Python
+    traceback ending in subprocess._execute_child ValueError: illegal environment
+    variable name, exit 1. No process starts and no value leaks (verified with a /proc
+    observer), but the user gets a traceback rather than a fail-closed "Preflight:
+    FAILED - env name ... is not a valid variable name" line. Expected: reject or
+    flag invalid env names at load/preflight (provider show/test) with a clean message
+    naming the variable but not its value; check the container probe and ordinary
+    router launches for the same name. Capture: /pm-captures/scenarios/3/story7-bad-env-name
+    in that session.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T03:23:55.443880+00:00'
+  updated_at: '2026-11-02T03:23:55.443880+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
