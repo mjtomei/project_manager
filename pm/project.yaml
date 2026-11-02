@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T00:27:01.888902+00:00'
+  updated_at: '2026-11-02T00:29:20.465625+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25323,6 +25323,19 @@ prs:
       in a one-row PR tree j/k do not move the selection (l/h do).'
     created_at: '2026-11-02T00:27:01Z'
     last_edited: '2026-11-02T00:27:01Z'
+  - id: note-a978035
+    text: 'QA S5 refiner (2026-11-02): all 4 stories held live, real Claude for the
+      discovery watcher included. Traps: (1) the watcher real Claude stops at the
+      folder-trust prompt unless the test dir is added with pm trust add (pm only
+      auto-trusts ~/.pm/workdirs); (2) the pm session guide pane starts a real Claude,
+      so kill it; (3) TEST_DIR must be on the same filesystem as ~/.pm (/tmp, not
+      /scratch or /workspace) while create_scenario_workdir still runs git clone --local;
+      (4) there is no CLI for base_branch, so rename the branch away (git branch -m
+      master master-moved) to force the clone failure; (5) set remain-on-exit on the
+      discovery window to read the dead pane; tmux 3.2a leaves pane_dead_status empty;
+      (6) the watcher kills and recreates the discovery window every tick.'
+    created_at: '2026-11-02T00:29:20Z'
+    last_edited: '2026-11-02T00:29:20Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
