@@ -70,8 +70,11 @@ def build_history(pr_id: str, *, pr: dict | None = None,
     defaults to the action-history clock.  ``live=False`` skips the
     runtime mirror and hook events (pure journal view, used by tests).
     """
-    t_now = _ah.now() if now is None else float(now)
     events = _ah.read_events(pr_id)
+    # "now" is taken after the read, so the snapshot never predates an
+    # event it renders (a timer armed between the two read 3600.06 s left
+    # on a 1 h deadline: "1h00m left").
+    t_now = _ah.now() if now is None else float(now)
     attempts, timers, timer_history = _replay(events)
     aliases = _fold_retracked(attempts, timers)
     _link_children(attempts)

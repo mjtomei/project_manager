@@ -1765,6 +1765,29 @@ class TestReconciliation:
             == ["5s", "59s", "59s", "59s", "1m00s", "1m00s", "59m59s",
                 "1h00m", "47h59m", "2d00h"]
 
+    def test_live_read_takes_now_after_reading_the_journal(
+            self, clock, monkeypatch):
+        """QA S60: a back-to-back reader took its "now" 0.06 s before a
+        QA planner deadline was armed, then read the journal with the arm
+        in it: 3600.06 s left, "1h00m left".  The snapshot time must not
+        precede the events it renders."""
+        owner = ah.start_attempt(PR, "qa", label="qa planner")
+        real = ah.read_events
+
+        def racing_read(pr_id):
+            clock.advance(0.06)
+            ah.arm_timer(PR, "qa-planner-deadline:L1",
+                         purpose="QA planner deadline", owner_action="qa",
+                         owner_attempt=owner, duration=3600, effect="fires")
+            clock.advance(0.01)
+            return real(pr_id)
+
+        monkeypatch.setattr(ah, "read_events", racing_read)
+        m = hq.build_history(PR, live=False)
+        (t,) = m["timers"]["active"]
+        assert 3599.9 < t["remaining_s"] < 3600
+        assert "59m59s left" in "\n".join(hq.render_text(m))
+
     def test_late_elapsed_clear_keeps_due_time(self, clock):
         # The owner books an elapsed gate when it notices (QA: at scenario
         # end, a minute later); the elapsed time must not move to that clear.
