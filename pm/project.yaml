@@ -40317,7 +40317,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T21:30:49.258634+00:00'
+  updated_at: '2026-11-02T22:12:56.674325+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42329,6 +42329,41 @@ prs:
       uses setdefault (master code; no history surface reads it).'
     created_at: '2026-11-02T21:30:49Z'
     last_edited: '2026-11-02T21:30:49Z'
+  - id: note-70dd281
+    text: 'QA S80 refiner (2026-11-02, code 7a52ecaa9): all 5 stories held live (/pm-captures/pr-8020495/s80-refiner,
+      README + drivers). Changes vs the draft: (1) a BLOCKED router throttle reads
+      cancelled (owner ended) only until the commit-triggered relaunch, which is a
+      `signoff router (stale)` that re-arms the same id, so that entry then reads
+      re-armed and the derived BLOCKED hold disappears; commit via `pm pr cd <A>`;
+      (2) the draft story-2 Given (held AND router in flight) is impossible: a router
+      launch supersedes the merge hold, so restart-during-router and restart-while-held
+      are two stories; (3) restart while held: a ~0.2 s lost-only gap (2 back-to-back
+      reads, Waiting for: nothing) precedes the re-arm (S53); (4) a g merge journals
+      no clear: the hold reads released (PR merged) at <merge>, not plain released
+      at; (5) "never held" needs an auto-merge PR: B switched to --auto-merge before
+      its sign-off shows no merge-hold row; (6) the hold purpose keeps naming only
+      B after C is added (not re-journaled); (7) a merged A has no window: open a
+      window named <A> to anchor prefix+P; (8) QA needs a qa spec: spec-mode auto
+      + pm pr spec <id> qa before the run.'
+    created_at: '2026-11-02T21:42:31Z'
+    last_edited: '2026-11-02T21:42:31Z'
+  - id: note-a74d08e
+    text: 'QA S80 (2026-11-02) NEEDS_WORK, fixed in 2d6e962a9; every S80 Then held
+      live (captures + per-Then README in /pm-captures/scenarios/80; refiner drivers
+      re-pointed, both recipes per step). Defect: after A (held for B) was merged
+      with g (pm pr merge journals no clear, history correctly read "released (PR
+      merged) at <A merge>"), B auto-merged minutes later and auto-start turned off:
+      _disable() released every PR in app._history_merge_holds incl. the already merged
+      A, journaling "released", so A merged history read "released at <B merge>" (3
+      min after A merged; same on pm autostart clear). Fix: release_merge_hold_journal
+      (non-force) only forgets merged/closed PRs; history_query keeps a merged PR
+      hold first cleared after merged_at as "released (PR merged)" at the merge. Pre-fix
+      main run (7a52ecaa9), fix-samejournal cast (same journal: old code vs new),
+      post-fix re-run of stories 2-5 on 2d6e962a9; suite 5846 passed/1 skipped. Story
+      1 (REVIEW->BLOCKED->commit->stale MERGE) not re-run: touches neither changed
+      path.'
+    created_at: '2026-11-02T22:12:56Z'
+    last_edited: '2026-11-02T22:12:56Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
