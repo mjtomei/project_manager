@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-02T01:09:19.718674+00:00'
+  updated_at: '2026-11-02T01:58:35.270443+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38955,6 +38955,27 @@ prs:
       The dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-11-02T01:09:19Z'
     last_edited: '2026-11-02T01:09:19Z'
+  - id: note-0107d78
+    text: 'Review loop 928f i46: one test gap in the kept web-UI-recipe scope; no
+      recipe or pm_core change. R112: the start block''s readiness timeout kills the
+      app it started (`kill "$SERVER_PID"`, then removes `server.pid`) before it exits
+      — the app outlives the block''s shell, so a failed start that leaves it running
+      keeps the port and the next run''s port pre-check refuses with "something already
+      answers", a cause the worker cannot connect to this block (and the one the refusal''s
+      `ss -ltnp` remedy is for). The kill was pinned only as text (`test_readiness_waits_are_bounded`
+      matches the line in a window around the poll), and every execution case started
+      the default stub app, which touches `app-launched` and exits at once, so the
+      kill was a no-op in all of them: moving it below the branch''s `exit 1` left
+      the whole file green (396 passed, verified). Fix (test-only): `test_a_failed_start_stops_the_app_it_started`
+      runs the block in `never` mode with a stub app that writes its pid, traps `TERM`
+      and stays up, and requires the trap''s marker after the block returns (a bounded
+      poll; the process is killed in a `finally` if the trap did not run); it fails
+      against the mutation and passes on the unmodified recipe. Recipe file 397 passed
+      (was 396); related suites 186 passed; full suite 5594 passed, 1 skipped, 0 failed
+      (543.84 s, once on the final tree). Evidence: /pm-captures/review-928f-i46/.
+      impl.md R112. The dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-11-02T01:58:35Z'
+    last_edited: '2026-11-02T01:58:35Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
