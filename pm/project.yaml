@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T04:06:14.677172+00:00'
+  updated_at: '2026-11-02T04:56:18.288115+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25584,6 +25584,20 @@ prs:
       (captures helpers/cam1.sh).'
     created_at: '2026-11-02T04:06:14Z'
     last_edited: '2026-11-02T04:06:14Z'
+  - id: note-e31e1fb
+    text: 'QA S14 refiner (live at ddd0ed30, /scratch fixture, all 5 drafted stories
+      driven): R26/R28/R29/E20 held: 3 runs in one second (TUI Enter, pm qa launch,
+      CLI) got distinct ids, stand-in env scrubbed, PM_TMUX_SOCKET kept; prompt names
+      the socket; ztest pm sessions from run panes nest + detach on C-b d, user sessions
+      byte-identical; --branch failure cleans only itself. R35 FAILS: a --file-prs
+      filing (pm -C <registry> pr add) from a run clone SIGUSR1-reloads the first
+      pm- session TUI by name (aproj), and from inside a ztest project reloads that
+      ztest TUI; the user TUI only shows run PRs via the 300 s sync or r. A concurrent
+      user pm pr add masks it (its reload reads all saves), so S14 checks R35 with
+      a solo filing. Evidence: "action: reload (state only)" in ~/.pm/debug/<tag>.log
+      and ~/.pm/runtime/home-refresh-<session> mtimes. Helpers: /pm-captures/scenarios/14/refiner-helpers.'
+    created_at: '2026-11-02T04:56:18Z'
+    last_edited: '2026-11-02T04:56:18Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
