@@ -27,6 +27,7 @@ from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core import pane_registry
 from pm_core import spec_gen
+from pm_core import workdirs as workdirs_mod
 from pm_core.backend import get_backend
 from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_session, launch_claude, finalize_transcript
 
@@ -40,6 +41,7 @@ from pm_core.cli.helpers import (
     _launch_blocked_at_lock,
     _log,
     _make_pr_entry,
+    _no_workdir_hint,
     _pr_display_id,
     format_pr_line,
     _pr_id_sort_key,
@@ -491,6 +493,24 @@ def pr_select(pr_id: str):
     trigger_tui_refresh()
 
 
+def _resolve_workdir(data: dict, pr_entry: dict, root: Path, *,
+                     persist: bool = True) -> "workdirs_mod.WorkdirResolution":
+    """:func:`pm_core.workdirs.resolve_workdir` for a per-PR command.
+
+    A stale record is recovered from this project's workdirs dir when the
+    PR's clone is still there (``pr_entry["workdir"]`` is updated).  A
+    persisted re-link is reported on stdout; an ambiguity, or same-named
+    clones that were skipped, on stderr.  Without *persist* the clone is
+    only used in memory (nothing to announce as re-linked).
+    """
+    found = workdirs_mod.resolve_workdir(data, pr_entry, root,
+                                         project_dir=_workdirs_dir(data),
+                                         persist=persist)
+    if found.reportable and (persist or found.path is None):
+        click.echo(found.describe(), err=found.path is None)
+    return found
+
+
 @pr.command("cd")
 @click.argument("identifier")
 def pr_cd(identifier: str):
@@ -505,9 +525,12 @@ def pr_cd(identifier: str):
     if not pr_entry:
         click.echo(f"PR '{identifier}' not found.", err=True)
         raise SystemExit(1)
-    workdir = pr_entry.get("workdir")
+    found = _resolve_workdir(data, pr_entry, root)
+    workdir = found.path
     if not workdir or not Path(workdir).is_dir():
-        click.echo(f"Workdir for {pr_entry['id']} does not exist: {workdir}", err=True)
+        if not found.reportable:
+            click.echo(f"Workdir for {pr_entry['id']} does not exist: "
+                       f"{pr_entry.get('workdir')}", err=True)
         raise SystemExit(1)
     shell = os.environ.get("SHELL", "/bin/sh")
     click.echo(f"Entering workdir for {pr_entry['id']} ({pr_entry.get('title', '???')})")
@@ -944,14 +967,31 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         )
         raise SystemExit(1)
 
+    # A stale workdir record (started under another HOME/machine, record
+    # rewritten) is recovered from this project's workdirs dir before a
+    # second clone is made (pm_core.workdirs).  Looked up at most once, and
+    # only when no --workdir was given and the recorded path is missing.
+    recovery = None
+
+    def _recover():
+        nonlocal recovery
+        if recovery is None:
+            recovery = _resolve_workdir(data, pr_entry, root)
+        return recovery
+
     if pr_entry.get("status") == "in_progress":
         # If already in_progress, reuse existing workdir if available
         existing_workdir = pr_entry.get("workdir")
         if existing_workdir and Path(existing_workdir).exists():
             click.echo(f"PR {pr_id} is already in_progress, reusing existing workdir.")
             workdir = existing_workdir  # Set workdir so it gets used below
-        else:
-            # Workdir was deleted — fall through to create a new one
+        elif not workdir and _recover().path:
+            click.echo(f"PR {pr_id} is already in_progress, reusing its "
+                       f"recovered workdir.")
+            workdir = recovery.path
+        elif not workdir and recovery.status != workdirs_mod.AMBIGUOUS:
+            # Workdir was deleted — fall through to create a new one (an
+            # explicit --workdir is used as given, nothing is created)
             click.echo(f"PR {pr_id} workdir missing, creating a new one.")
 
     if pr_entry.get("status") == "merged":
@@ -1048,6 +1088,13 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         existing_workdir = pr_entry.get("workdir")
         if existing_workdir and Path(existing_workdir).exists():
             work_path = Path(existing_workdir)
+        elif _recover().path:
+            work_path = Path(recovery.path)
+        elif recovery.status == workdirs_mod.AMBIGUOUS:
+            # The PR's clone exists but can't be chosen safely; another
+            # clone would only add one more to choose from.
+            click.echo(f"Not creating another workdir for {pr_id}.", err=True)
+            raise SystemExit(1)
         else:
             # Need to clone first, then figure out the final path
             # Clone to a temp location under the project dir
@@ -1075,13 +1122,20 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 "rev-parse", "--short=8", "HEAD", cwd=tmp_path, check=False
             ).stdout.strip()
 
-            # Final path: <project_dir>/<branch_slug>-<base_hash>
+            # Final path: <project_dir>/<branch_slug>-<base_hash>, never a
+            # same-named directory discovery skipped (clone_destination).
             # Re-resolve project_dir since _resolve_repo_id may have updated data
-            branch_slug = store.slugify(branch.replace("/", "-"))
-            dir_name = f"{branch_slug}-{base_hash}" if base_hash else branch_slug
             final_project_dir = _workdirs_dir(data)
             final_project_dir.mkdir(parents=True, exist_ok=True)
-            work_path = final_project_dir / dir_name
+            work_path = workdirs_mod.clone_destination(
+                data, final_project_dir, branch, base_hash, tmp_path)
+            if work_path is None:
+                shutil.rmtree(tmp_path, ignore_errors=True)
+                click.echo(f"Not creating a workdir for {pr_id}: its workdir "
+                           f"names in {final_project_dir} are taken by "
+                           "directories that aren't its clone; move them "
+                           "aside.", err=True)
+                raise SystemExit(1)
 
             if work_path.exists():
                 shutil.rmtree(tmp_path)
@@ -1373,7 +1427,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         root = state_root()
         workdir = _ensure_workdir(data, pr_entry, root)
         if not workdir:
-            click.echo(f"Review window: no workdir for {pr_entry['id']}. Start the PR first.")
+            click.echo(f"Review window: no workdir for {pr_entry['id']}. "
+                       f"{_no_workdir_hint(data, pr_entry)}")
             return
 
     # Review loop always forces a fresh window
@@ -1916,11 +1971,19 @@ def pr_signoff_record(pr_id: str):
             f"PR {pr_id}: report.html carries no valid pm-signoff-verdict "
             f"meta tag — regenerate with `pm pr signoff {pr_id}`.", err=True)
         raise SystemExit(1)
+    # A stale record is re-linked first, like the merge gate this feeds.
+    found = _resolve_workdir(data, pr_entry, root)
     sha = signoff_mod.head_sha(pr_entry.get("workdir"))
     if not sha:
-        click.echo(
-            f"PR {pr_id}: no workdir/HEAD to record the verdict against.",
-            err=True)
+        if found.status == workdirs_mod.AMBIGUOUS:
+            click.echo(
+                f"PR {pr_id}: not recording: the HEAD to bind is in one of "
+                f"the clones listed above. Move the extra clone(s) aside, "
+                f"then re-run `pm pr signoff record {pr_id}`.", err=True)
+        else:
+            click.echo(
+                f"PR {pr_id}: no workdir/HEAD to record the verdict "
+                f"against.", err=True)
         raise SystemExit(1)
 
     # Bind the approval to the integration check the report assessed: the
@@ -1999,6 +2062,24 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool):
     data = store.load(root)
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
+    # Re-link a stale record to the PR's clone first: otherwise --record
+    # replaces a valid check with "no PR workdir" while the clone is still
+    # here.  The default check stays read-only: the clone is used but the
+    # re-link isn't written.
+    found = _resolve_workdir(data, pr_entry, root, persist=record or apply_)
+    if found.status == workdirs_mod.AMBIGUOUS:
+        # The PR's HEAD is in one of the listed clones, so there is nothing
+        # to check — and recording that as "no PR workdir" would replace
+        # the existing check (which a sign-off verdict may be bound to).
+        flags = "".join(f for f, on in ((" --record", record),
+                                        (" --apply", apply_)) if on)
+        kept = (" The recorded integration check is left as it was."
+                if record or apply_ else "")
+        click.echo(
+            f"PR {pr_id}: not checking: the PR HEAD is in one of the clones "
+            f"listed above.{kept} Move the extra clone(s) aside, then "
+            f"re-run `pm pr signoff integrate {pr_id}{flags}`.", err=True)
+        raise SystemExit(1)
     if record or apply_:
         rec = integration.check_integration(root, pr_id, data=data)
     else:
@@ -2885,6 +2966,13 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
         click.echo(f"PR {pr_id} is already merged.", err=True)
         raise SystemExit(1)
 
+    # A stale workdir record (started under another HOME/machine, record
+    # rewritten) is re-linked to the PR's clone when it is still here —
+    # never cloned — so the gate below reads the PR's actual HEAD instead of
+    # refusing for a missing workdir (pm_core.workdirs).  The gate still
+    # decides: a re-linked HEAD that isn't the approved one refuses as usual.
+    found = _resolve_workdir(data, pr_entry, root)
+
     backend_name = data["project"].get("backend", "vanilla")
     base_branch = data["project"].get("base_branch", "master")
 
@@ -2922,9 +3010,18 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     if current_sha is None and refusal and merge_gate_refusal(
             pr_entry, (pr_entry.get("signoff") or {}).get("sha"),
             base_branch) is None:
-        refusal = (f"PR {pr_id} workdir not found; the approved HEAD and "
-                   f"candidate live there, so nothing can be published. "
-                   f"Restore the workdir, then re-run sign-off.")
+        if found.status == workdirs_mod.AMBIGUOUS:
+            # The approved HEAD is in one of the clones listed above; the
+            # sign-off itself is fine, so don't send the user back to it.
+            refusal = (f"PR {pr_id}: the approved HEAD is in one of the "
+                       f"clones listed above, so nothing can be published "
+                       f"until one remains. Move the extra clone(s) aside, "
+                       f"then re-run `pm pr merge {pr_id}`.")
+        else:
+            refusal = (f"PR {pr_id} workdir not found; the approved HEAD "
+                       f"and candidate live there, so nothing can be "
+                       f"published. Restore the workdir, then re-run "
+                       f"sign-off.")
     if refusal:
         click.echo(refusal, err=True)
         raise SystemExit(1)

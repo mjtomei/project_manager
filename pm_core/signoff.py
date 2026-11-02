@@ -412,7 +412,8 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
     no separate shell evidence pane is needed.
     """
     # Imported lazily to avoid a heavy import cycle at module import time.
-    from pm_core.cli.helpers import _get_pm_session, _ensure_workdir, state_root
+    from pm_core.cli.helpers import (_get_pm_session, _ensure_workdir,
+                                     _no_workdir_hint, state_root)
     from pm_core.claude_launcher import build_claude_shell_cmd
     from pm_core import pane_registry, home_window
     from pm_core.model_config import (
@@ -436,7 +437,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         workdir = _ensure_workdir(data, pr_entry, root)
         if not workdir:
             print(f"Sign-off window: no workdir for {pr_entry['id']}. "
-                  "Start the PR first.")
+                  f"{_no_workdir_hint(data, pr_entry)}")
             return
 
     pr_id = pr_entry["id"]

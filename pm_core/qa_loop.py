@@ -5576,10 +5576,23 @@ def _run_qa_sync(
         from pm_core.cli.helpers import _ensure_workdir
         workdir_path = _ensure_workdir(data, live_pr, pm_root)
     if not workdir_path or not Path(workdir_path).is_dir():
-        _log.error("QA aborted: workdir for %s does not exist and could not be created", state.pr_id)
+        reason = (f"Workdir for {state.pr_id} does not exist on this machine "
+                  "and could not be created")
+        # _ensure_workdir also gives up when several verified clones of the
+        # PR branch exist (it won't pick one or clone another).  Its report
+        # went to stderr, which the TUI log line never shows: say so here
+        # instead of claiming the workdir is gone.
+        from pm_core import workdirs
+        amb = workdirs.ambiguity(data, live_pr)
+        if amb:
+            _log.error("QA aborted: %s", amb.describe())
+            reason = f"Workdir for {state.pr_id}: {amb.summary()}"
+        else:
+            _log.error("QA aborted: workdir for %s does not exist and could "
+                       "not be created", state.pr_id)
         state.running = False
         state.latest_verdict = "ERROR"
-        state.latest_output = f"Workdir for {state.pr_id} does not exist on this machine and could not be created"
+        state.latest_output = reason
         return state
 
     # Create QA workdir

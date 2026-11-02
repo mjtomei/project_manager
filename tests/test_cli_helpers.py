@@ -382,6 +382,19 @@ from pm_core.cli.helpers import _ensure_workdir
 class TestEnsureWorkdir:
     """Tests for _ensure_workdir — auto-create workdir when missing."""
 
+    @pytest.fixture(autouse=True)
+    def workdirs_base(self, tmp_path, monkeypatch):
+        """Keep every workdir, lock and fake clone out of the real ~/.pm.
+
+        _ensure_workdir creates the project workdirs dir and its per-PR lock,
+        and the clone test leaves its fake clone there.  In the real HOME that
+        plain dir outlives the run, and the next run's clone refuses to take
+        it over (it isn't the PR's clone), so the test failed on every rerun.
+        """
+        base = tmp_path / "workdirs-base"
+        monkeypatch.setattr("pm_core.paths.workdirs_base", lambda: base)
+        return base
+
     def test_returns_existing_workdir(self, tmp_path):
         """When workdir exists on disk, returns it unchanged."""
         workdir = tmp_path / "existing"
@@ -406,14 +419,13 @@ class TestEnsureWorkdir:
             result = _ensure_workdir(data, pr_entry, tmp_path)
         assert result is None
 
-    def test_clones_and_returns_new_workdir(self, tmp_path):
+    def test_clones_and_returns_new_workdir(self, tmp_path, workdirs_base):
         """When workdir is missing, clones repo and returns new path."""
         pm_root = tmp_path / "pm"
         pm_root.mkdir()
         pr_entry = {"id": "pr-001", "workdir": "/nonexistent", "branch": "pm/pr-001"}
         data = {"project": {"name": "test", "repo_id": "abc12345def", "repo": "https://example.com/repo.git"}}
 
-        fake_workdir = tmp_path / "workdirs" / "test-abc12345"
         calls = {}
 
         def fake_clone(src, dest, branch=None):
@@ -438,6 +450,7 @@ class TestEnsureWorkdir:
 
         assert result is not None
         assert pr_entry["workdir"] == result
+        assert Path(result) == workdirs_base / "test-abc12345" / "pm-pr-001-abcd1234"
         assert "clone" in calls
         assert "checkout" in calls
 

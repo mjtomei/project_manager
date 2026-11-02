@@ -5173,7 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-11-02T01:59:14.222401+00:00'
+  updated_at: '2026-11-02T22:49:11.454898+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5206,6 +5206,401 @@ prs:
       Current main-account routing supersedes older account notes.'
     created_at: '2026-11-02T01:59:14Z'
     last_edited: '2026-11-02T01:59:14Z'
+  - id: note-c8ec642
+    text: 'Impl done at 20280c56 (spec pm/specs/pr-4258a32/impl.md). New pm_core/workdirs.py:
+      resolve_workdir/get_workdir keep the fast path (recorded path exists -> returned,
+      no git/scan/lock); a missing/absent record scans ONLY this project workdirs
+      dir (one level) for <branch_slug>[-<7..40 hex>] names, verifies read-only (own
+      git toplevel, repo_id root commit or origin URL, HEAD on PR branch or rebase
+      head-name; GIT_OPTIONAL_LOCKS=0, never status/checkout), re-links a unique match
+      via compare-and-set under the store lock, reports >=2 verified as AMBIGUOUS
+      (no adopt, no clone). Shares the per-PR .workdir-<pr>.lock with cloning. Wired
+      into _ensure_workdir (review/done/merge window/sign-off/QA), pm pr start (before
+      cloning; --workdir skips discovery) and pm pr cd; nothing on registry load.
+      Tests: tests/test_workdirs.py (30, real git repos, temp workdirs_base). Full
+      suite in impl container: 5462 passed / 13 failed, failure set identical to origin/master
+      (markdown dep missing + push_proxy socket path = environment).'
+    created_at: '2026-11-02T02:18:12Z'
+    last_edited: '2026-11-02T02:18:12Z'
+  - id: note-da12d23
+    text: 'QA S1 run 2026-11-02 at 6253c650: stories 2-8 PASS live (pr cd/start re-link
+      at CA with clone state byte-identical, fast path, --workdir bypass with no lock,
+      absent field written back, reappeared symlink kept, fresh HOME rc=1). Story
+      1 Then "project.yaml sha256 AND mtime equal baseline" cannot hold as written:
+      the When browse Right/Left changes the TUI selection, and master pm_core/tui/pr_view.py:54-68
+      persists project.active_pr (Right writes A, Left writes B back, so the content
+      is byte-identical but the mtime moves). With list/--workdirs/show, Down/Up and
+      12 s of idle the sha and mtime were unchanged, and the stale record stayed stale
+      through the TUI write (no discovery). Fix the qa.md Then (sha only, or browse
+      without a selection change). Verdict INPUT_REQUIRED pending that call. Captures
+      /pm-captures/scenarios/1/{cli/fixture,cli/stories,tui,evidence}.'
+    created_at: '2026-11-02T04:47:14Z'
+    last_edited: '2026-11-02T04:47:14Z'
+  - id: note-49de3bf
+    text: 'QA S1 2026-11-02: the user ruled story 1 a PASS. The project.yaml mtime
+      moved only because the scenario''s TUI Right/Left browse saves active_pr; the
+      content sha matched and nothing was re-linked. Final verdict PASS 8/8 (follow-up
+      to note-da12d23).'
+    created_at: '2026-11-02T05:18:44Z'
+    last_edited: '2026-11-02T05:18:44Z'
+  - id: note-608e416
+    text: 'QA S7 run 2026-11-02 at 154ad662: PASS 5/5 (pm pr merge with stale records,
+      captures /pm-captures/scenarios/7/{fixture,story1-5}/{cli,tui}). A merged from
+      the re-linked clone (rc 0, record -> clone, no 2nd clone); B re-linked then
+      refused "verdict ... is stale (HEAD moved since)" rc 1, master unchanged; C
+      listed 2 verified clones (0000000c first), gate refused rc 1, project.yaml sha/master/C
+      clones unchanged (only a 0-byte .workdir-<C>.lock appears in $WD). Follow-up
+      findings (outside this PR, per spec A3): (1) `pm pr signoff record <pr>` with
+      a stale record says "no workdir/HEAD to record the verdict against." rc 1 although
+      the intact clone exists; it does not run discovery/re-link. (2) `pm pr signoff
+      integrate <pr> --record` with a stale record prints "integration check failed:
+      no PR workdir" (head/base None) rc 1 and OVERWRITES the valid up_to_date integration
+      record with status: error / error: no PR workdir (head, base_sha, candidate_tree
+      dropped), so a later re-link needs a fresh integrate before sign-off can be
+      recorded. Wording: after C''s ambiguity listing the gate still says "workdir
+      not found ... Restore the workdir, then re-run sign-off", which points away
+      from the real fix (move the extra clone).'
+    created_at: '2026-11-02T05:49:53Z'
+    last_edited: '2026-11-02T05:49:53Z'
+  - id: note-d152fcb
+    text: 'QA S9 story 2 finding at 0d42e087 (outside the re-link fix, d256 i1 covered
+      only the single-clone path): `pm pr signoff integrate <pr> --record` with a
+      stale record and 2 verified clones on the PR branch prints the ambiguity listing
+      on stderr, then "integration check failed: no PR workdir" (head/base None) rc
+      1, and OVERWRITES the valid up_to_date integration record: `pm pr show` drops
+      Base sha and shows Status: error; integration.json becomes {status: error, error:
+      "no PR workdir"} (head, base_sha, candidate_tree gone). Both clones and the
+      workdir record are untouched. Expected: with an ambiguity (no workdir resolved),
+      --record should leave the existing integration record alone, as the read-only
+      default does. Captures /pm-captures/scenarios/9/story2.'
+    created_at: '2026-11-02T07:05:21Z'
+    last_edited: '2026-11-02T07:05:21Z'
+  - id: note-96f21bf
+    text: 'QA S10 run 2026-11-02 at 700069de (code = 0d42e087): PASS 6/6 live (TUI
+      d/t/i/i-after-move/zz d/zz d-after-move with two verified clones; captures /pm-captures/scenarios/10/{fixture,tui,cli,evidence}).
+      d and i show "Review/Sign-off window: no workdir for <A>. 2 clones of ..." with
+      the full line in L and no "Start the PR first"; t ends "QA finished: ERROR"
+      in <1 s with the multi-line ERROR [qa_loop] record in L, no qa window or qa
+      workdir; after moving the copy aside, i opened signoff-<A> and zz d opened review-<B>
+      in the remaining clone (re-link logged, no new dir), review PASS in 22 s. Findings
+      (observational, outside this PR per spec A3): (1) the one-row message line clips
+      the remedy: at 79 cols it stops after "2 clones of", zoomed to 160 after "not
+      choosing one;", so "move the extra clone(s) aside" is visible only in L; (2)
+      the t abort reason reaches no message line, [tui] log line or note (newest note
+      is a bare "QA ERROR: "), filed pr-5626111; (3) zz d with 2 clones retries 3x
+      and ends LAUNCH_FAILED "window not found after launch" ~22 s after start with
+      0-char launch artifacts, and only child WARNING [workdirs] lines in L name the
+      clones, filed pr-5a6c061.'
+    created_at: '2026-11-02T07:34:03Z'
+    last_edited: '2026-11-02T07:34:03Z'
+  - id: note-8fee005
+    text: 'QA S11 story 3 finding (2026-11-02 at 700069de): a pm command run from
+      inside ANOTHER PR''s clone writes the re-link into that clone''s tracked pm/project.yaml
+      and blocks its integrate --apply. Repro (local backend, no pm session): PRs
+      B and C started (clones BC, CC; CC''s committed yaml lists B pending with no
+      workdir key). In CC, `pm pr cd <B>` prints ''no workdir is recorded; re-linked
+      the existing clone ... at <BC>'' and enters BC (BC stays clean, main project.yaml
+      sha unchanged), but CC now shows '' M pm/project.yaml'' (+ ''workdir: <BC>''
+      under B). From the main repo, `pm pr list --workdirs` marks C ''(dirty)'' and
+      `pm pr signoff integrate <C> --apply` prints ''merges cleanly with master@...''
+      then ''Not applied: workdir has uncommitted changes'' on stderr, rc 1. The 532f3ea1
+      guard (workdirs.resolve_workdir: _is_within(root, found)) only skips the write
+      when the cwd is the PR''s OWN clone; it should also skip it when the registry
+      being written is any PR clone''s tracked yaml rather than the main one. Captures
+      /pm-captures/scenarios/11/story3.'
+    created_at: '2026-11-02T07:34:30Z'
+    last_edited: '2026-11-02T07:34:30Z'
+  - id: note-2c7ee63
+    text: 'QA S11 run 2026-11-02 at 990c5b4f (code = 0d42e087): PASS 5/5 live, plain
+      shell + private tmux, no pm session (captures /pm-captures/scenarios/11/{fixture,story1-5,evidence}).
+      (1) pm pr cd B from inside B''s own clone (twice, and via a symlinked cwd) entered
+      the clone, wrote nothing: clone clean, its yaml and the main yaml sha unchanged;
+      only a 0-byte .workdir-<B>.lock appears. (2) main-repo signoff integrate B --apply
+      after master moved: merges cleanly, merged into the PR branch, rc 0, empty stderr,
+      clone still clean. (3) from C''s clone, pm pr cd B dirties C''s tracked yaml
+      and C''s integrate --apply is refused rc 1 (finding, note-8fee005). (4) renamed
+      B clone: main-repo cd re-links once, then the fast path, record lands only in
+      the main yaml. (5) flock barrier with 8 waiters (4 in-clone, 4 main), all rc
+      0 and empty stderr, exactly 1 main re-link line, one B clone, no .tmp- entry.
+      Wording observation: an in-clone run says "no workdir is recorded; re-linked
+      the existing clone ..." every time although nothing is recorded (resolve_workdir
+      reports RECOVERED for the not-persisted own-clone case). Also: d384a302 (S11
+      note commit) was briefly pushed with conflict markers in pm/project.yaml, fixed
+      in 990c5b4f; anyone who pulled d384a302 should pull again.'
+    created_at: '2026-11-02T07:37:50Z'
+    last_edited: '2026-11-02T07:37:50Z'
+  - id: note-9961d8b
+    text: 'SIGNOFF_IMPL return handled 2026-11-02: master@5b352d16 merged as 1d79a092
+      (pm/project.yaml via store.merge_3way(base, ours=master, theirs=branch): both
+      sides only appended records/notes, 586 unique PR ids, no true conflict; pm_core/cli/pr.py
+      auto-merged). Fixes in 0aaeb633: (1) note-d152fcb: `pm pr signoff integrate
+      <pr>` with 2+ verified clones now refuses in every mode after the listing: "PR
+      <pr>: not checking: the PR HEAD is in one of the clones listed above. [The recorded
+      integration check is left as it was.] Move the extra clone(s) aside, then re-run
+      `pm pr signoff integrate <pr> [--record] [--apply]`." exit 1; --record/--apply
+      no longer overwrite pr.integration or integration.json with status: error /
+      no PR workdir. (2) note-8fee005: a re-link is never written into ANY PR clone''s
+      tracked pm/project.yaml (workdirs.registry_clone: root inside the found clone
+      or this project''s workdirs dir, or root''s checked-out branch is some PR''s
+      branch, e.g. a container /workspace); the main repo still gets the record. Whenever
+      the re-link isn''t written the message says "Workdir for <pr>: ...; using the
+      existing clone on <branch> at <path> (not recorded: pm is using this clone''s
+      own tracked <root>/project.yaml | pm is using <root>/project.yaml, tracked in
+      the clone <clone> | could not write ...)" instead of "re-linked". QA spec (pm/specs/pr-4258a32/qa.md,
+      planner''s uncommitted edits left as found) R16 two-clone and R18 observationals
+      are now hard behaviour. Tests: tests/test_workdirs.py (+5, incl. pr cd from
+      another PR''s clone), tests/test_merge_publish.py (+1); new tests fail on the
+      pre-fix tree (other clone '' M pm/project.yaml'', integration record clobbered).
+      Full suite at 0aaeb633: 5588 passed, 1 skipped, 12 failed (all test_markdown_render.py:
+      markdown dep missing in the impl container; total = sign-off trial merge 5595
+      + 6 new).'
+    created_at: '2026-11-02T08:39:59Z'
+    last_edited: '2026-11-02T08:39:59Z'
+  - id: note-3391cb7
+    text: 'QA S15 run 2026-11-02 at d4ebdb22: PASS 7/7 live (plain shell, private
+      tmux, no pm session; captures /pm-captures/scenarios/15/{fixture,story1-7,evidence}).
+      pm pr cd B from B''s own clone (2x + symlinked cwd), from C''s clone, and from
+      two outside checkouts of B''s branch (scratch clone + ~/.pm/workdirs/qa/s15/b)
+      printed ''using the existing clone on <branch> at <BC> (not recorded: ...)''
+      naming the right registry, entered BC, and left every clone clean with yaml
+      shas unchanged and no ''re-linked''. Main integrate C --apply after master moved:
+      all three listed (clean), rc 0, empty stderr, merge commit in CC. In-clone read-only
+      integrate B: no ''Workdir for'' line, head = BC HEAD, nothing written. Main
+      repo on master re-links once and records it, then the fast path. Wording observation
+      (main repo checked out on C''s branch): ''(not recorded: pm is using <proj>/pm/project.yaml,
+      tracked in the clone <proj>)'' calls the main repository a clone and does not
+      say the reason is the PR-branch checkout; naming the branch (e.g. ''<proj>/pm/project.yaml
+      is on PR branch pm/<C>-charlie-api'') would be clearer.'
+    created_at: '2026-11-02T09:27:05Z'
+    last_edited: '2026-11-02T09:27:05Z'
+  - id: note-ffb2a0a
+    text: 'QA S16 run 2026-11-02 at 91ebf1b6 (code = 0aaeb633/d4ebdb22): PASS 6/6
+      live in a pm session with fake-claude (captures /pm-captures/scenarios/16/{fixture,story1-6,evidence}).
+      (1) 10 actors on B behind a .workdir-<B>.lock flock barrier (7 waiters in 193
+      ms): all rc 0, exactly one main-repo re-link line (cd2), in-BC and in-CC actors
+      print the "(not recorded: ...)" lines and both clones stay clean, 20 burst notes,
+      C retitled, signoff-<B> opened in BC. (2) D with 2 verified clones, 3x15 looping
+      integrate --record / integrate / signoff record and a mid-run mv of the copy:
+      30 refusals before the mv with the exact wording, 15 acted after it, one re-link
+      to DC, the yaml observer never saw status error and checked_at moved only after
+      the mv. (3) pm pr cd under a held pm edit lock: 2.089 s, "using ... (not recorded:
+      could not write ...)", yaml sha unchanged; after the save a 0.091 s re-link
+      that keeps the user_edit line. (4) E review+sign-off launches with no clone:
+      one clone, both windows in it. (5) duplicate pm pr merge: one merge (+1 first-parent),
+      the loser prints only "already merged" (rc 1). (6) G/H twin cd races: one re-link
+      per PR, no cross-link (repeated with renamed clones, same result). Finding (observational,
+      outside this PR): with pm edit holding the lock, pm pr signoff on an already-sign_off
+      PR dies with only the 2 s lock Error, rc 1, before it resolves the workdir.
+      Filed as pr-588171e.'
+    created_at: '2026-11-02T09:49:04Z'
+    last_edited: '2026-11-02T09:49:04Z'
+  - id: note-b5f73f5
+    text: 'QA S17 run 2026-11-02 at 2022dc10 (code = d4ebdb22): PASS 8/8 live, isolated
+      HOME + private pm session with TUI and fake-claude (captures /pm-captures/scenarios/17/{fixture,baseline,story1-8/{tui,cli},evidence}).
+      Browse left project.yaml sha and all 5 stale records untouched (mtime moved
+      only via active_pr), no lock/dir in W. s/d/i/t on A/B/C/Q each re-linked the
+      original clone (log line, record updated, no 2nd clone): A impl window kept
+      porcelain/stash/HEAD identical; B review window 2 panes in the clone; C sign-off
+      logged integration up_to_date head=<clone HEAD 8> and integration.json head
+      = clone HEAD, no "no PR workdir"; in-clone `pm pr signoff integrate C` from
+      a split of the sign-off window: rc 0, empty stderr, clone clean, both yamls
+      unchanged; Q QA scenario clones s-0/s-1 cloned from the Q clone, QA PASS ~1m55s.
+      D with 2 verified clones: d/i name the ambiguity on the message line + log with
+      no window, t ends ERROR in 0.44 s with the QA aborted listing, record stays
+      stale, no .tmp-; after moving the twin aside i opened signoff-D in the remaining
+      clone (re-link + up_to_date head=7d4b6d5b), W unchanged. Driving observations
+      only: card order changes after a launch (A moved to the left end), and with
+      the L pane open (79 cols) the cards wrap into rows so Left/Right paths differ;
+      check the ╔ card before each key.'
+    created_at: '2026-11-02T10:08:07Z'
+    last_edited: '2026-11-02T10:08:07Z'
+  - id: note-1e285c4
+    text: 'SIGNOFF_IMPL return handled 2026-11-02 at ba34f457 (test-only, pushed).
+      tests/test_cli_helpers.py::TestEnsureWorkdir now has an autouse fixture that
+      points paths.workdirs_base at tmp_path, so no test in the class writes the project
+      workdirs dir, .workdir-pr-001.lock or the fake clone into the real ~/.pm/workdirs.
+      The clone test also asserts the clone lands under that base. Repro before the
+      fix (fresh HOME, class run twice): run 1 passed 5/5, run 2 failed test_clones_and_returns_new_workdir
+      with "Not cloning pr-001: its workdir names ... are taken by directories that
+      aren''t its clone". After the fix: 5/5 on three runs in a fresh HOME, and 5/5
+      twice in the HOME holding the old leftover. Full suite run twice in one fresh
+      HOME (env -u PM_HOST_HOME PATH=/usr/bin:/bin, pytest 8.4.2 + markdown): 5729
+      passed, 1 skipped both times (446 s / 454 s), 0 failed. Run 2 added only .pm/debug
+      logs and .pm/run env files, nothing under workdirs/. Older tests still leave
+      an empty workdirs/test-project dir and .signoff-step-*/.merge-* lock files in
+      HOME. They predate this PR and don''t fail on rerun, so they''re left alone.
+      No production code changed since dcb8c0d2; master is still 6728fc22.'
+    created_at: '2026-11-02T17:17:45Z'
+    last_edited: '2026-11-02T17:17:45Z'
+  - id: note-78721a0
+    text: 'QA S18 run 2026-11-02 at d911598b: PASS 5/5 live (isolated HOME, private
+      pm session + TUI, fake-claude; captures /pm-captures/scenarios/18/{fixture,story1-5}).
+      (1) pm pr cd 136 / "#136" (gh_pr_number) re-linked A from an /home/olduser record,
+      one-line yaml diff, A dirty state (index sha/mtime, staged, stash, untracked,
+      evidence) identical; TUI card "#136" after r. (2) from C clone: no -C = "using
+      ... (not recorded: ... tracked in the clone <C>)", -C <M>/pm re-links then fast
+      path, PM_PROJECT=<C>/pm from main = not recorded; C yaml/porcelain unchanged.
+      (3) pm -C <M>/pm pr review from a non-pm session on the pm server: E re-linked,
+      review window in the pm session (panes in E clone), work client untouched; D
+      with 2 clones: listing (stderr) twice + "Review window: no workdir ... not choosing
+      one", rc 0, no window/dir. (4) E18 reproduced: id-less pm pr review in F stale
+      clone auto-selected active B (filed pr-8d624c5); after pm pr cd F it auto-selects
+      F. (5) 4-shell go-file race (-C main, cwd A/B/C/M): exactly 1 re-link line per
+      PR (G, H), 4x integrate up to date head = G clone HEAD, 4 notes, no lock error,
+      all clone yamls unchanged.'
+    created_at: '2026-11-02T17:51:56Z'
+    last_edited: '2026-11-02T17:51:56Z'
+  - id: note-79cdc4b
+    text: 'QA S19 run 2026-11-02 at d911598b: PASS 5/5 live via the tmux popups in
+      an isolated pm session (fake-claude, fzf 0.60.3, two harness clients; captures
+      /pm-captures/scenarios/19/{fixture,baseline,story1-5,raw,harness,evidence}).
+      From C''s window: prefix+P h d re-linked B and opened review-B in its clone;
+      prefix+M pr start E reused the dirty clone (no clone/pull); D with 2 clones:
+      d listed the ambiguity and changed nothing, s held "pm error ... Not creating
+      another workdir" until Enter, after moving the copy d re-linked and switched
+      to the same review-D window; g merged F from the re-linked clone (master 2 ->
+      3 first-parent, card merged); two clients sent i on G together: one sign-off
+      window, one re-link line. Every re-link landed in the main yaml; C''s clone
+      stayed clean, its yaml (and B''s) sha unchanged. Findings outside this PR: (1)
+      E19: rc-0 popups close at once, so the D ambiguity listing and hint are never
+      visible on screen (filed pr-ade4427, cause _run_picker_command echoes stderr
+      on rc 0 without _wait_dismiss); (2) the merge opens pm-home in C''s clone /pm
+      listing C''s committed yaml, all pending (existing pr-3f52b15, note added).'
+    created_at: '2026-11-02T17:52:55Z'
+    last_edited: '2026-11-02T17:52:55Z'
+  - id: note-1887e0e
+    text: 'QA S21 run 2026-11-02 at 7ccd9cdf6 (code = d911598b): PASS 5/5 live, isolated
+      HOME + private pm session with fake-claude (captures /pm-captures/scenarios/21/{fixture,story1-5,evidence}).
+      (1) close --remove kept the dirty clone; the re-add got the same id and branch;
+      the re-start printed "no workdir is recorded; re-linked ..." then "Workdir has
+      uncommitted changes — skipping git pull/checkout.", HEAD/porcelain intact, the
+      only WD change a 0-byte .workdir lock. (2) start of the closed PR: stderr refusal
+      only, rc 1, no re-link, lock, clone or window; yaml sha unchanged. (3) merged
+      PR with a stale record: cleanup "no workdir to clean up" while the clone exists;
+      --prune cleared it and the earlier closed PR (registry order); cd re-linked;
+      cleanup skipped the dirty clone; --force removed it; final cd "does not exist:
+      None" rc 1, no clone created. (4) cleanup --all removed the clean merged clone,
+      skipped the dirty in_progress one, and left a stale-record clone and its (missing)
+      record alone. (5) pm pr cd vs prune+cleanup --force, 5 rounds: cd won the store
+      lock each round and cleanup then removed the clone; record none, follow-up cd
+      rc 1, yaml parses, no .tmp-, empty stderr. Wording findings (1, 3: cleanup ignores
+      the discoverable clone; literal None) filed as pr-cd23997, outside this PR.'
+    created_at: '2026-11-02T18:31:21Z'
+    last_edited: '2026-11-02T18:31:21Z'
+  - id: note-72c6b70
+    text: 'SIGNOFF_IMPL return handled 2026-11-02: master@c3bac6cee203 merged into
+      the branch as b045f561 (pushed e820112b..b045f561). Conflict was pm/project.yaml
+      only: both sides appended new PR records at the same spot (QA-filed pr-5626111/pr-5a6c061/pr-588171e/pr-8d624c5/pr-ade4427/pr-cd23997
+      vs master''s pr-78e8ebe/pr-3199f44), no record changed on both sides and the
+      code files are disjoint. Resolved with store.merge_3way(base=6728fc22, ours=master,
+      theirs=branch) via the minimal-text route: 623 unique ids, every record verbatim
+      from one side, store.load(validate=True) OK, no markers. No code change. Full
+      suite on the merged tree (pytest 8.4.2 + markdown, fresh scratch HOME): 5745
+      passed, 1 skipped, 0 failed (449.78 s), same as the trial merge''s two runs.
+      The live uncommitted registry delta (pr-4258a32 status/workdir/model + the 3
+      QA planning notes) and the planner''s uncommitted qa.md edits are preserved
+      in the workdir.'
+    created_at: '2026-11-02T19:14:49Z'
+    last_edited: '2026-11-02T19:14:49Z'
+  - id: note-f71be6d
+    text: 'QA S23 2026-11-02 at a414867b: PASS 8/8 live (CLI only, no pm session;
+      isolated HOME; captures /pm-captures/scenarios/23/story1-8). (1) Two verified
+      clones of Alpha: cd rc 1 lists both + "Not choosing one...", start refuses with
+      "Not creating another workdir", no record or clone change; after moving one
+      out the next cd re-links the remaining clone (rc 0). (2) Bravo look-alikes (master
+      copy, plain dir, unrelated-repo clone, detached copy) each skipped with a reason,
+      record unchanged; start creates a fresh clone at the full-base-hash name and
+      leaves the four look-alikes byte-identical. (3) Charlie: both workdir names
+      held by plain dirs -> start refuses "workdir names ... are taken by directories
+      that aren''t its clone; move them aside", .tmp-pr-C removed, nothing recorded.
+      (4) Delta: symlink alias -0000000a sorts first but the real -d60f9a82 dir is
+      re-linked, not the alias. (5) Echo: inherited GIT_DIR/GIT_WORK_TREE pointing
+      at an unrelated repo does not fool discovery; plain dir skipped, real clone
+      re-linked once copied in. (6) Foxtrot: 17 same-named plain dirs -> "(more than
+      16; none verified)" listing, no clone, record unchanged. (7) Golf: clones only
+      outside the project workdirs dir -> cd says "Workdir ... does not exist: <recorded
+      path>" (no scan), start creates a fresh clone; outside snapshot identical before/after.
+      (8) Hotel: recorded path restored as a symlink -> fast path, no re-link, record
+      unchanged. Only deviation: git 2.34.1''s "not a git repository" stderr reads
+      "(or any parent up to mount point /)" vs the qa.md text (git wording, not pm).'
+    created_at: '2026-11-02T20:12:20Z'
+    last_edited: '2026-11-02T20:12:20Z'
+  - id: note-8096429
+    text: 'QA S24 run 2026-11-02 at 339731ce: PASS 8/8 live (isolated HOME, private
+      pm session with fake-claude, plain CLI; captures /pm-captures/scenarios/24/story1-8,
+      each with recording.cast/.mp4/manifest.md and evidence/ holding stdout, stderr
+      and exit code per command). Stories 1-7 matched the spec wording exactly: read-only
+      integrate writes nothing (yaml sha256+mtime and integration.json unchanged);
+      --record, signoff record and merge re-link the renamed clone; the two-clone
+      ambiguity refuses in all five modes (integrate, --record, --apply, signoff record,
+      merge) with empty stdout, rc 1 and the exact listing+refusal on stderr while
+      project.yaml, integration.json, both clones and master stay byte-identical;
+      the no-clone merge and signoff record print exactly "workdir not found ... Restore
+      the workdir, then re-run sign-off." and "no workdir/HEAD to record the verdict
+      against." Story 8 (cleanup/prune/cd) matched except one qa.md wording item:
+      after `pm pr cleanup <A>` (step 1) the listing shows the RECORDED -c3c3c3c3
+      path as (missing), not -c4c4c4c4 -- the registry was never updated to the renamed
+      clone, so the Then should say -c3c3c3c3 (cleanup does not re-link; that is also
+      the known pr-cd23997 behaviour the scenario encodes). Everything else exact:
+      --prune clears A -c3c3c3c3 and C oldhome path, cd re-links -c4c4c4c4 with pwd
+      -P = the clone, dirty skip + --force removal, final cd "does not exist: None"
+      rc 1 with no clone created.'
+    created_at: '2026-11-02T20:58:17Z'
+    last_edited: '2026-11-02T20:58:17Z'
+  - id: note-c7833d6
+    text: 'QA S25 run 2026-11-02 at 45c713a0: PASS 8/8 live (isolated HOME, private
+      tmux, local backend; captures /pm-captures/scenarios/25/{fixture,story1-8}).
+      (1) from B''s own clone, direct and via a symlink outside the workdirs dir:
+      "no workdir is recorded; using the existing clone ... (not recorded: pm is using
+      this clone''s own tracked <BC>/pm/project.yaml)", no re-link, BC clean, main
+      sha unchanged. (2) from C''s clone: same message with "tracked in the clone
+      <CC>"; B''s main record stays (missing), CC/BC clean, CC yaml sha unchanged;
+      integrate C --apply merges master and prints "Merged master@<sha> into the PR
+      branch as <sha>.". (3) pm -C main re-links into the main registry, the second
+      run is the fast path, PM_PROJECT=<CC>/pm writes nothing (both yamls same sha).
+      (4) held pm edit lock: 2.09 s, "could not write ... Could not acquire lock ...
+      within 2.0s", yaml byte-identical, then re-link records and user_edit: keep-me
+      survives. (5) nine actors behind a go-file (2 cd, start, review, signoff, 4
+      notes): all rc 0, exactly one "re-linked", one B-slug dir, no .tmp-<B>, single
+      B record naming the clone, all 4 note texts, review/signoff windows opened.
+      (6) concurrent G/H cd: two re-links, no cross-link. (7) duplicate pm pr merge
+      M: winner re-links+merges, loser only "already merged" on stderr rc 1, first-parent
+      4->5 once. (8) main repo checked out on B''s branch: "not recorded: pm is using
+      <main>/pm/project.yaml, tracked in the clone <main>", no write (porcelain -uno
+      empty, sha same); back on master it re-links. No code changes; no new bugs found.'
+    created_at: '2026-11-02T21:44:34Z'
+    last_edited: '2026-11-02T21:44:34Z'
+  - id: note-90e80b5
+    text: 'QA S26 run 2026-11-02 at 2150a33d: PASS 8/8 live (isolated HOME, private
+      tmux socket, fake-claude, fzf 0.60.3, textual 2.0.1 for story 4; captures /pm-captures/scenarios/26/story1-8).
+      (1) TUI d/t/s/i on A/B/C each re-linked the original clone; windows review-A,
+      qa-A, impl-B, signoff-C with panes in the clones; QA scripted PASS with scenario
+      clones origin = A clone; one clone per PR; clone HEAD/porcelain/stash/fixture
+      identical; records updated. Surface line is "QA PASS for pr-3e39908 — press
+      i to sign off" (scenario Then said "QA finished for A: PASS"); A needs a pm/specs/<pr>/qa.md
+      for the fake planner or QA stops at INPUT_REQUIRED. (2) Two-clone review: ambiguity
+      line + listing, no window/clone, D->in_review; after mv the re-link opens review-D.
+      (3) QA ERROR in <0.5 s naming the ambiguity; sign-off ambiguity message; no
+      windows/clones; D2->qa->sign_off; only .workdir-D2.lock. (4) textual 2.0.1:
+      modal on A, Down/Up move the row, e -> "pr-3e39908: effort for (all roles) ->
+      low (new launches use it)", effort: low recorded; note-add reload under the
+      modal -> "model settings: tree reload failed" + NoMatches #tech-tree (known
+      pr-3199f44), TUI survives; A workdir stays stale, no re-link/lock until d re-links
+      and opens review-A. (5) popup picker/M from C window: picker d re-links B and
+      "Switched to existing review window", picker s opens impl-B, "pm> pr start B"
+      selects the existing impl window; C clone yaml/porcelain unchanged; one B clone.
+      Observation: the popup re-link line is in the cwd-keyed popup log (~/.pm/debug/pm-pr-88c7ea1-...-af700eeb.log),
+      not the TUI session log. (6) popup "pr start S" with 2 clones exits non-zero,
+      shows the listing + "Not creating another workdir" + "Press q/Esc/Enter to close..."
+      and holds; picker d shows "already in_review" + the ambiguity listing, rc-0
+      popup closes at once (50 ms frame/raw stream), existing review-S untouched.
+      (7) separate project G/H: f/F/x/PageDown/PageUp/R + 8 s idle leave project.yaml
+      sha, locks and listing unchanged, no re-link; deliberate Left changes only active_pr.
+      (8) id-less pm -C pr review from inside E clone auto-selects F (pr-8d624c5 observation),
+      then after pm pr cd E re-links it auto-selects E; review-E panes in E clone;
+      one E clone. No new issues in this PR scope.'
+    created_at: '2026-11-02T22:49:11Z'
+    last_edited: '2026-11-02T22:49:11Z'
   model: provider:claude-main-xhigh-pm
   effort: high
 - id: pr-0778fbe
@@ -40768,38 +41163,40 @@ prs:
   notes: []
 - id: pr-9ee4d64
   plan: bugs
-  title: 'Bug: auto-start run transcripts overwrite pre-return impl/sign-off/review transcripts
-    after a sign-off return'
+  title: 'Bug: auto-start run transcripts overwrite pre-return impl/sign-off/review
+    transcripts after a sign-off return'
   branch: pm/pr-9ee4d64-bug-auto-start-run-transcripts-overwrite-pre-retur
   status: closed
   depends_on: []
   description: 'pm/transcripts/<autostart-run>/ keeps one file per (step, pr): impl-<pr>.jsonl,
     signoff-<pr>.jsonl, review-<pr>-i1.jsonl. When sign-off routes a PR back (SIGNOFF_IMPL/REVIEW)
-    within the same auto-start run, the rework impl, the fresh review loop (iteration restarts
-    at 1) and the fresh sign-off write the same paths, so the archived transcript of the router
-    that made the return decision (and the pre-return impl/review) is lost from the run archive
-    (the original ~/.claude/projects JSONL survives). Repro (QA pr-ac10f03 S15, 2026-10-22):
-    two overlapping PRs, B returned SIGNOFF_IMPL at 03:39:55; after B merged, pm/transcripts/autostart-*/signoff-<B>.jsonl
-    and impl-<B>.jsonl hold only the post-return sessions. Suggest suffixing by return round
-    (e.g. signoff-<pr>-r2.jsonl) or by session id.
+    within the same auto-start run, the rework impl, the fresh review loop (iteration
+    restarts at 1) and the fresh sign-off write the same paths, so the archived transcript
+    of the router that made the return decision (and the pre-return impl/review) is
+    lost from the run archive (the original ~/.claude/projects JSONL survives). Repro
+    (QA pr-ac10f03 S15, 2026-10-22): two overlapping PRs, B returned SIGNOFF_IMPL
+    at 03:39:55; after B merged, pm/transcripts/autostart-*/signoff-<B>.jsonl and
+    impl-<B>.jsonl hold only the post-return sessions. Suggest suffixing by return
+    round (e.g. signoff-<pr>-r2.jsonl) or by session id.
 
 
-    2026-10-28 live collector failure: #241 old review completion finalized the shared review-i1
-    transcript path before checking current loop ownership. A newer loop (8101 i1) had reused
-    the path; the obsolete callback froze its live symlink into an early copy, so the collector
-    saw no verdict even though the canonical newer SID finished with its own NEEDS_WORK. Recovery
-    preserved both and restored the exact link before collecting the original reviewer outcome.
-    Evidence: /home/matt/.local/state/pm-pr-shepherd/241-review-8101-i1-transcript-recovery.json
-    and check-20261028T122913Z/241-transcript-link-preservation. #248 S11 also exposed loss
-    of the earlier session_id from overwrite.
+    2026-10-28 live collector failure: #241 old review completion finalized the shared
+    review-i1 transcript path before checking current loop ownership. A newer loop
+    (8101 i1) had reused the path; the obsolete callback froze its live symlink into
+    an early copy, so the collector saw no verdict even though the canonical newer
+    SID finished with its own NEEDS_WORK. Recovery preserved both and restored the
+    exact link before collecting the original reviewer outcome. Evidence: /home/matt/.local/state/pm-pr-shepherd/241-review-8101-i1-transcript-recovery.json
+    and check-20261028T122913Z/241-transcript-link-preservation. #248 S11 also exposed
+    loss of the earlier session_id from overwrite.
 
 
     Extend acceptance to immutable per-attempt/loop/session archives and ownership-checked
-    finalization: superseded callbacks cannot freeze, replace, unlink or redirect a current
-    attempt''s live collector transcript. Keep both complete original sessions across multiple
-    sign-off returns, iteration resets, restart and late completion. Current collectors must
-    see later appended verdicts; never invent a verdict or delete history. User authorized
-    this PR to start2026-10-28 alongside the earlier integration gate.'
+    finalization: superseded callbacks cannot freeze, replace, unlink or redirect
+    a current attempt''s live collector transcript. Keep both complete original sessions
+    across multiple sign-off returns, iteration resets, restart and late completion.
+    Current collectors must see later appended verdicts; never invent a verdict or
+    delete history. User authorized this PR to start2026-10-28 alongside the earlier
+    integration gate.'
   agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
@@ -40810,91 +41207,96 @@ prs:
   merged_at: null
   notes:
   - id: note-6f1c638
-    text: 'QA INPUT_REQUIRED: Sign-off IMPL return keeps the pre-return implementation and
-      router transcripts: PASS; Sign-off REVIEW return restarts the review loop without overwriting
-      the earlier loop: PASS; A superseded review loop cannot freeze the current loop''s live
-      transcript: PASS; Turning auto-start off, or a watcher completing, must not freeze a
-      loop that is still writing: PASS; Restarting the TUI mid-run resumes on the same transcripts:
-      PASS; Two PRs and two sign-off returns inside one auto-start run: INPUT_REQUIRED; CLI
-      drivers preserve transcripts too (auto-sequence and CLI watcher): PASS; The bug''s reproduction
-      tests pass on the fix and fail before it: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-9ee4d64-0de466423db9dfc5)'
+    text: 'QA INPUT_REQUIRED: Sign-off IMPL return keeps the pre-return implementation
+      and router transcripts: PASS; Sign-off REVIEW return restarts the review loop
+      without overwriting the earlier loop: PASS; A superseded review loop cannot
+      freeze the current loop''s live transcript: PASS; Turning auto-start off, or
+      a watcher completing, must not freeze a loop that is still writing: PASS; Restarting
+      the TUI mid-run resumes on the same transcripts: PASS; Two PRs and two sign-off
+      returns inside one auto-start run: INPUT_REQUIRED; CLI drivers preserve transcripts
+      too (auto-sequence and CLI watcher): PASS; The bug''s reproduction tests pass
+      on the fix and fail before it: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-9ee4d64-0de466423db9dfc5)'
     created_at: '2026-10-28T20:28:46Z'
     last_edited: '2026-10-28T20:28:46Z'
   - id: note-user-restart-all-20261029
-    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart this
-      PR in implementation and merge latest origin/master INTO this existing PR branch before
-      any new review/QA. User explicitly released old review/QA holds for this restart; preserve
-      all earlier questions, answers, verdicts and evidence and re-evaluate after integration
-      rather than invent answers or waive acceptance. Preserve dirty source, planner/spec
-      edits, local registry/routing, stashes, untracked files and all evidence. The interrupted
-      work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
-      inspect its per-PR backup and original transcripts as needed. Safely reconcile interrupted
-      changes and current master, test, commit and push only this PR branch. Never force-push/reset
-      master or merge the PR into master. Report integrated master SHA and tests; only then
-      hand off to native review/QA. Keep assigned primary/helper model and explicit work Opus5.5/xhigh
-      signoff override. No new dependencies or unrelated work are authorized.
+    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart
+      this PR in implementation and merge latest origin/master INTO this existing
+      PR branch before any new review/QA. User explicitly released old review/QA holds
+      for this restart; preserve all earlier questions, answers, verdicts and evidence
+      and re-evaluate after integration rather than invent answers or waive acceptance.
+      Preserve dirty source, planner/spec edits, local registry/routing, stashes,
+      untracked files and all evidence. The interrupted work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
+      inspect its per-PR backup and original transcripts as needed. Safely reconcile
+      interrupted changes and current master, test, commit and push only this PR branch.
+      Never force-push/reset master or merge the PR into master. Report integrated
+      master SHA and tests; only then hand off to native review/QA. Keep assigned
+      primary/helper model and explicit work Opus5.5/xhigh signoff override. No new
+      dependencies or unrelated work are authorized.
 
       Test isolation is mandatory: #267 S10 refiner killed the REAL pm-project_manager-5b29c418
-      session after mistaking a test PR launch for ownership of that session. S9/S12 inherited
-      ambient tmux context and recreated test TUIs under that real name; S12 changed global
-      tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use an explicit dedicated test
-      tmux socket and isolated state/config, verify fixture ownership; never mutate the user''s
-      real session or shared host configuration as test cleanup. Preserve the failed-run evidence.
-      #278 is the existing per-session tmux-isolation fix. Do not relaunch old QA fixture
-      workers.'
+      session after mistaking a test PR launch for ownership of that session. S9/S12
+      inherited ambient tmux context and recreated test TUIs under that real name;
+      S12 changed global tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use
+      an explicit dedicated test tmux socket and isolated state/config, verify fixture
+      ownership; never mutate the user''s real session or shared host configuration
+      as test cleanup. Preserve the failed-run evidence. #278 is the existing per-session
+      tmux-isolation fix. Do not relaunch old QA fixture workers.'
     created_at: '2026-10-29T01:33:53.678599+00:00'
     last_edited: '2026-10-29T01:33:53.678599+00:00'
   - id: note-5d78b22
-    text: 'QA INPUT_REQUIRED: A sign-off implementation return keeps the pre-return implementation
-      and router transcripts: PASS; Whole-run archive audit across two returns, a restart
-      and the merge step: PASS; Review-loop ownership across a restart, a dead attempt and
-      a second loop: PASS; A pre-upgrade run directory — legacy adoption, frozen legacy files
-      and a live legacy link: PASS; Concurrent sweeps and overlapping writers: PASS; A failed
-      archive, and a pruned native transcript, never block the workflow: PASS; A sign-off
-      QA return archives its router and does not replay its verdict: PASS; CLI drivers keep
-      history too, and do not freeze a TUI loop: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-9ee4d64-b0d9756bebb216d5)'
+    text: 'QA INPUT_REQUIRED: A sign-off implementation return keeps the pre-return
+      implementation and router transcripts: PASS; Whole-run archive audit across
+      two returns, a restart and the merge step: PASS; Review-loop ownership across
+      a restart, a dead attempt and a second loop: PASS; A pre-upgrade run directory
+      — legacy adoption, frozen legacy files and a live legacy link: PASS; Concurrent
+      sweeps and overlapping writers: PASS; A failed archive, and a pruned native
+      transcript, never block the workflow: PASS; A sign-off QA return archives its
+      router and does not replay its verdict: PASS; CLI drivers keep history too,
+      and do not freeze a TUI loop: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-9ee4d64-b0d9756bebb216d5)'
     created_at: '2026-10-29T10:23:47Z'
     last_edited: '2026-10-29T10:23:47Z'
   - id: note-61363a5
-    text: 'User-authorized restart from the main PM session on 2026-10-31 after #249 merged
-      as eaf3372e60d1717bd97cc50b5e0b04c6df881fa1. Resume this existing PR in its existing
-      workdir. First integrate current origin/master INTO THIS PR branch, preserving its intended
-      behavior and all earlier review/QA corrections; resolve real code/test conflicts and
-      validate the combined behavior before handing off for a fresh review/QA/sign-off sequence.
-      Do not merge this PR into master or push/reset/delete master or other branches. This
-      is a user-directed implementation return, not a reviewer/sign-off verdict. GitHub reports
-      the PR conflicts with current master; reconcile that before resuming the prior review/QA
-      work. Retain all original source, dirty files, stashes, drafts, fixtures and captures.
-      Existing uncommitted content may have been intentionally excluded; inspect its provenance
-      instead of automatically committing it. Preserve every PR record and unrelated local
-      metadata during project.yaml reconciliation. Do not weaken acceptance criteria, choose
-      unresolved user policy questions or reuse stale PASS results. Historical captures have
-      been copied intact to the main session captures; overwritten filename collisions are
-      backed up in the host migration record. Main session is pm-project_manager-c5a1006b;
-      keep old restored sessions idle. Assigned models and explicit work-Opus sign-off override
-      remain unchanged. Autostart will use wait_for_merge; no PR merge is authorized by this
-      request.'
+    text: 'User-authorized restart from the main PM session on 2026-10-31 after #249
+      merged as eaf3372e60d1717bd97cc50b5e0b04c6df881fa1. Resume this existing PR
+      in its existing workdir. First integrate current origin/master INTO THIS PR
+      branch, preserving its intended behavior and all earlier review/QA corrections;
+      resolve real code/test conflicts and validate the combined behavior before handing
+      off for a fresh review/QA/sign-off sequence. Do not merge this PR into master
+      or push/reset/delete master or other branches. This is a user-directed implementation
+      return, not a reviewer/sign-off verdict. GitHub reports the PR conflicts with
+      current master; reconcile that before resuming the prior review/QA work. Retain
+      all original source, dirty files, stashes, drafts, fixtures and captures. Existing
+      uncommitted content may have been intentionally excluded; inspect its provenance
+      instead of automatically committing it. Preserve every PR record and unrelated
+      local metadata during project.yaml reconciliation. Do not weaken acceptance
+      criteria, choose unresolved user policy questions or reuse stale PASS results.
+      Historical captures have been copied intact to the main session captures; overwritten
+      filename collisions are backed up in the host migration record. Main session
+      is pm-project_manager-c5a1006b; keep old restored sessions idle. Assigned models
+      and explicit work-Opus sign-off override remain unchanged. Autostart will use
+      wait_for_merge; no PR merge is authorized by this request.'
     created_at: '2026-10-31T18:07:25.345765+00:00'
     last_edited: '2026-10-31T18:07:25.345765+00:00'
   - id: note-6a31b67
-    text: 'QA PASS: A sign-off return keeps the pre-return implementation and router transcripts
-      (original bug), and the run ends with live canonicals: PASS; A sign-off REVIEW return
-      starts a separate review loop and adopts an already-open return review window: PASS;
-      Overlapping review loops, a TUI restart and a follow-up verdict never cut the current
-      loop off from its own transcript: PASS; Turning auto-start off and finishing the watcher,
-      even at the same moment, never freezes a canonical transcript: PASS; One run, two PRs,
-      two returns and a restart: whole-run archive audit with concurrent writers: PASS; CLI
-      drivers keep history: auto-sequence returns and watcher runs, including two watchers
-      at once: PASS; Archive failures, pruned or dangling sessions and frozen canonicals never
-      block a return: PASS; Resuming a pre-upgrade run directory and an imperfect breadcrumb:
-      PASS (workdir: /home/matt/.pm/workdirs/qa/pr-9ee4d64-f7bc35893e6a7d19)'
+    text: 'QA PASS: A sign-off return keeps the pre-return implementation and router
+      transcripts (original bug), and the run ends with live canonicals: PASS; A sign-off
+      REVIEW return starts a separate review loop and adopts an already-open return
+      review window: PASS; Overlapping review loops, a TUI restart and a follow-up
+      verdict never cut the current loop off from its own transcript: PASS; Turning
+      auto-start off and finishing the watcher, even at the same moment, never freezes
+      a canonical transcript: PASS; One run, two PRs, two returns and a restart: whole-run
+      archive audit with concurrent writers: PASS; CLI drivers keep history: auto-sequence
+      returns and watcher runs, including two watchers at once: PASS; Archive failures,
+      pruned or dangling sessions and frozen canonicals never block a return: PASS;
+      Resuming a pre-upgrade run directory and an imperfect breadcrumb: PASS (workdir:
+      /home/matt/.pm/workdirs/qa/pr-9ee4d64-f7bc35893e6a7d19)'
     created_at: '2026-11-02T04:32:33Z'
     last_edited: '2026-11-02T04:32:33Z'
   - id: note-0a052ee
     text: 'Closed by explicit user request 2026-11-02, not merged. Superseded by pr-ec5bc84:
-      use harness-native logs directly and remove PM transcript symlink/copy/archive indirection.
-      Native retention is already configured. Keep this branch, workdir, QA evidence and drafts
-      for reference; never restart this closed PR.'
+      use harness-native logs directly and remove PM transcript symlink/copy/archive
+      indirection. Native retention is already configured. Keep this branch, workdir,
+      QA evidence and drafts for reference; never restart this closed PR.'
     created_at: '2026-11-02T05:06:21Z'
     last_edited: '2026-11-02T05:06:21Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
@@ -41268,7 +41670,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T16:09:51.542797+00:00'
-  updated_at: '2026-10-28T08:38:31.390723+00:00'
+  updated_at: '2026-11-02T17:52:54.395595+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -41283,6 +41685,16 @@ prs:
       for the window cwd would fix both. Captures: /pm-captures/scenarios/121/post-fix/s4/pm-home-pane.txt.'
     created_at: '2026-10-28T08:38:31Z'
     last_edited: '2026-10-28T08:38:31Z'
+  - id: note-3452fa2
+    text: 'QA S19 of pr-4258a32 (2026-11-02, d911598b) hit this from the merge path:
+      in an isolated pm session, prefix+P from PR C''s window, then g on another PR
+      F at sign_off (pm pr merge --resolve-window F) merged F and opened pm-home (new_window
+      session=<S>~1 name=pm-home switch=False) with pane cwd <C clone>/pm. It lists
+      C''s committed project.yaml, every PR [pending] including the just-merged F,
+      while the session registry has F merged and others in_review/sign_off. Nothing
+      is written (C clone stays clean). Capture: /pm-captures/scenarios/19/story4/pm-home-pane.txt.'
+    created_at: '2026-11-02T17:52:54Z'
+    last_edited: '2026-11-02T17:52:54Z'
 - id: pr-8700be3
   plan: improvements
   title: Improve autostart status readability with compact text and highlighted human
@@ -53797,6 +54209,70 @@ prs:
     signoff: provider:claude-work-xhigh-249
     merge: provider:deepseek-flash
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-049649a-remove-all-pr-autostart-and-fail-clo-registered-20261027
+- id: pr-5626111
+  plan: bugs
+  title: 'Bug: TUI QA run that aborts before planning (ambiguous or missing workdir)
+    leaves a bare "QA ERROR: " note and only "QA finished for X: ERROR" on the message
+    line'
+  branch: pm/pr-5626111-bug-tui-qa-run-that-aborts-before-planning-ambiguo
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_loop.py run_qa_sync early workdir abort (~L5570-5591)
+    sets state.latest_output to the one-line reason ("Workdir for X: 2 clones of <branch>
+    in <dir>, not choosing one; move the extra clone(s) aside", or "... does not exist
+    on this machine and could not be created") but not state._error; pm_core/tui/qa_loop_ui.py
+    _record_qa_note builds the note from qa_outcome_detail/qa_error_detail (both read
+    _error only) and _on_qa_complete logs only "QA finished for X: ERROR". So the
+    reason reaches no message line, no [tui] log line and no note; only the multi-line
+    ERROR [qa_loop] record in the L log names it. Repro (pr-4258a32 QA S10, 2026-11-02):
+    PR in_review whose workdir record names a vanished path and 2 verified clones
+    of its branch in ~/.pm/workdirs/<proj>/; press t in the TUI -> "Starting QA..."
+    then "QA finished for X: ERROR" in <1 s, `pm pr note list X` newest note is "QA
+    ERROR: " with nothing after it. Same bare note on master for the plain missing-workdir
+    abort. Note the CLI already prints the full listing to stderr, so a fix should
+    avoid printing it twice there.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T07:33:44.611691+00:00'
+  updated_at: '2026-11-02T07:33:44.611691+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-5a6c061
+  plan: bugs
+  title: 'Bug: review loop whose `pm pr review --review-loop` child refuses (workdir
+    ambiguity / no workdir) retries 3x and ends LAUNCH_FAILED "window not found after
+    launch" with empty launch artifacts; the refusal reason never reaches the user'
+  branch: pm/pr-5a6c061-bug-review-loop-whose-pm-pr-review-review-loop-chi
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/review_loop.py ~L890-905: when _find_review_claude_pane
+    finds no window, _write_launch_artifact is called with returncode=None, stdout="",
+    stderr="", so the child output of _launch_review_window (stdout "Review window:
+    no workdir for X. 2 clones of <branch> in <dir>, not choosing one; move the extra
+    clone(s) aside." + stderr listing) is dropped; the error is retryable=True reason=window,
+    so the loop retries at 5 s and 10 s on a deterministic refusal. Repro (pr-4258a32
+    QA S10, 2026-11-02): in_progress PR whose workdir record names a vanished path
+    and 2 verified clones of its branch in ~/.pm/workdirs/<proj>/; z z d in the TUI
+    -> PR moves to in_review, "Review launch retry ... (attempt 2; attempt 1 failed:
+    Review window review-X not found after launch (artifact: ...)", attempt 3, then
+    "Review loop done for X: LAUNCH_FAILED (1 iteration)" ~22 s after start. The three
+    artifacts say "note: window review-X not found after launch" with 0-char stderr/stdout;
+    the only mention of the clones is the child WARNING [workdirs] lines in the L
+    log. Expected: capture the child output in the artifact and surface its one-line
+    reason (and treat a no-workdir refusal as non-retryable). Moving the extra clone
+    aside and pressing z z d again then works.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T07:33:53.298584+00:00'
+  updated_at: '2026-11-02T07:33:53.298584+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
 - id: pr-8162f0f
   plan: plan-delivery
   title: Project-owner guidance for automatic versus human-approved merges
@@ -55619,6 +56095,41 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-588171e
+  plan: bugs
+  title: 'Bug: pm pr signoff on a PR already at sign_off fails with a bare project.yaml
+    lock error (no workdir/Integration/window) while pm edit holds the store lock'
+  branch: pm/pr-588171e-bug-pm-pr-signoff-on-a-pr-already-at-sign-off-fail
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/pr.py pr_signoff runs store.locked_update(root,
+    apply) unconditionally, even when the PR is already sign_off and no transition
+    is needed, before signoff.launch_signoff_window resolves the workdir. A StoreLockTimeout
+    then surfaces as the click error "Error: Could not acquire lock on <root>/pm/project.yaml.lock
+    within 2.0s — another pm process may be writing project.yaml. If no other process
+    is running, delete <root>/pm/project.yaml.lock and retry." on stderr, rc 1, after
+    ~2.08 s. No "Workdir for ...: using ... (not recorded: ...)" line, no "Integration:"
+    line, no signoff-<pr> window; project.yaml and integration.json are unchanged.
+    Repro (QA S16 story 3 of pr-4258a32, observational, at 91ebf1b6): PR B at sign_off
+    (skip-qa on) with a stale workdir record and its clone renamed to <slug>-0b0b0b02;
+    window 1: EDITOR="python3 qa-editor.py" pm edit (holds pm/project.yaml.lock);
+    window 2: time (pm pr signoff B) -> 2.08 s, rc 1, only the lock error. After the
+    editor saves, the same command re-links the clone, prints "Integration: merges
+    cleanly with master@..." and opens signoff-B. Contrast: pm pr cd B under the same
+    held lock proceeds after 2.1 s with "(not recorded: could not write ...)". Expected:
+    when the PR is already sign_off the launch should not die on the lock (keep the
+    at-lock close/merge guard some other way, e.g. a short read-only re-check), or
+    at least say that no sign-off window was opened because another pm process (for
+    example pm edit) holds project.yaml. Captures /pm-captures/scenarios/16/story3.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T09:48:47.287671+00:00'
+  updated_at: '2026-11-02T09:48:47.287671+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
 - id: pr-3199f44
   plan: improvements
   title: 'TUI at Textual 2.x: background reloads/syncs are dropped while a modal is
@@ -55667,62 +56178,66 @@ prs:
   branch: pm/pr-ec5bc84-use-native-session-logs-and-remove-pm-transcripts-
   status: pending
   depends_on: []
-  description: 'Replace the PM-owned transcript symlink/copy/archive tree with direct references
-    to harness-native session history. Supersedes closed #275 / pr-9ee4d64 by eliminating
-    the mutable indirection that caused the bug, rather than adding another archive layer.
-    User explicitly approved closing #275 and starting this simpler design on 2026-11-02.
+  description: 'Replace the PM-owned transcript symlink/copy/archive tree with direct
+    references to harness-native session history. Supersedes closed #275 / pr-9ee4d64
+    by eliminating the mutable indirection that caused the bug, rather than adding
+    another archive layer. User explicitly approved closing #275 and starting this
+    simpler design on 2026-11-02.
 
 
     Why: Claude already retains the original JSONL; the current installation has cleanupPeriodDays=365000.
-    PM currently reuses phase/iteration paths and sometimes freezes a live symlink into a
-    copy. A real #241 incident let an obsolete review completion freeze the next loop''s live
-    file and hide its eventual NEEDS_WORK. Earlier sign-off return history was also lost from
-    PM''s run directory even though native sessions survived.
+    PM currently reuses phase/iteration paths and sometimes freezes a live symlink
+    into a copy. A real #241 incident let an obsolete review completion freeze the
+    next loop''s live file and hide its eventual NEEDS_WORK. Earlier sign-off return
+    history was also lost from PM''s run directory even though native sessions survived.
 
 
-    Desired design: keep the smallest durable mapping needed to associate project/PR, phase
-    and exact run/loop/attempt with native session ID and native log location, reusing existing
-    session/runtime metadata. Launches register their own identity; collectors and history
-    readers read that session directly. Do not derive identity from a mutable alias, scan
-    the entire history when a known session ID suffices, or replace this with a new copy/archive
-    service. Use native retention; do not silently change global retention or promise history
-    beyond the configured harness retention. A missing/pruned native log must be reported
-    accurately, never treated as a verdict or another session.
+    Desired design: keep the smallest durable mapping needed to associate project/PR,
+    phase and exact run/loop/attempt with native session ID and native log location,
+    reusing existing session/runtime metadata. Launches register their own identity;
+    collectors and history readers read that session directly. Do not derive identity
+    from a mutable alias, scan the entire history when a known session ID suffices,
+    or replace this with a new copy/archive service. Use native retention; do not
+    silently change global retention or promise history beyond the configured harness
+    retention. A missing/pruned native log must be reported accurately, never treated
+    as a verdict or another session.
 
 
     Retire all new writes and runtime dependence on pm/transcripts, including implementation,
-    reviews, QA roles, sign-off, watchers and CLI flows that use it. Keep genuine execution
-    stdout/stderr, recordings and non-native artifacts in their existing appropriate capture/state
-    locations; do not throw away evidence merely because it is called a transcript. Reuse
-    launch/session plumbing and one small common resolver rather than adding parallel role-specific
-    machinery. Review any proposed compatibility code against the simplification goal.
+    reviews, QA roles, sign-off, watchers and CLI flows that use it. Keep genuine
+    execution stdout/stderr, recordings and non-native artifacts in their existing
+    appropriate capture/state locations; do not throw away evidence merely because
+    it is called a transcript. Reuse launch/session plumbing and one small common
+    resolver rather than adding parallel role-specific machinery. Review any proposed
+    compatibility code against the simplification goal.
 
 
-    Upgrade safely: existing in-flight sessions and saved runtime records must remain identifiable,
-    and earlier evidence/unsent drafts must not be deleted. Preserve legacy copies that are
-    the only remaining evidence. A bounded read-only compatibility/adoption path is acceptable;
-    new runs must not recreate the old tree. Do not delete the live installation''s pm/transcripts
-    or alter the running host during implementation/QA.
+    Upgrade safely: existing in-flight sessions and saved runtime records must remain
+    identifiable, and earlier evidence/unsent drafts must not be deleted. Preserve
+    legacy copies that are the only remaining evidence. A bounded read-only compatibility/adoption
+    path is acceptable; new runs must not recreate the old tree. Do not delete the
+    live installation''s pm/transcripts or alter the running host during implementation/QA.
 
 
-    Acceptance: exact-session verdict collection across sign-off returns, fresh review loops
-    restarting at iteration one, concurrent PRs, late completion from an obsolete loop, TUI
-    restart/adoption and human follow-up in the existing pane. Reproduce #241''s stale-finalizer
-    failure and show it cannot freeze or retarget a newer native log. Verify newly appended
-    outcomes remain readable and prior session identities remain discoverable. Include representative
-    coverage of every affected producer/consumer; use isolated test projects, HOME/PM state
-    and tmux servers inside the configured containers. Preserve manual merge/spec gates and
-    the existing verdict policy. No broad workflow rewrite, new archive retention subsystem
-    or unrelated recipe hardening.
+    Acceptance: exact-session verdict collection across sign-off returns, fresh review
+    loops restarting at iteration one, concurrent PRs, late completion from an obsolete
+    loop, TUI restart/adoption and human follow-up in the existing pane. Reproduce
+    #241''s stale-finalizer failure and show it cannot freeze or retarget a newer
+    native log. Verify newly appended outcomes remain readable and prior session identities
+    remain discoverable. Include representative coverage of every affected producer/consumer;
+    use isolated test projects, HOME/PM state and tmux servers inside the configured
+    containers. Preserve manual merge/spec gates and the existing verdict policy.
+    No broad workflow rewrite, new archive retention subsystem or unrelated recipe
+    hardening.
 
 
-    Coordination: #248 INPUT_REQUIRED adoption, #260 fresh implementation handoff and #274
-    integration-return gate currently depend on #275''s session ownership fixes. The approved
-    scheduling holds now target this replacement for downstream review/QA; their existing
-    implementation/evidence remain preserved. Coordinate with #237 action history without
-    expanding into that feature. Start fresh from current master, not from #275''s unmerged
-    archive implementation; use its incident evidence and focused regression intent where
-    useful.'
+    Coordination: #248 INPUT_REQUIRED adoption, #260 fresh implementation handoff
+    and #274 integration-return gate currently depend on #275''s session ownership
+    fixes. The approved scheduling holds now target this replacement for downstream
+    review/QA; their existing implementation/evidence remain preserved. Coordinate
+    with #237 action history without expanding into that feature. Start fresh from
+    current master, not from #275''s unmerged archive implementation; use its incident
+    evidence and focused regression intent where useful.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
@@ -55733,12 +56248,13 @@ prs:
   merged_at: null
   notes:
   - id: note-dcc1cd1
-    text: 'User authorized this replacement to start immediately. Use main-account Opus 5.5/xhigh
-      for all roles/helpers/sign-off, matching the superseded PR current routing. The provider
-      pins the effective xhigh setting. Keep wait_for_merge. No spec-approval pause requested
-      for this code simplification; do not expand into prompt redesign. No live host PM/tmux/settings
-      mutation in tests. Preserve old #275 source and evidence; it is closed by user choice
-      despite its historical passing sign-off.'
+    text: 'User authorized this replacement to start immediately. Use main-account
+      Opus 5.5/xhigh for all roles/helpers/sign-off, matching the superseded PR current
+      routing. The provider pins the effective xhigh setting. Keep wait_for_merge.
+      No spec-approval pause requested for this code simplification; do not expand
+      into prompt redesign. No live host PM/tmux/settings mutation in tests. Preserve
+      old #275 source and evidence; it is closed by user choice despite its historical
+      passing sign-off.'
     created_at: '2026-11-02T05:06:19Z'
     last_edited: '2026-11-02T05:06:19Z'
   model: provider:claude-main-xhigh-pm
@@ -56072,6 +56588,107 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T13:58:00.818355+00:00'
   updated_at: '2026-11-02T13:58:00.818355+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8d624c5
+  plan: bugs
+  title: 'Bug: id-less pm pr review/signoff/cd from a PR clone whose workdir record
+    is stale acts on the active PR instead of the clone''s PR'
+  branch: pm/pr-8d624c5-bug-id-less-pm-pr-review-signoff-cd-from-a-pr-clon
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/helpers.py _infer_pr_id (used by id-less pm
+    pr review/signoff/qa/cd etc.). It matches the cwd only against recorded pr["workdir"]
+    paths (string prefix), then falls back to project.active_pr. When the user is
+    inside a PR clone whose record is stale (clone renamed/moved, record from another
+    machine), inference misses the clone and silently acts on whatever PR is active.
+    Repro (QA S18 story 4, pr-4258a32 at d911598b, local backend, private pm session
+    + fake-claude): start PRs B and F; mv F clone to <WD>/pm-pr-<F>-...-0f0f0f0f;
+    `pm pr select <B>`; in a tmux shell in the F clone with PM_PROJECT=<main>/pm run
+    `pm pr review` -> "Auto-selected <B>", "PR <B> marked as in_review.", "Opened
+    review window review-<B>" (panes in B clone). After `pm pr cd <F>` re-links F,
+    the same id-less command auto-selects F. Expected: when cwd is inside a git clone
+    whose checked-out branch is a PR branch (or the workdirs dir of this project),
+    infer that PR (verify via the same read-only identity checks pm_core/workdirs.py
+    uses, optionally re-link), or at least refuse/ask instead of acting on a different
+    PR. Captures: /pm-captures/scenarios/18/story4.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T17:51:35.706301+00:00'
+  updated_at: '2026-11-02T17:51:35.706301+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ade4427
+  plan: bugs
+  title: 'Bug: prefix+P / prefix+M popup closes at once when the dispatched pm command
+    exits 0, so its stderr (e.g. the two-clone workdir ambiguity from pr review) is
+    never readable'
+  branch: pm/pr-ade4427-bug-prefix-p-prefix-m-popup-closes-at-once-when-th
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/session.py _run_picker_command, direct route:
+    on returncode 0 it echoes result.stderr ("so they don''t vanish") but never calls
+    _wait_dismiss(), so display-popup -E closes the popup as soon as the command returns;
+    only rc != 0 gets "pm error: ..." + "Press q/Esc/Enter to close...". Repro (QA
+    S19 of pr-4258a32 at d911598b, isolated pm session, fake-claude): PR D in_review,
+    its recorded workdir missing and two verified clones of its branch in the workdirs
+    dir. From another PR''s window press prefix+P, l to D, d. pm pr review prints
+    "PR D is already in_review." and "Review window: no workdir for D. 2 clones of
+    pm/<D-branch> in <WD>, not choosing one; move the extra clone(s) aside." plus
+    the stderr listing (both clone paths, "Not choosing one. Move the extra clone(s)
+    out of that directory ..."), exits 0, and the popup is gone: 50 ms capture-pane
+    polling saw the picker at +0.004 s, an empty popup frame at +0.057 s, no popup
+    at +0.161 s. The text exists only in a raw pipe-pane stream; the client stays
+    on its window with no review window and no visible reason. Same path for pr signoff
+    (rc 0 on the ambiguity) and any rc-0 command that warns on stderr. Fix idea: hold
+    the popup (_wait_dismiss) when the command wrote to stderr or printed a "no workdir"/refusal
+    line, or route that line to tmux display-message / the TUI message line; note
+    that re-link success lines are on stdout, so holding on stderr would not stop
+    normal re-link popups from closing. Captures: /pm-captures/scenarios/19/story3
+    (poll-t1-*.txt, raw-text-t1-a.txt, checks.txt).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T17:52:31.779846+00:00'
+  updated_at: '2026-11-02T17:52:31.779846+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-cd23997
+  plan: bugs
+  title: 'Bug: pm pr cleanup says "no workdir to clean up" (and --prune silently clears
+    the record) while a discoverable clone sits behind a stale workdir record; pm
+    pr cd with no record prints "does not exist: None"'
+  branch: pm/pr-cd23997-bug-pm-pr-cleanup-says-no-workdir-to-clean-up-and-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/pr.py (pr cleanup / --prune, pr cd). Seen in
+    QA S21 of pr-4258a32 (captures /pm-captures/scenarios/21/story3). Repro (local
+    backend): merge a PR, add an untracked file to its clean clone, mv the clone to
+    <slug>-0a11ce03 in the same project workdirs dir so the record is stale but discovery
+    would match it. (1) `pm pr cleanup <pr>` prints "  <pr>: no workdir to clean up"
+    rc 0 although the clone (with the untracked file) is still on disk; cleanup does
+    not run discovery, so the user is told nothing is left. (2) `pm pr cleanup --prune`
+    prints "  <pr>: cleared missing workdir <old path>" and sets the record to none
+    without mentioning the same-PR clone it could have found, so the clone is orphaned
+    from cleanup until `pm pr cd`/start re-links it. Suggest: for a stale record,
+    run the read-only discovery and either clean the verified clone (same dirty/--force
+    rules) or name it ("the recorded path is missing; a clone of <pr> exists at <path>:
+    re-link with pm pr cd, or remove it by hand"). (3) After the clone is removed
+    and the record is none, `pm pr cd <pr>` prints "Workdir for <pr> does not exist:
+    None" (literal None, same as master) rc 1; say "No workdir for <pr> (none recorded
+    and no clone found). Start the PR first: pm pr start <pr>" instead.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T18:30:59.584226+00:00'
+  updated_at: '2026-11-02T18:30:59.584226+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
