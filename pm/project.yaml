@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-02T00:03:33.932093+00:00'
+  updated_at: '2026-11-02T00:38:30.139005+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38902,6 +38902,32 @@ prs:
       work stays dropped.'
     created_at: '2026-11-02T00:03:33Z'
     last_edited: '2026-11-02T00:03:33Z'
+  - id: note-ec16623
+    text: 'Review loop 928f i44: the tmux recipe''s step-4 capture-directory guard
+      had no no-search-bit case, and the CLI produced-files note claimed the completion
+      mark for every form; one test gap and one prose overclaim, no pm_core change.
+      R110: R84 gave step 4 the guard `[ -d ] && [ -x ]` because its failure path
+      saves the recorder pane into <capture-dir>, but its only case ran the missing-path
+      shape, which fails on `-d` either way. Removing `&& [ -x <capture-dir> ]` left
+      the whole recipe file green (392 passed, verified) while the block then read
+      the directory, derived the target, drove the TUI (the stub''s sends succeed)
+      and exited 0. test_tmux_driving_step_refuses_a_missing_capture_dir is now test_tmux_driving_step_refuses_a_capture_dir_it_cannot_read,
+      parametrized over missing and mode 600 (no search bit) like every other capture-directory
+      guard: the refusal message, no pm tui send and no tmux call; the mutation fails
+      exactly the no-search-bit case and leaves the missing case green. Separately,
+      the CLI recipe''s produced-files list said recorder.command-done "is present
+      in every finished capture" — only the no-TTY scaffold writes it; the one-command,
+      manual and scripted forms run asciinema directly, with no mark and no step 4,
+      and asciinema exits 0 when it is stopped there too — so the note now scopes
+      the mark to the scaffold and says an automated capture uses it. Recipe file
+      393 passed (was 392); related suites 210 passed; full suite 5590 passed, 1 skipped,
+      0 failed (504.47 s, once on the final tree; a first run without markdown on
+      the scratch PYTHONPATH failed only test_markdown_render.py, the documented env
+      gap). Evidence: /pm-captures/review-928f-i44/ (mutation-check.log, recipe-file.log,
+      related-suites.log, suite.log, README.md, scripts/). impl.md R110. The dropped
+      helper/prompt/verifier work stays dropped.'
+    created_at: '2026-11-02T00:38:30Z'
+    last_edited: '2026-11-02T00:38:30Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
