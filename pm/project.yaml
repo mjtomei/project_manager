@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T07:28:54.926324+00:00'
+  updated_at: '2026-11-02T07:38:27.639327+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25834,6 +25834,25 @@ prs:
       7 before and after (reaper). Captures: /pm-captures/scenarios/20/.'
     created_at: '2026-11-02T07:28:54Z'
     last_edited: '2026-11-02T07:28:54Z'
+  - id: note-7f07a39
+    text: 'QA S21 (2026-11-02): PASS at 7cf77655, both stories live from /scratch/s21
+      (device differs from ~/.pm) with pm session --global, no fix. Story 1: Enter
+      with container mode on and docker absent logged the refusal in the TUI and the
+      share-tag debug log (Cause, docker remedy, pm container disable); k/j moved
+      right after Enter; panes, registry and 200x50 were unchanged; nothing was created;
+      the stand-in never ran. Story 2 (slim podman image, fake qa_regression): the
+      header and container name use the share tag; mounts, env (only PM_CAPTURES_PR
+      + PM_HOST_HOME, no tmux) and the read-only entries held; neither marker was
+      visible; pm -C /pm-project pr add exited 0 into the host registry. The TUI was
+      not reloaded at filing (A14), and r showed 2 PRs. Filed A14 once as pr-7ebc650.
+      Container removed 10.7 s after Ctrl-C (podman events). Scenario wording, not
+      a bug: rm /pm-project/.gitignore from a tty shell says Read-only file system
+      (coreutils rm checks faccessat first); with stdin </dev/null it says Device
+      or resource busy. The run pane closed within 0.1 s of the removal, not 0.5 s
+      after. Rig traps: no bc in this container; tmux 3.2a after-split-window[1] pipe
+      hook for the run pane transcript. Captures: /pm-captures/scenarios/21/.'
+    created_at: '2026-11-02T07:38:27Z'
+    last_edited: '2026-11-02T07:38:27Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
@@ -53210,6 +53229,39 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T06:33:02.505900+00:00'
   updated_at: '2026-11-02T06:33:02.505900+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7ebc650
+  plan: bugs
+  title: 'Bug: a container-mode regression run''s --file-prs filing (pm -C /pm-project
+    pr add) never reloads the user''s TUI; the PR shows only after r or the 300 s
+    sync'
+  branch: pm/pr-7ebc650-bug-a-container-mode-regression-run-s-file-prs-fil
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/helpers.py trigger_tui_reload/_find_tui_pane
+    run inside the regression container at filing time. The container has its own
+    ~/.pm and PID namespace, no tmux binary (slim image) and no view of the host tmux
+    server or the TUI pidfile, so the reload attempt fails quietly and no SIGUSR1
+    reaches the host TUI. Repro (pr-7d5d036 QA S21, 2026-11-02, nested podman, project
+    in /scratch/s21/proj, pm session --global): enable container mode with a working
+    image, press Enter on a regression test in the shared TUI QA view, open podman
+    exec -it -w /workspace <run container> bash, run pm -C /pm-project pr add ''S21
+    container finding''. Expected: like a host-mode run (R35/R37), the user TUI reloads
+    at filing time and lists the PR. Actual: the filing exits 0 and lands in the host
+    pm/project.yaml, but the TUI debug log gains no reload line and the PR tree still
+    shows 1 PRs; only r (or the 300 s sync) shows 2 PRs. Predates the -C TUI lookup
+    (QA spec A14). Possible fixes: have the host-side runner (build_exec_cmd cleanup
+    or a watcher on the mounted pm dir) trigger the reload, or pass a reload channel
+    into the container. Captures: /pm-captures/scenarios/21/story2/ (TUI cast + ex
+    shell cast) under the pr-7d5d036 QA captures dir.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T07:36:24.056218+00:00'
+  updated_at: '2026-11-02T07:36:24.056218+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
