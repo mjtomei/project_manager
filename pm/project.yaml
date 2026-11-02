@@ -4187,11 +4187,33 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-03T04:13:33.757811+00:00'
-  updated_at: '2026-03-03T04:13:33.757811+00:00'
+  updated_at: '2026-11-02T03:13:22.333422+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-78d0571
+    text: 'pr-073910f (per-session tmux server isolation) addresses the reported mechanism;
+      it takes effect when it merges. Every pm session runs on its own tmux server
+      (/tmp/pm-sessions/pm-<tag>), so a -t target sent from one pm session can no
+      longer resolve to another pm session''s panes. The TUI quit key no longer runs
+      a bare detach-client either: tmux.detach_current_client detaches exactly one
+      client of its own session group, by TTY. Two things remain after it merges.
+      (1) Sessions started by a pre-isolation pm stay on the shared default server
+      until the user runs `pm session kill` + `pm session`. Between such sessions,
+      several commands still pass a base session name to prefix-matched tmux targets:
+      pm pr start''s session_exists + new_window, home_window.park_if_on and other
+      raw `-t <session>` call sites. On pr-073910f only `pm session kill` (exact =name
+      targets) and discovery (find_session_server''s exact-or-group confirmation)
+      are hardened. Reaching the wrong session that way needs a second legacy session
+      whose name starts with the first one''s full pm-<dir>-<hash> name, which is
+      contrived; this is the residual pr-073910f''s review notes (b48f i16-i21) carried.
+      (2) Re-run this PR''s original repro once the user''s sessions run on private
+      servers. If it no longer reproduces, close this PR. If prefix targets still
+      matter, the fix is an exact-or-group helper (tmux =name, or a #{session_group}
+      check) at each mutation site. Recorded from pr-073910f review-loop b48f i22.'
+    created_at: '2026-11-02T03:13:22Z'
+    last_edited: '2026-11-02T03:13:22Z'
 - id: pr-4fd59d4
   plan: tui-ux
   title: Separate fresh and looping review onto different prefix keys
@@ -4397,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T02:23:58.715025+00:00'
+  updated_at: '2026-11-02T03:13:38.366606+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7054,6 +7076,31 @@ prs:
       server or shared host config touched.'
     created_at: '2026-11-02T02:23:58Z'
     last_edited: '2026-11-02T02:23:58Z'
+  - id: note-17583da
+    text: 'Review loop b48f i22 (no code changes, no requirement changes). Targeted
+      suites on head 617aea97: 871 passed (test_session_socket_isolation, test_tmux,
+      test_cli_helpers, test_shared_sessions, test_qa_resume, test_qa_pane, test_regression_prompts,
+      test_cli_qa, test_pane_layout, test_tui_pidfile), log /pm-captures/review-b48f-i22/targeted-head-617aea97.log.
+      The i21 full suite (5507 passed / 1 skipped) still stands: since 39213310 the
+      head changes only pm/project.yaml. This was a fresh read of every source file
+      in the diff: paths, wrapper, cli/__init__, tmux, cli/session, cli/helpers, pane_ops,
+      pane_registry, pane_layout, tui_pidfile, qa_status, qa_loop, qa_loop_ui, screens,
+      auto_start, cli/qa, cli/meta, cli/tui, home_window, prompt_gen and regression_prompts.
+      No defect found. Every tmux invocation goes through _tmux_cmd or qa_status._tmux_argv
+      (no bare tmux argv left), and no split("~") remains in pm_core. Cross-PR notes
+      so nothing gets lost: pr-924acb8 (`pm tui capture` from a pane while a $S~N
+      client is attached) is fixed by this branch''s base-session normalisation in
+      _find_tui_pane, checked with a mocked repro (master returns pm-x~2, the branch
+      returns pm-x). pr-6de8207 has its "~" part fixed here; its "." / ":" part stays
+      with pr-bebe64b and pr-991aaab. pr-442e51c''s mechanism (cross-session -t targets,
+      bare detach-client) is addressed here, and the i16 residual (prefix-matched
+      raw targets between legacy default-server sessions) is now recorded on pr-442e51c
+      instead of only in this PR''s notes. The i18 residual (a legacy shared session
+      at the unhashed 101-107-byte path) is unchanged. It is transient: it goes away
+      once such pre-PR shared sessions are restarted. No live session, server or shared
+      host config was touched.'
+    created_at: '2026-11-02T03:13:38Z'
+    last_edited: '2026-11-02T03:13:38Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
@@ -37274,11 +37321,24 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T22:52:25.678569+00:00'
-  updated_at: '2026-10-12T22:52:25.678569+00:00'
+  updated_at: '2026-11-02T03:13:19.107963+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-6d9aa33
+    text: Fixed by pr-073910f (per-session tmux server isolation); takes effect when
+      it merges. On that branch _find_tui_pane() always returns the base pm session.
+      Its in-tmux branch resolves the pane's session through pane_registry.pm_session_name
+      (session group first, then a numeric ~N strip), so `pm tui capture` and every
+      other `pm tui` subcommand run without -s while a $S~N client is attached now
+      configure $S, not $S~N. Checked on pr-073910f head 617aea97 with a mocked tmux
+      reproducing this repro (in_tmux true, get_session_name -> pm-x-abc12345~2, registry
+      recording the TUI under pm-x-abc12345). origin/master returns pm-x-abc12345~2;
+      the branch returns pm-x-abc12345. Re-verify live after pr-073910f merges, and
+      close this PR if it holds. Found during pr-073910f review-loop b48f i22.
+    created_at: '2026-11-02T03:13:19Z'
+    last_edited: '2026-11-02T03:13:19Z'
 - id: pr-8cdbe60
   plan: bugs
   title: 'Bug: container git proxy forwards pull/fetch/push from any repo to the scenario
@@ -49447,7 +49507,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-29T03:19:50.032775+00:00'
-  updated_at: '2026-11-01T07:40:40.191888+00:00'
+  updated_at: '2026-11-02T03:13:20.604317+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -49472,6 +49532,22 @@ prs:
       repos would need a migration path.'
     created_at: '2026-11-01T07:40:40Z'
     last_edited: '2026-11-01T07:40:40Z'
+  - id: note-4de11fa
+    text: The "~" part of this bug is fixed by pr-073910f (review-loop b48f i11, refined
+      in i13, i16 and i19); it takes effect when that PR merges. paths.base_session_name()
+      is now the single definition, and it strips only an ASCII-numeric ~N suffix.
+      pane_registry.base_session_name, the TUI pidfile, command queue and merge-restart
+      marker, helpers._canonical_session, home_window (park_if_on, pr_list sentinel),
+      the auto_start breadcrumb, the tui history file and the wrapper's IPC tag all
+      delegate to it, and no split("~") is left in pm_core. tmux.list_grouped_sessions
+      requires the whole remainder after base~ to be ASCII digits, so another project's
+      pm-x~foo-<hash>~1 is not a pm-x grouped session. The "." / ":" rewrite described
+      in the earlier note is not addressed by pr-073910f; see pr-bebe64b and pr-991aaab.
+      After pr-073910f merges, the remaining scope here is that sanitisation (or close
+      this PR as a duplicate of those two). Found during pr-073910f review-loop b48f
+      i22.
+    created_at: '2026-11-02T03:13:20Z'
+    last_edited: '2026-11-02T03:13:20Z'
 - id: pr-ea98f71
   plan: bugs
   title: 'Bug: a second concurrent `pm session` start can respawn the TUI of a session
