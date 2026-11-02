@@ -39226,7 +39226,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-11-02T02:52:53.437329+00:00'
+  updated_at: '2026-11-02T03:23:41.740898+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40223,6 +40223,26 @@ prs:
       as to captures; the verdict stands.'
     created_at: '2026-11-02T02:52:53Z'
     last_edited: '2026-11-02T02:52:53Z'
+  - id: note-81f784a
+    text: 'QA S21 (2026-11-02, f98268a79) PASS on both stories, no code change. Captures
+      /pm-captures/scenarios/21/{story1,story2}/{tui,cli}/ (+ story2/cli-followup).
+      Story 1: DEP+TGT share one run dir; TGT returned twice; pm tui restart --breadcrumb
+      ran inside the 60 s hold of the post-return review (L2 cc9447b3). archive/ ends
+      with impl-TGT.{S1,S2} and signoff-TGT.{R1,R2}, all frozen, sid-matched, both
+      SIGNOFF_IMPL. impl/signoff canonicals link to S3/R3 (R3 = SIGNOFF_MERGE). Symlink
+      lines 3/3/1/1, routed IMPL x2 and MERGE x1, nothing named for DEP in archive
+      except its review copy, no shared sids across PRs. Restart: merge_restart_marker
+      -> consume_breadcrumb (same run_id) -> resumed -> adopting in-flight i1 -> PASS,
+      one L2 link, one autostart dir, pre-restart sha256 OK; 37/37 checks. Story 2:
+      X/Y routers launched and returned in the same second, each archived its own
+      impl+router, and every archive entry is cmp-equal to its own PR native session;
+      post-returns sha256 OK, one --fresh start per PR, both merged; 26/26. Verifier
+      gotcha for future runs: the run dir is named after the first target (autostart-<X>-<hex>),
+      so log greps for a PR id must anchor on the final argv or the canonical path,
+      not match anywhere in the line. pr-9966785 stalls ran 3-4 min each (story 1
+      total about 11 min).'
+    created_at: '2026-11-02T03:23:41Z'
+    last_edited: '2026-11-02T03:23:41Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
