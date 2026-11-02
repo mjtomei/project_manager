@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-02T05:47:41.534085+00:00'
+  updated_at: '2026-11-02T06:13:29.038487+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48400,6 +48400,22 @@ prs:
       tag on the clean merge.'
     created_at: '2026-11-02T05:47:41Z'
     last_edited: '2026-11-02T05:47:41Z'
+  - id: note-46d2d70
+    text: 'QA scenario 68 (hand-edited reason members render as placeholders, 48dd
+      i1/i2/i4) PASS at 53353295 — no code change. All three stories held live on
+      a throwaway local-backend project: (1) dirty-workdir resolved-but-unapplied
+      P with apply_error={why: x}/base_behavior_error=[1, 2]: show/integrate clean,
+      signoff record refuses (exit 1), the driver tick coerces to SIGNOFF_BLOCKED
+      with "(the workdir could not take the merge)"; (2) R merge-gate variants 1-6
+      refuse with reason not recorded / no check / base@ + targets ?/ (unknown error)
+      / target repository changed (? -> …), QA: PASS|?|absent, master unchanged; (3)
+      S routed return: show keeps only the Integration line, pm prompt renders **?**
+      (to ?), HEAD ?, Reason: not recorded, an unknown error. Harness fact: the scenario
+      env file says `unset TMUX`, but commands run inside pm-session panes must keep
+      TMUX (unset it only when it does not point at the isolated socket) or pm skips
+      window creation. Captures: /pm-captures/scenarios/68/.'
+    created_at: '2026-11-02T06:13:28Z'
+    last_edited: '2026-11-02T06:13:28Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
