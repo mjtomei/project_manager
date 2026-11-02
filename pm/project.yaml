@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T09:08:15.777045+00:00'
+  updated_at: '2026-11-02T09:23:16.851340+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7648,6 +7648,29 @@ prs:
       handler could no longer run. It is removed.'
     created_at: '2026-11-02T09:08:15Z'
     last_edited: '2026-11-02T09:08:15Z'
+  - id: note-e9fed1e
+    text: 'Review loop 68bd i3 (commit 010f154d; no requirement changes; full suite
+      5564 passed / 1 skipped, 428 s, log /pm-captures/review-68bd-i3/full-suite-final.log).
+      Checked i2''s change, and it holds. paths imports nothing with side effects
+      at module level, and neither does git_ops (no logger). base_session_name keeps
+      the inline rule it replaced: only a numeric ASCII ~N suffix counts. The autostart
+      "cannot raise" comment is true, because the alias rewrite only changes the quote-free
+      first word. One cleanup of the same kind as i2. wrapper._PM_SOCKET_DIR was a
+      copy of paths.SHARED_SOCKET_DIR. Its comment said it was "kept inline so the
+      wrapper does not import pm_core before it has chosen", but after i2 _get_session_tag
+      does exactly that import, two calls later. _mark_tmux_socket now reads the directory
+      from paths. The $TMUX parse stays a copy of tmux.socket_path_from_tmux_env,
+      and the docstring says why: importing pm_core.tmux sets up its pm.tmux logger,
+      and _run_cli''s purge drops modules but not logging''s loggers, so the chosen
+      pm_core would inherit that handler. A new test replaces the literal-parity test:
+      the wrapper follows a monkeypatched paths.SHARED_SOCKET_DIR. The test fails
+      on the pre-edit wrapper. pm_core/qa_status.py keeps its own "/tmp/pm-sessions"
+      on purpose, since it runs standalone without pm_core, and an existing source
+      test pins it. Not addressed (unchanged from 54bf i1): origin/master has moved
+      to 5b352d16 and a trial merge conflicts in pm_core/tui/qa_loop_ui.py _resume_incomplete_qa.
+      That is for the master-integration step, not review.'
+    created_at: '2026-11-02T09:23:16Z'
+    last_edited: '2026-11-02T09:23:16Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
