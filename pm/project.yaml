@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T15:29:33.000033+00:00'
+  updated_at: '2026-11-02T16:40:24.084236+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8200,6 +8200,39 @@ prs:
       Captures /pm-captures/scenarios/44 (README.md).'
     created_at: '2026-11-02T15:29:32Z'
     last_edited: '2026-11-02T15:29:32Z'
+  - id: note-f5d5188
+    text: 'QA S46 refiner (2026-11-02, 8ea8a9a1, tmux 3.2a): all 6 stories held live
+      (kills from B dir, B-session shell, /tmp, $HOME, A src/deep, A workdir clone;
+      TUI-alone window; kill -9 + pm session from src/deep; zview from /tmp; legacy
+      L from B dir; 3 race rounds 0 MULTI, no TuiPidfileConflict, no traceback). Harness
+      trap: never pass the awkward A path to a tmux -c/-s/format argument (new-window
+      -c "$A" ran #(touch PWNED) and started the shell in $HOME, so pm session made
+      pm-pm-00000000 and launched the real-Claude guide); cd inside the shell instead.
+      find PWNED without -xdev (/scratch is its own mount). Notes are not auto-opened:
+      press n + any key. With the TUI alone in its window, a zview kill switches only
+      the zview client (A clients land on another window), so story 4 reopens notes
+      first.'
+    created_at: '2026-11-02T16:21:56Z'
+    last_edited: '2026-11-02T16:21:56Z'
+  - id: note-b6cfb61
+    text: 'QA S46 (killed TUI respawns in its own session dir from any cwd; awkward
+      A name with space/quote/$HOME/#(touch PWNED)/日本, legacy L upgraded to this build,
+      zview from /tmp, 3-session race) PASS 6/6 on 8ea8a9a1, no source changes. Story
+      1: kills from B dir, B shell window, /tmp, ~, A/src/deep, A workdir clone all
+      rc 0, new pm _tui listed 0.06-0.12 s later, cwd + pane_current_path = A dir
+      exactly, Alpha titles only, registry/pidfile follow, no PWNED anywhere, B/L/keepme
+      byte-identical. Story 2 (TUI alone): new window @4 at index 0, TA switched to
+      it (transient name seen was bash, not pm, then python3). Story 3: kill -9 pane
+      gone 0.03 s (pid Zs); pm session from src/deep -> TUI pane missing + Attaching
+      ~2, TUI cwd A root, log order as specified. Story 4: zview C-b x -> new TUI
+      beside notes for ~1/~2/zview, no registry file for zview. Story 5: legacy L
+      respawn in L dir with PYTHONPATH=/workspace, no L socket. Story 6: 932 ticks
+      0 MULTI, 0 refusal/conflict/traceback lines, teardown clean. Guard (reaper.py)
+      saw 0 real-claude/pm-guide processes. Filed pr-3121cc8 (pre-existing): the after-kill-pane
+      hook logs its respawn lines to the killing shell cwd project log (B log / default.log).
+      Captures /pm-captures/scenarios/46 (README.md; harness/ scripts reusable).'
+    created_at: '2026-11-02T16:40:23Z'
+    last_edited: '2026-11-02T16:40:23Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
@@ -52839,6 +52872,40 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T15:27:09.952166+00:00'
   updated_at: '2026-11-02T15:27:09.952166+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3121cc8
+  plan: bugs
+  title: 'Bug: after-kill-pane hook (pm _pane-closed) writes its respawn log lines
+    to the debug log of the killing shell''s cwd project, not the session''s'
+  branch: pm/pr-3121cc8-bug-after-kill-pane-hook-pm-pane-closed-writes-its
+  status: pending
+  depends_on: []
+  description: 'Observed in QA S46 on pr-073910f (2026-11-02, head 8ea8a9a1, tmux
+    3.2a). The global hook `after-kill-pane[0] run-shell "pm _pane-closed"` runs with
+    the cwd of the client that issued kill-pane, and pm picks its debug log at import
+    time from cwd (paths.command_log_file -> get_session_tag from the cwd git repo,
+    else default.log). So the respawn is correct (the new TUI starts in the session
+    dir and logs its own mount in the right log), but the hook lines "handle_any_pane_closed:
+    TUI pane was killed, respawning", "_respawn_tui: window @N gone, creating new
+    window", "_respawn_tui: created pane %N" land in ANOTHER project log: killing
+    A''s TUI from project B''s dir writes them to ~/.pm/debug/<B-tag>.log, from /tmp
+    or $HOME or a C-b x in a view created from /tmp to default.log; only a kill from
+    inside A''s repo logs them to A''s log. Same for L on the default server killed
+    from B''s dir (lines in B''s log). Repro: two projects A, B with pm sessions;
+    from a shell in B run `tmux -S /tmp/pm-sessions/pm-<A-tag> kill-pane -t <A TUI
+    pane>`; grep "TUI pane was killed" ~/.pm/debug/*.log. Master has the same cwd-based
+    log selection (pre-existing). Suggested fix: once _pane-closed/_pane-opened/_pane-exited/_window-resized
+    resolve the session, re-point the pm.* file handlers to command_log_file(<session
+    tag>) (or pass the tag explicitly). Related: pr-f98ac63 (popup dispatch tag from
+    cwd splits logs).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T16:37:56.411929+00:00'
+  updated_at: '2026-11-02T16:37:56.411929+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
