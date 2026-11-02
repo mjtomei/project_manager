@@ -5173,7 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-11-02T08:39:59.130043+00:00'
+  updated_at: '2026-11-02T09:27:05.551490+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5328,6 +5328,23 @@ prs:
       + 6 new).'
     created_at: '2026-11-02T08:39:59Z'
     last_edited: '2026-11-02T08:39:59Z'
+  - id: note-3391cb7
+    text: 'QA S15 run 2026-11-02 at d4ebdb22: PASS 7/7 live (plain shell, private
+      tmux, no pm session; captures /pm-captures/scenarios/15/{fixture,story1-7,evidence}).
+      pm pr cd B from B''s own clone (2x + symlinked cwd), from C''s clone, and from
+      two outside checkouts of B''s branch (scratch clone + ~/.pm/workdirs/qa/s15/b)
+      printed ''using the existing clone on <branch> at <BC> (not recorded: ...)''
+      naming the right registry, entered BC, and left every clone clean with yaml
+      shas unchanged and no ''re-linked''. Main integrate C --apply after master moved:
+      all three listed (clean), rc 0, empty stderr, merge commit in CC. In-clone read-only
+      integrate B: no ''Workdir for'' line, head = BC HEAD, nothing written. Main
+      repo on master re-links once and records it, then the fast path. Wording observation
+      (main repo checked out on C''s branch): ''(not recorded: pm is using <proj>/pm/project.yaml,
+      tracked in the clone <proj>)'' calls the main repository a clone and does not
+      say the reason is the PR-branch checkout; naming the branch (e.g. ''<proj>/pm/project.yaml
+      is on PR branch pm/<C>-charlie-api'') would be clearer.'
+    created_at: '2026-11-02T09:27:05Z'
+    last_edited: '2026-11-02T09:27:05Z'
 - id: pr-0778fbe
   plan: plan-003
   title: Add PR ownership tracking with workdir history
