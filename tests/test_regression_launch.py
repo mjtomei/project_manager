@@ -379,6 +379,10 @@ def test_container_run_on_a_router_that_cannot_launch_creates_nothing(
     assert result.exit_code == 1
     assert expect in result.output
     assert "No session was launched on the host" in result.output
+    # A provider problem, not a container one: no runtime/disable advice.
+    assert "provider cannot launch it" in result.output
+    assert "pm container status" not in result.output
+    assert "pm container disable" not in result.output
     if bridge_error is None:
         ensure.assert_not_called()
     spies.create.assert_not_called()
@@ -485,7 +489,11 @@ def test_container_create_failure_launches_nothing(project, home):
                                     container_enabled=True, create=create)
     assert result.exit_code == 1
     assert "podman vanished" in result.output
+    assert "regression container could not be set up" in result.output
     assert "No session was launched on the host" in result.output
+    # A container problem: the runtime fix and the explicit opt-out.
+    assert "pm container status" in result.output
+    assert "pm container disable" in result.output
     spies.remove.assert_called_once_with(create.call_args.kwargs["name"])
     spies.build.assert_not_called()
     spies.execvpe.assert_not_called()

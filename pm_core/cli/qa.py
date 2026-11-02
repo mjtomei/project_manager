@@ -366,7 +366,9 @@ def _regression_route_mounts(session_tag: str | None) -> dict[Path, str]:
 
     A router whose settings cannot launch, or whose host bridge cannot be
     set up, raises (:class:`~pm_core.router_route.RouteSetupError`) before
-    any bridge or container is started.
+    any bridge or container is started.  The settings are checked for a
+    faked session too: ``build_claude_shell_cmd`` resolves a router's
+    launch parts before it looks for a fake, so it would refuse them later.
     """
     from pm_core import router_route
     from pm_core.model_config import ModelResolution
@@ -595,11 +597,24 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
     except Exception as exc:
         # Container mode is an execution boundary: report the failure rather
         # than continuing on the host.  Release only this run's container.
+        from pm_core.providers import ProviderNotFoundError
         if cname:
             try:
                 container_mod.remove_container(cname)
             except Exception:
                 pass
+        if cname and isinstance(exc, ProviderNotFoundError):
+            # The session's provider cannot launch it: a router's own
+            # settings, or its host bridge (_regression_route_mounts).  The
+            # error carries its remedy; fixing the container runtime or
+            # disabling container mode would not fix a provider setting.
+            click.echo(
+                "Container mode is enabled, but the regression session's "
+                f"provider cannot launch it: {exc}\n\n"
+                "No session was launched on the host.",
+                err=True,
+            )
+        elif cname:
             click.echo(
                 "Container mode is enabled, but the regression container "
                 f"could not be set up: {exc}\n\n"

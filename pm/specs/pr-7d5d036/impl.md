@@ -271,10 +271,19 @@ No [UNRESOLVED] items.
   `pm qa debug`; the container is removed by the exec trap when the session
   exits.
 - E10: Router providers. The session is built with `container=True`, so a
-  router default provider starts the in-container bridge first and fails
-  closed without it. Route-bridge mounts for regression containers are not
-  added here; that belongs to the container-launch hardening PRs. Model routing
-  is unchanged: no per-type model resolution, as before.
+  router provider starts the in-container bridge first. That step needs the
+  host bridge's socket dir mounted, which the container did not get, so every
+  container-mode run on a router died at the bridge step (QA S28, R41).
+  `cli/qa.py:_regression_route_mounts` resolves the provider the session
+  launches on (`PM_PROVIDER`, the session provider file, `pm provider
+  default`), runs `router_route.require_setup(container=True)`, skips the
+  mount for a `qa_regression` fake, and passes
+  `router_route.container_mounts(strict=True)` as `create_qa_container`
+  `route_mounts`, as QA scenario containers get it (ef4f5c19). A router
+  that cannot launch, or whose host bridge cannot start, is refused before
+  any container exists. The refusal gives the provider's own error and
+  remedy, without the container retry advice (review f51f i1). Model
+  routing is unchanged: no per-type model resolution, as before.
 - E11: Host mode (container mode off) shares the user's tmux server, as QA
   host scenarios do. The prompt requires explicit `-s <session>` and forbids
   driving sessions the test did not start. Container mode is the boundary.
