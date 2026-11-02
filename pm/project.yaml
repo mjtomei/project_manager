@@ -5173,7 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-11-02T07:05:21.826723+00:00'
+  updated_at: '2026-11-02T07:34:03.752173+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5247,6 +5247,24 @@ prs:
       default does. Captures /pm-captures/scenarios/9/story2.'
     created_at: '2026-11-02T07:05:21Z'
     last_edited: '2026-11-02T07:05:21Z'
+  - id: note-96f21bf
+    text: 'QA S10 run 2026-11-02 at 700069de (code = 0d42e087): PASS 6/6 live (TUI
+      d/t/i/i-after-move/zz d/zz d-after-move with two verified clones; captures /pm-captures/scenarios/10/{fixture,tui,cli,evidence}).
+      d and i show "Review/Sign-off window: no workdir for <A>. 2 clones of ..." with
+      the full line in L and no "Start the PR first"; t ends "QA finished: ERROR"
+      in <1 s with the multi-line ERROR [qa_loop] record in L, no qa window or qa
+      workdir; after moving the copy aside, i opened signoff-<A> and zz d opened review-<B>
+      in the remaining clone (re-link logged, no new dir), review PASS in 22 s. Findings
+      (observational, outside this PR per spec A3): (1) the one-row message line clips
+      the remedy: at 79 cols it stops after "2 clones of", zoomed to 160 after "not
+      choosing one;", so "move the extra clone(s) aside" is visible only in L; (2)
+      the t abort reason reaches no message line, [tui] log line or note (newest note
+      is a bare "QA ERROR: "), filed pr-5626111; (3) zz d with 2 clones retries 3x
+      and ends LAUNCH_FAILED "window not found after launch" ~22 s after start with
+      0-char launch artifacts, and only child WARNING [workdirs] lines in L name the
+      clones, filed pr-5a6c061.'
+    created_at: '2026-11-02T07:34:03Z'
+    last_edited: '2026-11-02T07:34:03Z'
 - id: pr-0778fbe
   plan: plan-003
   title: Add PR ownership tracking with workdir history
@@ -51521,3 +51539,67 @@ prs:
     signoff: provider:claude-work-xhigh-249
     merge: provider:deepseek-flash
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-049649a-remove-all-pr-autostart-and-fail-clo-registered-20261027
+- id: pr-5626111
+  plan: bugs
+  title: 'Bug: TUI QA run that aborts before planning (ambiguous or missing workdir)
+    leaves a bare "QA ERROR: " note and only "QA finished for X: ERROR" on the message
+    line'
+  branch: pm/pr-5626111-bug-tui-qa-run-that-aborts-before-planning-ambiguo
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_loop.py run_qa_sync early workdir abort (~L5570-5591)
+    sets state.latest_output to the one-line reason ("Workdir for X: 2 clones of <branch>
+    in <dir>, not choosing one; move the extra clone(s) aside", or "... does not exist
+    on this machine and could not be created") but not state._error; pm_core/tui/qa_loop_ui.py
+    _record_qa_note builds the note from qa_outcome_detail/qa_error_detail (both read
+    _error only) and _on_qa_complete logs only "QA finished for X: ERROR". So the
+    reason reaches no message line, no [tui] log line and no note; only the multi-line
+    ERROR [qa_loop] record in the L log names it. Repro (pr-4258a32 QA S10, 2026-11-02):
+    PR in_review whose workdir record names a vanished path and 2 verified clones
+    of its branch in ~/.pm/workdirs/<proj>/; press t in the TUI -> "Starting QA..."
+    then "QA finished for X: ERROR" in <1 s, `pm pr note list X` newest note is "QA
+    ERROR: " with nothing after it. Same bare note on master for the plain missing-workdir
+    abort. Note the CLI already prints the full listing to stderr, so a fix should
+    avoid printing it twice there.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T07:33:44.611691+00:00'
+  updated_at: '2026-11-02T07:33:44.611691+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-5a6c061
+  plan: bugs
+  title: 'Bug: review loop whose `pm pr review --review-loop` child refuses (workdir
+    ambiguity / no workdir) retries 3x and ends LAUNCH_FAILED "window not found after
+    launch" with empty launch artifacts; the refusal reason never reaches the user'
+  branch: pm/pr-5a6c061-bug-review-loop-whose-pm-pr-review-review-loop-chi
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/review_loop.py ~L890-905: when _find_review_claude_pane
+    finds no window, _write_launch_artifact is called with returncode=None, stdout="",
+    stderr="", so the child output of _launch_review_window (stdout "Review window:
+    no workdir for X. 2 clones of <branch> in <dir>, not choosing one; move the extra
+    clone(s) aside." + stderr listing) is dropped; the error is retryable=True reason=window,
+    so the loop retries at 5 s and 10 s on a deterministic refusal. Repro (pr-4258a32
+    QA S10, 2026-11-02): in_progress PR whose workdir record names a vanished path
+    and 2 verified clones of its branch in ~/.pm/workdirs/<proj>/; z z d in the TUI
+    -> PR moves to in_review, "Review launch retry ... (attempt 2; attempt 1 failed:
+    Review window review-X not found after launch (artifact: ...)", attempt 3, then
+    "Review loop done for X: LAUNCH_FAILED (1 iteration)" ~22 s after start. The three
+    artifacts say "note: window review-X not found after launch" with 0-char stderr/stdout;
+    the only mention of the clones is the child WARNING [workdirs] lines in the L
+    log. Expected: capture the child output in the artifact and surface its one-line
+    reason (and treat a no-workdir refusal as non-retryable). Moving the extra clone
+    aside and pressing z z d again then works.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T07:33:53.298584+00:00'
+  updated_at: '2026-11-02T07:33:53.298584+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
