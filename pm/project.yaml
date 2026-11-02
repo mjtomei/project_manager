@@ -5173,7 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-11-02T18:31:21.385440+00:00'
+  updated_at: '2026-11-02T19:14:50.039654+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5487,6 +5487,21 @@ prs:
       the discoverable clone; literal None) filed as pr-cd23997, outside this PR.'
     created_at: '2026-11-02T18:31:21Z'
     last_edited: '2026-11-02T18:31:21Z'
+  - id: note-72c6b70
+    text: 'SIGNOFF_IMPL return handled 2026-11-02: master@c3bac6cee203 merged into
+      the branch as b045f561 (pushed e820112b..b045f561). Conflict was pm/project.yaml
+      only: both sides appended new PR records at the same spot (QA-filed pr-5626111/pr-5a6c061/pr-588171e/pr-8d624c5/pr-ade4427/pr-cd23997
+      vs master''s pr-78e8ebe/pr-3199f44), no record changed on both sides and the
+      code files are disjoint. Resolved with store.merge_3way(base=6728fc22, ours=master,
+      theirs=branch) via the minimal-text route: 623 unique ids, every record verbatim
+      from one side, store.load(validate=True) OK, no markers. No code change. Full
+      suite on the merged tree (pytest 8.4.2 + markdown, fresh scratch HOME): 5745
+      passed, 1 skipped, 0 failed (449.78 s), same as the trial merge''s two runs.
+      The live uncommitted registry delta (pr-4258a32 status/workdir/model + the 3
+      QA planning notes) and the planner''s uncommitted qa.md edits are preserved
+      in the workdir.'
+    created_at: '2026-11-02T19:14:49Z'
+    last_edited: '2026-11-02T19:14:49Z'
   model: provider:claude-main-xhigh-pm
   effort: high
 - id: pr-0778fbe
