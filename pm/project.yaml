@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-22T18:52:47.226716+00:00'
+  updated_at: '2026-11-02T02:01:25.784391+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39485,6 +39485,30 @@ prs:
       0.88 s cancel journal). Captures /pm-captures/scenarios/46.'
     created_at: '2026-10-22T18:52:47Z'
     last_edited: '2026-10-22T18:52:47Z'
+  - id: note-3c66acb
+    text: 'Impl resumed 2026-11-02 (Opus 5.5): merged origin/master@c1fcecc5 as 20273e15
+      (pushed, fast-forward from 243ca527). Re-grounded on master: review launch retries
+      are backoff phases with a review-launch-retry timer, the lease wait is a queued
+      phase, CLOSED/HOLD/LAUNCH_FAILED end the iteration, and the auto-start re-arm
+      cooldown is a timer. Held QA runs journal a "QA INPUT_REQUIRED hold" and the
+      waiting scenario stays open in waiting_human (the observer is per run). Journals
+      are per pm session (~/.pm/history/<pm-session>/<pr>.jsonl, like the S93 runtime
+      dirs). The wait-for-merge hold is released when auto-start drops the target.
+      A merged PR''s picker keeps master''s notice row plus History (H only). Dropped
+      in favour of master: the branch''s QA-resume session-tag filter (master S39/S41
+      rules), _send_followup, _parse_fzf_expect, and the immediate pane lookup (now
+      a stop check after the window wait). impl.md updated. Validation: full suite
+      5572 passed, 1 skipped, 0 failed; isolated sandbox e2e (fake-claude) review
+      loop, held QA, kill/retry/reopen all read correctly; evidence /pm-captures/pr-8020495/impl-2026-11-02-master-merge.
+      Overlap with open PRs (textual; whichever lands second resolves; no ordering
+      decision needed): #241 pr-1139060 qa_loop +8 hunks and pr_cleanup 1; #247 pr-1ab9075
+      qa_loop +5; #257 pr-6566901 restructures poll_for_verdict (keep our once-a-second
+      pane check during the hook wait); #275 pr-9ee4d64 review_loop adopt path (combine
+      resolve_iteration_transcript with _start_iteration_attempt); #244 and #274 none.
+      Left uncommitted as found: the pm/project.yaml delta (status, notes b8f5690/dc959dc/61763c9,
+      model/effort) and verify-s12/s6-followup.md.'
+    created_at: '2026-11-02T02:01:25Z'
+    last_edited: '2026-11-02T02:01:25Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
