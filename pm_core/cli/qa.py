@@ -15,10 +15,10 @@ def qa():
     """Manage QA instructions, regression tests, artifact recipes, and mocks.
 
     This group runs individual items (`pm qa run`, `pm qa standalone`,
-    `pm qa regression`).  To run the full QA loop for a PR — planner plus
-    scenario windows — use the TUI: `pm pr qa <id>` prints the exact
-    command-bar form, or press `t` on the PR (`z t` fresh restart,
-    `zz t` loop).
+    `pm qa regression`).  The full QA loop for a PR — planner plus
+    scenario windows — runs from the TUI: select the PR and press `t`
+    (`z t` fresh restart, `zz t` loop).  `pm pr qa <id>` prints that
+    command-bar form.
     """
 
 

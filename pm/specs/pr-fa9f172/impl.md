@@ -351,3 +351,23 @@ the routed form and `--fresh` so help is complete.
   command only prints guidance); it names `ws` and points at `pm watcher
   stop` for guidance. `pm watcher stop`'s own help now says "Explain how
   to stop a running watcher" instead of promising the action.
+
+- Review-loop i5: two things the sweep still got wrong.
+  (a) The `?` HelpScreen clipped every row at the 50-column container
+  (`.help-row { height: 1 }` with natural width), so the new Command Bar
+  section lost its CLI/TUI half exactly where the equivalents start —
+  and the `y`/`w` rows added in i3 were cut too. `.help-row` is now
+  `width: 100%; height: auto`, so long rows wrap; a Textual `run_test`
+  assertion renders the screen and checks the tails of the longest rows.
+  (b) `_next_step_for_status(..., "in_review")` and the `pr signoff`
+  "no qa/sign_off PR" remedy named `pm pr qa <id>` as the way to *run*
+  QA, but that CLI is diagnostic only (it prints the command-bar form and
+  exits 1) — the remedy sent the operator in a circle. Both now name the
+  action (`t` in the TUI, `pr qa <id>` in the command bar). Also added
+  `[--companion]` to `pm pr merge`'s equivalent-forms line and table row
+  (the flag is real), and replaced the `review-loop` table's "(TUI only)"
+  with the actual one-iteration CLI form `pm pr review --review-loop`.
+  Correction to the i4 note: the watcher already-running message does not
+  itself name `ws` — it points at `pm watcher stop`, which names `ws` —
+  because the `ws` chord toggles only the auto-start watcher while
+  `start_watcher` accepts any type.

@@ -81,12 +81,29 @@ def test_pr_merge_help_names_tui_keys_and_no_fresh():
     out = _help("pr", "merge")
     assert "TUI" in out and "g" in out and "G" in out
     assert "no --fresh" in out
+    # The companion flag is real and belongs in the equivalent-forms line.
+    assert "pm pr merge [--companion] [PR_ID]" in out
 
 
 def test_pr_signoff_help_names_routed_form_and_record():
     out = _help("pr", "signoff")
     assert "--fresh" in out
     assert "record" in out and "integrate" in out
+
+
+@pytest.mark.parametrize("name", ["start", "review", "merge", "signoff"])
+def test_lifecycle_help_matches_the_shared_table(name):
+    """The hand-written equivalent blocks and the shared table agree.
+
+    start/review/merge/signoff prose differs, so those blocks are not
+    generated from ``command_surface``; this is the drift guard for them
+    (it would have caught merge's missing ``[--companion]``).  The
+    expected form is read from the table, not retyped here.
+    """
+    cli_form = next(
+        cli for form, cli, _keys, _desc in command_surface.COMMAND_BAR_COMMANDS
+        if form.startswith(f"pr {name} "))
+    assert cli_form in " ".join(_help("pr", name).split())
 
 
 def test_pr_signoff_accepts_the_help_alias():
@@ -197,6 +214,52 @@ def test_help_screen_lines_escape_textual_markup():
     assert any("\\[--fresh]" in line for line in lines)
     assert not any(re.search(r"(?<!\\)\[", line) for line in lines), \
         "unescaped '[' would be parsed as Textual markup"
+
+
+def test_help_screen_renders_the_whole_command_bar_section():
+    """The `?` screen must not clip the half that matters.
+
+    ``.help-row`` used to be one line tall with a natural (overflowing)
+    width, so every row was cut at the 50-column container — exactly where
+    the CLI/TUI equivalents start.  The rows now wrap; assert the rendered
+    text (whitespace-normalized, since wrapping breaks lines at spaces)
+    contains the ends of the longest rows.
+    """
+    import asyncio
+
+    from textual.app import App
+
+    from pm_core.tui.screens import HelpScreen
+
+    class _HelpApp(App):
+        CSS = HelpScreen.CSS
+
+        def on_mount(self) -> None:
+            self.push_screen(HelpScreen())
+
+    async def render() -> str:
+        app = _HelpApp()
+        async with app.run_test(size=(80, 50)) as pilot:
+            await pilot.pause()
+            chunks = []
+            for label in app.screen.query("#help-container Label"):
+                lines = [label.render_line(i).text
+                         for i in range(label.region.height)]
+                chunks.append(" ".join(lines))
+            return re.sub(r"\s+", " ", " ".join(chunks))
+
+    text = asyncio.run(render())
+    for tail in (
+        # command-bar table, second line of the longest rows
+        "TUI: s / z s / S / z S",
+        "TUI: zz t",
+        "CLI: pm pr merge [--companion] [PR_ID] TUI: g / G",
+        "pr qa <id> --loop = pr qa loop <id>",
+        # rows this PR lengthened in the keybinding list
+        "Watcher prefix: ww list, wf focus, ws start/stop, wr review",
+        "Cleanup, then: ys start, yd review, yt QA",
+    ):
+        assert tail in text, f"{tail!r} clipped from the ? screen"
 
 
 def test_tui_keys_matches_the_shared_table():
@@ -421,6 +484,21 @@ def test_status_next_step_maps_lifecycle_order():
     assert "pm pr signoff pr-001" in _next_step_for_status("pr-001", "qa")
     assert "pm pr merge pr-001" in _next_step_for_status("pr-001", "sign_off")
     assert "pm pr show pr-001" in _next_step_for_status("pr-001", "merged")
+
+
+def test_status_next_step_does_not_name_the_diagnostic_qa_command():
+    """`pm pr qa` only prints the command-bar form; it never starts QA.
+
+    A remedy that says "run QA with `pm pr qa`" sends the operator in a
+    circle: that command answers with another instruction and exits 1.
+    The in_review step must name the action that actually starts QA.
+    """
+    from pm_core.cli.pr import _next_step_for_status
+
+    remedy = _next_step_for_status("pr-001", "in_review")
+    assert "pm pr qa" not in remedy
+    assert "pr qa pr-001" in remedy
+    assert "press t" in remedy
 
 
 # ---------------------------------------------------------------------------

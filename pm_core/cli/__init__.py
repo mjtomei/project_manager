@@ -693,7 +693,7 @@ COMMANDS
   pm set <setting> <value>      Configure a global pm setting
   pm setting <setting> <value>  Alias for 'pm set'
   pm project set <key> <value>  Configure a project-level setting
-  pm log tail|grep|show         Tail or search the pm session log
+  pm log tail|grep|show|clear|path|sources  Tail, search or inspect the pm session log
   pm session home|kill|mobile|name|tag  Manage the pm tmux session
   pm container build-base       Build the pm developer base image
   pm fake-claude config|emit    Scriptable Claude stand-in (integration testing)

@@ -45,7 +45,7 @@ def _qa_running_remedy(pr_id: str) -> str:
     """Corrective sentence for a QA start refused because a run exists."""
     return (f"QA already running for {pr_id} — restart with "
             f"`pr qa fresh {pr_id}` (TUI: select the PR, press z t); "
-            f"stop a running loop with `pr qa loop {pr_id}` (TUI: zz t).")
+            f"stop it with `pr qa loop {pr_id}` (TUI: zz t toggles the run).")
 
 
 def _qa_held_remedy(pr_id: str) -> str:

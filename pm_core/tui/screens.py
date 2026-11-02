@@ -202,7 +202,12 @@ class HelpScreen(ModalScreen):
         color: $primary;
     }
     .help-row {
-        height: 1;
+        /* Full width + auto height so a long row wraps instead of being
+           clipped at the 50-column container.  The command-bar table's
+           useful half (the CLI and TUI equivalents) sits past column 44,
+           so height:1 silently hid exactly what this screen now documents. */
+        width: 100%;
+        height: auto;
     }
     """
 

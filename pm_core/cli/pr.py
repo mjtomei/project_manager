@@ -1860,7 +1860,8 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
         if pr_id is None:
             click.echo(
                 "No qa/sign_off PR to sign off. Specify one — run QA first "
-                "with 'pm pr qa <id>' (TUI: t).", err=True)
+                "(TUI: select the PR and press t; command bar: "
+                "'pr qa <id>').", err=True)
             raise SystemExit(1)
         click.echo(f"Auto-selected {pr_id}")
 
@@ -2799,7 +2800,10 @@ def _next_step_for_status(pr_id: str, status: str | None) -> str:
     if status == "in_progress":
         return f"Review it first with 'pm pr review {pr_id}' (TUI: d)."
     if status == "in_review":
-        return f"Run QA next with 'pm pr qa {pr_id}' (TUI: t)."
+        # `pm pr qa` is diagnostic only (it prints the command-bar form and
+        # exits); naming it as the runner would send the operator in a loop.
+        return (f"Run QA next: press t on the PR in the TUI, or type "
+                f"'pr qa {pr_id}' in the command bar.")
     if status == "qa":
         return f"Sign it off next with 'pm pr signoff {pr_id}' (TUI: i)."
     if status == "sign_off":
@@ -2946,8 +2950,8 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
 
     \b
     Equivalent forms:
-      CLI          pm pr merge [PR_ID]
-      command bar  pr merge [PR_ID]
+      CLI          pm pr merge [--companion] [PR_ID]
+      command bar  pr merge [--companion] [PR_ID]
       TUI          g      merge
                    G      merge with a companion shell pane
 
