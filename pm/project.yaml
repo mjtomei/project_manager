@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T12:49:11.224234+00:00'
+  updated_at: '2026-11-02T13:03:00.445059+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -26170,6 +26170,32 @@ prs:
       + rehearsal: /pm-captures/scenarios/30/refiner-helpers.'
     created_at: '2026-11-02T12:49:11Z'
     last_edited: '2026-11-02T12:49:11Z'
+  - id: note-ece185b
+    text: 'QA S29 (2026-11-02): PASS at de47f015 (pm_core with route-mount fix ef4f5c19
+      + review f51f i1-i3), all 5 stories live from /scratch/s29 (device differs from
+      ~/.pm), router default r-ctr -> 127.0.0.1:18429 request log, token via --env
+      PM_QA_RTOKEN, no fix. Container runs from the CLI (--file-prs), TUI Enter, the
+      command bar (--branch alt) and pm qa launch --target-window discovery each got
+      route-bridge/r-ctr -> /run/pm-route, in-container ANTHROPIC_BASE_URL=http://127.0.0.1:18429,
+      PM_QA_RTOKEN=set, and a GET that reached the server in the same second, all
+      behind ONE host bridge (route_bridge.py host ~/.pm/route-bridge/r-ctr/router.sock
+      127.0.0.1 18429, pid unchanged across 4 runs). podman exec carried 11 bare -e
+      names (0 with =); token in 0 ps dumps, podman inspect CreateCommand, prompt.md,
+      ~/.pm/debug, pane start cmds, drv scrollbacks; only ~/.pm/providers.yaml. CLI:
+      header in 1.3 s; pm -C /pm-project filing rc 0 (pr list + sha changed, tui view
+      0 until r = A14/pr-7ebc650); plans/specs Read-only file system rc 1; exit ->
+      rc=0 in 10.49 s, container removed. TUI Enter: pane in 0.21 s with the trap
+      wrapper; user pane kept id/pid/text, rebalanced (TUI+run left, user right);
+      pane gone 10.54 s. Command bar: exact command (no --file-prs), alt commit =
+      rev-parse, prompt.md 4 sections/no pm -C, /pm-project absent, TUI answered in
+      0.11 s. qa launch: rc 0 "Launched ... (pane %7)", outside tmux rc 1; 4 distinct
+      ids/workdirs/captures/containers, each captures dir prompt.md + 1 stand-in record.
+      Host mode after disable + rm router.sock: Runs in host, captures prompt.md only,
+      GET direct to api_base, no bridge, no router.sock. Rig trap: "Runs in:" is indented
+      two spaces in the header, so anchor waits on "^  Runs in:" or the prompt. Captures:
+      /pm-captures/scenarios/29/ (s1-s5 cli/tui, evidence/).'
+    created_at: '2026-11-02T13:03:00Z'
+    last_edited: '2026-11-02T13:03:00Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
