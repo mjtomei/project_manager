@@ -3901,3 +3901,49 @@ tmux targets) and the i18 residual (a legacy shared session whose
 72–78-character tag kept the unhashed socket path) are unchanged.  No live
 session, server or shared host configuration was touched — every fixture
 used a disposable socket, a temporary HOME or a mocked tmux.
+
+## Review iteration (2026-11-02, review-loop b48f i20)
+
+Verification pass over the head after the b48f i19 fixes.  One item: an
+implicit socket lookup without the ownership check every other implicit
+lookup applies.  No requirement changes.
+
+1. **`qa_loop.run_session_live_elsewhere()` probed sockets other users
+   own.**  b48f i15 added it so the TUI's QA resume scan leaves a run
+   alone when another clone's session is alive on another server.  The
+   name it looks up comes from the run snapshot's `session_tag`, so the
+   lookup is implicit, but it called `find_session_server(run_session)`
+   without `owned_only`.  It was the only implicit caller left without it
+   (every `find_session_server` / `_select_session_socket` caller was
+   checked; the only other one without the flag is the explicit `-s`
+   branch of `_find_tui_pane`, which is exempt by design).  Another local
+   user could bind a server at the run's deterministic name in the 1777
+   socket directory.  The victim's TUI then connected to it
+   (`has-session`, then the group confirmation) and, because it answered,
+   left the run unresumed.  The run was launched by this user's pm, whose
+   server binds a socket this user owns.  That holds for a shared session
+   too, because the sharing user's `~/.pm` is the one holding the
+   snapshot.  So the call now passes `owned_only=True` unconditionally.
+   With no server of ours the session counts as gone and the run is
+   resumed here, which is what already happens when the session really is
+   gone.  Test:
+   `tests/test_qa_resume.py::TestCrossServerRunSession::test_a_socket_another_user_planted_is_not_the_run_session`
+   binds a real socket at the deterministic path with a foreign owner.
+   It fails on the pre-fix code (`run_session_live_elsewhere` returned
+   True after probing the planted socket) and passes with the fix.
+
+Heads-up for the next master integration, not changed here.
+`origin/master` has moved 183 commits past the merge base (eaf3372e →
+c1fcecc5).  A read-only `git merge-tree` shows textual conflicts only in
+`pm/project.yaml` (registry 3-way merge) and in one hunk of
+`pm_core/tui/qa_loop_ui.py::_resume_incomplete_qa`.  There, master adds a
+re-read of `qa_status.json` (refreshing `overall` and keeping the daemon's
+`error`) at the spot where this PR inserts the "live on another server"
+skip.  Keep both, with master's re-read **first**, so `needs_driving` sees
+the refreshed `overall`.
+
+The i16 residual (other commands passing a base name to prefix-matched
+tmux targets) and the i18 residual (a legacy shared session whose
+72–78-character tag kept the unhashed socket path) are unchanged.  No live
+session, server or shared host configuration was touched.  Every fixture
+used a disposable socket, a temporary HOME or a mocked tmux.

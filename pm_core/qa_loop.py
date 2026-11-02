@@ -6228,6 +6228,16 @@ def run_session_live_elsewhere(session_tag: str | None) -> bool:
 
     A session that is gone everywhere is *not* "elsewhere": its windows
     went with it, so the run is resumed here (see :func:`_resume_session`).
+
+    The lookup is implicit (the name comes from the snapshot's tag), so it
+    requires a socket this user owns (``find_session_server``'s
+    *owned_only*), like every other implicit lookup.  The run was launched
+    by this user's pm, whose server binds a socket this user owns, and
+    that holds for a shared session too: its sharing user is the one whose
+    ``~/.pm`` holds the snapshot.  Without the check, a socket another user
+    planted under the run's deterministic name in the world-writable socket
+    directory was connected to, and its answer made this TUI leave the run
+    alone instead of resuming it (review-loop b48f i20).
     """
     if not session_tag:
         return False
@@ -6238,7 +6248,8 @@ def run_session_live_elsewhere(session_tag: str | None) -> bool:
         # pre-isolation session, or this TUI's own).
         if tmux_mod.session_exists(f"={run_session}"):
             return False
-        socket_path, _on_private = tmux_mod.find_session_server(run_session)
+        socket_path, _on_private = tmux_mod.find_session_server(
+            run_session, owned_only=True)
     except OSError:
         # tmux missing/unexecutable: nothing can be driven, and the resume
         # degrades to this TUI's own session as it did before (the same

@@ -403,6 +403,43 @@ class TestCrossServerRunSession:
     def test_no_recorded_session_is_not_elsewhere(self):
         assert qa_loop.run_session_live_elsewhere(None) is False
 
+    def test_a_socket_another_user_planted_is_not_the_run_session(
+            self, monkeypatch, tmp_path):
+        """The lookup is implicit, so only a socket we own can host the run.
+
+        ``/tmp/pm-sessions`` is world-writable and the run's socket name is
+        derived from its tag, so another user can bind a server there.  It
+        must not be contacted, and its answer must not make this TUI leave
+        the run alone (review-loop b48f i20).  With no server of ours, the
+        session is gone and the run is resumed here.
+        """
+        import os
+        import socket
+
+        from pm_core import paths, tmux
+
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        tag = "other-clone-cafe1234"
+        planted = tmux.session_socket_for(f"pm-{tag}")
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            s.bind(planted)
+        finally:
+            s.close()
+        real_uid = os.getuid()
+        monkeypatch.setattr(os, "getuid", lambda: real_uid + 1)
+        probed: list[str | None] = []
+
+        def exists(name, socket_path=None, use_env=True):
+            probed.append(socket_path)
+            # Only the planted server would answer.
+            return socket_path == planted
+
+        monkeypatch.setattr(tmux, "session_exists", exists)
+
+        assert qa_loop.run_session_live_elsewhere(tag) is False
+        assert planted not in probed
+
     def test_tmux_missing_is_not_elsewhere(self, monkeypatch):
         """No tmux: degrade to the old behaviour instead of crashing the scan."""
         def missing(*a, **k):
