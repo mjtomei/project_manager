@@ -40317,7 +40317,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T23:41:46.060190+00:00'
+  updated_at: '2026-11-02T23:57:37.402363+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42402,6 +42402,38 @@ prs:
       needed). E19 (focus) is not in the committed qa.md.'
     created_at: '2026-11-02T23:41:45Z'
     last_edited: '2026-11-02T23:41:45Z'
+  - id: note-24409ba
+    text: 'QA S82 refiner (2026-11-02, head 6d1e8651): all 3 stories held live with
+      the S76 drivers re-pointed (/scratch/q82r, torn down); evidence + README /pm-captures/pr-8020495/s82-refiner.
+      Restart-1 old-loop-open reads at +0.054/+0.059 s after return (inside the 0.3
+      s allowance); restart-2 qa=running-unmarked transient caught at +0.123. Setup
+      trap: the env -i PATH must hold a `claude` (dummy is fine) next to the pm wrapper
+      + fake-claude link, else TUI s prints the impl prompt and opens no window and
+      pm pr spec Q qa fails. fzf/less need sudo apt-get update first. S76 scripts
+      never stop the story-1 readers; they keep polling through stories 2-3. pm session
+      with stdin /dev/null prints an attach Traceback on stdout (not the debug log).'
+    created_at: '2026-11-02T23:39:27Z'
+    last_edited: '2026-11-02T23:39:27Z'
+  - id: note-22eab40
+    text: 'QA S82 (2026-11-02) PASS on 01c6c58f3 (app d2e0097e), no code edits: refiner
+      drivers (S76 re-pointed) re-run in env -i sandbox /scratch/q82 (torn down);
+      captures + per-Then README in /pm-captures/scenarios/82 (scripts/, reads.tgz,
+      journals/). Story 1: restart 1 in i2 grace (14.1 s left, pid 200869 kept); old
+      loop last read open +0.108 s, stale gap +0.186, no runtime +0.278, parent-only
+      +0.335 (text), adopted i2 open "running for 0s" +0.368 (journal 27 ms), steady
+      +0.461; restart 2 1.41 s after the s1 relaunch: old run last open -0.061, no
+      qa runtime +0.526..+1.711, back +2.307 (unmarked qa=running not caught); 1 Relaunched
+      line, one PASS per scenario, max_concurrency 2, QA PASS. chk.py BAD 0 on 4735
+      JSON reads, txtchk 0 pre-restart rows -> now; new trc.py transient classifier
+      VIOLATIONS 0. Story 2: SIGKILL at i1 agent 3.1 s, an2 BAD 0 (b1 934/b2 926/mj
+      151 post-kill), b3 933 text 0 open; respawn pid 281373, swept at mount, 18.2
+      s no loop, hand loop PASS (2 it); medians 0.074/0.102/0.106 s. Story 3: cleanup
+      -> interrupted/vanished KILLED/cancelled, 0 post-return transients; plain merge
+      rc 1; recovery 0.314 s; 3 parent-run-ended-first reads <= +0.17 s; popup (3/3)
+      rows/z/d/pager pcmp2 EQUAL. s1b.sh now stops the story-1 readers (refiner copy
+      left them polling).'
+    created_at: '2026-11-02T23:57:37Z'
+    last_edited: '2026-11-02T23:57:37Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
