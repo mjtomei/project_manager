@@ -272,6 +272,22 @@ def _history_end_detail(e: BaseException, limit: int = 300) -> str:
     return text[:limit]
 
 
+# A review HOLD's message is pm's own workspace-trust text
+# (``workspace_trust.blocked_message``): a fixed template that names the
+# workdir twice and ends with what to run.  Any real workdir pushes it past
+# 300 characters, so a plain 300-char cut always dropped that instruction
+# ("To proceed: " and nothing after it).  The text is bounded by the
+# template, so it is journaled whole; the cap only guards a pathological
+# path.
+_HOLD_DETAIL_LIMIT = 1000
+
+
+def _hold_end_detail(e: BaseException, limit: int = _HOLD_DETAIL_LIMIT) -> str:
+    """The journaled end detail of an iteration held at a trust prompt."""
+    text = "held at a permission/trust prompt: " + str(e)
+    return text if len(text) <= limit else text[:limit - 3] + "..."
+
+
 def _write_launch_artifact(*, transcript: str | None, pr_id: str,
                            iteration: int, loop_id: str, attempt: int,
                            cmd: list[str], returncode: int | None,
@@ -1639,8 +1655,7 @@ def run_review_loop_sync(
                 state.launch_retryable = False
                 _ah.end_attempt(state.pr_id, attempt, "failed",
                                 verdict=VERDICT_HOLD,
-                                detail=("held at a permission/trust prompt: "
-                                        + str(e))[:300])
+                                detail=_hold_end_detail(e))
                 break
             except ReviewLaunchError as e:
                 # A genuine failed authorized launch.  Never fabricate an

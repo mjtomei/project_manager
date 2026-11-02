@@ -173,7 +173,7 @@ pane's polling starts and cleared when the poll returns (an adopted pane
 is polled without a grace, so none is armed).  Iteration ends: verdict →
 `done` with verdict; `PaneKilledError` → `vanished` (`cancelled` when the
 loop was stopped); `ReviewClosedError` → `cancelled` `CLOSED`;
-`ReviewHoldError` → `failed` `HOLD`; `ReviewLaunchError` → `failed`
+`ReviewHoldError` → `failed` `HOLD` (detail "held at a permission/trust prompt: " + pm's whole trust-prompt message, which names the workdir twice and ends with what to run, capped at 1000 characters, `review_loop._hold_end_detail`, QA S64; a 300-char cut always dropped the instruction); `ReviewLaunchError` → `failed`
 `LAUNCH_FAILED` (`superseded` when another loop owns the launch; the
 end detail is clipped to 300 characters but keeps a trailing
 `(artifact: <path>)` whole, `review_loop._history_end_detail`, QA S50

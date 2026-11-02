@@ -1261,6 +1261,32 @@ class TestReviewLoopHistory:
                                    artifact="/a.log")
         assert rl._history_end_detail(err) == "short (artifact: /a.log)"
 
+    def test_hold_end_keeps_the_trust_instruction(self, clock, monkeypatch):
+        # QA S64 story 6: pm's trust-prompt message names the workdir twice
+        # and ends with what to run; any real workdir pushed that past a
+        # 300-char cut, so the HOLD row read "... To proceed: " and stopped.
+        from pm_core import review_loop as rl
+        from pm_core.workspace_trust import blocked_message
+        wd = ("/scratch/r64/home/.pm/workdirs/proj-b13d1987/"
+              "pm-pr-e626745-retry-target-alpha-ecffcbc2")
+        err = rl.ReviewHoldError(blocked_message(wd, 31))
+        self._retry_loop(clock, [err], monkeypatch)
+        (it,) = [a for a in _attempts().values() if a.get("iteration") == 1]
+        detail = _ends()[it["attempt"]]["detail"]
+        assert detail == "held at a permission/trust prompt: " + str(err)
+        assert detail.endswith("then restart this step.")
+        assert f"run `pm trust add {wd}`" in detail
+        text = " ".join(" ".join(hq.render_text(
+            hq.build_history(PR, now=clock.t, live=False))).split())
+        assert "then restart this step." in text
+
+    def test_hold_end_detail_is_bounded(self):
+        from pm_core import review_loop as rl
+        detail = rl._hold_end_detail(rl.ReviewHoldError("p" * 5000))
+        assert len(detail) == rl._HOLD_DETAIL_LIMIT
+        assert detail.startswith("held at a permission/trust prompt: ppp")
+        assert detail.endswith("...")
+
     def test_review_hold_is_a_derived_hold(self, clock):
         runtime = {"review-loop": {"state": "failed", "verdict": "HOLD",
                                    "updated_at": "2026-11-02T00:00:00+00:00"}}
