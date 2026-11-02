@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T03:29:11.587952+00:00'
+  updated_at: '2026-11-02T03:45:18.416162+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25539,6 +25539,22 @@ prs:
       are symlinks, so use grep -R, not -r. Captures: /pm-captures/scenarios/11/.'
     created_at: '2026-11-02T03:29:11Z'
     last_edited: '2026-11-02T03:29:11Z'
+  - id: note-5f8e222
+    text: 'QA S13 refiner (live at a610bc87; qa debug/QA-loop code unchanged at 634a4c05;
+      /scratch project, private tmux socket): all 3 stories held, no bug. Draft Givens
+      that fail as written: (1) the bare upstream must be a file:// URL; a plain-path
+      bare origin is local-only to resolve_real_origin, so scenario/debug clones keep
+      the PR workdir/project as origin. (2) Commit pm/project.yaml after pm pr add,
+      or TUI s says ''not committed on master yet''. (3) The fake planner writes no
+      QA spec: commit pm/specs/<pr>/qa.md in the PR workdir, or the run ends INPUT_REQUIRED
+      ''QA spec was not generated during planning''. (4) A fake config with _all also
+      fakes pm qa debug''s qa_author session; clear it before a claude-stand-in debug
+      story. (5) --foreground prints ''Debug: <title>'' + Workdir (not ''Launched
+      debug session'') and runs in the calling pane. Loop PASS about 2 min after t;
+      a /scratch debug clone is a copy (link count 1), QA scenario clones hardlink
+      to the PR workdir.'
+    created_at: '2026-11-02T03:45:18Z'
+    last_edited: '2026-11-02T03:45:18Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
