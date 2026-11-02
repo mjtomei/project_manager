@@ -37641,7 +37641,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-14T15:34:14.432857+00:00'
-  updated_at: '2026-11-01T23:37:43.555888+00:00'
+  updated_at: '2026-11-02T00:45:28.966024+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37657,6 +37657,14 @@ prs:
       alongside notes.txt/.pm-sessions.json (pm_core/cli/__init__.py ~L156).'
     created_at: '2026-11-01T23:37:43Z'
     last_edited: '2026-11-01T23:37:43Z'
+  - id: note-b1040c2
+    text: 'Same fix site, more dirs: pm watcher start discovery in a pm init --backend
+      local project leaves "?? pm/watchers/" (discovery.log work log) and "?? pm/transcripts/"
+      (discovery-<hex>/ symlinks) untracked beside pm/prompts/. Seen in pr-7d5d036
+      QA S5 story 4 (git status --short after tick 1). Consider ensuring all three
+      in pm/.gitignore.'
+    created_at: '2026-11-02T00:45:28Z'
+    last_edited: '2026-11-02T00:45:28Z'
 - id: pr-4bde874
   plan: bugs
   title: 'Bug: test_installer_writes_standalone_receiver fails whenever PM_HOST_HOME
