@@ -1724,7 +1724,8 @@ def list_pm_sessions() -> list[dict]:
     the socket is group/world accessible (``--global``/``--group``
     sessions chmod it; private servers are 0600).
     """
-    from pm_core.paths import SHARED_SOCKET_DIR, default_socket_path
+    from pm_core.paths import (SHARED_SOCKET_DIR, default_socket_path,
+                               shared_socket_dir_is_usable)
 
     def is_shared(sock: Path | None) -> bool:
         if sock is None:
@@ -1812,11 +1813,10 @@ def list_pm_sessions() -> list[dict]:
     # must not enumerate it either — the target's owner would decide which
     # servers appear as pm sessions, and discovery would scan them.  A
     # missing directory is the normal first-run state: nothing to scan.
-    try:
-        dir_mode = SHARED_SOCKET_DIR.lstat().st_mode
-    except OSError:
-        dir_mode = None
-    if dir_mode is not None and not stat.S_ISDIR(dir_mode):
+    # The rule is ``paths.shared_socket_dir_is_usable``, the same one
+    # ``find_session_server`` and ``pm session kill`` apply, so the read
+    # paths cannot drift apart.
+    if not shared_socket_dir_is_usable():
         _log.warning("list_pm_sessions: %s is not a real directory; "
                      "not scanning it", SHARED_SOCKET_DIR)
         sockets = []

@@ -475,6 +475,28 @@ def _removable_private_socket(socket_path: str) -> bool:
     return stat.S_ISSOCK(entry.st_mode) or stat.S_ISREG(entry.st_mode)
 
 
+def _remove_stale_socket(socket_path: str) -> None:
+    """Unlink *socket_path* when it is ours and no server answers on it.
+
+    tmux leaves the socket file behind after its server exits, and
+    `pm session list` would keep reporting the dead server.  A *live*
+    server's socket is kept: it can still host grouped sessions after its
+    base was killed elsewhere, or a session outside the killed group (a
+    stray or hand-made one, or a kill-session that failed), and unlinking
+    it strands every client attached there.  ``_removable_private_socket``
+    refuses the hostile states first (a planted directory link, a planted
+    symlink, another user's socket), so nothing is probed or deleted
+    through a path pm does not trust.  Both ``pm session kill`` branches
+    (session not found, session killed) apply this one rule.
+    """
+    if (_removable_private_socket(socket_path)
+            and not tmux_mod.server_alive(socket_path)):
+        try:
+            Path(socket_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def _pick_existing_session(candidates: list[str]) -> str:
     """Return the first candidate session that is actually running.
 
@@ -1140,19 +1162,8 @@ def session_kill(start_dir):
         session_name, owned_only=_owned_only_for_target(session_name))
     if hosting_socket is None:
         click.echo(f"No session '{session_name}' found.", err=True)
-        # Remove the socket file only when no server answers on it.  A live
-        # server can still host grouped sessions after its base session was
-        # killed elsewhere; unlinking its socket would strand those clients.
-        # ``_removable_private_socket`` refuses the hostile states (a
-        # planted directory link, a planted symlink, another user's
-        # socket): probing or deleting through one would act on a path pm
-        # does not trust.
-        if (_removable_private_socket(socket_path)
-                and not tmux_mod.server_alive(socket_path)):
-            try:
-                Path(socket_path).unlink(missing_ok=True)
-            except OSError:
-                pass
+        # A stale socket file is still cleaned up; a live server's is kept.
+        _remove_stale_socket(socket_path)
         raise SystemExit(1)
 
     # From here on the command must run to the end even if its terminal
@@ -1193,20 +1204,9 @@ def session_kill(start_dir):
                     "Session kill cleanup: %d container(s), %d proxy(ies)",
                     n_containers, n_proxies)
 
-        # tmux leaves the socket file behind after the server exits; remove it
-        # so `pm session list` does not keep reporting a dead server.  Only
-        # remove it when no server answers on it: the kill may have left the
-        # server alive (a session that is not part of this group — a stray or
-        # hand-made one — or a kill-session that failed), and unlinking a live
-        # server's socket strands every client attached to it.  This is the
-        # same rule the not-found branch above follows, including the refusal
-        # to probe or delete through a planted directory link or symlink.
-        if (_removable_private_socket(socket_path)
-                and not tmux_mod.server_alive(socket_path)):
-            try:
-                Path(socket_path).unlink(missing_ok=True)
-            except OSError:
-                pass
+        # The server normally exits with its last session; remove the socket
+        # file it leaves behind (kept if the server is still alive).
+        _remove_stale_socket(socket_path)
 
         _echo_surviving_hangup(f"Killed session '{session_name}'.")
 
