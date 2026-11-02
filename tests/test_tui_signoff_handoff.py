@@ -1042,6 +1042,35 @@ def test_auto_start_off_after_g_merge_journals_no_late_release(
         assert row["resolved_at"] == merged_at
 
 
+def test_release_merge_hold_reads_registry_only_for_journaled_holds(
+        tmp_path):
+    """Auto-start releasing PRs this TUI never journaled a hold for writes
+    nothing and does not read project.yaml on the main thread; a PR it
+    holds is released unless the registry says it merged since."""
+    from types import SimpleNamespace
+    from pm_core import action_history
+    app = SimpleNamespace(_root=tmp_path, _data={},
+                          _history_merge_holds={"pr-held", "pr-gone"})
+    loads = []
+
+    def load(root):
+        loads.append(root)
+        return {"prs": [{"id": "pr-held", "status": "qa"},
+                        {"id": "pr-gone", "status": "merged"}]}
+
+    with patch.object(review_loop_ui.store, "load", side_effect=load):
+        review_loop_ui.release_merge_hold_journal(app, ["pr-x", "pr-y"])
+        assert loads == []
+        assert not action_history.has_journal("pr-x")
+        review_loop_ui.release_merge_hold_journal(
+            app, ["pr-held", "pr-gone", "pr-x"])
+    assert loads == [tmp_path]
+    assert [e.get("reason") for e in action_history.read_events("pr-held")
+            if e["kind"] == "timer_clear"] == ["released"]
+    assert not action_history.has_journal("pr-gone")
+    assert app._history_merge_holds == set()
+
+
 def test_terminal_signoff_hop_does_not_reread_journal_each_poll(
         world_factory):
     """ready_to_merge repeats on every 5 s poll; journaling the routed

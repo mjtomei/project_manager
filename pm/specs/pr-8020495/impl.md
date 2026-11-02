@@ -265,7 +265,12 @@ R7. **Holds** (indefinite timers, `due_t = null`, no countdown):
     PR merges, auto-start drops the wait target that held it or is turned
     off (`auto_start._release_hold_journal`), or a new sign-off router run
     starts — `superseded`, since the earlier SIGNOFF_MERGE no longer
-    covers HEAD).
+    covers HEAD).  Auto-start's release journals no clear for a PR that
+    has merged or closed since (read from the on-disk registry,
+    `review_loop_ui._terminal_pr_ids`): `g` merges through `pm pr merge`,
+    which journals none, and a clear written when auto-start turns off
+    minutes later (another target merged) would move the release past the
+    merge (QA S80, 2d6e962a).
   - Derived at query time, not journaled: `spec_pending` (project.yaml,
     armed at `generated_at`), QA INPUT_REQUIRED (runtime `qa` done +
     INPUT_REQUIRED, unless a journaled QA hold is active or a QA run
@@ -324,6 +329,9 @@ The model contains:
     whether or not its owner is still alive (merges via `pm pr merge` /
     GitHub sync never reach the TUI's hold-release point, and the arming
     TUI has usually exited by the time a merged PR's history is read).
+    So does a hold on a merged PR first cleared after `merged_at`: the
+    merge released it, and a later clear must not move that release (QA
+    S80); a hold cleared before the merge keeps its own reason and time.
   - `holds`: journaled + derived holds.
   - `now`: live per-action status (runtime `derive_action_status`) plus,
     for an open attempt in `agent` phase with a known session, the latest

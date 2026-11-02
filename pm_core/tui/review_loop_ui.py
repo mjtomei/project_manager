@@ -1018,7 +1018,10 @@ def release_merge_hold_journal(app, pr_ids, *, force: bool = False) -> None:
     """
     held = getattr(app, "_history_merge_holds", None) or set()
     from pm_core import action_history as _ah
-    done = set() if force else _terminal_pr_ids(app, pr_ids)
+    # Only PRs with a hold this TUI journaled can get a clear here, so the
+    # registry is read only for those (none: no read on the main thread).
+    done = set() if force else _terminal_pr_ids(
+        app, [p for p in pr_ids if p in held])
     for pr_id in pr_ids:
         if force or (pr_id in held and pr_id not in done):
             _ah.clear_timer(pr_id, f"merge-hold:{pr_id}", "released")
@@ -1028,6 +1031,8 @@ def release_merge_hold_journal(app, pr_ids, *, force: bool = False) -> None:
 def _terminal_pr_ids(app, pr_ids) -> set[str]:
     """The merged/closed PRs among *pr_ids*, from the on-disk registry (the
     TUI's copy may predate a ``g`` merge's write)."""
+    if not pr_ids:
+        return set()
     try:
         data = store.load(app._root) if getattr(app, "_root", None) \
             else app._data
