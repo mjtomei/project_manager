@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T16:31:05.333010+00:00'
+  updated_at: '2026-11-02T16:43:28.416310+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40330,6 +40330,25 @@ prs:
       the loop child end.'
     created_at: '2026-11-02T16:31:05Z'
     last_edited: '2026-11-02T16:31:05Z'
+  - id: note-b2da457
+    text: 'Review e5eb i1 (2026-11-02, code f5d778bf3 at 0f9147c6, PASS): no code
+      edits. Re-read the whole diff (journal, query/render, runtime/loop/QA/sign-off/picker/cleanup
+      integration, f5d778bf HOLD detail); 787 targeted tests pass, no new pyflakes
+      warnings vs master, master@3c90b3b2 merge preview conflicts only in pm/project.yaml.
+      Reviewer call on the open QA items: both are honest transient states, not defects,
+      so the next QA plan should allow them rather than change code. S68: "agent turn
+      finished at T (idle Ns); no verdict accepted yet — waiting for the next turn"
+      is the post-grace state master poll_for_verdict has (an idle inside the grace
+      is skipped; the verdict is read at the next idle_prompt), so it belongs among
+      the loop-open Waiting-for forms. S69: the <=~1.2 s read after pm pr merge returns
+      showing i2 "interrupted / parent run ended first" + grace "cancelled (owner
+      ended)" is query-time inference until the TUI loop thread journals vanished
+      KILLED; making merge/cleanup wait on another process loop thread would couple
+      the CLI to the TUI for a cosmetic transient, so allow it in the merge-mid Then.
+      Filed pr-8cf8c18 for the pre-existing master hazard QA S69 saw (a plain window
+      named like the impl window is adopted as the impl session).'
+    created_at: '2026-11-02T16:43:28Z'
+    last_edited: '2026-11-02T16:43:28Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
@@ -53405,6 +53424,36 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T15:14:18.975751+00:00'
   updated_at: '2026-11-02T15:14:18.975751+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8cf8c18
+  plan: bugs
+  title: 'Bug: a non-Claude pane first in a PR impl window is adopted as the impl
+    session (pane_runs_transcript counts "no session id" as a match)'
+  branch: pm/pr-8cf8c18-bug-a-non-claude-pane-first-in-a-pr-impl-window-is
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/review_loop_ui.py _poll_impl_idle -> _find_impl_pane
+    (first pane of the window named like the PR display id), gated by claude_launcher.pane_runs_transcript,
+    which returns True when the pane start command shows no Claude session id ("cannot
+    be checked and counts as a match"). Repro (seen live in pr-8020495 QA S69 refiner,
+    /pm-captures/pr-8020495/s69-refiner): start P with TUI s, kill its impl window,
+    then open a plain shell window named exactly the PR display id (tmux new-window
+    -n <pr-id>). Within one 5 s impl-idle tick the TUI registers that shell pane against
+    the old impl-<pr>.jsonl session: the runtime start entry goes back to running,
+    the popup shows [open] [idle] from the dead session hook file, and pm pr history
+    folds it into the killed start as "PM watching the pane again". Impact: impl-idle
+    detection (auto-start in_progress -> in_review) can act on a stale session idle
+    event for a pane that is not running Claude. Expected: a pane whose start command
+    shows no session id is not treated as the PR session, so only the PR own Claude
+    pane is tracked.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T16:43:15.945286+00:00'
+  updated_at: '2026-11-02T16:43:15.945286+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
