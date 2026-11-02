@@ -33,7 +33,8 @@ New module (low-level: imports `store`, `paths`; never `pm_core.cli`).
   a thin delegate so existing imports/patches (`pr_mod._workdirs_dir` in
   `tests/test_github_draft_pr.py`) keep working.  Unlike today it must not be
   required to `mkdir` for a read-only lookup (callers that provision keep
-  their own `mkdir`).
+  their own `mkdir`).  `pm_core/pr_sync.py:find_workdir`'s private copy of
+  the same naming (its any-clone fallback for merge checks) uses it too.
 - `workdir_lock(project_dir, pr_id)` — context manager holding the existing
   per-PR provisioning lock `project_dir/.workdir-{pr_id}.lock` (exclusive,
   blocking `fcntl.flock`), exactly the lock `_ensure_workdir` takes today.

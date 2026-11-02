@@ -218,6 +218,25 @@ class TestFindWorkdir:
 
         assert result == str(workdir)
 
+    def test_find_workdir_falls_back_to_project_workdirs_dir(
+            self, tmp_pm_root, tmp_path):
+        """With no usable PR workdir, a clone in this project's workdirs dir
+        (<name>-<repo_id[:8]>, the naming pm clones with) is used — not one
+        in a same-named project's dir."""
+        data = store.load(tmp_pm_root)
+        data["project"]["repo_id"] = "0123456789abcdef"
+        base = tmp_path / "workdirs"
+        other = base / "test-project-fedcba98" / "pm-pr-001-first"
+        other.mkdir(parents=True)
+        mine = base / "test-project-01234567" / "pm-pr-001-first-10e74920"
+        mine.mkdir(parents=True)
+
+        with patch("pm_core.paths.workdirs_base", return_value=base), \
+             patch("pm_core.git_ops.is_git_repo", return_value=True):
+            result = pr_sync.find_workdir(data)
+
+        assert result == str(mine)
+
 
 class TestSyncPrs:
     """Tests for the main sync function."""
