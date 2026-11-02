@@ -51796,3 +51796,45 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-3199f44
+  plan: improvements
+  title: 'TUI at Textual 2.x: background reloads/syncs are dropped while a modal is
+    open'
+  branch: pm/pr-3199f44-tui-at-textual-2-x-background-reloads-syncs-are-dr
+  status: pending
+  depends_on: []
+  description: 'At the declared Textual floor (2.0.1, pinned by pr-5f30bdf), App.query_one
+    searches only the active screen''s DOM, so with any modal open (e.g. the model
+    popup, `o`) background paths that query main-screen widgets fail.
+
+
+    Observed headless and live at 2.0.1: a `pm pr add` SIGUSR1 reload under the popup
+    replaces in-memory state but raises NoMatches on `#tech-tree` in `_update_status_bar`/`_update_display`;
+    the tree stays stale after Esc and `auto_start.on_state_loaded` is skipped, so
+    the next reload''s "previous state" already contains the change (a merge seen
+    only in that reload can miss its auto-start transition). The 5-minute sync tick
+    survives but logs `Sync error: No nodes match ''#tech-tree''`.
+
+
+    Textual 3.0.0+ lets App.query_one reach the default screen under a modal (bisected:
+    2.0.1 and 2.1.2 NoMatches; 3.0.0, 3.7.1, 5.0.0, 8.2.7 found), and at 8.2.7 the
+    same reload applies normally under the popup.
+
+
+    Options: raise the floor to textual>=3.0 (re-check the popup''s escaped-bracket
+    rendering at 3.0.0) or make the reload/sync path''s main-screen queries screen-aware.
+    Until then, TUI code running from background paths must not assume App.query_one
+    can see the main screen.
+
+
+    Evidence: pr-5f30bdf sign-off report section F1 (signoff/textual-2x-modal-followup:
+    version bisect, reload under the popup at 2.0.1 vs 8.2.7, sync tick at 2.0.1).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T08:57:36.104793+00:00'
+  updated_at: '2026-11-02T08:57:36.104793+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
