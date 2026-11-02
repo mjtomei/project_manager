@@ -5173,7 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-11-02T02:18:12.681826+00:00'
+  updated_at: '2026-11-02T04:47:14.417003+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5194,6 +5194,20 @@ prs:
       (markdown dep missing + push_proxy socket path = environment).'
     created_at: '2026-11-02T02:18:12Z'
     last_edited: '2026-11-02T02:18:12Z'
+  - id: note-da12d23
+    text: 'QA S1 run 2026-11-02 at 6253c650: stories 2-8 PASS live (pr cd/start re-link
+      at CA with clone state byte-identical, fast path, --workdir bypass with no lock,
+      absent field written back, reappeared symlink kept, fresh HOME rc=1). Story
+      1 Then "project.yaml sha256 AND mtime equal baseline" cannot hold as written:
+      the When browse Right/Left changes the TUI selection, and master pm_core/tui/pr_view.py:54-68
+      persists project.active_pr (Right writes A, Left writes B back, so the content
+      is byte-identical but the mtime moves). With list/--workdirs/show, Down/Up and
+      12 s of idle the sha and mtime were unchanged, and the stale record stayed stale
+      through the TUI write (no discovery). Fix the qa.md Then (sha only, or browse
+      without a selection change). Verdict INPUT_REQUIRED pending that call. Captures
+      /pm-captures/scenarios/1/{cli/fixture,cli/stories,tui,evidence}.'
+    created_at: '2026-11-02T04:47:14Z'
+    last_edited: '2026-11-02T04:47:14Z'
 - id: pr-0778fbe
   plan: plan-003
   title: Add PR ownership tracking with workdir history
