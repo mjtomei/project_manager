@@ -12,6 +12,19 @@ from pm_core.paths import base_session_name, configure_logger, write_env_file
 _log = configure_logger("pm.tmux")
 
 
+def format_literal(text: str) -> str:
+    """Escape *text* for a tmux argument that tmux expands as a format.
+
+    tmux runs ``new-session -s``, ``-c`` start directories and
+    ``display-popup -d`` through format expansion: ``#{...}``, ``#S`` and
+    ``##`` are rewritten, and ``#(cmd)`` runs *cmd* in a shell.  A repo
+    directory named ``a#(touch X)b`` therefore ran ``touch X`` on every
+    ``pm session`` and window start, and the pane opened in the wrong
+    directory (QA S28).  ``##`` is tmux's escape for a literal ``#``.
+    """
+    return text.replace("#", "##")
+
+
 def _tmux_cmd(*args: str, socket_path: str | None = None,
               use_env: bool = True) -> list[str]:
     """Build a tmux command with optional custom socket.
@@ -521,7 +534,8 @@ def create_session(name: str, cwd: str, cmd: str, socket_path: str | None = None
     """
     try:
         _run_with_env(
-            _tmux_cmd("new-session", "-d", "-s", name, "-n", "main", "-c", cwd,
+            _tmux_cmd("new-session", "-d", "-s", format_literal(name),
+                      "-n", "main", "-c", format_literal(cwd),
                       cmd, socket_path=socket_path),
             env,
             check=True,
@@ -625,8 +639,8 @@ def new_window(session: str, name: str, cmd: str, cwd: str,
     # Use session: format to explicitly target session, not window index
     target = f"{session}:"
     _run_with_env(
-        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd,
-                  cmd),
+        _tmux_cmd("new-window", "-d", "-t", target, "-n", name,
+                  "-c", format_literal(cwd), cmd),
         env,
         check=True,
     )
@@ -660,7 +674,7 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
     result = _run_with_env(
         _tmux_cmd("new-window", "-d", "-P", "-F",
                   "#{pane_id} #{window_id} #{window_index}",
-                  "-t", target, "-n", name, "-c", cwd, cmd),
+                  "-t", target, "-n", name, "-c", format_literal(cwd), cmd),
         env,
         check=True, text=True,
     )
@@ -753,7 +767,7 @@ def split_pane_at(pane_id: str, direction: str, cmd: str,
     flag = "-h" if direction == "h" else "-v"
     args = ["split-window", flag, "-t", pane_id, "-P", "-F", "#{pane_id}"]
     if cwd:
-        args += ["-c", cwd]
+        args += ["-c", format_literal(cwd)]
     args.append(cmd)
     if background:
         args.insert(2, "-d")
@@ -1147,8 +1161,8 @@ def create_grouped_session(base: str, name: str, socket_path: str | None = None)
     """
     try:
         _run(
-            _tmux_cmd("new-session", "-d", "-t", base, "-s", name,
-                       socket_path=socket_path),
+            _tmux_cmd("new-session", "-d", "-t", base,
+                      "-s", format_literal(name), socket_path=socket_path),
             check=True,
         )
     except subprocess.CalledProcessError:

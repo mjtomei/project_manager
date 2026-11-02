@@ -24,7 +24,29 @@ def _get_session_tag() -> str | None:
     repo_name = get_github_repo_name(git_root) or git_root.name
     path_hash = hashlib.md5(str(git_root).encode()).hexdigest()[:8]
 
-    return f"{repo_name}-{path_hash}"
+    return _tmux_safe_name(f"{repo_name}-{path_hash}")
+
+
+def _tmux_safe_name(name: str) -> str:
+    """Inline copy of ``pm_core.paths.tmux_safe_name`` (see there).
+
+    The tag must match the one ``pm meta`` wrote its override under, and
+    that one comes from ``paths.get_session_tag``.  Kept inline for the
+    same reason as ``_PM_SOCKET_DIR``: this runs before the chosen pm_core
+    is imported.
+    """
+    chars = [
+        "_" if (c in "#.:\\" or ord(c) < 0x20 or c == "\x7f"
+                or 0xDC80 <= ord(c) <= 0xDCFF)
+        else c
+        for c in name
+    ]
+    for i in range(len(chars) - 2, -1, -1):
+        if chars[i] == "$" and (chars[i + 1].isascii()
+                                and (chars[i + 1].isalpha()
+                                     or chars[i + 1] in "_{")):
+            chars[i] = "_"
+    return "".join(chars)
 
 
 def _find_active_override() -> str | None:

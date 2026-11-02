@@ -268,6 +268,18 @@ def _schedule_rebalance(session_name: str) -> None:
     if not windows:
         return
     window_ids = [w["id"] for w in windows]
+    # Registry windows tmux no longer has are rebalanced too.  A window
+    # killed with ``C-b &`` or ``kill-window`` fires no pm hook, so its
+    # panes stayed registered until the TUI next restarted (QA S28: a
+    # review window killed from outside left its review-diff pane in the
+    # registry).  rebalance() reconciles first, and for a window that is
+    # gone while the session lives, that drops the window's entry.
+    try:
+        from pm_core import pane_registry
+        registered = pane_registry.load_registry(session_name).get("windows") or {}
+    except Exception:  # an unreadable registry is healed elsewhere
+        registered = {}
+    window_ids += [wid for wid in registered if wid not in window_ids]
     # Build a Python one-liner that rebalances every window
     rebalance_calls = "; ".join(
         f"rebalance({session_name!r}, {wid!r})" for wid in window_ids
@@ -1387,7 +1399,7 @@ def popup_show_cmd(kind: str, client: str | None = None,
               kind, client, session, win_width, threshold, width, pane_cwd)
     popup_cmd = ["display-popup", "-E", "-w", width, "-h", height]
     if pane_cwd:
-        popup_cmd[2:2] = ["-d", pane_cwd]
+        popup_cmd[2:2] = ["-d", tmux_mod.format_literal(pane_cwd)]
     if client:
         popup_cmd[1:1] = ["-c", client]
     popup_cmd[1:1] = target

@@ -1249,7 +1249,8 @@ def _get_session_name_for_cwd() -> str:
         return f"pm-{tag}"
 
     # Fallback if not in a git repo
-    return f"pm-{Path.cwd().name}-00000000"
+    from pm_core.paths import tmux_safe_name
+    return f"pm-{tmux_safe_name(Path.cwd().name)}-00000000"
 
 
 def _get_current_pm_session() -> str | None:
