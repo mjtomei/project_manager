@@ -1101,8 +1101,12 @@ _CONFIG_NAMES = {"pyproject.toml", "setup.py", "setup.cfg", "package.json",
                  "Dockerfile", "install.sh", "Makefile"}
 _PROJECT_BEHAVIOR_KEYS = ("model_config", "skip_qa", "base_branch", "backend",
                           "nested_podman", "libyaml")
+# ``effort``/``session_effort`` are the reasoning-effort siblings of
+# ``model``/``session_models`` (``pm pr model`` sets both; ``model_config``
+# resolves a launch's effort from them), so a base change to them changes what
+# runs exactly as a model change does.
 _PR_BEHAVIOR_FIELDS = ("status", "depends_on", "model", "session_models",
-                       "plan")
+                       "effort", "session_effort", "plan")
 
 
 def base_behavior_changes(workdir: str, merge_base: str,
@@ -1143,7 +1147,12 @@ def _show_yaml(workdir: str, rev: str, path: str):
         return None
 
 
-def _short(value) -> str:
+def _value_preview(value) -> str:
+    """A one-line (≤ 80 chars) JSON rendering of a config value.
+
+    Not :func:`short_revision`: this previews a *value* for the behaviour
+    summary, it does not shorten a revision.
+    """
     text = json.dumps(value, default=str)
     return text if len(text) <= 80 else text[:77] + "..."
 
@@ -1154,7 +1163,8 @@ def _diff_leaves(old, new, path: str, out: list[str]) -> None:
             _diff_leaves(old.get(key), new.get(key), f"{path}.{key}", out)
         return
     if old != new:
-        out.append(f"{path} changed ({_short(old)} -> {_short(new)})")
+        out.append(f"{path} changed ({_value_preview(old)} -> "
+                   f"{_value_preview(new)})")
 
 
 def _project_yaml_behavior_changes(workdir: str, merge_base: str,
@@ -1181,8 +1191,8 @@ def _project_yaml_behavior_changes(workdir: str, merge_base: str,
             else:
                 out.append(
                     f"`{path}`: project.{key} changed "
-                    f"({_short(old_project.get(key))} -> "
-                    f"{_short(new_project.get(key))})")
+                    f"({_value_preview(old_project.get(key))} -> "
+                    f"{_value_preview(new_project.get(key))})")
     focus = (pr or {}).get("id")
     # Hand-edited state: a non-list ``depends_on`` is not a set of ids
     # (``for d in 5`` raises, and iterating a string yields characters), so it
@@ -1214,8 +1224,8 @@ def _project_yaml_behavior_changes(workdir: str, merge_base: str,
             if old_prs[pr_id].get(field) != entry.get(field):
                 out.append(
                     f"`{path}`: base changed {pr_id}.{field} "
-                    f"({_short(old_prs[pr_id].get(field))} -> "
-                    f"{_short(entry.get(field))})")
+                    f"({_value_preview(old_prs[pr_id].get(field))} -> "
+                    f"{_value_preview(entry.get(field))})")
     for pr_id in old_prs:
         if pr_id not in new_prs and relevant(pr_id):
             out.append(f"`{path}`: base removed PR {pr_id}")

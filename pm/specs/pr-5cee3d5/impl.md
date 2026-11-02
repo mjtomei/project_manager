@@ -155,7 +155,10 @@ non-empty base diff (clean merge included):
 - for changed `project.yaml` files: diffs of `project.model_config`,
   `project.skip_qa`, `project.base_branch`, `project.backend`,
   `project.nested_podman`, `project.libyaml`, PR `status` / `depends_on` /
-  `model` / `session_models` / `plan`, plan `status`;
+  `model` / `session_models` / `effort` / `session_effort` / `plan`, plan
+  `status` (`effort`/`session_effort` are the reasoning-effort siblings of the
+  model fields — `pm pr model` sets both and `model_config` resolves a
+  launch's effort from them — so a base change to them changes what runs);
 - for changed dependency/config paths (`pyproject.toml`, `requirements*.txt`
   / `requirements*.in`, `setup.py`/`setup.cfg`, `package.json`, `Dockerfile`,
   `install.sh`, `Makefile`) and CI workflow files (`.github/workflows/`):
@@ -616,7 +619,8 @@ tests):
 4. Non-project.yaml (code) conflict → `CONFLICT`, never auto-resolved.
 5. Clean base change to `project.model_config` → `CLEAN` but
    `base_behavior_changes` non-empty and a MERGE requires the justification
-   tags.
+   tags.  The same holds for a base change to this PR's own `effort` /
+   `session_effort` (model settings, like `model`).
 6. Stale candidate identity: base moved after approval → refused/invalidated;
    a re-check with a different candidate tree → refused.
 7. Preservation: resolution never changes the PR workdir HEAD/branch/dirty

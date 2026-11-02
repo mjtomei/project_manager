@@ -937,6 +937,37 @@ def test_behavioral_changes_are_focused_on_this_pr_and_its_dependencies(w):
     assert any("pr-100.status" in c for c in rec["base_behavior_changes"])
 
 
+def test_a_base_change_to_the_prs_reasoning_effort_is_behavioural(w):
+    """``effort``/``session_effort`` are model settings, like ``model``.
+
+    ``model_config`` resolves a launch's reasoning effort from the PR's
+    ``session_effort``/``effort`` before any project default, so a base that
+    changes them changes what runs.  The summary omitted them, so such a base
+    merged CLEAN with no behaviour change listed and the merge gate asked for
+    no evidence statement.
+    """
+    data = store.load(w.base_pm)
+    entry = store.get_pr(data, PR)
+    entry["effort"] = "low"
+    entry["session_effort"] = {"review": "low"}
+    store.save(data, w.base_pm)
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base lowers the PR's effort")
+
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN
+    changes = rec["base_behavior_changes"]
+    assert any(f"{PR}.effort" in c for c in changes), changes
+    assert any(f"{PR}.session_effort" in c for c in changes), changes
+
+    # The gate therefore requires the reuse/checks statement.
+    write_report(w, rec, evidence=False)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(pr_mod.pr, ["signoff", "record", PR])
+    assert r.exit_code != 0 and "pm-signoff-evidence" in r.output
+
+
 def test_resolved_approval_is_invalidated_when_the_base_moves(w):
     rec = _metadata_conflict(w)
     record_merge(w, rec)
