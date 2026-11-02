@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T06:38:51.384787+00:00'
+  updated_at: '2026-11-02T06:55:12.082638+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7335,6 +7335,37 @@ prs:
       so stray-server checks must ignore Z state.'
     created_at: '2026-11-02T06:38:51Z'
     last_edited: '2026-11-02T06:38:51Z'
+  - id: note-9a7aab4
+    text: 'QA S27 (first pm sessions on a clean machine, core journey) PASS 7/7 on
+      670d2c3d (code = a7169e96), no source changes. Real HOME, tmux 3.2a, two projects
+      qa27-alpha/qa27-beta driven from harness terminals (tmux -L q27h, status off,
+      window-size manual), starting with no /tmp/pm-sessions. (1) Two starts 4 s apart:
+      Creating lines, /tmp/pm-sessions drwxrwxrwt 1777 pm with exactly two srwx------
+      sockets, each server only base(0)+~1(1) in one group, sh windows print own socket
+      twice + /workspace, pm session list 2 rows CLIENTS 1, default server work byte-identical.
+      (2) A2 120x40 -> Attaching ~2, in-pane script attach -> ~3, no Creating, %0
+      pid + pidfile identical, @0 120x39 + rebalance line, clients ~1 200x50/~2 120x40/~3
+      200x49, CLIENTS 3 then 2 after C-b d (COMMAND_EXIT_CODE=0). (3) --print-connect
+      from plain shell and sh window = tmux -S <SA> attach; C popup Connect Command
+      + hint, Esc then l works; pasted into P1 joins ~3, beta/default untouched, C-b
+      d prints [detached (from session ...~3)]. (4) view/send/frames resolve the cwd
+      session, -s pm-<B> from inside alpha moves only beta, typo -s gives No TUI pane
+      found rc1 with no frames, notes n/C-b Left/n/keypress logs Launched/already
+      exists focusing/handle_pane_exited/unregister/rebalance 200x49; beta windows/panes/registry
+      identical. (5) Ctrl+R keeps pid+starttime (new started_at), mobile --force/home
+      from sh window, A1 moves to pm-home, beta loop ok=100 fail=0. (6) Ctrl-Q from
+      A2 detaches only /dev/pts/<A2>; no-client pm tui send C-q changes no client
+      list anywhere and only logs no attached client lines; TUI answers h. (7) kill
+      alpha only (rc0, A1 rc0, SA and .mobile gone, beta identical, loop ok=60 fail=0),
+      re-create gives new socket/pid/starttime, teardown leaves /tmp/pm-sessions empty.
+      Fixture notes for the next run: script(1) writes its own "Script started" header
+      before the Attaching line in inpane.log; story 3 l leaves alpha on card 2, so
+      press h before story 4; press l after C-b 0 in story 6 so both later h presses
+      select a new card; read-only harness recorders (tmux -L q27rec ... attach -r
+      -t =v-<term>) give per-terminal casts without adding pm clients. Captures: /pm-captures/scenarios/27/
+      (README.md, 22 casts+mp4, screens/, sh-windows/, scripts/).'
+    created_at: '2026-11-02T06:55:11Z'
+    last_edited: '2026-11-02T06:55:11Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
