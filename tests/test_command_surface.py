@@ -293,15 +293,8 @@ def test_help_screen_lines_escape_textual_markup():
         "unescaped '[' would be parsed as Textual markup"
 
 
-def test_help_screen_renders_the_whole_command_bar_section():
-    """The `?` screen must not clip the half that matters.
-
-    ``.help-row`` used to be one line tall with a natural (overflowing)
-    width, so every row was cut at the 50-column container — exactly where
-    the CLI/TUI equivalents start.  The rows now wrap; assert the rendered
-    text (whitespace-normalized, since wrapping breaks lines at spaces)
-    contains the ends of the longest rows.
-    """
+def _render_help_screen(**kwargs) -> str:
+    """Render the `?` screen and return its text, whitespace-normalized."""
     import asyncio
 
     from textual.app import App
@@ -312,7 +305,7 @@ def test_help_screen_renders_the_whole_command_bar_section():
         CSS = HelpScreen.CSS
 
         def on_mount(self) -> None:
-            self.push_screen(HelpScreen())
+            self.push_screen(HelpScreen(**kwargs))
 
     async def render() -> str:
         app = _HelpApp()
@@ -325,7 +318,19 @@ def test_help_screen_renders_the_whole_command_bar_section():
                 chunks.append(" ".join(lines))
             return re.sub(r"\s+", " ", " ".join(chunks))
 
-    text = asyncio.run(render())
+    return asyncio.run(render())
+
+
+def test_help_screen_renders_the_whole_command_bar_section():
+    """The `?` screen must not clip the half that matters.
+
+    ``.help-row`` used to be one line tall with a natural (overflowing)
+    width, so every row was cut at the 50-column container — exactly where
+    the CLI/TUI equivalents start.  The rows now wrap; assert the rendered
+    text (whitespace-normalized, since wrapping breaks lines at spaces)
+    contains the ends of the longest rows.
+    """
+    text = _render_help_screen()
     for tail in (
         # command-bar table, second line of the longest rows
         "TUI: s / z s / S / z S",
@@ -346,6 +351,79 @@ def test_help_screen_renders_the_whole_command_bar_section():
         "Cleanup PR workdir",
     ):
         assert tail in text, f"{tail!r} clipped from the ? screen"
+
+
+_TREE_ONLY_HELP_ROWS = (
+    "Start QA on selected PR",
+    "Launch Claude session",
+    "Start PR with companion pane",
+    "Merge with companion pane",
+)
+
+
+def test_help_screen_lists_tree_only_actions_in_the_tree_view():
+    text = _render_help_screen()
+    for row in _TREE_ONLY_HELP_ROWS:
+        assert row in text, f"{row!r} missing from the tree-view ? screen"
+
+
+@pytest.mark.parametrize("kwargs, kept", [
+    ({"in_plans": True}, "Toggle plans view"),
+    ({"in_qa": True}, "Toggle QA instructions"),
+])
+def test_help_screen_omits_actions_blocked_in_that_view(kwargs, kept):
+    """The `?` screen must not name keys the current view ignores.
+
+    `check_action` blocks `t` (start_qa_on_pr), `S`/`G`
+    (start/merge companion) and `c` (launch_claude) in both the plans and
+    QA views, so a context-sensitive help screen that still lists them
+    sends the operator to a key that does nothing.  Only `c` was guarded
+    before (and only for the plans view).
+    """
+    text = _render_help_screen(**kwargs)
+    for blocked in _TREE_ONLY_HELP_ROWS:
+        assert blocked not in text, f"{blocked!r} listed in {kwargs}"
+    assert kept in text
+
+
+def test_tui_keys_enter_names_the_qa_view_action():
+    """`pm tui keys` must cover Enter in the QA view too.
+
+    Enter edits the selected PR in the tree, opens the plan file in the
+    plans view, and runs the selected item in the QA view; naming only the
+    first two left the QA view undocumented.
+    """
+    out = CliRunner().invoke(cli, ["tui", "keys"]).output
+    flat = " ".join(out.split())
+    assert "plans view: view plan file" in flat
+    assert "QA view: run item" in flat
+
+
+def test_tui_keys_documents_the_plans_and_qa_views():
+    """`pm tui keys` covers the keys of both alternate views.
+
+    The `?` screen has Plans/QA sections; `pm tui keys` listed only the
+    toggle keys (`p`, `q`), so an operator inside either view had no
+    reference for the keys that work there.  `d` (debug) in the QA view was
+    also missing from the `?` screen even though the status bar names it.
+    """
+    out = CliRunner().invoke(cli, ["tui", "keys"]).output
+    assert "Plans view (p):" in out and "QA view (q):" in out
+    plans_block = out.split("Plans view (p):", 1)[1].split("QA view (q):", 1)[0]
+    for key in ("Enter", "a", "e", "w", "c", "l", "D", "p"):
+        assert re.search(rf"^\s*{re.escape(key)}\s{{2,}}\S", plans_block, re.M), (
+            f"plans-view key {key!r} missing from `pm tui keys`")
+    qa_block = out.split("QA view (q):", 1)[1].split("Tmux prefix bindings:", 1)[0]
+    for key in ("Enter", "e", "d", "a", "q"):
+        assert re.search(rf"^\s*{re.escape(key)}\s{{2,}}\S", qa_block, re.M), (
+            f"QA-view key {key!r} missing from `pm tui keys`")
+
+
+def test_help_screen_qa_view_lists_the_debug_key():
+    text = _render_help_screen(in_qa=True)
+    for row in ("Run selected item", "Edit item", "Debug item",
+                "Add instruction"):
+        assert row in text
 
 
 def test_tui_keys_matches_the_shared_table():
@@ -761,6 +839,21 @@ def test_require_plan_names_the_listing_command(capsys):
     with pytest.raises(SystemExit):
         _require_plan({"plans": [{"id": "bugs"}]}, "nope")
     assert "pm plan list" in capsys.readouterr().err
+
+
+def test_provider_show_not_found_names_the_listing_command(tmp_path):
+    """`pm provider show` must name `pm provider list`, like `remove` does.
+
+    ``_echo_provider`` reported only "provider 'x' is not configured in
+    <path>"; the sibling ``provider remove`` refusal already named the
+    listing command.
+    """
+    from unittest import mock
+
+    with mock.patch("pm_core.providers.pm_home", return_value=tmp_path):
+        result = CliRunner().invoke(cli, ["provider", "show", "nope"])
+    assert result.exit_code == 1, result.output
+    assert "pm provider list" in result.output
 
 
 def test_status_next_step_maps_lifecycle_order():

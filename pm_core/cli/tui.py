@@ -271,7 +271,8 @@ Navigation:
   Up/Down, j/k     Navigate PR list
   Left/Right, h/l  Navigate tree columns
   J/K              Jump to next/prev plan
-  Enter            Edit selected PR (plans view: view plan file)
+  Enter            Edit selected PR (plans view: view plan file;
+                   QA view: run item)
   x                Hide/show plan group
   X                Toggle merged PRs
   f                Cycle status filter
@@ -303,6 +304,25 @@ Views:
   /                Open command bar
   w                Watcher prefix: ww list, wf focus, ws start/stop, wr review
   ?                Show help
+
+Plans view (p):
+  Up/Down, j/k     Move selection
+  Enter            View plan file
+  a                Add a plan
+  e                Edit plan file
+  w                Break plan into PRs
+  c                Review plan-PR consistency
+  l                Load PRs from plan
+  D                Review PR dependencies
+  p                Back to tree view
+
+QA view (q):
+  Up/Down, j/k     Move selection
+  Enter            Run selected item
+  e                Edit item
+  d                Debug item
+  a                Add instruction
+  q                Back to tree view
 
 Tmux prefix bindings:
   prefix P         PR action picker popup (q/Esc to quit)

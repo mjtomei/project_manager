@@ -226,6 +226,7 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]↑↓[/] or [bold]jk[/]  Move selection", classes="help-row")
                 yield Label("  [bold]Enter[/]  Run selected item", classes="help-row")
                 yield Label("  [bold]e[/]  Edit item", classes="help-row")
+                yield Label("  [bold]d[/]  Debug item", classes="help-row")
                 yield Label("  [bold]a[/]  Add instruction", classes="help-row")
                 yield Label("  [bold]q[/]  Back to tree view", classes="help-row")
             elif self._in_plans:
@@ -265,7 +266,9 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]y[/]  Cleanup, then: ys start, yd review, yt QA", classes="help-row")
                 yield Label("  [bold]w[/]  Watcher prefix: ww list, wf focus, ws start/stop, wr review", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
-            if not self._in_plans:
+            # `c` (launch_claude) is blocked by `check_action` in both the
+            # plans and QA views, so list it only where it works.
+            if not (self._in_plans or self._in_qa):
                 yield Label("  [bold]c[/]  Launch Claude session", classes="help-row")
             yield Label("  [bold]H[/]  Launch guide (setup or assist)", classes="help-row")
             yield Label("  [bold]/[/]  Open command bar", classes="help-row")
@@ -273,12 +276,18 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]m[/]  Meta: work on pm itself", classes="help-row")
             yield Label("  [bold]L[/]  View TUI log", classes="help-row")
             yield Label("  [bold]p[/]  Toggle plans view", classes="help-row")
-            yield Label("  [bold]t[/]  Start QA on selected PR", classes="help-row")
+            # `t` (start_qa_on_pr) is a tree-view action: `check_action`
+            # blocks it in both the plans and QA views.
+            if not (self._in_plans or self._in_qa):
+                yield Label("  [bold]t[/]  Start QA on selected PR", classes="help-row")
             yield Label("  [bold]q[/]  Toggle QA instructions", classes="help-row")
             yield Label("  [bold]b[/]  Rebalance panes", classes="help-row")
-            yield Label("Companion Pane", classes="help-section")
-            yield Label("  [bold]S[/]  Start PR with companion pane", classes="help-row")
-            yield Label("  [bold]G[/]  Merge with companion pane", classes="help-row")
+            # S/G are start_pr_companion/merge_pr_companion, also blocked
+            # outside the tree view.
+            if not (self._in_plans or self._in_qa):
+                yield Label("Companion Pane", classes="help-section")
+                yield Label("  [bold]S[/]  Start PR with companion pane", classes="help-row")
+                yield Label("  [bold]G[/]  Merge with companion pane", classes="help-row")
             yield Label("Other", classes="help-section")
             yield Label("  [bold]z[/]  Prefix: restart the pane instead of focusing it (s S d t e v n L H c; zz d / zz t: loop)", classes="help-row")
             yield Label("  [bold]r[/]  Refresh / sync with GitHub", classes="help-row")
