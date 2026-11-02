@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T12:43:16.932763+00:00'
+  updated_at: '2026-11-02T12:57:00.323522+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7960,6 +7960,38 @@ prs:
       | awk`. Captures: /pm-captures/scenarios/38 (README.md).'
     created_at: '2026-11-02T12:43:16Z'
     last_edited: '2026-11-02T12:43:16Z'
+  - id: note-32d2e8f
+    text: 'QA S39 refiner (2026-11-02, 6f24e3a1, tmux 3.2a): all 3 stories held live.
+      Create userb/userc BEFORE the owner starts (tmux >=3.3 server-access is granted
+      only at creation). Joiners compute the tag even though git refuses the repo
+      as "dubious ownership". After TUI `n` the notes pane has focus and no vi is
+      installed, so a stray key there exits notes: select the TUI pane, and set EDITOR
+      to a script that ends `exec cat`. Barrier racers can share one ~N (converge
+      or reuse), so count clients. Joiner adopt evidence: the joiner''s ~/.pm/debug/default.log
+      line "adopted it instead of respawning". The owner''s create run prints no Attaching
+      line. Detach with C-b d. After the kill, clients return to the shell with no
+      message.'
+    created_at: '2026-11-02T12:45:47Z'
+    last_edited: '2026-11-02T12:45:47Z'
+  - id: note-7724625
+    text: 'QA S39 (shared-session joiners adopt the owner TUI; 2 joiners + owner reattach
+      raced; scoped send/quit/kill) PASS 3/3 on dad28ab1 (code a337a168d), no source
+      changes. Live on tmux 3.2a, real users userb/userc (created before the owner
+      start). (1) userb join with no registry: b1.log one "Attaching to session pm-projP-<h>~2",
+      debug roles_alive: set() -> "TUI pane %0 is running but was not registered;
+      adopted it instead of respawning" -> creating ~2; joiner registry %0 tui cmd
+      "tui" generation ""; owner md5 unchanged; 2 clients (pm, userb). (2) 3 go-file
+      rounds: attaches r1 ~5/~4/~3, r2 ~4/~5/~3, r3 ~4/~4/~3 (both joiners reused
+      ~4); one adopt line per joiner per round; 5 = list CLIENTS while attached, 2
+      after C-b d. (3) userb tui send l rc=0 moved the selection in all 3 panes; Ctrl+Q
+      detached only userb; kill --global rc=0, NOSERVER, clients silent, projQ private
+      server + default-server keepme untouched. Over the whole run a 0.1 s poll (11392
+      samples) saw only %0 (TUI, one pid) and %2 (notes). Harness gotcha: the scenario
+      barrier `sudo ... sh -c ... $G` loses G to sudo env_reset (empty $G makes [
+      ! -e ] false, releasing at once); write the go-file path literally. Captures
+      /pm-captures/scenarios/39 (README.md).'
+    created_at: '2026-11-02T12:57:00Z'
+    last_edited: '2026-11-02T12:57:00Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
