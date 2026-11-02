@@ -8,6 +8,7 @@ output, and CLI/TUI agreement.
 
 import asyncio
 import json
+import os
 import re
 from unittest.mock import patch
 
@@ -204,6 +205,17 @@ class TestDedupe:
         ("qa", {}, "qa", "starts on next scheduler pass"),
         ("sign_off", {}, "sign-off",
          "no window; relaunches on next scheduler pass"),
+        ("sign_off", {"signoff": {"pr-x": {"verdict": "SIGNOFF_MERGE",
+                                           "fresh": False}}}, "sign-off",
+         "SIGNOFF_MERGE stale (HEAD moved); relaunches against current HEAD"),
+        ("sign_off", {"signoff": {"pr-x": {
+            "verdict": "SIGNOFF_MERGE", "fresh": False,
+            "stale_reason": "base moved"}}}, "sign-off",
+         "SIGNOFF_MERGE stale (base moved); re-runs against the current base"),
+        ("qa", {"qa_loops": {"pr-x": {"error": "boom"}}}, "qa", "error: boom"),
+        ("sign_off", {"pending_merge": {"pr-x"}, "signoff": {"pr-x": {
+            "verdict": "SIGNOFF_MERGE", "fresh": True}}}, "merge",
+         "attempt failed; no merge window"),
     ])
     def test_reason_does_not_repeat_the_phase_token(self, status, extra,
                                                     token, short):
@@ -392,6 +404,21 @@ class TestForest:
             "(in_progress)" in " ".join(text.split())
         assert "⚠ 2 need you: pr-f1f1f1f, pr-f2f2f2f" in text
 
+    def test_closed_blocker_sharing_a_github_number_is_named_by_pm_id(self):
+        # A closed PR and the local PR that took over its GitHub number:
+        # ``blocked on #40 (closed), #40 (in_progress)`` would read as one
+        # PR, so the blocker reason names both by their unique pm ids.
+        status = _graph([
+            _p("pr-t", deps=["pr-old", "pr-new"], gh_pr_number=50),
+            _p("pr-old", "closed", gh_pr_number=40),
+            _p("pr-new", "in_progress", gh_pr_number=40)], {"pr-t": {}})
+        text = st.format_text(status)
+        assert "blocked on pr-old (closed), pr-new (in_progress)" in text
+        assert "└ #40 pr-new PAUSED impl" in text
+        # No collision: a closed blocker keeps its display id.
+        assert "blocked on pr-gone000 (missing), #304 (closed)" in \
+            st.format_text(edge_status())
+
     def test_order_is_deterministic(self):
         assert _text() == _text()
         a = st.format_text(edge_status())
@@ -452,7 +479,9 @@ class TestWidth:
         text = st.format_text(st.build_status(inp), 60)
         assert "\t" not in text
         block = _row_block(text, "└ #235")
-        assert "QA error: Traceback: boom line" in " ".join(block.split())
+        # ``FAILED qa`` already names the phase: the reason is the error.
+        assert "error: Traceback: boom line" in " ".join(block.split())
+        assert "QA error" not in block
         first, *rest = block.splitlines()
         assert rest and all(ln.startswith("      ") for ln in rest)
         assert all(cell_len(ln) <= 60 for ln in text.splitlines())
@@ -508,7 +537,7 @@ class TestWidth:
         assert "\x1b" not in plain and "\x07" not in plain
         assert "\x00" not in plain
         assert "Fix red popup ok" in " ".join(_row_block(plain, "◎ #238").split())
-        assert "QA error: boom warn end" in " ".join(
+        assert "error: boom warn end" in " ".join(
             _row_block(plain, "└ #235").split())
         assert all(cell_len(ln) <= 40 for ln in plain.splitlines())
         colored = st.format_text(status, width=40, color=True)
@@ -638,6 +667,30 @@ class TestCLI:
     def test_width_option(self):
         res = _cli_status("--width", "60")
         assert max(cell_len(ln) for ln in res.output.splitlines()) <= 60
+
+    def test_width_follows_the_terminal_up_to_99(self, monkeypatch):
+        from pm_core.cli import autostart as cli_as
+
+        class Tty:
+            def isatty(self):
+                return True
+
+        # A narrower terminal narrows the report; a wider one stops at 99.
+        for cols, want in (("60", 60), ("200", 99), ("10", view.MIN_WIDTH)):
+            monkeypatch.setenv("COLUMNS", cols)
+            assert cli_as._status_width(None) == want
+            res = _cli_status(env={"COLUMNS": cols, "NO_COLOR": None})
+            assert max(cell_len(ln) for ln in res.output.splitlines()) \
+                <= want
+        # --width wins over the terminal.
+        assert cli_as._status_width(45) == 45
+        # Redirected with no COLUMNS: 99, whatever the real terminal is.
+        monkeypatch.delenv("COLUMNS")
+        assert cli_as._status_width(None) == 99
+        monkeypatch.setattr(cli_as.sys, "stdout", Tty())
+        with patch("shutil.get_terminal_size",
+                   return_value=os.terminal_size((72, 24))):
+            assert cli_as._status_width(None) == 72
 
     def test_color_flag_and_no_color(self):
         assert RED_LABEL in _cli_status("--color").output

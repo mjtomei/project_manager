@@ -191,9 +191,9 @@ def blockers_text(blockers: list[dict], *, holds: bool = True,
     parts = []
     for b in blockers:
         tag = f"{name(b['pr_id'])} ({b.get('status')}"
-        hold = held_by_text({"targets": [name(t) for t in b.get("held_by") or []]})
-        if holds and hold:
-            tag += ", " + hold
+        if holds and b.get("held_by"):
+            tag += ", " + held_by_text(
+                {"targets": [name(t) for t in b["held_by"]]})
         parts.append(tag + ")")
     return ", ".join(parts)
 
@@ -666,7 +666,8 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
             return (phase, "waiting",
                     "merge blocked by sign-off gate (no fresh SIGNOFF_MERGE)",
                     plain)
-        return "merge", "failed", "merge attempt failed; no merge window", plain
+        return ("merge", "failed", "merge attempt failed; no merge window",
+                _info(short="attempt failed; no merge window"))
 
     if status == "pending":
         deps = pr.get("depends_on") or []
@@ -789,7 +790,8 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
     if status == "qa":
         if qa:
             if qa.get("error"):
-                return phase, "failed", f"QA error: {qa['error']}", plain
+                return (phase, "failed", f"QA error: {qa['error']}",
+                        _info(short=f"error: {qa['error']}"))
             verdict = qa.get("verdict") or ""
             total = qa.get("total") or 0
             done = qa.get("done") or 0
@@ -847,9 +849,13 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
             why = signoff.get("stale_reason") or "HEAD moved"
             if why == "HEAD moved":
                 return (phase, "waiting", f"{verdict} stale (HEAD moved); "
-                        "sign-off relaunches against current HEAD", plain)
+                        "sign-off relaunches against current HEAD",
+                        _info(short=f"{verdict} stale (HEAD moved); "
+                              "relaunches against current HEAD"))
             return (phase, "waiting", f"{verdict} stale ({why}); sign-off "
-                    "re-runs against the current base", plain)
+                    "re-runs against the current base",
+                    _info(short=f"{verdict} stale ({why}); re-runs against "
+                          "the current base"))
         if verdict == "SIGNOFF_MERGE":
             reason, info = _signed_off(pr_id, holds)
             return phase, "waiting", reason, info

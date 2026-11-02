@@ -74,7 +74,10 @@ R2 — Phase/progress once per PR.
   scheduler pass`, not `QA starts …`; `RUNNING impl` → `launching`, `idle;
   review transition pending`; `review` → `loop starts on next scheduler
   pass`, `window open (no loop)`; `sign-off` / `impl` without a window →
-  `no window…`).
+  `no window…`); failed and stale rows likewise (`FAILED qa` → `error: …`,
+  not `QA error: …`; `FAILED merge` → `attempt failed; no merge window`;
+  stale sign-off → `SIGNOFF_MERGE stale (HEAD moved); relaunches against
+  current HEAD`).
 - `_derive()` returns `(phase, state, reason, info)`; info carries
   `attention`, the short reason and `blockers`.  The JSON `reason` keeps its
   full text (machine-readable data unchanged); `short_reason`, `attention`,
@@ -124,7 +127,8 @@ R4 — Width and wrapping.
   pieces as fit, never mid-word through a PR id or session name (only a
   single word wider than the line is hard-split).  A ` · ` separator at a
   break is dropped (no line starts or ends with `·`).
-- CLI: width = `min(99, terminal columns)` (redirected output → 99);
+- CLI: width = `min(99, terminal columns)` (redirected output → 99,
+  unless `COLUMNS` is set);
   `--width N` overrides (clamped to 30..99).  TUI: popup container fits 99 +
   chrome (`width: 106; max-width: 95%`, stable 1-column scrollbar gutter);
   render width is the body's content width minus the 2-column selection
@@ -170,7 +174,9 @@ R6 — One dependency forest, one row per PR (user requirement 2026-11-02).
   reason.  A target whose PR is gone is a `FAILED` row, `PR not found`.
 - References (holders, also, cycle, blockers, need-you list) use display
   ids (`#240`), except where several local PRs share a display id — then
-  each is named by its pm id.
+  each is named by its pm id.  A closed or missing blocker named in a
+  blocker reason counts toward that check (`blocked on pr-old (closed),
+  pr-new (in_progress)`, not `#40 (closed), #40 (in_progress)`).
 - Row fields: `{pr_id, depth, kind (target|dep), run, parent, ancestors,
   root, inherited, also, cycle, progress, policy}`.  Policy labels are
   relative to the row's ancestors and the wait targets holding them

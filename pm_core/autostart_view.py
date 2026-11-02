@@ -325,12 +325,19 @@ def display_names(status: dict) -> dict[str, str]:
     """PR id → the name the report uses for it in references (holders,
     "also needed by", blockers, the need-you list): its display id
     (``#240``), as on its own row — unless several local PRs share that
-    display id, in which case each is named by its unique pm id."""
+    display id, in which case each is named by its unique pm id.  A
+    closed or missing blocker has no row but is named in a blocker reason,
+    so it counts too: ``#40 (closed)`` must not read as the active ``#40``
+    when a new local PR took over that GitHub number."""
     disp = {}
     for r in status.get("runs") or []:
         disp[r["pr_id"]] = str(r.get("display_id") or r["pr_id"])
     for t in status.get("targets") or []:
         disp.setdefault(t["pr_id"], t["pr_id"])
+    for r in status.get("runs") or []:
+        for b in r.get("blockers") or []:
+            disp.setdefault(b["pr_id"],
+                            str(b.get("display_id") or b["pr_id"]))
     count: dict[str, int] = {}
     for d in disp.values():
         count[d] = count.get(d, 0) + 1
@@ -340,8 +347,8 @@ def display_names(status: dict) -> dict[str, str]:
 def reason_text(run: dict, names: dict[str, str] | None = None) -> str:
     """Compact reason.  Blockers name the blocking PRs and their status
     only: each unmerged blocker the report lists has its own row (with any
-    hold labels it needs), and one it does not list is merged-away, closed
-    or missing, which its status says."""
+    hold labels it needs), and one it does not list is closed or missing,
+    which its status says."""
     blockers = run.get("blockers")
     if blockers:
         names = names or {}
