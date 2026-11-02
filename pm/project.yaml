@@ -5173,7 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-11-02T07:37:50.223762+00:00'
+  updated_at: '2026-11-02T08:39:59.130043+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5301,6 +5301,33 @@ prs:
       in 990c5b4f; anyone who pulled d384a302 should pull again.'
     created_at: '2026-11-02T07:37:50Z'
     last_edited: '2026-11-02T07:37:50Z'
+  - id: note-9961d8b
+    text: 'SIGNOFF_IMPL return handled 2026-11-02: master@5b352d16 merged as 1d79a092
+      (pm/project.yaml via store.merge_3way(base, ours=master, theirs=branch): both
+      sides only appended records/notes, 586 unique PR ids, no true conflict; pm_core/cli/pr.py
+      auto-merged). Fixes in 0aaeb633: (1) note-d152fcb: `pm pr signoff integrate
+      <pr>` with 2+ verified clones now refuses in every mode after the listing: "PR
+      <pr>: not checking: the PR HEAD is in one of the clones listed above. [The recorded
+      integration check is left as it was.] Move the extra clone(s) aside, then re-run
+      `pm pr signoff integrate <pr> [--record] [--apply]`." exit 1; --record/--apply
+      no longer overwrite pr.integration or integration.json with status: error /
+      no PR workdir. (2) note-8fee005: a re-link is never written into ANY PR clone''s
+      tracked pm/project.yaml (workdirs.registry_clone: root inside the found clone
+      or this project''s workdirs dir, or root''s checked-out branch is some PR''s
+      branch, e.g. a container /workspace); the main repo still gets the record. Whenever
+      the re-link isn''t written the message says "Workdir for <pr>: ...; using the
+      existing clone on <branch> at <path> (not recorded: pm is using this clone''s
+      own tracked <root>/project.yaml | pm is using <root>/project.yaml, tracked in
+      the clone <clone> | could not write ...)" instead of "re-linked". QA spec (pm/specs/pr-4258a32/qa.md,
+      planner''s uncommitted edits left as found) R16 two-clone and R18 observationals
+      are now hard behaviour. Tests: tests/test_workdirs.py (+5, incl. pr cd from
+      another PR''s clone), tests/test_merge_publish.py (+1); new tests fail on the
+      pre-fix tree (other clone '' M pm/project.yaml'', integration record clobbered).
+      Full suite at 0aaeb633: 5588 passed, 1 skipped, 12 failed (all test_markdown_render.py:
+      markdown dep missing in the impl container; total = sign-off trial merge 5595
+      + 6 new).'
+    created_at: '2026-11-02T08:39:59Z'
+    last_edited: '2026-11-02T08:39:59Z'
 - id: pr-0778fbe
   plan: plan-003
   title: Add PR ownership tracking with workdir history
