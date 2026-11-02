@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-02T00:51:43.786955+00:00'
+  updated_at: '2026-11-02T03:22:28.240878+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48286,6 +48286,23 @@ prs:
       (QA-session artifacts).'
     created_at: '2026-11-02T00:51:43Z'
     last_edited: '2026-11-02T00:51:43Z'
+  - id: note-7ae55a2
+    text: 'review-loop 48dd i5 (603da6a5): one residual gap fixed. merge_integrity.verify_github_merge
+      put the recorded base_sha/head into `git log <base>..<tip>` after checking only
+      for a non-empty string (integration.revision_of), even though its comment said
+      they must be object names. git parses a leading `-` as an option, so a hand-edited
+      base_sha of `--output=<file>` made post-publish/sync verification write the
+      log to a file. Both now go through integration._sha_like (the hex rule contained_base
+      already uses). The regression test fails on the pre-fix tree. Also re-reviewed
+      the resolver, merge gate, approval justification, prepare/apply and the sign-off
+      prompt: sound. On the real 3 MB project.yaml the resolver merges this branch
+      against master correctly in 1.6 s. New master c1fcecc5 (#282) touches no file
+      this PR changes, so integrating it is clean (sign-off owns that). Full suite:
+      5763 passed, 1 skipped (/pm-captures/review-48dd-i5/). Left untouched: the uncommitted
+      pm/project.yaml / qa.md R19 edits and the untracked verify-s51-followup.md (QA-session
+      artifacts).'
+    created_at: '2026-11-02T03:22:28Z'
+    last_edited: '2026-11-02T03:22:28Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
