@@ -36,6 +36,13 @@ The partial infrastructure already exists:
    removes only a **numeric** `~N`: a session name is derived from the repo
    directory name, which may contain `~` itself, and splitting at the first
    `~` gave two unrelated projects the same socket (review-loop b48f i11).
+   The tag goes through `paths.tmux_safe_name()` where it is derived
+   (`get_session_tag()`).  tmux rewrites a session name it is given:
+   `.` and `:` become `_`, `$HOME` becomes `\$HOME`, and `#` is
+   format-expanded.  With the tag already in that form, the name pm
+   computes is the name tmux stores.  Every format-expanded path
+   argument (`new-session -s`, each `-c <cwd>`, `display-popup -d`)
+   goes through `tmux.format_literal()` (QA S28).
 2. Compute `socket_path = str(paths.session_socket_path(tag))`, i.e.
    `/tmp/pm-sessions/pm-<tag>`. `paths.session_socket_path()` is the new
    canonical name; `paths.shared_socket_path()` remains as an alias.
@@ -108,6 +115,16 @@ sessions today).
    S118/S121/S124) is not a session of its own: it is skipped whatever its
    name — including a name that looks like a pm session, e.g. `pm-laptop` —
    so one session is one row (review-loop 2caf i4).
+   A socket directory that exists but cannot be read (a root-owned
+   `1733` `/tmp/pm-sessions`, which `pm session` accepts) is reported,
+   not hidden.  The `os.scandir` scan puts the error in `read_errors`
+   and still probes the sockets its caller names.  `pm session list`
+   names two: the cwd project's deterministic socket, and the socket of
+   the pm session the command runs in (`$PM_TMUX_SOCKET`, else the one
+   `$TMUX` names).  Each is probed only when it is an entry of the
+   socket directory, and only once.  A warning on stderr says what was
+   checked, and the command never answers with a bare "No pm sessions
+   found." while sessions run (QA S34 `43b35445`, QA S40 `99deef53`).
 4. `pm_core/cli/helpers.py::_find_tui_pane()` (used by every `pm tui`
    subcommand) resolves the server for an explicit `--session`, the current
    pane, the cwd-derived session, and finally scans pm servers for a live
@@ -140,7 +157,15 @@ sessions today).
    last-resort scan) resolves the name tmux reports through the session
    *group* (`_pm_session_of`): `list-panes -a` lists a shared pane once per
    session in its group, so tmux may report it under a user's own view's
-   name (review-loop 2caf i4).
+   name (review-loop 2caf i4).  "A live `pm _tui` pane" has one
+   definition, `_start_command_is_tui()`.  The pane's
+   `#{pane_start_command}` is split into shell words, twice, because tmux
+   reports a command pm passed as one string as one quoted word.  The
+   words must hold a pm entry point and the exact `_tui` argument
+   (`tui_pidfile.cmdline_is_tui`).  A substring match is not enough: in
+   a repo whose name contains `_tui`, every EXIT-trap pane names the
+   session, and a review-diff pane cds into a workdir named after the
+   repo (QA S38 `a337a168`).
 5. `pm_core/tmux.py` gains `list_pm_sessions()` and
    `socket_path_from_tmux_env()`; `pm_core/paths.py` gains
    `session_socket_path()` / `ensure_socket_dir()`.
@@ -3994,3 +4019,88 @@ tmux targets) and the i18 residual (a legacy shared session whose
 72–78-character tag kept the unhashed socket path) are unchanged.  No live
 session, server or shared host configuration was touched.  Every fixture
 used a disposable socket directory, a temporary HOME or a mocked tmux.
+
+## QA-driven fixes and reviews (2026-11-02)
+
+QA scenarios 23–40 ran after review loop b48f i21.  Seven of them found
+defects, each fixed in a `qa:` commit.  The review loops after them
+(54bf, 68bd, e661, 4c75) made cleanups only.  None of this changes a
+requirement.  R1.1, R3.3 and R3.4 above now state the rules these fixes
+introduced.  `qa.md` has the per-scenario expectations.
+
+1. **QA S23, `87b2d1d1`: an awkward name broke the pane-switch gate and
+   the prompt-file path.**  `_register_tmux_bindings` built its gate
+   condition from the raw `#{session_group}`/`#{session_name}`.  A name
+   with an apostrophe silently fell back to a plain `select-pane`, and a
+   name with a backtick ran a command on every prefix+o.  The condition
+   now uses `#{q:…}`.  The second defect is pre-existing on master:
+   `build_claude_shell_cmd` wrote `"$(cat <path>)"` with the path
+   unquoted, so a space in the path gave Claude an empty prompt, and a
+   backtick in it executed.  The directory and file name are now
+   shell-quoted inside the substitution, and `container.wrap_claude_cmd`
+   matches the quoted prefix.  Tests:
+   `test_the_pane_switch_gate_condition_matches_the_registry` (real tmux
+   `if-shell`) and `test_shell_cmd_cat_path_survives_an_awkward_cwd`.
+2. **QA S28, `78b7b2fa`: awkward repo paths.**  Four defects, all
+   pre-existing on master.  (a) tmux rewrites some session names, so a
+   repo named with `$HOME`, `.`, `:`, `#` or a control character could
+   not get a session.  The tag is now `tmux_safe_name()`d at its source
+   (R1.1).  (b) A path containing `#(cmd)` ran `cmd` on each session and
+   window start, because `-s`, `-c` and `-d` are format-expanded.  These
+   arguments now go through `format_literal()`.  (c) The `--transcript`
+   path was unquoted, so TUI `s`/`d` in a repo path containing a quote
+   crashed the TUI and its server.  The path is now `shlex.quote`d in
+   `start_pr`, `review_pr` and auto-merge, and `run_command` logs a line
+   it cannot parse instead of raising.  (d) A window killed outside pm
+   stayed in the pane registry.  `_schedule_rebalance` now also visits
+   registry windows that tmux no longer has.  Tests:
+   `tests/test_awkward_repo_paths.py`.
+3. **QA S30, `7deab88e`: `pm session kill` run inside the session it
+   kills died on SIGHUP.**  The server's exit hung up the pane that ran
+   the command, so the teardown never finished: the push proxy and the
+   socket file leaked.  The teardown now runs under `_hangup_ignored()`,
+   and the result line goes through `_echo_surviving_hangup()`, which
+   drops the EIO from the dead pane.  Tests:
+   `TestSessionKillFromInsideItsOwnSession` (real tmux).
+4. **QA S34, `43b35445`: `pm session list` on an unreadable socket
+   directory said "No pm sessions found." while sessions ran.**
+   `Path.glob` swallows EACCES.  The scan now uses `os.scandir`, reports
+   the error, and probes the cwd project's socket (R3.3).
+5. **QA S35, `7a32e665`: `pm session` could start a second TUI.**  This
+   happened within about a second of an older pm half-starting a session
+   whose name tmux rewrote: the registry did not list the TUI yet, so pm
+   respawned it.  `_adopt_running_tui()` now adopts a live, not-dead
+   `pm _tui` pane of the session before it respawns.  It finds the pane
+   the same way as `pm tui view`/`send`, and records it under the
+   registry lock, only if it is missing.
+6. **QA S38, `a337a168`: a pane that only named a `_tui` session counted
+   as the TUI.**  `pm session` adopted the notes pane or a review-diff
+   pane instead of respawning a crashed TUI, and `pm tui view`/`send`
+   drove that pane.  A TUI pane is now matched by exact shell words
+   (R3.4).  Tests: `TestStartCommandIsTui`, two `TestFindLiveTuiPane`
+   cases, and a real-tmux `_session_start` case on `pm-iso_tui`.
+7. **QA S40, `99deef53`: on an unreadable socket directory, a pane's
+   own session was missing from the list.**  This was a pane cd'd to
+   `$HOME` or a PR workdir clone.  `pm session list` now also probes the
+   socket of the session the command runs in, and the warning names
+   what was checked (R3.3; `qa.md` ambiguity 12).
+
+The review loops in between:
+
+- **54bf i1** passed with no changes.
+- **68bd i1** fixed two things.  The TUI command bar now parses a line
+  before it takes the in-flight guard, and logs a line it cannot parse
+  (`e1c5bc95`).  `wrapper._get_session_tag` now mixes `PM_SHARE_MODE`
+  into the tag the way `paths.get_session_tag` does (`cfccf55c`).
+- **68bd i2–i4** were cleanups: the wrapper delegates tag derivation
+  and the socket directory to `paths`; `list_pm_sessions` uses
+  `paths.shared_socket_dir_is_usable`; `pm session kill` uses one
+  `_remove_stale_socket` helper.  The wrapper's `$TMUX` parse stays a
+  copy on purpose.  Importing `pm_core.tmux` would configure the
+  `pm.tmux` logger before the wrapper chooses which `pm_core` to run.
+- **e661 i1** made `pane_registry.register_tui_pane` the one "record the
+  window's TUI" step, used by both `heal_registry` and
+  `_adopt_running_tui`.  It also made the adopt's registry write
+  best-effort, so a held lock no longer fails the attach.
+- **4c75 i1** corrected the `list_pm_sessions` docstrings.
+- **4c75 i2** brought this spec up to date.  It found no code defect.

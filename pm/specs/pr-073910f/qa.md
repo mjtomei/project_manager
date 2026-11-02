@@ -883,8 +883,10 @@ Resolved by judgement (no **[UNRESOLVED]** items):
    story expected was a drafting error, not a requirement (resolved by
    the 2026-11-02 second planning pass).
 12. **`pm session list` on an unreadable socket directory from inside a
-   pm pane** — added by the 2026-11-02 second planning pass.  The
-   implementation probes only the cwd project's socket.  A pane's cwd can
+   pm pane** — added by the 2026-11-02 second planning pass.  At that
+   time the implementation probed only the cwd project's socket.  QA S40
+   found the failure, and `99deef53` fixed it: the list now also probes
+   the socket of the session the command runs in.  A pane's cwd can
    be a PR workdir clone, which has a different tag, or a directory
    outside any repo, while the session the pane belongs to is reachable
    through the pane's own socket.  Resolved by judgement from R3's
