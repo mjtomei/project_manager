@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T03:02:18.804947+00:00'
+  updated_at: '2026-11-02T03:08:26.165469+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25485,6 +25485,25 @@ prs:
       Captures in /pm-captures/scenarios/10/.'
     created_at: '2026-11-02T03:02:18Z'
     last_edited: '2026-11-02T03:02:18Z'
+  - id: note-fa468f2
+    text: 'QA S11 refiner (2026-11-02): all 4 stories held live at a610bc87 (no pm_core
+      change through 414dd863) with the project in /scratch (device differs from ~/.pm;
+      clone objects link count 1, i.e. copied). Draft fixes, not bugs: (1) pm qa launch
+      runs the bare `pm -C <proj>/pm qa regression <id> --file-prs` as the pane start
+      command; only TUI launches add the pm _pane-exited trap. (2) --target-window
+      discovery needs an existing window named discovery (create it with tmux new-window
+      -d -n discovery before the watcher runs). (3) Renamed-away master gives "Could
+      not clone ''master'' for the regression run: ... exit status 128" + "fatal:
+      Remote branch master not found in upstream origin"; tmux 3.2a showed "Pane is
+      dead (status 1, ...)" with remain-on-exit. Real-Claude discovery watcher (pm
+      trust add $TEST_DIR, pm watcher start discovery --wait 150 in a driver window):
+      tick 1 took ~70 s and logged "regression library empty, nothing scheduled";
+      tick 2 started ~4 min in, launched beta into discovery and logged "launched
+      regression:beta ... in flight". No guide pane started this time. Teardown: Ctrl-C
+      the watcher and the run pane, kill-server, rm ~/.pm/tui-<ses>.{pid,cmd-queue}
+      and the runs'' ~/.pm/sessions/repo-*/override dirs.'
+    created_at: '2026-11-02T03:08:26Z'
+    last_edited: '2026-11-02T03:08:26Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
