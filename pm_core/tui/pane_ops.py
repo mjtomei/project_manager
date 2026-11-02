@@ -263,11 +263,12 @@ def view_plan(app) -> None:
         return
     plan_file = plan.get("file", "")
     if not plan_file or not app._root:
-        app.log_message("Plan file not found")
+        app.log_message("Plan file not found — run `pm plan list` to see every plan")
         return
     plan_path = app._root / plan_file
     if not plan_path.exists():
-        app.log_message(f"Plan file not found: {plan_path}")
+        app.log_message(f"Plan file not found: {plan_path} — run `pm plan list` "
+                        f"to see every plan")
         return
     launch_pane(app, f"less {plan_path}", "plan", fresh=fresh)
 
@@ -542,7 +543,8 @@ def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
 
     item = qa_instructions.get_instruction(app._root, qa_id, category=category)
     if not item:
-        app.log_message(f"QA item not found: {item_id}")
+        app.log_message(f"QA item not found: {item_id} — run `pm qa list` "
+                        f"to see the library")
         return
 
     sess = app._session_name or "default"

@@ -27,6 +27,25 @@ QA_MODES: tuple[tuple[str, str, str, str], ...] = (
      "start or stop the repeating QA loop"),
 )
 
+# The command bar accepts either spelling for a QA mode, anywhere in the
+# argument list.  Rendered next to the QA rows so `pm pr qa --help`,
+# `pm tui keys` and the `?` HelpScreen all document the flag forms (the
+# positional-only table would otherwise hide `pr qa <id> --fresh`).  Kept as
+# short lines so a narrow terminal wraps cleanly.
+QA_FLAG_NOTE_LINES: tuple[str, ...] = (
+    "Flag spellings work anywhere:",
+    "  pr qa <id> --fresh = pr qa fresh <id>",
+    "  pr qa <id> --loop = pr qa loop <id>",
+)
+
+# The QA rows are derived from QA_MODES: the CLI form is always diagnostic
+# only, so deriving keeps the two tables from drifting (the module's whole
+# point).  A new QA mode added above shows up here automatically.
+_QA_COMMAND_BAR_ROWS: tuple[tuple[str, str, str, str], ...] = tuple(
+    (form, "pm pr qa [PR_ID] (diagnostic only)", keys, desc)
+    for _mode, form, keys, desc in QA_MODES
+)
+
 # (command-bar form, CLI form, TUI keys, description)
 COMMAND_BAR_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
     ("pr start [--fresh] [--companion] [PR_ID]",
@@ -35,15 +54,7 @@ COMMAND_BAR_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
     ("pr review [--fresh] [PR_ID]",
      "pm pr review [--fresh] [PR_ID]",
      "d / z d / zz d", "review; z d fresh, zz d loop"),
-    ("pr qa [PR_ID]",
-     "pm pr qa [PR_ID] (diagnostic only)",
-     "t", "focus an existing QA run, or start one"),
-    ("pr qa fresh [PR_ID]",
-     "pm pr qa [PR_ID] (diagnostic only)",
-     "z t", "fresh QA restart"),
-    ("pr qa loop [PR_ID]",
-     "pm pr qa [PR_ID] (diagnostic only)",
-     "zz t", "start/stop the QA loop"),
+    *_QA_COMMAND_BAR_ROWS,
     ("pr merge [PR_ID]",
      "pm pr merge [PR_ID]",
      "g / G", "publish a signed-off PR"),
@@ -99,18 +110,32 @@ def command_bar_lines(*, textual: bool = False, indent: str = "  ") -> list[str]
     return lines
 
 
+def _flag_note_lines(indent: str, *, textual: bool = False) -> list[str]:
+    lines = [f"{indent}{line}" for line in QA_FLAG_NOTE_LINES]
+    return [_escape_markup(line) for line in lines] if textual else lines
+
+
 def qa_help_table() -> str:
-    """The QA modes block embedded in ``pm pr qa --help``."""
-    return "\n".join(qa_mode_lines(indent="    "))
+    """The QA modes block embedded in ``pm pr qa --help``.
+
+    No blank line between the table and the note: this fragment lives inside
+    a Click ``\\b`` block, and a blank line would end the block, so Click
+    would re-wrap (and mangle) the note's aligned lines.
+    """
+    return "\n".join([*qa_mode_lines(indent="    "),
+                      *_flag_note_lines("    ")])
 
 
 def command_bar_help_text() -> str:
     """The command-bar section for ``pm tui keys`` (plain text)."""
     header = "Command bar (press /):"
-    return "\n".join([header, *command_bar_lines(indent="  ")])
+    return "\n".join([header, *command_bar_lines(indent="  "), "",
+                      *_flag_note_lines("  ")])
 
 
 def command_bar_help_lines_textual() -> list[str]:
     """The command-bar section for the TUI ``?`` HelpScreen (escaped markup)."""
     return [command_bar_help_text().splitlines()[0],
-            *command_bar_lines(textual=True, indent="  ")]
+            *command_bar_lines(textual=True, indent="  "),
+            "",
+            *_flag_note_lines("  ", textual=True)]

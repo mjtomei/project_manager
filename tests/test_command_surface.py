@@ -40,7 +40,7 @@ def _help(*args: str) -> str:
 
 def test_pr_qa_help_lists_every_command_bar_mode():
     out = _help("pr", "qa")
-    for token in ("fresh", "loop", "z t", "zz t", "--fresh",
+    for token in ("fresh", "loop", "z t", "zz t", "--fresh", "--loop",
                   "pr qa fresh", "pr qa loop"):
         assert token in out, f"{token!r} missing from `pm pr qa --help`"
     # The CLI form is diagnostic; it must not claim to start the loop.
@@ -119,7 +119,12 @@ def test_top_level_help_lists_the_missing_lifecycle_commands():
 
 
 def test_help_text_only_names_real_commands():
-    """Every ``pm ...`` path in HELP_TEXT resolves in the Click tree."""
+    """Every ``pm ...`` path in HELP_TEXT resolves in the Click tree.
+
+    Resolution walks the whole command path, not just the first token, so a
+    renamed or removed subcommand (``pm pr qa`` before it existed) fails here
+    instead of merely shortening the resolved prefix.
+    """
     for line in HELP_TEXT.splitlines():
         stripped = line.strip()
         if not stripped.startswith("pm "):
@@ -135,6 +140,13 @@ def test_help_text_only_names_real_commands():
                 resolved.append(tok)
                 cmd = cmd.commands[tok]
             else:
+                # The path may stop at an argument placeholder, a flag, or
+                # the capitalized description.  A lowercase word is a command
+                # name that does not exist.
+                is_stale = (tok[0] not in "<[-" and tok.isalpha()
+                            and tok.islower())
+                assert not is_stale, \
+                    f"HELP_TEXT names an unknown command: {stripped!r}"
                 break
         assert resolved, f"HELP_TEXT names an unknown command: {stripped!r}"
 
@@ -145,7 +157,8 @@ def test_help_text_only_names_real_commands():
 
 def test_command_surface_table_contains_qa_forms():
     text = command_surface.command_bar_help_text()
-    for token in ("pr qa fresh", "pr qa loop", "z t", "zz t", "pr start"):
+    for token in ("pr qa fresh", "pr qa loop", "z t", "zz t", "pr start",
+                  "--fresh", "--loop"):
         assert token in text
 
 
@@ -159,7 +172,8 @@ def test_help_screen_lines_escape_textual_markup():
 def test_tui_keys_matches_the_shared_table():
     out = CliRunner().invoke(cli, ["tui", "keys"]).output
     assert "Command bar (press /):" in out
-    for token in ("pr qa fresh", "pr qa loop", "z t", "zz t", "pr merge"):
+    for token in ("pr qa fresh", "pr qa loop", "z t", "zz t", "pr merge",
+                  "--fresh", "--loop"):
         assert token in out
 
 
@@ -176,6 +190,21 @@ def test_tui_keys_matches_the_shared_table():
 ])
 def test_parse_qa_command_accepts_both_spellings(args, expected):
     assert parse_qa_command(args) == expected
+
+
+def test_parser_accepts_every_documented_qa_mode():
+    """The documented modes and the parser cannot drift apart.
+
+    A mode added to the shared table must be accepted by the command bar
+    (and vice versa: an undocumented spelling is rejected).
+    """
+    for mode, _form, _keys, _desc in command_surface.QA_MODES:
+        if mode == "run":  # the plain form, not a modifier
+            continue
+        assert parse_qa_command([mode]) == (mode, None)
+        assert parse_qa_command([f"--{mode}"]) == (mode, None)
+    with pytest.raises(ValueError):
+        parse_qa_command(["--resume", "pr-001"])
 
 
 @pytest.mark.parametrize("args", [

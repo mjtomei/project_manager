@@ -1448,7 +1448,7 @@ class ProjectManagerApp(App):
 
         pr = store.get_pr(self._data, pr_id)
         if not pr:
-            self.log_message(f"PR {pr_id} not found")
+            self.log_message(f"PR {pr_id} not found — see `pr list` (TUI: r to refresh)")
             return
 
         phase = spec_gen.get_pending_spec_phase(pr)

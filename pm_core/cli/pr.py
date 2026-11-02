@@ -1054,7 +1054,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         else:
             click.echo(
                 f"PR {pr_id} was not found in project.yaml. "
-                f"Check that the PR ID is correct and has been added to the project.",
+                f"Check that the PR ID is correct and has been added to the "
+                f"project — run 'pm pr list' to see every PR.",
                 err=True,
             )
         raise SystemExit(1)
@@ -2819,6 +2820,7 @@ Examples:
   pr qa fresh pr-001         # fresh restart         (= z t)
   pr qa pr-001 --fresh       # same as `pr qa fresh`
   pr qa loop pr-001          # start/stop the loop   (= zz t)
+  pr qa pr-001 --loop        # same as `pr qa loop`
 
 A single QA instruction — not the full loop — runs with
 ``pm qa run <instruction-id> --pr <pr-id>``.
@@ -2876,10 +2878,12 @@ def pr_qa(pr_id: str | None):
     if not pm_session:
         click.echo("QA requires a pm tmux session for managing scenario windows.", err=True)
         click.echo("Start a session first with: pm session", err=True)
-        click.echo(f"Then use the TUI command bar: /pr qa {_pr_display_id(pr_entry)}", err=True)
+        click.echo(f"Then open the TUI command bar (press /) and type: "
+                   f"pr qa {_pr_display_id(pr_entry)}", err=True)
         raise SystemExit(1)
 
-    click.echo(f"Use the TUI command bar to start QA: /pr qa {_pr_display_id(pr_entry)}", err=True)
+    click.echo(f"Open the TUI command bar (press /) and type: "
+               f"pr qa {_pr_display_id(pr_entry)}", err=True)
     click.echo("Or press 't' on the PR in the TUI (z t = fresh restart, zz t = loop).", err=True)
     raise SystemExit(1)
 

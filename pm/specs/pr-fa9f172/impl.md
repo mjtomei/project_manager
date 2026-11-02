@@ -285,9 +285,13 @@ the routed form and `--fresh` so help is complete.
 
 ## Implementation Notes (shipped)
 
-- `pm_core/command_surface.py` holds `QA_MODES` and `COMMAND_BAR_COMMANDS`;
-  `pm pr qa --help`, the TUI `?` HelpScreen, and `pm tui keys` all render
-  from it. The HelpScreen escapes `[` as `\[` so option brackets display.
+- `pm_core/command_surface.py` holds `QA_MODES`, `COMMAND_BAR_COMMANDS` and
+  `QA_FLAG_NOTE_LINES`; `pm pr qa --help`, the TUI `?` HelpScreen, and
+  `pm tui keys` all render from it. `QA_FLAG_NOTE_LINES` documents the
+  `pr qa <id> --fresh` / `--loop` flag spellings in all three surfaces
+  (the positional table alone would have hidden them); the QA command-bar
+  rows are derived from `QA_MODES` so the two tables cannot drift. The
+  HelpScreen escapes `[` as `\[` so option brackets display.
 - `pm pr qa` help is supplied via `@pr.command(help=_QA_HELP)` because a
   Python f-string cannot be a docstring (`__doc__` stays `None`).
 - The command bar accepts `pr qa <id> --fresh` / `--loop` via the pure
@@ -301,4 +305,7 @@ the routed form and `--fresh` so help is complete.
   corrective QA messages (prefix assertions plus the remedy).
 - `pm tui keys` also gained the missing real bindings (`i`, `z d`, `S`,
   `G`, `Y`, `o`, `V`, `w`).
+- Remaining user-facing TUI not-found messages that the first pass missed
+  (spec review in `app.py`, plan file and QA item in `pane_ops.py`) now
+  name `pr list` / `pm plan list` / `pm qa list`.
 
