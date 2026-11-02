@@ -499,6 +499,47 @@ class TestFindLiveTuiPane:
                          '%9:pm-other:"pm _tui"\n'):
             assert _find_live_tui_pane("pm-test") == ("%8", "pm-test")
 
+    def test_a_pane_naming_a_tui_session_is_not_the_tui(self):
+        """QA S38: in a repo named ``rich_tui`` every pane pm wraps in its
+        EXIT trap names the session, ``pm-rich_tui-<h>``, and a review-diff
+        pane cds into ``~/.pm/workdirs/rich_tui-<h>/``.  With the TUI
+        crashed (its registry entry dead), neither may be returned as the
+        TUI: ``pm tui view`` printed the notes pane and ``pm tui send``
+        typed into it.  The start commands are the ones tmux 3.2a reported.
+        """
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        sess = "pm-rich_tui-1f36a2a6"
+        data = self._registry(
+            {"id": "%0", "role": "tui", "order": 0, "cmd": "pm _tui"},
+            {"id": "%2", "role": "notes", "order": 1, "cmd": "pm notes"})
+        notes = ('%2:pm-rich_tui-1f36a2a6:"bash -c \'trap \\"pm '
+                 '_pane-exited pm-rich_tui-1f36a2a6 @0 1793622288 '
+                 '\\$TMUX_PANE\\" EXIT; pm notes\'"\n')
+        diff = ('%3:pm-rich_tui-1f36a2a6:"cd /home/u/.pm/workdirs/'
+                'rich_tui-7656872a/pm-pr-051d62a-add-login-c7012788 && '
+                '{ git --no-pager diff master...HEAD; } | less -R; '
+                'exec /bin/bash"\n')
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             self._panes(notes + diff):
+            assert _find_live_tui_pane(sess) == (None, sess)
+
+    def test_a_respawned_tui_beside_them_is_found(self):
+        """The same session after a respawn: only the ``pm _tui`` pane."""
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        sess = "pm-rich_tui-1f36a2a6"
+        data = self._registry(
+            {"id": "%0", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             self._panes('%2:pm-rich_tui-1f36a2a6:"bash -c \'trap '
+                         '\\"pm _pane-exited pm-rich_tui-1f36a2a6 @0 1 '
+                         '\\$TMUX_PANE\\" EXIT; pm notes\'"\n'
+                         '%5:pm-rich_tui-1f36a2a6:"pm _tui"\n'):
+            assert _find_live_tui_pane(sess) == ("%5", sess)
+
     def test_never_falls_back_to_another_session(self):
         from pm_core.cli.helpers import _find_live_tui_pane
 
@@ -648,6 +689,52 @@ class TestFindLiveTuiPane:
                    return_value=empty), \
              self._panes("%3:pm-test:bash\n"):
             assert _find_live_tui_pane("pm-test") == (None, "pm-test")
+
+
+# ---------------------------------------------------------------------------
+# _start_command_is_tui
+# ---------------------------------------------------------------------------
+
+
+class TestStartCommandIsTui:
+    """A pane is the TUI only when its start command runs ``pm _tui``.
+
+    The strings are ``#{pane_start_command}`` as tmux reports it: a command
+    pm passed as one shell string comes back as one double-quoted word.
+    """
+
+    @pytest.mark.parametrize("command", [
+        '"PM_TMUX_SOCKET=/tmp/pm-sessions/pm-rich_tui-1f36a2a6 pm _tui"',
+        '"PM_TMUX_SOCKET=/tmp/pm-sessions/pm-x PM_SHARE_MODE=global pm _tui"',
+        # A tag with a space and an apostrophe, shlex-quoted by pm and
+        # escaped again by tmux.
+        '"PM_TMUX_SOCKET=\'/tmp/pm-sessions/pm-qa it\'\\"\'\\"\'s here-1\' '
+        'pm _tui"',
+        '"pm _tui"',          # respawned, or a legacy session
+        "pm _tui",            # passed as separate arguments
+    ])
+    def test_the_tui(self, command):
+        from pm_core.cli.helpers import _start_command_is_tui
+        assert _start_command_is_tui(command)
+
+    @pytest.mark.parametrize("command", [
+        # QA S38: the session name (repo rich_tui) inside the EXIT trap.
+        '"bash -c \'trap \\"pm _pane-exited pm-rich_tui-1f36a2a6 @0 '
+        '1793622288 \\$TMUX_PANE\\" EXIT; pm notes\'"',
+        # QA S38: the review-diff pane cds into a workdir named after it.
+        '"cd /home/u/.pm/workdirs/rich_tui-7656872a/pm-pr-1-c70 && '
+        '{ git status; } | less -R; exec /bin/bash"',
+        # The project tag alone, or a word that only contains ``_tui``.
+        '"PM_TMUX_SOCKET=/tmp/pm-sessions/pm-rich_tui-1 pm notes"',
+        '"pm my_tui"',
+        "",                    # a plain shell window
+        "bash",
+        # Unbalanced quoting falls back to whole words, never substrings.
+        '"echo \' pm-rich_tui-1 pm notes"',
+    ])
+    def test_not_the_tui(self, command):
+        from pm_core.cli.helpers import _start_command_is_tui
+        assert not _start_command_is_tui(command)
 
 
 # ---------------------------------------------------------------------------

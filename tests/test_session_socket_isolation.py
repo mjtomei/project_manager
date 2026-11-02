@@ -5787,6 +5787,31 @@ class TestSessionStartAttachesToLegacySession:
         panes = registry["windows"][window_id]["panes"]
         assert [(p["id"], p["role"]) for p in panes] == [(tui_pane, "tui")]
 
+    def test_a_pane_naming_a_tui_session_is_respawned_beside_not_adopted(
+            self, short_sock_dir, tmp_path, monkeypatch, capsys):
+        """QA S38: in a repo named ``rich_tui`` the session is
+        ``pm-rich_tui-<h>``, and every pane pm wraps in its EXIT trap names
+        it.  With the TUI crashed and a notes pane left, ``pm session``
+        adopted the notes pane as the TUI, so no TUI came back.  Only a
+        pane running ``pm _tui`` may be adopted; this one is respawned
+        beside and keeps its own role.
+        """
+        from pm_core import pane_registry
+
+        name = "pm-iso_tui"
+        respawned, attached, registry, notes_pane, window_id = \
+            self._start_against_unregistered_tui(
+                short_sock_dir, tmp_path, monkeypatch, name,
+                f"bash -c 'trap \": pm _pane-exited {name} @0 1\" EXIT; "
+                "sleep 300'", private=True)
+
+        assert "TUI pane missing — respawning..." in capsys.readouterr().out
+        assert respawned == [(name, window_id)]
+        assert attached == [(f"{name}~1", str(short_sock_dir / name))]
+        tui_ids = [p["id"] for _, p in pane_registry._iter_all_panes(registry)
+                   if p["role"] == "tui"]
+        assert notes_pane not in tui_ids
+
     def test_a_session_without_a_live_tui_pane_is_still_respawned(
             self, short_sock_dir, tmp_path, monkeypatch, capsys):
         """No pane runs ``pm _tui``: the respawn path is unchanged."""

@@ -5,6 +5,7 @@ HelpGroup, state management, PR ID resolution, TUI refresh, and session helpers.
 """
 
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -1718,9 +1719,46 @@ def _live_panes_and_tuis() -> tuple[dict[str, str], list[tuple[str, str]]]:
             continue
         pane_id, session = parts[0], parts[1]
         panes[pane_id] = session
-        if len(parts) == 3 and "_tui" in parts[2]:
+        if len(parts) == 3 and _start_command_is_tui(parts[2]):
             tuis.append((pane_id, session))
     return panes, tuis
+
+
+def _shell_words(command: str) -> list[str]:
+    """Split *command* into shell words; degrade to a whitespace split.
+
+    An unbalanced quote makes ``shlex`` raise.  The fallback keeps each
+    word whole (only stray quotes at its ends are dropped), so a word is
+    never cut down to a shorter one that could match exactly.
+    """
+    try:
+        return shlex.split(command)
+    except ValueError:
+        return [word.strip("\"'") for word in command.split()]
+
+
+def _start_command_is_tui(command: str) -> bool:
+    """True when a pane's ``#{pane_start_command}`` runs ``pm _tui``.
+
+    tmux reports each argument it was given, quoted the way its own
+    parser reads it back.  pm passes every pane command as one shell
+    string (``PM_TMUX_SOCKET=<socket> pm _tui``), so it comes back as a
+    single double-quoted word, which is split once more into the words the
+    shell runs.  Those words must hold a pm entry point and the exact
+    ``_tui`` argument: the same test the pidfile applies to a live TUI's
+    argv (``tui_pidfile.cmdline_is_tui``).
+
+    A substring test is not enough.  Every pane pm wraps in its EXIT trap
+    names the session (``trap "pm _pane-exited pm-<tag> ..." EXIT; pm
+    notes``), and a review-diff pane cds into a workdir named after the
+    repo, so in a repo whose name contains ``_tui`` those panes looked
+    like the TUI (QA S38): ``pm session`` adopted the notes pane instead
+    of respawning a crashed TUI, and ``pm tui send`` typed into it.
+    """
+    words = _shell_words(command)
+    if len(words) == 1:
+        words = _shell_words(words[0])
+    return tui_pidfile.cmdline_is_tui(words)
 
 
 def _find_live_tui_pane(
