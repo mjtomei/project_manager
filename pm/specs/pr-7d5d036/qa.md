@@ -63,6 +63,27 @@ R39 and the real-Claude share-mode path are therefore still unexercised.
 R33 is amended: `pm qa launch` also adds `--file-prs`. A14, A7 and A9 are
 extended. The other items are unchanged.
 
+Revised 2026-11-02 (round 6) at head `b35f2804`, after the master
+integration. The resumed round 5 run passed S23 (R39 and R26–R29 across a
+`--global` session and a private-socket project) and S24 (R36/R37 with a
+real Claude from a `--global` TUI), with no fix, so every requirement up to
+R39 has now passed live at `a3777520`. Sign-off then sent the PR back for a
+registry-only conflict. `7518aa8a` merged master@`5b352d16`; this PR's
+`pm_core` files are unchanged by it, but master brought in pr-5ec411c
+(Claude effort levels, per-provider `supported_efforts`, effort warnings
+and dropping an ambient `CLAUDE_CODE_EFFORT_LEVEL` when pm passes
+`--effort`) and pr-3d3b3ce (a router's env values stay out of probe argv).
+Both touch `claude_launcher.build_claude_shell_cmd`, which every regression
+run goes through. The next QA attempt ended ERROR at launch (`podman info`
+timed out on the host, QA-loop infrastructure, not a scenario). Round 6
+re-checks the core stories on the merged code and adds R40–R43, E24, E25
+and A15 for how a regression run uses the user's provider configuration.
+Planning found that the regression container path calls
+`create_qa_container` without `route_mounts`, unlike the QA loop's scenario
+containers, while `build_claude_shell_cmd(container=True)` with a router
+provider prefixes the in-container bridge step that needs that mount (R41).
+The other items are unchanged.
+
 ## What changed, as a user sees it
 
 - The 20 old regression scenarios under `pm/qa/regression/` are gone. The
@@ -373,6 +394,52 @@ extended. The other items are unchanged.
   new PRs without `r`, no test-project TUI and no other project's TUI logs
   a reload at filing time, and no `.tmp` file is left behind.
 
+### Added in the round-6 revision
+
+A regression run picks its provider the way master's regression launcher
+did: `PM_PROVIDER`, then the session's provider file, then
+`pm provider default`, then built-in claude. It does not read `pm model`
+per-role settings (there is no `qa_regression` role) and passes no
+`--effort`. That is unchanged from master and is not checked here (A15).
+
+- **R40** Given container mode off and a default provider whose launch sets
+  environment variables (a claude/local-type provider with an `--env`
+  entry holding a secret-like value, or a router provider with a host
+  `--launcher`), when the user runs a regression test from the CLI and from
+  TUI Enter, then the session runs on that provider: its recorded
+  environment has the provider's variables (a router's
+  `ANTHROPIC_BASE_URL` included), the variables the provider unsets are
+  absent, and it got the provider's `--model`. The R7 variables are still
+  removed and `PM_TMUX_SOCKET` kept. No provider value appears in the run
+  pane's start command, any process argv (`ps`), the run header,
+  `prompt.md` or pm's command/debug logs. Names may appear.
+- **R41** Given container mode on with a working QA image and a router
+  default provider whose `api_base` is a host-local endpoint, when the user
+  runs a regression test (CLI and TUI Enter), then the session in the
+  container starts with `ANTHROPIC_BASE_URL` at the in-container forwarder
+  and a request to it reaches the host endpoint, as a QA scenario container
+  on that route does. The provider's values reach the container only
+  through `-e NAME` on the runtime command line. If routes are not
+  supported in regression containers, the launch is refused before any
+  container, workdir, captures dir or pane exists, naming the provider and
+  a remedy. A run whose session dies at the bridge step, or one that falls
+  back to the host, fails this.
+- **R42** Given a default router provider whose settings cannot launch (no
+  model, or an `api_base` with no port/host), when the user runs a
+  regression test from the CLI (host and container mode), TUI Enter or
+  `pm qa launch`, then the run stops with the provider's
+  "provider '<name>': … Remedy: …" error and exit 1. No session starts on
+  the host, and no container, workdir or captures dir is left behind. A TUI
+  or `pm qa launch` pane that closes at once without showing it is
+  pr-089af69: cite it.
+- **R43** Given R41 works, when two container-mode regression runs on the
+  same router provider start at the same moment and one ends first, then
+  both sessions reach the host endpoint through the one host bridge, and
+  the survivor still reaches it after the other's container is removed.
+  Two host-mode runs launched at once with different providers (one
+  through `pm provider default`, one with `PM_PROVIDER` exported) each get
+  only their own provider's variables and `--model`.
+
 ## 2. Setup
 
 - Install pm from the PR clone (`./install.sh --local` from the repo, or the
@@ -484,6 +551,16 @@ extended. The other items are unchanged.
   test project's, which recorded its own pm dir), or a dead session's
   leftover `~/.pm/sessions/<tag>/pm_root` naming the `-C` pm dir: neither
   is chosen. Only a live session whose recorded pm dir is the `-C` dir is.
+- **E24** Ambient effort and provider effort: master now drops an inherited
+  `CLAUDE_CODE_EFFORT_LEVEL` only when pm passes `--effort`. A regression
+  run passes none, so with `CLAUDE_CODE_EFFORT_LEVEL` exported, or a
+  default provider created with `--effort`, the session gets no `--effort`
+  and the exported value passes through. Record what the session got; it
+  matches master's regression launcher (A15).
+- **E25** `PM_PROVIDER` exported where the run is launched is not in the
+  scrubbed list: the run uses that provider, and `pm` commands inside the
+  run (the test project's session) see it too. Record it; a provider
+  variable leaking into the test project's own sessions is not a failure.
 
 ## 4. Pass/Fail criteria
 
@@ -505,6 +582,11 @@ Pass means every Then clause above can be observed on the user's surface
 - a `pm -C`/`PM_PROJECT` command outside a pm session reloads or shows
   another project's TUI while the named project's TUI is running (R38)
 - a container-mode failure falls back to the host
+- a provider's variable value appears in a run's pane start command, a
+  process argv, the header, `prompt.md` or pm's logs (R40, R41)
+- a container-mode regression run on a router default provider starts a
+  session that dies at the bridge step, instead of reaching the route or
+  being refused up front (R41)
 - a failed launch leaves a workdir, a captures run dir, a container or a
   `prompt.md`
 - `--file-prs` findings are lost, or anything other than the registry is
@@ -581,6 +663,21 @@ exercised.
   pr-7ebc650; don't file it again. Since the `-C` lookup now runs inside
   the container at filing time, the filing itself must still exit 0 with
   no traceback and land in the host registry (it did in S21).
+- **A15** Round 6, providers. Master's regression launcher also used
+  `build_claude_shell_cmd` with no model, provider or effort, so which
+  provider a run uses (E25), and that `pm model` per-role settings and a
+  provider's `effort` don't apply (E24), are unchanged and out of scope.
+  What is in scope is that this PR's new paths carry the chosen provider
+  correctly: host mode layers the provider env over the scrubbed
+  environment (R40), and the new container path must handle a router the
+  way the QA loop's scenario containers do, through
+  `router_route.container_mounts` (R41). `pm qa debug`'s container path had
+  the same missing mount on master; if a worker confirms it, file it once
+  as a separate bug rather than failing this PR on it. Router stories need
+  a recording stand-in, not the fake: the fake-claude branch of
+  `build_claude_shell_cmd` drops the bridge prefix, so a `qa_regression`
+  fake config hides R41. A host-local endpoint can be any small HTTP server
+  that logs requests; nothing needs to answer like a real router.
 
 - **A7** Bugs found in round 1 and filed elsewhere are not failures of this
   PR: pr-a571291 (`--file-prs` filings make the filed PR the user's active
