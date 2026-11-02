@@ -52,7 +52,9 @@ class LocalBackend(Backend):
             f"- You're on branch `{branch}`\n"
             f"- Commit as you go\n"
             f"- When ready for review: press `d` in the TUI or run `pm pr review {pr_id}` from the base pm directory (not from this workdir)\n"
-            f"- To merge: run `pm pr merge {pr_id}` from the base pm directory"
+            f"- Merging happens after sign-off (`pm pr merge {pr_id}` from the base pm "
+            f"directory publishes only a signed-off candidate); never push or merge "
+            f"into `{base_branch}` yourself"
         )
 
 
@@ -74,7 +76,9 @@ class VanillaBackend(Backend):
             f"- You're on branch `{branch}`\n"
             f"- Commit and push as you go: `git push origin {branch}`\n"
             f"- When ready for review: press `d` in the TUI or run `pm pr review {pr_id}` from the base pm directory (not from this workdir)\n"
-            f"- To merge: run `pm pr merge {pr_id}` from the base pm directory"
+            f"- Merging happens after sign-off (`pm pr merge {pr_id}` from the base pm "
+            f"directory publishes only a signed-off candidate); never push or merge "
+            f"into `{base_branch}` yourself"
         )
 
 

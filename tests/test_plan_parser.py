@@ -1,6 +1,6 @@
-"""Tests for pm_core.plan_parser."""
+"""Tests for pm_core.plans.parser."""
 
-from pm_core.plan_parser import extract_field, parse_plan_children, parse_plan_prs
+from pm_core.plans.parser import extract_field, parse_plan_children, parse_plan_prs
 
 
 def test_parse_empty():

@@ -217,6 +217,29 @@ class TestMergeWindowCompanion:
         mock_tmux.new_window.assert_called_once()
         mock_tmux.new_window_get_pane.assert_not_called()
 
+    @patch.object(pr_mod, "tmux_mod")
+    @patch.object(pr_mod, "prompt_gen")
+    @patch.object(pr_mod, "build_claude_shell_cmd", return_value="claude ...")
+    def test_claude_cmd_uses_tmux_session_tag(
+        self, mock_cmd, _prompt, mock_tmux,
+    ):
+        """Launch config (fake-claude, skip-permissions) follows the tmux
+        session, not the cwd tag of a PR workdir the picker runs from."""
+        mock_tmux.has_tmux.return_value = True
+        mock_tmux.in_tmux.return_value = True
+        mock_tmux.session_exists.return_value = True
+        mock_tmux.find_window_by_name.return_value = None
+
+        data = {"project": {"base_branch": "master"}}
+        pr_entry = {"id": "pr-001", "workdir": "/work/dir"}
+
+        with patch.object(pr_mod, "_get_pm_session", return_value="pm-sess"), \
+             patch("pm_core.paths.get_global_setting", return_value=False), \
+             patch.object(pr_mod, "_ensure_workdir", return_value="/work/dir"):
+            pr_mod._launch_merge_window(data, pr_entry, "conflict error")
+
+        assert mock_cmd.call_args.kwargs["session_tag"] == "sess"
+
 
 # ---------------------------------------------------------------------------
 # TUI companion parameter for start_pr

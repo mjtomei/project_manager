@@ -221,4 +221,5 @@ def cluster_explore(bridged, fresh):
     session_key = "cluster:explore"
     if fresh:
         clear_session(root, session_key)
-    launch_claude(prompt, cwd=str(repo_root), session_key=session_key, pm_root=root, resume=not fresh)
+    launch_claude(prompt, cwd=str(repo_root), session_key=session_key, pm_root=root,
+                  resume=not fresh, session_type="cluster")

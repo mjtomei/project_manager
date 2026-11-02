@@ -1,9 +1,9 @@
-"""Tests for pm_core.review — post-step review logic."""
+"""Tests for pm_core.plans.review — post-step plan-command review logic."""
 
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from pm_core.review import (
+from pm_core.plans.review import (
     _parse_verdict,
     build_fix_prompt,
     _write_review_file,
@@ -184,14 +184,14 @@ class TestReviewPrompts:
 # ---------------------------------------------------------------------------
 
 class TestReviewStep:
-    @patch("pm_core.review.find_claude", return_value=None)
+    @patch("pm_core.plans.review.find_claude", return_value=None)
     def test_returns_early_when_no_claude(self, mock_fc, tmp_path):
         """Line 116-117: returns immediately if claude not found."""
         review_step("plan-add", "ctx", "prompt", tmp_path)
         # No error, just returns
 
-    @patch("pm_core.review.launch_claude_print_background")
-    @patch("pm_core.review.find_claude", return_value="/usr/bin/claude")
+    @patch("pm_core.plans.review.launch_claude_print_background")
+    @patch("pm_core.plans.review.find_claude", return_value="/usr/bin/claude")
     def test_launches_background_review(self, mock_fc, mock_launch, tmp_path):
         """Line 169: launches claude in background with callback."""
         review_step("plan-add", "ctx", "check prompt", tmp_path)
@@ -199,22 +199,22 @@ class TestReviewStep:
         assert mock_launch.call_args[0][0] == "check prompt"
         assert mock_launch.call_args[1]["callback"] is not None
 
-    @patch("pm_core.review.launch_claude_print_background")
-    @patch("pm_core.review.find_claude", return_value="/usr/bin/claude")
+    @patch("pm_core.plans.review.launch_claude_print_background")
+    @patch("pm_core.plans.review.find_claude", return_value="/usr/bin/claude")
     def test_callback_pass_not_in_tmux(self, mock_fc, mock_launch, tmp_path):
         """PASS verdict without tmux just returns."""
         review_step("plan-add", "ctx", "check", tmp_path)
         callback = mock_launch.call_args[1]["callback"]
         # Simulate PASS verdict, not in tmux
-        with patch("pm_core.review.tmux_mod") as mock_tmux:
+        with patch("pm_core.plans.review.tmux_mod") as mock_tmux:
             mock_tmux.in_tmux.return_value = False
             callback("PASS — looks good", "", 0)
         # No review file should be written
         assert not (tmp_path / "reviews").exists() or \
                len(list((tmp_path / "reviews").iterdir())) == 0
 
-    @patch("pm_core.review.launch_claude_print_background")
-    @patch("pm_core.review.find_claude", return_value="/usr/bin/claude")
+    @patch("pm_core.plans.review.launch_claude_print_background")
+    @patch("pm_core.plans.review.find_claude", return_value="/usr/bin/claude")
     def test_callback_empty_output(self, mock_fc, mock_launch, tmp_path):
         """Empty output should return without action."""
         review_step("plan-add", "ctx", "check", tmp_path)
@@ -223,13 +223,13 @@ class TestReviewStep:
         # No review file
         assert not (tmp_path / "reviews").exists()
 
-    @patch("pm_core.review.launch_claude_print_background")
-    @patch("pm_core.review.find_claude", return_value="/usr/bin/claude")
+    @patch("pm_core.plans.review.launch_claude_print_background")
+    @patch("pm_core.plans.review.find_claude", return_value="/usr/bin/claude")
     def test_callback_needs_fix_not_in_tmux(self, mock_fc, mock_launch, tmp_path, capsys):
         """NEEDS_FIX verdict outside tmux prints to stderr."""
         review_step("plan-add", "ctx", "check", tmp_path)
         callback = mock_launch.call_args[1]["callback"]
-        with patch("pm_core.review.tmux_mod") as mock_tmux:
+        with patch("pm_core.plans.review.tmux_mod") as mock_tmux:
             mock_tmux.in_tmux.return_value = False
             callback("NEEDS_FIX — missing tests", "", 0)
         # Review file should be created
@@ -241,28 +241,28 @@ class TestReviewStep:
         assert "NEEDS_FIX" in captured.err
 
     @patch("subprocess.run")
-    @patch("pm_core.review.launch_claude_print_background")
-    @patch("pm_core.review.find_claude", return_value="/usr/bin/claude")
+    @patch("pm_core.plans.review.launch_claude_print_background")
+    @patch("pm_core.plans.review.find_claude", return_value="/usr/bin/claude")
     def test_callback_needs_fix_in_tmux(self, mock_fc, mock_launch, mock_sp_run, tmp_path):
         """NEEDS_FIX verdict in tmux opens a pane."""
         review_step("plan-add", "ctx", "check", tmp_path)
         callback = mock_launch.call_args[1]["callback"]
         mock_sp_run.return_value = MagicMock(stdout="main-session")
-        with patch("pm_core.review.tmux_mod") as mock_tmux:
+        with patch("pm_core.plans.review.tmux_mod") as mock_tmux:
             mock_tmux.in_tmux.return_value = True
             mock_tmux._tmux_cmd.return_value = ["tmux", "display-message", "-p", "#{session_name}"]
             callback("NEEDS_FIX — missing tests", "", 0)
         mock_tmux.split_pane_background.assert_called_once()
 
     @patch("subprocess.run")
-    @patch("pm_core.review.launch_claude_print_background")
-    @patch("pm_core.review.find_claude", return_value="/usr/bin/claude")
+    @patch("pm_core.plans.review.launch_claude_print_background")
+    @patch("pm_core.plans.review.find_claude", return_value="/usr/bin/claude")
     def test_callback_pass_in_tmux(self, mock_fc, mock_launch, mock_sp_run, tmp_path):
         """PASS verdict in tmux opens a pane with PASS message."""
         review_step("plan-add", "ctx", "check", tmp_path)
         callback = mock_launch.call_args[1]["callback"]
         mock_sp_run.return_value = MagicMock(stdout="main-session")
-        with patch("pm_core.review.tmux_mod") as mock_tmux:
+        with patch("pm_core.plans.review.tmux_mod") as mock_tmux:
             mock_tmux.in_tmux.return_value = True
             mock_tmux._tmux_cmd.return_value = ["tmux", "display-message", "-p", "#{session_name}"]
             callback("PASS — all good", "", 0)
@@ -270,13 +270,13 @@ class TestReviewStep:
         pane_cmd = mock_tmux.split_pane_background.call_args[0][2]
         assert "PASS" in pane_cmd
 
-    @patch("pm_core.review.launch_claude_print_background")
-    @patch("pm_core.review.find_claude", return_value="/usr/bin/claude")
+    @patch("pm_core.plans.review.launch_claude_print_background")
+    @patch("pm_core.plans.review.find_claude", return_value="/usr/bin/claude")
     def test_callback_needs_fix_tmux_exception_fallback(self, mock_fc, mock_launch, tmp_path, capsys):
         """When tmux fails, falls back to stderr."""
         review_step("plan-add", "ctx", "check", tmp_path)
         callback = mock_launch.call_args[1]["callback"]
-        with patch("pm_core.review.tmux_mod") as mock_tmux:
+        with patch("pm_core.plans.review.tmux_mod") as mock_tmux:
             mock_tmux.in_tmux.return_value = True
             mock_tmux._tmux_cmd.side_effect = Exception("tmux not available")
             callback("NEEDS_FIX — problem", "", 0)

@@ -6,19 +6,23 @@ HelpGroup, state management, PR ID resolution, TUI refresh, and session helpers.
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import textwrap
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 import click
 
+from pm_core import tui_pidfile
 from pm_core import store, git_ops
 from pm_core.paths import configure_logger
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core import pane_registry
+from pm_core.pr_utils import TERMINAL_PR_STATES
 
 _log = configure_logger("pm.cli")
 
@@ -157,7 +161,7 @@ class HelpGroup(click.Group):
 
     Handles two cases:
     - ``pm pr help`` — 'help' as the command name on a group
-    - ``pm tui test help`` — 'help' as an arg to a leaf command
+    - ``pm qa show help`` — 'help' as an arg to a leaf command
     """
 
     group_class = type  # auto-propagate HelpGroup to child groups
@@ -174,7 +178,7 @@ class HelpGroup(click.Group):
             args = ["list"] + args[1:]
         cmd_name, cmd, remaining = super().resolve_command(ctx, args)
         # Also handle 'help' as first arg to a leaf command:
-        # e.g. 'pm tui test help' → 'pm tui test --help'
+        # e.g. 'pm qa show help' → 'pm qa show --help'
         if (remaining and remaining[0] == "help"
                 and cmd is not None and not isinstance(cmd, click.MultiCommand)):
             remaining = ["--help"] + remaining[1:]
@@ -264,6 +268,7 @@ PR_STATUS_ICONS = {
     "in_progress": "🔨",
     "in_review": "👀",
     "qa": "🧪",
+    "sign_off": "✔️",
     "merged": "✅",
     "closed": "🚫",
     "blocked": "🚫",
@@ -278,6 +283,13 @@ def format_pr_line(p: dict, active_pr: str | None = None,
     provider so both render PRs identically.
     """
     icon = PR_STATUS_ICONS.get(p.get("status", "pending"), "?")
+    # For a sign_off PR, append the latest recorded router verdict icon; a
+    # PR sign-off sent back shows the return verdict's icon.
+    verdict_str = ""
+    from pm_core.signoff import signoff_verdict_icon, display_signoff_verdict
+    v_icon = signoff_verdict_icon(display_signoff_verdict(p))
+    if v_icon:
+        verdict_str = f" {v_icon}"
     deps = p.get("depends_on") or []
     dep_str = f" <- [{', '.join(deps)}]" if deps else ""
     machine = p.get("agent_machine")
@@ -294,7 +306,7 @@ def format_pr_line(p: dict, active_pr: str | None = None,
                 ts_str = f" [{ts}]"
     return (
         f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} "
-        f"[{p.get('status', '?')}]{dep_str}{machine_str}{active_str}{ts_str}"
+        f"[{p.get('status', '?')}{verdict_str}]{dep_str}{machine_str}{active_str}{ts_str}"
     )
 
 
@@ -316,7 +328,7 @@ def kill_pr_windows(session: str, pr: dict) -> list[str]:
     # caller isn't on the doomed window but another grouped session is.
     # No recreate follows here, so parked clients stay on home.
     for win_name in (display_id, f"review-{display_id}", f"merge-{display_id}",
-                     f"qa-{display_id}"):
+                     f"qa-{display_id}", f"signoff-{display_id}"):
         win = tmux_mod.find_window_by_name(session, win_name)
         if win:
             home_window.park_if_on(session, win["id"])
@@ -435,7 +447,8 @@ def _make_pr_entry(
     }
 
 
-def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
+def _record_status_timestamp(pr_entry: dict, status: str | None = None, *,
+                             previous_status: str | None = None) -> None:
     """Record timestamps on *pr_entry*.
 
     Always sets ``updated_at``.  When *status* is provided, also sets
@@ -443,25 +456,323 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
 
     * ``started_at`` — set once on the first transition to ``in_progress``.
     * ``reviewed_at`` — updated each time the PR enters ``in_review``.
+    * ``signed_off_at`` — updated each time the PR enters ``sign_off``.
     * ``merged_at`` — set when the PR is ``merged``.
+    * ``closed_at`` — set when the PR is ``closed`` (a retained historical
+      record, not a deletion).
+
+    ``closed_at`` is maintained as history, not as a cache of the current
+    status: any transition to another status drops it, and only a *fresh*
+    closure records one — pass *previous_status* so a repeat close (or an
+    edit that re-states ``closed``) keeps the original closure time, and so
+    an entry closed before the field existed keeps none instead of inventing
+    one.  It is keyword-only: every caller passes a status it computed, and a
+    positional slip would silently look like a previous status.
     """
     now = datetime.now(timezone.utc).isoformat()
     pr_entry["updated_at"] = now
+    if status is not None and status != "closed":
+        pr_entry.pop("closed_at", None)
     if status == "in_progress" and not pr_entry.get("started_at"):
         pr_entry["started_at"] = now
     elif status == "in_review":
         pr_entry["reviewed_at"] = now
+    elif status == "sign_off":
+        pr_entry["signed_off_at"] = now
     elif status == "merged":
         pr_entry["merged_at"] = now
+    elif status == "closed" and previous_status != "closed":
+        pr_entry["closed_at"] = now
+
+
+def _terminal_status_at_lock(pr: dict | None) -> str | None:
+    """Return *pr*'s status when a launch command must not record its work.
+
+    ``pm pr start`` and ``pm pr review`` guard against a merged/closed PR from
+    their pre-lock snapshot, but they clone/push/create a draft PR before
+    writing the transition under the store lock.  A ``pm pr close`` (or a
+    merge) landing in that window would otherwise be resurrected: the launch
+    writes ``in_progress``/``in_review`` over the terminal record, which also
+    erases ``closed_at`` and (for a start) re-activates the retired PR.
+
+    Re-checking inside the lock makes the concurrent close win.  The caller
+    no-ops on a non-None result and reports it instead of proceeding.
+    """
+    status = (pr or {}).get("status") or "pending"
+    return status if status in TERMINAL_PR_STATES else None
+
+
+#: Sentinel returned by :func:`_launch_blocked_at_lock` when the record was
+#: deleted (``pm pr close --remove``) between a launch's pre-lock snapshot and
+#: its apply — distinct from a terminal status because the launch's wording
+#: has to say the record is gone, not that it is retired.
+LAUNCH_REMOVED_AT_LOCK = "removed"
+
+
+def _launch_blocked_at_lock(pr: dict | None) -> str | None:
+    """Return why a launch command must not record its work, or ``None``.
+
+    A launch (start/review/sign-off) checks its pre-lock snapshot, then does
+    real work — clone/push/draft-PR create, workdir resolution, window setup —
+    before writing its transition under the store lock.  Anything that lands
+    in that window must win:
+
+    * a ``pm pr close``/merge turns the record terminal — reported as its
+      status (see :func:`_terminal_status_at_lock`);
+    * ``pm pr close --remove`` deletes the record outright — reported as
+      ``"removed"``.  ``store.get_pr`` answers ``None`` then, and a launch that
+      treated that as "nothing to update" still printed its success line and
+      opened its window against a PR the registry no longer has (pr-62ad13d).
+    """
+    if pr is None:
+        return LAUNCH_REMOVED_AT_LOCK
+    return _terminal_status_at_lock(pr)
+
+
+def _report_launch_blocked(pr_id: str, blocked: str, *, doing: str,
+                           consequence: str) -> None:
+    """Report a launch that lost the store lock to a close/merge/removal.
+
+    ``doing`` is the gerund phrase after "while" (``"starting"``,
+    ``"opening the review"``) and ``consequence`` the clause after the em
+    dash.  The state wording — "was removed" versus "became <status>" — is
+    derived here from :func:`_launch_blocked_at_lock`'s result, so start,
+    review and sign-off cannot drift apart in the one sentence a user reads
+    when their launch was beaten by a concurrent close (pr-62ad13d).  Echoes
+    and exits 1; the caller must not have printed a success line or opened a
+    window yet.
+    """
+    state = ("was removed" if blocked == LAUNCH_REMOVED_AT_LOCK
+             else f"became {blocked}")
+    click.echo(f"PR {pr_id} {state} while {doing} — {consequence}", err=True)
+    raise SystemExit(1)
+
+
+def _closed_reopen_hint(pr_id: str, purpose: str | None = None) -> str:
+    """The refusal sentence for a command run against a retained closed PR.
+
+    A closed record is terminal — ``pm pr close`` keeps it as history — so
+    every lifecycle command refuses and names the one way back: an explicit
+    status edit.  Shared so the wording cannot drift between start, review,
+    QA, sign-off and merge: a user reading any refusal gets the same concrete
+    command.  *purpose* adds the command-specific verb ("to merge it").
+    """
+    hint = (f"PR {pr_id} is closed — reopen it first with "
+            f"'pm pr edit {pr_id} --status pending'")
+    return f"{hint} {purpose}." if purpose else f"{hint}."
+
+
+def _canonical_session(session: str) -> str:
+    """Strip the tmux session-group suffix (``~N``) from ``session``.
+
+    The TUI keys its pidfile and command-queue by its own session name
+    with the group suffix removed (see TechTreeApp: ``split("~")[0]``).
+    A user started via ``pm session`` is attached to the *grouped*
+    session (e.g. ``pm-foo~1``), so callers that resolve the current
+    session name (``_find_tui_pane`` -> ``get_session_name``) see the
+    ``~N`` form.  Normalizing here keeps every consumer pointed at the
+    same canonical file the TUI actually wrote, so external mutations
+    (``pm pr edit`` -> SIGUSR1 reload) reach the TUI.
+    """
+    return session.split("~")[0]
 
 
 def _tui_pidfile_for_session(session: str) -> Path:
     """Path to the pidfile a TUI in ``session`` writes at startup."""
-    from pm_core.paths import pm_home
-    return pm_home() / f"tui-{session}.pid"
+    return tui_pidfile.pidfile_path(_canonical_session(session))
 
 
-def trigger_tui_reload(session: str | None = None) -> None:
+def _tui_command_queue_for_session(session: str) -> Path:
+    """Path to the per-session TUI command queue file."""
+    return tui_pidfile.command_queue_path(_canonical_session(session))
+
+
+@dataclass(frozen=True)
+class TuiIpcResult:
+    """Outcome of a TUI IPC attempt.
+
+    ``reason`` is a stable machine-readable code; ``message`` is a
+    user-facing explanation suitable for a popup.
+    """
+
+    ok: bool
+    reason: str = ""
+    message: str = ""
+
+
+def _read_tui_owner(
+    session: str,
+) -> tuple[Path, str | None, tui_pidfile.TuiPidfile | None, str | None]:
+    """Read *session*'s pidfile and report why its owner is unusable.
+
+    Returns ``(pidfile, raw_text, descriptor, problem)``.  ``problem`` is
+    ``None`` when the file names a live TUI; otherwise it is a short
+    human-readable reason (``"no pidfile"``, ``"unreadable pidfile"``,
+    ``"empty pidfile"``, or an identity problem from
+    :func:`tui_pidfile.identity_problem`).  Nothing is modified here, so
+    the result is safe to poll; callers that want the stale file removed
+    go through :func:`_validate_tui_owner`.
+    """
+    path = _tui_pidfile_for_session(session)
+    raw = tui_pidfile.read_pidfile_text(path)
+    if raw is None:
+        return path, None, None, (
+            "unreadable pidfile" if path.exists() else "no pidfile")
+    if raw == "":
+        # A TUI creates the file with O_EXCL and writes its descriptor a
+        # moment later (``claim_tui_pidfile`` waits out that window on
+        # the writing side).  A *zero-length* file is therefore ambiguous,
+        # not stale: callers must not delete it, or a second TUI could
+        # claim the session while the first is still starting.  Whitespace-
+        # only content is not that window (the claim writes a whole JSON
+        # descriptor in one go), so it falls through as unreadable — which
+        # matches the claim, where only ``""`` is retried.
+        return path, raw, None, "empty pidfile"
+    desc = tui_pidfile.parse_pidfile(raw)
+    if desc is None:
+        return path, raw, None, "unreadable pidfile"
+    return path, raw, desc, tui_pidfile.identity_problem(desc)
+
+
+def _validate_tui_owner(
+    session: str,
+) -> tuple[Path, str | None, tui_pidfile.TuiPidfile | None, TuiIpcResult | None]:
+    """Resolve the pidfile for *session* and validate its owner.
+
+    Returns ``(pidfile, raw_text, descriptor, error)``.  On success
+    ``error`` is ``None`` and the other three describe a live TUI.  On
+    failure ``error`` carries the result to hand back to the caller and
+    any stale pidfile has already been removed — except for an empty file
+    (``"starting"``), which is left for the TUI that is mid-claim.
+    """
+    pidfile, raw, desc, problem = _read_tui_owner(session)
+    if problem == "no pidfile":
+        return pidfile, None, None, TuiIpcResult(
+            False, "no_pidfile",
+            f"No TUI is running for session {session}.")
+    if problem == "empty pidfile":
+        # A TUI is mid-claim (see ``_read_tui_owner``).  Leave the file
+        # alone so the starting TUI keeps its claim.  It can also be
+        # *permanently* empty if a TUI was killed between its ``O_EXCL``
+        # create and its first write, so name the restart fix as well —
+        # "try again in a moment" alone would be a dead end.
+        return pidfile, raw, None, TuiIpcResult(
+            False, "starting",
+            f"The TUI for session {session} has not finished starting up; "
+            f"try again in a moment, otherwise restart the TUI (Ctrl+R).")
+    if problem is not None:
+        # Unreadable, dead, recycled, or not a TUI: stale.
+        tui_pidfile.unlink_if_unchanged(pidfile, raw)
+        if desc is None:
+            message = (f"The TUI pidfile for session {session} is "
+                       f"unreadable; restart the TUI.")
+        elif problem == "process is not running":
+            message = (f"The TUI for session {session} is not running; "
+                       f"restart the TUI.")
+        else:
+            message = (f"The TUI for session {session} is not available "
+                       f"({problem}); restart the TUI.")
+        return pidfile, raw, desc, TuiIpcResult(
+            False, "stale_pidfile", message)
+    return pidfile, raw, desc, None
+
+
+def tui_owner_problem(session: str) -> str | None:
+    """Why *session* has no live TUI to signal, or ``None`` when it does.
+
+    Identity-only: capabilities are deliberately not checked, so this is
+    safe to poll while a TUI is starting up or restarting.  Unlike
+    :func:`_validate_tui_owner` it never removes the pidfile.
+    """
+    return _read_tui_owner(session)[3]
+
+
+def _missing_command_cap_result(
+    session: str, desc: tui_pidfile.TuiPidfile,
+) -> TuiIpcResult:
+    """Explain that the live TUI cannot handle a queued command.
+
+    Only the command-queue path needs a user-facing explanation: a reload
+    is fire-and-forget (see ``trigger_tui_reload``), so a TUI without
+    ``sigusr1`` is simply not signaled and the caller keeps its state.
+    """
+    if desc.legacy:
+        return TuiIpcResult(
+            False, "missing_capability",
+            f"The TUI for session {session} predates the command-queue "
+            f"feature; restart the TUI (Ctrl+R) to use it.")
+    if not desc.caps:
+        # Claimed but nothing published yet: mid-startup, or the handler
+        # install failed and the capabilities were never advertised.
+        return TuiIpcResult(
+            False, "starting",
+            f"The TUI for session {session} has not advertised its signal "
+            f"handlers yet; if it is still starting up, try again in a "
+            f"moment, otherwise restart the TUI (Ctrl+R).")
+    return TuiIpcResult(
+        False, "missing_capability",
+        f"The TUI for session {session} does not advertise the "
+        f"command-queue capability; restart the TUI (Ctrl+R) to use it.")
+
+
+# ``_signal_tui`` reasons that mean the pidfile no longer names a live TUI,
+# so the file should be removed.
+_STALE_SIGNAL_REASONS = frozenset({
+    "process is not running",
+    "process is a zombie",
+    "pid was reused by another process",
+})
+
+
+def _signal_tui(pid: int, sig: int, starttime: int | None = None) -> str | None:
+    """Send *sig* to *pid*; return an error reason or ``None``.
+
+    Where the kernel supports it, the signal goes out through a pidfd
+    (``pidfd_send_signal``) rather than ``os.kill``: a bare kill resolves
+    the PID *number* again, so a TUI that died between validation and the
+    signal could hand the signal to a recycled PID.  A pidfd names one
+    exact process, and sending to it fails with ``ESRCH`` once that
+    process is gone.  *starttime* is re-checked after the pidfd is opened
+    to close the same window on kernels without pidfd support.
+
+    A target that exited but has not been reaped (a zombie) is reported
+    as dead: both ``os.kill`` and ``pidfd_send_signal`` "succeed" against
+    a zombie and then discard the signal, so returning ``None`` there
+    would claim a delivery that can never be handled.
+    """
+    pidfd = None
+    try:
+        try:
+            pidfd = tui_pidfile.open_pidfd(pid)
+        except ProcessLookupError:
+            return "process is not running"
+        if starttime is not None:
+            live_starttime = tui_pidfile.proc_starttime(pid)
+            if live_starttime is not None and live_starttime != starttime:
+                return "pid was reused by another process"
+        if tui_pidfile.is_zombie(pid):
+            return "process is a zombie"
+        sender = getattr(signal, "pidfd_send_signal", None)
+        if pidfd is not None and sender is not None:
+            sender(pidfd, sig)
+        else:
+            os.kill(pid, sig)
+        return None
+    except ProcessLookupError:
+        return "process is not running"
+    except PermissionError:
+        return "permission denied"
+    except OSError as e:
+        return str(e)
+    finally:
+        if pidfd is not None:
+            try:
+                os.close(pidfd)
+            except OSError:
+                pass
+
+
+def trigger_tui_reload(session: str | None = None) -> bool:
     """Ask the TUI to reload state from disk via SIGUSR1.
 
     The TUI registers a SIGUSR1 handler at startup that runs
@@ -472,46 +783,219 @@ def trigger_tui_reload(session: str | None = None) -> None:
     Resolves the target TUI by session: if ``session`` is given it is
     used directly, otherwise we look up the TUI for the current
     cwd/tmux context (same logic as ``_find_tui_pane``).
+
+    The pidfile is validated before signaling: a dead/reused PID, a
+    non-TUI process, or a TUI that does not advertise ``sigusr1`` means
+    no signal is sent.  Returns True only when SIGUSR1 was delivered.
     """
-    import signal
     try:
         if session is None:
             _, session = _find_tui_pane()
+        # Kick the home window in lockstep with the TUI: every state
+        # mutation that warrants a TUI reload also warrants pm-home
+        # rechecking its rendered content. With hash-diff in the home
+        # loop, a redundant kick is free.
+        try:
+            from pm_core.home_window import refresh_home
+            refresh_home(session)
+        except Exception:
+            _log.debug("trigger_tui_reload: refresh_home failed",
+                       exc_info=True)
         if not session:
-            return
-        pidfile = _tui_pidfile_for_session(session)
-        if not pidfile.exists():
-            _log.debug("No TUI pidfile for session %s", session)
-            return
-        try:
-            pid = int(pidfile.read_text().strip())
-        except (ValueError, OSError) as e:
-            _log.debug("Could not read TUI pidfile %s: %s", pidfile, e)
-            return
-        try:
-            os.kill(pid, signal.SIGUSR1)
-            _log.debug("Sent SIGUSR1 to TUI pid %d (session %s)", pid, session)
-        except ProcessLookupError:
-            _log.debug("TUI pid %d gone, removing stale pidfile", pid)
-            pidfile.unlink(missing_ok=True)
-        except PermissionError as e:
-            _log.debug("Cannot signal TUI pid %d: %s", pid, e)
+            return False
+        pidfile, raw, desc, error = _validate_tui_owner(session)
+        if error is not None:
+            _log.debug("trigger_tui_reload: %s", error.message)
+            return False
+        if tui_pidfile.CAP_RELOAD not in desc.caps:
+            _log.info("TUI pid %d (session %s) does not advertise %s; "
+                      "not signaling", desc.pid, session,
+                      tui_pidfile.CAP_RELOAD)
+            return False
+        problem = _signal_tui(desc.pid, signal.SIGUSR1, desc.starttime)
+        if problem in _STALE_SIGNAL_REASONS:
+            _log.debug("TUI pid %d gone, removing stale pidfile", desc.pid)
+            tui_pidfile.unlink_if_unchanged(pidfile, raw)
+            return False
+        if problem is not None:
+            _log.debug("Cannot signal TUI pid %d: %s", desc.pid, problem)
+            return False
+        _log.debug("Sent SIGUSR1 to TUI pid %d (session %s)",
+                   desc.pid, session)
+        return True
     except Exception as e:
         _log.debug("Could not trigger TUI reload: %s", e)
+        return False
 
 
 # Backwards-compatible alias for existing callers.
 trigger_tui_refresh = trigger_tui_reload
 
 
-def _tui_command_queue_for_session(session: str) -> Path:
-    """Path to the per-session TUI command queue file."""
-    from pm_core.paths import pm_home
-    return pm_home() / f"tui-{session}.cmd-queue"
+# Every character ``str.splitlines`` treats as a line boundary.  A queued
+# command must be exactly *one* line: the TUI's drain splits the file with
+# ``splitlines`` while ``_unqueue_line`` splits on ``b"\n"``, so a line
+# break left inside a command would make the drain see several commands
+# and the rollback see one — a submission reported as failed could then
+# never be taken back and would be applied by a later drain.
+_LINE_BREAKS = str.maketrans({
+    c: " " for c in "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
+})
+
+
+def _queue_line(cmd: str) -> str:
+    """Normalize *cmd* into a single ``\\n``-terminated queue line."""
+    return cmd.strip().translate(_LINE_BREAKS) + "\n"
+
+
+def _unqueue_line(queue: Path, line: str) -> None:
+    """Best-effort removal of the line this process just appended.
+
+    Used when the signal after the append fails: the caller is told the
+    command was *not* applied, so it must not sit in the queue waiting
+    for some later drain to execute it.  Runs under the same ``flock``
+    the appender and the TUI's drain use, and matches whole lines only:
+    every other line is kept byte-for-byte, and a later command that
+    merely *ends* with ours (``pm qa pr-1`` ends with ``qa pr-1``) is
+    never touched.  The match is the last identical line, so a caller
+    that appended after us cannot be the one removed unless its command
+    is byte-identical to ours — two identical submissions are
+    indistinguishable by content, so at most one copy is rolled back and
+    the other stays queued for its own caller.
+    """
+    import fcntl
+
+    target = line.rstrip("\n").encode("utf-8")
+    try:
+        with open(queue, "r+b") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                lines = f.read().split(b"\n")
+                if lines and lines[-1] == b"":
+                    lines.pop()  # trailing newline, not an empty command
+                for i in range(len(lines) - 1, -1, -1):
+                    if lines[i] == target:
+                        del lines[i]
+                        break
+                else:
+                    return  # already drained, or never written
+                remainder = b"".join(entry + b"\n" for entry in lines)
+                f.seek(0)
+                f.write(remainder)
+                f.flush()
+                f.truncate(len(remainder))
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    except OSError as e:
+        _log.debug("Could not unqueue TUI command %r: %s", line, e)
+
+
+def submit_tui_command(session: str, cmd: str) -> TuiIpcResult:
+    """Queue *cmd* for the TUI and signal it, with a reason on failure.
+
+    Validation happens before anything is written: a missing/stale
+    pidfile, a PID that is dead, recycled, or not a pm TUI, or a TUI
+    that does not advertise ``sigusr2`` all return ``ok=False`` with a
+    user-facing message and leave the process untouched.  A stale
+    pidfile is removed so the next caller starts clean.
+    """
+    import fcntl
+
+    pidfile, raw, desc, error = _validate_tui_owner(session)
+    if error is not None:
+        return error
+    if tui_pidfile.CAP_COMMAND not in desc.caps:
+        return _missing_command_cap_result(session, desc)
+    queue = _tui_command_queue_for_session(session)
+    line = _queue_line(cmd)
+    try:
+        # Binary append: the bytes are then exactly ``_unqueue_line``'s
+        # UTF-8 target (it compares bytes), and a caller whose locale is
+        # not UTF-8 can neither garble the command nor defeat the
+        # rollback below.
+        #
+        # *Unbuffered* append, for two reasons.  (1) The line must be on
+        # disk while the flock is held: the TUI's drain reads and
+        # truncates the queue under the same lock, so bytes still sitting
+        # in Python's buffer at LOCK_UN would land in the file *after* a
+        # drain truncated it — the command would be silently dropped and
+        # the caller would spin on "queued…" forever with a perfectly
+        # healthy TUI (so the spinner's owner check would never abort
+        # it).  (2) A buffered writer cannot be rolled back: when a flush
+        # fails CPython keeps the unwritten remainder in its buffer, so
+        # ``truncate`` re-raises from its own flush and the partial line
+        # survives (a later ``close`` would even re-append the
+        # remainder).  With a raw file the rollback is a plain
+        # ``ftruncate``.
+        with open(queue, "ab", buffering=0) as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                # The rollback target must be the file's end *as of the
+                # lock*, not as of ``open()``: another appender (or a
+                # drain) can run in between, and append mode pins the
+                # stream position at open time, so ``tell()`` would be
+                # stale.  Truncating back to a stale offset would delete a
+                # line another caller was told was queued (or, after a
+                # drain shrank the file, extend it with NULs).  ``st_size``
+                # under the flock is the authoritative end.
+                start = os.fstat(f.fileno()).st_size
+                view = memoryview(line.encode("utf-8"))
+                try:
+                    # A raw write may be short (ENOSPC, quota); finish the
+                    # line if the kernel lets us, the same way
+                    # ``tui_pidfile._write_all`` does for the descriptor.
+                    while view:
+                        written = f.write(view)
+                        if not written:
+                            raise OSError(f"short write to {queue}")
+                        view = view[written:]
+                except OSError:
+                    # A failed (possibly partial) write can leave *part*
+                    # of the line behind.  ``_unqueue_line`` matches whole
+                    # lines only, so it could not take that back — cut the
+                    # partial bytes off here, under the same lock, or a
+                    # later drain would run a truncated command the caller
+                    # was told was not applied.  Best effort: the write
+                    # itself just failed, so this may fail too.
+                    try:
+                        f.truncate(start)
+                    except OSError:
+                        pass
+                    raise
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    except OSError as e:
+        _log.debug("Could not append to TUI command queue %s: %s", queue, e)
+        return TuiIpcResult(
+            False, "queue_error",
+            f"Could not write to the TUI command queue: {e}")
+    problem = _signal_tui(desc.pid, signal.SIGUSR2, desc.starttime)
+    if problem is not None:
+        # The command is already queued but nothing will drain it now (or
+        # not soon); take it back (best effort) so the failure we report
+        # is the truth.
+        _unqueue_line(queue, line)
+        if problem in _STALE_SIGNAL_REASONS:
+            _log.debug("TUI pid %d gone, removing stale pidfile", desc.pid)
+            tui_pidfile.unlink_if_unchanged(pidfile, raw)
+            return TuiIpcResult(
+                False, "stale_pidfile",
+                f"The TUI for session {session} is not running "
+                f"(process disappeared); restart the TUI.")
+        _log.debug("Cannot signal TUI pid %d: %s", desc.pid, problem)
+        return TuiIpcResult(
+            False, "signal_error",
+            f"Could not signal the TUI for session {session} ({problem}).")
+    _log.debug("Queued command %r and sent SIGUSR2 to TUI pid %d (%s)",
+               cmd, desc.pid, session)
+    return TuiIpcResult(True)
 
 
 def trigger_tui_command(session: str, cmd: str) -> bool:
     """Submit ``cmd`` to the TUI's command bar via SIGUSR2 + queue file.
+
+    Thin boolean wrapper around :func:`submit_tui_command`; callers that
+    want the failure reason use that instead.
 
     The TUI registers a SIGUSR2 handler at startup that drains the
     per-session queue file and dispatches each line through the same
@@ -526,41 +1010,7 @@ def trigger_tui_command(session: str, cmd: str) -> bool:
 
     Returns True if the signal was sent, False otherwise.
     """
-    import fcntl
-    import signal
-    pidfile = _tui_pidfile_for_session(session)
-    if not pidfile.exists():
-        _log.debug("No TUI pidfile for session %s", session)
-        return False
-    try:
-        pid = int(pidfile.read_text().strip())
-    except (ValueError, OSError) as e:
-        _log.debug("Could not read TUI pidfile %s: %s", pidfile, e)
-        return False
-    queue = _tui_command_queue_for_session(session)
-    line = cmd.strip().replace("\n", " ") + "\n"
-    try:
-        with open(queue, "a") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            try:
-                f.write(line)
-            finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-    except OSError as e:
-        _log.debug("Could not append to TUI command queue %s: %s", queue, e)
-        return False
-    try:
-        os.kill(pid, signal.SIGUSR2)
-        _log.debug("Queued command %r and sent SIGUSR2 to TUI pid %d (%s)",
-                   cmd, pid, session)
-        return True
-    except ProcessLookupError:
-        _log.debug("TUI pid %d gone, removing stale pidfile", pid)
-        pidfile.unlink(missing_ok=True)
-        return False
-    except PermissionError as e:
-        _log.debug("Cannot signal TUI pid %d: %s", pid, e)
-        return False
+    return submit_tui_command(session, cmd).ok
 
 
 def trigger_tui_restart() -> None:
@@ -569,19 +1019,33 @@ def trigger_tui_restart() -> None:
     Used after pulling new code so the TUI picks up the latest version.
     Writes a merge-restart marker so the TUI can distinguish this from
     a user-initiated Ctrl+R and preserve auto-start state.
+
+    The marker must not outlive a restart that never happened: it is
+    only consumed by ``save_breadcrumb`` when the TUI actually restarts,
+    so a leftover marker would make the *next* start (even a plain Ctrl+R
+    days later) behave as a merge restart.  It is therefore written after
+    a live pane is resolved and removed again if the send fails.
     """
+    marker = None
     try:
         if not tmux_mod.has_tmux():
             return
-        tui_pane, session = _find_tui_pane()
-        if tui_pane and session:
-            from pm_core.paths import pm_home
-            marker = pm_home() / "merge-restart"
-            marker.touch()
-            _log.debug("Wrote merge-restart marker %s", marker)
-            tmux_mod.send_keys_literal(tui_pane, "C-r")
-            _log.debug("Sent restart to TUI pane %s in session %s", tui_pane, session)
+        # Resolve a *live* pane: the registry keeps a dead ``tui`` entry
+        # until the next heal_registry pass, and send-keys to it fails.
+        tui_pane, session = _find_live_tui_pane()
+        if not (tui_pane and session):
+            _log.debug("trigger_tui_restart: no live TUI pane to restart")
+            return
+        # Scoped to the session whose TUI is being restarted: the marker is
+        # a single shared file, so an unscoped one would let a concurrent
+        # restart in another session consume it (and preserve its own state).
+        marker = tui_pidfile.write_merge_restart_marker(session)
+        _log.debug("Wrote merge-restart marker %s", marker)
+        tmux_mod.send_keys_literal(tui_pane, "C-r")
+        _log.debug("Sent restart to TUI pane %s in session %s", tui_pane, session)
     except Exception as e:
+        if marker is not None:
+            tui_pidfile.clear_merge_restart_marker(session)
         _log.debug("Could not trigger TUI restart: %s", e)
 
 
@@ -670,12 +1134,53 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
     Returns the workdir path (str) on success, or *None* on failure.
     Updates *pr_entry["workdir"]* and persists the change when a new
     clone is created.
+
+    Provisioning is serialized per-PR with an exclusive file lock: two
+    commands that both find the workdir missing (e.g. two ``pm pr signoff``
+    racing) would otherwise both clone into the fixed ``.tmp-{pr_id}`` path and
+    corrupt each other — one ``rmtree``/moves the dir out from under the other,
+    crashing its git ops with a traceback.  The lock makes the loser wait, then
+    adopt the winner's freshly-persisted workdir instead of re-cloning.
     """
-    import shutil
+    import fcntl
 
     workdir = pr_entry.get("workdir")
     if workdir and Path(workdir).exists():
         return workdir
+
+    pr_id = pr_entry.get("id")
+    project_dir = _workdirs_dir(data)
+    project_dir.mkdir(parents=True, exist_ok=True)
+
+    lock_path = project_dir / f".workdir-{pr_id}.lock"
+    lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        # Double-checked: another caller may have created and persisted the
+        # workdir while we waited for the lock.  Re-read the authoritative
+        # on-disk record and adopt it if it now exists.
+        try:
+            fresh_pr = store.get_pr(store.load(root), pr_id)
+            fresh_wd = (fresh_pr or {}).get("workdir")
+        except Exception:
+            fresh_wd = None
+        if fresh_wd and Path(fresh_wd).exists():
+            pr_entry["workdir"] = fresh_wd
+            return fresh_wd
+        return _clone_workdir(data, pr_entry, root)
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
+
+
+def _clone_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
+    """Clone + check out a PR's workdir.  Caller holds the per-PR lock.
+
+    Extracted from :func:`_ensure_workdir` so the actual clone/move/checkout
+    runs under the exclusive provisioning lock.  Do not call directly — go
+    through :func:`_ensure_workdir`, which serializes concurrent callers.
+    """
+    import shutil
 
     branch = pr_entry.get("branch")
     if not branch:
@@ -713,15 +1218,11 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
             shutil.rmtree(tmp_path, ignore_errors=True)
         return None
 
-    # Set up remote URLs when cloned from a local repo:
-    # - fetch from GitHub (so we can find PR branches from other machines)
-    # - push to both local and GitHub
+    # Set up remote URLs when cloned from a local repo: fetch from GitHub
+    # (so we can find PR branches from other machines, and so the container
+    # push proxy accepts pushes), push to both local and GitHub.
     if clone_source == str(repo_dir) and repo_url:
-        git_ops.run_git("remote", "set-url", "origin", repo_url, cwd=tmp_path)
-        git_ops.run_git("remote", "set-url", "--push",
-                        "origin", clone_source, cwd=tmp_path)
-        git_ops.run_git("remote", "set-url", "--add", "--push",
-                        "origin", repo_url, cwd=tmp_path)
+        git_ops.configure_dual_remote(tmp_path, clone_source, repo_url)
 
     # Resolve repo_id if not cached yet
     _resolve_repo_id(data, tmp_path, root)
@@ -846,25 +1347,37 @@ def _get_session_name_for_cwd() -> str:
 def _get_current_pm_session() -> str | None:
     """Return the base pm session name when running inside one.
 
-    Reads the actual session from $TMUX_PANE and strips any grouped-session
-    ~N suffix.  Returns None if not inside tmux or not in a pm- session.
+    Reads the actual session from $TMUX_PANE and resolves it to its pm
+    session: a grouped ``~N`` view or a user's own view of any name
+    (tmux names that view for every pane and popup of the group while its
+    client is the most recently active one, S118/S124).  Returns None if
+    not inside tmux or not in a pm- session.
     """
     if not tmux_mod.in_tmux():
         return None
-    name = tmux_mod.get_session_name()
-    # Strip grouped session suffix
-    if "~" in name:
-        name = name.rsplit("~", 1)[0]
-    if name.startswith("pm-"):
-        return name
-    return None
+    name = pane_registry.pm_session_name(tmux_mod.get_session_name())
+    return name if name.startswith("pm-") else None
 
 
 def _get_pm_session() -> str | None:
-    """Get the pm tmux session name if running inside one."""
+    """Get the pm tmux session name if running inside one.
+
+    Outside a pm session that is the session of the project this command
+    works on: the ``-C``/``PM_PROJECT`` project when given (a PR workdir is
+    its own git clone, so its cwd names a session nobody runs), else the
+    project of the cwd.
+    """
     if not tmux_mod.has_tmux():
         return None
-    return _get_current_pm_session() or _get_session_name_for_cwd()
+    current = _get_current_pm_session()
+    if current:
+        return current
+    if _project_override:
+        from pm_core.paths import get_session_tag
+        tag = get_session_tag(start_path=_project_override)
+        if tag:
+            return f"pm-{tag}"
+    return _get_session_name_for_cwd()
 
 
 def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
@@ -935,3 +1448,74 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
                     return parts[0], parts[1]
 
     return None, None
+
+
+def _live_panes_and_tuis() -> tuple[set[str], list[tuple[str, str]]]:
+    """Return ``(live_pane_ids, live_tui_panes)`` from tmux in one query.
+
+    ``live_pane_ids`` is every pane tmux currently knows about;
+    ``live_tui_panes`` is the ``(pane_id, session_name)`` pairs whose
+    start command is ``pm _tui``.  Returns ``(set(), [])`` when tmux
+    cannot be queried (no server), so callers degrade to "no live TUI".
+    """
+    try:
+        result = subprocess.run(
+            tmux_mod._tmux_cmd(
+                "list-panes", "-a",
+                "-F", "#{pane_id} #{session_name} #{pane_start_command}"),
+            capture_output=True, text=True,
+        )
+    except Exception:
+        _log.debug("_live_panes_and_tuis: tmux query failed", exc_info=True)
+        return set(), []
+    if result.returncode != 0:
+        return set(), []
+    ids: set[str] = set()
+    tuis: list[tuple[str, str]] = []
+    for line in result.stdout.splitlines():
+        parts = line.split(None, 2)
+        if not parts:
+            continue
+        ids.add(parts[0])
+        if len(parts) >= 3 and "_tui" in parts[2]:
+            tuis.append((parts[0], parts[1]))
+    return ids, tuis
+
+
+def _find_live_tui_pane(
+        session: str | None = None) -> tuple[str | None, str | None]:
+    """Find the TUI pane, ignoring registry entries whose pane is gone.
+
+    ``_find_tui_pane`` resolves the *session* even when the recorded pane
+    no longer exists — callers such as ``pm autostart`` use that to report
+    a stale pidfile for the right session.  Commands that drive the pane
+    (``pm tui view`` / ``pm tui send`` / ``pm tui restart``) must not
+    target a dead pane: the pane registry keeps its ``role="tui"`` entry
+    after the TUI exits until the next ``heal_registry`` pass, and
+    capturing or sending to that pane yields an empty frame with exit 0
+    (view) or a raw tmux error (send).
+
+    Returns ``(pane_id, session)`` only when the pane is still alive in
+    tmux.  When the recorded pane is gone, falls back to a live
+    ``pm _tui`` pane in the same session (never another session's), and
+    otherwise returns ``(None, session)``.
+    """
+    pane_id, sess = _find_tui_pane(session)
+    if not sess:
+        if not session:
+            return None, None
+        # An explicit session whose registry has no ``tui`` entry yet
+        # (a hand-started TUI before the first ``heal_registry`` pass,
+        # or an entry healed away) still has a live pane to find:
+        # ``_find_tui_pane`` only consults the registry when a session is
+        # given, so without this the caller reports "No TUI pane found"
+        # for a TUI that is running and owns the pidfile.
+        sess = session
+    live_ids, live_tuis = _live_panes_and_tuis()
+    if pane_id and pane_id in live_ids:
+        return pane_id, sess
+    base = sess.rsplit("~", 1)[0]
+    for tui_id, tui_sess in live_tuis:
+        if tui_sess.rsplit("~", 1)[0] == base:
+            return tui_id, sess
+    return None, sess

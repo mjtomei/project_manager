@@ -41,7 +41,7 @@ def _make_project(tmp_path, *, pr_status="in_review", auto_start=False,
     app._root = pm_dir
     app._data = data
     app._auto_start = auto_start
-    app._auto_start_target = auto_start_target
+    app._auto_start_targets = {auto_start_target: {}} if auto_start_target else {}
     app._qa_loops = {}
     app._review_loops = {}
     app._self_driving_qa = {}
@@ -91,8 +91,6 @@ class TestMaybeStartQaWithAutoStart:
                                      auto_start_target="pr-001")
 
         with patch("pm_core.tui.auto_start.is_enabled", return_value=True), \
-             patch("pm_core.tui.auto_start.get_target", return_value="pr-001"), \
-             patch("pm_core.tui.auto_start._transitive_deps", return_value=set()), \
              patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
             from pm_core.tui.review_loop_ui import _maybe_start_qa
             _maybe_start_qa(app, "pr-001")
@@ -200,8 +198,8 @@ class TestQPaneEmptyInstructions:
     def test_qa_pane_flatten_empty(self):
         """Flatten with empty data produces only headers."""
         from tests.test_qa_pane import _flatten_items
-        flat = _flatten_items({"instructions": [], "regression": []})
-        assert len(flat) == 2  # Just 2 section headers
+        flat = _flatten_items({"instructions": [], "regression": [], "artifacts": []})
+        assert len(flat) == 3  # 3 section headers
         selectable = [i for i, item in enumerate(flat) if "_section" not in item]
         assert selectable == []
 

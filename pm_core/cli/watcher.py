@@ -9,6 +9,10 @@ Provides ``pm watcher`` as a command group with subcommands:
 
 Internal mode (``pm watcher --iteration N``) creates a single tmux
 window for the given iteration (called by the watcher loop engine).
+
+A watcher started outside the TUI has no auto-start targets, so the
+auto-start watcher is observation-only: it reports issues instead of
+fixing them.  Targets are owned by the running TUI (``pm autostart add``).
 """
 
 import secrets
@@ -86,8 +90,8 @@ def _run_user_watcher_loop(wait: int, max_iterations: int) -> None:
 @click.option("--wait", default=120, type=int, help="Seconds between iterations")
 @click.option("--max-iterations", default=0, type=int,
               help="Maximum iterations (0 = unlimited)")
-@click.option("--auto-start-target", default=None, hidden=True,
-              help="Auto-start target PR ID (passed by watcher loop engine)")
+@click.option("--auto-start-target", "auto_start_targets", multiple=True, hidden=True,
+              help="Auto-start target PR ID; repeatable (passed by watcher loop engine)")
 @click.option("--meta-pm-root", default=None, hidden=True,
               help="Absolute path to meta workdir pm/ dir (passed by watcher loop engine)")
 @click.option("--watcher-type", default="auto-start", hidden=True,
@@ -95,7 +99,7 @@ def _run_user_watcher_loop(wait: int, max_iterations: int) -> None:
 @click.pass_context
 def watcher_cmd(ctx, iteration: int | None, loop_id: str | None,
                 transcript: str | None, wait: int, max_iterations: int,
-                auto_start_target: str | None, meta_pm_root: str | None,
+                auto_start_targets: tuple[str, ...], meta_pm_root: str | None,
                 watcher_type: str):
     """Manage watchers.
 
@@ -126,7 +130,7 @@ def watcher_cmd(ctx, iteration: int | None, loop_id: str | None,
     if iteration is not None:
         # Internal mode: create a single tmux window for this iteration
         _create_watcher_window(iteration, loop_id or "", transcript,
-                               auto_start_target=auto_start_target,
+                               auto_start_targets=list(auto_start_targets),
                                meta_pm_root=meta_pm_root,
                                watcher_type=watcher_type)
     else:
@@ -146,7 +150,8 @@ def watcher_start(watcher_type: str, wait: int | None):
 
     \b
     Available types:
-      auto-start             Monitor auto-start sessions for issues (default)
+      auto-start             Monitor auto-start sessions for issues (default;
+                             observation-only when started from the CLI)
       bug-fix-impl           Drive the bug-fix flow (auto-merge on PASS)
       discovery              Schedule regression tests and reconcile filings
       improvement-fix-impl   Drive plan=ux PRs through auto-sequence (gated at QA PASS)
@@ -310,7 +315,7 @@ def watcher_list():
 
 def _create_watcher_window(iteration: int, loop_id: str,
                            transcript: str | None,
-                           auto_start_target: str | None = None,
+                           auto_start_targets: list[str] | None = None,
                            meta_pm_root: str | None = None,
                            watcher_type: str = "auto-start") -> None:
     """Create (or recreate) the watcher tmux window for one iteration."""
@@ -357,7 +362,7 @@ def _create_watcher_window(iteration: int, loop_id: str,
         watcher_prompt = prompt_gen.generate_watcher_prompt(
             data, session_name=pm_session,
             iteration=iteration, loop_id=loop_id,
-            auto_start_target=auto_start_target,
+            auto_start_targets=auto_start_targets,
             meta_pm_root=meta_pm_root,
         )
 
@@ -368,6 +373,7 @@ def _create_watcher_window(iteration: int, loop_id: str,
     from pm_core.model_config import resolve_model_and_provider
     _resolution = resolve_model_and_provider("watcher", project_data=data)
 
+    env: dict[str, str] = {}
     claude_cmd = build_claude_shell_cmd(
         prompt=watcher_prompt,
         transcript=transcript,
@@ -375,6 +381,8 @@ def _create_watcher_window(iteration: int, loop_id: str,
         model=_resolution.model,
         provider=_resolution.provider,
         effort=_resolution.effort,
+        session_type="watcher",
+        env_out=env,
     )
 
     # Kill existing watcher window and recreate (fresh each iteration).
@@ -402,7 +410,7 @@ def _create_watcher_window(iteration: int, loop_id: str,
     try:
         tmux_mod.new_window_get_pane(
             pm_session, window_name, claude_cmd, repo_dir,
-            switch=False,
+            switch=False, env=env,
         )
         new_win = tmux_mod.find_window_by_name(pm_session, window_name)
         _log.info("_create_watcher_window: new window created: %s", new_win)

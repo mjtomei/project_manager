@@ -1,5 +1,6 @@
 """YAML read/write for project.yaml state management."""
 
+import asyncio
 import errno
 import fcntl
 import hashlib
@@ -7,12 +8,49 @@ import logging
 import os
 import re
 import stat
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Hashable, Optional
 
 import yaml
+
+# libyaml (C) loader/dumper are ~14-16x faster than the pure-Python ones on a
+# large project.yaml (e.g. ~1MB/350-PR: load 1480ms -> 93ms, dump 1130ms ->
+# 80ms). The WriteQueue drains run via ``asyncio.to_thread``; pure-Python
+# (de)serialization holds the GIL except for the ~5ms switch interval, so it
+# contends with the event loop for CPU and throttles TUI repaints while a write
+# is in flight. The C path releases the GIL, so background drains are fast and
+# don't steal CPU from the UI.
+#
+# Loader: always prefer C when available — parsing is byte-irrelevant and the C
+# loader produces identical objects, so there is no compatibility risk.
+#
+# Dumper: the C dumper wraps long scalars (e.g. multi-line PR descriptions)
+# differently from the pure-Python dumper. Both are valid YAML and parse
+# identically, but the bytes differ, which would churn the committed
+# project.yaml whenever a save lands on an environment with a different backend.
+# So the C dumper is gated by the per-project ``project.libyaml`` flag (default
+# OFF): pure-Python output is byte-stable across mixed environments, so it is the
+# safe default. Set ``libyaml: true`` to opt into the faster C dumper where every
+# writer is known to share the C backend. Defaulting off (rather than on) means a
+# dropped/absent flag degrades to stable output instead of silently reformatting
+# the whole file the next time a writer with the C backend saves.
+try:
+    from yaml import CSafeLoader as _CSafeLoader, CSafeDumper as _CSafeDumper
+except ImportError:  # pragma: no cover - depends on the PyYAML build
+    _CSafeLoader = _CSafeDumper = None
+
+
+def _yaml_loader():
+    return _CSafeLoader or yaml.SafeLoader
+
+
+def _yaml_dumper(data: dict):
+    if _CSafeDumper is not None and (data.get("project") or {}).get("libyaml", False):
+        return _CSafeDumper
+    return yaml.SafeDumper
 
 _log = logging.getLogger("pm.store")
 
@@ -30,8 +68,24 @@ class ProjectYamlParseError(Exception):
     """Raised when project.yaml cannot be parsed (e.g. mid-edit or merge conflict)."""
 
 
-class PlanValidationError(Exception):
-    """Raised when plan entries have invalid references (e.g. bad parent ID, cycles)."""
+class PlanValidationError(ProjectYamlParseError):
+    """Raised when plan entries have invalid references (e.g. bad parent ID, cycles).
+
+    A ProjectYamlParseError: a clean merge or pull can leave such a file just
+    as it can leave conflict markers, and every caller that keeps its previous
+    state on an unloadable file must survive both (S44: the TUI exited).
+    """
+
+
+class ProjectYamlMissingError(ProjectYamlParseError, FileNotFoundError):
+    """Raised by load() when project.yaml does not exist.
+
+    Still a FileNotFoundError for callers that treat a missing file as "no
+    project".  Also an unloadable file for callers that keep their previous
+    state: a checkout or rebase unlinks project.yaml before writing the new
+    one, and the TUI keeps its root meanwhile (S44), so a handler catching
+    only ProjectYamlParseError would raise out of a TUI timer.
+    """
 
 
 VALID_PLAN_STATUSES = {"draft", "active", "done"}
@@ -72,7 +126,9 @@ def load(root: Optional[Path] = None, validate: bool = True) -> dict:
     path = root / "project.yaml"
     try:
         with open(path) as f:
-            data = yaml.safe_load(f)
+            data = yaml.load(f, Loader=_yaml_loader())
+    except FileNotFoundError as e:
+        raise ProjectYamlMissingError(e.errno, e.strerror, e.filename) from e
     except yaml.YAMLError as e:
         raise ProjectYamlParseError(f"project.yaml is not valid YAML: {e}") from e
 
@@ -102,12 +158,19 @@ def _validate_pr_statuses(data: dict) -> None:
             pr["status"] = "pending"
         # Backfill created_at / updated_at for PRs that predate these fields.
         # Use the best available timestamp so sorting works immediately.
+        # `closed_at` is a lifecycle timestamp too (pr-62ad13d: a closed PR is
+        # a retained record, not a deletion), so a hand-edited or imported
+        # entry that only carries it still sorts by its closure.
         if not pr.get("created_at"):
             pr["created_at"] = (pr.get("started_at")
                                 or pr.get("reviewed_at")
-                                or pr.get("merged_at"))
+                                or pr.get("merged_at")
+                                or pr.get("closed_at"))
         if not pr.get("updated_at"):
+            # Closing is the last lifecycle event, so it outranks the
+            # mid-lifecycle timestamps.
             pr["updated_at"] = (pr.get("merged_at")
+                                or pr.get("closed_at")
                                 or pr.get("reviewed_at")
                                 or pr.get("started_at"))
 
@@ -166,7 +229,10 @@ def save(data: dict, root: Optional[Path] = None) -> None:
     tmp = path.with_suffix(".yaml.tmp")
     with open(tmp, "w") as f:
         f.write(_YAML_HEADER)
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        yaml.dump(
+            data, f, Dumper=_yaml_dumper(data),
+            default_flow_style=False, sort_keys=False, allow_unicode=True,
+        )
         f.flush()
         os.fsync(f.fileno())
     tmp.rename(path)
@@ -201,6 +267,16 @@ LOCK_TIMEOUT_SECONDS = 2.0
 
 class StoreLockTimeout(Exception):
     """Raised when the project.yaml lock cannot be acquired within the timeout."""
+
+
+# Writers retried on the TUI's poll timer pass ``timeout=NO_WAIT``: a single
+# non-blocking lock attempt.  Waiting the default 2 s on every tick while the
+# user keeps ``pm edit`` open (lock held until the editor quits) blocked the
+# TUI for most of every tick (RQ38); such a caller keeps its write pending,
+# says once that it waits (``LOCK_BUSY_REASON``) and retries next tick.
+NO_WAIT = 0.0
+LOCK_BUSY_REASON = ("project.yaml is locked by another pm process "
+                    "(e.g. an open `pm edit`)")
 
 
 @contextmanager
@@ -240,6 +316,72 @@ def _lock(root: Path, timeout: float = LOCK_TIMEOUT_SECONDS):
             fd.close()
 
 
+@contextmanager
+def bounded_flock(path: Path, timeout: float):
+    """Exclusive advisory lock on *path*, waiting at most *timeout* seconds.
+
+    Yields True while the lock is held, or False when another holder still
+    has it at the deadline — the caller decides whether to skip or proceed.
+    """
+    deadline = time.monotonic() + timeout
+    with open(path, "a") as f:
+        while True:
+            try:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    yield False
+                    return
+                time.sleep(0.05)
+        yield True
+
+
+def merge_3way(base, ours, theirs):
+    """Three-way merge of parsed project.yaml values.
+
+    *theirs* (pm's live state) wins true conflicts; *ours* (e.g. a merged
+    branch's committed changes) is kept wherever *theirs* left the value as
+    it was in *base*.  Lists of ``id``-keyed entries (prs, plans, notes)
+    merge entry by entry.
+    """
+    if ours == theirs or ours == base:
+        return theirs
+    if theirs == base:
+        return ours
+    if isinstance(ours, dict) and isinstance(theirs, dict):
+        b = base if isinstance(base, dict) else {}
+        out = {}
+        for k in theirs:
+            if k in ours:
+                out[k] = merge_3way(b.get(k), ours[k], theirs[k])
+            elif k not in b or b[k] != theirs[k]:
+                out[k] = theirs[k]          # else: removed by *ours*
+        for k in ours:
+            if k not in theirs and k not in b:
+                out[k] = ours[k]            # added by *ours*
+        return out
+    if (_is_id_list(ours) and _is_id_list(theirs)
+            and (base is None or _is_id_list(base))):
+        b = {e["id"]: e for e in base or []}
+        o = {e["id"]: e for e in ours}
+        t = {e["id"] for e in theirs}
+        out = []
+        for e in theirs:
+            if e["id"] in o:
+                out.append(merge_3way(b.get(e["id"]), o[e["id"]], e))
+            elif b.get(e["id"]) != e:
+                out.append(e)
+        out.extend(e for e in ours if e["id"] not in t and e["id"] not in b)
+        return out
+    return theirs
+
+
+def _is_id_list(value) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(e, dict) and "id" in e for e in value)
+
+
 def locked_update(
     root: Path,
     fn: Callable[[dict], None],
@@ -257,13 +399,125 @@ def locked_update(
     ``locked_update`` and pass the results into ``fn`` via a closure.
 
     Raises ``StoreLockTimeout`` if the lock cannot be acquired within
-    *timeout* seconds (default 2).
+    *timeout* seconds (default 2); ``NO_WAIT`` tries exactly once.
     """
     with _lock(root, timeout):
         data = load(root, validate=validate)
         fn(data)
         save(data, root)
     return data
+
+
+class WriteQueue:
+    """Coalescing write queue for project.yaml mutations.
+
+    The TUI keeps its working state in memory (``app._data``) and must not
+    block the asyncio event loop on a file lock + full-yaml parse + rewrite
+    for every mutation (e.g. the per-keypress ``active_pr`` persist).  This
+    queue decouples in-memory updates from disk:
+
+    * ``enqueue(key, fn)`` records a pending mutation closure tagged by
+      *key* and returns immediately.  Re-enqueuing the same *key* replaces
+      the pending closure (coalescing), so a burst of rapid updates to the
+      same field collapses to a single disk write of the final value.
+    * A background worker (``run``) drains the queue after a short
+      *debounce* window and applies all pending closures in one
+      :func:`locked_update`, which re-reads fresh on-disk state under the
+      lock first — so concurrent external edits from other pm processes are
+      respected, not clobbered.
+    * The blocking ``locked_update`` runs on a thread (``to_thread``) so the
+      event loop stays responsive even while a write is in flight.
+    * ``flush_sync`` drains synchronously for shutdown paths (``on_unmount``,
+      ``restart``) where the worker may not get another chance to run.
+
+    The worker writes to disk only; it never mutates ``app._data``.  In-memory
+    state is the source of truth for the running TUI and is re-synced from disk
+    by the existing background-sync / reload paths.
+    """
+
+    def __init__(
+        self,
+        root: Path,
+        *,
+        validate: bool = True,
+        timeout: float = LOCK_TIMEOUT_SECONDS,
+        debounce: float = 0.1,
+    ) -> None:
+        self._root = root
+        self._validate = validate
+        self._timeout = timeout
+        self._debounce = debounce
+        self._pending: "dict[Hashable, Callable[[dict], None]]" = {}
+        self._lock = threading.Lock()
+        self._event = asyncio.Event()
+        self._stopped = False
+
+    def enqueue(self, key: Hashable, fn: Callable[[dict], None]) -> None:
+        """Record a pending mutation, replacing any prior op with the same key."""
+        with self._lock:
+            self._pending[key] = fn
+        # Wake the worker.  set() is safe to call from the event-loop thread;
+        # enqueue is only ever called there (TUI key handling).
+        self._event.set()
+
+    def _take_pending(self) -> "dict[Hashable, Callable[[dict], None]]":
+        """Atomically swap out and return the pending ops."""
+        with self._lock:
+            ops = self._pending
+            self._pending = {}
+        return ops
+
+    def _drain_once(self) -> None:
+        """Apply all currently-pending ops in one locked read-modify-write.
+
+        Swaps the pending map out under the lock first, so a concurrent
+        drainer (e.g. the worker thread vs. a ``flush_sync`` on shutdown)
+        only ever applies a given op once.  No-op when nothing is pending.
+        """
+        ops = self._take_pending()
+        if not ops:
+            return
+
+        def apply(data: dict) -> None:
+            for op in ops.values():
+                op(data)
+
+        locked_update(self._root, apply, validate=self._validate,
+                      timeout=self._timeout)
+
+    async def run(self) -> None:
+        """Worker coroutine: debounce bursts, then drain off the event loop."""
+        while not self._stopped:
+            await self._event.wait()
+            # Resetting debounce: keep waiting while new enqueues keep
+            # arriving within the debounce window, so a held key collapses
+            # to a single write of the final value once input goes quiet.
+            while not self._stopped:
+                self._event.clear()
+                try:
+                    await asyncio.wait_for(self._event.wait(), timeout=self._debounce)
+                except asyncio.TimeoutError:
+                    break
+            try:
+                await asyncio.to_thread(self._drain_once)
+            except (StoreLockTimeout, ProjectYamlParseError) as e:
+                _log.warning("WriteQueue drain failed: %s", e)
+            except Exception:
+                _log.exception("WriteQueue drain raised")
+
+    def stop(self) -> None:
+        """Signal the worker to exit after its current cycle."""
+        self._stopped = True
+        self._event.set()
+
+    def flush_sync(self) -> None:
+        """Drain any pending ops synchronously (for shutdown / restart paths)."""
+        try:
+            self._drain_once()
+        except (StoreLockTimeout, ProjectYamlParseError) as e:
+            _log.warning("WriteQueue flush failed: %s", e)
+        except Exception:
+            _log.exception("WriteQueue flush raised")
 
 
 def locked_edit(root: Path, timeout: float = 30.0) -> dict:
@@ -393,17 +647,21 @@ def generate_note_id(pr_id: str, text: str, existing_ids: set[str] | None = None
 
 
 def get_pr(data: dict, pr_id: str) -> Optional[dict]:
-    """Get a PR entry by id."""
+    """Get a PR entry by id.
+
+    Entries without an id (a hand-edited or partially written project.yaml)
+    are skipped, not raised on: a QA completion recording its note looks its
+    PR up here, and a KeyError killed the TUI (S94)."""
     for pr in data.get("prs") or []:
-        if pr["id"] == pr_id:
+        if isinstance(pr, dict) and pr.get("id") == pr_id:
             return pr
     return None
 
 
 def get_plan(data: dict, plan_id: str) -> Optional[dict]:
-    """Get a plan entry by id."""
+    """Get a plan entry by id (entries without an id are skipped)."""
     for plan in data.get("plans") or []:
-        if plan["id"] == plan_id:
+        if isinstance(plan, dict) and plan.get("id") == plan_id:
             return plan
     return None
 

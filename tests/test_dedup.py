@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from pm_core.plan_parser import extract_field
+from pm_core.plans.parser import extract_field
 from pm_core.git_ops import get_git_root, get_github_repo_name
 
 

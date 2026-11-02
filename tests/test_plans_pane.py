@@ -6,7 +6,7 @@ import re
 import pytest
 from rich.text import Text
 
-from pm_core.plan_parser import extract_plan_intro
+from pm_core.plans.parser import extract_plan_intro
 from pm_core.tui.plans_pane import PlansPane
 
 

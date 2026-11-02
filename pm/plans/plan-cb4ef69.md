@@ -11,6 +11,29 @@ relate to plans. A parent plan contains summaries of its children and acts as th
 is mutable — plans and PRs can be moved between parents — and review is
 hierarchy-aware, checking both summary accuracy and cross-level consistency.
 
+> **Cross-plan note (2026-08-31):** [[plan-jurisdiction]] Set A relocates three thin
+> slices needed before the riscv-pareto campaign launches — the store traversal
+> helpers (`get_children/get_ancestors/get_subtree/is_ancestor`), a **non-interactive**
+> `pm plan register <file> --parent` (this plan's `pm plan add --parent` launches a
+> Claude session; agents need registration without one), and a minimal indented
+> plans-pane rendering. A slice of the **external-child-plan** design also moves:
+> jurisdiction promotes it to *the* hierarchy primitive — a child is a full pm
+> **subproject** rooted either in a separate repo (this plan's existing `external:`
+> path flavor) or in a **branch of the containing repo that acts as its master**
+> (new `branch:` flavor; `base_branch` per project) — relocating the reference
+> field + status-aggregation loader. This plan keeps everything else
+> (hierarchy-aware review, reparent/move + integrity checks, tech-tree
+> labels/collapse-all, the external TUI markers / review reach-in / mutation
+> guards) and should build on those slices when picked up. Jurisdiction also adds
+> loop-maintained *self*-summaries + work logs per node; this plan's authored
+> `## Plans` roll-ups and their review-checked accuracy remain the parent-side
+> counterpart — "summaries are authored, not generated" applies to the roll-up,
+> not the node's own log. Project-level membership is **plural** (a DAG, per
+> jurisdiction design law 3): a subproject may be referenced as a child by many
+> parents, each edge with its own pin/approver/staleness — while a plan's
+> `parent` *within* one project stays single as designed here; cycle detection
+> extends to project edges.
+
 ## Scope
 
 - Add optional `parent` field to plan entries in project.yaml
