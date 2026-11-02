@@ -6819,7 +6819,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/136
   gh_pr_number: 136
   created_at: '2026-03-09T16:23:27.180369+00:00'
-  updated_at: '2026-03-23T13:16:45.851043+00:00'
+  updated_at: '2026-11-02T05:11:10.991759+00:00'
   started_at: '2026-03-10T15:18:02.866746+00:00'
   reviewed_at: '2026-03-11T00:23:28.233394+00:00'
   merged_at: null
@@ -6838,6 +6838,17 @@ prs:
       exact ID: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-6aa74c6-32ce8ddb3cb52310)'
     created_at: '2026-03-14T22:07:31Z'
     last_edited: '2026-03-14T22:07:31Z'
+  - id: note-0d772aa
+    text: 'QA S7 incidental fix d6b2c29e (pre-existing command-bar race, not fuzzy-select
+      logic): under a reload stream (outside pm pr edit loop) a key typed right after
+      a command-bar Enter could land inside the submitted command (/pr select spec
+      Enter ] -> "pr select spec]", No PR matches, fuzzy list cleared; 2 of 5 live).
+      ProjectManagerApp.on_event now holds terminal keys behind a command-bar Enter
+      and replays them in order after CommandSubmitted is handled (3 s fallback);
+      CommandBar posts CommandSubmitted for empty commands too. Tests: test_key_after_command_bar_enter_waits_for_the_command,
+      test_keys_held_behind_empty_enter_are_replayed. Captures /pm-captures/scenarios/7/{pre-fix,post-fix}.'
+    created_at: '2026-11-02T05:11:10Z'
+    last_edited: '2026-11-02T05:11:10Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-6aa74c6-fuzzy-select-for-pr-and-plan-command-ab512a43
 - id: pr-98bf8df
   plan: plan-qa
