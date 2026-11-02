@@ -5845,7 +5845,7 @@ class TestSessionStartAttachesToLegacySession:
                             lambda n: None)
         respawned: list[tuple[str, str]] = []
         monkeypatch.setattr(pane_layout, "_respawn_tui",
-                            lambda s, w: respawned.append((s, w)))
+                            lambda s, w, **kw: respawned.append((s, w)))
         monkeypatch.setattr(pane_layout, "rebalance", lambda s, w: None)
         attached: list[tuple[str, str | None]] = []
         monkeypatch.setattr(

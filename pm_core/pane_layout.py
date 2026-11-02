@@ -610,12 +610,21 @@ def handle_pane_exited(session: str, window: str, generation: str,
     )
 
 
-def _respawn_tui(session: str, window: str) -> str:
+def _respawn_tui(session: str, window: str, *, select: bool = True) -> str:
     """Respawn the TUI pane in *window* after it was killed.
 
     If the window still exists (other panes remain), splits a new pane
     into it.  If the window is gone (TUI was the last pane), creates a
     new window so the session stays alive.
+
+    A new window is selected for the caller's client (``select_window``
+    picks the client) unless *select* is false.  ``pm session`` passes
+    false: run outside tmux it has no client of its own yet, so
+    ``select_window`` fell back to the first *attached* grouped session
+    and switched another user's client — a shared session's owner — to
+    the new window, while the attach landed on whatever window its own
+    grouped session showed (QA S45).  It selects the window in the
+    grouped session it attaches instead.
 
     Returns the window ID the TUI was actually created in (may differ
     from *window* when a new window had to be created).
@@ -652,7 +661,8 @@ def _respawn_tui(session: str, window: str) -> str:
                 start_dir_format=tmux_mod.SESSION_START_DIR)
             tmux_mod.set_shared_window_size(session, window)
             # Switch the client to the new window so the user sees it
-            tmux_mod.select_window(session, window)
+            if select:
+                tmux_mod.select_window(session, window)
 
         # Register with lowest order so TUI sorts first (leftmost)
         from pm_core.pane_registry import locked_read_modify_write, _prepare_registry_data

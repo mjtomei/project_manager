@@ -19,6 +19,7 @@ PATH, so a ``pm _tui`` pane is a ``sleep`` that tmux still reports with the
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import threading
@@ -344,6 +345,123 @@ class TestSessionStartDecidesUnderTheLock:
             session_mod._session_start()
         assert events == [("lock", "pm-x"), "enter", ("ensure", "pm-x"),
                           "exit", ("rebalance", "pm-x", "@4")]
+
+
+def _attach(session):
+    """A real client attached to *session* under a pty, or skip."""
+    sock = os.environ["PM_TMUX_SOCKET"]
+    proc = subprocess.Popen(
+        ["script", "-qec",
+         f"tmux -S {shlex.quote(sock)} attach -t {shlex.quote('=' + session)}",
+         "/dev/null"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        r = subprocess.run(["tmux", "-S", sock, "list-clients", "-F",
+                            "#{client_session}"],
+                           capture_output=True, text=True)
+        if session in r.stdout.splitlines():
+            return proc
+        if proc.poll() is not None:
+            break
+        time.sleep(0.05)
+    proc.kill()
+    pytest.skip("could not attach a tmux client in this environment")
+
+
+@needs_tmux
+class TestAttachRespawnLeavesOtherClientsAlone:
+    """QA S45: a joiner's ``pm session`` (run outside tmux) found the TUI's
+    window gone and respawned it in a new window.  The respawn then selected
+    that window through ``select_window``, which outside tmux falls back to
+    the first *attached* grouped session — the shared session's owner — so
+    the owner was switched off the window they were using."""
+
+    def test_a_new_window_respawn_does_not_switch_an_attached_client(
+            self, server, tmp_path):
+        from pm_core.cli import session as session_mod
+        project, window, tui, notes = _start(server, tmp_path)
+        shell = server("new-window", "-d", "-t", f"={SESSION}:", "-P", "-F",
+                       "#{window_id}", "sleep 300")
+        for n in ("~1", "~2"):
+            server("new-session", "-d", "-t", f"={SESSION}",
+                   "-s", f"{SESSION}{n}")
+            server("select-window", "-t", f"={SESSION}{n}:{shell}")
+        owner = _attach(f"{SESSION}~1")
+        try:
+            server("kill-window", "-t", window)  # the TUI and notes
+            with pane_registry.tui_respawn_lock(SESSION):
+                new_window = session_mod._ensure_tui_running(SESSION)
+            assert new_window not in (None, window)
+            assert _tui_panes(server) != []
+            assert server("list-clients", "-F",
+                          "#{client_session} #{window_id}") == (
+                f"{SESSION}~1 {shell}")
+        finally:
+            owner.kill()
+
+
+class TestSessionStartSelectsTheRespawnedWindowInItsOwnSession:
+
+    def _run(self, monkeypatch, tmp_path, respawned):
+        from contextlib import nullcontext
+        from pm_core.cli import session as session_mod
+        events = []
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr(pane_registry, "tui_respawn_lock",
+                            lambda name: nullcontext(True))
+
+        class Stop(Exception):
+            pass
+
+        def attach(name, socket_path=None):
+            events.append(("attach", name))
+            raise Stop
+
+        monkeypatch.setattr(session_mod, "_ensure_tui_running",
+                            lambda s: respawned)
+        monkeypatch.setattr(pane_layout, "rebalance", lambda s, w: None)
+        monkeypatch.setattr(session_mod, "_register_tmux_bindings",
+                            lambda s: None)
+        monkeypatch.setattr(session_mod, "_schedule_rebalance",
+                            lambda s: None)
+        monkeypatch.setattr(session_mod, "_resolve_start_session_name",
+                            lambda shared: "pm-x")
+        monkeypatch.setattr(session_mod, "_resolve_session_socket",
+                            lambda n, shared: ("/tmp/none", False))
+        exists = iter([True, True])
+        monkeypatch.setattr(session_mod.tmux_mod, "session_exists",
+                            lambda *a, **k: next(exists))
+        monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: True)
+        monkeypatch.setattr(session_mod.tmux_mod,
+                            "find_unattached_grouped_session",
+                            lambda *a, **k: "pm-x~2")
+        monkeypatch.setattr(
+            session_mod.tmux_mod, "select_window_in_session",
+            lambda s, w: events.append(("select_in", s, w)) or True)
+        monkeypatch.setattr(
+            session_mod.tmux_mod, "select_window",
+            lambda s, w: events.append(("select", s, w)) or True)
+        monkeypatch.setattr(session_mod.tmux_mod, "attach", attach)
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        from pm_core import hook_install
+        monkeypatch.setattr(hook_install, "ensure_hooks_installed",
+                            lambda: None)
+        monkeypatch.setattr(session_mod, "state_root",
+                            MagicMock(side_effect=FileNotFoundError()))
+        with pytest.raises(Stop):
+            session_mod._session_start()
+        return events
+
+    def test_a_respawned_window_is_selected_in_the_attached_session(
+            self, monkeypatch, tmp_path):
+        assert self._run(monkeypatch, tmp_path, "@4") == [
+            ("select_in", "pm-x~2", "@4"), ("attach", "pm-x~2")]
+
+    def test_nothing_is_selected_when_the_tui_was_running(
+            self, monkeypatch, tmp_path):
+        assert self._run(monkeypatch, tmp_path, None) == [("attach", "pm-x~2")]
 
 
 @needs_tmux

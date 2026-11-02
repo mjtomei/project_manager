@@ -192,8 +192,10 @@ def _ensure_tui_running(session_name: str) -> str | None:
     """Make sure the running session *session_name* has a TUI pane.
 
     Returns the window a TUI was respawned in (for the caller to
-    rebalance), or ``None`` when one was already there or none could be
-    started.  ``_session_start`` calls this under
+    rebalance and to select in the grouped session it attaches), or
+    ``None`` when one was already there or none could be started.  The
+    respawn selects no window itself: it cannot know which client is the
+    caller's (QA S45).  ``_session_start`` calls this under
     ``pane_registry.tui_respawn_lock``, which the ``after-kill-pane`` hook
     also holds while it respawns a killed TUI, so a TUI the hook has just
     started is registered by the time this looks (QA S42).
@@ -245,7 +247,7 @@ def _ensure_tui_running(session_name: str) -> str | None:
                    "Kill the session manually and re-run pm session.",
                    err=True)
         return None
-    return pane_layout._respawn_tui(session_name, tui_window)
+    return pane_layout._respawn_tui(session_name, tui_window, select=False)
 
 
 def _register_tmux_bindings(session_name: str) -> None:
@@ -898,6 +900,11 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
                     tmux_mod.set_session_option(grouped, "window-size", "smallest",
                                                 socket_path=socket_path)
                 click.echo(f"Attaching to session '{grouped}'...")
+            if respawned_window:
+                # Show the respawned TUI in the session this command
+                # attaches, and only there.  Another client of the group
+                # (a shared session's owner) stays on its window (QA S45).
+                tmux_mod.select_window_in_session(grouped, respawned_window)
             # Disconnect other clients if requested (before attaching so
             # window-size recalculates based only on our terminal).
             if disconnect_others:
