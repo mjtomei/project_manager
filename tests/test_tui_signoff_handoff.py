@@ -429,6 +429,9 @@ def test_restart_with_new_run_dir_adopts_running_router(world_factory,
     adopted = so.current_signoff_session(new_run, PR)
     assert (adopted.session_id, adopted.head) == (w.sid, w.head)
     assert adopted.adopted_from == "run"
+    # The adoption keeps the cwd the router's own launch recorded.
+    assert adopted.cwd and adopted.cwd == session_log.find(
+        PR, phase="signoff", run_id="run", include_retired=True)[-1].cwd
     assert so.current_signoff_session("run", PR) is None  # moved, not copied
     assert app.pr().get("signoff") is None
     assert w.window and len(w.launches()) == 1

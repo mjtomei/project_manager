@@ -6366,7 +6366,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/184
   gh_pr_number: 184
   created_at: '2026-03-09T15:17:01.313859+00:00'
-  updated_at: '2026-05-05T12:15:18.337503+00:00'
+  updated_at: '2026-11-02T06:33:04.459201+00:00'
   started_at: '2026-05-03T11:57:41.026322+00:00'
   reviewed_at: '2026-05-05T12:15:18.337503+00:00'
   merged_at: null
@@ -6375,6 +6375,16 @@ prs:
     text: 'QA INPUT_REQUIRED:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-18ac983-e21fdbbf66b41d89)'
     created_at: '2026-04-04T14:56:24Z'
     last_edited: '2026-04-04T14:56:24Z'
+  - id: note-52742e1
+    text: 'pr-ec5bc84 (native session logs) changes the watcher launch API: BaseWatcher.build_launch_cmd(iteration,
+      session_id=None, run_id="") replaces transcript=, and BaseWatcher._iteration_args(session_id,
+      run_id) builds the --loop-id/--session-id/--run-id flags. SessionHealthWatcher.build_launch_cmd
+      still takes transcript= and passes --transcript, so after master integration
+      _launch_window raises TypeError (unexpected kwarg session_id). Adapt it like
+      the other watchers (cmd.extend(self._iteration_args(session_id, run_id))) when
+      merging master.'
+    created_at: '2026-11-02T06:33:04Z'
+    last_edited: '2026-11-02T06:33:04Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-18ac983-session-health-watcher-detect-and-re-f6381eb7
 - id: pr-945546e
   plan: watchers

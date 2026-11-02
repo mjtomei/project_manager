@@ -539,13 +539,8 @@ def _attempt_records(state: "ReviewLoopState", iteration: int) -> list:
 
 def _session_log_path(pr_id: str, session_id: str | None) -> str | None:
     """Native log of *session_id* (recorded path, else a lookup by id)."""
-    if not session_id:
-        return None
     from pm_core import session_log
-    rec = session_log.by_session(pr_id, session_id)
-    if rec is not None:
-        return str(session_log.log_path(rec))
-    found = session_log.find_native_log(session_id)
+    found = session_log.log_of(pr_id, session_id)
     return str(found) if found else None
 
 

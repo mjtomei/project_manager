@@ -131,7 +131,7 @@ def get_run_id(app) -> str:
     1. The active auto-start run (``app._auto_start_run_id``) when
        auto-start is active.
     2. A lazily-created ``manual-<token>`` run cached on the app as
-       ``_manual_transcript_run_id``.  Used for manually-started review
+       ``_manual_run_id``.  Used for manually-started review
        loops (``zz d``) and other launches outside auto-start.
 
     The run id scopes this TUI's sessions in the session ledger
@@ -141,10 +141,10 @@ def get_run_id(app) -> str:
     """
     run_id = app._auto_start_run_id
     if not run_id:
-        run_id = getattr(app, "_manual_transcript_run_id", None)
+        run_id = getattr(app, "_manual_run_id", None)
         if not run_id:
             run_id = f"manual-{secrets.token_hex(3)}"
-            app._manual_transcript_run_id = run_id
+            app._manual_run_id = run_id
     return run_id
 
 

@@ -114,6 +114,19 @@ def test_log_path_follows_the_session_id_when_the_slug_differs(home):
     assert session_log.log_state(rec) == "present"
 
 
+def test_log_of_reads_exactly_the_named_session(home):
+    sid, unrecorded = _sid(), _sid()
+    rec = session_log.register(_launch(), sid, "/w")
+    assert session_log.log_of(PR, sid) == Path(rec.log)   # expected path
+    # A session pm never recorded (pre-upgrade) is found by its id only.
+    assert session_log.log_of(PR, unrecorded) is None
+    native = home / ".claude" / "projects" / "-x" / f"{unrecorded}.jsonl"
+    native.parent.mkdir(parents=True)
+    native.write_text(_turn("hi"))
+    assert session_log.log_of(PR, unrecorded) == native
+    assert session_log.log_of(PR, None) is None
+
+
 def test_missing_log_is_reported_not_substituted(home):
     sid, other = _sid(), _sid()
     rec = session_log.register(_launch(), sid, "/w")

@@ -84,18 +84,12 @@ def _read_transcript_text(transcript_path: str | Path | None) -> str:
         sid = None
     if not sid:
         sid = p.stem
-    if not (len(sid) == 36 and sid.count("-") == 4):
+    # The session ledger's lookup by id (the most recently modified match,
+    # should a stale file with the same sid linger from a prior run).
+    from pm_core.session_log import find_native_log
+    real = find_native_log(sid)
+    if real is None:
         return ""
-    projects_dir = Path.home() / ".claude" / "projects"
-    try:
-        matches = list(projects_dir.glob(f"*/{sid}.jsonl"))
-    except OSError:
-        return ""
-    if not matches:
-        return ""
-    # Pick the most recently modified — handles edge cases where stale
-    # files with the same sid linger from a prior run.
-    real = max(matches, key=lambda m: m.stat().st_mtime)
     try:
         return real.read_text(errors="replace")
     except OSError:

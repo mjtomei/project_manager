@@ -326,8 +326,6 @@ def test_failed_launch_is_retried_not_terminal(tmp_path, monkeypatch):
     window is closed, container setup then fails).  Pre-fix this ended the
     loop with ERROR on the first attempt; the fix retries the same
     iteration and collects its own verdict."""
-    import uuid
-
     from pm_core import review_loop as rl
     from pm_core import tmux
 

@@ -197,8 +197,8 @@ class BaseWatcher(ABC):
     def _session_log(self, session_id: str | None) -> str | None:
         """Native log of this watcher's *session_id*, from the ledger."""
         from pm_core import session_log
-        rec = session_log.by_session(self.ledger_subject, session_id)
-        return str(session_log.log_path(rec)) if rec else None
+        found = session_log.log_of(self.ledger_subject, session_id)
+        return str(found) if found else None
 
     def _wait_for_follow_up(self, transcript_path: str | None) -> str | None:
         """Wait for a follow-up verdict after INPUT_REQUIRED (hook-driven)."""
@@ -215,6 +215,7 @@ class BaseWatcher(ABC):
     def _run_iteration(self, iteration: int,
                        session_id: str | None = None) -> str:
         """Launch a window, poll its session for a verdict, return output."""
+        from pm_core import session_log
         from pm_core import tmux as tmux_mod
 
         session = get_pm_session()
@@ -238,25 +239,25 @@ class BaseWatcher(ABC):
         _log.info("watcher[%s]: polling pane %s in window %s",
                   self.WATCHER_TYPE, pane_id, self.WINDOW_NAME)
 
-        transcript = self._session_log(session_id)
-        if not transcript:
+        # The launch must have recorded exactly this session (its child
+        # registers it); the poll then reads only that session's log.
+        record = session_log.by_session(self.ledger_subject, session_id)
+        if record is None:
             raise RuntimeError(
                 f"Watcher[{self.WATCHER_TYPE}] launch registered no session "
                 f"{session_id}"
             )
 
         content = self._poll_for_verdict(
-            pane_id, transcript,
+            pane_id, str(session_log.log_path(record)),
             grace_period=self.VERDICT_GRACE_PERIOD,
         )
         if content is None:
             if self.state.stop_requested:
                 raise PaneKilledError("Watcher stopped by user")
-            from pm_core import session_log
             raise PaneKilledError(
                 f"Pane disappeared (window: {self.WINDOW_NAME})"
-                + session_log.missing_suffix(session_log.by_session(
-                    self.ledger_subject, session_id))
+                + session_log.missing_suffix(record)
             )
         return content
 

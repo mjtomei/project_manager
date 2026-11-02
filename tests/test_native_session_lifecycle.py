@@ -272,6 +272,15 @@ def test_auto_sequence_reads_its_iteration_and_continues_legacy_numbering(
         _, log4 = _launch_review(tmp_path, PR, "", 4, run="auto-sequence")
         log4.write_text(_turn("PASS"))
         assert pr_mod._check_review_verdict(PR) == ("PASS", 4)
+        # Iteration 4 relaunched within the same second: the newest attempt
+        # is the iteration's session, never the one it replaced.
+        with patch.object(session_log, "_now",
+                          return_value="2026-11-02T00:00:00+00:00"):
+            _, a = _launch_review(tmp_path, PR, "", 5, run="auto-sequence")
+            _, b = _launch_review(tmp_path, PR, "", 5, run="auto-sequence")
+        a.write_text(_turn("NEEDS_WORK"))
+        b.write_text(_turn("PASS"))
+        assert pr_mod._check_review_verdict(PR) == ("PASS", 5)
     assert sorted(p.name for p in adir.iterdir()) == before
     assert os.readlink(adir / f"review-{PR}-i3.jsonl") == str(native)
 

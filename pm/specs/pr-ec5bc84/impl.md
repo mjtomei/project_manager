@@ -64,7 +64,11 @@ archived or deleted; native retention governs history.
     legacy=/adopted_from=)` directly.
   - `log_path(record)` → the recorded native path, else the session-id lookup
     `~/.claude/projects/*/<sid>.jsonl` (the existing pr-488b748 band-aid, keyed by
-    the known id — never a history scan); `log_state(record)` →
+    the known id — never a history scan; `find_native_log(sid)`, which
+    `verdict_transcript` reuses); `log_of(subject, sid)` → that path for
+    exactly *sid* (its record, else the id lookup for a session pm never
+    recorded — follow-up waits of review loops and watchers);
+    `log_state(record)` →
     `present | missing`; `missing_message(record)` — an accurate report that
     names the session, the expected path and Claude's configured
     `cleanupPeriodDays` (read-only from Claude settings; pm never changes it);

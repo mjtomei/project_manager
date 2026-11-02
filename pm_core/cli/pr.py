@@ -29,7 +29,11 @@ from pm_core import pane_registry
 from pm_core import spec_gen
 from pm_core.backend import get_backend
 from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_session, launch_claude
-from pm_core.session_log import SessionLaunch, run_id_from_legacy_path
+# The CLI auto-sequence driver's run id in the session ledger (its own
+# driver scope, distinct from the TUI's runs).
+from pm_core.session_log import (
+    AUTO_SEQUENCE_RUN as _AUTO_SEQ_RUN, SessionLaunch, run_id_from_legacy_path,
+)
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
@@ -4045,11 +4049,6 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
 # ready_to_merge; the merge itself stays with the caller)
 # ---------------------------------------------------------------------------
 
-# The CLI auto-sequence driver's run id in the session ledger (its own
-# driver scope, distinct from the TUI's runs; pm_core.session_log).
-from pm_core.session_log import AUTO_SEQUENCE_RUN as _AUTO_SEQ_RUN
-
-
 def _impl_window_pane(session: str, pr_entry: dict) -> str | None:
     """Return the first pane id of the impl tmux window, or None."""
     win = tmux_mod.find_window_by_name(session, _pr_display_id(pr_entry))
@@ -4082,7 +4081,9 @@ def _auto_seq_review_session(pr_id: str):
                                         run_id=_AUTO_SEQ_RUN, loop_id="")
             if r.iteration is not None]
     if recs:
-        best = max(recs, key=lambda r: (r.iteration, r.at))
+        # Highest iteration; for a relaunched iteration the newest record
+        # (ledger order — ``at`` has only second resolution).
+        best = max(enumerate(recs), key=lambda t: (t[1].iteration, t[0]))[1]
         return best, best.iteration
     d = session_log.legacy_dir(state_root(), _AUTO_SEQ_RUN, pr_id)
     best = None

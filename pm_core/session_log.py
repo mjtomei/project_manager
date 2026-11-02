@@ -333,6 +333,16 @@ def log_path(record: SessionRecord) -> Path:
     return find_native_log(record.session_id) or p
 
 
+def log_of(subject: str, session_id: str | None) -> Path | None:
+    """Native log of exactly *session_id*: its recorded path (see
+    :func:`log_path`), else — a session pm never recorded, e.g. one a
+    pre-upgrade launch named only by its symlink — the lookup by id."""
+    rec = by_session(subject, session_id)
+    if rec is not None:
+        return log_path(rec)
+    return find_native_log(session_id)
+
+
 def log_state(record: SessionRecord) -> str:
     """``present`` or ``missing`` (never written, or pruned by Claude)."""
     return "present" if log_path(record).exists() else "missing"

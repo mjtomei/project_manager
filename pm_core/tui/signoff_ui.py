@@ -308,7 +308,7 @@ def _adopt_orphaned_run(app, pr: dict, run_id: str, session: str) -> None:
         except (TypeError, ValueError):
             at = None
         if _recent(at) and (best is None or (at or 0) >= best[0]):
-            best = (at or 0, rec.session_id, rec.log, rec.run_id,
+            best = (at or 0, rec.session_id, rec.log, rec.cwd, rec.run_id,
                     rec.head, rec.base, "")
     if best is None:
         # A router launched before the upgrade: its old run-dir link.
@@ -329,18 +329,18 @@ def _adopt_orphaned_run(app, pr: dict, run_id: str, session: str) -> None:
             except OSError:
                 at = None
             if _recent(at) and (best is None or (at or 0) >= best[0]):
-                best = (at or 0, link.session_id, str(link.log), other,
+                best = (at or 0, link.session_id, str(link.log), "", other,
                         link.head, link.base, str(link.path))
     if best is None:
         return
-    _at, sid, log, other, head, base, legacy = best
+    _at, sid, log, cwd, other, head, base, legacy = best
     try:
         if not legacy:
             session_log.retire(pr_id, sid, f"adopted by run {run_id}")
         session_log.register(
             session_log.SessionLaunch(subject=pr_id, phase="signoff",
                                       run_id=run_id, head=head, base=base),
-            sid, "", log=log, legacy=legacy, adopted_from=other)
+            sid, cwd, log=log, legacy=legacy, adopted_from=other)
     except (OSError, ValueError) as e:
         _log.warning("signoff: adopting %s run from %s failed: %s",
                      pr_id, other, e)
