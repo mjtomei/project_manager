@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T05:09:23.546903+00:00'
+  updated_at: '2026-11-02T05:20:36.377232+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25614,6 +25614,24 @@ prs:
       from the build_exec_cmd cleanup trap. Captures: /pm-captures/scenarios/15/.'
     created_at: '2026-11-02T05:09:23Z'
     last_edited: '2026-11-02T05:09:23Z'
+  - id: note-7087275
+    text: 'QA S14 (2026-11-02): NEEDS_WORK, R35 fixed. Pre-fix (c54e22ce), a host-mode
+      run filing with pm -C <registry> pr add, with TMUX scrubbed, made _find_tui_pane
+      resolve the TUI from its cwd. From a clone (no session) it reloaded the first
+      pm session with a TUI (aproj); from the disposable test project it reloaded
+      that project''s own TUI. The user''s TUI stayed at 4 PRs for 15 s after each
+      solo filing and showed them only after r. A concurrent user filing hid this.
+      Fix: _find_tui_pane (cli/helpers.py) tries the -C/PM_PROJECT project''s session
+      after the in-tmux check and before the cwd, the same order as _get_pm_session.
+      Test: TestFindTuiPaneProjectOverride (3 of 5 fail pre-fix). Full suite 5493
+      passed/1 skipped. After the fix, all 6 stories held live on a rebuilt /scratch
+      fixture; each solo filing showed in mproj''s TUI at +0 s. A bare pm pr add in
+      a clone still writes the clone registry (by design) and signals the any-session
+      fallback TUI (a no-op reload). Captures: /pm-captures/scenarios/14/{pre-fix,post-fix}/.
+      Filed pr-60d2e79: the pytest suite writes into the real ~/.pm; do not run it
+      during a debug-log-diff story.'
+    created_at: '2026-11-02T05:20:36Z'
+    last_edited: '2026-11-02T05:20:36Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
@@ -52852,6 +52870,35 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T02:27:48.995190+00:00'
   updated_at: '2026-11-02T02:27:48.995190+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-60d2e79
+  plan: bugs
+  title: 'Bug: the pytest suite writes into the real ~/.pm (debug logs, workdirs locks
+    and dirs, run/env-*.sh canaries, sessions dirs)'
+  branch: pm/pr-60d2e79-bug-the-pytest-suite-writes-into-the-real-pm-debug
+  status: pending
+  depends_on: []
+  description: 'Observed in QA S14 of pr-7d5d036 (2026-11-02): one full `python3 -m
+    pytest -q` run in /workspace with HOME=/home/pm left behind in the real ~/.pm:
+    ~/.pm/debug/{proj-deadbeef,my-notes-app-a4a85c68,wt-31c1b47d}.log plus ~40 repo-<hash>.log
+    (and lines appended to workspace-<hash>.log); ~/.pm/workdirs/.signoff-step-{a,b,c,d,f,pr-001,pr-aaa1111}.lock
+    and .merge--pr-001.lock (signoff.py:1235 bounded_flock on workdirs_base()), ~/.pm/workdirs/{test,test-abc12345,test-project}/;
+    ~/.pm/run/env-*.sh holding ANTHROPIC_API_KEY=canary-... (test_tmux.py / test_container.py
+    / test_provider_integration.py use canary values); an empty ~/.pm/sessions/project_manager-<hash>/.
+    Suspects: tests that do not redirect HOME/PM_HOME (the debug logger in pm_core
+    writes ~/.pm/debug/<tag>.log at import), test_fake_github.py and test_init_scenarios.py
+    (proj-deadbeef, my-notes-app). Effect: a QA run that diffs ~/.pm/debug or ~/.pm/workdirs
+    while the suite runs sees foreign files, and canary env files accumulate. Expected:
+    the suite leaves ~/.pm untouched (autouse fixture pointing HOME or the pm home
+    at tmp_path).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T05:20:24.558509+00:00'
+  updated_at: '2026-11-02T05:20:24.558509+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

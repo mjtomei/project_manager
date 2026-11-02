@@ -1,6 +1,8 @@
 """Tests for pm_core.cli.helpers — shared CLI utility functions."""
 
 from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -614,6 +616,99 @@ class TestFindLiveTuiPane:
                    return_value=empty), \
              self._panes("%3 pm-test bash\n"):
             assert _find_live_tui_pane("pm-test") == (None, "pm-test")
+
+
+class TestFindTuiPaneProjectOverride:
+    """Outside a pm session, ``-C <registry>`` names the TUI to reload.
+
+    A host-mode regression run has TMUX scrubbed and files its findings with
+    ``pm -C <user project>/pm pr add`` from its clone or its disposable test
+    project.  Resolving by cwd alone reloaded the first pm session with a
+    TUI (another project's) or the test project's own TUI, so the user's
+    TUI never showed the filed PR until ``r`` (QA S14, R35).
+    """
+
+    SESSIONS = ("pm-aproj-1111", "pm-mproj-2222", "pm-ztest-3333")
+
+    @pytest.fixture
+    def env(self, monkeypatch, tmp_path):
+        from types import SimpleNamespace
+        from pm_core import paths
+        from pm_core.cli import helpers
+        tags = {str(tmp_path / "mproj" / "pm"): "mproj-2222",
+                str(tmp_path / "clone"): "repo-9999",
+                str(tmp_path / "ztest"): "ztest-3333"}
+        for d in ("mproj/pm", "clone", "ztest"):
+            (tmp_path / d).mkdir(parents=True)
+        monkeypatch.setattr(
+            paths, "get_session_tag",
+            lambda start_path=None, use_github_name=True:
+                tags.get(str(start_path or Path.cwd())))
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: False)
+        monkeypatch.setattr(helpers.tmux_mod, "session_exists",
+                            lambda name, socket_path=None:
+                                name in self.SESSIONS)
+        monkeypatch.setattr(
+            helpers.pane_registry, "load_registry",
+            lambda s: {"session": s, "generation": "1", "windows": {
+                "@0": {"panes": [{"id": f"%{s[-4:]}", "role": "tui",
+                                  "order": 0, "cmd": "pm _tui"}]}}})
+        monkeypatch.setattr(
+            helpers.subprocess, "run",
+            lambda *a, **k: SimpleNamespace(
+                returncode=0, stdout="\n".join(self.SESSIONS) + "\n"))
+        monkeypatch.setattr(helpers, "_project_override", None)
+        return SimpleNamespace(helpers=helpers, root=tmp_path)
+
+    def test_filing_from_a_clone_reaches_the_registry_session(
+            self, env, monkeypatch):
+        monkeypatch.chdir(env.root / "clone")
+        # Without -C the clone matches no session: the scan picks the first
+        # pm session with a TUI, as before.
+        assert env.helpers._find_tui_pane() == ("%1111", "pm-aproj-1111")
+        monkeypatch.setattr(env.helpers, "_project_override",
+                            env.root / "mproj" / "pm")
+        assert env.helpers._find_tui_pane() == ("%2222", "pm-mproj-2222")
+
+    def test_filing_from_another_live_project_reaches_the_registry_session(
+            self, env, monkeypatch):
+        monkeypatch.chdir(env.root / "ztest")
+        assert env.helpers._find_tui_pane() == ("%3333", "pm-ztest-3333")
+        monkeypatch.setattr(env.helpers, "_project_override",
+                            env.root / "mproj" / "pm")
+        assert env.helpers._find_tui_pane() == ("%2222", "pm-mproj-2222")
+
+    def test_current_pm_session_still_wins(self, env, monkeypatch):
+        monkeypatch.chdir(env.root / "clone")
+        monkeypatch.setattr(env.helpers, "_project_override",
+                            env.root / "mproj" / "pm")
+        monkeypatch.setattr(env.helpers.tmux_mod, "in_tmux", lambda: True)
+        monkeypatch.setattr(env.helpers.tmux_mod, "get_session_name",
+                            lambda: "pm-ztest-3333")
+        assert env.helpers._find_tui_pane() == ("%3333", "pm-ztest-3333")
+
+    def test_override_without_a_live_session_falls_through_to_cwd(
+            self, env, monkeypatch, tmp_path):
+        monkeypatch.chdir(env.root / "ztest")
+        (tmp_path / "gone").mkdir()
+        monkeypatch.setattr(env.helpers, "_project_override",
+                            tmp_path / "gone")
+        assert env.helpers._find_tui_pane() == ("%3333", "pm-ztest-3333")
+
+    def test_reload_signals_the_registry_sessions_tui(self, env,
+                                                      monkeypatch):
+        monkeypatch.chdir(env.root / "clone")
+        monkeypatch.setattr(env.helpers, "_project_override",
+                            env.root / "mproj" / "pm")
+        seen = []
+        monkeypatch.setattr(
+            env.helpers, "_validate_tui_owner",
+            lambda s: (seen.append(s), (None, None, None,
+                                        SimpleNamespace(message="stop")))[1])
+        with patch("pm_core.home_window.refresh_home") as home:
+            assert env.helpers.trigger_tui_reload() is False
+        assert seen == ["pm-mproj-2222"]
+        home.assert_called_once_with("pm-mproj-2222")
 
 
 # ---------------------------------------------------------------------------

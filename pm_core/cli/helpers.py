@@ -1387,33 +1387,51 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
 
     If session is provided, uses that. Otherwise:
     - If in a pm- tmux session, uses current session
+    - Otherwise, the session of the ``-C``/``PM_PROJECT`` project, if any
     - Otherwise, tries to find session matching current directory
     - Falls back to searching for any pm- session with a TUI pane
     """
-    # If session specified, use it
-    if session:
-        data = pane_registry.load_registry(session)
+    def registry_tui(sess: str) -> str | None:
+        data = pane_registry.load_registry(sess)
         for _, pane in pane_registry._iter_all_panes(data):
             if pane.get("role") == "tui":
-                return pane.get("id"), session
-        return None, None
+                return pane.get("id")
+        return None
+
+    # If session specified, use it
+    if session:
+        pane_id = registry_tui(session)
+        return (pane_id, session) if pane_id else (None, None)
 
     # If in a pm session, use current
     if tmux_mod.in_tmux():
         current_session = tmux_mod.get_session_name()
         if current_session.startswith("pm-"):
-            data = pane_registry.load_registry(current_session)
-            for _, pane in pane_registry._iter_all_panes(data):
-                if pane.get("role") == "tui":
-                    return pane.get("id"), current_session
+            pane_id = registry_tui(current_session)
+            if pane_id:
+                return pane_id, current_session
+
+    # Outside a pm session, a ``-C``/``PM_PROJECT`` project names the
+    # registry this command works on, and the cwd may be anywhere else.  A
+    # host-mode regression run files with ``pm -C <registry> pr add`` from
+    # its clone or its disposable test project, with TMUX scrubbed: by cwd
+    # alone its reload went to the first pm session with a TUI, or to the
+    # test project's own TUI, never the user's (QA S14, R35).  Same order
+    # as ``_get_pm_session``.
+    if _project_override:
+        from pm_core.paths import get_session_tag
+        tag = get_session_tag(start_path=_project_override)
+        if tag and tmux_mod.session_exists(f"pm-{tag}"):
+            pane_id = registry_tui(f"pm-{tag}")
+            if pane_id:
+                return pane_id, f"pm-{tag}"
 
     # Try to find session matching current directory first
     expected_session = _get_session_name_for_cwd()
     if tmux_mod.session_exists(expected_session):
-        data = pane_registry.load_registry(expected_session)
-        for _, pane in pane_registry._iter_all_panes(data):
-            if pane.get("role") == "tui":
-                return pane.get("id"), expected_session
+        pane_id = registry_tui(expected_session)
+        if pane_id:
+            return pane_id, expected_session
 
     # Fall back to searching for any pm session with a TUI
     result = subprocess.run(

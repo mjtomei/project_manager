@@ -73,7 +73,11 @@ Change:
     (`_REGRESSION_SCRUBBED_ENV`, 634a4c05): pm resolves "the current pm
     session" from `$TMUX_PANE` before the cwd, so a `pm session` the test
     started in its own project reused and rebalanced the user's session
-    (QA S12, R28).
+    (QA S12, R28). With TMUX gone, a finding filed with
+    `pm -C <registry> pr add` resolves the TUI to reload from the `-C`
+    project (`_find_tui_pane` tries its session before the cwd), not from
+    the clone or test-project cwd, which reloaded another project's TUI
+    (QA S14, R35).
   - No pm session is required. The old `--session/-s` option is kept,
     hidden, only so existing invocations still parse: it is ignored with
     a note on stderr, because a regression run never targets a pm session.
