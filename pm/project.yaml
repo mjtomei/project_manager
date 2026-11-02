@@ -39215,7 +39215,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-11-02T01:44:31.913450+00:00'
+  updated_at: '2026-11-02T02:19:29.205680+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40125,6 +40125,41 @@ prs:
       (TUI + CLI cast/mp4, evidence).'
     created_at: '2026-11-02T01:44:31Z'
     last_edited: '2026-11-02T01:44:31Z'
+  - id: note-4e8be0a
+    text: 'QA S19 refiner (2026-11-02, 58b3ece2b): story 3 now restarts the TUI mid-iteration
+      BEFORE the INPUT_REQUIRED turn lands (R10 order: restart -> adopt -> INPUT_REQUIRED
+      -> follow-up), not during the follow-up wait. Restarting during the wait is
+      the pending pr-a80bde5 bug (fix 75a221df is in neither this branch nor master):
+      the breadcrumb history already holds the INPUT_REQUIRED entry, so the resumed
+      loop starts iteration N+1 with --fresh and kills the waiting pane (dry-run:
+      "resumed at iteration 2", kill_window). fake-claude writes one turn and cannot
+      emit a follow-up (NONE is rejected for review), so the tester appends the answer
+      + PASS records to the session native JSONL (readlink -f of the loop-scoped link).
+      Never type into the fake pane: it exits on input.'
+    created_at: '2026-11-02T02:07:08Z'
+    last_edited: '2026-11-02T02:07:08Z'
+  - id: note-5250c4d
+    text: 'QA S19 (2026-11-02) PASS, 3/3 stories, at 77a45d22a, fake-claude, each
+      story its own HOME + private tmux socket, run in parallel. (1) Overlapping zz
+      d loops: loop 1 c724cd87 (NEEDS_WORK held in its 20 s grace) superseded by loop
+      2 55948a06; loop 1 ended KILLED ~15 s later and finalized only review-<pr>-c724cd87-i1.jsonl
+      (sid1 only, cmp-identical archive entry) while loop 2 link stayed a live 2-line
+      symlink; recipe-A append grew it to 4 lines through the link; "⏸ INPUT_REQUIRED"
+      then exactly one "✓ PASS (1 iteration)", tree in_review ⟳1✓; the only finalized
+      line in the window named loop 1; no ownership-skip line; archive = one entry
+      per sid. (2) pm tui restart --breadcrumb mid-iteration 2 of an auto-start loop:
+      save/consume/resumed/Auto-start resumed/adopting (pane %9)/poll (same sid) in
+      order; zero relauncher/kill_window after the restart, one symlink line for i2,
+      same pane id+pid; PASS (2 iterations) froze only i1/i2 (archive exactly i1.sid1
+      + i2.sid2, cmp-equal); impl canonical still a live link. (3) Restart before
+      the INPUT_REQUIRED turn: adopt same pane %7 -> hook-driven IR -> 20 s with no
+      follow-up/done line and i1 a 2-line link -> append -> hook-driven follow-up
+      PASS on the same loop id; i1 frozen with 4 records of one sid, single cmp-identical
+      archive entry. Captures: /pm-captures/scenarios/19/{story1,story2,story3}/ (cast+mp4+transcript+manifest+evidence/then-checks.txt)
+      and scripts/. Fixture note: story 2 auto-QA hand-off ends "QA spec missing"
+      (S15 prerequisite, outside the story).'
+    created_at: '2026-11-02T02:19:29Z'
+    last_edited: '2026-11-02T02:19:29Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
