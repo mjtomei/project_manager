@@ -51816,6 +51816,76 @@ prs:
       run_id/session_log instead of transcript_dir/finalize_transcript.'
     created_at: '2026-11-02T06:10:47Z'
     last_edited: '2026-11-02T06:10:47Z'
+  - id: note-8990811
+    text: 'QA S1 refiner (rehearsed live at b7137091): `pm session` installs pm hooks
+      into ~/.claude/settings.json, so take the settings checksum AFTER the session
+      starts (later launches never rewrite it; cleanupPeriodDays untouched). Fake
+      impl commits nothing: pre-commit on pm/pr-<id>-<slug> or sign-off coerces SIGNOFF_MERGE
+      to BLOCKED. A PR added after setup needs `pm push` + `git merge pm/sync-*` before
+      `s`. The #241 check is driven from the TUI (`zz d` superseding a held loop);
+      the killed fake attempt correctly reads log[missing].'
+    created_at: '2026-11-02T07:43:17Z'
+    last_edited: '2026-11-02T07:43:17Z'
+  - id: note-8defac9
+    text: 'QA S1 run (6cf1e4b1, PASS): story-4 "same second" Then is timing-dependent,
+      not a product bug. A held fake (delay 240) writes no idle hook, so loop A re-checks
+      its pane only at its 15 s wait_for_event timeout (poll start + 15 s; poll start
+      is about first zz d + 2.9 s). The 4 supersede/KILLED lines share one second
+      only when the second zz d lands early in the second that A boundary falls in,
+      with that boundary at least ~0.45 s into the second. Observed both ways: Y 2
+      s apart, Z 1 s, W same second (driver: /pm-captures/scenarios/1/driver/timed_zzd.py).'
+    created_at: '2026-11-02T08:04:28Z'
+    last_edited: '2026-11-02T08:04:28Z'
+  - id: note-5307001
+    text: 'QA S4 refiner 2026-11-02 (rehearsed live at 6cf1e4b1): a TUI review loop
+      waiting on INPUT_REQUIRED does NOT keep waiting across a state-preserving restart
+      (`pm tui restart --breadcrumb`). The breadcrumb stores i1=INPUT_REQUIRED in
+      history, so run_review_loop_sync sees adopt = iteration > last_done as False
+      and launches i2 with --fresh, which replaces the pane the human was answering
+      in (observed: a new i2 row and session, a fresh INPUT_REQUIRED notice). origin/master
+      has the same logic, so this predates the PR and is not a regression; it is outside
+      R2.5/R5.3. S4 story 1 now restarts while i1 is still in flight (it adopts the
+      same pane and session, then INPUT_REQUIRED and the follow-up PASS land on that
+      session). A plain Ctrl+R keeps no review-loop state at all: only the merge-restart
+      marker (`--breadcrumb`) writes the breadcrumb.'
+    created_at: '2026-11-02T08:34:19Z'
+    last_edited: '2026-11-02T08:34:19Z'
+  - id: note-8254254
+    text: 'QA S5 refiner (2026-11-02, 6cf1e4b1, rehearsed live): upgrade = one pm
+      shim on PATH whose PYTHONPATH flips from a master tree (git archive origin/master)
+      to the branch; TUI upgrade is `pm tui restart --breadcrumb` after the flip (execvp
+      re-runs pm from PATH; quitting writes no breadcrumb on master). Master deletes
+      signoff-<pr>.jsonl+.head on any sign-off bounce, so an in-flight sign-off and
+      an in-flight review loop need two PRs in one auto-start run. Master-made frozen
+      copies (finished loop iterations) are never adopted or listed; the adopted-frozen-copy
+      path (log = the copy) needs a hand freeze (cp -p over the link, like finalize_transcript)
+      of an auto-sequence iteration. Fake writes its JSONL only at verdict time, so
+      an adopted in-flight row reads log[missing] until then.'
+    created_at: '2026-11-02T09:15:21Z'
+    last_edited: '2026-11-02T09:15:21Z'
+  - id: note-82e3458
+    text: 'QA S6 refiner (rehearsed live at 6cf1e4b1): two auto-start watcher runs
+      in one pm session share the tmux window "watcher", and each iteration launch
+      kills the existing window. So an overlapping CLI `pm watcher start auto-start`
+      and TUI `ws` watcher KILL each other (TUI showed "Auto-Start Watcher stopped:
+      X KILLED"). This is pre-existing: master `_create_watcher_window` also kills
+      the window. It is not a ledger bug. Stagger them: start the CLI one about 75
+      s after `ws`, both with a 120 s wait (iterations take about 34 s: 30 s grace
+      plus the 2 s settle). The regression-loop types have their own windows and run
+      truly in parallel. Pre-create ~/.pm/workdirs/meta-<tag> so `ws` does not clone
+      pm from GitHub. Ctrl+C through `| tee` loses the final stop lines.'
+    created_at: '2026-11-02T09:36:15Z'
+    last_edited: '2026-11-02T09:36:15Z'
+  - id: note-088f4d8
+    text: 'QA S5 run (2026-11-02, bb54d8f2 = 6cf1e4b1 code, PASS 4/4 stories, captures
+      /pm-captures/scenarios/5): put the scenario Q dir OUTSIDE the workdir (used
+      /scratch/q5/s<n>). With Q=/workspace/q5 the pm wrapper cwd walk (cwd + 3 parents)
+      finds /workspace/pm_core from $Q/proj, so every "master" command silently runs
+      branch code and no pm/transcripts tree appears; check `pm which` from inside
+      $Q/proj, not only from /tmp. TUI-launched pm children use sys.executable -m
+      pm_core.wrapper with the TUI env, so the TUI flips only on `pm tui restart --breadcrumb`.'
+    created_at: '2026-11-02T09:38:24Z'
+    last_edited: '2026-11-02T09:38:24Z'
   - id: note-67b9ac3
     text: 'QA S7 refiner (6cf1e4b1, rehearsed live): killed-pane missing-log report
       reaches only the L pane / ~/.pm/debug/<tag>.log (TUI line is just "Review loop
@@ -51842,6 +51912,19 @@ prs:
       pre-existing on master.'
     created_at: '2026-11-02T10:11:21Z'
     last_edited: '2026-11-02T10:14:43Z'
+  - id: note-36a18aa
+    text: 'QA S6 (2026-11-02, bb54d8f2): every watcher-session Then held in 2 full
+      runs (per-iteration sessions, attribution, ledger integrity under 5 concurrent
+      runs, no copy on stop, no pm/transcripts). Two story-2 Thens fail as written.
+      (1) "w2 prints each burst of all three types in the same second": run 1 burst
+      5 printed :43/:44/:44; run 2 (Enter timed to x.77 s) bursts 3 and 5 straddled.
+      (2) "the same iteration of all three types launched in the same second": run
+      1 i3 :03/:03/:04, run 2 i4 :39/:38/:39. The three prints in a burst are 0.20-0.63
+      s apart and the phase drifts about 0.4 s per 63 s period, so no start time keeps
+      5 bursts within whole seconds. Spec owner: should the Then read "the same burst,
+      within about 1 s"? Evidence: /pm-captures/scenarios/6/{story2,rerun-timed/story2}/cli-w2/burst-timing.txt.'
+    created_at: '2026-11-02T10:12:26Z'
+    last_edited: '2026-11-02T10:12:26Z'
   model: provider:claude-main-xhigh-pm
   effort: high
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ec5bc84-use-native-session-logs-and-remove-p-4d0c07a5
