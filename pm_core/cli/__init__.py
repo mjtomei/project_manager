@@ -648,7 +648,7 @@ COMMANDS
   pm qa show <id>                  Show full content of a QA instruction or artifact recipe
   pm qa run <id> --pr <pr-id>      Run a QA instruction against a PR
   pm qa standalone <id>            Run a QA instruction against master
-  pm qa regression <test-id>       Run a regression test in an isolated QA run (container when enabled)
+  pm qa regression <test-id>       Run a regression test in an isolated QA run
   pm qa captures-path <pr-id>      Print the host path of a PR's captures directory
 
   pm qa mocks list               List shared mock definitions

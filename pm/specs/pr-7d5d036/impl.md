@@ -56,8 +56,8 @@ Change:
 - `pm qa regression <id> [--file-prs] [--branch B]` becomes the single
   regression launcher. It prepares a run with the primitives `pm qa debug`
   and the QA scenario path already use — `qa_loop.create_qa_workdir`,
-  `qa_loop.create_scenario_workdir` (fresh `git clone --local` + empty
-  scratch), `qa_loop._setup_clone_override`, `container.create_qa_container`,
+  `qa_loop.create_scenario_workdir` (fresh local `git clone` + empty
+  scratch; see E13), `qa_loop._setup_clone_override`, `container.create_qa_container`,
   `claude_launcher.build_claude_shell_cmd`, `container.build_exec_cmd(cleanup=True)`
   — and runs the session in the foreground (`os.execvpe`, like
   `pm qa debug --foreground`). No new runner, sandbox or recipe mechanism.
@@ -264,6 +264,11 @@ No [UNRESOLVED] items.
   else project.repo when it is a local checkout, else the cwd), the same
   resolution `pm cluster`, `pm plan` and PR sync use. Cloning `root.parent`
   would fail, or clone an unrelated repo, for that layout (review fc31 i6).
+- E13: Project checkout on another filesystem than `~/.pm` (QA S3/S4). The
+  clone is a plain path `git clone`, not an explicit `--local`: git then
+  hardlinks the objects when it can and copies them otherwise, where an
+  explicit `--local` dies with "Invalid cross-device link" before any
+  container check (fixed in 2f6c2fc9; `test_clone_does_not_force_hardlinks`).
 
 ## 5. Verification (bounded)
 

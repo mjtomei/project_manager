@@ -529,7 +529,7 @@ def _remote_branch_sha(workdir: str | Path, url: str, branch: str,
 def _publish_planner_head(workdir_path: str, branch: str) -> str:
     """Make sure the planner's committed PR head is on the real upstream.
 
-    Scenario workdirs are ``git clone --local`` copies of the PR workdir
+    Scenario workdirs are local ``git clone`` copies of the PR workdir
     whose ``origin`` is then swapped to the real upstream.  If the planner
     committed (fixes, QA specs, instructions) without pushing, the clone
     starts at the unpublished head, and a worker's later ``git pull
