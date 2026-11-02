@@ -98,6 +98,7 @@ def build_regression_test_prompt(
     captures_dir: str,
     file_findings: bool,
     registry: str | None = None,
+    tmux_socket: str | None = None,
 ) -> str:
     """Assemble the full prompt the regression runner hands to Claude.
 
@@ -115,12 +116,23 @@ def build_regression_test_prompt(
 
     *target* describes the clone (e.g. ``"`master` (commit `abc123`)"``); the
     paths are as the session sees them (``/workspace`` etc. in a container).
+
+    *tmux_socket* is the ``PM_TMUX_SOCKET`` a host-mode session keeps.  The
+    runner drops ``TMUX``, so a plain ``tmux`` command there goes to the
+    default server while ``pm`` uses that socket; the prompt says so.
     """
     if file_findings and not registry:
         raise ValueError("file_findings requires the registry path")
     where = ("inside a pm QA container" if in_container
              else "on the host (container mode is off)")
     addendum = _filing_addendum(registry) if file_findings else ""
+    socket_note = ""
+    if tmux_socket:
+        socket_note = (
+            f"\n\n`pm` commands here use the tmux server at `{tmux_socket}` "
+            "(`$PM_TMUX_SOCKET`). `$TMUX` is unset, so a plain `tmux` command "
+            "reaches a different server: run it as "
+            f"`tmux -S {shlex.quote(tmux_socket)} …`.")
     setup = _recipe_lines(
         setup_recipes,
         "(none in this project's library — set the project up as the test "
@@ -143,7 +155,7 @@ with a setup recipe, then drive and capture with the capture recipes. It is
 never the user's own pm project or a pm/tmux session you did not start: run
 `pm` from the disposable project, start any pm session you need from there,
 pass that session's name explicitly to `pm tui` commands (`-s <session>`),
-and leave every other session alone.
+and leave every other session alone.{socket_note}
 
 ## Recipes
 

@@ -75,6 +75,16 @@ def test_host_mode_says_so():
     assert "`/h/clone`" in out
 
 
+def test_host_tmux_socket_is_named_for_plain_tmux():
+    """Host mode drops TMUX but keeps PM_TMUX_SOCKET: pm uses that server,
+    a plain tmux command would not, so the prompt names the socket."""
+    out = _prompt(in_container=False, tmux_socket="/tmp/my socks/s.sock")
+    assert "tmux server at `/tmp/my socks/s.sock`" in out
+    assert "`tmux -S '/tmp/my socks/s.sock' …`" in out
+    # Nothing to say without one (the default server is used throughout).
+    assert "tmux -S" not in _prompt(in_container=False)
+
+
 def test_empty_recipe_libraries_are_stated():
     out = _prompt(setup_recipes=[], capture_recipes=[])
     assert "(none in this project's library" in out

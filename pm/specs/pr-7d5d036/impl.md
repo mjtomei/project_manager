@@ -68,7 +68,12 @@ Change:
   - Container mode disabled: runs on the host in the clone (the documented
     non-container QA fallback), with `PM_PROJECT`/`PM_SESSION` scrubbed from
     the session environment so `pm` commands inside the disposable project
-    cannot resolve to the user's project.
+    cannot resolve to the user's project. `TMUX`, `TMUX_PANE`,
+    `PM_POPUP_SESSION` and `PM_IN_TMUX_SESSION` are scrubbed too
+    (`_REGRESSION_SCRUBBED_ENV`, 634a4c05): pm resolves "the current pm
+    session" from `$TMUX_PANE` before the cwd, so a `pm session` the test
+    started in its own project reused and rebalanced the user's session
+    (QA S12, R28).
   - No pm session is required. The old `--session/-s` option is kept,
     hidden, only so existing invocations still parse: it is ignored with
     a note on stderr, because a regression run never targets a pm session.
@@ -260,6 +265,10 @@ No [UNRESOLVED] items.
 - E11: Host mode (container mode off) shares the user's tmux server, as QA
   host scenarios do. The prompt requires explicit `-s <session>` and forbids
   driving sessions the test did not start. Container mode is the boundary.
+  `PM_TMUX_SOCKET` is kept, but with `TMUX` scrubbed a plain `tmux` command
+  ignores it and reaches the default server, while `pm` uses the socket. So
+  when it is set, the host-mode prompt names it and tells the session to run
+  plain tmux as `tmux -S <socket>` (`tmux_socket`, review a1f7 i1).
 - E12: Standalone pm repo (`pm init --dir`, project.yaml at the root of a
   repo that holds only pm state). The code repo to clone is resolved with the
   shared `cli.helpers._resolve_repo_dir` (the parent of an in-repo `pm/` dir,

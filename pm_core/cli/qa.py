@@ -313,7 +313,9 @@ def qa_edit(instruction_id: str, category: str | None):
 # makes commands such as ``pm pr merge`` open windows in that session, and
 # ``PM_POPUP_SESSION`` names it when the run is started from a popup.  Host
 # mode still shares the user's tmux server (``PM_TMUX_SOCKET`` is kept); the
-# session's own pm commands just behave as they do outside tmux.
+# session's own pm commands just behave as they do outside tmux.  Without
+# ``TMUX`` a plain ``tmux`` command ignores that socket and reaches the
+# default server, so the prompt names the socket (``tmux_socket``).
 _REGRESSION_SCRUBBED_ENV = ("PM_PROJECT", "PM_SESSION", "TMUX", "TMUX_PANE",
                             "PM_POPUP_SESSION", "PM_IN_TMUX_SESSION")
 
@@ -510,6 +512,10 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
             captures_dir=captures_in,
             file_findings=file_prs,
             registry=registry_in if file_prs else None,
+            # Host mode keeps it (and drops TMUX): name it so the
+            # session's plain tmux commands reach the same server as pm.
+            tmux_socket=(None if use_containers
+                         else os.environ.get("PM_TMUX_SOCKET")),
         )
         if use_containers:
             cname = container_mod.qa_container_name(

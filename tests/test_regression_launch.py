@@ -194,8 +194,10 @@ def test_host_run_is_isolated_and_needs_no_pm_session(project, home,
     for var in ("TMUX", "TMUX_PANE", "PM_POPUP_SESSION",
                 "PM_IN_TMUX_SESSION"):
         assert var not in args[2], var
-    # Host mode still shares the user's tmux server.
+    # Host mode still shares the user's tmux server.  With TMUX gone a
+    # plain tmux command would miss it, so the prompt names the socket.
     assert args[2]["PM_TMUX_SOCKET"] == "/tmp/shared.sock"
+    assert "`tmux -S /tmp/shared.sock …`" in prompt
     spies.create.assert_not_called()
     # pm run from the clone uses this pm_core, as in QA scenarios.
     (override,) = _clone_overrides(home)
@@ -232,10 +234,12 @@ def test_host_run_files_findings_into_the_project_registry(project, home):
     assert f"pm -C {project.root} pr add '<title>' --plan bugs" in prompt
 
 
-def test_container_run_uses_a_qa_container(project, home):
+def test_container_run_uses_a_qa_container(project, home, monkeypatch):
     """Container mode on and healthy: the session runs inside its QA
     container via exec; no push proxy; the registry is not mounted
     unless findings are filed."""
+    # The host's tmux server is not reachable from the container.
+    monkeypatch.setenv("PM_TMUX_SOCKET", "/tmp/shared.sock")
     result, spies = _run_regression(project, ["demo"],
                                     container_enabled=True)
     assert result.exit_code == 0, result.output
@@ -260,6 +264,7 @@ def test_container_run_uses_a_qa_container(project, home):
     assert "`/scratch/qa-instructions/setup.md`" in prompt
     assert "\n    /pm-captures\n" in prompt
     assert "/pm-captures/demo" not in prompt
+    assert "/tmp/shared.sock" not in prompt
     (captures,) = _run_captures(home)
     assert captures.parent.name == run_id
 

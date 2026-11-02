@@ -127,7 +127,11 @@ project's setup recipes (`pm/qa/instructions/`) and capture recipes
   cannot be created, the run stops with an error. It never falls back
   to the host.
 - **Container mode off**: the session runs on the host in the clone,
-  which is the same fallback QA scenarios use.
+  which is the same fallback QA scenarios use. Its environment drops the
+  variables that point `pm` at your project or pm session (`PM_PROJECT`,
+  `PM_SESSION`, `TMUX`, `TMUX_PANE` and the like), so `pm` in the run
+  behaves as it does outside tmux. A `PM_TMUX_SOCKET` is kept, and the
+  prompt tells the session to pass it to plain `tmux` commands with `-S`.
 
 The test target is a **disposable project** the session creates in the
 scratch dir with a setup recipe, then drives and captures with the
@@ -183,7 +187,7 @@ title: TUI startup renders PR tree
 description: Verify the TUI comes up and the dependency tree displays
 ---
 You are a careful tester. Create a disposable pm project in the
-scratch dir (see the `throwaway-pm-test-project` setup recipe), start
+scratch dir with a setup recipe from the Recipes list above, start
 a `pm session` from it, and verify:
 
 - The TUI renders without error.
