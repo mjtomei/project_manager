@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T11:02:04.201222+00:00'
+  updated_at: '2026-11-02T11:03:11.834775+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -26060,6 +26060,32 @@ prs:
       before j/Enter. Captures: /pm-captures/scenarios/27/.'
     created_at: '2026-11-02T11:02:04Z'
     last_edited: '2026-11-02T11:02:04Z'
+  - id: note-a089f33
+    text: 'QA S28 refiner (2026-11-02, live at 4126cee0 = merged 7518aa8a code; branch
+      code unchanged through 431504a2): R41 FAILS. A container-mode regression run
+      on a router default provider (r-ctr, api_base http://127.0.0.1:<port>) dies
+      at the bridge step, on both the CLI and TUI Enter: ''pm route: route ''r-ctr''
+      socket /run/pm-route/router.sock is not mounted in this container. Remedy: ...''.
+      The stand-in never starts, the host server gets no request, and the CLI pane
+      prints rc=0. pm provider test r-ctr --container passes and leaves the host bridge
+      running. Even with that bridge up, the regression run still fails, because cli/qa.py
+      qa_regression calls create_qa_container with no route_mounts. A scratch-copy
+      prototype (not on the branch) that passes route_mounts=router_route.container_mounts(ModelResolution(provider=get_provider(None).name),
+      strict=True) for a router default made R41 and R43 hold live: two same-second
+      runs got distinct names, workdirs and captures, both mounted ~/.pm/route-bridge/r-ctr
+      at /run/pm-route behind one host bridge, and the survivor''s request reached
+      the server after the other container was removed. Fail-closed (docker runtime,
+      missing image), p-env token by name only (-e PM_QA_SECRET; the token is in no
+      argv, header, prompt.md or ~/.pm/debug log), the /pm-project ro overlay, and
+      the no-model router in container mode (''...could not be set up: provider ''r-ctr'':
+      no model configured. Remedy: ...'', rc 1, nothing left) all held. Traps: pm
+      bind-mounts the host PATH''s claude at /usr/local/bin/claude, so put the stand-in
+      on the host PATH, not in the image. ''pm provider edit --clear model'' is refused
+      for a router, so delete the model line in ~/.pm/providers.yaml. Check the TUI
+      cursor reads ''demo: Demo'' before Enter. The slim image has no ps. Helpers,
+      the prototype diff and rehearsal evidence are in /pm-captures/scenarios/28/refiner-helpers.'
+    created_at: '2026-11-02T11:03:11Z'
+    last_edited: '2026-11-02T11:03:11Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
