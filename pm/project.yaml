@@ -33039,7 +33039,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-11-02T02:24:43.719441+00:00'
+  updated_at: '2026-11-02T21:37:04.053766+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33072,6 +33072,38 @@ prs:
       wait-for-merge remains required.'
     created_at: '2026-11-02T02:24:43Z'
     last_edited: '2026-11-02T02:24:43Z'
+  - id: note-ce97911
+    text: 'QA scenario 4 refinement (concurrent actors / state remedies): three draft
+      remedies have NO user-surface entry point and cannot be driven — (1) qa_loop_ui.stop_qa''s
+      ''No QA running for <id> — start with pr qa <id> (TUI: t)'' (stop_qa has no
+      caller; zz t starts a loop instead); (2) review_loop_ui._stop_loop''s ''No review
+      loop running … review-loop <id> … one-shot review, not a loop'' (only stop_loop_for_pr,
+      which has no caller; zz d always starts a loop); (3) watcher_ui.start_watcher''s
+      ''Watcher <type> is already running — see pm watcher stop <type>'' (ws toggles
+      and stops instead; the message is only reachable from an internal second start,
+      e.g. breadcrumb resume). Scenario 4 was refined to the reachable subset: no-workdir
+      review-loop remedy, double-submit already-running QA remedy, t-focus, held remedy,
+      loop-key wording, two-client fresh+plain picker race with a #42 display id,
+      and the command-bar Busy guard. Note for the worker: the fixture needs gh_pr_number:
+      42 on the in_review PR (bootstrap edit) so qa-#42 windows exist; export PM_PROJECT=<test>/pm
+      before pm session so popup spinner state_root() resolves the project when the
+      popup cwd is a workdir.'
+    created_at: '2026-11-02T20:50:03Z'
+    last_edited: '2026-11-02T20:50:03Z'
+  - id: note-38926c0
+    text: 'QA scenario 4 (concurrent actors / remedies) PASS. Fixture gotchas for
+      the next run: (1) the PR-action picker z/zz chord path needs fzf — the no-fzf
+      fallback is a line menu with no chords; install an fzf static binary (aarch64
+      in this container) on the popup PATH before the two-client race. (2) A pre-existing
+      QA spec (pm/specs/<PR>/qa.md) is required because the scripted fake planner
+      writes none in Step 0. (3) The scenario''s single-burst `tmux send-keys … Enter
+      … Enter` races the command bar focus hand-off (first Enter swallowed or characters
+      interleaved); at human typing speed it works, and the focus-independent TUI
+      queue (submit_tui_command, the same handle_command_submitted path the picker
+      uses) reliably shows the back-to-back already-running/Busy remedies. Captures:
+      /pm-captures/scenarios/4/{story6-two-client-race,tui-remedies}.'
+    created_at: '2026-11-02T21:37:03Z'
+    last_edited: '2026-11-02T21:37:03Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
