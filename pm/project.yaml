@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-02T07:10:55.444424+00:00'
+  updated_at: '2026-11-02T08:20:22.258188+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48453,6 +48453,22 @@ prs:
       integrate R --record before writing a second report. Captures: /pm-captures/scenarios/70/.'
     created_at: '2026-11-02T07:10:55Z'
     last_edited: '2026-11-02T07:10:55Z'
+  - id: note-ed35028
+    text: 'Sign-off SIGNOFF_IMPL integration done (no code work): merged master@5b352d16
+      (#283 pr-5ec411c effort, worker_route->router_route rename; #293 pr-3d3b3ce)
+      as f77a9ebc. pm/project.yaml conflicted only on appended records and was resolved
+      by record id with this PR resolver (10 records from the PR, 2 from the base,
+      594 total, 22 plans, none lost, no duplicates); the merge tree equals the sign-off
+      candidate tree 10f35bdf. pm_core/cli/pr.py auto-merged (master pr_model_set
+      effort warning only). No new project.yaml behaviour key from the base (effort/session_effort
+      already summarised; providers.yaml is host config). Full suite on the merged
+      tree: 5871 passed, 1 skipped, 0 failed. Spec section added (c06ad6a3). Kept
+      uncommitted: the user model/effort switch and note-3e35aa1 in pm/project.yaml,
+      qa.md R19/R20, verify-s51-followup.md. Evidence reuse stands per the sign-off
+      reason (review 48dd i10 + QA S65-S70 at 62705458, code unchanged since 6ed6c31f);
+      next sign-off only binds to the merged head.'
+    created_at: '2026-11-02T08:20:22Z'
+    last_edited: '2026-11-02T08:20:22Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
