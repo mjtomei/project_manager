@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T14:48:21.856061+00:00'
+  updated_at: '2026-11-02T15:05:22.570175+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40229,6 +40229,24 @@ prs:
       /pm-captures/pr-8020495/s67-refiner (main.sh, an3.py).'
     created_at: '2026-11-02T14:46:27Z'
     last_edited: '2026-11-02T14:46:27Z'
+  - id: note-e5c205d
+    text: 'QA S67 (2026-11-02) PASS on dcfcae77f (app f5d778bf3), no code edits: refiner
+      drivers re-run unattended in env -i sandbox /scratch/s67 (bootstrap.sh + main.sh;
+      captures/README /pm-captures/scenarios/67). Race hit both first try (X start
+      +3.11 s, Y +4.48 s after loops). Round 1: 1384 reader calls clean, own journal
+      dirs, no cross-project ids/owners; S start no-start -> untracked -> running+merged,
+      never two rows, own pane session ids; XD .1 rename 2.4 s into loop 3b26, count
+      never dipped; XB up to 2, wall<sum; medians 0.08-0.10 s (XD 0.101 vs S 0.088).
+      Kill 2.9 s into X S loop 3719 (grace 19.3 s left): S 34/34+9/9 interrupted owner-exited
+      + stale runtime + grace lost; XD (d6a95eaf) 21/21+10/10 start interrupted, start=idle
+      (stale: owner exited), Waiting for nothing, then swept; YC (E12) 13/13+10/10
+      start running, Now agent turn finished, start=idle not stale; gate elapsed->re-armed;
+      resumed XB s6 PASS; typed loop 0cd5 new PASS; Y loop 7815 + YC qa-run-bg run
+      untouched; 530 lines/191 ids, no Traceback. Harness note: R1 (0.5 s, 2 PRs)
+      can miss the loop-done/untracked shape when the next tick re-tracks within ~0.4
+      s of loop end (R2/R3 caught it).'
+    created_at: '2026-11-02T15:05:22Z'
+    last_edited: '2026-11-02T15:05:22Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
