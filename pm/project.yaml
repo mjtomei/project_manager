@@ -33279,65 +33279,92 @@ prs:
     last_edited: '2026-05-25T22:43:57Z'
 - id: pr-fa9f172
   plan: improvements
-  title: 'Self-documenting + consistent pm commands: complete --help, actionable errors,
-    unified flags'
+  title: 'Self-documenting + consistent pm commands: complete --help, actionable errors, unified
+    flags'
   branch: pm/pr-fa9f172-self-documenting-consistent-pm-commands-complete-h
   status: pending
   depends_on: []
-  description: 'Make pm''s command surface self-documenting so an operator — human
-    OR a driving Claude session — can go from "I know the task" to "I know the exact
-    command" without reading source. Motivating failure: restarting QA needed `pr
-    qa fresh <id>`, but `pm pr qa --help` didn''t list the `fresh` mode, and `--fresh`
-    is a flag on `pr start`/`pr review` yet a positional mode on `qa` — so the restart
-    path was undiscoverable and led to a workaround (rm + TUI-restart). The absence
-    in help is the bug.
+  description: 'Make pm''s command surface self-documenting so an operator — human OR a driving
+    Claude session — can go from "I know the task" to "I know the exact command" without reading
+    source. Motivating failure: restarting QA needed `pr qa fresh <id>`, but `pm pr qa --help`
+    didn''t list the `fresh` mode, and `--fresh` is a flag on `pr start`/`pr review` yet a
+    positional mode on `qa` — so the restart path was undiscoverable and led to a workaround
+    (rm + TUI-restart). The absence in help is the bug.
 
 
     THREE CHANGES:
 
-    1. Complete + accurate --help for every command/subcommand. Each command lists
-    ALL its real subcommands/modes/options (e.g. `pr qa` must show the `fresh` mode),
-    and shows the CLI <-> command-bar <-> TUI-keybinding equivalents where they exist
-    (e.g. "fresh restart = `pr qa fresh <id>` = TUI `z t`"). The command-bar help
-    should match.
+    1. Complete + accurate --help for every command/subcommand. Each command lists ALL its
+    real subcommands/modes/options (e.g. `pr qa` must show the `fresh` mode), and shows the
+    CLI <-> command-bar <-> TUI-keybinding equivalents where they exist (e.g. "fresh restart
+    = `pr qa fresh <id>` = TUI `z t`"). The command-bar help should match.
 
 
-    2. Self-documenting error messages. Every "wrong state / already running / must
-    use the TUI / not found / needs --flag" error names the EXACT corrective command
-    (and TUI/keybinding equivalent). E.g. "QA already running for <id> — restart with
-    `pr qa fresh <id>` (TUI: select the PR, press z t)." Generalizes pr-7ab0a99''s
-    principle (surface remediation in the error) to all user-facing errors.
+    2. Self-documenting error messages. Every "wrong state / already running / must use the
+    TUI / not found / needs --flag" error names the EXACT corrective command (and TUI/keybinding
+    equivalent). E.g. "QA already running for <id> — restart with `pr qa fresh <id>` (TUI:
+    select the PR, press z t)." Generalizes pr-7ab0a99''s principle (surface remediation in
+    the error) to all user-facing errors.
 
 
-    3. Consistent flags/verbs across `pr start` / `pr review` / `pr qa` / `pr merge`.
-    Same concept -> same flag: accept `--fresh` everywhere (so `pr qa <id> --fresh`
-    ≡ `pr qa fresh <id>`); align verb/option naming. Reduces wrong guesses.
+    3. Consistent flags/verbs across `pr start` / `pr review` / `pr qa` / `pr merge`. Same
+    concept -> same flag: accept `--fresh` everywhere (so `pr qa <id> --fresh` ≡ `pr qa fresh
+    <id>`); align verb/option naming. Reduces wrong guesses.
 
 
     ALSO: sweep the whole command surface (CLI + command-bar) for additional inconsistencies
-    and out-of-date / inaccurate help text and fix them. (Ongoing detection of this
-    drift is the job of the regression test in [SIBLING]: plan-regression help-consistency
-    regression.)
+    and out-of-date / inaccurate help text and fix them. (Ongoing detection of this drift
+    is the job of the regression test in [SIBLING]: plan-regression help-consistency regression.)
 
 
-    Known inconsistency to fix as part of this: the plan is named `improvements` but
-    docs/prompts/plans refer to `plan=ux` (e.g. the watchers plan, the improvement-fix
-    watcher) — reconcile to one name.
+    Known inconsistency to fix as part of this: the plan is named `improvements` but docs/prompts/plans
+    refer to `plan=ux` (e.g. the watchers plan, the improvement-fix watcher) — reconcile to
+    one name.
 
 
     Files: pm_core/cli/* (help strings + error messages), pm_core/tui/pr_view.py (command-bar
-    parsing + errors), keeping CLI / command-bar / TUI in sync. Tests: help lists
-    each command''s modes/flags; key error paths include a corrective command; --fresh
-    accepted on start/review/qa/merge.'
+    parsing + errors), keeping CLI / command-bar / TUI in sync. Tests: help lists each command''s
+    modes/flags; key error paths include a corrective command; --fresh accepted on start/review/qa/merge.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-05-25T23:07:46.493552+00:00'
+  updated_at: '2026-11-02T02:24:43.719441+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-b6a37bf
+    text: 'User approved starting this CLI consistency improvement. Reconcile the older description
+      against current implemented commands before changing behavior. In particular, current
+      pm pr qa directs users to the TUI; pm qa run is a separate interface. Do not blindly
+      add the obsolete pr qa fresh syntax, resurrect removed review-loop stop/all-PR-autostart
+      paths, or invent --fresh semantics merely for uniform spelling. Cover accurate CLI and
+      command-bar help, actionable corrective errors and consistent options where their behavior
+      really matches. Preserve compatibility and existing command authority, manual merge/spec
+      gates and target isolation. Coordinate with #278 targeting, #260 reimplementation handoff
+      and #244 status presentation without duplicating their lifecycle changes. Current plan
+      names and descriptions, rather than stale ux references, are authoritative. No additional
+      hard prerequisite was identified for this scoped help/error/consistency work.
+
+
+      Routing authorized 2026-11-02: use DeepSeek Flash 1017/high for implementation, review,
+      QA and helpers because the current main-account usage pace approaches exhaustion tomorrow
+      morning; retain MAIN-account Opus5.5/xhigh for sign-off. This overrides the earlier
+      proposed all-main routing for this PR only. Start from current master and leave ordinary
+      implementation handoff/review/QA to PM. Use isolated containers, test projects, HOME/settings
+      and tmux servers; never drive the live user PM session or shared host configuration.
+      Preserve unrelated source, dirty files, stashes, drafts and evidence. No force push,
+      master reset/deletion, PR merge, spec approval, unrelated launch or host fallback is
+      authorized. Manual wait-for-merge remains required.'
+    created_at: '2026-11-02T02:24:43Z'
+    last_edited: '2026-11-02T02:24:43Z'
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    signoff: provider:claude-main-xhigh-pm
+  session_effort:
+    signoff: high
 - id: pr-71e9ec7
   plan: bugs
   title: 'Bug: review-window diff pane pipes through `less -R` with no fallback —
@@ -53699,3 +53726,57 @@ prs:
     last_edited: '2026-11-02T01:59:09Z'
   model: provider:claude-main-xhigh-pm
   effort: high
+- id: pr-5f30bdf
+  plan: improvements
+  title: 'Hardening after #249: providers.yaml lock timeout + set-default re-check under lock;
+    model popup textual>=2 pin'
+  branch: pm/pr-5f30bdf-hardening-after-249-providers-yaml-lock-timeout-se
+  status: pending
+  depends_on: []
+  description: 'Found at sign-off of #249 (pr-592e4bd), HEAD 49bbc7e4; non-blocking. (1) pm
+    provider default X racing pm provider remove X: cli/provider.py ~417 validates the name
+    outside the providers.yaml lock, then providers.set_default_provider writes default: X
+    after remove deleted X — re-check the name inside the locked update. (2) providers.py
+    ~566-580: the flock has no timeout (a stuck holder blocks every edit forever) and an unwritable
+    ~/.pm raises a traceback instead of one Error: line. (3) tui/model_screen.py ~194 imports
+    textual.markup.to_content, which exists only in textual 2.x+, while pyproject.toml declares
+    textual>=0.40 — on an older install opening the TUI o popup raises ImportError; pin textual>=2
+    or guard the import.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T02:46:55.100157+00:00'
+  updated_at: '2026-11-02T02:24:48.894904+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-dd6ad69
+    text: 'User approved starting this bounded provider-hardening PR. Confirm and fix the
+      current providers.yaml unbounded flock, actionable errors for unwritable state, and
+      set-default/remove race by rechecking provider existence under the same lock. Preserve
+      merged credential-file 0600 and atomic-save protections. Reconcile the Textual to_content
+      import with the supported dependency floor or safe compatibility path; validate against
+      the actual relevant API. #283 has nearby reasoning/model configuration changes: preserve
+      its interfaces and integrate it if merged, without taking over its scope. Use isolated
+      HOME/PM settings and synthetic data; never mutate real provider credentials/settings
+      in tests. No additional hard prerequisite was identified.
+
+
+      Routing authorized 2026-11-02: use DeepSeek Flash 1017/high for implementation, review,
+      QA and helpers because the current main-account usage pace approaches exhaustion tomorrow
+      morning; retain MAIN-account Opus5.5/xhigh for sign-off. This overrides the earlier
+      proposed all-main routing for this PR only. Start from current master and leave ordinary
+      implementation handoff/review/QA to PM. Use isolated containers, test projects, HOME/settings
+      and tmux servers; never drive the live user PM session or shared host configuration.
+      Preserve unrelated source, dirty files, stashes, drafts and evidence. No force push,
+      master reset/deletion, PR merge, spec approval, unrelated launch or host fallback is
+      authorized. Manual wait-for-merge remains required.'
+    created_at: '2026-11-02T02:24:48Z'
+    last_edited: '2026-11-02T02:24:48Z'
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    signoff: provider:claude-main-xhigh-pm
+  session_effort:
+    signoff: high
