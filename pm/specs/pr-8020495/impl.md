@@ -174,7 +174,10 @@ is polled without a grace, so none is armed).  Iteration ends: verdict →
 `done` with verdict; `PaneKilledError` → `vanished` (`cancelled` when the
 loop was stopped); `ReviewClosedError` → `cancelled` `CLOSED`;
 `ReviewHoldError` → `failed` `HOLD`; `ReviewLaunchError` → `failed`
-`LAUNCH_FAILED` (`superseded` when another loop owns the launch); other
+`LAUNCH_FAILED` (`superseded` when another loop owns the launch; the
+end detail is clipped to 300 characters but keeps a trailing
+`(artifact: <path>)` whole, `review_loop._history_end_detail`, QA S50
+2d8a84f7); other
 exceptions → `failed` `ERROR`; an exception none of those handlers
 catch (e.g. from the INPUT_REQUIRED follow-up wait) ends the iteration
 still open in `run_review_loop_sync`'s `finally` the same way
@@ -257,7 +260,9 @@ R7. **Holds** (indefinite timers, `due_t = null`, no countdown):
     covers HEAD).
   - Derived at query time, not journaled: `spec_pending` (project.yaml,
     armed at `generated_at`), QA INPUT_REQUIRED (runtime `qa` done +
-    INPUT_REQUIRED, unless a journaled QA hold is active), review HOLD
+    INPUT_REQUIRED, unless a journaled QA hold is active or a QA run
+    attempt is open: the runtime keeps the previous run's verdict until
+    the new run's scenarios launch, QA S52 626b1240), review HOLD
     (runtime `review-loop` `failed` + `HOLD`), sign-off BLOCKED
     (`pr["signoff"].verdict == SIGNOFF_BLOCKED`).
 
@@ -286,10 +291,12 @@ The model contains:
     `(stale: owner exited)`.
   - For parents with two or more scenario children: a `scenarios` dict
     with `count` (distinct scenarios), `attempts` (incl. retries),
-    `wall_s` (union of child execution intervals — a scenario's leading
-    `queued` wait is excluded), `sum_s` (explicitly labelled "not
-    wall-clock") and `max_concurrency` — the parent's own elapsed time is
-    never the sum.
+    `wall_s` (union of child execution intervals: a scenario's wait
+    spans — `queued`, `backoff`, `waiting_human` — are excluded wherever
+    they fall, since the loop frees a waiting scenario's slot; QA S52
+    626b1240), `sum_s` (the summed execution intervals, explicitly
+    labelled "not wall-clock") and `max_concurrency` (peak overlap of
+    those intervals) — the parent's own elapsed time is never the sum.
   - `timers`: `active` (owner alive, not cleared, due in future or
     indefinite) with `armed_at`, `due_at`, `remaining_s` (null for holds),
     `expected`; `overdue` (`fires` timers past due, owner alive); and
@@ -479,6 +486,15 @@ attempt rows uninterpreted (omitted when absent).
   one, and the kept attempt lists the folded ids as `merged_ids` in JSON
   so every journaled id resolves (QA S41, b29bcdfa).  A different session is a new attempt.  This removes the phantom
   "start untracked (5s)" rows seen in QA S4 without a runtime tombstone.
+  A review loop that starts before the first impl-idle tick after `s`
+  would leave the impl session with no `start` attempt (the tick skips
+  PRs with a running loop before registering their pane), so the tick
+  journals it once as opened-and-`untracked` while the loop runs
+  (`review_loop_ui._note_impl_start_before_loop`, observational only:
+  the pane is not tracked or polled); the post-loop registration folds
+  into it.  Noted sessions are kept per `(pr_id, session_id)` and checked
+  before any tmux lookup, since the tick runs on the TUI main thread
+  every 5 s of every running loop (QA S55 439b5927).
 - E9. Claude-resolved merge: when the TUI detects a merge window's
   `MERGED` verdict (`_finalize_detected_merge`) it records runtime
   `merge` `done` + `MERGED` before killing the window, so the merge

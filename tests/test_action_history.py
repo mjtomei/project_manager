@@ -134,6 +134,19 @@ class TestJournal:
         model = hq.build_history(PR, now=clock.t, live=False)
         assert model["attempts"] and hq.render_text(model)
 
+    def test_attempt_start_without_action_is_readable(self, clock):
+        # A damaged start line that still parses (no "action") must not
+        # raise out of the model build, whose QA-run check once indexed
+        # it directly; the row reads "?" like any unnamed attempt.
+        with open(ah.journal_path(PR), "a") as f:
+            f.write('{"kind": "attempt_start", "attempt": "x1", "t": %s}\n'
+                    % clock.t)
+        model = hq.build_history(PR, pr={"status": "qa"}, now=clock.t,
+                                 live=False)
+        (row,) = model["attempts"]
+        assert row["name"] == "?"
+        assert hq.render_text(model) and hq.summary_badge(model)
+
     def test_append_after_truncated_last_line_is_not_lost(self, clock):
         # A crash mid-write leaves a partial line with no trailing newline;
         # the next event must start on its own line, not be glued onto it.
@@ -621,9 +634,14 @@ class TestRuntimeCapture:
         monkeypatch.setattr("pm_core.tmux.pane_start_command",
                             lambda pane: f"claude --session-id {sid}")
         monkeypatch.setattr("pm_core.tmux.pane_exists", lambda pane: True)
-        monkeypatch.setattr(
-            review_loop_ui, "_find_impl_pane",
-            lambda session, name: "%3" if name == PR else None)
+        lookups = []
+
+        def _find(session, name):
+            if name == PR:  # impl window (the merge pass looks up others)
+                lookups.append(name)
+                return "%3"
+            return None
+        monkeypatch.setattr(review_loop_ui, "_find_impl_pane", _find)
         loop = SimpleNamespace(running=True)
         app = SimpleNamespace(
             _session_name="sess", _pane_idle_tracker=PaneIdleTracker(),
@@ -646,15 +664,21 @@ class TestRuntimeCapture:
             assert not rs.get_action_state(PR, "start")
             # Observational only: the pane is not tracked during the loop.
             assert not app._pane_idle_tracker.is_tracked(PR)
+            # The main-thread tick looks the pane up once per session, not
+            # on every tick of the loop.
+            assert lookups == [PR]
             loop.running = False
             review_loop_ui._poll_impl_idle(app)
             assert app._pane_idle_tracker.is_tracked(PR)
             assert rs.get_action_state(PR, "start")["state"] == "running"
-            # A second loop on the same pane does not journal it again.
+            # A second loop on the same pane does not journal it again,
+            # and costs no tmux lookup.
             loop.running = True
+            n = len(lookups)
             for _ in range(2):
                 review_loop_ui._poll_impl_idle(app)
                 clock.advance(5)
+            assert len(lookups) == n
         starts = [a for a, e in _attempts().items() if e["action"] == "start"]
         assert len(starts) == 2
         (row,) = [a for a in hq.build_history(

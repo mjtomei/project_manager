@@ -1398,6 +1398,14 @@ def _transcript_is_another_session(app, pane_id: str,
     return True
 
 
+def _impl_start_noted(app) -> set[tuple[str, str]]:
+    """``(pr_id, session_id)`` of impl sessions whose start is journaled."""
+    noted = getattr(app, "_impl_start_noted", None)
+    if not isinstance(noted, set):
+        noted = app._impl_start_noted = set()
+    return noted
+
+
 def _note_impl_start_before_loop(app, session: str, pr: dict) -> None:
     """Journal an impl session a review loop took over before PM tracked it.
 
@@ -1420,23 +1428,28 @@ def _note_impl_start_before_loop(app, session: str, pr: dict) -> None:
         _runtime_mirror_register, _runtime_mirror_clear)
     from pm_core import runtime_state as _rs
 
+    # This runs on the main thread every tick a loop runs: the cheap
+    # filesystem checks come first, and a noted session costs no tmux call
+    # (e.g. every tick of a loop whose impl pane PM tracked before it).
     pr_id = pr.get("id", "")
-    noted = app.__dict__.setdefault("_impl_start_noted", set())
-    pane_id = _find_impl_pane(session, _pr_display_id(pr))
-    if not pane_id or (pr_id, pane_id) in noted:
-        return
     tdir = _auto_start.get_transcript_dir(app)
     if not tdir:
         return
     impl_transcript = str(tdir / f"impl-{pr_id}.jsonl")
     if not os.path.lexists(impl_transcript):
         return  # not launched by this TUI with a transcript (e.g. CLI start)
-    noted.add((pr_id, pane_id))
-    if not pane_runs_transcript(pane_id, pr.get("workdir"), impl_transcript):
-        return  # another driver's pane (S79): not ours to journal
     session_id = session_id_from_transcript(impl_transcript)
     if not session_id:
         return
+    noted = _impl_start_noted(app)
+    if (pr_id, session_id) in noted:
+        return
+    pane_id = _find_impl_pane(session, _pr_display_id(pr))
+    if not pane_id:
+        return  # window not up yet: look again next tick
+    noted.add((pr_id, session_id))
+    if not pane_runs_transcript(pane_id, pr.get("workdir"), impl_transcript):
+        return  # another driver's pane (S79): not ours to journal
     cur = _rs.get_action_state(pr_id, "start") or {}
     if cur.get("state") in _rs.IN_FLIGHT_STATES:
         return  # already open (e.g. still mirrored by an earlier tick)
@@ -1520,8 +1533,10 @@ def _poll_impl_idle(app) -> None:
                 continue
             # Its start is journaled now; a later review loop must not
             # note it again (_note_impl_start_before_loop).
-            app.__dict__.setdefault("_impl_start_noted", set()).add(
-                (pr_id, pane_id))
+            from pm_core.claude_launcher import session_id_from_transcript
+            sid = session_id_from_transcript(impl_transcript)
+            if sid:
+                _impl_start_noted(app).add((pr_id, sid))
 
         tracker.poll(pr_id)
 

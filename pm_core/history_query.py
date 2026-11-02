@@ -124,7 +124,7 @@ def build_history(pr_id: str, *, pr: dict | None = None,
                             journaled={t["timer"].split(":", 1)[0]
                                        for t in holds},
                             qa_running=any(
-                                a["action"] == "qa" and a.get("open")
+                                a.get("action") == "qa" and a.get("open")
                                 and not a.get("_parent_obj")
                                 for a in attempts.values()))
     waiting_for = _waiting_for(holds, timer_rows, current, attempts)
