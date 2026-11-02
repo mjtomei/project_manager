@@ -5173,7 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-11-02T09:49:04.642106+00:00'
+  updated_at: '2026-11-02T10:08:07.368610+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5366,6 +5366,26 @@ prs:
       Filed as pr-588171e.'
     created_at: '2026-11-02T09:49:04Z'
     last_edited: '2026-11-02T09:49:04Z'
+  - id: note-b5f73f5
+    text: 'QA S17 run 2026-11-02 at 2022dc10 (code = d4ebdb22): PASS 8/8 live, isolated
+      HOME + private pm session with TUI and fake-claude (captures /pm-captures/scenarios/17/{fixture,baseline,story1-8/{tui,cli},evidence}).
+      Browse left project.yaml sha and all 5 stale records untouched (mtime moved
+      only via active_pr), no lock/dir in W. s/d/i/t on A/B/C/Q each re-linked the
+      original clone (log line, record updated, no 2nd clone): A impl window kept
+      porcelain/stash/HEAD identical; B review window 2 panes in the clone; C sign-off
+      logged integration up_to_date head=<clone HEAD 8> and integration.json head
+      = clone HEAD, no "no PR workdir"; in-clone `pm pr signoff integrate C` from
+      a split of the sign-off window: rc 0, empty stderr, clone clean, both yamls
+      unchanged; Q QA scenario clones s-0/s-1 cloned from the Q clone, QA PASS ~1m55s.
+      D with 2 verified clones: d/i name the ambiguity on the message line + log with
+      no window, t ends ERROR in 0.44 s with the QA aborted listing, record stays
+      stale, no .tmp-; after moving the twin aside i opened signoff-D in the remaining
+      clone (re-link + up_to_date head=7d4b6d5b), W unchanged. Driving observations
+      only: card order changes after a launch (A moved to the left end), and with
+      the L pane open (79 cols) the cards wrap into rows so Left/Right paths differ;
+      check the ╔ card before each key.'
+    created_at: '2026-11-02T10:08:07Z'
+    last_edited: '2026-11-02T10:08:07Z'
 - id: pr-0778fbe
   plan: plan-003
   title: Add PR ownership tracking with workdir history
