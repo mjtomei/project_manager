@@ -74,6 +74,7 @@ class Host(App):
     action_fuzzy_next = ProjectManagerApp.action_fuzzy_next
     action_fuzzy_prev = ProjectManagerApp.action_fuzzy_prev
     _command_bar_in_use = ProjectManagerApp._command_bar_in_use
+    _focus_current_view = ProjectManagerApp._focus_current_view
     # Key order behind a command-bar Enter (and the release after submit).
     on_event = ProjectManagerApp.on_event
     _dispatch_terminal_key = ProjectManagerApp._dispatch_terminal_key
@@ -599,6 +600,29 @@ async def test_no_match_from_plans_view_stays_in_plans(project):
         app._qa_visible = True
         await _cmd(app, pilot, "pr select")
         assert app.focused is app.query_one("#qa-pane")
+
+
+@pytest.mark.parametrize("view, pane", [
+    ("plans", "#plans-pane"), ("qa", "#qa-pane"), (None, "#tech-tree")])
+def test_escape_from_command_bar_focuses_current_view(project, view, pane):
+    """``_focus_current_view`` is shared by Esc in the command bar and the
+    select commands: both land on the visible view's widget."""
+    @async_test
+    async def run():
+        app = _app(project)
+        async with app.run_test(size=(160, 50)) as pilot:
+            await pilot.pause()
+            app._plans_visible = view == "plans"
+            app._qa_visible = view == "qa"
+            bar = app.query_one("#command-bar", CommandBar)
+            bar.focus()
+            bar.value = "pr sel"
+            await pilot.pause()
+            ProjectManagerApp.action_unfocus_command(app)
+            await pilot.pause()
+            assert bar.value == ""
+            assert app.focused is app.query_one(pane)
+    run()
 
 
 @async_test

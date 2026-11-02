@@ -59,16 +59,6 @@ def handle_select_command(app, kind: str, query: str) -> None:
         handle_plan_select(app, query)
 
 
-def focus_current_view(app) -> None:
-    """Return focus to the visible view's main widget."""
-    if app._plans_visible:
-        app.query_one("#plans-pane").focus()
-    elif app._qa_visible:
-        app.query_one("#qa-pane").focus()
-    else:
-        app.query_one("#tech-tree").focus()
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

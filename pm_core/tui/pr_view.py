@@ -653,7 +653,7 @@ def handle_command_submitted(app, cmd: str) -> None:
     if select_cmd is not None:
         kind, query = select_cmd
         fuzzy_select_cmd.handle_select_command(app, kind, query)
-        fuzzy_select_cmd.focus_current_view(app)
+        app._focus_current_view()
         return
 
     parts = shlex.split(cmd)

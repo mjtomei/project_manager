@@ -1789,12 +1789,17 @@ class ProjectManagerApp(App):
         cmd_bar = self.query_one("#command-bar", CommandBar)
         if cmd_bar.has_focus:
             cmd_bar.value = ""
-            if self._plans_visible:
-                self.query_one("#plans-pane", PlansPane).focus()
-            elif self._qa_visible:
-                self.query_one("#qa-pane", QAPane).focus()
-            else:
-                self.query_one("#tech-tree", TechTree).focus()
+            self._focus_current_view()
+
+    def _focus_current_view(self) -> None:
+        """Focus the visible view's main widget (plans pane, QA pane or
+        tree), e.g. when a command-bar command hands focus back."""
+        if self._plans_visible:
+            self.query_one("#plans-pane").focus()
+        elif self._qa_visible:
+            self.query_one("#qa-pane").focus()
+        else:
+            self.query_one("#tech-tree").focus()
 
     def action_show_help(self) -> None:
         _log.debug("action: show_help")

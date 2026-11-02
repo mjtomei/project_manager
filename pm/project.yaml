@@ -36681,11 +36681,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T05:08:39.944928+00:00'
-  updated_at: '2026-10-13T05:08:39.944928+00:00'
+  updated_at: '2026-11-02T05:34:35.194135+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-5fbd062
+    text: 'From pr-6aa74c6 review 0402 i1: ProjectManagerApp._focus_current_view()
+      (plans pane / QA pane / tree, whichever view is visible) now exists and is shared
+      by Esc in the command bar and the fuzzy pr/plan select branch of pr_view.handle_command_submitted.
+      Use it for the other focus restores in handle_command_submitted (autostart,
+      action-guard refusal, review-loop, edit, pr qa, generic tail) instead of adding
+      a new helper.'
+    created_at: '2026-11-02T05:34:35Z'
+    last_edited: '2026-11-02T05:34:35Z'
 - id: pr-291ed27
   plan: bugs
   title: 'Bug: TUI cursor ignores external pm pr select of the previously followed
@@ -36708,11 +36717,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T05:08:46.426074+00:00'
-  updated_at: '2026-10-13T05:08:46.426074+00:00'
+  updated_at: '2026-11-02T05:34:36.685747+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-beacec6
+    text: 'From pr-6aa74c6 review 0402 i1: keyboard navigation, fuzzy pr/plan select
+      and ]/[ cycling now all persist the selection through pr_view.persist_active_pr,
+      so set _followed_active_pr there. Land pr-dd3682f first (the sync reloads do
+      not flush the pending active_pr write): with followed = navigation target, every
+      reload that reads the stale disk value would snap the cursor back.'
+    created_at: '2026-11-02T05:34:36Z'
+    last_edited: '2026-11-02T05:34:36Z'
 - id: pr-7e0eec4
   plan: bugs
   title: 'Bug: container .claude.json copy ignores CLAUDE_CONFIG_DIR'
@@ -53651,6 +53668,38 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T04:00:50.977706+00:00'
   updated_at: '2026-11-02T04:00:50.977706+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-dd3682f
+  plan: bugs
+  title: 'Bug: TUI periodic sync reloads project.yaml without flushing the pending
+    active_pr write, snapping the cursor back'
+  branch: pm/pr-dd3682f-bug-tui-periodic-sync-reloads-project-yaml-without
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/sync.py background_sync() (store.load -> app._data
+    = data) and the reloads in do_normal_sync() (store.load / store.locked_update
+    after the GitHub sync). Unlike ProjectManagerApp._load_state, which calls self._write_queue.flush_sync()
+    before re-reading disk, these paths replace app._data while the WriteQueue may
+    still hold the 1.5 s debounced active_pr write from cursor navigation. _update_display
+    -> _follow_active_pr then sees the stale on-disk active_pr; when it differs from
+    _followed_active_pr the cursor snaps back to that earlier PR, while the queue
+    later writes the new PR to disk (display and project.yaml disagree until the next
+    reload). Repro (pr-6aa74c6 QA S4, reproduced live at 87a42088 with a plain Down
+    arrow, not fuzzy select): start the TUI (first background tick = start + 300 s);
+    let one navigation flush to disk (PR B), then press Down to PR C about 0.7 s before
+    a tick: the cursor jumps back to B with no keypress. Applies equally to fuzzy
+    pr select / ]/[ (pr_view.persist_active_pr). Expected: flush the write queue before
+    each sync reload, as _load_state does. Related: pr-291ed27 (setting _followed_active_pr
+    on navigation) is only safe once this is fixed, because otherwise every stale
+    reload would snap back.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T05:34:01.802707+00:00'
+  updated_at: '2026-11-02T05:34:01.802707+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

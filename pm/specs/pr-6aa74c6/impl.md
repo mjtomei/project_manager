@@ -177,12 +177,30 @@ Plan: `tui-ux`
 - I7 — View switching. The select commands and cycle keys switch from the
   plans or QA view to the tree view only when they actually navigate. On a
   usage error or no match, the current view stays and focus goes back to that
-  view's widget (plans pane, QA pane, or tree), as master's other command
-  branches do.
+  view's widget (plans pane, QA pane, or tree) through
+  `ProjectManagerApp._focus_current_view()`. Esc in the command bar
+  (`action_unfocus_command`) uses the same helper (review-loop 0402 i1).
+  master's other command branches return focus to the plans pane or the tree
+  only, never the QA pane. That is the pre-existing bug pr-adfdce3, which
+  has a note to reuse this helper.
 - I8 — Filter predicate parity. "Shown by the current filters" uses the same
   predicate as `tree_layout.compute_tree_layout`. It is factored into
   `tree_layout.passes_status_filter(pr, status_filter, hide_merged,
   hide_closed)` and used by both, so they cannot drift.
+- I9 — Key order behind a command-bar Enter. This was a QA S7 incidental fix
+  (`d6b2c29e`) for a pre-existing race; it is not fuzzy-select logic.
+  - The race: Textual submits an `Input` only after the Enter has bubbled
+    back up to the App, where Input's `enter` binding runs. Under a stream of
+    reloads, the App could meanwhile forward the next key to the still
+    focused bar, so `/pr select spec` Enter `]` submitted `pr select spec]`.
+  - The fix: `ProjectManagerApp.on_event` holds terminal (non-forwarded)
+    `Key` events that arrive while a command-bar Enter is in flight.
+    `on_command_submitted` replays them in order with `call_later`, after
+    the command's own focus change. A replayed Enter that goes to the bar
+    again starts a new hold. `HELD_KEYS_TIMEOUT` (3 s) releases the keys if
+    no `CommandSubmitted` arrives.
+  - `CommandBar` posts `CommandSubmitted` for an empty command too, so an
+    empty Enter also releases the hold. The app ignores the empty command.
 
 ## Ambiguities (resolved)
 
@@ -231,6 +249,21 @@ No **[UNRESOLVED]** items.
 - The command arrives via the SIGUSR2 queue while the user is typing:
   `_drain_command_queue` already restores command-bar focus.
 
+## Known pre-existing issues (filed, out of scope)
+
+QA found these on this branch. They are not caused by fuzzy select, and none
+of them blocks this PR.
+
+- pr-bda8833: hiding a plan with `x` moves the cursor but leaves `active_pr`
+  on the hidden PR (QA S4).
+- pr-dd3682f: `sync.background_sync` and `do_normal_sync` reload
+  `project.yaml` without the write-queue flush that `_load_state` does. A
+  pending `active_pr` from navigation, fuzzy select or `]`/`[` can therefore
+  be read back stale, and the cursor snaps back (QA S4 refiner note).
+- pr-291ed27: `_followed_active_pr` is not updated on navigation. Its fix now
+  belongs in `pr_view.persist_active_pr`, and it should land after
+  pr-dd3682f.
+
 ## Test plan
 
 - Unit (`tests/test_fuzzy_select.py`):
@@ -252,6 +285,11 @@ No **[UNRESOLVED]** items.
     view stays in plans.
   - `[`/`]` typed in the command bar do not cycle.
   - Unbalanced-quote and bracket queries work.
+  - I9: a `]` posted right behind a command-bar Enter cycles after the
+    select instead of joining the query. Keys held behind an empty Enter
+    are replayed into the bar.
+  - Esc in the command bar focuses the plans pane, the QA pane or the tree
+    (`_focus_current_view`).
 - Help screen markup test (R6).
 - Full suite once after the final edits, using the container recipe
   (`env -u PM_HOST_HOME PATH=/usr/bin:/bin`, `pytest<9`).
