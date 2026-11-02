@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T14:26:00.265523+00:00'
+  updated_at: '2026-11-02T14:48:21.856061+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40200,6 +40200,22 @@ prs:
       clock wraps after "released"/"re-armed".'
     created_at: '2026-11-02T14:24:46Z'
     last_edited: '2026-11-02T14:24:46Z'
+  - id: note-5b2613d
+    text: 'QA S66 (2026-11-02) PASS on f4116d2c3 (app f5d778bf3), no code edits: refiner
+      drivers re-run unattended (16 min) in env -i sandbox /scratch/s66.EaVx; captures
+      + per-Then README in /pm-captures/scenarios/66. Seven wrong-shape signoff attempt_start
+      lines appended at router +8.4 s left no trace in ~13k reads (rc 0 everywhere,
+      no injected id/? row, one signoff id, journal.events 34->34, 0 Tracebacks);
+      restart 1 at +10.82 s -> interrupted +0.24 s (bA), adopted done SIGNOFF_MERGE
+      same id 20.55 s later with the merge hold in the same read. Throttle max remaining
+      59.96, first text read 59s, launching for 0s only to +0.1 s. Restart 2 re-armed
+      +0.55 s (no-hold reads +0.23..0.40 s only). remove A released +0.03 s; --auto-merge
+      merged A +0.22 s; merged reads today/TZ/+365d/OFF2 all ok (max 77 cols, TTY==cat,
+      JSON equal); C REVIEW->released, BLOCKED->cancelled + derived hold, badge, pager
+      342 words equal. Analyzer-only flags: read bucketed by end stamp, router +0.02
+      s launching read, 0.27 s qa->router "nothing" gap (also seen on A in JSON).'
+    created_at: '2026-11-02T14:48:21Z'
+    last_edited: '2026-11-02T14:48:21Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
