@@ -55,7 +55,8 @@ R1 — Drop text the tree already implies.
   and one it does not list is closed or missing, which its status says.
   Structured blockers are added to the run entry
   (`blockers: [{pr_id, display_id, status, held_by}]`); the JSON `reason`
-  keeps the full text including hold causes.
+  keeps the full text including hold causes, and `short_reason` is the
+  same list without them (pm ids; the report renames them by display id).
 
 R2 — Phase/progress once per PR.
 - One phase/progress token per row (`impl`, `review #3`, `review #3 (launch
@@ -130,7 +131,7 @@ R4 — Width and wrapping.
   break is dropped (no line starts or ends with `·`).
 - CLI: width = `min(99, terminal columns)` (redirected output → 99,
   unless `COLUMNS` is set);
-  `--width N` overrides (clamped to 30..99).  TUI: popup container fits 99 +
+  `--width N` (N ≥ 1) overrides (clamped to 30..99).  TUI: popup container fits 99 +
   chrome (`width: 106; max-width: 95%`, stable 1-column scrollbar gutter);
   render width is the body's content width minus the 2-column selection
   gutter, re-rendered on resize; the header stays within 99 columns; the

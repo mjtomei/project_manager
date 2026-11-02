@@ -684,9 +684,12 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
                 "held_by": list((holds.get(d) or {}).get("targets") or []),
             })
         if blockers:
+            # The full reason names each blocker's hold cause; the short one
+            # does not (each held blocker's own row carries its hold label).
             return ("pending", "waiting",
                     "blocked on " + blockers_text(blockers),
-                    _info(blockers=blockers))
+                    _info(short="blocked on " + blockers_text(
+                        blockers, holds=False), blockers=blockers))
         if pr_id in (inp.get("launching") or set()):
             return ("implementation", "running", "launching implementation",
                     _info(short="launching"))

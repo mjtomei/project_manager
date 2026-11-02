@@ -60,6 +60,9 @@ class TestStructured:
         assert "wait-for-merge ← pr-4a5b6c7" in docs["reason"]
         assert [b["pr_id"] for b in docs["blockers"]] == \
             ["pr-1c2d3e4", "pr-0a1b2c3"]
+        # The short reason drops the hold causes the tree already shows.
+        assert docs["short_reason"] == \
+            "blocked on pr-1c2d3e4 (in_review), pr-0a1b2c3 (sign_off)"
         assert docs["blockers"][1] == {
             "pr_id": "pr-0a1b2c3", "display_id": "#231", "status": "sign_off",
             "held_by": ["pr-4a5b6c7"]}
@@ -670,6 +673,12 @@ class TestCLI:
     def test_width_option(self):
         res = _cli_status("--width", "60")
         assert max(cell_len(ln) for ln in res.output.splitlines()) <= 60
+        # Below the minimum clamps to 30; a non-positive width is refused
+        # (it used to fall back to 99 silently).
+        res = _cli_status("--width", "5")
+        assert max(cell_len(ln) for ln in res.output.splitlines()) \
+            <= view.MIN_WIDTH
+        assert _cli_status("--width", "-5").exit_code == 2
 
     def test_width_follows_the_terminal_up_to_99(self, monkeypatch):
         from pm_core.cli import autostart as cli_as

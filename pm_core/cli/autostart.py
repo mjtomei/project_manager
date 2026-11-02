@@ -390,9 +390,9 @@ def _status_width(width: int | None) -> int:
 @_session_opt
 @_timeout_opt
 @_json_opt
-@click.option("--width", type=int, default=None,
-              help="Wrap the report to this many columns (default: the "
-                   "terminal width, at most 99)")
+@click.option("--width", type=click.IntRange(min=1), default=None,
+              help="Wrap the report to this many columns, 30-99 (default: "
+                   "the terminal width, at most 99)")
 @click.option("--color/--no-color", "color", default=None,
               help="Force color on/off (default: on for a terminal unless "
                    "NO_COLOR is set)")
