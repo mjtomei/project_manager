@@ -40317,7 +40317,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T23:02:32.437129+00:00'
+  updated_at: '2026-11-02T23:41:46.060190+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42376,6 +42376,32 @@ prs:
       suite 5847 passed/1 skipped, evidence /pm-captures/pr-8020495/review-c75e-i1.'
     created_at: '2026-11-02T23:02:32Z'
     last_edited: '2026-11-02T23:02:32Z'
+  - id: note-2c6b9c2
+    text: 'QA S81 refiner (2026-11-02, head 6d1e8651): all 4 stories held live in
+      one fresh HOME with S74''s drivers re-pointed (0 FAIL; evidence /pm-captures/pr-8020495/s81-refiner).
+      Post-loop bare ''review-loop=done PASS'' + ''Waiting for: nothing'' lasted 1.7
+      s; both iterations exec 22 s; untimed z d fresh review row read 5 s (allowed
+      0-5 s); command-bar review=idle transient 4.4 s (Then says about 4-5 s). Focus
+      label E19 does not exist in qa.md (E1-E18 only). Container: run ''sudo apt-get
+      update'' before installing fzf/less/faketime.'
+    created_at: '2026-11-02T23:30:40Z'
+    last_edited: '2026-11-02T23:30:40Z'
+  - id: note-3c0bfc4
+    text: 'QA S81 (2026-11-02) PASS on 6d1e8651 (app d2e0097e), no code edits. Refiner
+      drivers (S74 re-pointed) re-run unattended in a fresh env -i sandbox /scratch/q81
+      (torn down; sockets x81/y81, one HOME, stories 1-4 back to back); captures +
+      per-Then README in /pm-captures/scenarios/81 (scripts/, reads.tgz, journal/,
+      debug/). Checkers 0 FAIL: story 1 32 OK, story 2 24 OK, story 3 20 OK, story
+      4 16 OK; all 5 popup pagers matched the preceding | cat read word for word.
+      Measured: post-loop bare runtime: review-loop=done PASS + Waiting for: nothing
+      lasted 1.7 s, start re-tracked 0.92 s after loop done, both iterations exec
+      22 s; Q review row 2.0 s (JSON) after the submit, review=idle transient 3.3
+      s; hold first read +22.5 s, held 31.9 s with exec_s fixed; untimed z d fresh
+      review row 5 s; A i1 superseded 0.53 s then cancelled KILLED, B grace +2.24
+      s; 477 back-to-back JSON reads valid. Story-1 pagers fit on one page (no Space
+      needed). E19 (focus) is not in the committed qa.md.'
+    created_at: '2026-11-02T23:41:45Z'
+    last_edited: '2026-11-02T23:41:45Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
