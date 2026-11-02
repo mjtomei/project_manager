@@ -40317,7 +40317,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T18:26:56.611560+00:00'
+  updated_at: '2026-11-02T18:58:48.066401+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42084,6 +42084,21 @@ prs:
       tick, so 1-2.5 s is expected.'
     created_at: '2026-11-02T18:26:56Z'
     last_edited: '2026-11-02T18:26:56Z'
+  - id: note-71047dc
+    text: 'Sign-off r1 return handled (2026-11-02): merged origin/master@c3bac6ce
+      as 2a0a7419. Only pm/project.yaml conflicted; it was resolved as master''s text
+      with this branch''s 5 note-changed and 10 added PR records spliced in, checked
+      equal to store.merge_3way(base, ours=master, theirs=branch): 627 unique ids,
+      all 114 committed pr-8020495 notes kept. All code auto-merged and has no code
+      edits. Also committed the qa.md re-sync (186786bb) and a spec line about the
+      merge (ca229299). Full suite on the merged tree: 5836 passed, 1 skipped (pytest<9,
+      env -u PM_HOST_HOME PATH=/usr/bin:/bin), which matches sign-off''s trial merge.
+      Log + splice script are in /pm-captures/pr-8020495/signoff-r1-master-c3bac6ce.
+      The live registry delta (status, notes b8f5690/dc959dc/61763c9/ace7cbb/e9cc109/8e8e8c1/0f91ca8/997e28f/2ad2c1c,
+      model override) and the verify-s*.md files are still uncommitted, as found.
+      Ready for a fresh sign-off.'
+    created_at: '2026-11-02T18:58:47Z'
+    last_edited: '2026-11-02T18:58:47Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
