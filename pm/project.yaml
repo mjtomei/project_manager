@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T05:41:31.543483+00:00'
+  updated_at: '2026-11-02T06:12:40.181191+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39637,6 +39637,44 @@ prs:
       (README).'
     created_at: '2026-11-02T05:41:31Z'
     last_edited: '2026-11-02T05:41:31Z'
+  - id: note-a5f7a46
+    text: 'S54 refine (815d6bfe, two projects one HOME, per-session journals): verified
+      live in a scratch HOME: (1) -C takes the PM dir: `pm -C <root>/pm pr history
+      ...` works from any cwd and names ~/.pm/history/pm-<tag>/; `-C <root>` exits
+      1 "No such file ... <root>/project.yaml". (2) A plain shell in a PR workdir
+      without -C gets rc 0, attempts [], and journal.path ~/.pm/history/pm-<workdir-clone-name>-<hash>/
+      (the read creates that empty dir). A pane inside the session in the same workdir
+      (pm pr cd) reads ~/.pm/history/pm-<X tag>/, but title/status come from the workdir''s
+      committed project.yaml (e.g. pending). (3) Plain shells need tmux on PATH (has_tmux)
+      or journals fall back to flat ~/.pm/history/<pr>.jsonl; set PM_TMUX_SOCKET so
+      auto-sequence/qa-run-bg windows reach the test server. (4) After kill -9 the
+      TUI pane closes and nothing respawns it; `pm session </dev/null` from the root
+      prints "TUI pane missing — respawning..." and the new TUI is window 0 named
+      python3. (5) Pad with /pm-captures/scenarios/41/scripts/pad.py at the new per-session
+      path, after X TUI tracks XD. (6) Round 2 YC: `pm pr edit YC --status in_review`
+      before the auto-sequence tick (a PASS run leaves YC in qa; the next tick would
+      go to sign_off); XB fresh run via /pr qa fresh XB.'
+    created_at: '2026-11-02T05:33:19Z'
+    last_edited: '2026-11-02T05:33:19Z'
+  - id: note-b51a9b1
+    text: 'QA S54 (2026-11-02) PASS on 3a314bb8, no edits: two projects in one HOME,
+      same id pr-988d4ec. R1 (pane in X session, pm pr cd XA) / R2 (X subdir) / R3
+      (-C Y/pm from non-git dir) / R4 (Y root | cat): 4244 reads rc 0, journal.path
+      per session, no read ever showed the other project loop; popups H == CLI word-equal
+      both sessions. YC qa-run-bg run in pm-<Y>/YC.jsonl only by its pid; CLI-opened
+      start row open in all 612 R3 reads. XD rotated once inside its loop, attempt
+      count never dipped, 4 non-padded ids 1 start/1 end. Round 2: kill -9 X TUI 2.5
+      s into XA i1 (grace 19.8 s left, XB qa-grace elapsed, s6 open): gap reads interrupted
+      owner-exited >2s/>88s/>68s, runtime stale, grace lost; elapsed gate never lost
+      then re-armed; qa_resume.json kept 76/76 samples; respawn resumed XB (resumed,
+      plain s6, one done per scenario, cap 2), XA swept not resumed; Y loop + new
+      qa-run-bg untouched, no cross-project resume. Latency 0.08-0.10 s, no step at
+      owner events. Spec nits: CLI pm pr start is never TUI-tracked (no --transcript
+      symlink) so XD gets no start row before padding; tui-<session>.pid is JSON so
+      kill -9 $(cat ...) fails (extract pid); window 0 briefly named pm before python3.
+      Captures /pm-captures/scenarios/54.'
+    created_at: '2026-11-02T06:12:23Z'
+    last_edited: '2026-11-02T06:12:40Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
