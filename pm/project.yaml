@@ -51778,7 +51778,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/297
   gh_pr_number: 297
   created_at: '2026-11-02T05:06:16.376330+00:00'
-  updated_at: '2026-11-02T10:11:21.940768+00:00'
+  updated_at: '2026-11-02T10:14:43.932937+00:00'
   started_at: '2026-11-02T05:06:42.121417+00:00'
   reviewed_at: null
   merged_at: null
@@ -51828,18 +51828,20 @@ prs:
       before `pm session kill`, else kill prints the same Errno 2.'
     created_at: '2026-11-02T09:54:24Z'
     last_edited: '2026-11-02T09:54:24Z'
-  - id: note-a2fc740
-    text: 'QA S7 run (bb54d8f2 = 6cf1e4b1 code, PASS, captures /pm-captures/scenarios/7):
-      all 5 stories observed. Killed-pane KILLED latency is 0-15 s by design (held
-      fake sends no hooks, so pane-gone is checked on the 15 s wait_for_event timeout):
-      9 s when the kill landed 6 s into the poll, 2.2 s when timed 13 s in (story2b).
-      `find $HOME -name <sid>*` also matches ~/.pm/hooks/<sid>.json (301-byte idle_prompt
-      hook event, pre-existing on master, no log content) for sessions that went idle.
-      Filed pr-2592e3d (pm hard-codes ~/.claude for logs/hooks while retention honours
-      CLAUDE_CONFIG_DIR) and pr-27ac16c (retry line err[:200] cuts the "(artifact:
-      ...)" path); both pre-existing on master.'
+  - id: note-063eba2
+    text: 'QA S7 run (bb54d8f2 = 6cf1e4b1 code, INPUT_REQUIRED, captures /pm-captures/scenarios/7):
+      every Then observed except one literal one. Story 1 "find $HOME -name <i1 sid>*
+      finds nothing" matches ~/.pm/hooks/<sid>.json, a 301-byte idle_prompt hook record
+      (no log content) that master writes for every idle session and never deletes
+      (hook_events.clear_event has no callers); *.jsonl find = 0. Spec owner to rule.
+      Killed-pane KILLED latency is 0-15 s by design (held fake sends no hooks, so
+      pane-gone is checked on the 15 s wait_for_event timeout): 9 s when the kill
+      landed 6 s into the poll, 2.2 s when timed 13 s in (story2b). Filed pr-2592e3d
+      (pm hard-codes ~/.claude for logs/hooks while retention honours CLAUDE_CONFIG_DIR)
+      and pr-27ac16c (retry line err[:200] cuts the "(artifact: ...)" path); both
+      pre-existing on master.'
     created_at: '2026-11-02T10:11:21Z'
-    last_edited: '2026-11-02T10:11:21Z'
+    last_edited: '2026-11-02T10:14:43Z'
   model: provider:claude-main-xhigh-pm
   effort: high
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ec5bc84-use-native-session-logs-and-remove-p-4d0c07a5
