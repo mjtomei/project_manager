@@ -59,7 +59,11 @@ def _no_inherited_routing_env(monkeypatch):
     that set them themselves.
     """
     from pm_core.providers import LAUNCH_ROUTING_ENV_VARS
-    for var in (*LAUNCH_ROUTING_ENV_VARS, "ANTHROPIC_BASE_URL"):
+    # CLAUDE_CODE_EFFORT_LEVEL is read by model_config's effort resolution
+    # (it overrides --effort inside the CLI), so an inherited value would
+    # change every effort the suite asserts.  Tests that exercise it set it.
+    for var in (*LAUNCH_ROUTING_ENV_VARS, "ANTHROPIC_BASE_URL",
+                "CLAUDE_CODE_EFFORT_LEVEL"):
         monkeypatch.delenv(var, raising=False)
 
 
