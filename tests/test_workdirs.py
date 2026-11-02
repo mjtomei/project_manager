@@ -239,6 +239,28 @@ class TestRecovery:
         assert res.status == workdirs.MISSING
         assert "different repository" in res.rejected[0][1]
 
+    def test_origin_url_identity_ignores_ssh_vs_https_spelling(self, env):
+        """project.repo and the clone's origin can spell one GitHub repo as
+        SSH and HTTPS; a different repo on the same host still differs."""
+        data, pr = env.fresh()
+        del data["project"]["repo_id"]
+        data["project"]["repo"] = "git@github.com:org/project.git"
+        project_dir = workdirs.project_workdirs_dir(data)
+        project_dir.mkdir(parents=True)
+        clone = project_dir / f"{SLUG}-10e74920"
+        subprocess.run(["git", "clone", "-q", str(env.origin), str(clone)],
+                       check=True, capture_output=True)
+        git(clone, "checkout", "-q", "-b", BRANCH)
+        git(clone, "remote", "set-url", "origin",
+            "https://github.com/org/project/")
+        assert workdirs.get_workdir(data, pr) == str(clone)
+        git(clone, "remote", "set-url", "origin",
+            "https://github.com/org/other.git")
+        pr["workdir"] = env.stale
+        res = workdirs.resolve_workdir(data, pr)
+        assert res.status == workdirs.MISSING
+        assert "different repository" in res.rejected[0][1]
+
     def test_persist_is_compare_and_set(self, env, tmp_path):
         clone = env.clone(f"{SLUG}-10e74920")
         # On-disk record still the stale path: the recovered path is written.

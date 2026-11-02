@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from pm_core import store
+from pm_core.git_ops import normalize_repo_url
+from pm_core.integration import same_target
 from pm_core.paths import configure_logger
 
 _log = configure_logger("pm.workdirs")
@@ -189,18 +191,13 @@ def _git(cwd: Path, *args: str) -> tuple[int | None, str, str]:
 
 
 def _same_repo_url(a: str, b: str) -> bool:
-    def norm(u: str) -> str:
-        u = u.strip().rstrip("/")
-        return u[:-4] if u.endswith(".git") else u
+    """Whether remote URLs *a* and *b* name one repository: equal once
+    normalized (SSH/HTTPS spellings, ``.git``, trailing ``/``), or local
+    paths to the same directory."""
     if not a or not b:
         return False
-    if norm(a) == norm(b):
-        return True
-    try:
-        pa, pb = Path(a), Path(b)
-        return pa.is_dir() and pb.is_dir() and pa.resolve() == pb.resolve()
-    except (OSError, ValueError):
-        return False
+    return (normalize_repo_url(a) == normalize_repo_url(b)
+            or same_target(a, b))
 
 
 def _checked_out_branch(path: Path) -> tuple[str | None, str]:

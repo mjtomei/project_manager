@@ -186,24 +186,9 @@ class HelpGroup(click.Group):
 
 
 def _normalize_repo_url(url: str) -> str:
-    """Normalize git remote URL for comparison.
-
-    git@github.com:org/repo.git -> github.com/org/repo
-    https://github.com/org/repo.git -> github.com/org/repo
-    """
-    url = url.strip().rstrip("/")
-    if url.endswith(".git"):
-        url = url[:-4]
-    # SSH format: git@host:path
-    if ":" in url and "@" in url.split(":")[0]:
-        _, rest = url.split(":", 1)
-        host = url.split("@")[1].split(":")[0]
-        return f"{host}/{rest}"
-    # HTTPS format
-    for prefix in ("https://", "http://"):
-        if url.startswith(prefix):
-            return url[len(prefix):]
-    return url
+    """Normalize git remote URL for comparison
+    (:func:`pm_core.git_ops.normalize_repo_url`)."""
+    return git_ops.normalize_repo_url(url)
 
 
 def _verify_pm_repo_matches_cwd(pm_root: Path) -> None:

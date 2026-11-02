@@ -25,7 +25,8 @@ resolved by picking the first match.
 
 ### R1: Shared helper module `pm_core/workdirs.py`
 
-New module (low-level: imports `store`, `paths`; never `pm_core.cli`).
+New module (low-level: imports `store`, `paths`, `git_ops`, `integration`;
+never `pm_core.cli`).
 
 - `project_workdirs_dir(data) -> Path` — the `<workdirs_base>/<name>-<repo_id[:8]>`
   (or `<workdirs_base>/<name>`) directory.  The body of
@@ -96,8 +97,11 @@ candidate is **verified** only if all hold:
   candidate itself (a plain dir, or a subdir of some other repo, is rejected).
 - **Repository identity**: when `project.repo_id` is cached, the repo contains
   that root commit (`git cat-file -e <repo_id>^{commit}`); otherwise the
-  `origin` fetch URL equals `project.repo` (normalized: trailing `/` and
-  `.git` ignored).  With neither available it is rejected as unverifiable.
+  `origin` fetch URL names `project.repo` — equal under the shared
+  `git_ops.normalize_repo_url` (SSH/HTTPS spellings, trailing `/` and `.git`
+  ignored), or a local path to the same directory
+  (`integration.same_target`).  With neither available it is rejected as
+  unverifiable.
 - **Branch/PR identity**: `HEAD` is the symbolic ref `refs/heads/<pr branch>`,
   or — mid-rebase with a detached HEAD — the rebase's `head-name`
   (`rebase-merge/` or `rebase-apply/`) names that branch.  Any other branch
