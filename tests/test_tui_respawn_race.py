@@ -600,3 +600,125 @@ class TestStuckHolderDelaysOneWait:
         assert 0.4 <= elapsed < 0.8, elapsed
         assert log.warning.call_count == 1
         assert "still held" in log.warning.call_args.args[0]
+
+
+@needs_tmux
+class TestAnotherReconcileTookTheDeadTuiEntry:
+    """QA S50: every ``rebalance()`` reconciles the registry without the
+    respawn lock.  The background rebalance of a ``pm session`` attach
+    (about 0.6 s after its Enter) could drop the killed TUI's entry before
+    the after-kill-pane hook reconciled, and the hook, which respawned
+    only a TUI its own reconcile removed, left the session with none."""
+
+    def test_entry_gone_before_the_hook_read_the_registry(
+            self, server, tmp_path, monkeypatch):
+        project, window, tui, notes = _start(server, tmp_path)
+        server("kill-pane", "-t", tui)
+        # The attach's rebalance reconciles first: the hook then reads a
+        # registry that lists no TUI at all.
+        assert pane_registry._reconcile_registry(SESSION, window) == [tui]
+        pane_layout._process_registry_pane_closed(
+            pane_registry.load_registry(SESSION))
+        [new] = _tui_panes(server)
+        assert server("display-message", "-p", "-t", new,
+                      "#{window_id}") == window
+        assert _registered_tuis() == [new]
+
+    def test_entry_gone_between_the_hooks_read_and_its_reconcile(
+            self, server, tmp_path, monkeypatch):
+        project, window, tui, notes = _start(server, tmp_path)
+        before = pane_registry.load_registry(SESSION)  # what the hook read
+        server("kill-pane", "-t", tui)
+        assert pane_registry._reconcile_registry(SESSION, window) == [tui]
+        pane_layout._process_registry_pane_closed(before)
+        [new] = _tui_panes(server)
+        assert server("display-message", "-p", "-t", new,
+                      "#{window_id}") == window
+        assert _registered_tuis() == [new]
+
+    def test_with_no_listed_window_the_tui_goes_into_main(
+            self, server, tmp_path, monkeypatch):
+        """Nothing records where the TUI was: ``main``, as ``pm session``'s
+        own respawn picks."""
+        project, window, tui, notes = _start(server, tmp_path)
+        other = server("new-window", "-d", "-P", "-F", "#{window_id}",
+                       "-t", f"={SESSION}:", "sleep 300")
+        server("kill-pane", "-t", tui)
+        pane_registry._reconcile_registry(SESSION, window)
+        pane_layout._process_registry_pane_closed(
+            {"session": SESSION, "windows": {other: {"panes": []}}})
+        [new] = _tui_panes(server)
+        assert server("display-message", "-p", "-t", new,
+                      "#{window_id}") == window
+
+    def test_a_running_unlisted_tui_is_left_alone(
+            self, server, tmp_path, monkeypatch):
+        """A TUI that has not registered itself yet is running: no second."""
+        project, window, tui, notes = _start(server, tmp_path)
+        pane_registry.unregister_pane(SESSION, tui)
+        pane_layout._process_registry_pane_closed(
+            pane_registry.load_registry(SESSION))
+        assert _tui_panes(server) == [tui]
+
+
+class TestUnlistedTuiRespawnNeedsTheLock:
+
+    def _wire(self, monkeypatch, *, locked, registry, running=None):
+        events = []
+
+        class Lock:
+            def __init__(self, name):
+                pass
+
+            def __enter__(self):
+                return locked
+
+            def __exit__(self, *exc):
+                events.append("exit")
+
+        monkeypatch.setattr(pane_registry, "tui_respawn_lock", Lock)
+        monkeypatch.setattr(pane_layout, "_reconcile_registry",
+                            lambda s, w: [])
+        monkeypatch.setattr(pane_layout, "load_registry", lambda s: registry)
+        monkeypatch.setattr(pane_layout, "_running_tui_pane",
+                            lambda s: events.append("running?") or running)
+        monkeypatch.setattr(pane_layout, "_respawn_tui",
+                            lambda s, w: events.append(("respawn", w)) or w)
+        monkeypatch.setattr(pane_layout, "rebalance",
+                            lambda s, w: events.append(("rebalance", w)))
+        return events
+
+    SNAPSHOT = {"session": "pm-x", "windows": {"@0": {"panes": [
+        {"id": "%0", "role": "tui", "order": 0, "cmd": "pm _tui"},
+        {"id": "%1", "role": "notes", "order": 1, "cmd": "x"}]}}}
+
+    def test_respawns_under_the_lock(self, monkeypatch):
+        events = self._wire(monkeypatch, locked=True, registry={
+            "windows": {"@0": {"panes": [
+                {"id": "%1", "role": "notes", "order": 1, "cmd": "x"}]}}})
+        pane_layout._process_registry_pane_closed(self.SNAPSHOT)
+        assert events == ["running?", ("respawn", "@0"), "exit",
+                          ("rebalance", "@0")]
+
+    def test_not_without_the_lock(self, monkeypatch):
+        """Two hooks past a stuck holder would both find no TUI; only the
+        one whose reconcile removed the entry starts one."""
+        events = self._wire(monkeypatch, locked=False, registry={
+            "windows": {"@0": {"panes": []}}})
+        pane_layout._process_registry_pane_closed(self.SNAPSHOT)
+        assert events == ["exit"]
+
+    def test_not_while_a_tui_is_listed(self, monkeypatch):
+        """A TUI pane kept dead by remain-on-exit is still listed (tmux
+        still has it); ``pm session`` leaves that alone too.  Nothing is
+        asked of tmux on an ordinary close."""
+        events = self._wire(monkeypatch, locked=True,
+                            registry=self.SNAPSHOT)
+        pane_layout._process_registry_pane_closed(self.SNAPSHOT)
+        assert events == ["exit"]
+
+    def test_not_while_a_tui_runs(self, monkeypatch):
+        events = self._wire(monkeypatch, locked=True, running="%5",
+                            registry={"windows": {}})
+        pane_layout._process_registry_pane_closed(self.SNAPSHOT)
+        assert events == ["running?", "exit"]

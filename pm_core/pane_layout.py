@@ -704,6 +704,9 @@ def _process_registry_pane_closed(data: dict) -> None:
     from pm_core.pane_registry import tui_respawn_lock
 
     to_rebalance: list[str] = []
+    # Windows the registry listed a TUI in when this event was read.
+    tui_windows: list[str] = []
+    tui_handled = False
     # A `pm session` attach may find the TUI gone at this same moment and
     # respawn it; deciding under the lock it also holds means only one of
     # us starts a TUI (QA S42).  The lock is taken once for the whole
@@ -711,11 +714,13 @@ def _process_registry_pane_closed(data: dict) -> None:
     # run-shell, so the client that closed the pane is frozen while it
     # waits, and a stuck holder froze it for one full wait per window —
     # 30 s with the main window and two review windows (QA S47).
-    with tui_respawn_lock(session):
+    with tui_respawn_lock(session) as locked:
         for window_id, wdata in list(data.get("windows", {}).items()):
             # Snapshot TUI pane IDs before reconciliation removes them
             tui_ids = {p["id"] for p in wdata.get("panes", [])
                        if p.get("role") == "tui"}
+            if tui_ids:
+                tui_windows.append(window_id)
             removed = _reconcile_registry(session, window_id)
             if not removed:
                 continue
@@ -724,6 +729,7 @@ def _process_registry_pane_closed(data: dict) -> None:
             actual_window = None
             # Always respawn TUI regardless of user_modified
             if tui_ids & set(removed):
+                tui_handled = True
                 running = _running_tui_pane(session)
                 if running:
                     _logger.info("handle_any_pane_closed: TUI pane was killed, "
@@ -740,9 +746,66 @@ def _process_registry_pane_closed(data: dict) -> None:
                 to_rebalance.append(actual_window)
             elif not wdata.get("user_modified"):
                 to_rebalance.append(window_id)
+        if locked and not tui_handled:
+            actual_window = _respawn_unlisted_tui(session, tui_windows)
+            if actual_window:
+                to_rebalance.append(actual_window)
     # Layout work runs after the lock is released, as before.
-    for window_id in to_rebalance:
+    for window_id in dict.fromkeys(to_rebalance):
         rebalance(session, window_id)
+
+
+def _respawn_unlisted_tui(session: str, tui_windows: list[str]) -> str | None:
+    """Respawn a killed TUI whose registry entry another process removed.
+
+    Every ``rebalance()`` reconciles the registry first, without the
+    TUI-respawn lock: the background rebalance a ``pm session`` attach
+    schedules, the ``window-resized`` hook, a pane's EXIT trap.  When one
+    of them ran between the TUI's kill and this hook, it had already
+    dropped the dead TUI's entry, so this hook's own reconcile removed
+    nothing and the session was left with no TUI (QA S50: 2 of 4 rounds
+    with the attach's Enter 0.60-0.65 s before the kill, 5 of 8 for the
+    refiner; the entry was often gone before this hook even read the
+    registry, so the hook's own snapshot did not list the TUI either).
+
+    So, under the lock, a session whose registry now lists no TUI and
+    that runs no ``pm _tui`` pane gets one, whoever removed the entry.  A
+    TUI pane kept dead by ``remain-on-exit`` is still listed, and
+    ``pm session`` leaves it alone too, so this does not start one beside
+    it.  The TUI goes back into the window the registry listed it in when
+    this event was read (*tui_windows*); with no such window it goes into
+    ``main``, else the first window, as ``pm session``'s respawn does.
+
+    Called only while this hook holds the lock: two hooks that both went
+    ahead past a stuck holder would otherwise both find no TUI and both
+    start one, where only the one whose reconcile removed the entry did.
+    Returns the window the TUI was started in, or ``None``.
+    """
+    from pm_core import tmux as tmux_mod
+
+    registry = load_registry(session)
+    if any(p.get("role") == "tui"
+           for wdata in registry.get("windows", {}).values()
+           for p in wdata.get("panes", [])):
+        return None
+    if _running_tui_pane(session):
+        return None
+    window = tui_windows[0] if tui_windows else None
+    if window is None:
+        main = tmux_mod.find_window_by_name(session, "main")
+        if main:
+            window = main["id"]
+        else:
+            windows = tmux_mod.list_windows(session)
+            window = windows[0]["id"] if windows else None
+    if window is None:
+        _logger.warning("handle_any_pane_closed: no TUI is running and "
+                        "session %s has no windows; not respawning", session)
+        return None
+    _logger.info("handle_any_pane_closed: no TUI is running and none is "
+                 "registered (its entry was already reconciled); "
+                 "respawning in window %s", window)
+    return _respawn_tui(session, window)
 
 
 def _running_tui_pane(session: str) -> str | None:

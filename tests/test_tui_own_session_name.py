@@ -126,7 +126,11 @@ def test_views_named_like_pm_or_with_tilde_resolve_through_their_group(tmux_serv
 
 def _view_registry(t, tmp_path, monkeypatch, view):
     """pm-proj-abc with a two-pane window registered, plus a grouped *view*
-    that is the session pm sees (PM_POPUP_SESSION, as from a key binding)."""
+    that is the session pm sees (PM_POPUP_SESSION, as from a key binding).
+
+    The kept pane is registered as the TUI, as every pm session has one:
+    a pane close in a session whose registry lists no TUI and that runs
+    none respawns it (QA S50)."""
     import json
     from pm_core import pane_registry
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -137,7 +141,7 @@ def _view_registry(t, tmp_path, monkeypatch, view):
     t("new-session", "-d", "-t", "pm-proj-abc", "-s", view)
     pane_registry.registry_path("pm-proj-abc").write_text(json.dumps({
         "session": "pm-proj-abc", "windows": {wid: {"panes": [
-            {"id": keep, "role": "review-claude", "order": 0, "cmd": "x"},
+            {"id": keep, "role": "tui", "order": 0, "cmd": "pm _tui"},
             {"id": gone, "role": "review-diff", "order": 1, "cmd": "y"}],
             "user_modified": False}}}))
     monkeypatch.setenv("TMUX", "/x,1,0")
