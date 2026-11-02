@@ -386,6 +386,8 @@ def test_container_run_on_a_router_that_cannot_launch_creates_nothing(
     if bridge_error is None:
         ensure.assert_not_called()
     spies.create.assert_not_called()
+    # No container was named, so there is none to release.
+    spies.remove.assert_not_called()
     spies.build.assert_not_called()
     spies.execvpe.assert_not_called()
     assert _qa_workdirs(home) == []

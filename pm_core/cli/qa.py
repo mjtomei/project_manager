@@ -551,8 +551,6 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
                          else os.environ.get("PM_TMUX_SOCKET")),
         )
         if use_containers:
-            cname = container_mod.qa_container_name(
-                f"regression-{test_id}", run_id, 0, session_tag=session_tag)
             # This run's captures dir mounts at /pm-captures (creating it
             # on the host).  No push proxy: a regression run never pushes.
             # The project's pm dir is mounted only when findings are filed:
@@ -562,8 +560,13 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
             reg_rw, reg_ro = (registry_mounts(root) if file_prs
                               else (None, None))
             # A router provider reaches the container through the host
-            # route bridge: mount its socket dir, or stop here.
+            # route bridge: mount its socket dir, or stop here, before any
+            # container exists.
             route = _regression_route_mounts(session_tag)
+            # Named only now: from here on a failure may leave a container
+            # to release (below).
+            cname = container_mod.qa_container_name(
+                f"regression-{test_id}", run_id, 0, session_tag=session_tag)
             container_mod.create_qa_container(
                 name=cname,
                 config=container_mod.load_container_config(),
@@ -603,11 +606,12 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
                 container_mod.remove_container(cname)
             except Exception:
                 pass
-        if cname and isinstance(exc, ProviderNotFoundError):
+        if use_containers and isinstance(exc, ProviderNotFoundError):
             # The session's provider cannot launch it: a router's own
-            # settings, or its host bridge (_regression_route_mounts).  The
-            # error carries its remedy; fixing the container runtime or
-            # disabling container mode would not fix a provider setting.
+            # settings, or its host bridge (_regression_route_mounts, before
+            # any container is named).  The error carries its remedy; fixing
+            # the container runtime or disabling container mode would not
+            # fix a provider setting.
             click.echo(
                 "Container mode is enabled, but the regression session's "
                 f"provider cannot launch it: {exc}\n\n"
