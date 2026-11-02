@@ -5173,7 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-11-02T20:12:20.273950+00:00'
+  updated_at: '2026-11-02T20:58:17.502942+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5525,6 +5525,28 @@ prs:
       "(or any parent up to mount point /)" vs the qa.md text (git wording, not pm).'
     created_at: '2026-11-02T20:12:20Z'
     last_edited: '2026-11-02T20:12:20Z'
+  - id: note-8096429
+    text: 'QA S24 run 2026-11-02 at 339731ce: PASS 8/8 live (isolated HOME, private
+      pm session with fake-claude, plain CLI; captures /pm-captures/scenarios/24/story1-8,
+      each with recording.cast/.mp4/manifest.md and evidence/ holding stdout, stderr
+      and exit code per command). Stories 1-7 matched the spec wording exactly: read-only
+      integrate writes nothing (yaml sha256+mtime and integration.json unchanged);
+      --record, signoff record and merge re-link the renamed clone; the two-clone
+      ambiguity refuses in all five modes (integrate, --record, --apply, signoff record,
+      merge) with empty stdout, rc 1 and the exact listing+refusal on stderr while
+      project.yaml, integration.json, both clones and master stay byte-identical;
+      the no-clone merge and signoff record print exactly "workdir not found ... Restore
+      the workdir, then re-run sign-off." and "no workdir/HEAD to record the verdict
+      against." Story 8 (cleanup/prune/cd) matched except one qa.md wording item:
+      after `pm pr cleanup <A>` (step 1) the listing shows the RECORDED -c3c3c3c3
+      path as (missing), not -c4c4c4c4 -- the registry was never updated to the renamed
+      clone, so the Then should say -c3c3c3c3 (cleanup does not re-link; that is also
+      the known pr-cd23997 behaviour the scenario encodes). Everything else exact:
+      --prune clears A -c3c3c3c3 and C oldhome path, cd re-links -c4c4c4c4 with pwd
+      -P = the clone, dirty skip + --force removal, final cd "does not exist: None"
+      rc 1 with no clone created.'
+    created_at: '2026-11-02T20:58:17Z'
+    last_edited: '2026-11-02T20:58:17Z'
   model: provider:claude-main-xhigh-pm
   effort: high
 - id: pr-0778fbe
