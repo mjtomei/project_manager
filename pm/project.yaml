@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T06:14:50.865310+00:00'
+  updated_at: '2026-11-02T06:49:33.781015+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25722,6 +25722,22 @@ prs:
       tag, which the wrapper never reads.'
     created_at: '2026-11-02T06:14:50Z'
     last_edited: '2026-11-02T06:14:50Z'
+  - id: note-19703fd
+    text: 'QA S18 refiner (2026-11-02, live at 9a919d0a): both stories held from a
+      real pm session --global (pm-proj-<gtag> on /tmp/pm-sessions/pm-<gtag>); all
+      5 surfaces logged a scrubbed env with only PM_TMUX_SOCKET kept, captures under
+      the shared tag, 5 distinct run ids. Draft fixes: pm qa launch regression:<id>
+      also passes --file-prs (Filing Findings in 3 of 5 prompts: TUI Enter, command
+      bar, qa launch); the socket note names the path twice and shlex leaves a space-free
+      path unquoted; name the test project zz-* (sorts after proj) - with aaa-* the
+      any-session fallback would pick aaa-* and mask a missed cwd lookup (PM_SHARE_MODE=global
+      pm tui view falls back to pm-proj). tui-history/<user>.json is absent until
+      a pm tui view -s writes it. The test project TUI and guide pane carry PM_SHARE_MODE=global
+      (pr-50e1e3f) and log to <name>-<share hash>.log; its pm session start logs to
+      <name>-<plain hash>.log. Popup run closes <0.5 s after Enter (stand-in bash
+      -i hits EOF). Helpers: /pm-captures/scenarios/18/refiner-helpers.'
+    created_at: '2026-11-02T06:49:33Z'
+    last_edited: '2026-11-02T06:49:33Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
