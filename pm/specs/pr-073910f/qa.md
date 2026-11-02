@@ -54,8 +54,10 @@ simultaneously.
    `pm tui send` delivers keys to a bare pane id.
 8. **Per-server tmux state** — hooks (`set-hook -g`), global environment,
    windows, grouped sessions. Two servers must never share any of it.
-9. **Session-keyed artifacts** — TUI pidfile, frame/history files,
-   containers and push proxies cleaned up by `pm session kill`.
+9. **Session-keyed artifacts** — TUI pidfile and command queue,
+   frame/history files, the home-window refresh sentinel, the mobile
+   flag, containers and push proxies cleaned up by `pm session kill`.
+   All are keyed by the *base* session name.
 
 ## Requirements
 
@@ -281,7 +283,22 @@ pane unless stated otherwise.
   `pm _pane-opened` / `pm _window-resized` / `pm _pane-exited` as one
   argument and no part of it is executed by the shell: the bindings and
   hooks quote it with tmux's `#{q:...}` modifier, and the pane EXIT trap
-  quotes it for each of its shell layers (review-loop b48f i17).
+  quotes it for each of its shell layers (review-loop b48f i17).  That
+  includes the condition that gates the pane-switch binding: a name with
+  a single quote still gets pm's mobile-aware switch (not the plain
+  `select-pane` fallback), and a backtick in it runs nothing (QA S23,
+  commit 87b2d1d1).
+- **GIVEN** a pm project whose directory name contains a space, a quote,
+  a backtick or a `$` (so the agent's working directory — the repo, its
+  workdir clone under `~/.pm/workdirs/`, or the meta workdir — does too),
+  **WHEN** pm starts any agent with a prompt (`pm pr start`, a review, a
+  QA run, `pm meta`, a plan or guide session, from the CLI or the TUI),
+  **THEN** the agent receives the whole prompt as one argument (never an
+  empty prompt), no part of the path is executed by the shell, and the
+  temporary prompt file under `pm/prompts/` is removed afterwards.
+  Ordinary paths behave exactly as before, including container mode,
+  whose launch rewrites the prompt path to the container's workdir
+  (pre-existing on master; fixed in this PR by QA S23, commit 87b2d1d1).
 - **GIVEN** a QA run launched from another clone's pm session (recorded in
   its `qa_resume.json` session tag) whose session is still alive on that
   clone's own server, **WHEN** this clone's TUI restarts and scans for
@@ -612,8 +629,14 @@ them.
   directory that is not a git repository (including a mistyped
   `kill --dir`).
 - Repo directory names containing `~`, a space, a backtick or a quote —
-  each reaches tmux targets, hooks, key bindings, EXIT traps and agent
-  prompts as data, never as a group suffix or shell syntax.
+  each reaches tmux targets, hooks, key bindings, EXIT traps, agent
+  prompts and the agent launch command's prompt-file path as data, never
+  as a group suffix or shell syntax.
+- Two sessions' popups (prefix+P picker, prefix+M command prompt) opened
+  at the same moment, and commands queued from them into each session's
+  TUI command queue.
+- Container-mode agent launches in two sessions, and `pm session kill`
+  removing only the killed session's containers and push proxies.
 - Two unrelated legacy sessions on the default server where one's name
   starts with the other's name plus `~` (including that one's own `~1`).
 - tmux missing from `PATH` while `$TMUX` is set.
