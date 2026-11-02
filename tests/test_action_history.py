@@ -2304,6 +2304,41 @@ class TestReconciliation:
         (row,) = m["timers"]["recent"]
         assert row["resolution"] == "lost (owner process exited)"
 
+    def test_merged_pr_hold_cleared_after_merge_reads_released_by_merge(
+            self, clock):
+        # QA S80: ``g`` merged A (no clear journaled), then auto-start
+        # turned off when another target merged minutes later and cleared
+        # A's hold "released".  The merge released it, at the merge time.
+        ah.arm_timer(PR, f"merge-hold:{PR}", purpose="manual merge hold",
+                     owner_action="merge", duration=None, effect="fires")
+        clock.advance(60)
+        merged_t = clock.t
+        pr = {"id": PR, "status": "merged", "merged_at": ah.iso(merged_t)}
+        clock.advance(180)
+        ah.clear_timer(PR, f"merge-hold:{PR}", "released")
+        m = hq.build_history(PR, pr=pr, now=clock.t, live=False)
+        assert m["holds"] == [] and m["timers"]["active"] == []
+        (row,) = m["timers"]["recent"]
+        assert row["resolution"] == "released (PR merged)"
+        assert row["resolved_t"] == merged_t
+        assert "released (PR merged)" in " ".join(hq.render_text(m))
+
+    def test_merged_pr_hold_cleared_before_merge_keeps_its_release(
+            self, clock):
+        # A hold released before the merge (target removed, policy switched
+        # to auto-merge) keeps that release and its time.
+        ah.arm_timer(PR, f"merge-hold:{PR}", purpose="manual merge hold",
+                     owner_action="merge", duration=None, effect="fires")
+        clock.advance(30)
+        ah.clear_timer(PR, f"merge-hold:{PR}", "released")
+        released_t = clock.t
+        clock.advance(30)
+        pr = {"id": PR, "status": "merged", "merged_at": ah.iso(clock.t)}
+        m = hq.build_history(PR, pr=pr, now=clock.t + 600, live=False)
+        (row,) = m["timers"]["recent"]
+        assert row["resolution"] == "released"
+        assert row["resolved_t"] == released_t
+
     def test_recent_timer_row_with_year_dates_fits_80(self, clock):
         ah.arm_timer(PR, f"merge-hold:{PR}",
                      purpose="manual merge hold (stop-before-merge)",

@@ -1004,6 +1004,44 @@ def test_auto_start_dropping_wait_target_releases_journaled_hold(
         assert not action_history.has_journal("pr-out")
 
 
+def test_auto_start_off_after_g_merge_journals_no_late_release(
+        world_factory):
+    """QA S80: A is held for B, ``g`` merges A (``pm pr merge`` journals no
+    clear), and auto-start later turns off (B merged too).  Turning off must
+    not journal a "released" clear for the already merged A: its history
+    keeps "released (PR merged)" at A's merge time."""
+    from unittest.mock import MagicMock
+    from pm_core import action_history, history_query
+    with action_history.use_clock(lambda: 1_800_000_000.0):
+        app, w = world_factory(wait=True)
+        app._update_display = lambda: None
+        app._watcher_manager = MagicMock()
+        _qa_pass(app)
+        w.emit("SIGNOFF_MERGE")
+        _poll(app)
+        (hold,) = history_query.build_history(PR, pr=app.pr(),
+                                              live=False)["holds"]
+        merged_at = "2027-01-15T08:00:00+00:00"
+
+        def apply(d):     # what ``g`` (``pm pr merge``) writes
+            p = store.get_pr(d, PR)
+            p["status"], p["merged_at"] = "merged", merged_at
+        store.locked_update(app._root, apply)
+        auto_start.clear_targets(app)
+        assert not auto_start.is_enabled(app)
+        evs = [e for e in action_history.read_events(PR)
+               if e.get("timer") == f"merge-hold:{PR}"]
+        assert [e.get("reason") or e["kind"] for e in evs] == [
+            "superseded", "timer_arm"]
+        assert PR not in (getattr(app, "_history_merge_holds", None) or ())
+        m = history_query.build_history(PR, pr=app.pr(), live=False)
+        assert m["holds"] == []
+        (row,) = [r for r in m["timers"]["recent"]
+                  if r["timer"] == f"merge-hold:{PR}"]
+        assert row["resolution"] == "released (PR merged)"
+        assert row["resolved_at"] == merged_at
+
+
 def test_terminal_signoff_hop_does_not_reread_journal_each_poll(
         world_factory):
     """ready_to_merge repeats on every 5 s poll; journaling the routed

@@ -1009,13 +1009,36 @@ def release_merge_hold_journal(app, pr_ids, *, force: bool = False) -> None:
     armed it) and when auto-start drops the wait-for-merge target that
     held the PR.  Without *force* only holds this TUI journaled are
     released, so PRs that never had one get no journal events.
+
+    Without *force* a PR that has merged or closed since is only
+    forgotten: ``g`` merges through ``pm pr merge``, which journals no
+    clear, and history reports that hold released by the merge.  A clear
+    written later (auto-start turning off when another target merges, QA
+    S80) would move the release past the merge.
     """
     held = getattr(app, "_history_merge_holds", None) or set()
     from pm_core import action_history as _ah
+    done = set() if force else _terminal_pr_ids(app, pr_ids)
     for pr_id in pr_ids:
-        if force or pr_id in held:
+        if force or (pr_id in held and pr_id not in done):
             _ah.clear_timer(pr_id, f"merge-hold:{pr_id}", "released")
         held.discard(pr_id)
+
+
+def _terminal_pr_ids(app, pr_ids) -> set[str]:
+    """The merged/closed PRs among *pr_ids*, from the on-disk registry (the
+    TUI's copy may predate a ``g`` merge's write)."""
+    try:
+        data = store.load(app._root) if getattr(app, "_root", None) \
+            else app._data
+    except Exception:
+        data = getattr(app, "_data", None)
+    out = set()
+    for pr_id in pr_ids:
+        pr = store.get_pr(data or {}, pr_id) or {}
+        if pr.get("status") in ("merged", "closed"):
+            out.add(pr_id)
+    return out
 
 
 def _maybe_auto_merge(app, pr_id: str) -> None:

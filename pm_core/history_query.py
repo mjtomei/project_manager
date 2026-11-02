@@ -108,9 +108,12 @@ def build_history(pr_id: str, *, pr: dict | None = None,
     for a in attempts.values():
         _compute_concurrency(a)
 
+    status = (pr or {}).get("status")
     timer_rows = _reconcile_timers(
         timers, attempts, t_now, alive, owner_seen,
-        terminal=(pr or {}).get("status") in ("merged", "closed"))
+        terminal=status in ("merged", "closed"),
+        terminal_t=(_parse_iso((pr or {}).get("merged_at"))
+                    if status == "merged" else None))
     timer_rows["recent"] = (timer_history + timer_rows["recent"])
     _release_terminal_holds(pr or {}, timer_rows)
 
@@ -542,13 +545,17 @@ def _cleared_row(tm: dict) -> dict:
 def _reconcile_timers(timers: dict[str, dict], attempts: dict[str, dict],
                       t_now: float, owner_alive,
                       owner_seen: dict[tuple, float] | None = None, *,
-                      terminal: bool = False) -> dict:
+                      terminal: bool = False,
+                      terminal_t: float | None = None) -> dict:
     """Sort uncleared timers into active / overdue / recent rows.
 
     On a merged/closed PR (*terminal*) an uncleared hold is left active
     whatever its owner's fate, so :func:`_release_terminal_holds` reports
     it released by the merge: the TUI that armed it has usually exited by
-    the time anyone reads a merged PR's history.
+    the time anyone reads a merged PR's history.  So is a hold first
+    cleared after the merge (*terminal_t*, the merge time): the merge
+    released it, and a later clear (auto-start turning off when another
+    target merges, QA S80) must not move that release.
     """
     active: list[dict] = []
     overdue: list[dict] = []
@@ -556,6 +563,10 @@ def _reconcile_timers(timers: dict[str, dict], attempts: dict[str, dict],
     for tm in timers.values():
         due = tm.get("due_t")
         if tm.get("cleared"):
+            if (terminal and due is None and terminal_t is not None
+                    and tm["cleared"]["t"] > terminal_t):
+                active.append(_timer_row(tm, "active", None))
+                continue
             recent.append(_cleared_row(tm))
             continue
         owner_att = attempts.get(tm.get("owner_attempt") or "")
