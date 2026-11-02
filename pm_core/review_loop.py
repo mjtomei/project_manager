@@ -253,6 +253,25 @@ def _concise_launch_detail(stderr: str, stdout: str) -> str:
     return detail
 
 
+def _history_end_detail(e: BaseException, limit: int = 300) -> str:
+    """The journaled end detail of an iteration that raised *e*.
+
+    Clipped so a long child error cannot bloat the history journal, but a
+    launch failure keeps its trailing ``(artifact: …)`` pointer whole: the
+    complete child output lives only in that file, and a plain
+    ``str(e)[:limit]`` cut the path mid-name.
+    """
+    text = str(e)
+    artifact = getattr(e, "artifact", None)
+    suffix = f" (artifact: {artifact})" if artifact else ""
+    if suffix and text.endswith(suffix):
+        body = text[:-len(suffix)]
+        if len(body) > limit:
+            body = body[:limit - 3] + "..."
+        return body + suffix
+    return text[:limit]
+
+
 def _write_launch_artifact(*, transcript: str | None, pr_id: str,
                            iteration: int, loop_id: str, attempt: int,
                            cmd: list[str], returncode: int | None,
@@ -1640,7 +1659,7 @@ def run_review_loop_sync(
                                 "superseded" if e.reason == "superseded"
                                 else "failed",
                                 verdict=VERDICT_LAUNCH_FAILED,
-                                detail=str(e)[:300])
+                                detail=_history_end_detail(e))
                 break
             except Exception as e:
                 _log.exception("review_loop: review failed on iteration %d", state.iteration)

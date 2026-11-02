@@ -953,6 +953,37 @@ class TestReviewLoopHistory:
         end = _ends()[it["attempt"]]
         assert (end["outcome"], end["verdict"]) == (outcome, verdict)
 
+    def test_launch_failed_end_keeps_the_artifact_path(self, clock,
+                                                       monkeypatch):
+        # The concise launch error ends "(artifact: <path>)"; a long child
+        # error used to push the path past a plain 300-char cut, so the
+        # history row named "…-i1-attemp" and no file.
+        from pm_core import review_loop as rl
+        path = ("/very/long/project/pm/transcripts/manual-c417a4/"
+                "launch-artifacts/review-pr-001-i1-attempt3-"
+                "20261102T034058771255.log")
+        msg = ("Review window launch failed (rc=1): Failed to create "
+               "container 'x'. " + "Is podman running? " * 20
+               + f"(artifact: {path})")
+        err = rl.ReviewLaunchError(msg, retryable=False, reason="auth",
+                                   artifact=path)
+        self._retry_loop(clock, [err], monkeypatch)
+        (it,) = [a for a in _attempts().values() if a.get("iteration") == 1]
+        detail = _ends()[it["attempt"]]["detail"]
+        assert detail.endswith(f" (artifact: {path})")
+        assert detail.startswith("Review window launch failed (rc=1)")
+        assert len(detail) <= 300 + len(f" (artifact: {path})")
+        text = "\n".join(hq.render_text(
+            hq.build_history(PR, now=clock.t, live=False)))
+        assert path + ")" in text
+
+    def test_end_detail_without_artifact_is_clipped(self):
+        from pm_core import review_loop as rl
+        assert rl._history_end_detail(RuntimeError("y" * 500)) == "y" * 300
+        err = rl.ReviewLaunchError("short (artifact: /a.log)",
+                                   artifact="/a.log")
+        assert rl._history_end_detail(err) == "short (artifact: /a.log)"
+
     def test_review_hold_is_a_derived_hold(self, clock):
         runtime = {"review-loop": {"state": "failed", "verdict": "HOLD",
                                    "updated_at": "2026-11-02T00:00:00+00:00"}}
