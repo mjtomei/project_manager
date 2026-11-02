@@ -5,6 +5,7 @@ import re
 import shlex
 import stat
 import subprocess
+from collections.abc import Iterable
 from pathlib import Path
 
 from pm_core.paths import base_session_name, configure_logger, write_env_file
@@ -1706,7 +1707,8 @@ def _detach_current_client(socket_path: str | None) -> bool:
     return False
 
 
-def list_pm_sessions() -> list[dict]:
+def list_pm_sessions(*, extra_sockets: Iterable[str | Path] = (),
+                     read_errors: list[OSError] | None = None) -> list[dict]:
     """List pm sessions across every pm tmux server.
 
     Scans the per-session sockets under ``/tmp/pm-sessions/`` plus the
@@ -1718,6 +1720,15 @@ def list_pm_sessions() -> list[dict]:
     skipped, and so is a socket directory that is not a real directory
     (a symlink or a file planted in world-writable ``/tmp`` — ``pm
     session`` refuses the same path, so its contents are never ours).
+
+    *extra_sockets* are socket paths inside the socket directory that are
+    probed even when the scan does not report them — a caller that knows
+    a session's deterministic socket (``pm session list`` passes the cwd
+    project's) can still list it when the directory cannot be enumerated.
+    When the directory exists but cannot be read (EACCES on a root-owned
+    ``1733`` directory, which ``pm session`` accepts), the error is
+    appended to *read_errors* so the caller can say so instead of
+    reporting that nothing runs.
 
     Each row: ``{"name", "socket", "attached", "shared"}`` where ``socket``
     is None for sessions on the default server and ``shared`` is true when
@@ -1821,10 +1832,33 @@ def list_pm_sessions() -> list[dict]:
                      "not scanning it", SHARED_SOCKET_DIR)
         sockets = []
     else:
+        # os.scandir, not Path.glob: glob swallows a PermissionError on the
+        # directory itself.  A socket directory pm can write but not read —
+        # a root-owned 1733 /tmp/pm-sessions, which ensure_socket_dir
+        # accepts — then listed nothing at all, and `pm session list`
+        # printed "No pm sessions found." while the user's own session ran
+        # (QA S34).  The error is reported to the caller instead.
         try:
-            sockets = sorted(SHARED_SOCKET_DIR.glob("pm-*"))
-        except OSError:
+            with os.scandir(SHARED_SOCKET_DIR) as entries:
+                sockets = sorted(SHARED_SOCKET_DIR / entry.name
+                                 for entry in entries
+                                 if entry.name.startswith("pm-"))
+        except FileNotFoundError:
             sockets = []
+        except OSError as exc:
+            _log.warning("list_pm_sessions: cannot read %s: %s",
+                         SHARED_SOCKET_DIR, exc)
+            if read_errors is not None:
+                read_errors.append(exc)
+            sockets = []
+        # Sockets the caller can name without enumerating the directory
+        # (the cwd project's deterministic socket) stay reachable when it
+        # cannot be read.  Only entries of the socket directory itself are
+        # taken, and each goes through the same lstat check as the scan.
+        for extra in extra_sockets:
+            extra = Path(extra)
+            if extra.parent == SHARED_SOCKET_DIR and extra not in sockets:
+                sockets.append(extra)
     for sock in sockets:
         # lstat, not is_socket(): the socket directory is world-writable, so
         # a symlink another user plants there must not be followed — it

@@ -1099,7 +1099,29 @@ def session_list():
         click.echo("tmux is not installed.", err=True)
         raise SystemExit(1)
 
-    rows = tmux_mod.list_pm_sessions()
+    from pm_core.paths import (SHARED_SOCKET_DIR, get_session_tag,
+                               session_socket_path)
+
+    # The cwd project's socket is probed by name as well, so its session is
+    # still listed when the socket directory can be written but not read
+    # (a root-owned 1733 /tmp/pm-sessions); the scan reports that case in
+    # ``read_errors`` and it is said out loud below, never answered with a
+    # bare "No pm sessions found." while sessions run (QA S34).
+    tag = get_session_tag()
+    own_socket = [session_socket_path(tag)] if tag else []
+    read_errors: list[OSError] = []
+    rows = tmux_mod.list_pm_sessions(extra_sockets=own_socket,
+                                     read_errors=read_errors)
+    if read_errors:
+        reason = read_errors[0].strerror or str(read_errors[0])
+        checked = ("only this project's session was checked there"
+                   if own_socket else
+                   "run this from a project directory to check that "
+                   "project's session")
+        click.echo(
+            f"Cannot read tmux socket directory '{SHARED_SOCKET_DIR}' "
+            f"({reason}): other pm sessions may be running but cannot be "
+            f"listed; {checked}.", err=True)
     if not rows:
         click.echo("No pm sessions found.")
         return

@@ -1913,6 +1913,89 @@ class TestListPmSessions:
         assert probed == [str(paths.default_socket_path())]
         assert rows == []
 
+    @pytest.mark.skipif(os.geteuid() == 0,
+                        reason="root reads a directory whatever its mode")
+    @patch("pm_core.tmux.subprocess.run")
+    def test_unreadable_socket_dir_is_reported_and_named_sockets_probed(
+            self, mock_run, tmp_path):
+        """A socket dir pm can write but not read must not look empty.
+
+        ``ensure_socket_dir`` accepts a root-owned ``1733`` /tmp/pm-sessions
+        (sticky + world-writable), so sessions run there, but its entries
+        cannot be enumerated.  ``Path.glob`` swallowed the PermissionError
+        and the listing came back empty: `pm session list` said "No pm
+        sessions found." while the user's session ran (QA S34).  The error
+        is now reported, and a socket the caller names is still probed.
+        """
+        sock_dir = tmp_path / "pm-sessions"
+        sock_dir.mkdir()
+        sock = sock_dir / "pm-own"
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            s.bind(str(sock))
+        finally:
+            s.close()
+        sock.chmod(0o600)  # a private server's socket
+        sock_dir.chmod(0o333)  # write + search, no read: like 1733 to us
+
+        def fake_run(cmd, **kwargs):
+            if str(sock) in cmd:
+                return MagicMock(returncode=0, stdout="pm-own:pm-own:1\n")
+            return MagicMock(returncode=1, stdout="")
+
+        mock_run.side_effect = fake_run
+        try:
+            with patch.object(paths, "SHARED_SOCKET_DIR", sock_dir):
+                errors: list[OSError] = []
+                assert tmux.list_pm_sessions(read_errors=errors) == []
+                assert len(errors) == 1
+                assert isinstance(errors[0], PermissionError)
+
+                errors = []
+                rows = tmux.list_pm_sessions(extra_sockets=[sock],
+                                             read_errors=errors)
+                assert len(errors) == 1
+        finally:
+            sock_dir.chmod(0o755)
+
+        assert rows == [{"name": "pm-own", "socket": str(sock),
+                         "attached": 1, "shared": False}]
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_extra_sockets_are_deduplicated_and_confined_to_the_dir(
+            self, mock_run, tmp_path):
+        """A named socket already found by the scan is not listed twice,
+        and one outside the socket directory is never probed."""
+        sock_dir = tmp_path / "pm-sessions"
+        sock_dir.mkdir()
+        sock = sock_dir / "pm-own"
+        outside = tmp_path / "pm-outside"
+        for path in (sock, outside):
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                s.bind(str(path))
+            finally:
+                s.close()
+
+        def fake_run(cmd, **kwargs):
+            if "-S" in cmd:
+                name = Path(cmd[cmd.index("-S") + 1]).name
+                if name.startswith("pm-"):
+                    return MagicMock(returncode=0, stdout=f"{name}::0\n")
+            return MagicMock(returncode=1, stdout="")
+
+        mock_run.side_effect = fake_run
+        with patch.object(paths, "SHARED_SOCKET_DIR", sock_dir):
+            errors: list[OSError] = []
+            rows = tmux.list_pm_sessions(extra_sockets=[sock, outside],
+                                         read_errors=errors)
+
+        assert errors == []
+        assert [r["name"] for r in rows] == ["pm-own"]
+        probed = [c[0][0][c[0][0].index("-S") + 1]
+                  for c in mock_run.call_args_list if "-S" in c[0][0]]
+        assert str(outside) not in probed
+
     @patch("pm_core.tmux.subprocess.run")
     def test_marks_shared_sockets(self, mock_run, tmp_path):
         """--global/--group chmod the socket; private servers stay 0600."""
@@ -4909,8 +4992,67 @@ class TestSessionListCommand:
 
         monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: True)
         monkeypatch.setattr(session_mod.tmux_mod, "list_pm_sessions",
-                            lambda: rows)
+                            lambda **kwargs: rows)
         return CliRunner().invoke(session_mod.session, ["list"])
+
+    def test_unreadable_socket_dir_is_said_not_hidden(self, monkeypatch,
+                                                      tmp_path):
+        """EACCES on the socket directory is reported on stderr (QA S34).
+
+        The cwd project's deterministic socket is passed to the scan so its
+        session can still be listed, and the exit status stays 0.
+        """
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+
+        seen = {}
+
+        def fake_list(*, extra_sockets=(), read_errors=None):
+            seen["extra"] = list(extra_sockets)
+            read_errors.append(PermissionError(13, "Permission denied"))
+            return [{"name": "pm-repo-abc",
+                     "socket": str(paths.SHARED_SOCKET_DIR / "pm-repo-abc"),
+                     "attached": 1, "shared": False}]
+
+        monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: True)
+        monkeypatch.setattr(session_mod.tmux_mod, "list_pm_sessions",
+                            fake_list)
+        monkeypatch.setattr(paths, "get_session_tag", lambda: "repo-abc")
+
+        result = CliRunner().invoke(session_mod.session, ["list"])
+
+        assert result.exit_code == 0, result.output
+        assert seen["extra"] == [paths.session_socket_path("repo-abc")]
+        assert result.stderr == (
+            f"Cannot read tmux socket directory '{paths.SHARED_SOCKET_DIR}' "
+            "(Permission denied): other pm sessions may be running but "
+            "cannot be listed; only this project's session was checked "
+            "there.\n")
+        assert "pm-repo-abc" in result.stdout
+        assert "No pm sessions found." not in result.output
+
+    def test_unreadable_socket_dir_outside_a_project(self, monkeypatch):
+        """Outside a project nothing can be named: the warning says how to
+        check a project's session, and the empty listing is not silent."""
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+
+        def fake_list(*, extra_sockets=(), read_errors=None):
+            assert list(extra_sockets) == []
+            read_errors.append(PermissionError(13, "Permission denied"))
+            return []
+
+        monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: True)
+        monkeypatch.setattr(session_mod.tmux_mod, "list_pm_sessions",
+                            fake_list)
+        monkeypatch.setattr(paths, "get_session_tag", lambda: None)
+
+        result = CliRunner().invoke(session_mod.session, ["list"])
+
+        assert result.exit_code == 0, result.output
+        assert "Cannot read tmux socket directory" in result.stderr
+        assert "run this from a project directory" in result.stderr
+        assert result.stdout == "No pm sessions found.\n"
 
     def test_renders_private_legacy_and_shared_rows(self, monkeypatch):
         result = self._invoke(monkeypatch, [
