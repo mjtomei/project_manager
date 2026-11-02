@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T02:53:08.728734+00:00'
+  updated_at: '2026-11-02T02:54:13.382020+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25462,6 +25462,18 @@ prs:
       Overlay hardlinks work: same-fs clone objects show link count 2.'
     created_at: '2026-11-02T02:53:08Z'
     last_edited: '2026-11-02T02:53:08Z'
+  - id: note-14f875c
+    text: 'QA S9 (2026-11-02): PASS, all 4 retirement/recovery stories live at 4537058b,
+      no fix. 14/14 retired + path-like ids exit 1 inside a /workspace pm session
+      (fake-github seeded) with identical before/after snapshots and a silent claude
+      stand-in; 20/20 inventory blobs match c1fcecc5 (hash-object and rev-parse);
+      authored-then-removed only-one returns every surface to the empty messages.
+      Unscoped doc nit: the "minimal example" in pm_core/docs/qa_library.md "## Regression
+      tests" points at a `throwaway-pm-test-project` setup recipe that does not exist
+      (pm/qa/instructions/ has only tui-manual-test; master had the same reference
+      as an instruction).'
+    created_at: '2026-11-02T02:54:13Z'
+    last_edited: '2026-11-02T02:54:13Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
