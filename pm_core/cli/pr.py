@@ -510,11 +510,11 @@ def pr_cd(identifier: str):
     # PR's clone is still there (pm_core.workdirs).
     found = workdirs_mod.resolve_workdir(data, pr_entry, root,
                                          project_dir=_workdirs_dir(data))
-    if found.status in (workdirs_mod.RECOVERED, workdirs_mod.AMBIGUOUS):
+    if found.reportable:
         click.echo(found.describe(), err=found.path is None)
     workdir = found.path
     if not workdir or not Path(workdir).is_dir():
-        if found.status != workdirs_mod.AMBIGUOUS:
+        if not found.reportable:
             click.echo(f"Workdir for {pr_entry['id']} does not exist: "
                        f"{pr_entry.get('workdir')}", err=True)
         raise SystemExit(1)
@@ -964,8 +964,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         if recovery is None:
             recovery = workdirs_mod.resolve_workdir(
                 data, pr_entry, root, project_dir=_workdirs_dir(data))
-            if recovery.status in (workdirs_mod.RECOVERED,
-                                   workdirs_mod.AMBIGUOUS):
+            if recovery.reportable:
                 click.echo(recovery.describe(), err=recovery.path is None)
         return recovery
 

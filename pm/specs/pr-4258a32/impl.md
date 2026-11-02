@@ -67,7 +67,9 @@ Only when the field is empty or its path does not exist, and the PR has a
    `slug = store.slugify(branch.replace("/", "-"))` — the exact naming
    `pr start` / `_clone_workdir` use (`<branch_slug>-<base_hash>`, or the bare
    slug when no hash).  Dot entries (`.tmp-<pr>`, lock files) and non-dirs
-   are skipped.  Entries resolving to the same real path are deduplicated.
+   are skipped.  Entries resolving to the same real path are deduplicated,
+   keeping the real directory over a symlink alias (so the recorded path is
+   the clone itself, whatever the alias's name sorts as).
 3. If no name matches, return `missing` without taking any lock.
 
 QA scenario clones live under `<workdirs_base>/qa/<pr>-*/scenario-N/repo` and
@@ -77,8 +79,11 @@ so they are never candidates.
 ### R4: Read-only identity verification of each candidate
 
 All git calls use `GIT_OPTIONAL_LOCKS=0`, a timeout, and never `status`,
-`checkout`, `fetch`, `stash` or any write.  A candidate is **verified** only
-if all hold:
+`checkout`, `fetch`, `stash` or any write.  Repository-locating variables
+(`GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`, …) are
+dropped from git's environment, so a pm run that inherits them (e.g. from a
+git hook) still inspects each candidate rather than that repository.  A
+candidate is **verified** only if all hold:
 
 - **Own repository**: `git rev-parse --show-toplevel` resolves to the
   candidate itself (a plain dir, or a subdir of some other repo, is rejected).
@@ -107,6 +112,10 @@ identity; it also separates PRs whose 50-char-truncated slugs collide.
   listed by `describe()`; nothing is written and callers must **not** clone.
 - None verified → `status="missing"` with the rejected candidates and reasons;
   callers fall back to their existing behavior (clone).
+- `WorkdirResolution.reportable` (recovered, ambiguous, or any rejected
+  same-named candidate) tells callers to show `describe()`, so a fresh clone
+  made next to a skipped one — or `pm pr cd` failing — says which clones were
+  skipped and why.
 
 ### R6: Serialized with provisioning
 
@@ -123,7 +132,8 @@ deadlock).
 - `pm_core/cli/helpers.py:_ensure_workdir` — after its existing double-check,
   under the lock: `resolve_workdir(..., locked=True)`; recovered → return it
   (no clone); ambiguous → print `describe()` to stderr and return `None` (no
-  clone); missing → `_clone_workdir` as before.  This covers every existing
+  clone); missing → `_clone_workdir` as before (skipped same-named clones
+  are listed on stderr first).  This covers every existing
   consumer: `pm pr review` window (`cli/pr.py` review window), `pm pr done`,
   merge window, `signoff.py` launch, `qa_loop.py` QA launch.
 - `pm_core/cli/pr.py:pr_start` — when no `--workdir` is given and the recorded
@@ -206,7 +216,9 @@ parent (it belongs to another HOME/machine), not `qa/`, not other projects.
 - **`.tmp-<pr_id>` partial clone**: dot entry, skipped.
 - **Different repo in a same-named dir**: root commit absent → rejected.
 - **Symlink alias to the same clone**: deduplicated by real path (not
-  ambiguous).
+  ambiguous); the real directory, not the alias, is recorded.
+- **pm run with `GIT_DIR` set** (git hook): git's location variables are
+  dropped, so a plain same-named dir is still rejected.
 - **PR without `branch`**: no discovery; `missing`.
 - **Concurrent callers**: second caller waits on the per-PR lock, then adopts
   the persisted record from the first.

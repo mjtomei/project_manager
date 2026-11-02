@@ -1174,6 +1174,8 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
         if found.status == workdirs.AMBIGUOUS:
             click.echo(found.describe(), err=True)
             return None
+        if found.reportable:  # same-named clones skipped: say why
+            click.echo(found.describe(), err=True)
         return _clone_workdir(data, pr_entry, root)
 
 

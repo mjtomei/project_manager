@@ -204,10 +204,12 @@ class TestRecovery:
 
     def test_symlink_alias_is_not_ambiguous(self, env):
         clone = env.clone(f"{SLUG}-10e74920")
+        # The alias sorts first; the real directory is still what's recorded.
         (env.project_dir / f"{SLUG}-0000aaaa").symlink_to(clone)
         data, pr = env.fresh()
         res = workdirs.resolve_workdir(data, pr, env.root)
-        assert res.status == workdirs.RECOVERED
+        assert (res.status, res.path) == (workdirs.RECOVERED, str(clone))
+        assert env.fresh()[1]["workdir"] == str(clone)
 
     def test_origin_url_identity_when_repo_id_unknown(self, env):
         data, pr = env.fresh()
@@ -224,6 +226,22 @@ class TestRecovery:
         res = workdirs.resolve_workdir(data, pr)
         assert res.status == workdirs.MISSING
         assert "different repository" in res.rejected[0][1]
+
+    def test_persist_is_compare_and_set(self, env, tmp_path):
+        clone = env.clone(f"{SLUG}-10e74920")
+        # On-disk record still the stale path: the recovered path is written.
+        assert workdirs._persist(env.root, PR_ID, env.stale,
+                                 str(clone)) == str(clone)
+        assert env.fresh()[1]["workdir"] == str(clone)
+        # Another writer recorded an existing path meanwhile: it wins and is
+        # not overwritten.
+        other = tmp_path / "relinked-elsewhere"
+        other.mkdir()
+        store.locked_update(env.root, lambda d: store.get_pr(d, PR_ID)
+                            .__setitem__("workdir", str(other)))
+        assert workdirs._persist(env.root, PR_ID, env.stale,
+                                 str(clone)) == str(other)
+        assert env.fresh()[1]["workdir"] == str(other)
 
     def test_record_persisted_by_a_concurrent_caller_wins(self, env, tmp_path):
         env.clone(f"{SLUG}-10e74920")
@@ -287,6 +305,22 @@ class TestRejectionAndAmbiguity:
         res = workdirs.resolve_workdir(data, pr, env.root)
         assert res.status == workdirs.MISSING
         assert "different repository" in res.rejected[0][1]
+
+    def test_inherited_git_dir_does_not_verify_a_plain_dir(self, env,
+                                                          tmp_path,
+                                                          monkeypatch):
+        """pm run with GIT_DIR set (e.g. from a git hook) must still inspect
+        each candidate itself, not the inherited repository."""
+        elsewhere = tmp_path / "elsewhere"
+        subprocess.run(["git", "clone", "-q", str(env.origin),
+                        str(elsewhere)], check=True, capture_output=True)
+        git(elsewhere, "checkout", "-q", "-b", BRANCH)
+        (env.project_dir / f"{SLUG}-10e74920").mkdir(parents=True)
+        data, pr = env.fresh()
+        monkeypatch.setenv("GIT_DIR", str(elsewhere / ".git"))
+        res = workdirs.resolve_workdir(data, pr, env.root)
+        assert res.status == workdirs.MISSING
+        assert "not a git repository" in res.rejected[0][1]
 
     def test_non_repo_dir_is_rejected(self, env):
         (env.project_dir / f"{SLUG}-10e74920").mkdir(parents=True)
@@ -366,6 +400,16 @@ class TestEnsureWorkdir:
             assert helpers._ensure_workdir(data, pr, env.root) == "/cloned"
         clone.assert_called_once()
 
+    def test_skipped_clones_are_explained_before_cloning(self, env, capsys):
+        env.clone(f"{SLUG}-10e74920", branch=None)  # same name, on master
+        data, pr = env.fresh()
+        with mock.patch.object(helpers, "_clone_workdir",
+                               return_value="/cloned"):
+            assert helpers._ensure_workdir(data, pr, env.root) == "/cloned"
+        err = capsys.readouterr().err
+        assert f"skipped {env.project_dir / f'{SLUG}-10e74920'}" in err
+        assert f"on branch master, not {BRANCH}" in err
+
     def test_lock_is_held_while_recovering(self, env):
         """Recovery runs inside the per-PR provisioning lock (not a second,
         re-entrant acquisition, which would deadlock on flock)."""
@@ -427,6 +471,17 @@ class TestPrStart:
         gm["clone"].assert_not_called()
         assert env.fresh()[1]["workdir"] == str(clone)
 
+    def test_pending_start_reuses_clone_instead_of_cloning(self, env):
+        clone = env.clone(f"{SLUG}-10e74920")
+        store.locked_update(env.root, lambda d: store.get_pr(d, PR_ID)
+                            .update(status="pending", workdir=None))
+        result, gm = self._invoke(env)
+        assert result.exit_code == 0, result.output
+        assert "re-linked" in result.output
+        gm["clone"].assert_not_called()
+        _, pr = env.fresh()
+        assert (pr["workdir"], pr["status"]) == (str(clone), "in_progress")
+
     def test_ambiguity_refuses_to_clone(self, env):
         env.clone(f"{SLUG}-10e74920")
         env.clone(f"{SLUG}-ab512a43")
@@ -459,6 +514,17 @@ class TestPrCd:
         assert result.exit_code == 0, result.output
         chdir.assert_called_once_with(str(clone))
         execvp.assert_called_once()
+
+    def test_cd_explains_skipped_clone(self, env):
+        env.clone(f"{SLUG}-10e74920", branch=None)  # same name, on master
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root", return_value=env.root), \
+             mock.patch.object(pr_mod.os, "execvp") as execvp:
+            result = runner.invoke(pr_mod.pr, ["cd", PR_ID])
+        assert result.exit_code == 1
+        assert f"recorded path {env.stale} is missing" in result.output
+        assert f"on branch master, not {BRANCH}" in result.output
+        execvp.assert_not_called()
 
     def test_cd_reports_ambiguity(self, env):
         env.clone(f"{SLUG}-10e74920")

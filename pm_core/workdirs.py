@@ -40,6 +40,13 @@ MISSING = "missing"
 # of running git in every one of them.
 MAX_CANDIDATES = 16
 _GIT_TIMEOUT = 15.0
+# Variables that make git operate on a repository other than the one at its
+# cwd (set e.g. when pm runs from a git hook).  Inherited, they would make
+# every candidate "verify" as that repository.
+_GIT_LOCATION_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR",
+                      "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                      "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE",
+                      "GIT_CEILING_DIRECTORIES")
 # ``<branch_slug>`` or ``<branch_slug>-<base hash>`` (``rev-parse --short=8``
 # may lengthen the hash when it is ambiguous).
 _HASH_SUFFIX = r"(?:-[0-9a-f]{7,40})?"
@@ -57,6 +64,13 @@ class WorkdirResolution:
     project_dir: str | None = None
     candidates: list[str] = field(default_factory=list)
     rejected: list[tuple[str, str]] = field(default_factory=list)
+
+    @property
+    def reportable(self) -> bool:
+        """Whether callers should show :meth:`describe`: a re-link, an
+        ambiguity, or same-named clones that were skipped (so a fresh clone
+        made next to them is explained)."""
+        return self.status in (RECOVERED, AMBIGUOUS) or bool(self.rejected)
 
     def describe(self) -> str:
         """User-facing account of the outcome."""
@@ -125,10 +139,13 @@ def _git(cwd: Path, *args: str) -> tuple[int | None, str, str]:
     """Run a read-only git command; ``(returncode, stdout, stderr)``.
 
     ``GIT_OPTIONAL_LOCKS=0`` keeps git from refreshing (and so locking or
-    rewriting) the candidate's index; ``returncode`` is None when git could
-    not run or timed out.
+    rewriting) the candidate's index, and the repository-locating variables
+    are dropped so git inspects *cwd*, not an inherited ``GIT_DIR``;
+    ``returncode`` is None when git could not run or timed out.
     """
-    env = dict(os.environ, GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0")
+    env = {k: v for k, v in os.environ.items()
+           if k not in _GIT_LOCATION_VARS}
+    env.update(GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0")
     try:
         r = subprocess.run(["git", *args], cwd=str(cwd), env=env,
                            capture_output=True, text=True,
@@ -211,7 +228,11 @@ def verify_candidate(path: Path, data: dict, branch: str) -> str | None:
 
 
 def _name_matches(project_dir: Path, branch: str) -> list[Path]:
-    """Directories in *project_dir* named after *branch* (one level only)."""
+    """Directories in *project_dir* named after *branch* (one level only).
+
+    Entries that resolve to the same directory count once; the real
+    directory is kept over a symlink alias, so that is the path recorded.
+    """
     slug = store.slugify(branch.replace("/", "-"))
     if not slug:
         return []
@@ -220,22 +241,20 @@ def _name_matches(project_dir: Path, branch: str) -> list[Path]:
         entries = list(os.scandir(project_dir))
     except OSError:
         return []
-    seen: set[str] = set()
-    out: list[Path] = []
+    by_real: dict[str, tuple[bool, str]] = {}
     for entry in sorted(entries, key=lambda e: e.name):
         if entry.name.startswith(".") or not pattern.fullmatch(entry.name):
             continue
         try:
             if not entry.is_dir():
                 continue
+            alias = entry.is_symlink()
         except OSError:
             continue
         real = os.path.realpath(entry.path)
-        if real in seen:
-            continue
-        seen.add(real)
-        out.append(Path(entry.path))
-    return out
+        if real not in by_real or (by_real[real][0] and not alias):
+            by_real[real] = (alias, entry.path)
+    return sorted(Path(p) for _, p in by_real.values())
 
 
 def resolve_workdir(data: dict, pr_entry: dict, root: Path | None = None, *,
