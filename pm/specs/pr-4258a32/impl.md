@@ -155,6 +155,12 @@ deadlock).
   launch runs in the TUI, where that stderr report is never shown, so
   on failure it re-resolves (no persist) and its ERROR status line names
   the ambiguity instead of "does not exist … could not be created".
+  Likewise the review and sign-off windows' "no workdir" line (the TUI
+  shows a launch's last stdout line) names the ambiguity and says to
+  move the extra clone(s) aside, instead of "Start the PR first" (a
+  start would be refused for the same ambiguity).  These share
+  `workdirs.ambiguity()` (read-only re-check) and
+  `WorkdirResolution.summary()` (one line, no listing).
 - `pm_core/cli/pr.py:pr_start` — when no `--workdir` is given and the recorded
   path is missing, resolve (with `project_dir=_workdirs_dir(data)`) before
   printing "workdir missing, creating a new one" / cloning.  Recovered → reuse

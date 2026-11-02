@@ -5578,14 +5578,10 @@ def _run_qa_sync(
         # went to stderr, which the TUI log line never shows: say so here
         # instead of claiming the workdir is gone.
         from pm_core import workdirs
-        found = workdirs.resolve_workdir(data, dict(live_pr), persist=False)
-        if found.status == workdirs.AMBIGUOUS:
-            _log.error("QA aborted: %s", found.describe())
-            what = ("directories named after" if found.unverified
-                    else "clones of")
-            reason = (f"Workdir for {state.pr_id}: {len(found.candidates)} "
-                      f"{what} {found.branch} in {found.project_dir}, "
-                      "not choosing one; move the extra clone(s) aside")
+        amb = workdirs.ambiguity(data, live_pr)
+        if amb:
+            _log.error("QA aborted: %s", amb.describe())
+            reason = f"Workdir for {state.pr_id}: {amb.summary()}"
         else:
             _log.error("QA aborted: workdir for %s does not exist and could "
                        "not be created", state.pr_id)

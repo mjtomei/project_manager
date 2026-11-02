@@ -114,6 +114,17 @@ class WorkdirResolution:
         lines += [f"  - skipped {p}: {why}" for p, why in self.rejected]
         return "\n".join(lines)
 
+    def summary(self) -> str:
+        """The outcome in one line without the candidate listing, for a
+        status or launch line that can't show :meth:`describe`."""
+        if self.status == AMBIGUOUS:
+            what = ("directories named after" if self.unverified
+                    else "clones of")
+            return (f"{len(self.candidates)} {what} {self.branch} in "
+                    f"{self.project_dir}, not choosing one; move the extra "
+                    "clone(s) aside")
+        return self.describe().splitlines()[0]
+
 
 def branch_slug(branch: str) -> str:
     """*branch* as a directory-name slug (``pm/pr-x-title`` → ``pm-pr-x-title``,
@@ -458,6 +469,20 @@ def _persist(root: Path, pr_id: str, found: str) -> str:
         _log.warning("workdir for %s: could not record %s: %s",
                      pr_id, found, e)
     return winner
+
+
+def ambiguity(data: dict, pr_entry: dict) -> WorkdirResolution | None:
+    """The ambiguity behind a workdir lookup that came back empty, or None.
+
+    ``_ensure_workdir`` reports an ambiguity on stderr and returns None,
+    like a failed clone.  A caller whose own message is the line the user
+    actually sees (a TUI status or log line, a window-launch notice)
+    re-checks here, so it names the clones to move aside instead of saying
+    the workdir is gone or the PR needs starting.  Read-only: resolves a
+    copy of *pr_entry* and persists nothing.
+    """
+    found = resolve_workdir(data, dict(pr_entry), persist=False)
+    return found if found.status == AMBIGUOUS else None
 
 
 def get_workdir(data: dict, pr_entry: dict, root: Path | None = None,

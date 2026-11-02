@@ -1160,6 +1160,19 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
         return _clone_workdir(data, pr_entry, root)
 
 
+def _no_workdir_hint(data: dict, pr_entry: dict) -> str:
+    """What to do when :func:`_ensure_workdir` returned None, as one line.
+
+    Several clones of the PR branch → name them and say to move the extra
+    one(s) aside (starting the PR again would only be refused); otherwise
+    "Start the PR first."  One line because the TUI shows only the last
+    line of a launch, never ``_ensure_workdir``'s stderr listing.
+    """
+    from pm_core import workdirs
+    amb = workdirs.ambiguity(data, pr_entry)
+    return f"{amb.summary()}." if amb else "Start the PR first."
+
+
 def _clone_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
     """Clone + check out a PR's workdir.  Caller holds the per-PR lock.
 

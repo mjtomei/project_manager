@@ -743,3 +743,60 @@ class TestQaLaunch:
             state = self._run(env)
         assert state.latest_verdict == "ERROR"
         assert "does not exist on this machine" in state.latest_output
+
+
+class TestLaunchWindowMessages:
+    """Review and sign-off windows end with one line the user sees (the
+    TUI shows only a launch's last stdout line, never ``_ensure_workdir``'s
+    stderr listing): an ambiguity must be named there, not "Start the PR
+    first" — a start would only be refused for the same ambiguity."""
+
+    @pytest.fixture
+    def tmux(self, env, monkeypatch):
+        from pm_core import signoff
+        for mod in (pr_mod.tmux_mod, signoff.tmux_mod):
+            monkeypatch.setattr(mod, "has_tmux", lambda: True)
+            monkeypatch.setattr(mod, "in_tmux", lambda: True)
+            monkeypatch.setattr(mod, "session_exists", lambda s: True)
+        monkeypatch.setattr(pr_mod, "_get_pm_session", lambda: "pm-test")
+        monkeypatch.setattr(pr_mod, "state_root", lambda: env.root)
+        monkeypatch.setattr(helpers, "state_root", lambda: env.root)
+        return signoff
+
+    def _review(self, env, capsys):
+        data, pr = env.fresh()
+        pr_mod._launch_review_window(data, pr, background=True)
+        return capsys.readouterr().out.strip().splitlines()[-1]
+
+    def _signoff(self, env, signoff, capsys):
+        data, pr = env.fresh()
+        signoff.launch_signoff_window(data, pr, background=True,
+                                      session_name="pm-test")
+        return capsys.readouterr().out.strip().splitlines()[-1]
+
+    def test_review_window_names_the_ambiguity(self, env, tmux, capsys):
+        env.clone(f"{SLUG}-10e74920")
+        env.clone(f"{SLUG}-ab512a43")
+        last = self._review(env, capsys)
+        assert last.startswith(f"Review window: no workdir for {PR_ID}.")
+        assert f"2 clones of {BRANCH} in {env.project_dir}" in last
+        assert "move the extra clone(s) aside" in last
+        assert "Start the PR first" not in last
+        assert env.fresh()[1]["workdir"] == env.stale
+
+    def test_signoff_window_names_the_ambiguity(self, env, tmux, capsys):
+        env.clone(f"{SLUG}-10e74920")
+        env.clone(f"{SLUG}-ab512a43")
+        last = self._signoff(env, tmux, capsys)
+        assert last.startswith(f"Sign-off window: no workdir for {PR_ID}.")
+        assert "2 clones of" in last and "not choosing one" in last
+        assert "Start the PR first" not in last
+
+    def test_no_clone_at_all_still_says_start_the_pr(self, env, tmux,
+                                                      capsys):
+        with mock.patch.object(helpers, "_clone_workdir", return_value=None):
+            assert self._review(env, capsys) == (
+                f"Review window: no workdir for {PR_ID}. Start the PR first.")
+            assert self._signoff(env, tmux, capsys) == (
+                f"Sign-off window: no workdir for {PR_ID}. "
+                "Start the PR first.")

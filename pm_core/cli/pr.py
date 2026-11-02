@@ -41,6 +41,7 @@ from pm_core.cli.helpers import (
     _launch_blocked_at_lock,
     _log,
     _make_pr_entry,
+    _no_workdir_hint,
     _pr_display_id,
     format_pr_line,
     _pr_id_sort_key,
@@ -1426,7 +1427,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         root = state_root()
         workdir = _ensure_workdir(data, pr_entry, root)
         if not workdir:
-            click.echo(f"Review window: no workdir for {pr_entry['id']}. Start the PR first.")
+            click.echo(f"Review window: no workdir for {pr_entry['id']}. "
+                       f"{_no_workdir_hint(data, pr_entry)}")
             return
 
     # Review loop always forces a fresh window
