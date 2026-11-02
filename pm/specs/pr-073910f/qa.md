@@ -251,6 +251,14 @@ pane unless stated otherwise.
   mobile state requires) rather than the plain tmux `select-pane`
   fallback: the gate that decides this resolves the base session through
   tmux's session group and quotes the name (review-loop b48f i15).
+- **GIVEN** a pm session whose repo directory name contains a space, a
+  quote, a backtick or a `$` (so the session name does too), **WHEN** the
+  user presses the pane-switch prefix keys, or a pane opens, closes or
+  resizes in it, **THEN** the name reaches `pm _pane-switch` /
+  `pm _pane-opened` / `pm _window-resized` / `pm _pane-exited` as one
+  argument and no part of it is executed by the shell: the bindings and
+  hooks quote it with tmux's `#{q:...}` modifier, and the pane EXIT trap
+  quotes it for each of its shell layers (review-loop b48f i17).
 - **GIVEN** a QA run launched from another clone's pm session (recorded in
   its `qa_resume.json` session tag) whose session is still alive on that
   clone's own server, **WHEN** this clone's TUI restarts and scans for

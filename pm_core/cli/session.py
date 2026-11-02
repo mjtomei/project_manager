@@ -178,6 +178,16 @@ def _register_tmux_bindings(session_name: str) -> None:
     # or a repo directory may contain a space).  A session name containing
     # a single quote still breaks the assignment, which fails the condition
     # and so keeps the plain fallback — the safe direction.
+    #
+    # The *command* the gate runs needs the same treatment, and quoting the
+    # condition alone is not enough: ``pm _pane-switch #{session_name}``
+    # put the name into the shell unquoted, so a space split it into two
+    # arguments (Click rejected the command, so the mobile-aware switch the
+    # gate had just selected never ran) and a ``$`` or backtick ran command
+    # substitution.  ``#{q:...}`` is tmux's shell-quote modifier — the same
+    # one the popup bindings use (review-loop b48f i17).  The hook
+    # registrations below use it for the same reason; the window and pane
+    # ids are tmux-generated (``@N``/``%N``) and need no quoting.
     registry_dir = pane_registry.registry_dir()
     registry_test = (
         f"g='#{{session_group}}'; s='#{{session_name}}'; "
@@ -192,13 +202,13 @@ def _register_tmux_bindings(session_name: str) -> None:
     for key, (direction, fallback) in switch_keys.items():
         subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", key,
                  "if-shell", registry_test,
-                 f"run-shell 'pm _pane-switch #{{session_name}} {direction}'",
+                 f"run-shell 'pm _pane-switch #{{q:session_name}} {direction}'",
                  fallback),
                 check=False)
     subprocess.run(tmux_mod._tmux_cmd("set-hook", "-g", "after-kill-pane",
              "run-shell 'pm _pane-closed'"), check=False)
     subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "after-split-window",
-             "run-shell 'pm _pane-opened \"#{session_name}\" \"#{window_id}\" \"#{pane_id}\"'"),
+             "run-shell 'pm _pane-opened #{q:session_name} #{window_id} #{pane_id}'"),
             check=False)
     # Auto-rebalance when window resizes (triggered by clients connecting/
     # disconnecting with window-size=smallest, or moving terminal to a different monitor).
@@ -208,7 +218,7 @@ def _register_tmux_bindings(session_name: str) -> None:
     # Capture stderr: this also runs from the TUI, whose stderr is the pane
     # itself, and tmux < 3.3 rejects the hook ("invalid option").
     r = subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "window-resized",
-             "run-shell 'pm _window-resized \"#{session_name}\" \"#{window_id}\"'"),
+             "run-shell 'pm _window-resized #{q:session_name} #{window_id}'"),
             check=False, capture_output=True, text=True)
     if r.returncode != 0:
         _log.warning("set-hook window-resized failed: %s", r.stderr.strip())
@@ -876,10 +886,14 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     pane_registry.register_pane(session_name, window_id, tui_pane, "tui", "pm _tui")
 
     def _wrap(cmd: str) -> str:
-        """Wrap a pane command in bash with an EXIT trap for rebalancing."""
-        escaped = cmd.replace("'", "'\\''")
-        return (f"bash -c 'trap \"pm _pane-exited {session_name} {window_id} {generation} $TMUX_PANE\" EXIT; "
-                f"{escaped}'")
+        """Wrap a pane command in bash with an EXIT trap for rebalancing.
+
+        ``tmux.wrap_with_exit_trap`` escapes the session name and window
+        for the trap's double-quoted context (a repo directory may contain
+        a space or shell metacharacters; review-loop b48f i17).
+        """
+        return tmux_mod.wrap_with_exit_trap(cmd, session_name, window_id,
+                                            generation)
 
     # Notes pane is no longer auto-started — press `n` in the TUI to
     # open it on demand, or run `pm notes` in a pane manually.

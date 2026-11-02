@@ -3702,3 +3702,77 @@ fix-asserting tests were checked against a worktree of the pre-fix head
 (9bbe727f7).  No live session, server or shared host configuration was
 touched — every fixture used a disposable socket directory, a temporary
 HOME or a mocked tmux.
+
+## Review iteration (2026-11-02, review-loop b48f i17)
+
+Verification pass over the head after the b48f i16 fixes; two shell-quoting
+gaps of the "a name is a shell word" class, plus one prefix-match residue in
+discovery.  No requirement changes.
+
+1. **The pane-switch gate's fix was defeated by the command it gates.**  i15
+   quoted the *condition* (space names, `~` tags, user views), but the
+   command it runs — `run-shell 'pm _pane-switch #{session_name} {direction}'`
+   — interpolated the name unquoted.  tmux expands the format before the
+   shell runs, so a repo directory containing a space split the name into
+   two arguments (Click rejected the command, so the mobile-aware switch the
+   gate had just selected never ran) and one containing a `$` or a backtick
+   ran command substitution.  The two pane hooks (`_pane-opened`,
+   `_window-resized`) had the same value in double quotes, which stops word
+   splitting but not `$`/backtick expansion.  All three now use tmux's
+   shell-quote modifier, `#{q:...}` — the one `_bind_popups` already used —
+   and it exists on tmux 3.2a (the supported floor; verified live).  Tests:
+   `TestTmuxCommandsQuoteAwkwardSessionNames` registers the real bindings on
+   a disposable server, runs tmux's own expansion against a stub `pm`, and
+   asserts the name arrives as one argument for a space, a backtick, a
+   single quote, a double quote and a `;`; both tests fail on the pre-fix
+   head (the space splits into two arguments and the backtick executes
+   `id`).  A `$` cannot be round-tripped through a session *name* — tmux
+   mangles it at creation (stores a backslash before it) — so the trap test
+   below covers the `$` escaping instead.
+
+2. **The pane EXIT traps interpolated the session name into a shell
+   command.**  `pm _pane-exited {session} {window} {generation} $TMUX_PANE`
+   sat inside double quotes in a `bash -c '…'` string.  A name with a space
+   gave the handler extra arguments (so the pane stayed registered and the
+   layout was not rebalanced) and a `$`/backtick name ran command
+   substitution when the trap string was defined.  The wrapper existed in
+   three places (two in `pane_ops`, one in `_session_start`) and each
+   escaped only the wrapped command, never the trap.  New
+   `tmux.wrap_with_exit_trap()` is the single definition: the values are
+   shell-quoted for the trap's own re-parse (`shlex.quote`), escaped for the
+   double-quoted trap string (`tmux.shell_double_quote`), and escaped for
+   the single-quoted `bash -c` argument (`_single_quote`).  Tests:
+   `TestExitTrapQuoting` runs the generated wrapper with a stub `pm` for
+   space/quote/backtick/`$`/`;` names, asserts the exact argv, and that a
+   metacharacter never runs a command;
+   `test_the_pane_ops_wrapper_uses_the_same_trap` pins the `pane_ops`
+   delegation.  Verified pre-fix: the space name split into extra arguments
+   and the backtick case produced no `pm` call at all (the trap string was
+   mangled).
+
+3. **`_find_tui_pane()`'s cwd branch re-checked liveness with a prefix
+   match.**  i16 made `find_session_server` confirm its prefix probe through
+   the exact name and the session group, but the cwd branch called
+   `_select_session_socket` (the confirmed resolver) and then a bare
+   `session_exists` — a prefix target again.  With only a *different*
+   session whose name starts with the cwd session's name on the legacy
+   default server, that second probe identified a session that is not
+   running, and the registry probe below (pane ids are unique only per
+   server) could return an unrelated pane.  The branch now uses the
+   resolver's own answer (`cwd_server is not None`) and does not probe
+   again.  Test:
+   `TestFindTuiPaneAcrossServers::test_cwd_session_merely_named_like_a_group_is_not_identified`
+   (fails on the pre-fix head: it returned `%5`).  The i16 residual —
+   other commands still passing a base name to prefix-matched tmux
+   targets — is unchanged.
+
+Validation: full suite 5496 passed / 1 skipped (422.7 s, log
+`/pm-captures/review-b48f-i17/full-suite-final.log`).  Every fix-asserting
+test was checked against the pre-fix code — a pre-fix copy of the file for
+the binding and discovery tests, and the old inline trap wrapper
+reproduced verbatim for the trap tests (the space name split, and the
+backtick case produced no `pm` call).  Two test-hygiene edits made after
+the full run were re-run green (`test_session_socket_isolation.py`, 17
+passed).  No live session, server or shared host configuration was
+touched — every fixture used a disposable socket directory, a temporary
+HOME or a mocked tmux.

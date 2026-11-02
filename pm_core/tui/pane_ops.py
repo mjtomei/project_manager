@@ -227,8 +227,7 @@ def launch_pane(app, cmd: str, role: str, fresh: bool = False,
 
     data = pane_registry.load_registry(session)
     gen = data.get("generation", "0")
-    escaped = cmd.replace("'", "'\\''")
-    wrap = f"bash -c 'trap \"pm _pane-exited {session} {window} {gen} $TMUX_PANE\" EXIT; {escaped}'"
+    wrap = tmux_mod.wrap_with_exit_trap(cmd, session, window, gen)
     try:
         direction = pane_layout.preferred_split_direction(session, window)
         pane_id = tmux_mod.split_pane(session, direction, wrap, window=window,
@@ -652,12 +651,15 @@ def _focus_plans_window(app, plan_id: str | None) -> None:
 
 
 def _wrap_pane_cmd(session: str, window: str, cmd: str) -> str:
-    """Wrap a pane command with the EXIT trap that notifies pm of pane death."""
+    """Wrap a pane command with the EXIT trap that notifies pm of pane death.
+
+    Delegates to ``tmux.wrap_with_exit_trap``, which escapes the session
+    name and window for the trap's double-quoted context (a repo directory
+    may contain a space or shell metacharacters; review-loop b48f i17).
+    """
     data = pane_registry.load_registry(session)
     gen = data.get("generation", "0")
-    escaped = cmd.replace("'", "'\\''")
-    return (f"bash -c 'trap \"pm _pane-exited {session} {window} {gen} "
-            f"$TMUX_PANE\" EXIT; {escaped}'")
+    return tmux_mod.wrap_with_exit_trap(cmd, session, window, gen)
 
 
 def _launch_in_plans_window(app, plan_id: str | None, cmd: str, role: str,

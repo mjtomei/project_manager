@@ -1543,15 +1543,20 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
         # reason as the ambient branch above: `list_pm_sessions` enumerates
         # socket files, so a live server whose socket file was removed would
         # otherwise be unreachable by the last-resort scan.
+        #
+        # `_select_session_socket` already answers "is this session
+        # running?" through `find_session_server`, whose prefix match is
+        # confirmed through the exact name and the session group (b48f
+        # i16).  A second `session_exists` probe here would be a bare
+        # (prefix) target again: on the legacy default server it also
+        # succeeds for a *different* session whose name merely starts with
+        # this one, identifying a session that is not running and letting
+        # the registry probe below resolve a recorded pane id — pane ids
+        # are only unique per server — to an unrelated pane (review-loop
+        # b48f i17).
         cwd_server = _select_session_socket(
             expected_session, owned_only=_private_session_context())
-        try:
-            session_running = tmux_mod.session_exists(expected_session)
-        except OSError:
-            # tmux missing/unexecutable: discovery degrades to "no session"
-            # instead of crashing (same contract as find_session_server).
-            session_running = False
-        if session_running:
+        if cwd_server is not None:
             identified = expected_session
             identified_server = cwd_server
             pane_id = _registry_tui_pane(expected_session)

@@ -2260,8 +2260,13 @@ class TestFindTuiPaneAcrossServers:
                             lambda: "pm-other")
         # The cwd session is running, so _select_session_socket re-points
         # PM_TMUX_SOCKET at it — but its registry has no live TUI pane.
-        monkeypatch.setattr(helpers.tmux_mod, "session_exists",
-                            lambda *a, **kw: True)
+        # `find_session_server` is the branch's liveness answer (the same
+        # resolver `pm session` uses); a second bare `session_exists` probe
+        # is a prefix target and is deliberately not consulted any more
+        # (review-loop b48f i17).
+        monkeypatch.setattr(helpers.tmux_mod, "find_session_server",
+                            lambda name, owned_only=False: ("/tmp/cwd.sock",
+                                                            True))
         monkeypatch.setattr(helpers.tmux_mod, "pane_exists", lambda p: False)
         monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions",
                             lambda: [])
@@ -2306,6 +2311,45 @@ class TestFindTuiPaneAcrossServers:
 
         assert helpers._find_tui_pane() == ("%5", "pm-cwd")
         assert os.environ["PM_TMUX_SOCKET"] == sock
+
+    def test_cwd_session_merely_named_like_a_group_is_not_identified(
+            self, monkeypatch):
+        """A prefix match is not the cwd session (review-loop b48f i17).
+
+        ``find_session_server`` confirms its prefix probe through the exact
+        name and the session group, but the cwd branch used to re-check with
+        a bare ``session_exists`` — also a prefix target.  With only a
+        *different* session whose name starts with the cwd session's name on
+        the default server, that check identified a session that is not
+        running, and the registry probe (pane ids are only unique per
+        server) could hand back an unrelated pane.
+        """
+        from pm_core.cli import helpers
+        from pm_core import pane_registry
+
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: False)
+        monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-x")
+        # The exact/group-confirmed resolver says no session by that name
+        # runs anywhere.
+        monkeypatch.setattr(helpers.tmux_mod, "find_session_server",
+                            lambda name, owned_only=False: (None, False))
+        # A bare prefix probe would say "running" (the merely-named-like
+        # session), and pane_exists would accept a colliding pane id.
+        monkeypatch.setattr(helpers.tmux_mod, "session_exists",
+                            lambda *a, **kw: True)
+        monkeypatch.setattr(helpers.tmux_mod, "pane_exists", lambda p: True)
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions",
+                            lambda: [])
+        monkeypatch.setattr(helpers, "_live_panes_and_tuis",
+                            lambda: ({}, []))
+        monkeypatch.setattr(
+            pane_registry, "load_registry",
+            lambda name: {"windows": {"@1": {"panes": [
+                {"id": "%5", "role": "tui"}]}}})
+
+        assert helpers._find_tui_pane() == (None, None)
 
     def test_last_resort_finds_an_unregistered_tui_pane(self, monkeypatch):
         """A live ``pm _tui`` pane with no registry entry is still found.
@@ -4107,6 +4151,178 @@ class TestPaneSwitchBindingGate:
         assert not self._fires(condition, real_run, registry,
                                name="pm-other-abc", group="",
                                registry_names=["pm-x"])
+
+
+@pytest.mark.skipif(not tmux.has_tmux(), reason="tmux not installed")
+class TestTmuxCommandsQuoteAwkwardSessionNames:
+    """A session name must reach pm as one shell-safe argument.
+
+    The name is derived from the repo directory name, so it may contain a
+    space, a quote or a backtick.  The pane-switch command interpolated
+    ``#{session_name}`` unquoted — a space split it into two arguments (Click
+    rejected the command, so the mobile-aware switch the gate had just
+    selected never ran) and a backtick/dollar ran command substitution — and
+    the pane hooks interpolated it into double quotes (a backtick/dollar
+    still expanded).  The fix is tmux's ``#{q:...}`` shell-quote modifier,
+    which the popup bindings already used (review-loop b48f i17).  These
+    tests run the *real* tmux expansion against a stub ``pm``.
+    """
+
+    # Names tmux stores verbatim.  (A ``$`` is mangled by tmux's own command
+    # parser at creation — it stores a backslash before it — so it cannot be
+    # round-tripped through a session name; the trap test covers the ``$``
+    # escaping, which is the layer that protects it.)
+    CASES = [
+        "pm-my repo-abc",
+        "pm-a`id`'x-abc",
+        "pm-semi;touch injected-abc",
+        'pm-x"y-abc',
+    ]
+
+    @staticmethod
+    def _register(sock, monkeypatch, name):
+        """Register pm's bindings on the disposable server; return the calls."""
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setenv("PM_TMUX_SOCKET", sock)
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        calls: list[list[str]] = []
+        real_run = session_mod.subprocess.run
+
+        def fake_run(cmd, **kwargs):
+            calls.append(list(cmd))
+            return real_run(cmd, **kwargs)
+
+        monkeypatch.setattr(session_mod.subprocess, "run", fake_run)
+        session_mod._register_tmux_bindings(name)
+        return calls
+
+    @staticmethod
+    def _run_with_stub_pm(sock, pane, tmp_path, template):
+        """Expand *template* with tmux and run it; return the stub's argv."""
+        shim = tmp_path / "shim"
+        shim.mkdir(exist_ok=True)
+        record = tmp_path / "argv"
+        record.unlink(missing_ok=True)
+        pm = shim / "pm"
+        pm.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" > "
+                      + shlex.quote(str(record)) + "\n")
+        pm.chmod(0o755)
+        _tmux_out(sock, "set-environment", "-g", "PATH",
+                  f"{shim}:/usr/bin:/bin")
+        _tmux_out(sock, "set-environment", "-g", "REC", str(record))
+        _tmux_out(sock, "run-shell", "-t", pane, template)
+        for _ in range(200):
+            if record.exists() and record.read_text():
+                return record.read_text().splitlines()
+            time.sleep(0.05)
+        raise AssertionError(f"stub pm never ran for {template!r}")
+
+    def _check(self, short_sock_dir, tmp_path, monkeypatch, command_for):
+        sock = str(short_sock_dir / "pm-quote.sock")
+        for name in self.CASES:
+            r = _tmux(sock, "new-session", "-d", "-s", name, "sleep 60")
+            assert r.returncode == 0, r.stderr
+            try:
+                calls = self._register(sock, monkeypatch, name)
+                template = command_for(calls, name)
+                pane = _tmux_out(sock, "list-panes", "-t", f"={name}:",
+                                 "-F", "#{pane_id}").split()[0]
+                argv = self._run_with_stub_pm(sock, pane, tmp_path, template)
+                # One argument, and it is the name itself: a split would
+                # give more arguments, a substitution a different value.
+                assert len(argv) == 3, (name, argv)
+                assert argv[1] == name, (name, argv)
+            finally:
+                _tmux(sock, "kill-server")
+                Path(sock).unlink(missing_ok=True)
+
+    def test_the_pane_switch_command_keeps_the_name_whole(
+            self, short_sock_dir, tmp_path, monkeypatch):
+        def command_for(calls, name):
+            cmd = next(c[c.index("if-shell") + 2] for c in calls
+                       if "if-shell" in c)
+            return cmd.removeprefix("run-shell '").removesuffix("'")
+
+        self._check(short_sock_dir, tmp_path, monkeypatch, command_for)
+
+    def test_the_window_resized_hook_keeps_the_name_whole(
+            self, short_sock_dir, tmp_path, monkeypatch):
+        def command_for(calls, name):
+            cmd = next(c[c.index("window-resized") + 1] for c in calls
+                       if "window-resized" in c)
+            return cmd.removeprefix("run-shell '").removesuffix("'")
+
+        self._check(short_sock_dir, tmp_path, monkeypatch, command_for)
+
+
+class TestExitTrapQuoting:
+    """The pane EXIT trap must pass an awkward session name through intact.
+
+    The trap command is re-parsed by the shell when it fires, so the session
+    name (a repo directory name) must be quoted as a shell word *inside* the
+    trap string — and that string itself sits inside double quotes and a
+    single-quoted ``bash -c`` argument.  Unescaped, a space split the name
+    into extra arguments (the pane-exited handler never ran, so the pane
+    stayed registered) and a dollar/backtick was expanded by the shell
+    (command injection through the directory name).  ``tmux.wrap_with_exit_trap``
+    applies all three layers (review-loop b48f i17).
+    """
+
+    @staticmethod
+    def _trap_argv(tmp_path, name, window="@3", generation="77"):
+        from pm_core import tmux as tmux_mod
+
+        shim = tmp_path / "shim"
+        shim.mkdir(exist_ok=True)
+        record = tmp_path / "argv"
+        pm = shim / "pm"
+        pm.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" > "
+                      + shlex.quote(str(record)) + "\n")
+        pm.chmod(0o755)
+        wrap = tmux_mod.wrap_with_exit_trap("true", name, window, generation)
+        env = dict(os.environ, PATH=f"{shim}:/usr/bin:/bin",
+                   TMUX_PANE="%9")
+        # cwd=tmp_path so an injected ``touch injected-abc`` would land
+        # where the test looks for it.
+        subprocess.run(wrap, shell=True, check=True, env=env, cwd=tmp_path,
+                       capture_output=True, text=True)
+        return record.read_text().splitlines()
+
+    @pytest.mark.parametrize("name", [
+        "pm-plain-abc",
+        "pm-my repo-abc",
+        "pm-a`id`$HOME-abc",
+        "pm-o'brien-abc",
+        'pm-x"y-abc',
+        "pm-semi;touch injected-abc",
+    ])
+    def test_the_trap_passes_the_name_as_one_argument(self, tmp_path, name):
+        assert self._trap_argv(tmp_path, name) == [
+            "_pane-exited", name, "@3", "77", "%9"]
+        # A shell metacharacter in the name never runs a command.
+        assert not (tmp_path / "injected-abc").exists()
+
+    def test_the_pane_ops_wrapper_uses_the_same_trap(self, monkeypatch,
+                                                     tmp_path):
+        from pm_core.tui import pane_ops
+
+        monkeypatch.setattr(pane_ops.pane_registry, "load_registry",
+                            lambda name: {"generation": "9"})
+        wrap = pane_ops._wrap_pane_cmd("pm-my repo-abc", "@4", "true")
+        record = tmp_path / "argv"
+        shim = tmp_path / "shim"
+        shim.mkdir()
+        pm = shim / "pm"
+        pm.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" > "
+                      + shlex.quote(str(record)) + "\n")
+        pm.chmod(0o755)
+        subprocess.run(wrap, shell=True, check=True,
+                       env=dict(os.environ, PATH=f"{shim}:/usr/bin:/bin",
+                                TMUX_PANE="%8"),
+                       capture_output=True, text=True)
+        assert record.read_text().splitlines() == [
+            "_pane-exited", "pm-my repo-abc", "@4", "9", "%8"]
 
 
 # ---------------------------------------------------------------------------

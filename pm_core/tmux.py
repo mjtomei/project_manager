@@ -153,6 +153,64 @@ def _wrap_cmd_env(cmd: str, env: dict[str, str]) -> tuple[str, str]:
     return f"{head}sh -c {shlex.quote(prefix + body)}", path
 
 
+def shell_double_quote(value: str) -> str:
+    """Escape *value* for interpolation inside a double-quoted shell string.
+
+    A pm session name is derived from the repo directory name, which may
+    contain a space, a quote, a dollar sign or a backtick.  Where such a
+    name has to sit inside ``"…"`` in a command that a shell expands later
+    (the pane EXIT traps), it must be escaped for *that* context:
+    ``shlex.quote`` is the wrong tool there, because the single quotes it
+    emits are literal characters inside double quotes (``"pm-my\\ repo"``
+    reaches the command as ``pm-my\\ repo``, with the backslash kept).
+
+    Only the four characters bash still honours inside double quotes need
+    escaping: backslash, double quote, dollar and backtick.  A newline is
+    literal inside double quotes, so a name containing one stays a single
+    argument.
+    """
+    return (value.replace("\\", "\\\\")
+                 .replace('"', '\\"')
+                 .replace("$", "\\$")
+                 .replace("`", "\\`"))
+
+
+def _single_quote(value: str) -> str:
+    """Escape *value* for embedding inside a single-quoted shell string."""
+    return value.replace("'", "'\\''")
+
+
+def wrap_with_exit_trap(cmd: str, session: str, window: str,
+                        generation: str) -> str:
+    """Wrap *cmd* so its pane reports its own death to pm.
+
+    The wrapper is a ``bash -c`` whose EXIT trap runs ``pm _pane-exited``
+    with the session, window, registry generation and ``$TMUX_PANE``.  The
+    session name (and the window) are escaped for the trap's double-quoted
+    context: unescaped, a repo directory containing a space split the name
+    into extra arguments (the pane-exited handler never ran, so the pane
+    stayed registered and the layout was not rebalanced) and one containing
+    a dollar or a backtick was expanded by the shell — command injection
+    through the directory name (review-loop b48f i17).  ``$TMUX_PANE`` is
+    left unescaped on purpose: it is expanded by the pane's shell, not
+    interpolated here.
+
+    Two quoting layers apply to the interpolated values.  The trap command
+    is *re-parsed by the shell when it fires*, so each value is first
+    quoted as a shell word (``shlex.quote``) for that re-parse; the result
+    then sits inside the trap's double quotes (``shell_double_quote``), and
+    the whole ``bash -c`` argument is single-quoted (``_single_quote``).
+    Escaping only the double-quoted layer is not enough: the spaces it
+    leaves alone split the stored command when the trap runs.
+    """
+    def _value(v: str) -> str:
+        return _single_quote(shell_double_quote(shlex.quote(v)))
+
+    trap = (f"pm _pane-exited {_value(session)} {_value(window)} "
+            f"{_value(generation)} $TMUX_PANE")
+    return f"bash -c 'trap \"{trap}\" EXIT; {_single_quote(cmd)}'"
+
+
 def _run_with_env(args: list[str], env: dict[str, str] | None,
                   **kwargs) -> subprocess.CompletedProcess:
     """Run a tmux command whose last argument is the pane's shell command.
