@@ -280,7 +280,7 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]S[/]  Start PR with companion pane", classes="help-row")
             yield Label("  [bold]G[/]  Merge with companion pane", classes="help-row")
             yield Label("Other", classes="help-section")
-            yield Label("  [bold]z[/]  Modifier: kill existing before next", classes="help-row")
+            yield Label("  [bold]z[/]  Prefix before s/S/d/t: restart instead of focus (zz d / zz t: loop)", classes="help-row")
             yield Label("  [bold]r[/]  Refresh / sync with GitHub", classes="help-row")
             yield Label("  [bold]C[/]  Show shared connect command", classes="help-row")
             yield Label("  [bold]Ctrl+R[/]  Restart TUI", classes="help-row")

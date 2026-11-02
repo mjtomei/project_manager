@@ -437,3 +437,26 @@ the routed form and `--fresh` so help is complete.
   command bar, unlike `?` and every other command-bar path. It now calls
   `app.action_unfocus_command()` first (which also handles the plans and QA
   views). Test added.
+
+- Review-loop i11: the sweep's own remaining inaccuracies.
+  (a) The shared table's catch-all row said the command bar accepts
+  `<any pm command>` / `pm <command>`. It does not: `run_command` passes
+  the typed tokens straight to `pm_core.wrapper`, so `pm pr list` fails
+  with "No such command 'pm'". The command-bar column is now
+  `<command> [args]` (CLI column keeps the `pm` prefix), with a comment and
+  a test so the prefix cannot come back.
+  (b) `pm getting-started`'s plans-view keys said `v=view`, but `v` is
+  blocked in the plans view (`check_action`) and `Enter` is what opens the
+  plan file; it also omitted `D=deps`. Now `... D=deps Enter=view file`,
+  with a test.
+  (c) `pr start`'s short help still said "print prompt"; it launches
+  Claude (tmux window or blocking) — "clone, branch, launch Claude".
+  (d) The `?` screen described `z` as "Modifier: kill existing before
+  next", implying it applies to any action. `_consume_z` is read only by
+  `s`/`S`/`d`/`t`, so the row now says "Prefix before s/S/d/t: restart
+  instead of focus (zz d / zz t: loop)".
+  (e) `pm tui keys` put the "Targets are additive" auto-start paragraph
+  after the new command-bar section, disconnecting it from the Auto-start
+  block; it now sits with that block.
+  (f) Two shared-table rows exceeded the ~78-column budget (93 and 87);
+  trimmed to 79 and 79 so narrow terminals wrap cleanly.

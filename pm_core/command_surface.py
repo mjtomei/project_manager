@@ -24,7 +24,7 @@ QA_MODES: tuple[tuple[str, str, str, str], ...] = (
     ("run", "pr qa [PR_ID]", "t",
      "focus an existing run, or start one"),
     ("fresh", "pr qa fresh [PR_ID]", "z t",
-     "fresh restart: stop, kill old windows, start over"),
+     "fresh restart: stop and start over"),
     ("loop", "pr qa loop [PR_ID]", "zz t",
      "start or stop the repeating QA loop"),
 )
@@ -64,7 +64,7 @@ COMMAND_BAR_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
      "g / G", "publish a signed-off PR"),
     ("pr signoff [--fresh] [PR_ID]",
      "pm pr signoff [--fresh] [PR_ID]",
-     "i", "sign-off router (fresh restart: CLI/command bar only)"),
+     "i", "sign-off router (fresh: CLI/command bar only)"),
     ("review-loop [PR_ID]",
      "pm pr review --review-loop [PR_ID] (one iteration)",
      "zz d", "review loop (TUI-driven)"),
@@ -77,8 +77,11 @@ COMMAND_BAR_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
     ("plan add <name>",
      "pm plan add <name>",
      "p then a", "add a plan"),
-    ("<any pm command>",
-     "pm <command>",
+    # The command bar runs the sub-command directly: typing `pm pr list`
+    # would pass "pm" to the wrapper and fail ("No such command 'pm'"), so
+    # the command-bar form must not carry the `pm` prefix.
+    ("<command> [args]",
+     "pm <command> [args]",
      "—", "everything else runs through the CLI"),
 )
 

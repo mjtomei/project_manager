@@ -315,19 +315,18 @@ Auto-start (multiple targets; also `pm autostart --help`):
   a                Runs popup: targets + running/queued deps (Enter/f focus,
                    r refresh, Esc/q/a close)
 
+Targets are additive — A/O/`autostart target X` do not replace the previous
+target. Bare `autostart` only turns auto-start off. There is no all-PR
+mode: auto-start runs only the explicit targets you add and their
+dependency closures.
+
 Other:
   r                Refresh / sync
   b                Rebalance panes
   ctrl+r           Restart TUI
   ctrl+b d         Detach from session
 
-""" + command_surface.command_bar_help_text() + """
-
-Targets are additive — A/O/`autostart target X` do not replace the previous
-target. Bare `autostart` only turns auto-start off. There is no all-PR
-mode: auto-start runs only the explicit targets you add and their
-dependency closures.
-""")
+""" + command_surface.command_bar_help_text())
 
 
 @tui.command("restart")

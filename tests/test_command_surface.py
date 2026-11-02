@@ -238,6 +238,43 @@ def test_command_surface_table_contains_qa_forms():
         assert token in text
 
 
+def test_command_bar_forms_carry_no_pm_prefix():
+    """The command bar runs the sub-command directly.
+
+    ``run_command`` invokes ``pm_core.wrapper`` with the typed tokens as
+    argv, so a leading ``pm`` is passed through as a subcommand and fails
+    ("No such command 'pm'").  The table's command-bar column must therefore
+    never spell a form ``pm ...`` — that is the CLI column.
+    """
+    for form, _cli, _keys, _desc in command_surface.COMMAND_BAR_COMMANDS:
+        assert not form.startswith("pm "), form
+    # The catch-all row says the prefix is dropped, not repeated.
+    assert any(form == "<command> [args]"
+               for form, *_rest in command_surface.COMMAND_BAR_COMMANDS)
+
+
+def test_getting_started_plan_keys_match_the_plans_pane():
+    """The getting-started block must name keys the plans pane accepts.
+
+    ``PlansPane`` binds a/w/c/l/e/D; ``v`` is *blocked* in the plans view
+    (``check_action``) and ``Enter`` opens the plan file.  The block used to
+    say ``v=view`` and omit ``D``, so the help named a key that does nothing
+    and hid one that does.
+    """
+    from pm_core.cli import _getting_started_text
+
+    # The plan-key block is unconditional; stub repo detection so the test
+    # does not shell out to git or depend on the cwd being a repo.
+    import pm_core.cli as cli_mod
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(cli_mod, "_detect_git_repo", lambda: None)
+        text = " ".join(_getting_started_text().split())
+    assert "Enter=view file" in text
+    assert "D=deps" in text
+    assert "v=view" not in text
+
+
 def test_help_screen_lines_escape_textual_markup():
     lines = command_surface.command_bar_help_lines_textual()
     assert any("\\[--fresh]" in line for line in lines)

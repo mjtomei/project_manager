@@ -897,7 +897,7 @@ def pr_spec_approve(pr_id: str):
 @click.option("--companion", is_flag=True, default=False,
               help="Open a companion shell pane in the PR workdir")
 def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, transcript: str | None, companion: bool):
-    """Start working on a PR: clone, branch, print prompt.
+    """Start working on a PR: clone, branch, launch Claude.
 
     If PR_ID is omitted, uses the active PR if it's pending/ready, or
     auto-selects the next ready PR (when there's exactly one).
