@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T05:08:25.664644+00:00'
+  updated_at: '2026-11-02T05:21:20.382534+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7243,6 +7243,25 @@ prs:
       (README.md; recheck-87b2d1d16/ for the post-fix recheck).'
     created_at: '2026-11-02T05:08:25Z'
     last_edited: '2026-11-02T05:08:25Z'
+  - id: note-64106d4
+    text: 'QA S25 (another user''s 0777 server planted at this user''s own pm-<tag>)
+      PASS 3/3 on 62b144ce5, no source changes. Live on tmux 3.2a with a real second
+      user (qa25b, uid 1001) whose pty client stayed attached throughout. (1) From
+      a plain shell in P: tui view/send -> "No TUI pane found" rc1; --print-connect
+      refuses "owned by uid 1001" rc1; session home -> "Not inside a pm tmux session."
+      rc1; mobile -> "(not running)" rc0; pr start runs the stand-in claude in the
+      terminal (no tmux window); kill -> "No session ... found." rc1 with the socket
+      still srwxrwxrwx qa25b; pm session refuses rc1, creating no socket or server.
+      B''s as-B snapshot was identical, its heartbeat advanced, keys.log stayed empty.
+      (2) tui view -s pm-<tagP> shows B''s screen rc0, B otherwise unchanged. (3)
+      Inside a pre-change legacy L with B planted at L''s name (pane %0 collides):
+      mobile/print-connect/view all resolve to L (print-connect = tmux -S /tmp/tmux-1000/default
+      attach -t L). Kill takes L down and leaves B''s Q server untouched; list then
+      shows only B''s two sockets as (shared). Harness gotcha: run "PYTHONPATH=/opt/pm-src
+      pm ..." from a cwd outside /workspace, because the wrapper prefers a pm_core
+      found in cwd, so from /workspace it runs the branch. Captures: /pm-captures/scenarios/25/.'
+    created_at: '2026-11-02T05:21:20Z'
+    last_edited: '2026-11-02T05:21:20Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
