@@ -632,7 +632,6 @@ class TestFindTuiPaneProjectOverride:
 
     @pytest.fixture
     def env(self, monkeypatch, tmp_path):
-        from types import SimpleNamespace
         from pm_core import paths
         from pm_core.cli import helpers
         tags = {str(tmp_path / "mproj" / "pm"): "mproj-2222",

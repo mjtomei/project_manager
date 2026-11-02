@@ -73,7 +73,11 @@ Change:
     (`_REGRESSION_SCRUBBED_ENV`, 634a4c05): pm resolves "the current pm
     session" from `$TMUX_PANE` before the cwd, so a `pm session` the test
     started in its own project reused and rebalanced the user's session
-    (QA S12, R28). With TMUX gone, a finding filed with
+    (QA S12, R28). `PM_SHARE_MODE` is scrubbed as well (a7b2e4c4): a run
+    launched from a `pm session --global`/`--group` session inherited it,
+    and `get_session_tag` mixes it into every project's hash, so `pm tui
+    view` in the test's own project missed that project's session and fell
+    back to the user's TUI (QA S16, R7/R34). With TMUX gone, a finding filed with
     `pm -C <registry> pr add` resolves the TUI to reload from the `-C`
     project (`_find_tui_pane` tries its session before the cwd), not from
     the clone or test-project cwd, which reloaded another project's TUI
@@ -297,8 +301,10 @@ No [UNRESOLVED] items.
   `captures/regression/demo/<run-id>/`, and the source project was left clean.
 - Repo check: the 20 inventory ids are not listed, resolved or present; every
   blob matches at `c1fcecc5`; the instructions/artifacts recipes and fakes are
-  unchanged against master. A real container run was not done because no
-  pm-dev image was built in this environment.
+  unchanged against master. The implementation session had no pm-dev image,
+  so it did not do a real container run. QA did (S3, S6, S7, S12): nested
+  podman 3.4.4 with a slim image, covering mounts, captures isolation, the
+  push block, the registry-only filing mount and container removal.
 - Registry overlay (review fc31 i5): on podman 3.4.4 with pm's nested flags
   (`--uts=host --userns=keep-id --security-opt label=disable`), a busybox
   container with the pm dir rw plus its entries ro (children listed before the
