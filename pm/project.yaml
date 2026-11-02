@@ -5173,7 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-11-02T09:27:05.551490+00:00'
+  updated_at: '2026-11-02T09:49:04.642106+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5345,6 +5345,27 @@ prs:
       is on PR branch pm/<C>-charlie-api'') would be clearer.'
     created_at: '2026-11-02T09:27:05Z'
     last_edited: '2026-11-02T09:27:05Z'
+  - id: note-ffb2a0a
+    text: 'QA S16 run 2026-11-02 at 91ebf1b6 (code = 0aaeb633/d4ebdb22): PASS 6/6
+      live in a pm session with fake-claude (captures /pm-captures/scenarios/16/{fixture,story1-6,evidence}).
+      (1) 10 actors on B behind a .workdir-<B>.lock flock barrier (7 waiters in 193
+      ms): all rc 0, exactly one main-repo re-link line (cd2), in-BC and in-CC actors
+      print the "(not recorded: ...)" lines and both clones stay clean, 20 burst notes,
+      C retitled, signoff-<B> opened in BC. (2) D with 2 verified clones, 3x15 looping
+      integrate --record / integrate / signoff record and a mid-run mv of the copy:
+      30 refusals before the mv with the exact wording, 15 acted after it, one re-link
+      to DC, the yaml observer never saw status error and checked_at moved only after
+      the mv. (3) pm pr cd under a held pm edit lock: 2.089 s, "using ... (not recorded:
+      could not write ...)", yaml sha unchanged; after the save a 0.091 s re-link
+      that keeps the user_edit line. (4) E review+sign-off launches with no clone:
+      one clone, both windows in it. (5) duplicate pm pr merge: one merge (+1 first-parent),
+      the loser prints only "already merged" (rc 1). (6) G/H twin cd races: one re-link
+      per PR, no cross-link (repeated with renamed clones, same result). Finding (observational,
+      outside this PR): with pm edit holding the lock, pm pr signoff on an already-sign_off
+      PR dies with only the 2 s lock Error, rc 1, before it resolves the workdir.
+      Filed as pr-588171e.'
+    created_at: '2026-11-02T09:49:04Z'
+    last_edited: '2026-11-02T09:49:04Z'
 - id: pr-0778fbe
   plan: plan-003
   title: Add PR ownership tracking with workdir history
@@ -51822,6 +51843,41 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T03:23:55.443880+00:00'
   updated_at: '2026-11-02T03:23:55.443880+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-588171e
+  plan: bugs
+  title: 'Bug: pm pr signoff on a PR already at sign_off fails with a bare project.yaml
+    lock error (no workdir/Integration/window) while pm edit holds the store lock'
+  branch: pm/pr-588171e-bug-pm-pr-signoff-on-a-pr-already-at-sign-off-fail
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/pr.py pr_signoff runs store.locked_update(root,
+    apply) unconditionally, even when the PR is already sign_off and no transition
+    is needed, before signoff.launch_signoff_window resolves the workdir. A StoreLockTimeout
+    then surfaces as the click error "Error: Could not acquire lock on <root>/pm/project.yaml.lock
+    within 2.0s — another pm process may be writing project.yaml. If no other process
+    is running, delete <root>/pm/project.yaml.lock and retry." on stderr, rc 1, after
+    ~2.08 s. No "Workdir for ...: using ... (not recorded: ...)" line, no "Integration:"
+    line, no signoff-<pr> window; project.yaml and integration.json are unchanged.
+    Repro (QA S16 story 3 of pr-4258a32, observational, at 91ebf1b6): PR B at sign_off
+    (skip-qa on) with a stale workdir record and its clone renamed to <slug>-0b0b0b02;
+    window 1: EDITOR="python3 qa-editor.py" pm edit (holds pm/project.yaml.lock);
+    window 2: time (pm pr signoff B) -> 2.08 s, rc 1, only the lock error. After the
+    editor saves, the same command re-links the clone, prints "Integration: merges
+    cleanly with master@..." and opens signoff-B. Contrast: pm pr cd B under the same
+    held lock proceeds after 2.1 s with "(not recorded: could not write ...)". Expected:
+    when the PR is already sign_off the launch should not die on the lock (keep the
+    at-lock close/merge guard some other way, e.g. a short read-only re-check), or
+    at least say that no sign-off window was opened because another pm process (for
+    example pm edit) holds project.yaml. Captures /pm-captures/scenarios/16/story3.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T09:48:47.287671+00:00'
+  updated_at: '2026-11-02T09:48:47.287671+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
