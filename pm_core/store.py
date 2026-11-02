@@ -68,8 +68,24 @@ class ProjectYamlParseError(Exception):
     """Raised when project.yaml cannot be parsed (e.g. mid-edit or merge conflict)."""
 
 
-class PlanValidationError(Exception):
-    """Raised when plan entries have invalid references (e.g. bad parent ID, cycles)."""
+class PlanValidationError(ProjectYamlParseError):
+    """Raised when plan entries have invalid references (e.g. bad parent ID, cycles).
+
+    A ProjectYamlParseError: a clean merge or pull can leave such a file just
+    as it can leave conflict markers, and every caller that keeps its previous
+    state on an unloadable file must survive both (S44: the TUI exited).
+    """
+
+
+class ProjectYamlMissingError(ProjectYamlParseError, FileNotFoundError):
+    """Raised by load() when project.yaml does not exist.
+
+    Still a FileNotFoundError for callers that treat a missing file as "no
+    project".  Also an unloadable file for callers that keep their previous
+    state: a checkout or rebase unlinks project.yaml before writing the new
+    one, and the TUI keeps its root meanwhile (S44), so a handler catching
+    only ProjectYamlParseError would raise out of a TUI timer.
+    """
 
 
 VALID_PLAN_STATUSES = {"draft", "active", "done"}
@@ -111,6 +127,8 @@ def load(root: Optional[Path] = None, validate: bool = True) -> dict:
     try:
         with open(path) as f:
             data = yaml.load(f, Loader=_yaml_loader())
+    except FileNotFoundError as e:
+        raise ProjectYamlMissingError(e.errno, e.strerror, e.filename) from e
     except yaml.YAMLError as e:
         raise ProjectYamlParseError(f"project.yaml is not valid YAML: {e}") from e
 
@@ -140,12 +158,19 @@ def _validate_pr_statuses(data: dict) -> None:
             pr["status"] = "pending"
         # Backfill created_at / updated_at for PRs that predate these fields.
         # Use the best available timestamp so sorting works immediately.
+        # `closed_at` is a lifecycle timestamp too (pr-62ad13d: a closed PR is
+        # a retained record, not a deletion), so a hand-edited or imported
+        # entry that only carries it still sorts by its closure.
         if not pr.get("created_at"):
             pr["created_at"] = (pr.get("started_at")
                                 or pr.get("reviewed_at")
-                                or pr.get("merged_at"))
+                                or pr.get("merged_at")
+                                or pr.get("closed_at"))
         if not pr.get("updated_at"):
+            # Closing is the last lifecycle event, so it outranks the
+            # mid-lifecycle timestamps.
             pr["updated_at"] = (pr.get("merged_at")
+                                or pr.get("closed_at")
                                 or pr.get("reviewed_at")
                                 or pr.get("started_at"))
 
@@ -244,6 +269,16 @@ class StoreLockTimeout(Exception):
     """Raised when the project.yaml lock cannot be acquired within the timeout."""
 
 
+# Writers retried on the TUI's poll timer pass ``timeout=NO_WAIT``: a single
+# non-blocking lock attempt.  Waiting the default 2 s on every tick while the
+# user keeps ``pm edit`` open (lock held until the editor quits) blocked the
+# TUI for most of every tick (RQ38); such a caller keeps its write pending,
+# says once that it waits (``LOCK_BUSY_REASON``) and retries next tick.
+NO_WAIT = 0.0
+LOCK_BUSY_REASON = ("project.yaml is locked by another pm process "
+                    "(e.g. an open `pm edit`)")
+
+
 @contextmanager
 def _lock(root: Path, timeout: float = LOCK_TIMEOUT_SECONDS):
     """Acquire an exclusive advisory lock on project.yaml.lock.
@@ -281,6 +316,72 @@ def _lock(root: Path, timeout: float = LOCK_TIMEOUT_SECONDS):
             fd.close()
 
 
+@contextmanager
+def bounded_flock(path: Path, timeout: float):
+    """Exclusive advisory lock on *path*, waiting at most *timeout* seconds.
+
+    Yields True while the lock is held, or False when another holder still
+    has it at the deadline — the caller decides whether to skip or proceed.
+    """
+    deadline = time.monotonic() + timeout
+    with open(path, "a") as f:
+        while True:
+            try:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    yield False
+                    return
+                time.sleep(0.05)
+        yield True
+
+
+def merge_3way(base, ours, theirs):
+    """Three-way merge of parsed project.yaml values.
+
+    *theirs* (pm's live state) wins true conflicts; *ours* (e.g. a merged
+    branch's committed changes) is kept wherever *theirs* left the value as
+    it was in *base*.  Lists of ``id``-keyed entries (prs, plans, notes)
+    merge entry by entry.
+    """
+    if ours == theirs or ours == base:
+        return theirs
+    if theirs == base:
+        return ours
+    if isinstance(ours, dict) and isinstance(theirs, dict):
+        b = base if isinstance(base, dict) else {}
+        out = {}
+        for k in theirs:
+            if k in ours:
+                out[k] = merge_3way(b.get(k), ours[k], theirs[k])
+            elif k not in b or b[k] != theirs[k]:
+                out[k] = theirs[k]          # else: removed by *ours*
+        for k in ours:
+            if k not in theirs and k not in b:
+                out[k] = ours[k]            # added by *ours*
+        return out
+    if (_is_id_list(ours) and _is_id_list(theirs)
+            and (base is None or _is_id_list(base))):
+        b = {e["id"]: e for e in base or []}
+        o = {e["id"]: e for e in ours}
+        t = {e["id"] for e in theirs}
+        out = []
+        for e in theirs:
+            if e["id"] in o:
+                out.append(merge_3way(b.get(e["id"]), o[e["id"]], e))
+            elif b.get(e["id"]) != e:
+                out.append(e)
+        out.extend(e for e in ours if e["id"] not in t and e["id"] not in b)
+        return out
+    return theirs
+
+
+def _is_id_list(value) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(e, dict) and "id" in e for e in value)
+
+
 def locked_update(
     root: Path,
     fn: Callable[[dict], None],
@@ -298,7 +399,7 @@ def locked_update(
     ``locked_update`` and pass the results into ``fn`` via a closure.
 
     Raises ``StoreLockTimeout`` if the lock cannot be acquired within
-    *timeout* seconds (default 2).
+    *timeout* seconds (default 2); ``NO_WAIT`` tries exactly once.
     """
     with _lock(root, timeout):
         data = load(root, validate=validate)
@@ -546,17 +647,21 @@ def generate_note_id(pr_id: str, text: str, existing_ids: set[str] | None = None
 
 
 def get_pr(data: dict, pr_id: str) -> Optional[dict]:
-    """Get a PR entry by id."""
+    """Get a PR entry by id.
+
+    Entries without an id (a hand-edited or partially written project.yaml)
+    are skipped, not raised on: a QA completion recording its note looks its
+    PR up here, and a KeyError killed the TUI (S94)."""
     for pr in data.get("prs") or []:
-        if pr["id"] == pr_id:
+        if isinstance(pr, dict) and pr.get("id") == pr_id:
             return pr
     return None
 
 
 def get_plan(data: dict, plan_id: str) -> Optional[dict]:
-    """Get a plan entry by id."""
+    """Get a plan entry by id (entries without an id are skipped)."""
     for plan in data.get("plans") or []:
-        if plan["id"] == plan_id:
+        if isinstance(plan, dict) and plan.get("id") == plan_id:
             return plan
     return None
 

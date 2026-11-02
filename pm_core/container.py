@@ -311,17 +311,96 @@ def _invalidate_image_exists_cache(tag: str | None = None) -> None:
             _image_exists_cache.pop(tag, None)
 
 
-def _runtime_available() -> bool:
-    """Check if the configured container runtime is available."""
+def _runtime_status() -> tuple[bool, str]:
+    """Check the configured container runtime, keeping the failure cause.
+
+    Returns ``(available, problem)``.  ``problem`` is a short human
+    diagnostic when unavailable (missing binary, timeout, nonzero ``info``);
+    it is ``""`` when the runtime answers.
+
+    Callers that must fail closed when container mode is enabled use this
+    (via :func:`container_preflight_error`) instead of the boolean-only
+    :func:`_runtime_available`, so the launch error names the original cause
+    and the user gets an actionable remedy.
+    """
     runtime = _get_runtime()
     try:
         result = subprocess.run(
             [runtime, "info"],
             capture_output=True, timeout=10,
         )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
+    except FileNotFoundError:
+        return False, f"container runtime '{runtime}' was not found on PATH"
+    except subprocess.TimeoutExpired:
+        return False, f"'{runtime} info' timed out after 10s"
+    except OSError as exc:
+        return False, f"could not run '{runtime} info': {exc}"
+    if result.returncode != 0:
+        raw = result.stderr or result.stdout or ""
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", "replace")
+        detail = str(raw).strip().splitlines()
+        message = f"'{runtime} info' exited {result.returncode}"
+        if detail:
+            message += f": {detail[0][:300]}"
+        return False, message
+    return True, ""
+
+
+def _runtime_available() -> bool:
+    """Check if the configured container runtime is available."""
+    return _runtime_status()[0]
+
+
+def container_preflight_error() -> str | None:
+    """Return why a container-mode launch cannot proceed, or ``None``.
+
+    ``None`` when container mode is disabled (host execution is intended) or
+    the runtime answers ``info``.  Otherwise the diagnostic from
+    :func:`_runtime_status`.
+    """
+    if not is_container_mode_enabled():
+        return None
+    ok, problem = _runtime_status()
+    return None if ok else problem
+
+
+def container_retry_remedy(first_step: str) -> str:
+    """The shared ``To retry:`` block for container-mode launch errors.
+
+    Every fail-closed container launch offers the same two remedies: fix the
+    runtime and retry, or deliberately give up the isolation with
+    ``pm container disable``.  *first_step* is the situation-specific half of
+    the first bullet (which runtime check to fix).  Keeping this in one place
+    stops the messages on the different launch paths from drifting apart.
+    """
+    return (
+        "To retry:\n"
+        f"  - {first_step}; or\n"
+        "  - if host execution is intended, disable container mode "
+        "explicitly with 'pm container disable'."
+    )
+
+
+def container_unavailable_message(problem: str) -> str:
+    """Actionable error for a container-mode launch blocked by the runtime.
+
+    Container mode is an execution boundary, not a best-effort preference:
+    the message states that no agent was launched on the host, names the
+    original cause, and gives both remedies (fix the runtime, or deliberately
+    disable container mode).
+    """
+    runtime = _get_runtime()
+    return (
+        "Container mode is enabled, but the container runtime is unavailable, "
+        "so no agent was launched on the host.\n\n"
+        f"Cause: {problem}\n\n"
+        "Container mode is an execution boundary, not a best-effort "
+        "preference; pm will not silently run this agent on the host.\n\n"
+        + container_retry_remedy(
+            f"start or install the '{runtime}' container runtime and verify "
+            f"that '{runtime} info' succeeds, then retry this launch")
+    )
 
 
 def load_container_config() -> ContainerConfig:
@@ -345,14 +424,21 @@ def is_container_mode_enabled() -> bool:
 
 
 def _run_runtime(*args: str, check: bool = True,
-                 timeout: int | None = 30) -> subprocess.CompletedProcess:
-    """Run a container runtime command."""
+                 timeout: int | None = 30,
+                 env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    """Run a container runtime command.
+
+    *env* is added to the runtime's environment.  Callers pass secret
+    values this way (with ``-e NAME`` in *args*) because *args* is logged
+    and embedded in raised errors.
+    """
     runtime = _get_runtime()
     cmd = [runtime, *args]
     _log.debug("container: %s", " ".join(cmd))
     result = subprocess.run(
         cmd, capture_output=True, text=True,
         check=False, timeout=timeout,
+        env={**os.environ, **env} if env else None,
     )
     if result.returncode != 0:
         _log.error("container runtime failed (rc=%d): %s\nstderr: %s\nstdout: %s",
@@ -377,6 +463,127 @@ def container_is_running(name: str) -> bool:
 # ---------------------------------------------------------------------------
 # Git push proxy integration
 # ---------------------------------------------------------------------------
+
+
+def _build_git_wrapper_script(
+    host_workdir: str | None = None,
+    *,
+    socket_path: str | None = None,
+    container_workdir: str = _CONTAINER_WORKDIR,
+    real_git: str = "/usr/bin/git",
+) -> str:
+    """Return the in-container ``git`` wrapper that forwards to the push proxy.
+
+    Only ``push|fetch|pull|ls-remote`` on the container workdir's own
+    repository are forwarded: the proxy replays them in *host_workdir*, so a
+    remote command in any other repository (a scratch repo, or a nested pm
+    project's clone under /tmp) would otherwise be silently executed against
+    the workdir with the user's credentials.  The repository is resolved the
+    way git resolves it — cwd, leading ``-C <dir>`` options, and
+    ``GIT_DIR``/``GIT_WORK_TREE`` — and compared by top-level directory and
+    git dir.  Any other leading global option (``-c``, ``--git-dir``, …)
+    cannot be replayed by the proxy, so such commands run locally too.
+
+    The keyword arguments exist for tests, which point the wrapper at a temp
+    socket and a stand-in workdir; the defaults are the container's.
+    """
+    if socket_path is None:
+        from pm_core.push_proxy import _CONTAINER_SOCKET_PATH
+        socket_path = _CONTAINER_SOCKET_PATH
+    # Escape the host workdir for safe embedding in a JSON string literal.
+    # Backslash must come first to avoid double-escaping.
+    _escaped_host_workdir = ""
+    if host_workdir:
+        _escaped_host_workdir = (
+            host_workdir.replace("\\", "\\\\").replace('"', '\\"')
+        )
+    # NOTE: The inline Python block must start at column 0 inside the
+    # shell $(...) substitution, so we can't use textwrap.dedent here.
+    return (
+        "#!/bin/sh\n"
+        "# pm: git wrapper — remote commands go through the host-side proxy\n"
+        f"REAL_GIT={real_git}\n"
+        f'SOCKET="{socket_path}"\n'
+        # HOST_WORKDIR is the host-side clone path for this container,
+        # baked in at creation time so the proxy can use the correct
+        # source/target when multiple scenario containers share a proxy.
+        + (f'HOST_WORKDIR="{_escaped_host_workdir}"\n'
+           if _escaped_host_workdir else "")
+        + f'CONTAINER_WORKDIR="{container_workdir}"\n'
+        '# Remote commands are forwarded only for the workdir\'s own repository:\n'
+        '# the proxy replays them there.  Any other repository (a scratch repo,\n'
+        '# a nested pm project\'s clone) talks to its own remotes directly.\n'
+        '# Leading "-C <dir>" options are honoured; any other global option\n'
+        '# cannot be replayed by the proxy, so the command runs locally.\n'
+        'pm_scan() {\n'
+        '  pm_skip=0; pm_dir=.\n'
+        '  while [ "$1" = "-C" ] && [ $# -ge 2 ]; do\n'
+        '    case "$2" in\n'
+        '      "") ;;\n'
+        '      /*) pm_dir="$2" ;;\n'
+        '      *) pm_dir="$pm_dir/$2" ;;\n'
+        '    esac\n'
+        '    pm_skip=$((pm_skip + 2))\n'
+        '    shift 2\n'
+        '  done\n'
+        '  pm_cmd="$1"\n'
+        '}\n'
+        'pm_scan "$@"\n'
+        'case "$pm_cmd" in\n'
+        '  push|fetch|pull|ls-remote) ;;\n'
+        '  *) exec $REAL_GIT "$@" ;;\n'
+        'esac\n'
+        '# Match both the top-level dir and the git dir, so GIT_DIR pointing at\n'
+        '# another repository from inside the workdir is not mistaken for it.\n'
+        'pm_ws=$(cd "$CONTAINER_WORKDIR" 2>/dev/null && pwd -P && '
+        '(unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR; '
+        '$REAL_GIT rev-parse --absolute-git-dir 2>/dev/null))\n'
+        'pm_repo=$($REAL_GIT -C "$pm_dir" rev-parse --show-toplevel '
+        '--absolute-git-dir 2>/dev/null)\n'
+        'if [ -z "$pm_repo" ] || [ "$pm_repo" != "$pm_ws" ]; then\n'
+        '  exec $REAL_GIT "$@"\n'
+        'fi\n'
+        'shift $pm_skip\n'
+        'CMD="$1"\n'
+        'shift\n'
+        'args_json="["\n'
+        'first=1\n'
+        'for arg in "$@"; do\n'
+        '  if [ "$first" = "1" ]; then first=0; else args_json="$args_json,"; fi\n'
+        '  escaped=$(printf \'%s\' "$arg" | sed \'s/\\\\/\\\\\\\\/g; s/"/\\\\"/g\')\n'
+        '  args_json="$args_json\\"$escaped\\""\n'
+        'done\n'
+        'args_json="$args_json]"\n'
+        'escaped_cmd=$(printf \'%s\' "$CMD" | sed \'s/"/\\\\"/g\')\n'
+        + ('escaped_workdir=$(printf \'%s\' "$HOST_WORKDIR" | sed \'s/\\\\/\\\\\\\\/g; s/"/\\\\"/g\')\n'
+           'request=\'{"cmd": "\'$escaped_cmd\'", "args": \'$args_json\', "workdir": "\'$escaped_workdir\'"}\'\n'
+           if _escaped_host_workdir else
+           'request=\'{"cmd": "\'$escaped_cmd\'", "args": \'$args_json\'}\'\n')
+        + 'if ! command -v python3 >/dev/null 2>&1; then\n'
+        '  echo "pm: python3 required for git proxy client" >&2\n'
+        '  exit 1\n'
+        'fi\n'
+        'response=$(python3 -c "\n'
+        "import socket, sys, json\n"
+        "s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
+        "try:\n"
+        "    s.connect('$SOCKET')\n"
+        "except Exception as e:\n"
+        f"    print(json.dumps({{'exit_code': 1, 'stdout': '', 'stderr': f'git-proxy: cannot connect: {{e}}\\\\n'}}))\n"
+        "    sys.exit(0)\n"
+        "s.sendall((sys.argv[1] + '\\\\n').encode())\n"
+        "data = b''\n"
+        "while True:\n"
+        "    chunk = s.recv(4096)\n"
+        "    if not chunk:\n"
+        "        break\n"
+        "    data += chunk\n"
+        "s.close()\n"
+        "print(data.decode())\n"
+        '" "$request" 2>&1)\n'
+        'printf \'%s\' "$response" | python3 -c "import sys,json; r=json.load(sys.stdin); sys.stdout.write(r.get(\'stdout\',\'\')); sys.stderr.write(r.get(\'stderr\',\'\')); sys.exit(r.get(\'exit_code\',1))"\n'
+        'exit $?\n'
+    )
 
 
 def _build_git_setup_script(
@@ -438,78 +645,14 @@ def _build_git_setup_script(
     )
 
     # Install a git wrapper that intercepts remote-interacting commands
-    # (push, fetch, pull, ls-remote) and forwards them to the host-side
-    # proxy via the mounted Unix socket.  No credentials exist inside the
-    # container — the proxy on the host validates push targets and runs
-    # the real git commands.  All other git operations (commit, diff, log,
-    # etc.) run directly via /usr/bin/git.
+    # (push, fetch, pull, ls-remote) on the workdir's repository and
+    # forwards them to the host-side proxy via the mounted Unix socket.
+    # No credentials exist inside the container — the proxy on the host
+    # validates push targets and runs the real git commands.  All other git
+    # operations (commit, diff, log, etc.), and remote commands on any other
+    # repository, run directly via /usr/bin/git.
     if has_push_proxy:
-        from pm_core.push_proxy import _CONTAINER_SOCKET_PATH
-        # Escape the host workdir for safe embedding in a JSON string literal.
-        # Backslash must come first to avoid double-escaping.
-        _escaped_host_workdir = ""
-        if host_workdir:
-            _escaped_host_workdir = (
-                host_workdir.replace("\\", "\\\\").replace('"', '\\"')
-            )
-        # NOTE: The inline Python block must start at column 0 inside the
-        # shell $(...) substitution, so we can't use textwrap.dedent here.
-        wrapper_script = (
-            "#!/bin/sh\n"
-            "# pm: git wrapper — remote commands go through the host-side proxy\n"
-            "REAL_GIT=/usr/bin/git\n"
-            f'SOCKET="{_CONTAINER_SOCKET_PATH}"\n'
-            # HOST_WORKDIR is the host-side clone path for this container,
-            # baked in at creation time so the proxy can use the correct
-            # source/target when multiple scenario containers share a proxy.
-            + (f'HOST_WORKDIR="{_escaped_host_workdir}"\n'
-               if _escaped_host_workdir else "")
-            + '# Commands that interact with remotes and need proxy forwarding\n'
-            'case "$1" in\n'
-            '  push|fetch|pull|ls-remote)\n'
-            '    CMD="$1"\n'
-            '    shift\n'
-            '    args_json="["\n'
-            '    first=1\n'
-            '    for arg in "$@"; do\n'
-            '      if [ "$first" = "1" ]; then first=0; else args_json="$args_json,"; fi\n'
-            '      escaped=$(printf \'%s\' "$arg" | sed \'s/\\\\/\\\\\\\\/g; s/"/\\\\"/g\')\n'
-            '      args_json="$args_json\\"$escaped\\""\n'
-            '    done\n'
-            '    args_json="$args_json]"\n'
-            '    escaped_cmd=$(printf \'%s\' "$CMD" | sed \'s/"/\\\\"/g\')\n'
-            + ('    escaped_workdir=$(printf \'%s\' "$HOST_WORKDIR" | sed \'s/\\\\/\\\\\\\\/g; s/"/\\\\"/g\')\n'
-               '    request=\'{"cmd": "\'$escaped_cmd\'", "args": \'$args_json\', "workdir": "\'$escaped_workdir\'"}\'\n'
-               if _escaped_host_workdir else
-               '    request=\'{"cmd": "\'$escaped_cmd\'", "args": \'$args_json\'}\'\n')
-            + '    if ! command -v python3 >/dev/null 2>&1; then\n'
-            '      echo "pm: python3 required for git proxy client" >&2\n'
-            '      exit 1\n'
-            '    fi\n'
-            '    response=$(python3 -c "\n'
-            "import socket, sys, json\n"
-            "s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
-            "try:\n"
-            "    s.connect('$SOCKET')\n"
-            "except Exception as e:\n"
-            f"    print(json.dumps({{'exit_code': 1, 'stdout': '', 'stderr': f'git-proxy: cannot connect: {{e}}\\\\n'}}))\n"
-            "    sys.exit(0)\n"
-            "s.sendall((sys.argv[1] + '\\\\n').encode())\n"
-            "data = b''\n"
-            "while True:\n"
-            "    chunk = s.recv(4096)\n"
-            "    if not chunk:\n"
-            "        break\n"
-            "    data += chunk\n"
-            "s.close()\n"
-            "print(data.decode())\n"
-            '" "$request" 2>&1)\n'
-            '    printf \'%s\' "$response" | python3 -c "import sys,json; r=json.load(sys.stdin); sys.stdout.write(r.get(\'stdout\',\'\')); sys.stderr.write(r.get(\'stderr\',\'\')); sys.exit(r.get(\'exit_code\',1))"\n'
-            '    exit $?\n'
-            '    ;;\n'
-            'esac\n'
-            'exec $REAL_GIT "$@"\n'
-        )
+        wrapper_script = _build_git_wrapper_script(host_workdir)
         # Install to the pm user's local bin — it's first on PATH in both
         # the default image and project-specific images, and doesn't need
         # root to write.  /usr/local/bin/git would require root which
@@ -604,10 +747,11 @@ def create_container(
         extra_rw_mounts: Additional read-write mounts {host_path: container_path}.
         allowed_push_branch: If set, restrict git push to this branch only.
         session_tag: Session tag for shared push proxies.  When provided
-            together with *pr_id*, multiple containers on the same branch
-            share a single proxy (socket at a deterministic path).
-        pr_id: PR identifier — combined with *session_tag* to key shared
-            push proxies.
+            together with *pr_id*, containers on the same host workdir share
+            a single proxy (socket at a deterministic path); a container on
+            a different workdir — e.g. a QA scenario clone — gets its own.
+        pr_id: PR identifier — combined with *session_tag* and the workdir
+            to key shared push proxies.
 
     Returns:
         Container ID.
@@ -628,7 +772,7 @@ def create_container(
                 start_push_proxy, get_proxy_socket_path, proxy_is_alive,
             )
             sock = get_proxy_socket_path(name, session_tag=session_tag,
-                                         pr_id=pr_id)
+                                         pr_id=pr_id, workdir=str(workdir))
             if not sock or not proxy_is_alive(sock):
                 _log.warning("Push proxy dead/missing for container %s — "
                              "restarting proxy", name)
@@ -776,10 +920,15 @@ def create_container(
             cmd.extend(["-v", f"{host_path}:{container_path}"])
 
     # --- Environment ---
+    # Passed by name (``-e NAME``): the runtime reads each value from its
+    # own environment (*run_env*), so API keys and tokens never appear in
+    # the command line, which is logged and embedded in raised errors.
+    run_env: dict[str, str] = {}
     for env_var in _CLAUDE_ENV_VARS:
         val = os.environ.get(env_var)
         if val:
-            cmd.extend(["-e", f"{env_var}={val}"])
+            cmd.extend(["-e", env_var])
+            run_env[env_var] = val
 
     # PM_HOST_HOME tells code inside the container (notably
     # pm_core.hook_install) to embed the host's home path in any file
@@ -789,7 +938,8 @@ def create_container(
     cmd.extend(["-e", f"PM_HOST_HOME={Path.home()}"])
 
     for k, v in config.env.items():
-        cmd.extend(["-e", f"{k}={v}"])
+        cmd.extend(["-e", k])
+        run_env[k] = v
 
     # Extra mounts from config (user-specified, e.g. data dirs)
     for mount in config.extra_mounts:
@@ -798,13 +948,14 @@ def create_container(
     # --- Git push proxy ---
     # If an allowed push branch is set, start a host-side push proxy.
     # The proxy socket is mounted into the container; credentials stay
-    # on the host.  The proxy handles all origin types: real remotes
-    # (HTTP/SSH), local-path origins (from git clone --local), and
-    # repos with no remote (push fails cleanly).
+    # on the host.  The proxy serves one host workdir and only real
+    # remotes (HTTP/SSH): a local-path origin (from git clone --local) is
+    # rejected fail-closed rather than fetched into the target, and a repo
+    # with no remote fails cleanly.
     has_push_proxy = False
     if allowed_push_branch:
         from pm_core.push_proxy import (
-            start_push_proxy, _CONTAINER_SOCKET_DIR, _CONTAINER_SOCKET_PATH,
+            start_push_proxy, _CONTAINER_SOCKET_DIR,
         )
         sock_path = start_push_proxy(
             name, str(workdir), allowed_push_branch,
@@ -884,7 +1035,7 @@ def create_container(
     setup = "; ".join(setup_parts)
     cmd.extend([config.image, "bash", "-c", setup])
 
-    result = _run_runtime(*cmd, timeout=60)
+    result = _run_runtime(*cmd, timeout=60, env=run_env)
     container_id = result.stdout.strip()
 
     # Wait for the setup script to finish (sentinel file appears).
@@ -989,7 +1140,8 @@ def create_container(
 
 
 def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
-                   proxy_socket_path: str | None = None) -> str:
+                   proxy_socket_path: str | None = None,
+                   env: dict[str, str] | None = None) -> str:
     """Build a ``<runtime> exec -it`` command string for use in a tmux window.
 
     When the exec'd process exits, the container is removed (unless
@@ -999,17 +1151,28 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
     If *proxy_socket_path* is provided, the cleanup also removes the
     push proxy socket file and its parent directory.  This triggers the
     proxy daemon thread to self-terminate (it checks for socket existence).
+
+    *env* names environment variables to add to the exec'd process.  Only
+    the *name* goes on the runtime command line (``-e NAME``); the runtime
+    reads the value from its own environment, which the tmux pane carries
+    (the pane command sources a private env file).  Values must never be
+    interpolated into this string: it is logged and kept as
+    ``#{pane_start_command}``.
     """
     runtime = _get_runtime()
     escaped = shlex.quote(shell_cmd)
+    env_args = " ".join(f"-e {shlex.quote(k)}" for k in (env or {}))
+    env_prefix = f"{env_args} " if env_args else ""
     # Under Podman with --userns=keep-id, the default user is already the
     # host user (correct UID).  The "pm" username doesn't exist in
     # /etc/passwd, so -u pm would fail.  Under Docker, -u pm switches
     # from root to the pm user created during setup.
     if "podman" in runtime:
-        exec_part = f"{runtime} exec -it {shlex.quote(name)} bash -c {escaped}"
+        exec_part = (f"{runtime} exec -it {env_prefix}"
+                     f"{shlex.quote(name)} bash -c {escaped}")
     else:
-        exec_part = f"{runtime} exec -it -u {_CONTAINER_USER} {shlex.quote(name)} bash -c {escaped}"
+        exec_part = (f"{runtime} exec -it -u {_CONTAINER_USER} {env_prefix}"
+                     f"{shlex.quote(name)} bash -c {escaped}")
     if cleanup:
         cleanup_parts = []
         if proxy_socket_path:
@@ -1018,7 +1181,18 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
             f"{runtime} rm -f {shlex.quote(name)} >/dev/null 2>&1")
         if proxy_socket_path:
             sock_dir = str(Path(proxy_socket_path).parent)
+            # The proxy records its workdir/branch in a metadata sidecar next
+            # to the socket.  Leaving it behind makes `rmdir` fail, so the
+            # directory (and the sidecar) would leak in /tmp.
+            from pm_core.push_proxy import _METADATA_NAME
+            cleanup_parts.append(
+                f"rm -f {shlex.quote(str(Path(sock_dir) / _METADATA_NAME))}")
             cleanup_parts.append(f"rmdir {shlex.quote(sock_dir)} 2>/dev/null")
+            # The start lock lives *next to* the directory (outside the
+            # mount), so rmdir does not take it: without this the lock file
+            # leaks in /tmp for every per-container proxy a pane tears down.
+            cleanup_parts.append(
+                f"rm -f {shlex.quote(os.path.realpath(sock_dir) + '.lock')}")
         # Wrap in a bash trap so cleanup runs even when the pane is killed
         # via tmux kill-pane/kill-window (SIGHUP to the outer shell causes
         # ';'-chained commands to be skipped, but EXIT traps always fire).
@@ -1067,6 +1241,8 @@ def wrap_claude_cmd(
     allowed_push_branch: str | None = None,
     session_tag: str | None = None,
     pr_id: str | None = None,
+    provider: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     """Create a container and return a wrapped command for tmux.
 
@@ -1083,8 +1259,21 @@ def wrap_claude_cmd(
         allowed_push_branch: If set, restrict git push to this branch inside the container.
         session_tag: Session tag — embedded in the container name and used
             for shared push proxies (with *pr_id*).
-        pr_id: PR identifier — combined with *session_tag* to share push
-            proxies across containers on the same branch.
+        pr_id: PR identifier — combined with *session_tag* and the host
+            workdir to key shared push proxies: containers on the same
+            workdir share one, a container on a different workdir (e.g. a
+            QA scenario clone) gets its own.
+        provider: The provider *claude_cmd* was built for.  In container
+            mode a router provider (pm_core.router_route) gets its host
+            bridge started and its socket dir mounted; a bridge or
+            container that cannot be set up raises ContainerError.  Whether
+            the router answers is not checked: a router that is down is an
+            API failure inside the session, as on any other provider.
+        env: Provider environment variables to pass to the exec'd claude by
+            name (see ``build_exec_cmd``).  Callers must also export the same
+            values into the tmux pane (``env=`` on the pane helper); the pane
+            command sources a private env file, so only the names reach the
+            runtime command line.
 
     Returns:
         (wrapped_cmd, container_name).  container_name is "" if not containerised.
@@ -1092,12 +1281,40 @@ def wrap_claude_cmd(
     if not is_container_mode_enabled():
         return claude_cmd, ""
 
-    config = load_container_config()
     cname = _make_container_name(label, session_tag=session_tag)
+
+    # Workflow roles on a router reach it through the same bridge as QA
+    # workers.  Never fall back to another account when an explicitly
+    # selected route cannot be set up.
+    if provider:
+        from pm_core import router_route
+        from pm_core.model_config import ModelResolution
+        from pm_core.providers import ProviderNotFoundError
+        try:
+            route_mounts = router_route.container_mounts(
+                ModelResolution(provider=provider), strict=True)
+        except ProviderNotFoundError as exc:
+            raise ContainerError(str(exc)) from exc
+        # create_container reuses a running container by name, and a
+        # container created before the route was selected cannot gain the
+        # mount: its in-container ensure step would refuse to start Claude.
+        if (route_mounts and container_is_running(cname)
+                and router_route.container_has_route_mount(cname) is False):
+            raise ContainerError(
+                f"provider '{provider}': container {cname} is running "
+                "without the route socket mount. Remedy: end the "
+                f"session using it, remove it ({_get_runtime()} rm -f "
+                f"{cname}) and launch again.")
+        extra_rw_mounts = dict(extra_rw_mounts or {})
+        extra_rw_mounts.update(route_mounts)
+
+    config = load_container_config()
     _log.info(
         "wrap_claude_cmd: label=%s workdir=%s container=%s session_tag=%s pr_id=%s",
         label, workdir, cname, session_tag, pr_id,
     )
+
+    from pm_core.push_proxy import PushProxyError
 
     try:
         create_container(
@@ -1114,6 +1331,15 @@ def wrap_claude_cmd(
         _log.error("Failed to create container %s — aborting (container mode is enabled)",
                    cname, exc_info=True)
         raise
+    except PushProxyError as exc:
+        # The proxy is what makes pushes work from inside the container;
+        # report the real reason instead of blaming the container runtime.
+        _log.error("Push proxy unavailable for container %s — aborting",
+                   cname, exc_info=True)
+        raise ContainerError(
+            f"Failed to create container '{cname}': push proxy unavailable "
+            f"— {exc}"
+        ) from exc
     except Exception as exc:
         _log.error("Failed to create container %s — aborting (container mode is enabled)",
                    cname, exc_info=True)
@@ -1136,7 +1362,8 @@ def wrap_claude_cmd(
         _log.debug("wrap_claude_cmd: rewrote prompt-file path to container path")
 
     from pm_core.push_proxy import get_proxy_socket_path
-    proxy_sock = get_proxy_socket_path(cname)
+    proxy_sock = get_proxy_socket_path(
+        cname, session_tag=session_tag, pr_id=pr_id, workdir=workdir)
     # For shared proxies (session_tag + pr_id), don't embed socket cleanup
     # in the exec command — the socket is shared across containers and its
     # lifetime is managed via reference counting in stop_push_proxy().
@@ -1144,6 +1371,7 @@ def wrap_claude_cmd(
     exec_cmd = build_exec_cmd(
         cname, claude_cmd,
         proxy_socket_path=None if shared_proxy else proxy_sock,
+        env=env,
     )
     _log.info("Wrapped claude command in container %s", cname)
     return exec_cmd, cname
@@ -1161,12 +1389,16 @@ def create_qa_container(
     allowed_push_branch: str | None = None,
     session_tag: str | None = None,
     pr_id: str | None = None,
+    route_mounts: dict[Path, str] | None = None,
 ) -> str:
     """Create a detached container for a QA scenario.
 
     Convenience wrapper around create_container with QA-specific mounts:
       - workdir at /workspace (rw) — a standalone clone, not a worktree
       - scratch at /scratch (rw)
+      - *route_mounts* (rw): the route bridge socket directory
+        (pm_core.router_route.container_mounts) when QA sessions in this
+        container use a router provider
 
     The container has no access to the parent repo's git directory.
     If *allowed_push_branch* is set, a push proxy is started so the
@@ -1176,7 +1408,8 @@ def create_qa_container(
         name=name,
         config=config,
         workdir=workdir,
-        extra_rw_mounts={scratch_path: _CONTAINER_SCRATCH},
+        extra_rw_mounts={scratch_path: _CONTAINER_SCRATCH,
+                         **(route_mounts or {})},
         allowed_push_branch=allowed_push_branch,
         session_tag=session_tag,
         pr_id=pr_id,

@@ -1,5 +1,6 @@
 """Tests for the PR action-history journal, query model, CLI and pane entry."""
 
+import contextlib
 import json
 import multiprocessing
 import os
@@ -731,16 +732,33 @@ def _drive_review_loop(clock, outputs, follow_up=None, stop_after=None):
         clock.advance(600)
         return follow_up
 
-    with patch.object(rl, "_get_pm_session", return_value="pm-x"), \
-            patch("pm_core.tmux.session_exists", return_value=True), \
+    with _review_launch_fakes(clock), \
             patch.object(rl, "_launch_review_window", side_effect=_launch), \
-            patch.object(rl.time, "sleep", side_effect=clock.advance), \
-            patch.object(rl, "_find_claude_pane", return_value="%9"), \
             patch.object(rl, "_poll_for_verdict", side_effect=_poll), \
             patch.object(rl, "_wait_for_follow_up_verdict",
                          side_effect=_follow):
         rl.run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
     return state
+
+
+@contextlib.contextmanager
+def _review_launch_fakes(clock):
+    """Fake tmux, the launch lease and rediscovery around one review
+    launch, so an iteration always launches a fresh review window."""
+    from pm_core import review_loop as rl
+    with patch.object(rl, "_get_pm_session", return_value="pm-x"), \
+            patch("pm_core.tmux.session_exists", return_value=True), \
+            patch.object(rl.time, "sleep", side_effect=clock.advance), \
+            patch.object(rl, "_discover_iteration",
+                         return_value=rl.AttemptDiscovery("launch")), \
+            patch.object(rl, "_claim_launch", return_value=True), \
+            patch.object(rl, "_pr_is_terminal", return_value=False), \
+            patch.object(rl, "_live_review_pane_session", return_value=""), \
+            patch.object(rl, "_transcript_session_id", return_value=None), \
+            patch.object(rl, "_find_review_claude_pane", return_value="%9"), \
+            patch("pm_core.claude_launcher.session_id_from_transcript",
+                  return_value="sess-r"):
+        yield
 
 
 class TestReviewLoopHistory:
@@ -757,14 +775,140 @@ class TestReviewLoopHistory:
         assert [p["phase"] for p in i1["phases"]] == [
             "launching", "agent", "verdict"]
         launching, agent, _ = i1["phases"]
-        # 3 s launch; no 2 s settle once the pane is found at once.
-        assert launching["duration_s"] == 3
+        # 3 s launch plus the 2 s wait for the window to appear.
+        assert launching["duration_s"] == 5
         assert agent["duration_s"] == 100
-        assert i1["exec_s"] == i1["elapsed_s"] == 103
+        assert i1["exec_s"] == i1["elapsed_s"] == 105
         assert i1["wait_s"] == 0
         # Both grace timers were cleared when polling returned.
         assert model["timers"]["active"] == []
         assert {r["resolution"] for r in model["timers"]["recent"]} == {"elapsed"}
+
+    def _retry_loop(self, clock, outcomes, monkeypatch):
+        """Drive the loop with ``_run_claude_review`` faked per attempt."""
+        from pm_core import review_loop as rl
+        monkeypatch.setattr(rl, "REVIEW_LAUNCH_BACKOFF_BASE", 5.0)
+        state = rl.ReviewLoopState(pr_id=PR)
+        rs.set_action_state(PR, "review-loop", "running",
+                            loop_id=state.loop_id)
+        outs = list(outcomes)
+
+        def _review(*a, **k):
+            clock.advance(3)
+            out = outs.pop(0)
+            if isinstance(out, BaseException):
+                raise out
+            return out
+
+        def _sleep(seconds, *a, **k):
+            clock.advance(seconds)
+
+        with _review_launch_fakes(clock), \
+                patch.object(rl, "_run_claude_review", side_effect=_review), \
+                patch.object(rl, "_interruptible_sleep", side_effect=_sleep):
+            rl.run_review_loop_sync(state, "/tmp", _PR_DATA,
+                                    transcript_dir="/tmp")
+        return state
+
+    def test_launch_retry_backoff_is_a_wait_with_a_timer(self, clock,
+                                                         monkeypatch):
+        from pm_core import review_loop as rl
+        err = rl.ReviewLaunchError("container setup failed", retryable=True,
+                                   reason="window")
+        launches = [err, None]
+
+        def _launch(*a, **k):
+            clock.advance(3)
+            out = launches.pop(0)
+            if out is not None:
+                raise out
+
+        monkeypatch.setattr(rl, "REVIEW_LAUNCH_BACKOFF_BASE", 5.0)
+        state = rl.ReviewLoopState(pr_id=PR)
+        rs.set_action_state(PR, "review-loop", "running",
+                            loop_id=state.loop_id)
+        with _review_launch_fakes(clock), \
+                patch.object(rl, "_launch_review_window", side_effect=_launch), \
+                patch.object(rl, "_poll_for_verdict", return_value="ok\nPASS"), \
+                patch.object(rl, "_interruptible_sleep",
+                             side_effect=lambda sec, *a, **k: clock.advance(sec)):
+            rl.run_review_loop_sync(state, "/tmp", _PR_DATA,
+                                    transcript_dir="/tmp")
+        m = hq.build_history(PR, now=clock.t, live=False)
+        (it,) = m["attempts"][0]["children"]
+        assert (it["outcome"], it["verdict"]) == ("done", "PASS")
+        assert [p["phase"] for p in it["phases"]] == [
+            "launching", "backoff", "launching", "agent", "verdict"]
+        assert "launch attempt 2/3" in it["phases"][2]["detail"]
+        backoff = [p for p in it["phases"] if p["phase"] == "backoff"]
+        assert backoff and backoff[0]["duration_s"] == 5
+        assert "attempt 1 failed (window)" in backoff[0]["detail"]
+        assert it["wait_s"] == 5
+        (row,) = [r for r in m["timers"]["recent"]
+                  if r["timer"].startswith("review-launch-retry:")]
+        assert row["purpose"] == ("review launch retry backoff (iteration 1, "
+                                  "attempt 2/3)")
+        assert row["resolution"] == "fired"
+
+    def test_backoff_timer_active_mid_sleep(self, clock, monkeypatch):
+        from pm_core import review_loop as rl
+        seen = {}
+
+        def _sleep(seconds, *a, **k):
+            clock.advance(2)
+            seen["m"] = hq.build_history(PR, now=clock.t, live=False)
+            clock.advance(seconds - 2)
+
+        err = rl.ReviewLaunchError("boom", retryable=True, reason="window")
+        state = rl.ReviewLoopState(pr_id=PR)
+        state._history_attempt = ah.start_attempt(PR, "review-loop",
+                                                  iteration=1)
+        state.iteration = 1
+        monkeypatch.setattr(rl, "REVIEW_LAUNCH_BACKOFF_BASE", 5.0)
+        with _review_launch_fakes(clock), \
+                patch.object(rl, "_run_claude_review",
+                             side_effect=[err, "ok\nPASS"]), \
+                patch.object(rl, "_interruptible_sleep", side_effect=_sleep):
+            rl._run_iteration_with_retry(state, "/tmp", _PR_DATA, "/tmp", 1)
+        (t,) = seen["m"]["timers"]["active"]
+        assert t["effect"] == "fires" and t["remaining_s"] == 3
+        assert t["expected"] == "relaunch the review window"
+        assert "review launch retry backoff" in seen["m"]["waiting_for"]
+
+    @pytest.mark.parametrize("exc,outcome,verdict", [
+        ("closed", "cancelled", "CLOSED"),
+        ("hold", "failed", "HOLD"),
+        ("exhausted", "failed", "LAUNCH_FAILED"),
+        ("superseded", "superseded", "LAUNCH_FAILED"),
+    ])
+    def test_iteration_end_for_master_outcomes(self, clock, monkeypatch, exc,
+                                               outcome, verdict):
+        from pm_core import review_loop as rl
+        err = {
+            "closed": rl.ReviewClosedError("PR merged"),
+            "hold": rl.ReviewHoldError("trust prompt"),
+            "exhausted": rl.ReviewLaunchError("boom", retryable=False,
+                                              reason="auth"),
+            "superseded": rl.ReviewLaunchError("owned", retryable=False,
+                                               reason="superseded"),
+        }[exc]
+        state = self._retry_loop(clock, [err], monkeypatch)
+        assert state.latest_verdict == verdict
+        (it,) = [a for a in _attempts().values() if a.get("iteration") == 1]
+        end = _ends()[it["attempt"]]
+        assert (end["outcome"], end["verdict"]) == (outcome, verdict)
+
+    def test_review_hold_is_a_derived_hold(self, clock):
+        runtime = {"review-loop": {"state": "failed", "verdict": "HOLD",
+                                   "updated_at": "2026-11-02T00:00:00+00:00"}}
+        with patch.object(hq, "_runtime_actions", return_value=runtime), \
+                patch.object(hq, "_runtime_tracked_attempts",
+                             return_value=set()):
+            m = hq.build_history(PR, pr={"status": "in_review"},
+                                 now=clock.t)
+        (hold,) = m["holds"]
+        assert hold["purpose"] == "review HOLD at a permission/trust prompt"
+        assert m["waiting_for"].startswith("human: review HOLD")
 
     def test_input_required_hold_counts_as_wait(self, clock):
         _drive_review_loop(clock, ["need you\nINPUT_REQUIRED"],
@@ -827,15 +971,13 @@ class TestReviewLoopHistory:
             return None
 
         state = rl.ReviewLoopState(pr_id=PR)
-        with patch.object(rl, "_launch_review_window"), \
-                patch.object(rl, "_get_pm_session", return_value="pm-x"), \
-                patch("pm_core.tmux.session_exists", return_value=True), \
-                patch.object(rl.time, "sleep", side_effect=clock.advance), \
-                patch.object(rl, "_find_claude_pane", return_value="%9"), \
+        state._history_attempt = "a1"
+        with _review_launch_fakes(clock), \
+                patch.object(rl, "_launch_review_window"), \
                 patch.object(rl, "_poll_for_verdict", side_effect=_killed):
             with pytest.raises(rl.PaneKilledError):
                 rl._run_claude_review(PR, "/tmp", _PR_DATA, "/tmp/t.jsonl",
-                                      iteration=1, history_attempt="a1")
+                                      iteration=1, state=state)
         model = hq.build_history(PR, now=clock.t, live=False)
         (row,) = model["timers"]["recent"]
         assert row["resolution"] == "cancelled"
@@ -847,14 +989,17 @@ class TestReviewLoopHistory:
         transcript.write_text("")
         state = rl.ReviewLoopState(pr_id=PR)
         state.iteration = 2
+        state._history_attempt = "a2"
+        found = rl.AttemptDiscovery("adopt", pane_id="%9",
+                                    transcript=str(transcript))
         with patch.object(rl, "_get_pm_session", return_value="pm-x"), \
-                patch.object(rl, "_find_claude_pane", return_value="%9"), \
+                patch.object(rl, "_find_review_claude_pane",
+                             return_value="%9"), \
+                patch.object(rl, "_discover_iteration", return_value=found), \
                 patch("pm_core.claude_launcher.session_id_from_transcript",
                       return_value="sess-a"), \
-                patch("pm_core.hook_events.read_event", return_value=None), \
                 patch.object(rl, "_poll_for_verdict", return_value="ok\nPASS"):
-            out = rl._adopt_in_flight_review(state, _PR_DATA, str(tmp_path),
-                                             history_attempt="a2")
+            out = rl._adopt_in_flight_review(state, _PR_DATA, str(tmp_path))
         assert out == "ok\nPASS"
         (ev,) = [e for e in ah.read_events(PR) if e["kind"] == "phase"]
         assert (ev["attempt"], ev["phase"], ev["session_id"]) == (
@@ -1124,6 +1269,139 @@ class TestQARunJournal:
         (row,) = [r for r in hq.build_history(PR, now=clock.t, live=False)
                   ["timers"]["recent"] if r["timer"] == "qa-grace:L1"]
         assert row["resolution"] == reason
+
+
+class TestQAInputWaitAndHold:
+    """Master's held QA runs: a scenario that asks for input stays open in a
+    ``waiting_human`` phase, and a run held at INPUT_REQUIRED journals an
+    indefinite hold that its follow-up releases."""
+
+    def test_waiting_scenario_stays_open_until_its_follow_up(self, clock):
+        run = ah.start_attempt(PR, "qa", loop_id="L1", label="QA run")
+        obs = ah.ScenarioObserver(PR, run, "L1")
+        sc = [_sc(1)]
+        obs.observe(sc, pending={1}, verifying=set(), queued=set(),
+                    verdicts={})
+        clock.advance(50)
+        obs.observe(sc, pending=set(), verifying=set(), queued=set(),
+                    verdicts={1: "INPUT_REQUIRED"}, waiting={1})
+        # The poll loop exits while s1 waits; the run holds on it.
+        obs.finish(stopped=False, keep_waiting=True)
+        clock.advance(300)
+        m = hq.build_history(PR, now=clock.t, live=False)
+        (kid,) = m["attempts"][0]["children"]
+        assert kid["open"] and kid["phases"][-1]["phase"] == "waiting_human"
+        assert kid["wait_s"] == 300
+        # The reopened poll collects the follow-up.
+        obs.observe(sc, pending=set(), verifying=set(), queued=set(),
+                    verdicts={1: "PASS"})
+        m = hq.build_history(PR, now=clock.t, live=False)
+        (kid,) = m["attempts"][0]["children"]
+        assert (kid["outcome"], kid["verdict"]) == ("done", "PASS")
+        assert (kid["exec_s"], kid["wait_s"]) == (50, 300)
+
+    def test_run_ending_while_waiting_keeps_input_required(self, clock):
+        run = ah.start_attempt(PR, "qa", loop_id="L1", label="QA run")
+        obs = ah.ScenarioObserver(PR, run, "L1")
+        obs.observe([_sc(1)], pending=set(), verifying=set(), queued=set(),
+                    verdicts={1: "INPUT_REQUIRED"}, waiting={1})
+        obs.finish(stopped=False, keep_waiting=True)
+        obs.finish(stopped=False, verdicts={1: "INPUT_REQUIRED"})
+        (kid,) = hq.build_history(PR, now=clock.t, live=False)[
+            "attempts"][0]["children"]
+        assert (kid["outcome"], kid["verdict"]) == ("done", "INPUT_REQUIRED")
+
+    def _held_state(self):
+        from pm_core import qa_loop
+        sc = qa_loop.QAScenario(index=1, title="T", focus="t",
+                                window_name="qa-s1", pane_id="%1",
+                                session_id="sid-1", transcript_path="/t")
+        state = qa_loop.QALoopState(pr_id=PR)
+        state.loop_id = "L1"
+        state.scenarios = [sc]
+        state.scenario_verdicts = {1: "INPUT_REQUIRED"}
+        state.waiting_for_input = {1}
+        return state
+
+    def _finalize(self, state, *, hold, poll=None):
+        from contextlib import ExitStack
+        from pm_core import qa_loop
+        with ExitStack() as stack:
+            for name in ("_persist_scenario_verdicts", "_write_resume_file",
+                         "_write_status_file"):
+                stack.enter_context(patch.object(qa_loop, name))
+            stack.enter_context(patch.object(
+                qa_loop, "_run_qa_finalize_pane",
+                return_value="FINALIZE_DONE"))
+            stack.enter_context(patch.object(
+                qa_loop, "_poll_tmux_verdicts", side_effect=poll))
+            stack.enter_context(patch.object(
+                qa_loop, "_hold_for_follow_up", side_effect=hold))
+            with qa_loop._journal_qa_run(state, resumed=False):
+                qa_loop._execute_and_finalize(
+                    state, "/tmp", {"branch": "b"}, {}, "pm-x", "qa-w",
+                    "/tmp", "/tmp/status.json", None, use_containers=False,
+                    concurrency_cap=0, queued_scenarios=[],
+                    notify=lambda: None)
+
+    def test_held_run_journals_a_hold_released_by_the_follow_up(self, clock):
+        state = self._held_state()
+        polls = iter([None, "follow-up"])
+
+        def _poll(st, *a, **k):
+            if next(polls) == "follow-up":
+                st.waiting_for_input.clear()
+                st.scenario_verdicts = {1: "PASS"}
+
+        holds_seen = []
+
+        def _hold_once(*a, **k):
+            clock.advance(600)
+            holds_seen.append(hq.build_history(PR, now=clock.t, live=False))
+            return True     # a follow-up arrived: reopen the run
+
+        self._finalize(state, hold=_hold_once, poll=_poll)
+        (m,) = holds_seen
+        (hold,) = m["holds"]
+        assert hold["purpose"] == "QA INPUT_REQUIRED hold (scenario(s) 1)"
+        assert hold["due_at"] is None and hold["remaining_s"] is None
+        assert m["waiting_for"] == ("human: QA INPUT_REQUIRED hold "
+                                    "(scenario(s) 1)")
+        (run,) = m["attempts"]
+        assert run["open"] and run["phases"][-1]["phase"] == "waiting_human"
+        after = hq.build_history(PR, now=clock.t, live=False)
+        (run,) = after["attempts"]
+        assert (run["outcome"], run["verdict"]) == ("done", "PASS")
+        assert run["wait_s"] == 600
+        assert after["holds"] == []
+        (row,) = [r for r in after["timers"]["recent"]
+                  if r["timer"] == "qa-input-hold:L1"]
+        assert row["resolution"] == "released"
+
+    def test_hold_cancelled_by_a_stop(self, clock):
+        state = self._held_state()
+
+        def _hold(*a, **k):
+            state.stop_requested = True
+            return False
+
+        self._finalize(state, hold=_hold)
+        m = hq.build_history(PR, now=clock.t, live=False)
+        (row,) = [r for r in m["timers"]["recent"]
+                  if r["timer"] == "qa-input-hold:L1"]
+        assert row["resolution"] == "cancelled"
+        assert m["attempts"][0]["outcome"] == "cancelled"
+
+    def test_derived_runtime_hold_not_doubled_while_journaled(self, clock):
+        ah.arm_timer(PR, "qa-input-hold:L1", purpose="QA INPUT_REQUIRED "
+                     "hold (scenario(s) 1)", owner_action="qa",
+                     duration=None)
+        runtime = {"qa": {"state": "done", "verdict": "INPUT_REQUIRED"}}
+        with patch.object(hq, "_runtime_actions", return_value=runtime), \
+                patch.object(hq, "_runtime_tracked_attempts",
+                             return_value=set()):
+            m = hq.build_history(PR, pr={"status": "qa"}, now=clock.t)
+        assert [h["timer"] for h in m["holds"]] == ["qa-input-hold:L1"]
 
 
 # ---------------------------------------------------------------------------

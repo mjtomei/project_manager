@@ -10,6 +10,7 @@ The repo has no pytest-asyncio plugin, so each async body is driven through
 
 import asyncio
 import functools
+from unittest.mock import patch
 
 from textual.app import App, ComposeResult
 from textual.containers import ScrollableContainer
@@ -147,6 +148,28 @@ async def test_filter_empty_state_renders():
         assert "No qa PRs" in msg.render().plain
         assert msg.region.width > 0 and msg.region.height > 0, (
             f"filter empty-state message collapsed to {tuple(msg.region)}")
+
+
+@async_test
+async def test_hide_closed_empty_state_renders():
+    # A retained closed PR (``pm pr close`` keeps the registry entry) is hidden
+    # by the default ``hide closed`` toggle, so a project whose work is all
+    # closed has an empty grid.  It must draw an empty-state message: without
+    # one the tree mounts no children and Textual paints the widget's repr
+    # ("TechTree#tech-tree") instead of a hint.
+    app = _TreeApp([_pr("pr-a", status="closed")])
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        tree = app.query_one("#tech-tree", TechTree)
+        assert tree._status_filter is None
+        assert tree._empty_message(), (
+            "hide-closed hiding every PR must still produce a message")
+        statics = list(tree.query(Static))
+        assert statics, "hide-closed empty state should mount a message Static"
+        msg = statics[0]
+        assert "Press F to cycle filter" in msg.render().plain
+        assert msg.region.width > 0 and msg.region.height > 0, (
+            f"empty-state message collapsed to {tuple(msg.region)}")
 
 
 @async_test
@@ -515,3 +538,300 @@ async def test_reorder_keeps_cursor_on_same_pr():
         await pilot.pause()
         assert tree._ordered_ids != before, "precondition: order changed"
         assert tree.selected_pr_id == "pr-a"
+
+
+# ---------------------------------------------------------------------------
+# Sign-off marker vs a finished review loop
+# ---------------------------------------------------------------------------
+
+
+def _status_row(app, pr_id):
+    node = next(n for n in app.query(PRNode) if n.pr_id == pr_id)
+    return node.render().plain.splitlines()[3]
+
+
+def _finished_loop(pr_id, verdict="PASS"):
+    from pm_core.review_loop import ReviewLoopState
+    st = ReviewLoopState(pr_id=pr_id, iteration=1, latest_verdict=verdict)
+    st.running = False
+    return st
+
+
+@async_test
+async def test_sign_off_verdict_icon_not_masked_by_finished_review_loop():
+    pr = _pr("pr-a", status="sign_off", workdir="/w",
+             signoff={"verdict": "SIGNOFF_MERGE", "head": "abc"})
+    app = _TreeApp([pr])
+    app._review_loops["pr-a"] = _finished_loop("pr-a")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        row = _status_row(app, "pr-a")
+        assert "▲" in row and "⟳" not in row
+
+
+@async_test
+async def test_sign_off_rerun_spinner_not_masked_by_finished_review_loop():
+    from pm_core.tui.tech_tree import SPINNER_FRAMES
+    pr = _pr("pr-a", status="sign_off", workdir="/w")  # no verdict: running
+    app = _TreeApp([pr])
+    app._review_loops["pr-a"] = _finished_loop("pr-a")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        row = _status_row(app, "pr-a")
+        assert any(f in row for f in SPINNER_FRAMES) and "⟳" not in row
+
+
+@async_test
+async def test_in_review_keeps_finished_loop_marker():
+    app = _TreeApp([_pr("pr-a", status="in_review", workdir="/w")])
+    app._review_loops["pr-a"] = _finished_loop("pr-a")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        assert "⟳1" in _status_row(app, "pr-a")
+
+
+@async_test
+async def test_return_marker_shown_alongside_running_rework_markers():
+    """R5.2: a PR sent back by sign-off keeps ⇤ while its rework review
+    loop runs (CLI ``pm pr list`` shows it throughout)."""
+    from pm_core.review_loop import ReviewLoopState
+    ret = {"verdict": "SIGNOFF_IMPL", "hop": "impl", "reviewed_head": "abc"}
+    pr = _pr("pr-a", status="in_review", workdir="/w", signoff_return=ret)
+    app = _TreeApp([pr])
+    st = ReviewLoopState(pr_id="pr-a", iteration=2)
+    st.running = True
+    app._review_loops["pr-a"] = st
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        row = _status_row(app, "pr-a")
+        assert "⟳2" in row and "⇤" in row
+
+
+# ---------------------------------------------------------------------------
+# Live QA marker vs a finished review loop (S29)
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_qa_spinner_not_masked_by_finished_review_loop():
+    """S29: B's review loop had finished (⟳1⏸); while B's QA scenarios ran
+    the node kept reading '● qa ⟳1⏸' with no QA spinner."""
+    from pm_core.tui.tech_tree import SPINNER_FRAMES
+    app = _TreeApp([_pr("pr-a", status="qa", workdir="/w")])
+    app._review_loops["pr-a"] = _finished_loop("pr-a", "INPUT_REQUIRED")
+    with patch("pm_core.tui.tech_tree.qa_pane_state", return_value="active"):
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            row = _status_row(app, "pr-a")
+            assert any(f in row for f in SPINNER_FRAMES) and "⟳" not in row
+
+
+@async_test
+async def test_qa_waiting_marker_not_masked_by_finished_review_loop():
+    app = _TreeApp([_pr("pr-a", status="qa", workdir="/w")])
+    app._review_loops["pr-a"] = _finished_loop("pr-a", "PASS")
+    with patch("pm_core.tui.tech_tree.qa_pane_state", return_value="waiting"):
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            row = _status_row(app, "pr-a")
+            assert "⏸" in row and "⟳" not in row
+
+
+@async_test
+async def test_idle_qa_keeps_finished_loop_marker():
+    app = _TreeApp([_pr("pr-a", status="qa", workdir="/w")])
+    app._review_loops["pr-a"] = _finished_loop("pr-a", "PASS")
+    with patch("pm_core.tui.tech_tree.qa_pane_state", return_value="idle"):
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            assert "⟳1" in _status_row(app, "pr-a")
+
+
+@async_test
+async def test_running_review_loop_marker_wins_over_qa():
+    app = _TreeApp([_pr("pr-a", status="qa", workdir="/w")])
+    st = _finished_loop("pr-a", "")
+    st.running = True
+    app._review_loops["pr-a"] = st
+    with patch("pm_core.tui.tech_tree.qa_pane_state", return_value="active"):
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            assert "⟳1" in _status_row(app, "pr-a")
+
+
+@async_test
+async def test_merge_input_marker_survives_live_qa():
+    """Review 4f28 i1: only a finished loop's badge yields to live QA; a
+    merge INPUT_REQUIRED marker (⏸M) is not cleared with it."""
+    for qa_state in ("active", "waiting"):
+        app = _TreeApp([_pr("pr-a", status="qa", workdir="/w")])
+        app._merge_input_required_prs.add("pr-a")
+        with patch("pm_core.tui.tech_tree.qa_pane_state",
+                   return_value=qa_state):
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                assert "⏸M" in _status_row(app, "pr-a"), qa_state
+
+
+# ---------------------------------------------------------------------------
+# Live impl marker vs a finished review loop (S35)
+# ---------------------------------------------------------------------------
+
+
+def _track_impl(app, pr_id, tmp_path, idle=False, waiting=False):
+    sid = "6f1c2c1e-0000-4000-8000-000000000001"
+    tp = tmp_path / f"{sid}.jsonl"
+    tp.write_text("")
+    app._pane_idle_tracker.register(pr_id, "%1", str(tp))
+    st = app._pane_idle_tracker._states[pr_id]
+    st.idle, st.waiting_for_input = idle, waiting
+
+
+@async_test
+async def test_impl_spinner_not_masked_by_finished_review_loop():
+    """S35: after `z d` ended R's review loop (⟳2☠), a turn typed into R's
+    impl pane read as working in the picker but the node kept showing
+    '◉ in_review ⟳2☠' with no impl spinner."""
+    import tempfile
+    from pathlib import Path
+    from pm_core.tui.tech_tree import SPINNER_FRAMES
+    with tempfile.TemporaryDirectory() as d, \
+            patch("pm_core.pane_idle._runtime_mirror_register"):
+        for status in ("in_review", "in_progress"):
+            app = _TreeApp([_pr("pr-a", status=status, workdir="/w")])
+            app._review_loops["pr-a"] = _finished_loop("pr-a", "KILLED")
+            _track_impl(app, "pr-a", Path(d))
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                row = _status_row(app, "pr-a")
+                assert any(f in row for f in SPINNER_FRAMES), (status, row)
+                assert "⟳" not in row, (status, row)
+
+
+@async_test
+async def test_impl_waiting_marker_not_masked_by_finished_review_loop():
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as d, \
+            patch("pm_core.pane_idle._runtime_mirror_register"):
+        app = _TreeApp([_pr("pr-a", status="in_review", workdir="/w")])
+        app._review_loops["pr-a"] = _finished_loop("pr-a", "PASS")
+        _track_impl(app, "pr-a", Path(d), waiting=True)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            row = _status_row(app, "pr-a")
+            assert "⏸" in row and "⟳" not in row
+
+
+@async_test
+async def test_idle_impl_keeps_finished_loop_marker():
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as d, \
+            patch("pm_core.pane_idle._runtime_mirror_register"):
+        app = _TreeApp([_pr("pr-a", status="in_review", workdir="/w")])
+        app._review_loops["pr-a"] = _finished_loop("pr-a", "PASS")
+        _track_impl(app, "pr-a", Path(d), idle=True)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            assert "⟳1" in _status_row(app, "pr-a")
+
+
+@async_test
+async def test_running_review_loop_marker_wins_over_live_impl():
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as d, \
+            patch("pm_core.pane_idle._runtime_mirror_register"):
+        app = _TreeApp([_pr("pr-a", status="in_review", workdir="/w")])
+        st = _finished_loop("pr-a", "")
+        st.running = True
+        app._review_loops["pr-a"] = st
+        _track_impl(app, "pr-a", Path(d))
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            assert "⟳1" in _status_row(app, "pr-a")
+
+
+@async_test
+async def test_merge_input_marker_survives_live_impl():
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as d, \
+            patch("pm_core.pane_idle._runtime_mirror_register"):
+        app = _TreeApp([_pr("pr-a", status="in_review", workdir="/w")])
+        app._merge_input_required_prs.add("pr-a")
+        _track_impl(app, "pr-a", Path(d))
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            assert "⏸M" in _status_row(app, "pr-a")
+@async_test
+async def test_qa_spinner_shows_before_the_workdir_reaches_the_cache():
+    """S36: a PR's first QA run writes its workdir after start_qa reloaded
+    the TUI data, so the cached PR has none; its node stayed "● qa" with no
+    spinner while its workers ran, until the 300 s background sync."""
+    from pm_core.tui.tech_tree import SPINNER_FRAMES
+    app = _TreeApp([_pr("pr-a", status="qa")])
+    with patch("pm_core.tui.tech_tree.qa_pane_state", return_value="active"):
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            assert any(f in _status_row(app, "pr-a") for f in SPINNER_FRAMES)
+    app = _TreeApp([_pr("pr-a", status="qa")])
+    with patch("pm_core.tui.tech_tree.qa_pane_state", return_value="waiting"):
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            assert "⏸" in _status_row(app, "pr-a")
+
+
+@async_test
+async def test_qa_node_without_cached_workdir_is_repainted_while_its_loop_runs():
+    from pm_core.tui.tech_tree import TechTree
+    app = _TreeApp([_pr("pr-a", status="qa")])
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        tree = app.query_one("#tech-tree", TechTree)
+        pr = {"id": "pr-a", "status": "qa"}
+        assert not tree._is_active_pr(pr)
+        app._qa_loops = {"pr-a": object()}
+        assert tree._is_active_pr(pr)
+
+
+def test_idless_pr_entry_does_not_crash_recompute():
+    # A partial/externally written project.yaml can contain a PR mapping with
+    # a status but no id.  _recompute indexes every entry by id, so keeping
+    # such an entry raised KeyError and took the TUI down on refresh.
+    tree = TechTree([_pr("pr-a"), {"status": "in_review", "title": "no id"},
+                     "not-a-mapping"])
+    assert [p["id"] for p in tree._prs] == ["pr-a"]
+    tree._recompute()  # must not raise
+
+
+def test_update_prs_drops_idless_entries():
+    tree = TechTree([_pr("pr-a")])
+    tree.update_prs([_pr("pr-a"), {"status": "merged"}])
+    assert [p["id"] for p in tree._prs] == ["pr-a"]
+
+
+@async_test
+async def test_null_and_nonstring_titles_render_without_crashing():
+    """QA S31: a project.yaml with a null title (or a YAML integer title, or
+    control characters) must render, not take the TUI down.  PRNode.render
+    called cell_len(title) directly, so title: null raised TypeError and the
+    TUI unmounted on mount."""
+    ctrl = "Ctrl\nLine\rTab\tNUL\x00Esc\x1b[31mRed"
+    prs = [_pr("pr-null", title=None), _pr("pr-zero", title=0),
+           _pr("pr-ctrl", title=ctrl)]
+    app = _TreeApp(prs)
+    async with app.run_test(size=(160, 40)) as pilot:
+        await pilot.pause()
+        nodes = {n.pr_id: n for n in app.query(PRNode)}
+        null_lines = nodes["pr-null"].render().plain.splitlines()
+        zero_lines = nodes["pr-zero"].render().plain.splitlines()
+        ctrl_lines = nodes["pr-ctrl"].render().plain.splitlines()
+        assert null_lines[2].strip("│ ") == ""
+        assert "0" in zero_lines[2]
+        # Control characters are replaced by spaces: exactly one title row,
+        # no newline splitting the box and no live escape sequence.
+        assert len(ctrl_lines) == 5
+        assert ctrl_lines[2].startswith("║ Ctrl Line Tab NUL E")
+        assert "\x1b" not in "".join(ctrl_lines)

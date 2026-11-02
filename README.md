@@ -166,6 +166,74 @@ machine-readable status, automated dependency resolution, interfaces that
 can handle dozens of concurrent contributors without friction. `pm` prepares
 for this by abstracting git hosting behind a minimal pluggable interface.
 
+## Models, providers and effort
+
+Every session pm launches (implementation, review, each QA role, sign-off,
+merge, watcher) runs Claude Code with a model and effort chosen per role:
+
+    PM_MODEL  >  the PR's role setting  >  the PR's setting
+              >  project.yaml model_config  >  global ~/.pm/settings  >  CLI default
+
+Effort follows the same order, with the selected provider's own `effort`
+between the PR's setting and the project's.
+
+The choice is explicit and per role: any of those roles may be routed to
+a provider. A role with no setting of its own falls back to its parent
+(the QA sub-roles follow `qa`, `signoff` follows `review`), and with
+nothing configured at all the session runs plain `claude` on the CLI
+default. Routing one role never moves an unrelated role.
+
+A model value is a model name (`opus`, `claude-opus-5-5`, ...) or
+`provider:<name>` for a provider defined on this host in
+`~/.pm/providers.yaml`. A provider of type `router` points Claude at an
+Anthropic-compatible endpoint that holds its own credentials (an account
+router or proxy). pm sets `ANTHROPIC_BASE_URL` from its `api_base` and, in
+container mode, bridges it into the container. A provider that is missing
+or misconfigured stops the launch with an error; pm never falls back to
+another provider or account. A router that is down is not special: the
+session sees the API errors Claude Code reports for any unreachable
+endpoint, and pm handles that session like one on the default provider
+(`pm provider test` checks a router on demand). pm never stores, checks or
+refreshes credentials: signing in happens outside pm, as it does for plain
+`claude`.
+
+Scenario 0 (the interactive QA session you drive) is its own role,
+`qa_interactive`. Configs from before that role existed that set only
+`qa_scenario` to a plain model still apply that model to Scenario 0, but
+a `qa_scenario` provider (the QA workers' route) never follows it.
+
+```yaml
+# ~/.pm/providers.yaml
+providers:
+  my-router:
+    type: router
+    api_base: http://127.0.0.1:<port>
+    model: <model name as the router expects it>
+    effort: high                    # optional default effort
+    classifier_model: <model>       # optional: auto-mode permission classifier
+    launcher: <executable>          # optional: run instead of claude (host)
+    remedy: <text>                  # optional: shown when a check finds it down
+    env: {VAR: value}               # optional; VAR: null drops a default
+```
+
+```bash
+pm provider add my-router --type router --api-base http://127.0.0.1:<port> --model <model>
+pm provider show my-router          # settings, launch environment, status
+pm provider edit my-router --effort high
+pm model set qa_scenario provider:my-router --project   # one QA role, project-wide
+pm model set impl provider:my-router --project          # one role, any type
+pm model set signoff provider:my-router --project       # another role, independently
+pm model set impl opus --project                        # or just a plain model name
+pm pr model set pr-001 provider:my-router               # one PR, every role
+pm pr model set pr-001 opus --role signoff --effort high
+pm pr model show pr-001             # per role: model, effort, command, why
+```
+
+In the TUI, `o` opens the same view for the selected PR. Enter picks a
+model or provider, `e` cycles the effort, and `p` switches to the
+project's settings and the provider list. A `⇄` on a PR node means that PR
+has settings of its own.
+
 ## Architecture
 
 **pm/ directory inside your repo:**
@@ -226,8 +294,24 @@ When a PR is ready for review, the review loop automates the review-fix cycle:
 4. The loop stops when the PR receives PASS
 
 From the TUI:
-- `zz d` — start a review loop (iterates until PASS)
-- `z d` — stop a running loop, or do a single fresh review
+
+- `zz d` — start a fresh review loop (iterates until PASS), replacing any
+  running loop and its current review window.
+- `z d` — stop any running loop and immediately open a fresh single review.
+
+Neither shortcut is a stop-only toggle. The command bar's
+`review-loop [start] [PR_ID]` also starts fresh; `review-loop stop` is not
+supported.
+
+For a session-wide stop of review-loop scheduling, use a normal TUI restart
+(`Ctrl-r`, or `pm tui restart -s <session>`). This clears review-loop and
+auto-start state while leaving existing agent windows running. In-progress
+QA orchestration is recovered from its saved snapshots. A restart with
+`--breadcrumb`, including a merge-triggered restart, instead preserves
+auto-start and review-loop state.
+
+`pm autostart off` stops scheduling targets but does not stop review loops
+that are already running.
 
 The loop runs in the background without stealing focus from your active window,
 so you can continue working while reviews iterate.
@@ -246,27 +330,28 @@ holds that are currently armed. History is kept per PR under
 Auto-start drives an explicit set of target PRs through implementation →
 review → QA → sign-off inside the running TUI, starting each target's
 dependencies as they become ready (a dependency shared by several targets runs
-once). Targets are additive: pressing `O` (stop before merge) or `A`
-(auto-merge) on another PR adds it without dropping the others. An empty set
-means auto-start is off.
+once). Targets are additive: pressing `O` (wait for merge) or `A` (auto-merge)
+on another PR adds it without dropping the others. An empty set means
+auto-start is off.
 
 A QA PASS hands the PR to sign-off; the router's verdict is recorded against
 the branch HEAD and routed (re-QA, back to review, back to implementation, or
 blocked for a human). Only a fresh `SIGNOFF_MERGE` on the current HEAD
-finishes the sequence: `O` stops there ("ready to merge — press g"), `A`
-merges. With `skip_qa`, sign-off follows the review PASS.
+finishes the sequence. There is one manual policy, `wait-for-merge`: the
+target and every unmerged transitive prerequisite wait for you to merge them.
+`A` / `--auto-merge` is the separate opt-in that merges automatically once the
+sign-off gate passes. With `skip_qa`, sign-off follows the review PASS.
 
 ```bash
-pm autostart add pr-abc123 pr-def456   # add targets (default: stop before merge)
+pm autostart add pr-abc123 pr-def456   # add targets (default: wait for merge)
 pm autostart add 42 --auto-merge       # merge automatically (sign-off gate still applies)
-pm autostart add pr-final --wait-for-merge  # whole chain, every merge manual
+pm autostart add pr-final --wait-for-merge  # explicit; same as the default
 pm autostart remove pr-abc123          # stop scheduling it; running windows are kept
 pm autostart status --json             # what every target and dependency is doing
 ```
 
-`--stop-before-merge` holds only the named target, so its prerequisites still
-auto-merge. To walk an entire dependency chain with manual merges, add just the
-final PR with `--wait-for-merge`:
+Adding just the final PR of a chain with `--wait-for-merge` walks the whole
+chain with manual merges:
 
 1. The final PR stays the only target; every unmerged transitive prerequisite
    is held for a manual merge (as is the target itself). Holds are derived from
@@ -282,12 +367,13 @@ final PR with `--wait-for-merge`:
    target.
 
 A dependency shared by several targets is held while any active wait-for-merge
-target needs it or it carries its own stop mark; other targets keep their
-policy. Removing the wait target, or re-adding it with `--auto-merge` /
-`--stop-before-merge`, releases only the holds it caused (the command reports
-`released merge hold: …`). Re-adding without a flag keeps the policy; giving
-two policy flags is rejected without changing anything. The policy survives a
-merge-triggered TUI restart.
+target needs it; other targets keep their policy. Removing the wait target, or
+re-adding it with `--auto-merge`, releases only the holds it caused (the
+command reports `released merge hold: …`). Re-adding without a flag keeps the
+policy; giving two policy flags is rejected without changing anything. The
+policy survives a merge-triggered TUI restart. `--stop-before-merge` is
+accepted only as a deprecated alias for `--wait-for-merge`; it never creates a
+separate target-only hold.
 
 Press `a` in the TUI for a live runs popup (same data as `pm autostart status`):
 phase, running/waiting/paused/failed state with a reason, review iteration or QA

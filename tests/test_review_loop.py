@@ -1,5 +1,6 @@
 """Tests for pm_core.review_loop and pm_core.prompt_gen review loop prompt."""
 
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -316,6 +317,66 @@ class TestRunReviewLoopSync:
         mock_review.assert_called_once()
 
 
+# --- pr-e040aeb: a failed next-iteration launch is retried -----------------
+
+def test_failed_launch_is_retried_not_terminal(tmp_path, monkeypatch):
+    """The next iteration's ``pm pr review`` child fails (the historical
+    window is closed, container setup then fails).  Pre-fix this ended the
+    loop with ERROR on the first attempt; the fix retries the same
+    iteration and collects its own verdict."""
+    import uuid
+
+    from pm_core import review_loop as rl
+    from pm_core import tmux
+
+    monkeypatch.setattr(rl, "_get_pm_session", lambda: "pm-s")
+    monkeypatch.setattr(tmux, "session_exists", lambda _s: True)
+    monkeypatch.setattr(rl, "_find_claude_pane", lambda *a, **k: "%9")
+    monkeypatch.setattr(rl, "_find_review_claude_pane", lambda *a, **k: "%9",
+                        raising=False)
+    monkeypatch.setattr(rl, "_poll_for_verdict", lambda *a, **k: "**PASS**")
+    # Post-fix seams: discovery says nothing is live; retries are instant.
+    if hasattr(rl, "_discover_iteration"):
+        monkeypatch.setattr(
+            rl, "_discover_iteration",
+            lambda *a, **k: rl.AttemptDiscovery("launch"))
+        monkeypatch.setattr(rl, "REVIEW_LAUNCH_BACKOFF_BASE", 0.0)
+        monkeypatch.setattr(rl, "REVIEW_LAUNCH_BACKOFF_MAX", 0.0)
+        monkeypatch.setattr(rl, "_WINDOW_WAIT", 0.0)
+        monkeypatch.setattr(rl, "_pr_is_terminal", lambda *a, **k: False)
+        monkeypatch.setattr(rl, "_claim_launch", lambda *a, **k: True)
+
+    calls = []
+
+    def fake_run(cmd, **_kw):
+        # Only the launch child counts: ``rl.subprocess`` *is* the global
+        # ``subprocess`` module, so the episode-start pane snapshot's ambient
+        # ``tmux display-message`` probe would otherwise consume the "first
+        # call fails" slot — the loop would succeed on its first real launch
+        # and this test would pass without ever exercising a retry.
+        if "--review-loop" not in cmd:
+            return MagicMock(returncode=0, stdout="", stderr="")
+        calls.append(cmd)
+        if len(calls) == 1:
+            return MagicMock(returncode=1, stdout="",
+                             stderr="Failed to create container")
+        # The child created the iteration transcript before running Claude.
+        t = cmd[cmd.index("--transcript") + 1]
+        link = Path(t)
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(link.parent / f"{uuid.uuid4()}.jsonl")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(rl.subprocess, "run", fake_run)
+
+    state = ReviewLoopState(pr_id="pr-001")
+    run_review_loop_sync(state, str(tmp_path), _PR_DATA,
+                         transcript_dir=str(tmp_path))
+    assert len(calls) == 2, "the failed launch must be retried, not terminal"
+    assert state.iteration == 1
+    assert state.latest_verdict == VERDICT_PASS
+
+
 class TestResumeInFlightIteration:
     """A breadcrumb-resumed loop adopts the iteration still running in its
     review window instead of relaunching (which killed the window)."""
@@ -365,6 +426,159 @@ class TestResumeInFlightIteration:
         assert mock_review.call_args.kwargs["iteration"] == 2
 
 
+class _Clock:
+    """Fake monotonic clock: each sleep() advances it."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps = 0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, s):
+        self.sleeps += 1
+        self.now += s
+
+
+class TestAdoptWaitsForInFlightLaunch:
+    """S82: a TUI restart while the loop's container-mode ``pm pr review``
+    was still creating its container left no window to adopt yet, so the
+    resumed loop relaunched the same iteration and two review windows ran.
+    The resumed loop now waits for that launch's window."""
+
+    def _setup(self, tmp_path, *, symlink=True, started=False):
+        import uuid
+        tdir = tmp_path / "t"
+        tdir.mkdir()
+        target = tmp_path / f"{uuid.uuid4()}.jsonl"
+        if started:
+            target.write_text("{}\n")
+        if symlink:
+            (tdir / "review-pr-001-i1.jsonl").symlink_to(target)
+        # The breadcrumb restores ``iteration_attempted``: the pre-restart
+        # loop had started this iteration's launch.
+        state = ReviewLoopState(pr_id="pr-001", iteration=1,
+                                _transcript_dir=str(tdir),
+                                iteration_attempted=True)
+        return state, str(tdir)
+
+    def _adopt(self, state, tdir, panes):
+        from pm_core import review_loop
+        clock = _Clock()
+        find = MagicMock(side_effect=panes)
+        with patch("pm_core.review_loop._get_pm_session", return_value="pm-s"), \
+             patch("pm_core.review_loop._find_claude_pane", find), \
+             patch("pm_core.review_loop.time.monotonic", clock.monotonic), \
+             patch("pm_core.review_loop.time.sleep", clock.sleep), \
+             patch("pm_core.hook_events.read_event", return_value=None), \
+             patch("pm_core.review_loop._poll_for_verdict",
+                   return_value="**PASS**") as poll:
+            out = review_loop._adopt_in_flight_review(state, _PR_DATA, tdir)
+        return out, poll, find, clock
+
+    def test_adopts_window_that_opens_after_restart(self, tmp_path):
+        state, tdir = self._setup(tmp_path)
+        # (discovery looks the window's pane up again once it opened)
+        out, poll, find, clock = self._adopt(
+            state, tdir, [None] * 12 + ["%7"] * 3)
+        assert out == "**PASS**"
+        assert poll.call_args.args[0] == "%7"
+        assert clock.sleeps == 11  # the first of the 12 misses is the pre-wait lookup
+
+    def test_session_that_ran_without_window_is_rerun(self, tmp_path):
+        state, tdir = self._setup(tmp_path, started=True)
+        out, poll, find, clock = self._adopt(state, tdir, [None] * 5)
+        assert out is None
+        poll.assert_not_called()
+        assert clock.sleeps == 0
+
+    def test_launch_that_never_opens_gives_up_at_launch_timeout(self, tmp_path):
+        from pm_core.review_loop import _LAUNCH_TIMEOUT
+        state, tdir = self._setup(tmp_path)
+        out, poll, find, clock = self._adopt(state, tdir, [None] * 500)
+        assert out is None
+        poll.assert_not_called()
+        assert clock.now == _LAUNCH_TIMEOUT
+
+    def test_missing_symlink_waits_only_the_short_grace(self, tmp_path):
+        from pm_core.review_loop import _IN_FLIGHT_SYMLINK_GRACE
+        state, tdir = self._setup(tmp_path, symlink=False)
+        out, poll, find, clock = self._adopt(state, tdir, [None] * 500)
+        assert out is None
+        assert clock.now == _IN_FLIGHT_SYMLINK_GRACE
+
+    def test_failed_attempts_symlink_is_not_waited_on(self, tmp_path):
+        """S133: after this iteration's last launch attempt failed (an
+        auto-start re-arm, a restart inside the backoff), its dangling
+        symlink is that dead attempt's: nothing is in flight to wait for."""
+        state, tdir = self._setup(tmp_path)
+        state.retry_iteration = 1
+        state.last_attempt_failed = True
+        out, poll, find, clock = self._adopt(state, tdir, [None] * 500)
+        assert out is None
+        poll.assert_not_called()
+        assert clock.sleeps == 0
+
+    def test_failed_attempt_of_an_earlier_iteration_still_waits(self, tmp_path):
+        from pm_core.review_loop import _LAUNCH_TIMEOUT
+        state, tdir = self._setup(tmp_path)
+        state.retry_iteration = 0  # the flag is about another iteration
+        state.last_attempt_failed = True
+        out, poll, find, clock = self._adopt(state, tdir, [None] * 500)
+        assert out is None
+        assert clock.now == _LAUNCH_TIMEOUT
+
+    def test_rearmed_loop_relaunches_at_once(self, tmp_path):
+        """S133: a re-armed LAUNCH_FAILED loop resumed at iteration 1 with no
+        history relaunched only after waiting the whole launch timeout on
+        the failed attempt's symlink.  It now relaunches straight away."""
+        from pm_core.review_loop import AttemptDiscovery
+        state, tdir = self._setup(tmp_path)
+        state.retry_iteration = 1
+        state.last_attempt_failed = True
+        state.latest_verdict = "LAUNCH_FAILED"
+        clock = _Clock()
+        at_launch = []
+
+        def relaunch(*_a, **kw):
+            at_launch.append(clock.now)
+            return "**PASS**"
+
+        with patch("pm_core.review_loop._get_pm_session", return_value="pm-s"), \
+             patch("pm_core.review_loop._find_claude_pane", return_value=None), \
+             patch("pm_core.review_loop._discover_iteration",
+                   return_value=AttemptDiscovery("launch")), \
+             patch("pm_core.review_loop._claim_launch", return_value=True), \
+             patch("pm_core.review_loop._pr_is_terminal", return_value=False), \
+             patch("pm_core.review_loop.time.monotonic", clock.monotonic), \
+             patch("pm_core.review_loop.time.sleep", clock.sleep), \
+             patch("pm_core.review_loop._run_claude_review",
+                   side_effect=relaunch) as run:
+            result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir=tdir)
+        assert run.call_count == 1
+        assert run.call_args.kwargs["iteration"] == 1
+        assert at_launch == [0.0]
+        assert result.latest_verdict == VERDICT_PASS
+        assert result.last_attempt_failed is False
+
+    def test_resumed_loop_does_not_relaunch_late_window(self, tmp_path):
+        state, tdir = self._setup(tmp_path)
+        clock = _Clock()
+        with patch("pm_core.review_loop._get_pm_session", return_value="pm-s"), \
+             patch("pm_core.review_loop._find_claude_pane",
+                   side_effect=[None, None] + ["%7"] * 5), \
+             patch("pm_core.review_loop.time.monotonic", clock.monotonic), \
+             patch("pm_core.review_loop.time.sleep", clock.sleep), \
+             patch("pm_core.hook_events.read_event", return_value=None), \
+             patch("pm_core.review_loop._poll_for_verdict", return_value="**PASS**"), \
+             patch("pm_core.review_loop._run_claude_review") as relaunch:
+            result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir=tdir)
+        relaunch.assert_not_called()
+        assert result.iteration == 1
+        assert result.latest_verdict == VERDICT_PASS
+
+
 class TestStartReviewLoopBackground:
     @patch("pm_core.review_loop._run_claude_review")
     def test_runs_in_background_thread(self, mock_review):
@@ -382,45 +596,29 @@ class TestStartReviewLoopBackground:
         complete_callback.assert_called_once_with(state)
 
 
-class TestRunClaudeReviewPaneLookup:
-    def test_pane_found_before_any_settle_wait(self):
-        """The iteration looks its pane up as soon as the launch returns.
-
-        Sleeping first let a z d that killed the window and opened a
-        same-named fresh review in the gap hand the stopped loop the
-        replacement's pane."""
+class TestRunClaudeReviewStopDuringWindowWait:
+    def test_stop_during_window_wait_never_takes_the_pane(self):
+        """A z d / zz d that lands while the launch waits for its window
+        kills that window and may open a same-named one: the stopped loop
+        must not take the replacement's pane for its own (it would poll it
+        for as long as it lived)."""
         from pm_core import review_loop as rl
-        events = []
+        state = rl.ReviewLoopState(pr_id="pr-001")
+
+        def _sleep(_s):
+            state.stop_requested = True
+
         with patch.object(rl, "_launch_review_window"), \
                 patch.object(rl, "_get_pm_session", return_value="pm-x"), \
                 patch("pm_core.tmux.session_exists", return_value=True), \
-                patch.object(rl.time, "sleep",
-                             side_effect=lambda s: events.append("sleep")), \
-                patch.object(rl, "_find_claude_pane",
-                             side_effect=lambda *a: events.append("find")
-                             or "%9"), \
-                patch.object(rl, "_poll_for_verdict",
-                             return_value="ok\nPASS") as poll:
-            rl._run_claude_review("pr-001", "/tmp", _PR_DATA, "/tmp/t.jsonl")
-        assert events == ["find"]
-        assert poll.call_args.args[0] == "%9"
-
-    def test_falls_back_to_settle_wait_when_window_is_late(self):
-        from pm_core import review_loop as rl
-        events = []
-        panes = iter([None, "%9"])
-        with patch.object(rl, "_launch_review_window"), \
-                patch.object(rl, "_get_pm_session", return_value="pm-x"), \
-                patch("pm_core.tmux.session_exists", return_value=True), \
-                patch.object(rl.time, "sleep",
-                             side_effect=lambda s: events.append("sleep")), \
-                patch.object(rl, "_find_claude_pane",
-                             side_effect=lambda *a: events.append("find")
-                             or next(panes)), \
-                patch.object(rl, "_poll_for_verdict",
-                             return_value="ok\nPASS"):
-            rl._run_claude_review("pr-001", "/tmp", _PR_DATA, "/tmp/t.jsonl")
-        assert events == ["find", "sleep", "find"]
+                patch.object(rl.time, "sleep", side_effect=_sleep), \
+                patch.object(rl, "_find_review_claude_pane") as find, \
+                patch.object(rl, "_poll_for_verdict") as poll:
+            with pytest.raises(rl.PaneKilledError):
+                rl._run_claude_review("pr-001", "/tmp", _PR_DATA,
+                                      "/tmp/t.jsonl", state=state)
+        find.assert_not_called()
+        poll.assert_not_called()
 
 
 # --- generate_review_prompt with review_loop tests ---
@@ -641,3 +839,60 @@ class TestGenerateReviewPromptInputRequired:
         assert "INPUT_REQUIRED" in prompt
         # Should explain that it's reserved for genuine ambiguities
         assert "needs the user's attention" in prompt
+
+
+# --- _launch_review_window failure ---
+
+def test_launch_failure_is_an_error_verdict_without_traceback(caplog):
+    """A ``pm pr review`` launch that exits non-zero (a work route down)
+    ends the loop with a LAUNCH_FAILED verdict (pr-e040aeb: retryable, not
+    an agent verdict) naming the child's stderr, and is logged without a
+    traceback (S84: one ERROR line in the pm debug log)."""
+    import logging
+    from pm_core import review_loop
+    err = "work route 'w' unavailable: router not reachable at 127.0.0.1:1"
+
+    def launch_only(pr_id, pm_root, pr_data, **kw):
+        review_loop._launch_review_window(pr_id, pm_root, iteration=kw["iteration"])
+
+    logger = logging.getLogger("pm.review_loop")  # propagate=False
+    logger.addHandler(caplog.handler)
+    try:
+        with patch.object(review_loop.subprocess, "run", return_value=MagicMock(
+                returncode=1, stdout="", stderr=err)), \
+                patch.object(review_loop, "REVIEW_LAUNCH_BACKOFF_BASE", 0.01), \
+                patch.object(review_loop, "REVIEW_LAUNCH_BACKOFF_MAX", 0.01), \
+                patch.object(review_loop, "_run_claude_review", side_effect=launch_only):
+            state = ReviewLoopState(pr_id="pr-001")
+            run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+    finally:
+        logger.removeHandler(caplog.handler)
+    assert state.latest_verdict == review_loop.VERDICT_LAUNCH_FAILED
+    assert state.latest_output == f"Review window launch failed (rc=1): {err}"
+    failed = [r for r in caplog.records
+              if "review launch failed on iteration" in r.getMessage()]
+    assert len(failed) == 1 and err in failed[0].getMessage()
+    assert caplog.records and all(r.exc_info is None for r in caplog.records)
+
+
+# --- _launch_review_window child timeout ---
+
+def test_launch_child_outlives_the_return_clear_wait():
+    """The ``pm pr review --fresh --review-loop`` child may wait up to
+    RETURN_CLEAR_WAIT_SECONDS past its lock timeout to clear a sign-off
+    return's ``awaiting`` after its window opened; the loop must not kill
+    it first (S81: a 150 s project.yaml holder left ``awaiting`` and the
+    claim behind the live window, and a tick relaunched over it)."""
+    from pm_core import review_loop, store
+    from pm_core.signoff import RETURN_CLEAR_WAIT_SECONDS
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen.update(kw)
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with patch.object(review_loop.subprocess, "run", side_effect=fake_run):
+        review_loop._launch_review_window("pr-x", "/tmp", iteration=1)
+    assert seen["timeout"] >= (review_loop._LAUNCH_TIMEOUT
+                               + store.LOCK_TIMEOUT_SECONDS
+                               + RETURN_CLEAR_WAIT_SECONDS)

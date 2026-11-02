@@ -3,6 +3,8 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from pm_core import signoff
 from pm_core.signoff import (
     SIGNOFF_MERGE, SIGNOFF_REQA, SIGNOFF_REVIEW, SIGNOFF_IMPL, SIGNOFF_BLOCKED,
@@ -220,7 +222,7 @@ class TestPrListLine:
 
 
 class TestSignoffCommand:
-    def _invoke(self, tmp_path, pr, skip_qa=False):
+    def _invoke(self, tmp_path, pr, skip_qa=False, launch_error=None):
         from click.testing import CliRunner
         from pm_core.cli.pr import pr_signoff
         data = {"project": {"active_pr": pr["id"], "base_branch": "master",
@@ -232,9 +234,26 @@ class TestSignoffCommand:
              patch("pm_core.cli.pr.store.locked_update",
                    side_effect=_patch_locked_update_fn(data)), \
              patch("pm_core.cli.pr.trigger_tui_refresh"), \
-             patch("pm_core.signoff.launch_signoff_window") as mock_launch:
+             patch("pm_core.signoff.launch_signoff_window",
+                   side_effect=launch_error) as mock_launch:
             result = CliRunner().invoke(pr_signoff, [pr["id"]])
         return result, mock_launch, data
+
+    def test_container_error_is_a_failed_launch_on_stderr(self, tmp_path):
+        """A routed sign-off whose work route is down raises ContainerError
+        in container mode.  It printed the remedy to stdout and exited 0,
+        so the TUI sign-off driver (stdout discarded, last stderr line shown
+        on failure) logged "launched" and never showed the remedy."""
+        from pm_core.container import ContainerError
+        msg = ("work route 'claude-work' unavailable: router down. "
+               "Remedy: start it, then launch the session again")
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001"}
+        result, mock_launch, _ = self._invoke(
+            tmp_path, pr, launch_error=ContainerError(msg))
+        assert result.exit_code == 1
+        assert result.stderr.strip().splitlines()[-1] == msg
+        assert msg not in result.stdout
 
     def test_wrong_status_rejected(self, tmp_path):
         pr = {"id": "pr-001", "title": "T", "status": "in_progress",
@@ -286,6 +305,16 @@ class TestSignoffCommand:
         mock_launch.assert_not_called()
 
 
+BASE_SHA = "BASE-SHA-0123456789"
+INTEG = {"head": "HEAD-SHA", "target_repo": "/repo", "base_branch": "master",
+         "base_sha": BASE_SHA, "candidate_tree": "TREE-SHA",
+         "status": "clean"}
+
+
+def _bound(**over):
+    return dict(INTEG, **over)
+
+
 class TestMergeSignoffGate:
     """`pm pr merge` refuses to merge a PR that hasn't received a fresh
     SIGNOFF_MERGE verdict, unless --no-signoff-check is passed."""
@@ -330,10 +359,50 @@ class TestMergeSignoffGate:
         pr = {"id": "pr-001", "title": "T", "status": "sign_off",
               "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
               "signoff": {"verdict": SIGNOFF_MERGE, "sha": "OLD-SHA",
-                          "ts": "earlier", "origin": "auto-sequence"}}
+                          "ts": "earlier", "origin": "auto-sequence",
+                          "integration": _bound(head="OLD-SHA")}}
         result, _ = self._invoke(tmp_path, pr)
         assert result.exit_code != 0
         assert "stale" in result.output
+
+    def test_legacy_head_only_approval_blocks_merge(self, tmp_path):
+        """A SIGNOFF_MERGE recorded before integration-aware sign-off (no
+        integration binding) needs a fresh sign-off — even at HEAD."""
+        from pm_core.signoff import SIGNOFF_MERGE
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
+              "signoff": {"verdict": SIGNOFF_MERGE, "sha": "HEAD-SHA",
+                          "ts": "now", "origin": "auto-sequence"}}
+        result, _ = self._invoke(tmp_path, pr)
+        assert result.exit_code != 0
+        assert "predates integration-aware sign-off" in result.output
+
+    def test_invalidated_approval_blocks_merge(self, tmp_path):
+        from pm_core.signoff import SIGNOFF_MERGE
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
+              "signoff": {"verdict": SIGNOFF_MERGE, "sha": "HEAD-SHA",
+                          "ts": "now", "origin": "auto-sequence",
+                          "integration": _bound(),
+                          "invalidated": "master moved since sign-off"}}
+        result, _ = self._invoke(tmp_path, pr)
+        assert result.exit_code != 0
+        assert "no longer valid" in result.output
+        assert "master moved since sign-off" in result.output
+
+    def test_conflicted_or_other_branch_binding_blocks_merge(self, tmp_path):
+        from pm_core.signoff import SIGNOFF_MERGE
+        for bound, text in ((_bound(status="conflict", candidate_tree=None),
+                             "not bound to a conflict-free integration"),
+                            (_bound(base_branch="main"), "merges into")):
+            pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+                  "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
+                  "signoff": {"verdict": SIGNOFF_MERGE, "sha": "HEAD-SHA",
+                              "ts": "now", "origin": "auto-sequence",
+                              "integration": bound}}
+            result, _ = self._invoke(tmp_path, pr)
+            assert result.exit_code != 0
+            assert text in result.output
 
     def test_fresh_merge_verdict_passes_gate(self, tmp_path):
         """A fresh SIGNOFF_MERGE verdict gets past the gate. We don't drive
@@ -342,37 +411,45 @@ class TestMergeSignoffGate:
         pr = {"id": "pr-001", "title": "T", "status": "sign_off",
               "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
               "signoff": {"verdict": SIGNOFF_MERGE, "sha": "HEAD-SHA",
-                          "ts": "now", "origin": "auto-sequence"}}
+                          "ts": "now", "origin": "auto-sequence",
+                          "integration": _bound()}}
         result, _ = self._invoke(tmp_path, pr)
         # Gate-specific text must NOT appear — anything else is fine
         # (the merge will fail downstream because we haven't mocked git).
         assert "sign-off verdict" not in result.output
         assert "no sign-off verdict recorded" not in result.output
 
-    def test_no_signoff_check_overrides_gate(self, tmp_path):
-        """--no-signoff-check bypasses the gate entirely."""
+    def test_no_signoff_check_only_recovers_completed_merges(self, tmp_path):
+        """--no-signoff-check no longer publishes: for a PR that is not in
+        the base yet it refuses instead of merging unapproved code."""
         pr = {"id": "pr-001", "title": "T", "status": "sign_off",
               "branch": "pm/pr-001", "workdir": str(tmp_path / "wd")}
         result, _ = self._invoke(tmp_path, pr, extra_args=["--no-signoff-check"])
-        # Gate text must NOT appear (the merge itself isn't mocked, so
-        # the command will exit non-zero downstream, but the gate is
-        # what we're testing).
-        assert "no sign-off verdict recorded" not in result.output
-        assert "sign-off verdict" not in result.output
+        assert result.exit_code != 0
+        assert "only recover an already-completed merge" in result.output
 
 
-def _report_html(verdict: str = SIGNOFF_MERGE) -> str:
+def _report_html(verdict: str = SIGNOFF_MERGE, head: str | None = "HEAD-SHA",
+                 base: str | None = "BASE-SHA-0123456789",
+                 reason: str | None = None) -> str:
+    extra = ""
+    if head:
+        extra += f'<meta name="pm-signoff-head" content="{head}">'
+    if base:
+        extra += f'<meta content="{base}" name="pm-signoff-base">'
+    if reason:
+        extra += f"<meta name='pm-signoff-reason' content='{reason}'>"
     return ('<!DOCTYPE html><html><head>'
-            f'<meta name="pm-signoff-verdict" content="{verdict}">'
+            f'<meta name="pm-signoff-verdict" content="{verdict}">{extra}'
             '<title>r</title></head><body>report</body></html>')
 
 
 def _write_captures_report(tmp_path, pr_id="pr-001",
-                           verdict: str = SIGNOFF_MERGE):
+                           verdict: str = SIGNOFF_MERGE, **meta):
     croot = tmp_path / "caps"
     (croot / pr_id).mkdir(parents=True, exist_ok=True)
     report = croot / pr_id / "report.html"
-    report.write_text(_report_html(verdict), encoding="utf-8")
+    report.write_text(_report_html(verdict, **meta), encoding="utf-8")
     return croot, report
 
 
@@ -400,7 +477,8 @@ class TestSignoffRecordCommand:
         import hashlib
         croot, report = _write_captures_report(tmp_path)
         pr = {"id": "pr-001", "title": "T", "status": "sign_off",
-              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd")}
+              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
+              "integration": dict(INTEG)}
         result, data = self._invoke(tmp_path, pr, croot)
         assert result.exit_code == 0, result.output
         rec = data["prs"][0]["signoff"]
@@ -409,8 +487,56 @@ class TestSignoffRecordCommand:
         assert rec["origin"] == "manual"
         assert rec["report_hash"] == \
             hashlib.sha256(report.read_bytes()).hexdigest()
+        # The approval is bound to the integration check the report assessed.
+        assert rec["integration"]["base_sha"] == BASE_SHA
+        assert rec["integration"]["candidate_tree"] == "TREE-SHA"
         # Recording never changes status.
         assert data["prs"][0]["status"] == "sign_off"
+
+    def test_merge_record_refuses_legacy_report(self, tmp_path):
+        """A report without pm-signoff-head/base meta is HEAD-only."""
+        croot, _ = _write_captures_report(tmp_path, head=None, base=None)
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
+              "integration": dict(INTEG)}
+        result, data = self._invoke(tmp_path, pr, croot)
+        assert result.exit_code != 0
+        assert "legacy HEAD-only report" in result.output
+        assert "signoff" not in data["prs"][0]
+
+    def test_merge_record_refuses_mismatched_head_or_base(self, tmp_path):
+        for meta, integ, text in (
+                ({"head": "OTHERHEAD"}, INTEG, "reviewed HEAD"),
+                ({"base": "OTHERBASE99"}, INTEG, "assessed base"),
+                ({}, dict(INTEG, status="conflict", candidate_tree=None),
+                 "no conflict-free integration check"),
+                ({}, dict(INTEG, head="OLD-SHA"),
+                 "no conflict-free integration check")):
+            croot, _ = _write_captures_report(tmp_path, **meta)
+            pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+                  "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
+                  "integration": dict(integ)}
+            result, data = self._invoke(tmp_path, pr, croot)
+            assert result.exit_code != 0, meta
+            assert text in result.output
+            assert "signoff" not in data["prs"][0]
+
+    def test_record_routes_conflicted_review_to_impl(self, tmp_path):
+        """A manual record gets the driver's earliest-step routing: with a
+        conflicted integration a REVIEW verdict is recorded as IMPL."""
+        croot, _ = _write_captures_report(tmp_path, verdict=SIGNOFF_REVIEW)
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001", "workdir": str(tmp_path / "wd"),
+              "integration": dict(INTEG, status="conflict",
+                                  candidate_tree=None,
+                                  conflicts=["shared.txt"])}
+        result, data = self._invoke(tmp_path, pr, croot)
+        assert result.exit_code == 0, result.output
+        rec = data["prs"][0]["signoff"]
+        assert rec["verdict"] == SIGNOFF_IMPL
+        assert rec["original_verdict"] == SIGNOFF_REVIEW
+        assert "conflicts" in rec["coerced_reason"]
+        assert "coerced to SIGNOFF_IMPL" in result.output
 
     def test_refuses_without_report(self, tmp_path):
         croot = tmp_path / "caps"
@@ -489,7 +615,7 @@ class TestMergeGateReportHash:
 
     def _pr_with_record(self, tmp_path, report_hash=None):
         rec = {"verdict": SIGNOFF_MERGE, "sha": "HEAD-SHA",
-               "ts": "now", "origin": "manual"}
+               "ts": "now", "origin": "manual", "integration": _bound()}
         if report_hash:
             rec["report_hash"] = report_hash
         return {"id": "pr-001", "title": "T", "status": "sign_off",
@@ -537,13 +663,14 @@ class TestMergeGateReportHash:
         assert "changed since the recorded approval" not in result.output
         assert "no sign-off verdict recorded" not in result.output
 
-    def test_no_signoff_check_bypasses_hash_check(self, tmp_path):
+    def test_no_signoff_check_never_bypasses_into_a_merge(self, tmp_path):
         pr = self._pr_with_record(tmp_path, report_hash="deadbeef")
         croot = tmp_path / "caps"
         croot.mkdir()
         result, _ = self._invoke(tmp_path, pr, croot,
                                  extra_args=["--no-signoff-check"])
-        assert "changed since the recorded approval" not in result.output
+        assert result.exit_code != 0
+        assert "only recover an already-completed merge" in result.output
 
 
 def _patch_locked_update_fn(data: dict):
@@ -565,7 +692,8 @@ class TestWindowLaunchWorkdir:
     """
 
     def _launch(self, tmp_path, *, transcript=None, existing=None,
-                head="abc"):
+                head="abc", routed=False, model_settings=None,
+                wrap_error=None):
         from types import SimpleNamespace
         from contextlib import ExitStack
         from unittest.mock import MagicMock
@@ -580,7 +708,10 @@ class TestWindowLaunchWorkdir:
         pr_entry = {"id": "pr-001", "title": "T", "status": "sign_off",
                     "branch": "pm/pr-001", "workdir": str(workdir)}
 
-        new_window = MagicMock(return_value="cl_pane")
+        if model_settings is not None:
+            pr_entry.update(model_settings)
+
+        new_window = self.new_window = MagicMock(return_value="cl_pane")
         with ExitStack() as es:
             p = es.enter_context
             p(patch("pm_core.tmux.has_tmux", return_value=True))
@@ -591,17 +722,22 @@ class TestWindowLaunchWorkdir:
             p(patch("pm_core.tmux.select_window"))
             p(patch("pm_core.paths.workdirs_base", return_value=wdirs))
             p(patch("pm_core.signoff.head_sha", return_value=head))
-            p(patch("pm_core.model_config.resolve_model_and_provider",
-                    return_value=SimpleNamespace(model=None, provider=None,
-                                                 effort=None)))
-            p(patch("pm_core.model_config.get_pr_model_override",
-                    return_value=None))
+            if model_settings is None:
+                p(patch("pm_core.model_config.resolve_model_and_provider",
+                        return_value=SimpleNamespace(model=None, provider="claude-work" if routed else None,
+                                                     effort="high" if routed else None)))
+                p(patch("pm_core.model_config.get_pr_model_override",
+                        return_value=None))
             p(patch("pm_core.prompt_gen.generate_signoff_prompt",
                     return_value="PROMPT"))
-            p(patch("pm_core.claude_launcher.build_claude_shell_cmd",
+            self.build = p(patch("pm_core.claude_launcher.build_claude_shell_cmd",
                     return_value="CLAUDE_CMD"))
+            self.wrap = p(patch("pm_core.container.wrap_claude_cmd",
+                    return_value=("WRAPPED", "signoff-test"),
+                    side_effect=wrap_error))
+            self.remove = p(patch("pm_core.container.remove_container"))
             p(patch("pm_core.container.is_container_mode_enabled",
-                    return_value=False))
+                    return_value=routed))
             p(patch("pm_core.tmux.new_window_get_pane", new_window))
             p(patch("pm_core.tmux.set_shared_window_size"))
             p(patch("pm_core.tmux.switch_sessions_to_window"))
@@ -610,11 +746,60 @@ class TestWindowLaunchWorkdir:
             p(patch("pm_core.pane_registry.register_pane"))
             p(patch("pm_core.pane_registry.registry_path", return_value=tmp_path))
             p(patch("pm_core.pane_registry.locked_read_modify_write"))
+            p(patch("pm_core.cli.helpers.state_root", return_value=tmp_path))
+            self.checks = []
+            p(patch("pm_core.integration.check_integration",
+                    side_effect=lambda root, pr_id, **kw: (
+                        self.checks.append(pr_id) or {"status": "up_to_date",
+                                                      "base_branch": "master",
+                                                      "base_sha": "b" * 40})))
+            p(patch("pm_core.signoff.store.load", return_value=data))
 
             signoff.launch_signoff_window(
                 data, pr_entry, background=True,
                 transcript=str(transcript) if transcript else None)
         return new_window, workdir
+
+    def test_signoff_launch_honors_pr_role_exception(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        self._launch(tmp_path, routed=True, model_settings={
+            "model": "provider:deepseek-flash",
+            "session_models": {"signoff": "provider:claude-work"}})
+        assert self.build.call_args.kwargs["provider"] == "claude-work"
+        assert self.wrap.call_args.kwargs["provider"] == "claude-work"
+
+    def test_signoff_container_uses_selected_route(self, tmp_path):
+        self._launch(tmp_path, routed=True)
+        assert self.build.call_args.kwargs["container"] is True
+        assert self.build.call_args.kwargs["provider"] == "claude-work"
+        assert self.build.call_args.kwargs["session_tag"] == "x"
+        assert self.wrap.call_args.kwargs["provider"] == "claude-work"
+
+    def test_signoff_removes_the_session_tagged_container_it_recreates(
+            self, tmp_path):
+        """The old container is removed under the name wrap_claude_cmd
+        creates (with the session tag); the untagged name was never used,
+        so a still-running container was reused instead (and, routed,
+        refused when it lacked the route mount)."""
+        self._launch(tmp_path, routed=True)
+        self.remove.assert_called_once()
+        name = self.remove.call_args.args[0]
+        assert name == "pm-x-signoff-" + self.wrap.call_args.kwargs["pr_id"]
+
+    def test_unavailable_route_propagates_and_opens_no_window(self, tmp_path):
+        """The ContainerError reaches `pm pr signoff`, which reports it on
+        stderr with rc 1 (see TestSignoffCommand); nothing is launched."""
+        from pm_core.container import ContainerError
+        with pytest.raises(ContainerError, match="work route"):
+            self._launch(tmp_path, routed=True, wrap_error=ContainerError(
+                "work route 'claude-work' unavailable: x. Remedy: y"))
+        self.new_window.assert_not_called()
+        # The per-PR launch lock was released, so the next launch is not
+        # stuck behind it (non-blocking probe: a leak fails, not hangs).
+        import fcntl
+        lock = tmp_path / "workdirs" / ".signoff-launch-pm-x-pr-001.lock"
+        with open(lock, "w") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
 
     def test_window_creation_uses_workdir_cwd(self, tmp_path):
         new_window, workdir = self._launch(tmp_path)
@@ -623,6 +808,15 @@ class TestWindowLaunchWorkdir:
         args = new_window.call_args
         # workdir lands as the 4th positional argument.
         assert args.args[3] == str(workdir)
+
+    def test_new_window_runs_the_integration_check(self, tmp_path):
+        """Sign-off checks integration with the latest base before the
+        router's prompt is built; the reused-window fast path does not."""
+        self._launch(tmp_path)
+        assert self.checks == ["pr-001"]
+        self._launch(tmp_path,
+                     existing={"id": "@9", "index": 9, "name": "signoff-pr-001"})
+        assert self.checks == []
 
     def test_new_window_stamps_launched_head(self, tmp_path):
         """The run is bound to the HEAD it was launched on (verdict binding)."""
@@ -686,6 +880,64 @@ class TestLatestQaStatusPath:
         with patch("pm_core.paths.workdirs_base", return_value=tmp_path):
             assert paths.latest_qa_status_path("pr-001") is None
 
+    def test_instruction_run_is_skipped(self, tmp_path):
+        """S120: a ``pm qa run`` of one instruction is never the PR's QA,
+        even when its status is the newest."""
+        import os
+        from pm_core import paths
+        qa = tmp_path / "qa"
+        full = qa / "pr-001-aaaa" / "qa_status.json"
+        cli = qa / "pr-001-cli-pr-001" / "qa_status.json"
+        for st, mtime in ((full, 1000), (cli, 2000)):
+            st.parent.mkdir(parents=True)
+            st.write_text("{}")
+            os.utime(st, (mtime, mtime))
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path):
+            assert paths.latest_qa_status_path("pr-001") == full
+        full.unlink()
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path):
+            assert paths.latest_qa_status_path("pr-001") is None
+
+    def _two_clone_runs(self, tmp_path):
+        """This clone's older run and another clone's newer one of pr-001
+        (two clones share ~/.pm/workdirs/qa), plus an untagged legacy run."""
+        import json
+        import os
+        qa = tmp_path / "qa"
+        runs = {}
+        for name, tag, mtime in (("pr-001-mine", "a-1111", 2000),
+                                 ("pr-001-other", "b-2222", 3000),
+                                 ("pr-001-legacy", None, 1000)):
+            d = qa / name
+            d.mkdir(parents=True)
+            if tag:
+                (d / "qa_run.json").write_text(json.dumps(
+                    {"pr_id": "pr-001", "session_tag": tag}))
+            st = d / "qa_status.json"
+            st.write_text("{}")
+            os.utime(st, (mtime, mtime))
+            runs[name] = st
+        return runs
+
+    def test_another_clones_run_is_skipped_inside_a_pm_session(self, tmp_path):
+        """S90: clone B's newer PASS of the PR is not clone A's QA status."""
+        from pm_core import paths
+        runs = self._two_clone_runs(tmp_path)
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path), \
+                patch("pm_core.qa_loop.get_pm_session", return_value="pm-a-1111"):
+            assert paths.latest_qa_status_path("pr-001") == runs["pr-001-mine"]
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path), \
+                patch("pm_core.qa_loop.get_pm_session", return_value="pm-c-3333"):
+            # A session with no run of its own still sees untagged runs.
+            assert paths.latest_qa_status_path("pr-001") == runs["pr-001-legacy"]
+
+    def test_every_run_counts_outside_a_pm_session(self, tmp_path):
+        from pm_core import paths
+        runs = self._two_clone_runs(tmp_path)
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path), \
+                patch("pm_core.qa_loop.get_pm_session", return_value=None):
+            assert paths.latest_qa_status_path("pr-001") == runs["pr-001-other"]
+
 
 class TestPrompt:
     def test_prompt_contains_router_contract_and_verdicts(self):
@@ -708,6 +960,43 @@ class TestPrompt:
         assert "acceptance criteria" in p
         # merge is always a recommendation now (no autonomy/hardcoded gate)
         assert "never merges" in p.lower()
+
+class TestSignoffQaStatusFallback:
+    """A damaged qa_status.json must not abort the sign-off prompt.
+
+    ``_signoff_qa_scenarios_parts`` is inlined into the prompt the sign-off
+    session reads; an unhandled AttributeError here fails prompt generation
+    for the whole PR.  A valid-JSON non-object file is treated like an
+    unreadable one (the fallback tells the session to read the captures).
+    """
+
+    def test_non_object_status_file_uses_the_unreadable_fallback(self,
+                                                                 tmp_path):
+        from pm_core import prompt_gen
+
+        status = tmp_path / "qa_status.json"
+        status.write_text("[]")
+        with patch("pm_core.paths.latest_qa_status_path",
+                   return_value=status):
+            head, listing = prompt_gen._signoff_qa_scenarios_parts("pr-001")
+        assert "unreadable" in head
+        assert listing == ""
+
+    def test_object_status_file_still_inlines_overall_and_error(self,
+                                                               tmp_path):
+        import json
+
+        from pm_core import prompt_gen
+
+        status = tmp_path / "qa_status.json"
+        status.write_text(json.dumps({"overall": "ERROR",
+                                      "error": "container runtime down"}))
+        with patch("pm_core.paths.latest_qa_status_path",
+                   return_value=status):
+            head, _listing = prompt_gen._signoff_qa_scenarios_parts("pr-001")
+        assert "ERROR" in head
+        assert "container runtime down" in head
+
 
 class TestTuiKeybinding:
     def test_signoff_binding_present_and_shown(self):

@@ -1,0 +1,837 @@
+"""``pm pr merge`` publishes only the signed-off candidate (pr-ac10f03).
+
+Real git repositories throughout: sign-off's integration check records the
+candidate (PR HEAD merged with the fetched base), the approval binds to it,
+and the merge re-fetches, recomputes and publishes it with a
+compare-and-swap on the base revision.  Anything that moved refuses the
+merge, invalidates the approval (back to sign-off) and leaves the base
+untouched; no conflict-resolution window is ever opened.
+"""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
+
+import pytest
+from click.testing import CliRunner
+
+from pm_core import integration, signoff, store
+from pm_core.cli import pr as pr_mod
+
+PR = "pr-001"
+BRANCH = "pm/pr-001"
+
+
+def git(cwd: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=cwd, check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def commit(cwd: Path, name: str, text: str, msg: str) -> str:
+    (cwd / name).write_text(text)
+    git(cwd, "add", name)
+    git(cwd, "commit", "-q", "-m", msg)
+    return git(cwd, "rev-parse", "HEAD")
+
+
+@pytest.fixture(autouse=True)
+def _env(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    for k, v in {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                 "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}.items():
+        monkeypatch.setenv(k, v)
+    croot = tmp_path / "captures"
+    with mock.patch("pm_core.paths.captures_root", return_value=croot), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"), \
+         mock.patch.object(pr_mod, "trigger_tui_restart"):
+        yield
+
+
+def _state(tmp_path, project: dict, pr: dict) -> Path:
+    pm_dir = tmp_path / "pmstate"
+    pm_dir.mkdir(exist_ok=True)
+    store.save({"project": {"name": "proj", "base_branch": "master",
+                            **project},
+                "prs": [{"id": PR, "title": "PR one", "branch": BRANCH,
+                         "status": "sign_off", **pr}],
+                "plans": []}, pm_dir)
+    return pm_dir
+
+
+def approve(w) -> dict:
+    """What sign-off does: integration check, then a bound SIGNOFF_MERGE."""
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] in integration.MERGEABLE, rec
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, signoff.SIGNOFF_MERGE, rec["head"], "auto-sequence",
+        integration=integration.binding(rec))
+    return rec
+
+
+def merge(w, *extra):
+    """Run ``pm pr merge``; return (result, merge-window calls, finalized)."""
+    with mock.patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         mock.patch.object(pr_mod, "_launch_merge_window") as launch, \
+         mock.patch.object(pr_mod, "_finalize_merge") as finalize:
+        result = CliRunner().invoke(pr_mod.pr, ["merge", *extra, PR])
+    return result, launch.call_args_list, finalize.called
+
+
+def pr_entry(w) -> dict:
+    return store.get_pr(store.load(w.pm_dir), PR)
+
+
+# --- local backend ---------------------------------------------------------
+
+@pytest.fixture
+def local(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "master")
+    commit(repo, "shared.txt", "base\n", "init")
+    wd = tmp_path / "home" / ".pm" / "workdirs" / "proj" / PR
+    git(tmp_path, "clone", "-q", str(repo), str(wd))
+    git(wd, "checkout", "-q", "-b", BRANCH)
+    head = commit(wd, "feature.txt", "feature\n", "feature")
+    pm_dir = _state(tmp_path, {"repo": str(repo), "backend": "local"},
+                    {"workdir": str(wd)})
+    return SimpleNamespace(repo=repo, wd=wd, pm_dir=pm_dir, head=head,
+                           tmp=tmp_path)
+
+
+def test_local_publishes_the_approved_candidate(local):
+    rec = approve(local)
+    result, windows, finalized = merge(local)
+    assert result.exit_code == 0, result.output
+    assert finalized and windows == []
+    tip = git(local.repo, "rev-parse", "master")
+    parents = git(local.repo, "rev-list", "--parents", "-n1", tip).split()[1:]
+    assert parents == [rec["base_sha"], local.head]
+    assert git(local.repo, "rev-parse", "master^{tree}") == rec["candidate_tree"]
+    # The PR worktree stays on its branch, untouched.
+    assert git(local.wd, "rev-parse", "--abbrev-ref", "HEAD") == BRANCH
+    assert git(local.wd, "rev-parse", "HEAD") == local.head
+
+
+def test_local_publish_does_not_rely_on_main_repo_fetch_head(local):
+    """A concurrent fetch in the main repo rewrites its FETCH_HEAD; the
+    merge commit is fetched into a private ref instead, removed after."""
+    rec = approve(local)
+    real_run_git = pr_mod.git_ops.run_git
+
+    def run_git(*args, cwd=None, **kw):
+        r = real_run_git(*args, cwd=cwd, **kw)
+        if args[0] == "fetch" and str(cwd) == str(local.repo):
+            # Someone else's fetch lands right after ours.
+            git(local.repo, "fetch", "-q", str(local.wd), BRANCH)
+        return r
+
+    with mock.patch.object(pr_mod.git_ops, "run_git", side_effect=run_git):
+        result, windows, finalized = merge(local)
+    assert result.exit_code == 0, result.output
+    assert finalized and windows == []
+    assert git(local.repo, "rev-parse", "master^{tree}") == rec["candidate_tree"]
+    assert git(local.repo, "for-each-ref", "refs/pm/merge") == ""
+    assert git(local.wd, "for-each-ref", "refs/pm/merge") == ""
+
+
+def test_local_moved_base_integrates_without_changing_the_pr_head(local):
+    """Unchanged PR HEAD + moved base: sign-off approves the separate
+    candidate; merge publishes exactly it."""
+    other = commit(local.repo, "other.txt", "other\n", "other PR merged")
+    rec = approve(local)
+    assert rec["status"] == integration.CLEAN
+    assert rec["base_sha"] == other
+    result, windows, finalized = merge(local)
+    assert result.exit_code == 0, result.output
+    assert finalized and windows == []
+    assert git(local.repo, "rev-parse", "master^{tree}") == rec["candidate_tree"]
+    assert (local.repo / "feature.txt").exists()
+    assert (local.repo / "other.txt").exists()
+    assert git(local.wd, "rev-parse", "HEAD") == local.head
+
+
+def test_local_base_moved_after_approval_returns_to_signoff(local):
+    approve(local)
+    moved = commit(local.repo, "other.txt", "other\n", "merged after sign-off")
+    result, windows, finalized = merge(local)
+    assert result.exit_code != 0
+    assert "moved since sign-off" in result.output
+    assert "returned to sign-off" in result.output
+    assert windows == [] and not finalized
+    assert git(local.repo, "rev-parse", "master") == moved   # untouched
+    rec = pr_entry(local)["signoff"]
+    assert rec["invalidated"]
+    assert signoff.fresh_recorded_verdict(pr_entry(local), local.head) is None
+    # A retry is refused by the record gate itself.
+    result, _, _ = merge(local)
+    assert result.exit_code != 0 and "no longer valid" in result.output
+
+
+def test_local_base_moving_during_publication_is_refused(local):
+    """The base moves between validation and the final update (another
+    publisher won the race): the compare-and-swap refuses."""
+    approve(local)
+    real = integration.build_merge_commit
+    racing = {}
+
+    def build_then_race(*a, **kw):
+        out = real(*a, **kw)
+        racing["sha"] = commit(local.repo, "race.txt", "race\n", "racing merge")
+        return out
+
+    with mock.patch.object(integration, "build_merge_commit", build_then_race):
+        result, windows, finalized = merge(local)
+    assert result.exit_code != 0
+    assert "moved during the merge" in result.output
+    assert windows == [] and not finalized
+    assert git(local.repo, "rev-parse", "master") == racing["sha"]
+    assert pr_entry(local)["signoff"]["invalidated"]
+
+
+def test_local_base_moving_before_fast_forward_is_refused(local):
+    """The checked-out base moves after the CAS check, right before the
+    fast-forward: the failed ff returns the PR to sign-off (not "re-run")."""
+    approve(local)
+    real = pr_mod.git_ops.run_git
+    racing = {}
+
+    def run_git(*args, **kw):
+        if args[:2] == ("merge", "--ff-only") and not racing:
+            racing["sha"] = commit(local.repo, "race.txt", "race\n", "race")
+        return real(*args, **kw)
+
+    with mock.patch.object(pr_mod.git_ops, "run_git", run_git):
+        result, windows, finalized = merge(local)
+    assert result.exit_code != 0
+    assert "moved during the merge" in result.output
+    assert windows == [] and not finalized
+    assert git(local.repo, "rev-parse", "master") == racing["sha"]
+    assert pr_entry(local)["signoff"]["invalidated"]
+
+
+def test_local_target_spelled_differently_is_the_same_target(local):
+    """An approval whose target names the main repo through another path
+    spelling (e.g. a symlink) is not a changed target."""
+    approve(local)
+    link = local.tmp / "repo-link"
+    link.symlink_to(local.repo)
+
+    def _respell(d):
+        store.get_pr(d, PR)["signoff"]["integration"]["target_repo"] = str(link)
+    store.locked_update(local.pm_dir, _respell)
+    result, _, finalized = merge(local)
+    assert result.exit_code == 0, result.output
+    assert finalized
+
+
+def test_local_main_repo_on_other_branch_updates_ref(local):
+    git(local.repo, "checkout", "-q", "-b", "user-work")
+    rec = approve(local)
+    result, _, finalized = merge(local)
+    assert result.exit_code == 0, result.output
+    assert finalized
+    assert git(local.repo, "rev-parse", "--abbrev-ref", "HEAD") == "user-work"
+    assert git(local.repo, "rev-parse", "master^{tree}") == rec["candidate_tree"]
+
+
+def test_local_dirty_main_repo_is_preserved(local):
+    (local.repo / "shared.txt").write_text("user edit\n")
+    approve(local)
+    result, _, finalized = merge(local)
+    assert result.exit_code == 0, result.output
+    assert finalized
+    assert (local.repo / "shared.txt").read_text() == "user edit\n"
+    assert (local.repo / "feature.txt").exists()
+
+
+def test_head_moved_after_approval_is_stale(local):
+    approve(local)
+    commit(local.wd, "late.txt", "late\n", "unreviewed commit")
+    result, windows, _ = merge(local)
+    assert result.exit_code != 0
+    assert "stale" in result.output
+    assert windows == []
+
+
+def test_conflicting_integration_never_publishes(local):
+    commit(local.wd, "shared.txt", "pr side\n", "pr edits shared")
+    commit(local.repo, "shared.txt", "base side\n", "base edits shared")
+    rec = integration.check_integration(local.pm_dir, PR)
+    assert rec["status"] == integration.CONFLICT
+    assert rec["conflicts"] == ["shared.txt"]
+    # The PR worktree was never touched by the check.
+    assert git(local.wd, "status", "--porcelain") == ""
+    assert subprocess.run(["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"],
+                          cwd=local.wd).returncode != 0
+    assert git(local.wd, "worktree", "list").count("\n") == 0
+    # Even a (forged) MERGE bound to it is refused.
+    signoff.record_signoff_verdict(
+        local.pm_dir, PR, signoff.SIGNOFF_MERGE, rec["head"], "manual",
+        integration=integration.binding(rec))
+    before = git(local.repo, "rev-parse", "master")
+    result, windows, _ = merge(local)
+    assert result.exit_code != 0
+    assert "conflict-free" in result.output
+    assert windows == []
+    assert git(local.repo, "rev-parse", "master") == before
+
+
+def test_legacy_approval_is_refused(local):
+    signoff.record_signoff_verdict(local.pm_dir, PR, signoff.SIGNOFF_MERGE,
+                                   local.head, "auto-sequence")
+    result, _, _ = merge(local)
+    assert result.exit_code != 0
+    assert "predates integration-aware sign-off" in result.output
+
+
+def test_no_signoff_check_only_recovers(local):
+    before = git(local.repo, "rev-parse", "master")
+    result, _, finalized = merge(local, "--no-signoff-check")
+    assert result.exit_code != 0
+    assert "only recover an already-completed merge" in result.output
+    assert not finalized
+    assert git(local.repo, "rev-parse", "master") == before
+    # After a real publish (finalize interrupted), recovery finalizes.
+    approve(local)
+    result, _, _ = merge(local)
+    assert result.exit_code == 0, result.output
+    for flag in ("--no-signoff-check", "--propagation-only"):
+        result, _, finalized = merge(local, flag)
+        assert result.exit_code == 0, result.output
+        assert "already in master" in result.output and finalized
+
+
+# --- vanilla backend (bare remote, atomic lease) --------------------------
+
+@pytest.fixture
+def vanilla(tmp_path):
+    upstream = tmp_path / "upstream.git"
+    git(tmp_path, "init", "-q", "--bare", "-b", "master", str(upstream))
+    seed = tmp_path / "seed"
+    git(tmp_path, "clone", "-q", str(upstream), str(seed))
+    git(seed, "checkout", "-q", "-b", "master")
+    commit(seed, "shared.txt", "base\n", "init")
+    git(seed, "push", "-q", "origin", "master")
+    main = tmp_path / "main"
+    git(tmp_path, "clone", "-q", str(upstream), str(main))
+    wd = tmp_path / "home" / ".pm" / "workdirs" / "proj" / PR
+    git(tmp_path, "clone", "-q", str(upstream), str(wd))
+    git(wd, "checkout", "-q", "-b", BRANCH)
+    head = commit(wd, "feature.txt", "feature\n", "feature")
+    pm_dir = _state(tmp_path, {"repo": str(main), "backend": "vanilla"},
+                    {"workdir": str(wd)})
+    return SimpleNamespace(upstream=upstream, seed=seed, main=main, wd=wd,
+                           pm_dir=pm_dir, head=head)
+
+
+def test_vanilla_pushes_candidate_and_updates_main_repo(vanilla):
+    rec = approve(vanilla)
+    assert rec["target_repo"] == str(vanilla.upstream)
+    result, windows, finalized = merge(vanilla)
+    assert result.exit_code == 0, result.output
+    assert finalized and windows == []
+    tip = git(vanilla.upstream, "rev-parse", "master")
+    assert git(vanilla.upstream, "rev-parse", "master^{tree}") == rec["candidate_tree"]
+    assert git(vanilla.main, "rev-parse", "master") == tip
+
+
+def test_vanilla_base_moving_during_push_is_refused(vanilla):
+    approve(vanilla)
+    real = integration.build_merge_commit
+    racing = {}
+
+    def build_then_race(*a, **kw):
+        out = real(*a, **kw)
+        racing["sha"] = commit(vanilla.seed, "race.txt", "race\n", "race")
+        git(vanilla.seed, "push", "-q", "origin", "master")
+        return out
+
+    with mock.patch.object(integration, "build_merge_commit", build_then_race):
+        result, windows, finalized = merge(vanilla)
+    assert result.exit_code != 0
+    assert "moved during the merge" in result.output
+    assert windows == [] and not finalized
+    assert git(vanilla.upstream, "rev-parse", "master") == racing["sha"]
+    assert pr_entry(vanilla)["signoff"]["invalidated"]
+
+
+def test_vanilla_base_moved_after_approval_is_refused(vanilla):
+    approve(vanilla)
+    moved = commit(vanilla.seed, "other.txt", "o\n", "other")
+    git(vanilla.seed, "push", "-q", "origin", "master")
+    result, windows, _ = merge(vanilla)
+    assert result.exit_code != 0
+    assert "moved since sign-off" in result.output
+    assert windows == []
+    assert git(vanilla.upstream, "rev-parse", "master") == moved
+
+
+def test_vanilla_post_publish_pull_failure_opens_recovery_window_only(vanilla):
+    """Updating the main checkout after publication is recovery: its
+    window may open, but the publication already happened exactly once."""
+    commit(vanilla.main, "local.txt", "x\n", "unpushed local master commit")
+    rec = approve(vanilla)
+    result, windows, finalized = merge(vanilla, "--resolve-window")
+    assert result.exit_code == 0, result.output
+    assert not finalized
+    assert len(windows) == 1
+    assert windows[0].kwargs["cwd"] == str(vanilla.main)
+    assert git(vanilla.upstream, "rev-parse", "master^{tree}") == rec["candidate_tree"]
+
+
+def test_vanilla_recovery_without_workdir_checks_from_main_repo(vanilla):
+    """--propagation-only after a published merge still recovers when the
+    PR workdir is gone: the base is fetched from the main repo."""
+    approve(vanilla)
+    with mock.patch.object(pr_mod, "_finalize_merge"):
+        # Publish, but leave the PR un-finalized (finalize interrupted).
+        with mock.patch.object(pr_mod, "state_root",
+                               return_value=vanilla.pm_dir):
+            assert CliRunner().invoke(pr_mod.pr, ["merge", PR]).exit_code == 0
+    git(vanilla.main, "branch", "-q", BRANCH, vanilla.head)
+    shutil.rmtree(vanilla.wd)
+    result, windows, finalized = merge(vanilla, "--propagation-only")
+    assert result.exit_code == 0, result.output
+    assert "already in master" in result.output and finalized
+    assert windows == []
+
+
+@pytest.mark.parametrize("backend", ["vanilla", "github"])
+def test_post_publish_pull_failure_without_window_exits_nonzero(
+        backend, request):
+    """Remote backends alike: published, main checkout not updated and no
+    recovery window -> exit 1, PR not marked merged."""
+    w = request.getfixturevalue(backend)
+    commit(w.main, "local.txt", "x\n", "unpushed local master commit")
+    approve(w)
+    result, windows, finalized = merge(w, "--no-resolve-window")
+    assert result.exit_code != 0
+    assert not finalized and windows == []
+    assert "Pull failed" in result.output
+
+
+@pytest.mark.parametrize("backend", ["vanilla", "github"])
+def test_rerun_after_post_publish_failure_finalizes(backend, request):
+    """The printed advice after a failed main-checkout update — fix it, re-run
+    — finalizes the published merge: the moved base is the PR's own merge,
+    so the approval is kept (no return to sign-off) and nothing is
+    published twice."""
+    w = request.getfixturevalue(backend)
+    commit(w.main, "local.txt", "x\n", "unpushed local master commit")
+    approve(w)
+    result, _, finalized = merge(w, "--no-resolve-window")
+    assert result.exit_code != 0 and not finalized
+    remote = w.upstream if backend == "vanilla" else w.remote
+    published = git(remote, "rev-parse", "master")
+    git(w.main, "reset", "-q", "--hard", "HEAD~1")
+    result, windows, finalized = merge(w, "--no-resolve-window")
+    assert result.exit_code == 0, result.output
+    assert finalized and windows == []
+    assert "already in master" in result.output
+    assert git(remote, "rev-parse", "master") == published
+    rec = pr_entry(w)
+    assert not rec["signoff"].get("invalidated")
+    assert "merge_integrity" not in rec
+
+
+def test_local_rerun_after_interrupted_finalize_finalizes(local):
+    approve(local)
+    with mock.patch.object(pr_mod, "_finalize_merge"), \
+            mock.patch.object(pr_mod, "state_root", return_value=local.pm_dir):
+        assert CliRunner().invoke(pr_mod.pr, ["merge", PR]).exit_code == 0
+    published = git(local.repo, "rev-parse", "master")
+    result, windows, finalized = merge(local)
+    assert result.exit_code == 0, result.output
+    assert finalized and windows == []
+    assert git(local.repo, "rev-parse", "master") == published
+    assert not pr_entry(local)["signoff"].get("invalidated")
+
+
+# --- github backend (git-backed fake) -------------------------------------
+
+@pytest.fixture
+def github(tmp_path, fake_github_repo):
+    remote = Path(fake_github_repo.git_repo.path)
+    wd = tmp_path / "home" / ".pm" / "workdirs" / "proj" / PR
+    git(tmp_path, "clone", "-q", str(remote), str(wd))
+    git(wd, "checkout", "-q", "-b", BRANCH)
+    head = commit(wd, "feature.txt", "feature\n", "feature")
+    git(wd, "push", "-q", "origin", f"{BRANCH}:refs/heads/{BRANCH}")
+    gh_pr = fake_github_repo.add_pr(title="PR one", head=BRANCH)
+    main = tmp_path / "main"
+    git(tmp_path, "clone", "-q", str(remote), str(main))
+    pm_dir = _state(tmp_path, {"repo": str(main), "backend": "github"},
+                    {"workdir": str(wd), "gh_pr_number": gh_pr.number})
+    with mock.patch("pm_core.paths.fake_github_active", return_value=True):
+        yield SimpleNamespace(fake=fake_github_repo, remote=remote, wd=wd,
+                              main=main, pm_dir=pm_dir, head=head, pr=gh_pr)
+
+
+def _gh_merge_calls(fake):
+    return [c for c in fake.calls if c[:2] == ["pr", "merge"]]
+
+
+def test_github_merges_pinned_to_the_approved_head(github):
+    rec = approve(github)
+    result, windows, finalized = merge(github)
+    assert result.exit_code == 0, result.output
+    assert finalized and windows == []
+    assert github.pr.state == "MERGED"
+    calls = _gh_merge_calls(github.fake)
+    assert calls and "--match-head-commit" in calls[-1]
+    assert calls[-1][calls[-1].index("--match-head-commit") + 1] == github.head
+    assert git(github.remote, "rev-parse", "master^{tree}") == rec["candidate_tree"]
+    assert "merge_integrity" not in pr_entry(github)
+    assert git(github.main, "rev-parse", "master") == \
+        git(github.remote, "rev-parse", "master")
+
+
+def test_github_pushes_unpushed_approved_head_first(github):
+    head = commit(github.wd, "more.txt", "more\n", "approved, not pushed")
+    approve(github)
+    result, _, finalized = merge(github)
+    assert result.exit_code == 0, result.output
+    assert finalized
+    assert git(github.remote, "merge-base", "--is-ancestor", head,
+               "master") == ""
+
+
+def test_github_retries_merge_until_the_pushed_head_registers(github):
+    """Right after pm pushes the approved head, GitHub may still report the
+    old PR head to --match-head-commit; the merge is retried briefly instead
+    of failing (auto-merge would not try again)."""
+    import subprocess as sp
+    from pm_core import gh_ops
+    from pm_core.cli import pr as pr_mod
+    commit(github.wd, "more.txt", "more\n", "approved, not pushed")
+    approve(github)
+    orig = gh_ops.merge_pr
+    lagging = sp.CompletedProcess([], 1, "", "Head branch was modified")
+    calls = []
+
+    def merge_once_synced(*a, **kw):
+        calls.append(kw.get("match_head_commit"))
+        return lagging if len(calls) == 1 else orig(*a, **kw)
+
+    with mock.patch.object(gh_ops, "merge_pr", side_effect=merge_once_synced), \
+         mock.patch.object(pr_mod.time, "sleep") as slept:
+        result, _, finalized = merge(github)
+    assert result.exit_code == 0, result.output
+    assert finalized and github.pr.state == "MERGED"
+    assert len(calls) == 2 and slept.call_count == 1
+
+
+def test_github_no_retry_when_nothing_was_pushed(github):
+    import subprocess as sp
+    from pm_core import gh_ops
+    from pm_core.cli import pr as pr_mod
+    approve(github)
+    failed = sp.CompletedProcess([], 1, "", "Pull request is not mergeable")
+    with mock.patch.object(gh_ops, "merge_pr", return_value=failed) as m, \
+         mock.patch.object(pr_mod.time, "sleep") as slept:
+        result, _, _ = merge(github)
+    assert result.exit_code == 1
+    assert m.call_count == 1 and slept.call_count == 0
+
+
+def test_github_unapproved_remote_commits_are_refused(github):
+    approve(github)
+    other = github.wd.parent / "other-clone"
+    git(github.wd.parent, "clone", "-q", "-b", BRANCH, str(github.remote),
+        str(other))
+    commit(other, "sneak.txt", "x\n", "pushed after sign-off")
+    git(other, "push", "-q", "origin", BRANCH)
+    result, _, _ = merge(github)
+    assert result.exit_code != 0
+    assert "not signed off" in result.output
+    assert github.pr.state == "OPEN"
+    assert _gh_merge_calls(github.fake) == []
+    # Not invalidated: a re-sign-off of the workdir HEAD (which lacks the
+    # remote commits) would be refused the same way, forever.
+    assert not pr_entry(github)["signoff"].get("invalidated")
+
+
+def test_github_base_moved_after_approval_is_refused(github):
+    approve(github)
+    other = github.wd.parent / "base-clone"
+    git(github.wd.parent, "clone", "-q", str(github.remote), str(other))
+    # The fake remote is a non-bare repo with master checked out, so move
+    # its base in place (as another GitHub merge would).
+    commit(github.remote, "base2.txt", "b\n", "another PR merged")
+    result, windows, _ = merge(github)
+    assert result.exit_code != 0
+    assert "moved since sign-off" in result.output
+    assert windows == []
+    assert github.pr.state == "OPEN"
+    assert _gh_merge_calls(github.fake) == []
+
+
+def test_github_unreadable_base_keeps_the_approval(github):
+    """A failed ls-remote of the base is "unknown", not "moved": nothing is
+    merged and the approval stays valid for a retry."""
+    approve(github)
+    real = integration.remote_ref
+
+    def flaky(workdir, target, ref):
+        return None if ref == "refs/heads/master" else real(workdir, target, ref)
+
+    with mock.patch.object(integration, "remote_ref", side_effect=flaky):
+        result, windows, finalized = merge(github)
+    assert result.exit_code != 0
+    assert "cannot read master" in result.output
+    assert not finalized and windows == []
+    assert _gh_merge_calls(github.fake) == []
+    assert not pr_entry(github)["signoff"].get("invalidated")
+
+
+def test_github_merge_onto_a_moved_base_is_recorded(github):
+    """GitHub has no base precondition: a merge that landed on another base
+    is detected afterwards and recorded on ``merge_integrity``."""
+    from pm_core import gh_ops
+    rec = approve(github)
+    orig = gh_ops.merge_pr
+
+    def merge_after_base_moves(workdir, number, **kw):
+        commit(github.remote, "late.txt", "l\n", "landed during the merge")
+        return orig(workdir, number, **kw)
+
+    with mock.patch.object(gh_ops, "merge_pr", side_effect=merge_after_base_moves):
+        result, _, _ = merge(github)
+    assert result.exit_code == 0, result.output
+    integrity = pr_entry(github).get("merge_integrity")
+    assert integrity and "not the signed-off base" in integrity["problem"]
+    assert rec["base_sha"][:12] in integrity["problem"]
+    notes = [n["text"] for n in pr_entry(github).get("notes") or []]
+    assert any(t.startswith("Merge integrity:") for t in notes)
+
+
+def test_github_already_merged_elsewhere_is_still_verified(github):
+    """``gh pr merge`` failing on an already-merged PR (merged by someone
+    else) still checks what landed: no merge of the approved head on the
+    base is recorded on ``merge_integrity``, not silently accepted."""
+    import subprocess as sp
+    from pm_core import gh_ops
+    approve(github)
+    failed = sp.CompletedProcess([], 1, "", "Pull request is not mergeable")
+    with mock.patch.object(gh_ops, "merge_pr", return_value=failed), \
+         mock.patch.object(gh_ops, "is_pr_merged", return_value=True):
+        result, _, _ = merge(github)
+    assert result.exit_code == 0, result.output
+    assert "already merged" in result.output
+    integrity = pr_entry(github).get("merge_integrity")
+    assert integrity and "no merge commit of the approved head" in \
+        integrity["problem"]
+    assert integrity["merge_sha"] is None
+
+
+def _merge_on_remote(github, extra: bool) -> None:
+    """Someone merges the PR on GitHub (optionally after pushing an
+    unreviewed commit to its branch)."""
+    if extra:
+        other = github.wd.parent / "teammate"
+        git(github.wd.parent, "clone", "-q", "-b", BRANCH, str(github.remote),
+            str(other))
+        commit(other, "unreviewed.txt", "u\n", "unreviewed")
+        git(other, "push", "-q", "origin", BRANCH)
+    git(github.remote, "merge", "-q", "--no-ff", "-m", "merged on GitHub",
+        BRANCH)
+
+
+def test_github_recovery_of_the_approved_merge_records_nothing(github):
+    approve(github)
+    _merge_on_remote(github, extra=False)
+    result, _, finalized = merge(github, "--no-signoff-check")
+    assert result.exit_code == 0, result.output
+    assert "already in master; recovering" in result.output and finalized
+    assert "WARNING" not in result.output
+    assert "merge_integrity" not in pr_entry(github)
+
+
+def test_github_recovery_of_an_unapproved_merge_is_recorded(github):
+    """``--no-signoff-check`` recovering a GitHub merge that published more
+    than the signed-off head warns and records ``merge_integrity`` + a note
+    instead of finalizing silently."""
+    approve(github)
+    _merge_on_remote(github, extra=True)
+    result, _, finalized = merge(github, "--no-signoff-check")
+    assert result.exit_code == 0, result.output
+    assert "already in master; recovering" in result.output and finalized
+    assert "WARNING: GitHub merged pr-001 at " in result.output
+    assert "commits that were not signed off" in result.output
+    integrity = pr_entry(github).get("merge_integrity")
+    assert integrity and github.head[:12] in integrity["problem"]
+    assert integrity["merge_sha"] == git(github.remote, "rev-parse", "master")
+    notes = [n["text"] for n in pr_entry(github).get("notes") or []]
+    assert any(t.startswith("Merge integrity:") for t in notes)
+
+
+def test_github_repeated_recovery_notes_an_integrity_problem_once(github):
+    """Recovery re-verifies on every run (a repo-update window's
+    --propagation-only, a repeated --no-signoff-check): the same problem is
+    noted once, not appended again under the same note id."""
+    approve(github)
+    _merge_on_remote(github, extra=True)
+    for _ in range(2):
+        result, _, _ = merge(github, "--no-signoff-check")
+        assert result.exit_code == 0, result.output
+    notes = [n for n in pr_entry(github).get("notes") or []
+             if n["text"].startswith("Merge integrity:")]
+    assert len(notes) == 1
+
+
+def test_two_overlapping_prs_second_needs_integration(local, tmp_path):
+    """Merging the first PR makes the second's approval stale; its fresh
+    integration check finds the conflict (-> implementation), and after the
+    branch reconciles the base a new approval publishes cleanly."""
+    # PR 1 (this fixture's PR) and PR 2 both edit shared.txt.
+    commit(local.wd, "shared.txt", "pr1\n", "pr1 edits shared")
+    wd2 = tmp_path / "home" / ".pm" / "workdirs" / "proj" / "pr-002"
+    git(tmp_path, "clone", "-q", str(local.repo), str(wd2))
+    git(wd2, "checkout", "-q", "-b", "pm/pr-002")
+    commit(wd2, "shared.txt", "pr2\n", "pr2 edits shared")
+
+    def _add_pr2(d):
+        d["prs"].append({"id": "pr-002", "title": "PR two",
+                         "branch": "pm/pr-002", "status": "sign_off",
+                         "workdir": str(wd2)})
+    store.locked_update(local.pm_dir, _add_pr2)
+
+    def approve2():
+        rec = integration.check_integration(local.pm_dir, "pr-002")
+        if rec["status"] in integration.MERGEABLE:
+            signoff.record_signoff_verdict(
+                local.pm_dir, "pr-002", signoff.SIGNOFF_MERGE, rec["head"],
+                "auto-sequence", integration=integration.binding(rec))
+        return rec
+
+    assert approve2()["status"] == integration.UP_TO_DATE
+    approve(local)
+    result, _, _ = merge(local)                 # PR 1 lands
+    assert result.exit_code == 0, result.output
+
+    def merge2():
+        with mock.patch.object(pr_mod, "state_root", return_value=local.pm_dir), \
+             mock.patch.object(pr_mod, "_launch_merge_window") as launch, \
+             mock.patch.object(pr_mod, "_finalize_merge"):
+            r = CliRunner().invoke(pr_mod.pr, ["merge", "pr-002"])
+        return r, launch.call_args_list
+
+    result, windows = merge2()                  # stale: base moved
+    assert result.exit_code != 0 and "moved since sign-off" in result.output
+    assert windows == []
+    rec = approve2()                            # fresh sign-off check
+    assert rec["status"] == integration.CONFLICT
+    verdict, why = signoff.effective_verdict(signoff.SIGNOFF_MERGE, rec,
+                                             rec["head"])
+    assert verdict == signoff.SIGNOFF_IMPL and "conflicts" in why
+    # Implementation reconciles the base in the PR branch.
+    git(wd2, "fetch", "-q", str(local.repo), "master")
+    subprocess.run(["git", "merge", "-q", "FETCH_HEAD"], cwd=wd2,
+                   capture_output=True)
+    (wd2 / "shared.txt").write_text("pr1\npr2\n")
+    git(wd2, "add", "shared.txt")
+    git(wd2, "commit", "-q", "-m", "reconcile master")
+    rec = approve2()
+    assert rec["status"] == integration.UP_TO_DATE
+    result, windows = merge2()
+    assert result.exit_code == 0, result.output
+    assert windows == []
+    assert (local.repo / "shared.txt").read_text() == "pr1\npr2\n"
+
+
+# --- live pm state in the main repo ------------------------------------------
+
+def test_local_merge_keeps_live_state_and_branch_project_yaml_changes(tmp_path):
+    """An agent's cross-PR note committed on the PR branch must not leave
+    conflict markers in the main repo's uncommitted (live) project.yaml."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "master")
+    commit(repo, "app.py", "x = 1\n", "init")
+    wd = tmp_path / "home" / ".pm" / "workdirs" / "proj" / PR
+    pm_dir = repo / "pm"
+    pm_dir.mkdir()
+    prs = [{"id": PR, "title": "PR one", "branch": BRANCH, "status": "pending"},
+           {"id": "pr-002", "title": "PR two", "branch": "pm/pr-002",
+            "status": "pending"}]
+    store.save({"project": {"name": "proj", "base_branch": "master",
+                            "repo": str(repo), "backend": "local"},
+                "prs": prs, "plans": []}, pm_dir)
+    git(repo, "add", "pm")
+    git(repo, "commit", "-q", "-m", "pm state")
+    git(tmp_path, "clone", "-q", str(repo), str(wd))
+    git(wd, "checkout", "-q", "-b", BRANCH)
+    commit(wd, "app.py", "x = 2\n", "feature")
+    # The PR's agent leaves a note on the other PR (committed on its branch).
+    branch_data = store.load(wd / "pm")
+    store.get_pr(branch_data, "pr-002")["notes"] = [
+        {"id": "note-branch", "text": "conflicts with pr-001"}]
+    store.save(branch_data, wd / "pm")
+    git(wd, "commit", "-q", "-am", "note on pr-002")
+    head = git(wd, "rev-parse", "HEAD")
+    # Meanwhile pm's live (uncommitted) state in the main repo moves on.
+    live = store.load(pm_dir)
+    store.get_pr(live, PR).update(status="sign_off", workdir=str(wd))
+    store.get_pr(live, "pr-002").update(status="qa", workdir="/wd/pr-002")
+    store.save(live, pm_dir)
+    w = SimpleNamespace(repo=repo, wd=wd, pm_dir=pm_dir, head=head)
+
+    approve(w)
+    result, windows, finalized = merge(w)
+    assert result.exit_code == 0, result.output
+    assert finalized and windows == []
+    assert "<<<<<<<" not in (pm_dir / "project.yaml").read_text()
+    data = store.load(pm_dir)
+    one, two = store.get_pr(data, PR), store.get_pr(data, "pr-002")
+    assert one["status"] == "sign_off" and one["workdir"] == str(wd)
+    assert two["status"] == "qa" and two["workdir"] == "/wd/pr-002"
+    assert [n["id"] for n in two["notes"]] == ["note-branch"]
+    assert git(repo, "stash", "list") == ""
+    assert git(repo, "diff", "--name-only", "--diff-filter=U") == ""
+    assert (repo / "app.py").read_text() == "x = 2\n"
+
+
+def test_merge_yaml_3way_merges_id_lists_and_prefers_live_state():
+    base = {"prs": [{"id": "a", "status": "pending", "notes": [{"id": "n1"}]}]}
+    ours = {"prs": [{"id": "a", "status": "in_progress",
+                     "notes": [{"id": "n1"}, {"id": "n2"}]},
+                    {"id": "b", "status": "pending"}]}
+    theirs = {"prs": [{"id": "a", "status": "sign_off", "notes": [{"id": "n1"}],
+                       "workdir": "/w"}]}
+    assert store.merge_3way(base, ours, theirs) == {"prs": [
+        {"id": "a", "status": "sign_off", "notes": [{"id": "n1"}, {"id": "n2"}],
+         "workdir": "/w"},
+        {"id": "b", "status": "pending"}]}
+
+
+def test_publish_lock_says_it_waits_for_another_publisher(capsys):
+    import fcntl
+    import threading
+    from pm_core.paths import workdirs_base
+
+    data = {"project": {"repo_id": "rid"}}
+    held = open(workdirs_base() / ".publish-rid.lock", "w")
+    fcntl.flock(held.fileno(), fcntl.LOCK_EX)
+    entered = threading.Event()
+
+    def _publisher():
+        with pr_mod._publish_lock(data):
+            entered.set()
+
+    t = threading.Thread(target=_publisher)
+    t.start()
+    assert not entered.wait(0.3)
+    held.close()  # releases the other publisher's lock
+    t.join(5)
+    assert entered.is_set()
+    assert "Waiting for another merge" in capsys.readouterr().out
+
+    # Uncontended: no message.
+    with pr_mod._publish_lock(data):
+        pass
+    assert "Waiting" not in capsys.readouterr().out

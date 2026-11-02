@@ -1,6 +1,7 @@
 """Tests for pm_core.providers — LLM provider configuration."""
 
 import os
+import stat
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -153,6 +154,122 @@ class TestLoadSaveProviders:
             loaded = load_providers()
             assert loaded["default"] == "ollama"
             assert loaded["providers"]["ollama"]["model"] == "llama3.1"
+
+
+# ---------------------------------------------------------------------------
+# providers.yaml file permissions
+# ---------------------------------------------------------------------------
+
+DUMMY_KEY = "sk-test-dummy-not-a-real-key"
+DUMMY_KEY_2 = "sk-test-existing-dummy-not-a-real-key"
+
+
+class TestProvidersFilePermissions:
+    """``providers.yaml`` may hold literal API keys, so it must be owner-only.
+
+    Regression tests for the bug where ``save_providers`` used
+    ``Path.write_text``: a new file under the default ``umask 022`` came out
+    ``0644``, and an existing permissive file was never tightened.
+    """
+
+    @staticmethod
+    def _mode(path: Path) -> int:
+        return stat.S_IMODE(path.stat().st_mode)
+
+    @staticmethod
+    def _add(provider: str, api_base: str, api_key: str):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        return CliRunner().invoke(cli, [
+            "provider", "add", provider,
+            "--api-base", api_base,
+            "--api-key", api_key,
+            "--skip-check",
+        ])
+
+    @staticmethod
+    def _temp_files(tmp_path: Path) -> list[Path]:
+        """Temp files ``save_providers`` writes next to the config."""
+        return list(tmp_path.glob(".providers.yaml.pm-*"))
+
+    def test_new_file_is_owner_only_under_umask_022(self, tmp_path):
+        path = tmp_path / "providers.yaml"
+        assert not path.exists()
+        old_umask = os.umask(0o022)
+        try:
+            with patch("pm_core.providers.pm_home", return_value=tmp_path):
+                result = self._add("dummy", "http://localhost:1", DUMMY_KEY)
+                assert result.exit_code == 0, result.output
+                assert self._mode(path) == 0o600
+                assert self._temp_files(tmp_path) == []
+                config = load_providers()
+                assert config["providers"]["dummy"]["api_key"] == DUMMY_KEY
+        finally:
+            os.umask(old_umask)
+
+    def test_new_file_is_owner_only_under_umask_000(self, tmp_path):
+        # A fully permissive umask must not widen the credential file.
+        path = tmp_path / "providers.yaml"
+        old_umask = os.umask(0o000)
+        try:
+            with patch("pm_core.providers.pm_home", return_value=tmp_path):
+                result = self._add("dummy", "http://localhost:1", DUMMY_KEY)
+                assert result.exit_code == 0, result.output
+                assert self._mode(path) == 0o600
+        finally:
+            os.umask(old_umask)
+
+    def test_existing_permissive_file_is_tightened(self, tmp_path):
+        path = tmp_path / "providers.yaml"
+        path.write_text(
+            "providers:\n"
+            "  existing:\n"
+            "    type: local\n"
+            "    api_base: http://localhost:9\n"
+            f"    api_key: {DUMMY_KEY_2}\n"
+            "default: existing\n"
+        )
+        os.chmod(path, 0o644)
+        assert self._mode(path) == 0o644
+        old_umask = os.umask(0o022)
+        try:
+            with patch("pm_core.providers.pm_home", return_value=tmp_path):
+                result = self._add("dummy", "http://localhost:1", DUMMY_KEY)
+                assert result.exit_code == 0, result.output
+                assert self._mode(path) == 0o600
+                assert self._temp_files(tmp_path) == []
+                config = load_providers()
+                # Existing configuration and credential survive the save.
+                assert config["default"] == "existing"
+                assert config["providers"]["existing"]["api_key"] == DUMMY_KEY_2
+                assert config["providers"]["dummy"]["api_key"] == DUMMY_KEY
+        finally:
+            os.umask(old_umask)
+
+    def test_failed_replace_keeps_original_and_cleans_temp(self, tmp_path):
+        """A failed replace must not leave a stray temp or damage the config."""
+        path = tmp_path / "providers.yaml"
+        original = (
+            "providers:\n"
+            "  existing:\n"
+            "    type: local\n"
+            "    api_base: http://localhost:9\n"
+            f"    api_key: {DUMMY_KEY_2}\n"
+            "default: existing\n"
+        )
+        path.write_text(original)
+        os.chmod(path, 0o644)
+        with patch("pm_core.providers.pm_home", return_value=tmp_path), \
+                patch("pm_core.providers.os.replace", side_effect=OSError("boom")):
+            with pytest.raises(OSError):
+                save_providers({
+                    "providers": {"dummy": {"type": "local",
+                                            "api_base": "http://localhost:1",
+                                            "api_key": DUMMY_KEY}},
+                })
+        assert path.read_text() == original
+        assert self._mode(path) == 0o644
+        assert self._temp_files(tmp_path) == []
 
 
 # ---------------------------------------------------------------------------

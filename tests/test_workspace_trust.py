@@ -253,7 +253,13 @@ class TestLaunchBoundary:
         pane happens to start in (review pane regression)."""
         wd = _pm_workdir(home)
         cmd = build_claude_shell_cmd(prompt="p", cwd=str(wd), session_type="review")
-        assert cmd.startswith(f"cd {wd} && claude")
+        assert cmd.startswith(f"cd {wd} && env -u ANTHROPIC_DEFAULT_OPUS_MODEL "
+                              "-u ANTHROPIC_DEFAULT_SONNET_MODEL "
+                              "-u ANTHROPIC_DEFAULT_HAIKU_MODEL "
+                              "-u ANTHROPIC_DEFAULT_FABLE_MODEL "
+                              "-u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_SUBAGENT_MODEL "
+                              "-u CLAUDE_CODE_SUBAGENT_MODEL_FORCE "
+                              "-u CLAUDE_CODE_AUTO_MODE_MODEL -u PM_ROUTE_BASE_URL claude")
         container = build_claude_shell_cmd(prompt="p", cwd="/workspace",
                                            write_dir=str(wd), session_type="review")
         assert not container.startswith("cd ")
@@ -518,6 +524,9 @@ def test_adopted_review_polls_with_pr_workdir(tmp_path):
     (transcript_dir / "review-pr-x-i2.jsonl").symlink_to(tmp_path / f"{sid}.jsonl")
     state = review_loop.ReviewLoopState(pr_id="pr-x")
     state.iteration = 2
+    # A resumed loop only adopts an iteration it actually launched; the
+    # breadcrumb records that (pr-e040aeb's fabrication guard).
+    state.iteration_attempted = True
     pr_data = {"id": "pr-x", "workdir": "/wd/pr-x"}
     with patch("pm_core.review_loop._get_pm_session", return_value="pm-s"), \
          patch("pm_core.review_loop._find_claude_pane", return_value="%5"), \
@@ -732,7 +741,7 @@ def test_impl_idle_sweep_keeps_qa_tracker_keys(tmp_path):
     app = SimpleNamespace(
         _session_name="sess", _pane_idle_tracker=tracker,
         _data={"prs": []}, _review_loops={}, _pending_merge_prs=set(),
-        _merge_propagation_phase=set(), log_message=lambda *a, **k: None)
+        log_message=lambda *a, **k: None)
     with patch("pm_core.tui.auto_start.is_enabled", return_value=False):
         review_loop_ui._poll_impl_idle(app)
     assert tracker.is_tracked("qa:pr-q:s1")
@@ -797,7 +806,7 @@ def test_impl_idle_sweep_accepts_orphan_review_pane_after_restart(
     app = SimpleNamespace(
         _session_name="sess", _pane_idle_tracker=PaneIdleTracker(),
         _data={"prs": [pr]}, _review_loops={}, _pending_merge_prs=set(),
-        _merge_propagation_phase=set(), _root=tmp_path / "pm",
+        _root=tmp_path / "pm",
         _auto_start_run_id=None, log_message=lambda *a, **k: None)
     with patch("pm_core.tui.auto_start.is_enabled", return_value=False):
         review_loop_ui._poll_impl_idle(app)
@@ -863,7 +872,7 @@ def test_orphan_watch_skips_pane_already_reported_by_this_tui(
         app = SimpleNamespace(
             _session_name="sess", _pane_idle_tracker=PaneIdleTracker(),
             _data={"prs": [pr]}, _review_loops={}, _pending_merge_prs=set(),
-            _merge_propagation_phase=set(), _root=tmp_path / "pm",
+            _root=tmp_path / "pm",
             _auto_start_run_id=None,
             log_message=lambda msg, **k: logs.append(msg))
         return app, logs
@@ -1017,7 +1026,7 @@ def test_merge_window_in_unapproved_dir_names_the_remedy(home, approved,
         pr_mod._launch_merge_window({"project": {}}, {"id": "pr-001"},
                                      "conflict", cwd=str(root))
     out = capsys.readouterr().out
-    assert "Opened merge resolution window" in out
+    assert "Opened repo-update window" in out
     assert (f"pm trust add {root}" in out) is not approved
 
 
@@ -1042,8 +1051,8 @@ def test_tmux_guide_launch_goes_through_trust_boundary(home, tmp_path,
     monkeypatch.setattr(guide_cli.guide_mod, "build_assist_prompt",
                         lambda *a, **k: "assist")
     execs = []
-    monkeypatch.setattr(guide_cli.os, "execvp",
-                        lambda f, args: execs.append(args))
+    monkeypatch.setattr(guide_cli.os, "execvpe",
+                        lambda f, args, env: execs.append(args))
 
     monkeypatch.chdir(proj)
     guide_cli._run_guide()

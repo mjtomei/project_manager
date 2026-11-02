@@ -11,12 +11,43 @@ and never saves to disk — the main thread reloads and applies results.
 
 import asyncio
 import copy
+import errno
+import os
+from pathlib import Path
 
 from pm_core.paths import configure_logger
-from pm_core import store, guide, pr_sync
+from pm_core import store, guide, pr_sync, merge_integrity
 from pm_core.cli.helpers import _record_status_timestamp
+from pm_core.pr_utils import TERMINAL_PR_STATES, usable_prs
 
 _log = configure_logger("pm.tui.sync")
+
+# A merge-integrity warning is important enough to outlive the sync-status
+# and auto-start lines that follow it in the same tick (they are deferred
+# until the hold ends); auto_start.CONFIRM_HOLD_SECONDS is too short to read
+# the problem text.
+_INTEGRITY_HOLD_SECONDS = 6.0
+
+
+def _result_integrity(result) -> dict:
+    """The merge verifications on a sync result, keyed by PR id.
+
+    ``SyncResult`` always carries them; the default keeps a stubbed result
+    (a test double, a partial namespace) from breaking the tick.
+    """
+    return getattr(result, "merge_integrity", None) or {}
+
+
+def _log_merge_integrity(app, integrity: dict) -> None:
+    """Surface a sync-detected merge-integrity problem on the log line.
+
+    The record on the PR (``merge_integrity`` + note) is authoritative; the
+    held line makes the problem visible without opening the PR.
+    """
+    for verified in (integrity or {}).values():
+        if verified.problem:
+            app.log_message(f"Merge integrity: {verified.problem}",
+                            force=True, hold=_INTEGRITY_HOLD_SECONDS)
 
 
 def _kill_merged_pr_windows(app, merged_pr_ids: set[str]) -> None:
@@ -61,10 +92,27 @@ async def background_sync(app) -> None:
     try:
         root = store.find_project_root()
         data = store.load(root)
-    except FileNotFoundError:
+    except FileNotFoundError as e:
+        if app._root is not None and Path(app._root).is_dir():
+            # Only project.yaml is missing: a checkout or rebase unlinks
+            # it before writing the new one.  Dropping the root here left
+            # the TUI without a project until the next sync, so the QA
+            # resume scan stopped adopting orphaned runs (S44).  The root is
+            # found from the cwd, whose "cd into your repo" advice does not
+            # apply here: name the file that is missing (S45).
+            missing = Path(app._root) / "project.yaml"
+            if not isinstance(e, store.ProjectYamlMissingError):
+                e = store.ProjectYamlMissingError(
+                    errno.ENOENT, os.strerror(errno.ENOENT), str(missing))
+            _log.warning("Skipping sync: %s", e)
+            return
         app._root = None
         app._data = {}
     except store.ProjectYamlParseError as e:
+        # Also a merge that leaves plans that do not validate
+        # (PlanValidationError): like a conflicted file it must not escape
+        # this timer, which would kill the TUI and every QA loop it drives
+        # (S44).
         _log.warning("Skipping sync: %s", e)
         return
     else:
@@ -127,20 +175,30 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
 
         # Snapshot PR statuses before reload so we can detect merges that
         # happened outside of sync (e.g. `pm pr merge` for local/vanilla).
+        # Entries without a usable string id are skipped rather than
+        # indexed: a partial or externally written project.yaml must not
+        # raise out of the sync loop (the popup picker rejects such
+        # snapshots too, with a readable reason).
         old_statuses = {
             pr["id"]: pr.get("status")
-            for pr in (app._data.get("prs") or [])
+            for pr in usable_prs(app._data.get("prs"))
         }
 
         # Reload from disk and apply sync results (merged PRs) atomically.
         if result.merged_prs:
             merged_set = set(result.merged_prs)
+            integrity = _result_integrity(result)
 
             def apply_merged(data):
-                for pr in data.get("prs") or []:
+                for pr in usable_prs(data.get("prs")):
                     if pr["id"] in merged_set:
                         pr["status"] = "merged"
                         _record_status_timestamp(pr, "merged")
+                        # Sync verifies a discovered merge against the bound
+                        # SIGNOFF_MERGE in the worker thread; the evidence is
+                        # applied here, in the main thread's lock, with the
+                        # status it belongs to (pr-2e06289).
+                        merge_integrity.apply_to_pr(pr, integrity.get(pr["id"]))
 
             try:
                 app._data = store.locked_update(app._root, apply_merged)
@@ -167,11 +225,16 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
                 return
         app._update_display()
 
+        # A sync-detected merge that published something other than the
+        # signed-off candidate is recorded on the PR (merge_integrity + note);
+        # surface it on the log line too.
+        _log_merge_integrity(app, _result_integrity(result))
+
         # Detect PRs that became merged — either via sync or via CLI
         # (e.g. `pm pr merge` for local/vanilla backends saves status
         # to disk before triggering a TUI refresh).
         newly_merged = set(result.merged_prs)
-        for pr in app._data.get("prs") or []:
+        for pr in usable_prs(app._data.get("prs")):
             if pr.get("status") == "merged" and old_statuses.get(pr["id"]) != "merged":
                 newly_merged.add(pr["id"])
 
@@ -258,16 +321,32 @@ async def startup_github_sync(app) -> None:
         if result.synced and result.updated_count > 0:
             # Apply ALL status changes atomically under lock
             updates = result.status_updates
+            integrity = _result_integrity(result)
             newly_merged = set()
 
             def apply_github(data):
-                for pr in data.get("prs") or []:
+                for pr in usable_prs(data.get("prs")):
                     new_status = updates.get(pr["id"])
-                    if new_status and pr.get("status") != new_status:
+                    if not new_status:
+                        continue
+                    if pr.get("status") in TERMINAL_PR_STATES \
+                            and new_status != "merged":
+                        # The updates were computed from this worker's stale
+                        # copy; a concurrent merge/close is terminal and must
+                        # not be overwritten (pr-62ad13d).  A merge discovered
+                        # on GitHub still finalizes normally.
+                        continue
+                    if pr.get("status") != new_status:
                         if new_status == "merged":
                             newly_merged.add(pr["id"])
                         pr["status"] = new_status
                         _record_status_timestamp(pr, new_status)
+                    if new_status == "merged":
+                        # Applied even when another writer already set the
+                        # status: the verification is evidence about this
+                        # merge, not a side effect of the transition.
+                        merge_integrity.apply_to_pr(
+                            pr, integrity.get(pr["id"]))
 
             try:
                 app._data = store.locked_update(app._root, apply_github)
@@ -278,6 +357,7 @@ async def startup_github_sync(app) -> None:
             if newly_merged:
                 _kill_merged_pr_windows(app, newly_merged)
             app._update_display()
+            _log_merge_integrity(app, integrity)
             own_seq = app.log_message(
                 f"GitHub sync: {result.updated_count} PR(s) updated")
             # Auto-start ready PRs if enabled; the clear below stays bound

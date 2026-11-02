@@ -287,18 +287,26 @@ def get_pr_state(pr_ref: str | int, cwd: Optional[str] = None,
 
 
 def merge_pr(workdir: str, pr_ref: str | int,
-             method: str = "merge") -> subprocess.CompletedProcess:
-    """Merge a GitHub PR via gh CLI. Returns the completed process."""
-    return run_gh(
-        "pr", "merge", str(pr_ref), f"--{method}",
-        cwd=workdir,
-        check=False,
-    )
+             method: str = "merge",
+             match_head_commit: str | None = None) -> subprocess.CompletedProcess:
+    """Merge a GitHub PR via gh CLI. Returns the completed process.
+
+    *match_head_commit* makes GitHub refuse the merge unless the PR head is
+    still that commit (the revision sign-off approved).
+    """
+    args = ["pr", "merge", str(pr_ref), f"--{method}"]
+    if match_head_commit:
+        args += ["--match-head-commit", match_head_commit]
+    return run_gh(*args, cwd=workdir, check=False)
 
 
 def close_pr(pr_ref: str | int, delete_branch: bool = False,
              cwd: Optional[str] = None) -> subprocess.CompletedProcess:
-    """Close a GitHub PR via gh CLI. Returns the completed process."""
+    """Close a GitHub PR via gh CLI. Returns the completed process.
+
+    ``delete_branch`` is opt-in and deliberately unused by ``pm pr close``
+    (pr-62ad13d): closing a PR never deletes a local or remote branch.
+    """
     args = ["pr", "close", str(pr_ref)]
     if delete_branch:
         args.append("--delete-branch")

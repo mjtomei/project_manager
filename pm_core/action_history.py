@@ -6,10 +6,12 @@ swept on TUI restart and deleted after merge).  This module records what
 happened over time so ``pm pr history`` and the PR actions pane can show
 past attempts, how long they took, and which timers PM is waiting on.
 
-Storage: ``~/.pm/history/{pr_id}.jsonl`` — one JSON event per line,
-appended with ``O_APPEND`` under an exclusive flock so concurrent writers
-(TUI main thread, loop threads, ``qa-run-bg``, CLI) never interleave.
-The file is never removed by PR cleanup, so history survives merge.
+Storage: ``~/.pm/history/{pm-session}/{pr_id}.jsonl`` (per pm session,
+like ``runtime_state``; ``~/.pm/history/{pr_id}.jsonl`` outside any
+session) — one JSON event per line, appended with ``O_APPEND`` under an
+exclusive flock so concurrent writers (TUI main thread, loop threads,
+``qa-run-bg``, CLI) never interleave.  The file is never removed by PR
+cleanup, so history survives merge.
 
 Event kinds (all carry ``v``, ``ts``, ``t``, ``pr_id``, ``kind``,
 ``owner``):
@@ -400,9 +402,39 @@ def history_dir() -> Path:
     return d
 
 
+def _scope() -> str | None:
+    """This process's pm session, as the runtime mirror scopes it."""
+    try:
+        from pm_core import runtime_state
+        return runtime_state._scope()
+    except Exception:
+        return None
+
+
+def journal_dir() -> Path:
+    """Where this process's PR journals live.
+
+    Per pm session, like the runtime mirror (``runtime_state``): two clones
+    of one project share ``~/.pm`` and their PR ids, but each clone's
+    actions are its own, so one clone's history must not show the other's
+    attempts.  A process outside any pm session uses ``history/`` itself.
+    The owner-lock directory (``history/owners``) stays shared: liveness
+    is per process, whatever its session.
+    """
+    d = history_dir()
+    sess = _scope()
+    if sess:
+        d = d / sess
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass  # as in history_dir: readers find no journal
+    return d
+
+
 def journal_path(pr_id: str) -> Path:
     safe = pr_id.replace("/", "_").replace("\\", "_")
-    return history_dir() / f"{safe}.jsonl"
+    return journal_dir() / f"{safe}.jsonl"
 
 
 def _rotated_path(path: Path) -> Path:
@@ -618,12 +650,18 @@ def clear_timer(pr_id: str, timer: str, reason: str = "cancelled") -> None:
 # QA scenario observer
 # ---------------------------------------------------------------------------
 
+_WAITING_DETAIL = "INPUT_REQUIRED; waiting for input in the worker pane"
+
+
 class ScenarioObserver:
     """Turn QA scenario bookkeeping into scenario attempts.
 
     ``qa_loop._poll_tmux_verdicts`` hands it read-only snapshots once per
     poll tick; the observer diffs them against the previous snapshot and
     journals starts, phase changes and ends.  It never mutates loop state.
+    One observer lives for a whole run: a scenario whose worker asked for
+    input stays open (``waiting_human``) while the run is held, and the
+    reopened poll settles it.
     """
 
     def __init__(self, pr_id: str, parent: str | None, loop_id: str = "",
@@ -662,26 +700,33 @@ class ScenarioObserver:
         self._had_attempt.add(idx)
         if status in ("queued", "backoff"):
             return attempt  # the caller records the wait phase
+        if status == "waiting":
+            phase(self.pr_id, attempt, "waiting_human", _WAITING_DETAIL)
+            return attempt
         phase(self.pr_id, attempt, "agent")
         return attempt
 
     def observe(self, scenarios, *, pending, verifying, queued,
-                verdicts: dict) -> None:
+                verdicts: dict, waiting=()) -> None:
         try:
             self._observe(scenarios, pending=set(pending),
                           verifying=set(verifying), queued=set(queued),
-                          verdicts=dict(verdicts))
+                          verdicts=dict(verdicts), waiting=set(waiting))
         except Exception:
             _log.debug("ScenarioObserver.observe failed", exc_info=True)
 
     def _observe(self, scenarios, *, pending, verifying, queued,
-                 verdicts) -> None:
+                 verdicts, waiting) -> None:
         for sc in scenarios:
             idx = sc.index
             if idx in verifying:
                 status = "verifying"
             elif idx in pending:
                 status = "running"
+            elif idx in waiting:
+                # The worker emitted INPUT_REQUIRED; the loop keeps
+                # watching its pane for the follow-up the answer produces.
+                status = "waiting"
             elif idx in queued:
                 status = "queued"
             elif idx in verdicts:
@@ -698,7 +743,7 @@ class ScenarioObserver:
                 continue
             cur = self._open.get(idx)
             if cur is None:
-                if status in ("running", "verifying", "queued"):
+                if status in ("running", "verifying", "queued", "waiting"):
                     attempt = self._start(sc, status)
                     if status == "queued":
                         phase(self.pr_id, attempt, "queued",
@@ -723,13 +768,16 @@ class ScenarioObserver:
             if status == "verifying":
                 phase(self.pr_id, attempt, "verifying",
                       f"{verdicts.get(idx) or 'PASS'} under verification")
+            elif status == "waiting":
+                phase(self.pr_id, attempt, "waiting_human", _WAITING_DETAIL)
             elif status == "running":
                 # A queued scenario's attempt started before its worker
                 # had a session; the launch supplies it, so the live view
                 # can read the worker's hook events (turn finished, grace).
-                phase(self.pr_id, attempt, "agent",
-                      "re-evaluating after verification flag"
-                      if prev == "verifying" else "launched",
+                detail = {"verifying": "re-evaluating after verification flag",
+                          "waiting": "waiting attempt handed back to the "
+                                     "retry path"}.get(prev, "launched")
+                phase(self.pr_id, attempt, "agent", detail,
                       session_id=getattr(sc, "session_id", None) or None)
             elif status == "done":
                 end_attempt(self.pr_id, attempt, "done",
@@ -800,11 +848,27 @@ class ScenarioObserver:
         except Exception:
             _log.debug("ScenarioObserver.relaunched failed", exc_info=True)
 
-    def finish(self, *, stopped: bool) -> None:
-        """End any attempt still open when the poll loop exits."""
+    def finish(self, *, stopped: bool, keep_waiting: bool = False,
+               verdicts: dict | None = None) -> None:
+        """End attempts still open when the poll loop (or the run) exits.
+
+        With *keep_waiting* a scenario waiting for input stays open: the run
+        is about to hold on it.  At the end of the run such a scenario ends
+        with its INPUT_REQUIRED verdict (or ``cancelled`` on a stop).
+        """
         for idx, cur in list(self._open.items()):
-            end_attempt(self.pr_id, cur["attempt"],
-                        "cancelled" if stopped else "interrupted",
-                        detail="QA stopped" if stopped
-                        else "poll loop ended without a verdict")
+            waiting = cur["status"] == "waiting"
+            if waiting and keep_waiting and not stopped:
+                continue
+            if stopped:
+                end_attempt(self.pr_id, cur["attempt"], "cancelled",
+                            detail="QA stopped")
+            elif waiting:
+                end_attempt(self.pr_id, cur["attempt"], "done",
+                            verdict=(verdicts or {}).get(idx)
+                            or "INPUT_REQUIRED",
+                            detail="run ended while waiting for input")
+            else:
+                end_attempt(self.pr_id, cur["attempt"], "interrupted",
+                            detail="poll loop ended without a verdict")
             self._open.pop(idx, None)

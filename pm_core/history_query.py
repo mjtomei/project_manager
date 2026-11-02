@@ -120,7 +120,9 @@ def build_history(pr_id: str, *, pr: dict | None = None,
             entry["stale"] = "owner exited"
     current = _current_activity(attempts, timer_rows, t_now, live=live)
     holds = [t for t in timer_rows["active"] if t["due_at"] is None]
-    holds += _derived_holds(pr_id, pr or {}, runtime)
+    holds += _derived_holds(pr_id, pr or {}, runtime,
+                            journaled={t["timer"].split(":", 1)[0]
+                                       for t in holds})
     waiting_for = _waiting_for(holds, timer_rows, current, attempts)
 
     model: dict[str, Any] = {
@@ -763,7 +765,14 @@ def _derived_hold(timer: str, purpose: str, owner_action: str, armed,
     }
 
 
-def _derived_holds(pr_id: str, pr: dict, runtime: dict) -> list[dict]:
+def _derived_holds(pr_id: str, pr: dict, runtime: dict,
+                   journaled: set[str] = frozenset()) -> list[dict]:
+    """Holds read from project.yaml / the runtime mirror.
+
+    *journaled* names the kinds of hold already active in the journal
+    (timer id prefixes): a live held QA run journals its own hold, so the
+    runtime's INPUT_REQUIRED verdict must not add a second row for it.
+    """
     holds = []
     sp = pr.get("spec_pending")
     # A merged/closed PR can't be waiting on spec approval, even if a
@@ -776,12 +785,21 @@ def _derived_holds(pr_id: str, pr: dict, runtime: dict) -> list[dict]:
             "pm pr spec-approve (or V in the TUI) resumes"))
     qa = runtime.get("qa") or {}
     if qa.get("state") == "done" and qa.get("verdict") == "INPUT_REQUIRED" \
-            and pr.get("status") == "qa":
+            and pr.get("status") == "qa" \
+            and "qa-input-hold" not in journaled:
         holds.append(_derived_hold(
             "qa-input-required",
             "QA INPUT_REQUIRED (auto-start will not relaunch QA)",
             "qa", qa.get("updated_at"), "runtime qa verdict",
             "human resolves the QA scenarios and restarts QA"))
+    rl = runtime.get("review-loop") or {}
+    if rl.get("state") == "failed" and rl.get("verdict") == "HOLD" \
+            and pr.get("status") not in ("merged", "closed"):
+        holds.append(_derived_hold(
+            "review-hold",
+            "review HOLD at a permission/trust prompt",
+            "review-loop", rl.get("updated_at"), "runtime review-loop verdict",
+            "human answers the prompt, then restarts the review loop"))
     so = pr.get("signoff") or {}
     if isinstance(so, dict) and so.get("verdict") == "SIGNOFF_BLOCKED" \
             and pr.get("status") == "sign_off":

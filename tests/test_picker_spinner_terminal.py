@@ -114,3 +114,61 @@ def test_spinner_waits_through_stale_terminal_state(fake_stdin):
     # neither — the spinner kept polling and was cancelled by the user.
     assert not mock_dismiss.called
     assert select_calls["n"] >= 3
+
+
+def test_plain_qa_start_after_finished_run_waits_and_honours_q(fake_stdin, tmp_path):
+    """S92: a plain (non-fresh) ``qa`` start from the picker after a finished
+    run.  The entry still reads the prior run's ``done PASS`` until the new
+    run's windows exist, so the spinner must not exit on it: that printed
+    the old verdict, closed the popup before q/Esc could be read, and the
+    new run then took the focus the user asked to keep."""
+    from pm_core import runtime_state
+    runtime_state.set_action_state("pr-001", "qa", "done", verdict="PASS")
+    fake_tmux = MagicMock(list_windows=MagicMock(return_value=[]),
+                          select_window=MagicMock())
+    select_calls = {"n": 0}
+
+    def _select(*_a, **_kw):
+        select_calls["n"] += 1
+        if select_calls["n"] < 3:
+            return ([], [], [])
+        return ([sys.stdin], [], [])
+    sys.stdin.read = MagicMock(return_value="q")
+    with patch.object(session_mod, "tmux_mod", fake_tmux), \
+         patch.object(session_mod.store, "load", return_value={"prs": []}), \
+         patch.object(session_mod, "state_root", return_value="/tmp"), \
+         patch.object(session_mod, "_wait_dismiss") as mock_dismiss, \
+         patch("select.select", side_effect=_select), \
+         patch("click.echo") as mock_echo:
+        with pytest.raises(SystemExit):
+            session_mod._wait_for_tui_command("sess", "pr qa pr-001",
+                                              tick_s=0.001)
+    assert not mock_dismiss.called
+    assert select_calls["n"] >= 3
+    shown = " ".join(str(c.args[0]) for c in mock_echo.call_args_list if c.args)
+    assert "done" not in shown, shown
+    # The q left the flag for the new run's window creation to consume.
+    assert runtime_state.consume_suppress_switch("pr-001", "qa") is True
+
+
+def test_plain_qa_start_exits_on_this_runs_terminal_state(fake_stdin):
+    """The guard only skips the entry that was already terminal at popup
+    start: once this invocation writes a new terminal state (no window),
+    the spinner still exits on it."""
+    fake_tmux = MagicMock(list_windows=MagicMock(return_value=[]),
+                          select_window=MagicMock())
+    stale = {"state": "done", "verdict": "PASS", "updated_at": "2026-05-04T00:00:00Z"}
+    new = {"state": "failed", "verdict": "ERROR", "updated_at": "2026-05-04T00:01:00Z"}
+    entries = [stale, stale, new]
+
+    def _get(*_a, **_kw):
+        return entries.pop(0) if len(entries) > 1 else entries[0]
+    with patch.object(session_mod, "tmux_mod", fake_tmux), \
+         patch.object(session_mod.store, "load", return_value={"prs": []}), \
+         patch.object(session_mod, "state_root", return_value="/tmp"), \
+         patch("pm_core.runtime_state.get_action_state", side_effect=_get), \
+         patch.object(session_mod, "_wait_dismiss") as mock_dismiss, \
+         patch("select.select", return_value=([], [], [])), \
+         patch("click.echo"):
+        session_mod._wait_for_tui_command("sess", "pr qa pr-001", tick_s=0.001)
+    assert mock_dismiss.called

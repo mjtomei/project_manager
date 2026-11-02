@@ -158,7 +158,9 @@ def container_build(tag: str | None, base: str | None):
         click.echo(prompt)
         raise SystemExit(1)
 
-    claude_cmd = build_claude_shell_cmd(prompt=prompt, session_type="container")
+    env: dict[str, str] = {}
+    claude_cmd = build_claude_shell_cmd(prompt=prompt,
+                                        session_type="container", env_out=env)
 
     # Try to launch in tmux
     pm_session = _get_pm_session()
@@ -171,7 +173,7 @@ def container_build(tag: str | None, base: str | None):
             return
         try:
             tmux_mod.new_window(pm_session, window_name, claude_cmd,
-                                str(project_dir))
+                                str(project_dir), env=env)
             win = tmux_mod.find_window_by_name(pm_session, window_name)
             if win:
                 tmux_mod.set_shared_window_size(pm_session, win["id"])
@@ -288,8 +290,12 @@ def container_cleanup(pr_id: str | None):
 
     removed = 0
     for line in lines:
-        parts = line.split("\t", 1)
-        name = parts[0].strip()
+        # Split on whitespace, not "\t": podman 3.x prints the format's
+        # "\t" as spaces, and container names never contain whitespace.
+        parts = line.split(None, 1)
+        if not parts:
+            continue
+        name = parts[0]
         status = parts[1].strip() if len(parts) > 1 else ""
         if pr_id and pr_id not in name:
             continue

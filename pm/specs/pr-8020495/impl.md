@@ -2,7 +2,18 @@
 
 ## Background (current code)
 
-- **Runtime mirror** — `pm_core/runtime_state.py`, `~/.pm/runtime/{pr}.json`:
+*Re-grounded 2026-11-02 after merging origin/master@c1fcecc5 (1434
+commits).  Master changes this spec now builds on: per-pm-session runtime
+dirs (S93), review-loop launch retries with backoff, a cross-driver launch
+lease and HOLD/CLOSED/LAUNCH_FAILED outcomes (#259 pr-e040aeb), held QA
+runs that wait for a follow-up after INPUT_REQUIRED (#271 pr-2c67d50),
+wait-for-merge as the only manual merge hold (#261 pr-25f4038, which
+removed stop-before-merge), and a restructured popup picker (#242, #240,
+#263).*
+
+- **Runtime mirror** — `pm_core/runtime_state.py`,
+  `~/.pm/runtime/{pm-session}/{pr}.json` (per pm session since S93;
+  `~/.pm/runtime/{pr}.json` outside any session):
   one dict per action (`start`, `review`, `review-loop`, `qa`, `merge`),
   overwritten under flock by `set_action_state`. `started_at` is
   `setdefault` (first value wins), entries are deleted when a pane vanishes
@@ -34,16 +45,33 @@
     (`_launch`, `app._signoff_launched_at`);
   - workspace-trust grace (120 s, `WorkspacePromptWatch`) — no PR identity
     at the arm site.
-  - There is **no** review-loop retry/backoff and no "unknown-HEAD" retry
-    timer in production code (unknown HEAD → `step_signoff` stale relaunch,
-    which bypasses the throttle).
+  - review launch retry backoff (master #259):
+    `_run_iteration_with_retry` retries a failed authorized launch up to
+    `REVIEW_LAUNCH_MAX_ATTEMPTS = 3` times, sleeping
+    `min(60, 5 * 2**(attempt-1))` s (`_interruptible_sleep`) between
+    attempts; a restart mid-backoff sleeps the remainder
+    (`state.next_retry_at`).
+  - review launch lease wait: a loop that cannot claim the cross-driver
+    launch lease waits up to `REVIEW_LAUNCH_CLAIM_WAIT = 15` s.
+  - review launch re-arm cooldown: an auto-start target whose retries were
+    exhausted (retryable `LAUNCH_FAILED`) gets one TUI `set_timer` pass
+    after `REVIEW_LAUNCH_REARM_SECONDS = 60` (`_schedule_retry_rearm`).
+  - There is no "unknown-HEAD" retry timer in production code (unknown
+    HEAD → `step_signoff` stale relaunch, which bypasses the throttle).
 - **Human holds** — review-loop INPUT_REQUIRED (`state.input_required`,
-  follow-up wait with no timeout); merge-window INPUT_REQUIRED
-  (`app._merge_input_required_prs`); auto-merge hold
-  (`_maybe_auto_merge` → `auto_start.merge_hold`); `spec_pending`
-  (project.yaml, `{phase, generated_at}`); QA INPUT_REQUIRED (runtime `qa`
-  `done` + verdict, also the auto-start QA relaunch hold
-  `QA_HOLD_VERDICTS`); sign-off BLOCKED (`pr["signoff"]`).
+  follow-up wait with no timeout); review HOLD (a permission/trust prompt
+  ends the loop with verdict `HOLD`, runtime `review-loop` `failed`);
+  merge-window INPUT_REQUIRED (`app._merge_input_required_prs`);
+  wait-for-merge hold (`_maybe_auto_merge` → `auto_start.merge_hold`,
+  derived from the auto-start targets; released when a target is removed
+  or auto-start is turned off); `spec_pending` (project.yaml,
+  `{phase, generated_at}`); held QA run (a run that aggregates to
+  INPUT_REQUIRED while scenarios wait for input blocks in
+  `_hold_for_follow_up` until a follow-up verdict reopens it); a scenario
+  waiting for input inside a live run (`state.waiting_for_input`); QA
+  INPUT_REQUIRED after the run (runtime `qa` `done` + verdict, also the
+  auto-start QA relaunch hold `QA_HOLD_VERDICTS`); sign-off BLOCKED
+  (`pr["signoff"]`).
 - **PR actions pane** — fzf popup `pm _popup-picker` in
   `pm_core/cli/session.py` built from module tables `_ALL_ACTIONS`,
   `_LIST_ACTIONS`, `_SHORTCUT_KEYS` (local), `_actions_for_status` (returns
@@ -54,7 +82,11 @@
 ## 1. Requirements (grounded)
 
 R1. **Durable per-PR action journal** — new `pm_core/action_history.py`.
-Append-only JSONL at `pm_home()/history/{pr_id}.jsonl`; one JSON object per
+Append-only JSONL at `pm_home()/history/{pm-session}/{pr_id}.jsonl` — per
+pm session like the runtime mirror (`runtime_state._scope()`; two clones
+of one project share `~/.pm` and PR ids, and each clone's history is its
+own), `pm_home()/history/{pr_id}.jsonl` outside any session; the
+owner-lock dir `history/owners` stays shared.  One JSON object per
 line, written with `O_APPEND` under `flock(LOCK_EX)` so concurrent writers
 (TUI main thread, loop threads, `qa-run-bg`, CLI) never interleave or lose
 lines. Each event carries `v`, `ts` (ISO), `t` (epoch float from the
@@ -115,23 +147,42 @@ existing flock* so concurrent writers agree on one attempt:
   `attempt_id` field and an `owner` token (R1 `owner`) on in-flight
   entries; `set_action_state` behaviour/return value unchanged.
   `sweep_stale_states` leaves in-flight entries whose `owner` is another
-  live process image alone (several projects' TUIs and CLI drivers share
-  one `~/.pm/runtime`), and the TUI's QA resume scan skips
-  `qa_resume.json` snapshots written under another session tag.
+  live process image alone (CLI drivers and other TUIs can share a
+  runtime dir); master's `pr_ids`/`keep` sweep filters still apply.  The
+  QA resume scan uses master's rules (another project's PR ids are skipped,
+  S39; a run orphaned in another clone of this project is adopted, S41);
+  this PR adds no session-tag filter of its own there.  The launch-lease
+  helpers (`claim_action_lease`, `_locked_action_mutate`) write the entry
+  without journaling: a lease claim never starts or ends an attempt.
 
 R4. **Review-loop iterations** (`pm_core/review_loop.py`): each iteration
 is a child attempt (`action="review-loop"`, `iteration=N`, `loop_id`,
-`transcript`) with phases `launching` (before `_launch_review_window`),
-`agent` (pane found, polling), `verdict` (verdict extracted → callbacks /
-next-launch decision), `waiting_human` (INPUT_REQUIRED follow-up wait;
-also an indefinite `review-input-required` hold timer). Verdict grace is a
-`gate` timer (20 s) armed when polling starts and cleared when the poll
-returns. Iteration ends: verdict → `done` with verdict; `PaneKilledError`
-→ `vanished`; other exceptions → `failed`; stop requested → `cancelled`.
-Adopted in-flight iterations (`_adopt_in_flight_review`) start with
-`adopted=true`. The loop-level attempt comes from R3 (`_start_loop` →
-running, `_on_complete_from_thread` → done/failed, with
-`history_outcome="cancelled"` when `stop_requested`).
+`transcript`), started by `run_review_loop_sync` before
+`_run_iteration_with_retry` and kept on the state as `_history_attempt`
+(never persisted in the breadcrumb).  Phases: `launching` (before each
+`_launch_review_window`, detail "launch attempt k/3"), `queued` (waiting
+for another loop's launch lease), `backoff` (between failed launch
+attempts — a `fires` timer `review-launch-retry:<attempt>` armed for the
+backoff, cleared `fired`, or `cancelled` when a stop/PR close cuts the
+sleep short; a restart inside a backoff journals the remainder the same
+way), `agent` (pane found and polling, or an adopted pane), `verdict`
+(verdict extracted → callbacks / next-launch decision), `waiting_human`
+(INPUT_REQUIRED follow-up wait; also an indefinite `review-input-required`
+hold timer).  Verdict grace is a `gate` timer (20 s) armed when a launched
+pane's polling starts and cleared when the poll returns (an adopted pane
+is polled without a grace, so none is armed).  Iteration ends: verdict →
+`done` with verdict; `PaneKilledError` → `vanished` (`cancelled` when the
+loop was stopped); `ReviewClosedError` → `cancelled` `CLOSED`;
+`ReviewHoldError` → `failed` `HOLD`; `ReviewLaunchError` → `failed`
+`LAUNCH_FAILED` (`superseded` when another loop owns the launch); other
+exceptions → `failed` `ERROR`.  Adopted in-flight iterations
+(`_adopt_in_flight_review`) start with `adopted=true`.  The loop-level
+attempt comes from R3 (`_start_loop` → running, `_on_complete_from_thread`
+→ done/failed, with `history_outcome="cancelled"` when `stop_requested`
+or the verdict is `CLOSED`).  The auto-start re-arm cooldown after a
+retryable `LAUNCH_FAILED` is a `fires` timer `review-launch-rearm:<pr>`
+(owner: the TUI process), armed with the TUI timer and cleared `fired`
+when it runs.
 
 R5. **QA** (`pm_core/qa_loop.py`):
   - `run_qa_sync` / `resume_qa_sync` wrapped: QA run attempt
@@ -163,6 +214,22 @@ R5. **QA** (`pm_core/qa_loop.py`):
     `failed`.
   - Shared scenario verdict grace: `gate` timer armed at every
     `grace_start` assignment (id `qa-grace:<loop_id>`, re-arm replaces).
+  - Input waits and held runs (master #271): the observer belongs to the
+    run (`state._history_observer`), not to one `_poll_tmux_verdicts`
+    call.  A scenario in `state.waiting_for_input` is in a `waiting_human`
+    phase ("INPUT_REQUIRED; waiting for input in the worker pane"); it
+    stays open when the poll loop exits for the hold, and the reopened
+    poll ends it with its follow-up verdict (or hands it back to the retry
+    path).  When the run ends while it still waits it ends `done
+    INPUT_REQUIRED` (`cancelled` on a stop).  A run held at INPUT_REQUIRED
+    (`_execute_and_finalize` → `_hold_for_follow_up`) moves the run
+    attempt to `waiting_human` and arms an indefinite hold
+    `qa-input-hold:<loop_id>` ("QA INPUT_REQUIRED hold (scenario(s) …)"),
+    cleared `released` when a follow-up reopens the run or the hold ends,
+    `cancelled` on a stop; the reopened run goes back to `agent`
+    ("collecting the follow-up after the INPUT_REQUIRED wait").  A
+    resumed held run starts a new run attempt whose waiting scenarios
+    start in `waiting_human`.
   - The observer only reads values; it never mutates loop state.
 
 R6. **Sign-off** (`pm_core/tui/signoff_ui.py`): router launch attempt
@@ -174,16 +241,20 @@ throttle is a `gate` timer (60 s) armed at launch, cleared when
 `_launched_at().pop(pr_id)` runs.
 
 R7. **Holds** (indefinite timers, `due_t = null`, no countdown):
-  - review INPUT_REQUIRED (R4), merge-window INPUT_REQUIRED
-    (`_handle_merge_input_required`, only on first detection; released in
-    `_finalize_detected_merge`), auto-merge hold (`_maybe_auto_merge`
-    hold branch; released when a merge attempt runs, the PR merges, or a
-    new sign-off router run starts — `superseded`, since the earlier
-    SIGNOFF_MERGE no longer covers HEAD).
+  - review INPUT_REQUIRED (R4), held QA run (R5), merge-window
+    INPUT_REQUIRED (`_handle_merge_input_required`, only on first
+    detection; released in `_finalize_detected_merge`), wait-for-merge
+    hold (`_maybe_auto_merge` hold branch, "manual merge hold
+    (wait-for-merge: <targets>)"; released when a merge attempt runs, the
+    PR merges, auto-start drops the wait target that held it or is turned
+    off (`auto_start._release_hold_journal`), or a new sign-off router run
+    starts — `superseded`, since the earlier SIGNOFF_MERGE no longer
+    covers HEAD).
   - Derived at query time, not journaled: `spec_pending` (project.yaml,
     armed at `generated_at`), QA INPUT_REQUIRED (runtime `qa` done +
-    INPUT_REQUIRED), sign-off BLOCKED (`pr["signoff"].verdict ==
-    SIGNOFF_BLOCKED`).
+    INPUT_REQUIRED, unless a journaled QA hold is active), review HOLD
+    (runtime `review-loop` `failed` + `HOLD`), sign-off BLOCKED
+    (`pr["signoff"].verdict == SIGNOFF_BLOCKED`).
 
 R8. **One query/presentation model** — new `pm_core/history_query.py`:
 `build_history(pr_id, *, pr=None, now=None, live=True) -> dict` (schema
@@ -264,9 +335,14 @@ shortcut `H`, cli `pr history {pr_id}`, available for every status
 including merged/closed, `query` = `history_query.build_history`, `render`
 = `history_query.render_text`). The picker (`session.py`) adds a
 `history` row from the catalog for every PR (including merged/closed — a
-terminal PR shows only History instead of "No actions available"), binds
-`H`, and dispatches view actions in-process: render the same model and show
-it in `less -R` inside the popup (fallback: echo + `_wait_dismiss`). The
+terminal PR shows its title row and History instead of master's
+"No actions — PR is merged." notice, and its header advertises and accepts
+only `H`, no `z` chords), binds `H`, and dispatches view actions
+in-process (`view:<key> <pr>` route in `_run_picker_command`, after
+master's `_still_has_action` refresh check): render the same model at the
+popup width and show it in `less -R` inside the popup (fallback: echo +
+`_wait_dismiss`).  The PR record is read from `PM_PROJECT` (the root the
+picker exports), else the session's persisted root.  The
 badge for the History row is a compact summary (`hold: …`, `overdue: …`,
 `review-loop i3: turn done, 8s left`, `N runs`, `no history`).
 pr-72c8695 will move the session actions into this same module.
@@ -335,8 +411,11 @@ attempt rows uninterpreted (omitted when absent).
 
 ## 3. Ambiguities (resolved)
 
-- A1. *"Retries"* — there is no review-loop retry; retries = QA scenario
-  relaunches (with backoff), sign-off relaunches, review loop restarts
+- A1. *"Retries"* — QA scenario relaunches (with backoff), review launch
+  retries inside an iteration (master #259: `backoff` phases of the same
+  iteration attempt, since the iteration still yields one verdict), the
+  auto-start re-arm of an exhausted review loop (a new loop attempt after
+  the cooldown timer), sign-off relaunches, review loop restarts
   (superseded), and re-runs of the same action (new attempts).
 - A2. *"Approval waits"* — the human holds in R7; spec approval is derived
   from `spec_pending` (we do not journal spec approvals: approval clears
@@ -413,21 +492,26 @@ attempt rows uninterpreted (omitted when absent).
   pairing them mirrored a phantom "review running" forever (QA S26,
   c4e3f5b0).
 - E12. Cancel latency: `poll_for_verdict` checks the pane at most once a
-  second while it waits for a hook event, and `_run_claude_review`
-  looks the review pane up right after the synchronous launch (the 2 s
-  wait is only a fallback).  Otherwise a `z d` / `pm pr cleanup` that
-  killed the pane was noticed only after the full hook wait (the cancel
-  was journaled late, and a grace cancelled by `z d` read "elapsed"),
-  and a `z d` in the old 2 s gap let the stopped loop adopt the fresh
-  same-named review pane (QA S9, f0041424).
+  second while it waits for a hook event, so a `z d` / `pm pr cleanup`
+  that killed the pane is noticed then, not after the full hook wait (the
+  cancel was journaled late, and a grace cancelled by `z d` read
+  "elapsed").  A stop that lands during `_run_claude_review`'s
+  `_WINDOW_WAIT` raises `PaneKilledError` before any pane lookup, so the
+  stopped loop never adopts the fresh same-named review pane a `z d`
+  opened in that gap (QA S9, f0041424; after the master merge this
+  replaces the earlier "look the pane up before the wait", which master's
+  launch flow — wait, then pick the pane with a session id — rules out).
 - E13. QA resume snapshots: `qa_resume.json` is rewritten right after a
   scenario relaunch and a dequeued launch (not only at the top of each
   poll), verification passes that landed while the poll loop was blocked
   are settled into it first (`_drain_verified`), and a resumed run does
-  not poll scenarios that had already settled (`settled_before`).  A
-  restart in those windows otherwise resumed with a dead pane id or an
-  unverified PASS: duplicate workers past the cap, a second "done" per
-  scenario and re-verification into exited panes (QA S18 6813a7ec, S22
-  d6d0987a).  A follow-up typed into a pane that went away is treated
-  as the pane being gone (`_send_followup`), not an error out of the
-  poll loop.
+  not poll scenarios that had already settled.  A restart in those
+  windows otherwise resumed with a dead pane id or an unverified PASS:
+  duplicate workers past the cap, a second "done" per scenario and
+  re-verification into exited panes (QA S18 6813a7ec, S22 d6d0987a).
+  After the master merge, master's own fixes cover part of this: the
+  snapshot after a relaunch (S43), `_needs_polling` (settled scenarios
+  are not re-polled; the observer's `settled_before` is derived from it)
+  and `_send_submitted` (a follow-up into a vanished pane is the pane
+  being gone).  This PR keeps the snapshot after a dequeued launch and
+  `_drain_verified`, which master does not have.

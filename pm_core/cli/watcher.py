@@ -9,6 +9,10 @@ Provides ``pm watcher`` as a command group with subcommands:
 
 Internal mode (``pm watcher --iteration N``) creates a single tmux
 window for the given iteration (called by the watcher loop engine).
+
+A watcher started outside the TUI has no auto-start targets, so the
+auto-start watcher is observation-only: it reports issues instead of
+fixing them.  Targets are owned by the running TUI (``pm autostart add``).
 """
 
 import secrets
@@ -146,7 +150,8 @@ def watcher_start(watcher_type: str, wait: int | None):
 
     \b
     Available types:
-      auto-start             Monitor auto-start sessions for issues (default)
+      auto-start             Monitor auto-start sessions for issues (default;
+                             observation-only when started from the CLI)
       bug-fix-impl           Drive the bug-fix flow (auto-merge on PASS)
       discovery              Schedule regression tests and reconcile filings
       improvement-fix-impl   Drive plan=ux PRs through auto-sequence (gated at QA PASS)
@@ -368,6 +373,7 @@ def _create_watcher_window(iteration: int, loop_id: str,
     from pm_core.model_config import resolve_model_and_provider
     _resolution = resolve_model_and_provider("watcher", project_data=data)
 
+    env: dict[str, str] = {}
     claude_cmd = build_claude_shell_cmd(
         prompt=watcher_prompt,
         transcript=transcript,
@@ -376,6 +382,7 @@ def _create_watcher_window(iteration: int, loop_id: str,
         provider=_resolution.provider,
         effort=_resolution.effort,
         session_type="watcher",
+        env_out=env,
     )
 
     # Kill existing watcher window and recreate (fresh each iteration).
@@ -403,7 +410,7 @@ def _create_watcher_window(iteration: int, loop_id: str,
     try:
         tmux_mod.new_window_get_pane(
             pm_session, window_name, claude_cmd, repo_dir,
-            switch=False,
+            switch=False, env=env,
         )
         new_win = tmux_mod.find_window_by_name(pm_session, window_name)
         _log.info("_create_watcher_window: new window created: %s", new_win)

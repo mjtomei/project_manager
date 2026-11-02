@@ -198,7 +198,41 @@ class TestPullRebase:
     def test_calls_pull_rebase(self, mock_rg):
         mock_rg.return_value = MagicMock(returncode=0)
         pull_rebase(Path("/tmp"))
-        mock_rg.assert_called_once_with("pull", "--rebase", cwd=Path("/tmp"), check=False)
+        mock_rg.assert_called_once_with("pull", "--rebase=merges", cwd=Path("/tmp"), check=False)
+
+    def test_keeps_unpushed_merge(self, tmp_path):
+        """An unpushed merge of the base into the branch survives the pull
+        (a plain --rebase replays the base commits onto the branch)."""
+        import subprocess
+
+        def git(cwd, *args):
+            return subprocess.run(
+                ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                cwd=cwd, check=True, capture_output=True, text=True,
+            ).stdout.strip()
+
+        up = tmp_path / "up"
+        up.mkdir()
+        git(up, "init", "-q", "-b", "master")
+        (up / "a").write_text("a")
+        git(up, "add", ".")
+        git(up, "commit", "-qm", "init")
+        wd = tmp_path / "wd"
+        git(tmp_path, "clone", "-q", str(up), str(wd))
+        git(wd, "checkout", "-qb", "pr")
+        (wd / "p").write_text("p")
+        git(wd, "add", ".")
+        git(wd, "commit", "-qm", "pr")
+        git(wd, "push", "-qu", "origin", "pr")
+        (up / "b").write_text("b")
+        git(up, "add", ".")
+        git(up, "commit", "-qm", "base moved")
+        git(wd, "fetch", "-q", "origin", "master")
+        git(wd, "merge", "-q", "--no-ff", "-m", "integrate", "origin/master")
+        merge = git(wd, "rev-parse", "HEAD")
+
+        assert pull_rebase(wd).returncode == 0
+        assert git(wd, "rev-parse", "HEAD") == merge
 
 
 # ---------------------------------------------------------------------------
