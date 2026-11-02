@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T10:19:22.758463+00:00'
+  updated_at: '2026-11-02T10:32:21.227486+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25972,6 +25972,22 @@ prs:
       A pm session on a /scratch project ran no guide pane here.'
     created_at: '2026-11-02T10:19:22Z'
     last_edited: '2026-11-02T10:19:22Z'
+  - id: note-c10715d
+    text: 'QA S25 (2026-11-02): PASS at 41c71fa0 (pm_core = merged 7518aa8a), all
+      4 stories live from /scratch/s25 (device differs from ~/.pm), no fix. Library:
+      Regression Tests (0), retired + path-like ids refused by regression/launch (empty-library
+      message) and show/standalone/run/debug (rc 1), no launch; 3 recovered blobs
+      match the inventory, the c1fcecc5 clone lists 20; docs/help have no CAUTION
+      and cover every required point. Host run from a shell exporting bogus PM_PROJECT/PM_SESSION/TMUX/TMUX_PANE/PM_POPUP_SESSION/PM_IN_TMUX_SESSION/PM_SHARE_MODE=global:
+      stand-in saw all 7 unset with PM_TMUX_SOCKET kept, copied clone (links 1), push
+      blocked rc 128, refs unchanged; captures under the share-mode tag proj-7c2dc5ce.
+      The -C filing reached the user TUI in 0.1 s with one reload line; a plain clone
+      pm pr add stayed in the clone (second, harmless fallback reload). --branch alt/--session/--file-bugs
+      and all failure cases matched; no new workdir/captures/session dir after failures.
+      Rig trap: pm/qa/mocks is recreated by pm qa mocks list too (pr-8984bc7 covers
+      it). Captures: /pm-captures/scenarios/25/.'
+    created_at: '2026-11-02T10:32:21Z'
+    last_edited: '2026-11-02T10:32:21Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
