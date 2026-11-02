@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T15:18:23.905956+00:00'
+  updated_at: '2026-11-02T15:44:34.836851+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40260,6 +40260,28 @@ prs:
       form. Evidence: /pm-captures/pr-8020495/s68-refiner.'
     created_at: '2026-11-02T15:18:23Z'
     last_edited: '2026-11-02T15:18:23Z'
+  - id: note-fb7023f
+    text: 'QA S68 (2026-11-02) INPUT_REQUIRED on 38d5baad5 (app f5d778bf3), no code
+      edits; captures /pm-captures/scenarios/68 (README). Stories 1, 2, 4 and 5 held
+      literally, and so did every story-3 Then except one. (1) F honest-empty text/JSON/popup,
+      pr-deadbee rc 1, spec_pending derived hold. T after pm pr close --remove: `History
+      — <T>` with no status, title or milestones; rows kept; start untracked at the
+      next tick; 52 reads clean. (2) 46 reads clean, 3 allowed review=idle transients,
+      [review: working] -> [1 run]. (4) 1e20: TUI alive, [start: working]; restore
+      -> turn done. "abc" / [1, 2, 3]: TUI exits at pane_idle.py:167 (pr-28b84d4,
+      pre-filed). History reads rc 0 and honest (interrupted owner-exited, then swept;
+      C has no runtime line). (5) base + (a)-(d): same verdicts and status sequence,
+      (a)-(d) honest-empty, journal.exists F/F/F/T(0), 0 Tracebacks. Story 3: no damaged
+      id, timer 42 or events change; exactly one ? row; Waiting for follows i2 and
+      never ? while the loop is open; fragment followed by a pm timer_clear line;
+      pager == CLI. Open item: in 3/3 runs (main + 2 fresh re-runs), one loop-open
+      read showed `review-loop i2: agent turn finished at T (idle Ns); no verdict
+      accepted yet — waiting for the next turn`, which the Then omits. This is the
+      S49/S63 post-grace state: the i2 verdict is accepted +0.89/+0.90/+1.10 s after
+      the grace due, at the next fake idle. Next S68-style plan: allow that form among
+      the loop-open Waiting-for forms.'
+    created_at: '2026-11-02T15:44:34Z'
+    last_edited: '2026-11-02T15:44:34Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
