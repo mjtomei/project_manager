@@ -1827,7 +1827,7 @@ pm pr list --plan improvements
 For each newly-filed PR:
 - Skim title + description against existing open PRs in the same plan.
 - If it duplicates an open PR, merge useful detail into the existing one with
-  `pm pr note <existing-id> '<additional context>'` and close the duplicate
+  `pm pr note add <existing-id> '<additional context>'` and close the duplicate
   via the standard pm flow. Record the dedup decision in the work log.
 - If it is genuinely new, leave it.
 
