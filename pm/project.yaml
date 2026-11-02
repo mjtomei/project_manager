@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T00:29:20.465625+00:00'
+  updated_at: '2026-11-02T00:43:31.176470+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25336,6 +25336,23 @@ prs:
       (6) the watcher kills and recreates the discovery window every tick.'
     created_at: '2026-11-02T00:29:20Z'
     last_edited: '2026-11-02T00:29:20Z'
+  - id: note-5d7ed83
+    text: 'QA S6 refiner (2026-11-02): all 5 stories held live at 795722d4 (project
+      in /scratch, private PM_TMUX_SOCKET, fake {"qa_regression": {}}). 3 runs started
+      in one second got distinct ids/workdirs/captures; 3 concurrent registry filings
+      all landed, no project.yaml.tmp; a test pm session started from a run''s scratch
+      left the user''s windows/panes/pane-registry byte-identical; --branch no-such-branch
+      removed only its own workdir (path is in the git clone error); two container
+      runs got distinct containers, own /pm-captures, and each was removed ~10 s after
+      its own Ctrl-C. Traps: a slim QA image needs ENV PATH=/home/pm/.local/bin:...
+      (else ''env: fake-claude: No such file or directory'' and the TUI pane closes
+      at once) plus a uid-1000 pm user; the TUI''s qa-item dedup allows one TUI-launched
+      run at a time, so start the others from CLI shells; filing from a clone of a
+      project with a local bare origin prints a benign ''PM repo targets <origin.git>
+      but you''re in a repo with remote <proj>'' warning (resolve_real_origin keeps
+      the local origin).'
+    created_at: '2026-11-02T00:43:31Z'
+    last_edited: '2026-11-02T00:43:31Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
