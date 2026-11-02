@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T07:25:21.124484+00:00'
+  updated_at: '2026-11-02T07:28:54.926324+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25820,6 +25820,20 @@ prs:
       in proj. Helpers: /pm-captures/scenarios/21/refiner-helpers.'
     created_at: '2026-11-02T07:25:21Z'
     last_edited: '2026-11-02T07:25:21Z'
+  - id: note-43dddfa
+    text: 'QA S20 (2026-11-02): PASS at 87a2c327, no fix. All 5 plain multi-project
+      stories (R38/A13/E21/E22) held live on /scratch/s20, with a private socket and
+      alpha sorting first. Outside a session, -C and PM_PROJECT filings reloaded only
+      the named project TUI, in the same second and without r, and tui view/send hit
+      it even from alpha cwd. Inside alpha session, -C beta reloaded alpha and tui
+      view named alpha (A13). With beta TUI stopped, the add reloaded nothing and
+      removed the stale pidfile, and tui view gave "No TUI pane found" rc 1. A no-session
+      project fell back to alpha (E21). Relative, trailing-slash and symlinked -C
+      all found beta (E22). Capture note: with a recorder client attached to the base
+      session, the in-session tui view header names pm-alpha-<h>, not ~1. Zombies
+      7 before and after (reaper). Captures: /pm-captures/scenarios/20/.'
+    created_at: '2026-11-02T07:28:54Z'
+    last_edited: '2026-11-02T07:28:54Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
