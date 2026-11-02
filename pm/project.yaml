@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-02T06:13:29.038487+00:00'
+  updated_at: '2026-11-02T06:35:37.192922+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48416,6 +48416,20 @@ prs:
       window creation. Captures: /pm-captures/scenarios/68/.'
     created_at: '2026-11-02T06:13:28Z'
     last_edited: '2026-11-02T06:13:28Z'
+  - id: note-6006951
+    text: 'QA scenario 69 (GitHub backend + hand-edited base_branch mapping/int; non-object-name
+      approvals; two concurrent syncs) PASS at b43f3813 — no code change. All three
+      stories held live on a fake-github project: draft PR #1 base "master" (not the
+      mapping), pm prompt "Pull the latest `master`" with no bad/no git diff line
+      (int 7 too), review prompt `git diff origin/master...HEAD`, diff pane clean;
+      two barrier-released simultaneous pm pr sync runs (overlapping 06:32:59.22-.44)
+      each rc 0 + stderr WARNING, but one note + one merge_integrity on P, twin silent;
+      Q base_sha "--output=<scratch>/leak.txt" and R sha "HEAD" read as absent: --propagation-only
+      R + sync Q rc 0, no WARNING/verif, no notes, no leak.txt*. Captures /pm-captures/scenarios/69.
+      Harness: split sync streams + a go-file barrier keep asciinema startup jitter
+      from serialising the two operators.'
+    created_at: '2026-11-02T06:35:37Z'
+    last_edited: '2026-11-02T06:35:37Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
