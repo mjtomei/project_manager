@@ -273,6 +273,69 @@ def test_one_sided_reorder_is_preserved():
     assert merged.index("id: pr-2") < merged.index("id: pr-1")
 
 
+def _prs_doc(*ids: str) -> str:
+    return "project:\n  name: p\nprs:\n" + "".join(
+        f"- id: {i}\n  status: pending\n" for i in ids)
+
+
+def _merged_ids(base: str, ours: str, theirs: str) -> list[str]:
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is not None, details
+    return [p["id"] for p in yaml.safe_load(merged)["prs"]]
+
+
+def test_an_addition_keeps_the_position_its_side_gave_it():
+    """A record the base inserted mid-list stays there, not at the end.
+
+    This repository's GitHub merges insert records mid-list.  Appending every
+    addition moved such a record to the end of the PR branch's list, so the
+    branch's order of the shared records drifted from the base's.
+    """
+    base = _prs_doc("pr-1", "pr-2", "pr-3")
+    ours = _prs_doc("pr-1", "pr-2", "pr-3", "pr-9")
+    theirs = _prs_doc("pr-0", "pr-1", "pr-5", "pr-2", "pr-3")
+    assert _merged_ids(base, ours, theirs) == [
+        "pr-0", "pr-1", "pr-5", "pr-2", "pr-3", "pr-9"]
+    # The PR branch's mid-list insertion keeps its place too.
+    ours_mid = _prs_doc("pr-1", "pr-2", "pr-7", "pr-3")
+    assert _merged_ids(base, ours_mid, theirs) == [
+        "pr-0", "pr-1", "pr-5", "pr-2", "pr-7", "pr-3"]
+    # Both sides adding after the same record: a fixed, PR-first order.
+    theirs_same_anchor = _prs_doc("pr-1", "pr-2", "pr-8", "pr-3")
+    assert _merged_ids(base, ours_mid, theirs_same_anchor) == [
+        "pr-1", "pr-2", "pr-7", "pr-8", "pr-3"]
+    # Plain appends on both sides merge exactly as before (#250).
+    theirs_append = _prs_doc("pr-1", "pr-2", "pr-3", "pr-4")
+    assert _merged_ids(base, ours, theirs_append) == [
+        "pr-1", "pr-2", "pr-3", "pr-9", "pr-4"]
+    # A record one side deleted is no anchor: the other side's addition after
+    # it follows the record before it.
+    ours_deleted = _prs_doc("pr-1", "pr-3")
+    theirs_after_deleted = _prs_doc("pr-1", "pr-2", "pr-6", "pr-3")
+    assert _merged_ids(base, ours_deleted, theirs_after_deleted) == [
+        "pr-1", "pr-6", "pr-3"]
+
+
+def test_a_later_base_reorder_still_resolves_after_a_mid_list_insertion():
+    """The drift appending caused turned the next integration into a refusal.
+
+    The branch took a base that inserted a record mid-list; the base then
+    reordered records on its own (a one-sided change).  With the insertion
+    appended, the branch's order of the shared records differed from the
+    base's, so the next integration saw *both* sides reordered and refused —
+    the "both sides reordered records differently" refusal this repository's
+    own registry hit.
+    """
+    base0 = _prs_doc("pr-1", "pr-2", "pr-3")
+    branch0 = _prs_doc("pr-1", "pr-2", "pr-3", "pr-9")
+    base1 = _prs_doc("pr-1", "pr-5", "pr-2", "pr-3")
+    merged, details = integration.resolve_project_yaml(base0, branch0, base1)
+    assert merged is not None, details
+    base2 = _prs_doc("pr-1", "pr-5", "pr-3", "pr-2")    # the base reorders
+    assert _merged_ids(base1, merged, base2) == [
+        "pr-1", "pr-5", "pr-3", "pr-2", "pr-9"]
+
+
 def test_id_list_absent_from_the_base_merges_like_an_empty_one():
     """A nested list the merge base never had still merges by record id."""
     base = "project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"

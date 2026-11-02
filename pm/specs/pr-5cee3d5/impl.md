@@ -55,7 +55,16 @@ theirs_text)`:
   makes the list "atomic" (it is then taken wholesale), so a duplicate id
   hiding behind it would otherwise ride into the merged document unnoticed.
   Ordering changes are preserved when only one side reordered; conflicting
-  reorders are a conflict. A list absent from the merge base (a PR record
+  reorders are a conflict. An added record keeps the position its side gave
+  it: it is placed right after every record that precedes it on that side
+  (the furthest of them in the merged order, so a record a side appended
+  stays last even when the other side reordered the shared records; the PR
+  branch's additions first when both sides added after the same record),
+  not unconditionally appended to the end. Appending moved a record the new base had inserted
+  mid-list (this repository's GitHub merges do) to the end of the branch's
+  list, so the branch's order of the shared records drifted from the base's
+  and the next integration refused "both sides reordered" as soon as the base
+  reordered anything. A list absent from the merge base (a PR record
   that never had a `notes` key) merges like an empty one — independent
   additions survive and a same-id/different-content entry is still
   ambiguous.
@@ -698,7 +707,10 @@ tests):
     even when recorded directly, a re-checked record for another HEAD is
     refused, and a concurrent apply that already integrated the base is not
     committed over or reset away.
-12. Resolver safety rails: conflicting reorders, field (scalar-key)
+12. Resolver safety rails (and order fidelity: a record the base inserted
+    mid-list keeps its position, both sides' additions after one record keep
+    a fixed PR-first order, and a later one-sided base reorder of a branch
+    that took such an insertion still resolves): conflicting reorders, field (scalar-key)
     deletion-vs-edit in both directions, a merged document with an invalid
     status or a plan cycle, a nested duplicate id (including one that sits
     beside a hand-edited member which is not a mapping — such a list is taken
@@ -1137,9 +1149,10 @@ tests):
 
 - **Determinism.** The resolver must produce the same bytes at check time and
   at apply/merge time, or the merge gate would refuse every resolved
-  candidate. Hence: fixed merge order (base order, then ours-only additions,
-  then theirs-only additions), pm's serializer, no timestamps in the
-  serialized document.
+  candidate. Hence: fixed merge order (the shared records in the chosen
+  order, each side's additions after the record that precedes them on that
+  side, the PR branch's before the base's at the same anchor), pm's
+  serializer, no timestamps in the serialized document.
 - **Read-only check.** `run_check` must not write the PR worktree, index,
   branch, or base; only the explicit `apply_integration` step does.
 - **Locking.** Resolution worktrees/fetches stay inside `_repo_lock`; the

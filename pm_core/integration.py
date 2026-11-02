@@ -717,12 +717,50 @@ def _merge_id_list(base: list, ours: list, theirs: list, path: str,
         t_order if t_order != common else common)
     order = [i for i in order
              if results.get(i) is not _DELETED and i in results]
-    for seq in (ours_seq, theirs_seq):
-        for rec_id in seq:
-            if rec_id in results and results[rec_id] is not _DELETED \
-                    and rec_id not in order:
-                order.append(rec_id)
+    _place_additions(order, results, ours_seq, theirs_seq, t)
     return [results[i] for i in order], []
+
+
+def _place_additions(order: list, results: dict, ours_seq: list,
+                     theirs_seq: list, theirs_ids) -> None:
+    """Insert each side's added records into *order* where that side put them.
+
+    An addition goes right after every record that precedes it on its own
+    side (the furthest of them in the merged order, so a record a side
+    appended stays at the end even when the other side reordered the shared
+    records), not unconditionally at the end of the list.  Appending
+    every addition moved a record the new base had inserted mid-list to the
+    end of the PR branch's list, so the branch's order of the shared records
+    no longer matched the base's.  The *next* integration then saw a reorder
+    on the PR side, and as soon as the base reordered anything itself the
+    resolver refused "both sides reordered records differently" — this
+    repository's own registry hit exactly that (the base's GitHub merges
+    insert records mid-list).  Keeping the base's positions keeps the branch's
+    order equal to the base's, so a later base reorder is taken as one-sided.
+
+    Additions anchored after the same record keep a fixed order (the PR
+    branch's first), so the result is deterministic; plain appends on both
+    sides merge exactly as before (the branch's additions, then the base's).
+    """
+    placed = set(order)
+    for theirs_pass, seq in ((False, ours_seq), (True, theirs_seq)):
+        anchor = -1               # index in *order* the next addition follows
+        for rec_id in seq:
+            if rec_id in placed:
+                # Insertions only land after the anchor, so a kept index stays
+                # valid; the max keeps the addition after *all* predecessors.
+                anchor = max(anchor, order.index(rec_id))
+                continue
+            if results.get(rec_id, _DELETED) is _DELETED:
+                continue
+            pos = anchor + 1
+            if theirs_pass:
+                # The PR branch's additions after the same anchor come first.
+                while pos < len(order) and order[pos] not in theirs_ids:
+                    pos += 1
+            order.insert(pos, rec_id)
+            placed.add(rec_id)
+            anchor = pos
 
 
 def _preservation_problems(base, side, merged, label: str) -> list[str]:
