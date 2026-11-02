@@ -5414,6 +5414,24 @@ prs:
       check the ╔ card before each key.'
     created_at: '2026-11-02T10:08:07Z'
     last_edited: '2026-11-02T10:08:07Z'
+  - id: note-1e285c4
+    text: 'SIGNOFF_IMPL return handled 2026-11-02 at ba34f457 (test-only, pushed).
+      tests/test_cli_helpers.py::TestEnsureWorkdir now has an autouse fixture that
+      points paths.workdirs_base at tmp_path, so no test in the class writes the project
+      workdirs dir, .workdir-pr-001.lock or the fake clone into the real ~/.pm/workdirs.
+      The clone test also asserts the clone lands under that base. Repro before the
+      fix (fresh HOME, class run twice): run 1 passed 5/5, run 2 failed test_clones_and_returns_new_workdir
+      with "Not cloning pr-001: its workdir names ... are taken by directories that
+      aren''t its clone". After the fix: 5/5 on three runs in a fresh HOME, and 5/5
+      twice in the HOME holding the old leftover. Full suite run twice in one fresh
+      HOME (env -u PM_HOST_HOME PATH=/usr/bin:/bin, pytest 8.4.2 + markdown): 5729
+      passed, 1 skipped both times (446 s / 454 s), 0 failed. Run 2 added only .pm/debug
+      logs and .pm/run env files, nothing under workdirs/. Older tests still leave
+      an empty workdirs/test-project dir and .signoff-step-*/.merge-* lock files in
+      HOME. They predate this PR and don''t fail on rerun, so they''re left alone.
+      No production code changed since dcb8c0d2; master is still 6728fc22.'
+    created_at: '2026-11-02T17:17:45Z'
+    last_edited: '2026-11-02T17:17:45Z'
   model: provider:claude-main-xhigh-pm
   effort: high
 - id: pr-0778fbe
