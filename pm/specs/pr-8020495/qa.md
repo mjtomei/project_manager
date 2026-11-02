@@ -19,6 +19,15 @@ picker notice row, and master's follow-up baseline (pr-8efa789), which makes
 the review INPUT_REQUIRED hold last until the user acts even with
 fake-claude.*
 
+*Re-synced 2026-11-02 (head d8ad5502) with the fixes from QA run
+3ee307f1 (S49-S55) and review 935d: 2d8a84f7 (a LAUNCH_FAILED row keeps
+its `(artifact: <path>)` whole, R16), 626b1240 (waiting_human spans are
+not execution in a run's scenario summary; no stale derived QA hold while
+a new run is open, R5/R12/R17), 439b5927 + b0cfe591 (an impl start a loop
+takes over before the first impl-idle tick is journaled once, E10; a
+journal line without an `action` field renders `?`, E3). R17's
+leave-qa timing corrected to the held run's 60 s status check.*
+
 ## 1. Requirements
 
 ### Nominal history
@@ -71,7 +80,9 @@ fake-claude.*
   (verified)" line, after the shared 30 s verdict grace), and the run shows a scenario summary with
   scenario count, a wall-clock figure (union of execution intervals) and a
   sum labelled "not wall-clock"; the run's elapsed time is never the sum of
-  scenario times.
+  scenario times. Execution intervals leave out every wait span
+  (`queued`, `backoff`, `waiting_human`) wherever it falls, so "up to N
+  at once" never exceeds the concurrency cap (626b1240).
 - **R6 — queued and retried scenarios.** Given a QA concurrency cap lower
   than the scenario count, when history is viewed, then waiting scenarios show
   a `queued` phase counted as wait, then `launching` while the worker is
@@ -110,6 +121,10 @@ fake-claude.*
   that armed it has exited or was killed before the history is read (never
   `lost (owner process exited)` on a merged/closed PR). A stale
   spec-awaiting-approval flag on a merged/closed PR is not shown as a hold.
+  A closed PR's badge depends on whether the TUI's 5 s impl-idle tick fell
+  inside the last loop: the impl `start` either stays tracked
+  (`start: turn done`) or ended untracked (`N runs`); both are correct
+  (QA S51 re-run).
 - **R10 — sign-off router and throttle.** Given auto-start drives a PR into
   sign-off, when the router launches, then history shows a
   `signoff router` attempt and a 60 s relaunch-throttle timer (gate, id
@@ -152,7 +167,10 @@ fake-claude.*
 - **R12 — derived holds.** Given a PR with a spec awaiting approval, QA
   ended INPUT_REQUIRED while status is `qa`, or sign-off BLOCKED, then a
   corresponding hold is shown without countdown even though nothing was
-  journaled. The derived QA hold appears only once the run is over. A
+  journaled. The derived QA hold appears only once the run is over, and
+  it disappears again as soon as a fresh QA run attempt opens (the
+  runtime keeps the old `done INPUT_REQUIRED` until the new run's
+  scenarios launch; 626b1240). A
   held run (R17) journals its own hold, and the PR never lists both. A
   review loop ended `HOLD` at a permission/trust prompt (runtime
   `review-loop` `failed` + `HOLD`) is also a derived hold: the iteration
@@ -187,7 +205,8 @@ fake-claude.*
   armed/due/remaining falling, and is then listed `fired`. A launch that
   succeeds on a retry continues the same iteration to its verdict. After
   three failures the iteration ends `failed LAUNCH_FAILED` and so does the
-  loop. A manual loop (`zz d`) stops there. An auto-start target instead
+  loop; its detail keeps the trailing `(artifact: <path>)` whole even
+  when the error text is clipped (2d8a84f7). A manual loop (`zz d`) stops there. An auto-start target instead
   gets a `fires` timer "review launch re-arm cooldown (auto-start)"
   (60 s, expected "auto-start pass re-arms the review loop"), listed
   `fired` when it runs. The re-armed loop is a new loop attempt. A stop
@@ -215,9 +234,13 @@ fake-claude.*
   INPUT_REQUIRED wait"), the scenario is relaunched as `qa sN retry 1`
   (relaunch backoff timer) and the run ends with the new verdict. Stopping
   QA while held ends the hold `cancelled` and the waiting scenario
-  `cancelled`. Moving the PR out of `qa` while held ends the hold within
-  a few seconds; the run is then over and the scenario ends
-  `done INPUT_REQUIRED`. A held run resumed after a TUI restart is a new
+  `cancelled`. Moving the PR out of `qa` while held ends the hold at the
+  held run's next status check, which runs every 60 s counted from when
+  the hold armed (master `_HOLD_STATUS_CHECK_TICKS` = 12 × 5 s), so up to
+  60 s later; the run is then over and the scenario ends
+  `done INPUT_REQUIRED`. While held, the run's scenario summary keeps the
+  same wall/sum figures and never reads more than the cap at once
+  (626b1240). A held run resumed after a TUI restart is a new
   run attempt `(resumed)` whose waiting scenario starts in
   `waiting_human`. The new run re-arms the same hold id, so the old entry
   reads `re-armed`, not `lost`.
@@ -320,7 +343,9 @@ fake-claude.*
   the popup badge/pager and sign-off routing (which looks up the newest
   open router attempt in the journal) keep working. A parseable line whose
   time fields are not numbers (e.g. `"t": "abc"`) is skipped like a
-  garbage line, never a traceback (78c6edcd).
+  garbage line, never a traceback (78c6edcd). A parseable line with no
+  `action` field renders as a `?` row, never a traceback in the CLI or
+  the popup badge (b0cfe591).
 - **E4 — instrumentation must not change execution.** Given the history
   directory is unwritable (or the journal file is a directory), when the
   user runs a review loop / QA run, then the loop reaches the same verdicts
@@ -367,6 +392,14 @@ fake-claude.*
   "start untracked" row per review loop. In `--json` the kept attempt
   lists the folded ids as `merged_ids`, so the runtime mirror's
   `attempt_id` for `start` always resolves to an attempt (b29bcdfa).
+  A loop started within the first ~5 s impl-idle tick after TUI `s`
+  (before PM registered the impl pane) still gives the session one
+  `start` row: it is journaled once as `untracked` while the loop runs,
+  shows after `pm pr cleanup --resources`, and the post-loop re-track
+  folds into it (439b5927). It is dated at the tick, so it may sort just
+  above that loop. The note is observational only: idle detection and
+  auto-start behave as before. A CLI `pm pr start` passes no transcript
+  and is never journaled.
 - **E10b — command-bar review.** A review started by typing
   `/pr review <pr>` in the TUI command bar is tracked and journaled like
   one started with `d` (76742637); history never says "No recorded
