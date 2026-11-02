@@ -51452,3 +51452,60 @@ prs:
     signoff: provider:claude-work-xhigh-249
     merge: provider:deepseek-flash
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-049649a-remove-all-pr-autostart-and-fail-clo-registered-20261027
+- id: pr-5f30bdf
+  plan: improvements
+  title: 'Hardening after #249: providers.yaml lock timeout + set-default re-check
+    under lock; model popup textual>=2 pin'
+  branch: pm/pr-5f30bdf-hardening-after-249-providers-yaml-lock-timeout-se
+  status: pending
+  depends_on: []
+  description: 'Found at sign-off of #249 (pr-592e4bd), HEAD 49bbc7e4; non-blocking.
+    (1) pm provider default X racing pm provider remove X: cli/provider.py ~417 validates
+    the name outside the providers.yaml lock, then providers.set_default_provider
+    writes default: X after remove deleted X — re-check the name inside the locked
+    update. (2) providers.py ~566-580: the flock has no timeout (a stuck holder blocks
+    every edit forever) and an unwritable ~/.pm raises a traceback instead of one
+    Error: line. (3) tui/model_screen.py ~194 imports textual.markup.to_content, which
+    exists only in textual 2.x+, while pyproject.toml declares textual>=0.40 — on
+    an older install opening the TUI o popup raises ImportError; pin textual>=2 or
+    guard the import.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T02:46:55.100157+00:00'
+  updated_at: '2026-11-02T02:24:48.894904+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-dd6ad69
+    text: 'User approved starting this bounded provider-hardening PR. Confirm and
+      fix the current providers.yaml unbounded flock, actionable errors for unwritable
+      state, and set-default/remove race by rechecking provider existence under the
+      same lock. Preserve merged credential-file 0600 and atomic-save protections.
+      Reconcile the Textual to_content import with the supported dependency floor
+      or safe compatibility path; validate against the actual relevant API. #283 has
+      nearby reasoning/model configuration changes: preserve its interfaces and integrate
+      it if merged, without taking over its scope. Use isolated HOME/PM settings and
+      synthetic data; never mutate real provider credentials/settings in tests. No
+      additional hard prerequisite was identified.
+
+
+      Routing authorized 2026-11-02: use DeepSeek Flash 1017/high for implementation,
+      review, QA and helpers because the current main-account usage pace approaches
+      exhaustion tomorrow morning; retain MAIN-account Opus5.5/xhigh for sign-off.
+      This overrides the earlier proposed all-main routing for this PR only. Start
+      from current master and leave ordinary implementation handoff/review/QA to PM.
+      Use isolated containers, test projects, HOME/settings and tmux servers; never
+      drive the live user PM session or shared host configuration. Preserve unrelated
+      source, dirty files, stashes, drafts and evidence. No force push, master reset/deletion,
+      PR merge, spec approval, unrelated launch or host fallback is authorized. Manual
+      wait-for-merge remains required.'
+    created_at: '2026-11-02T02:24:48Z'
+    last_edited: '2026-11-02T02:24:48Z'
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    signoff: provider:claude-main-xhigh-pm
+  session_effort:
+    signoff: high
