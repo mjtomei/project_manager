@@ -366,9 +366,25 @@ def is_instruction_run(pr_id: str, qa_workdir: str | Path) -> bool:
     return Path(qa_workdir).name == f"{pr_id}-{instruction_run_loop_id(pr_id)}"
 
 
-def _scenario_transcript_path(qa_workdir: str | Path, scenario_index: int) -> str:
-    """Return the path where a scenario's transcript symlink should live."""
-    return str(Path(qa_workdir) / f"transcript-s{scenario_index}.jsonl")
+def _scenario_claude_cwd(scenario: "QAScenario", workdir_path: str) -> str:
+    """The directory a scenario worker's Claude runs in.
+
+    ``/workspace`` inside the scenario's container, else its host clone —
+    which is where Claude's native log of the worker session lives.
+    """
+    if scenario.container_name:
+        from pm_core import container as container_mod
+        return container_mod._CONTAINER_WORKDIR
+    return scenario.worktree_path or workdir_path
+
+
+def _scenario_log_path(scenario: "QAScenario", workdir_path: str,
+                       session_id: str) -> str:
+    """Native log of the worker session *session_id* (see
+    :func:`_scenario_claude_cwd`); the worker launch records it too."""
+    from pm_core.claude_launcher import transcript_path_for
+    return str(transcript_path_for(
+        _scenario_claude_cwd(scenario, workdir_path), session_id))
 
 
 def _next_scenario_offset(pr_id: str, current_loop_id: str) -> int:
@@ -3005,7 +3021,7 @@ def _launch_scenarios_in_tmux(
     setup_errors: list[Exception] = []
 
     # --- Phase 1: clone workdirs and create concretizer windows in parallel ---
-    # Each entry: (scenario, concretize_pane, scenario_cwd, clone_path, scratch_path, transcript)
+    # Each entry: (scenario, concretize_pane, scenario_cwd, clone_path, scratch_path, worker_sid)
     pending: list[tuple] = []
     pending_lock = threading.Lock()
 
@@ -3056,10 +3072,12 @@ def _launch_scenarios_in_tmux(
                                     scratch_dir=str(scratch_path))
 
         scenario_cwd = str(clone_path) if repo_root else workdir_path
-        transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
         win_name = _scenario_window_name(pr_data, scenario.index)
 
         import uuid as _uuid
+        # The worker's own session, recorded at launch; its native log is
+        # the scenario's verdict source (no PM-owned link).
+        worker_sid = str(_uuid.uuid4())
         scenario.concretize_session_id = str(_uuid.uuid4())
         concretize_env: dict[str, str] = {}
         try:
@@ -3087,7 +3105,7 @@ def _launch_scenarios_in_tmux(
         scenario.window_name = win_name
         with pending_lock:
             pending.append((scenario, concretize_pane, scenario_cwd,
-                            clone_path, scratch_path, transcript, win_name,
+                            clone_path, scratch_path, worker_sid, win_name,
                             instruction_content))
 
     prep_threads = [
@@ -3120,7 +3138,7 @@ def _launch_scenarios_in_tmux(
             scenario_cwd: str,
             clone_path: Path,
             scratch_path: Path,
-            transcript: str,
+            worker_sid: str,
             win_name: str,
             instruction_content: str | None = None,
     ) -> None:
@@ -3150,7 +3168,7 @@ def _launch_scenarios_in_tmux(
             scenario_env: dict[str, str] = {}
             try:
                 child_cmd, pane_cwd = _build_scenario_run_cmd(
-                    scenario, state, data, transcript, _qa_resolution,
+                    scenario, state, data, worker_sid, _qa_resolution,
                     session=session, workdir_path=workdir_path,
                     env_out=scenario_env,
                 )
@@ -3163,12 +3181,9 @@ def _launch_scenarios_in_tmux(
         if scenario_pane:
             scenario.window_name = win_name
             scenario.pane_id = scenario_pane
-            scenario.transcript_path = transcript
-            try:
-                from pm_core.claude_launcher import session_id_from_transcript
-                scenario.session_id = session_id_from_transcript(transcript)
-            except Exception:
-                scenario.session_id = None
+            scenario.session_id = worker_sid
+            scenario.transcript_path = _scenario_log_path(
+                scenario, workdir_path, worker_sid)
 
         # window_name is already set while the refiner runs, so only a
         # created worker pane counts as a launch.
@@ -3306,7 +3321,10 @@ def _launch_scenarios_in_containers(
             _install_artifact_files(pm_root, scenario, scratch_path,
                                     scratch_dir=container_scratch)
 
-        transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
+        import uuid as _uuid
+        # The worker's own session, recorded at launch; its native log is
+        # the scenario's verdict source (no PM-owned link).
+        worker_sid = str(_uuid.uuid4())
 
         cname = container_mod.qa_container_name(
             state.pr_id, state.loop_id, scenario.index,
@@ -3406,7 +3424,7 @@ def _launch_scenarios_in_containers(
         # the concretizer window during the concretization phase.
         scenario.window_name = win_name
         with pending_lock:
-            pending.append((scenario, concretize_pane, win_name, cname, transcript,
+            pending.append((scenario, concretize_pane, win_name, cname, worker_sid,
                             clone_path, instruction_content))
 
     prep_threads = [
@@ -3455,7 +3473,7 @@ def _launch_scenarios_in_containers(
             concretize_pane: str,
             win_name: str,
             cname: str,
-            transcript: str,
+            worker_sid: str,
             clone_path: Path,
             instruction_content: str | None = None,
     ) -> None:
@@ -3485,7 +3503,7 @@ def _launch_scenarios_in_containers(
             scenario_env: dict[str, str] = {}
             try:
                 exec_cmd, pane_cwd = _build_scenario_run_cmd(
-                    scenario, state, data, transcript, _qa_resolution,
+                    scenario, state, data, worker_sid, _qa_resolution,
                     session=None, workdir_path=workdir_path,
                     env_out=scenario_env,
                 )
@@ -3498,12 +3516,9 @@ def _launch_scenarios_in_containers(
         if scenario_pane:
             scenario.window_name = win_name
             scenario.pane_id = scenario_pane
-            scenario.transcript_path = transcript
-            try:
-                from pm_core.claude_launcher import session_id_from_transcript
-                scenario.session_id = session_id_from_transcript(transcript)
-            except Exception:
-                scenario.session_id = None
+            scenario.session_id = worker_sid
+            scenario.transcript_path = _scenario_log_path(
+                scenario, workdir_path, worker_sid)
 
         # window_name is already set while the refiner runs, so only a
         # created worker pane counts as a launch.
@@ -3601,7 +3616,7 @@ def _build_scenario_run_cmd(
     scenario: QAScenario,
     state: QALoopState,
     data: dict,
-    transcript: str,
+    session_id: str,
     qa_resolution,
     *,
     session: str | None,
@@ -3609,6 +3624,9 @@ def _build_scenario_run_cmd(
     env_out: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     """Build the shell command that launches a scenario's claude pane.
+
+    The worker runs as *session_id* and records its own identity (PR, QA
+    loop, scenario index) in the session ledger.
 
     Returns ``(run_cmd, pane_cwd)`` — the command tmux should run, and the
     cwd to give the new pane.  Centralising this here keeps the prompt
@@ -3624,6 +3642,9 @@ def _build_scenario_run_cmd(
 
     use_containers = bool(scenario.container_name)
     host_clone = scenario.worktree_path or workdir_path
+    # Where Claude runs — and so where its native log lands; the scenario's
+    # transcript_path is computed from the same helper.
+    wd_in = _scenario_claude_cwd(scenario, workdir_path)
 
     # Captures dir: container workers see the bind-mounted /pm-captures
     # path; host workers see the full host path under
@@ -3631,12 +3652,10 @@ def _build_scenario_run_cmd(
     # interpolates this as `{captures_root}/scenarios/<n>/...`.
     from pm_core.paths import captures_dir, CONTAINER_CAPTURES_MOUNT
     if use_containers:
-        wd_in = container_mod._CONTAINER_WORKDIR
         scratch = container_mod._CONTAINER_SCRATCH
         sess_for_prompt = None
         captures_root = CONTAINER_CAPTURES_MOUNT
     else:
-        wd_in = host_clone
         scratch = str(Path(state.qa_workdir) / f"s-{scenario.index}" / "scratch")
         sess_for_prompt = session
         host_captures = captures_dir(state.pr_id, session_tag=state.session_tag)
@@ -3654,11 +3673,16 @@ def _build_scenario_run_cmd(
         state.pr_id, scenario.index, "prompt.md", child_prompt,
         session_tag=state.session_tag,
     )
+    from pm_core.session_log import SessionLaunch
     claude_cmd = build_claude_shell_cmd(
         prompt=child_prompt,
         model=qa_resolution.model, provider=qa_resolution.provider,
         effort=qa_resolution.effort,
-        transcript=transcript, cwd=wd_in, write_dir=host_clone,
+        session_id=session_id,
+        launch=SessionLaunch(subject=state.pr_id, phase="qa",
+                             loop_id=state.loop_id,
+                             iteration=scenario.index),
+        cwd=wd_in, write_dir=host_clone,
         session_type="qa_scenario",
         session_tag=state.session_tag,
         container=use_containers,
@@ -3783,8 +3807,9 @@ def _relaunch_scenario_window(
                     "fix the container runtime, then retry QA")
             )
 
-    # New transcript for the relaunched session (old one is stale)
-    transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
+    # A new session for the relaunched worker (the old one is stale).
+    import uuid as _uuid
+    worker_sid = str(_uuid.uuid4())
 
     if use_containers:
         # A container stopped/removed under a live run is recreated under
@@ -3795,7 +3820,7 @@ def _relaunch_scenario_window(
     try:
         scenario_env: dict[str, str] = {}
         run_cmd, pane_cwd = _build_scenario_run_cmd(
-            scenario, state, data, transcript, _qa_resolution,
+            scenario, state, data, worker_sid, _qa_resolution,
             session=None if scenario.container_name else session,
             workdir_path=workdir_path,
             env_out=scenario_env,
@@ -3818,12 +3843,9 @@ def _relaunch_scenario_window(
 
         scenario.window_name = win_name
         scenario.pane_id = pane_id
-        scenario.transcript_path = transcript
-        try:
-            from pm_core.claude_launcher import session_id_from_transcript
-            scenario.session_id = session_id_from_transcript(transcript)
-        except Exception:
-            scenario.session_id = None
+        scenario.session_id = worker_sid
+        scenario.transcript_path = _scenario_log_path(
+            scenario, workdir_path, worker_sid)
         _log.info("Relaunched scenario %d in window %s", scenario.index, win_name)
         try:
             from pm_core import pane_layout

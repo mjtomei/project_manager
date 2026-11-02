@@ -20,7 +20,6 @@ def _make_state(pr_id: str, verdict: str) -> ReviewLoopState:
     s = ReviewLoopState(pr_id=pr_id)
     s.iteration = 2
     s.latest_verdict = verdict
-    s._transcript_dir = None
     return s
 
 

@@ -182,7 +182,9 @@ class TestReviewLoopState:
         assert state.latest_verdict == ""
         assert state.history == []
         # loop_id is auto-generated
-        assert len(state.loop_id) == 4  # 2 bytes = 4 hex chars
+        # 4 bytes = 8 hex chars: it keys the loop's attempts in the session
+        # ledger, so a PR's loops must not collide on it.
+        assert len(state.loop_id) == 8
 
     def test_unique_loop_ids(self):
         """Each state gets a unique loop_id."""
@@ -213,7 +215,7 @@ class TestRunReviewLoopSync:
     def test_stops_on_pass(self, mock_review):
         mock_review.return_value = "All good.\n\n**PASS**"
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, run_id="run")
         assert result.iteration == 1
         assert result.latest_verdict == VERDICT_PASS
         assert result.running is False
@@ -228,7 +230,7 @@ class TestRunReviewLoopSync:
             "All good.\n\n**PASS**",
         ]
         state = ReviewLoopState(pr_id="pr-001")
-        run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        run_review_loop_sync(state, "/tmp", _PR_DATA, run_id="run")
         # First call: iteration=1, second call: iteration=2
         calls = mock_review.call_args_list
         assert calls[0].kwargs["iteration"] == 1
@@ -244,7 +246,7 @@ class TestRunReviewLoopSync:
             "All good.\n\n**PASS**",
         ]
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, run_id="run")
         assert result.iteration == 3
         assert result.latest_verdict == VERDICT_PASS
         assert len(result.history) == 3
@@ -253,7 +255,7 @@ class TestRunReviewLoopSync:
     def test_respects_max_iterations(self, mock_review):
         mock_review.return_value = "**NEEDS_WORK**"
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp", max_iterations=3)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, run_id="run", max_iterations=3)
         assert result.iteration == 3
         assert result.latest_verdict == VERDICT_NEEDS_WORK
         assert mock_review.call_count == 3
@@ -268,7 +270,7 @@ class TestRunReviewLoopSync:
 
         mock_review.side_effect = side_effect
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, run_id="run")
         assert result.iteration == 1
         assert result.running is False
 
@@ -282,7 +284,7 @@ class TestRunReviewLoopSync:
 
         mock_review.side_effect = side_effect
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, run_id="run")
         assert result.iteration == 1
         assert result.running is False
         # Iteration completed and verdict was recorded
@@ -294,14 +296,14 @@ class TestRunReviewLoopSync:
         mock_review.return_value = "**PASS**"
         callback = MagicMock()
         state = ReviewLoopState(pr_id="pr-001")
-        run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp", on_iteration=callback)
+        run_review_loop_sync(state, "/tmp", _PR_DATA, run_id="run", on_iteration=callback)
         callback.assert_called_once_with(state)
 
     @patch("pm_core.review_loop._run_claude_review")
     def test_handles_exception(self, mock_review):
         mock_review.side_effect = RuntimeError("setup failure")
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, run_id="run")
         assert result.latest_verdict == "ERROR"
         assert result.running is False
 
@@ -310,7 +312,7 @@ class TestRunReviewLoopSync:
         """When the pane is killed externally, loop stops with KILLED verdict."""
         mock_review.side_effect = PaneKilledError("pane disappeared")
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, run_id="run")
         assert result.latest_verdict == VERDICT_KILLED
         assert result.running is False
         assert result.iteration == 1
@@ -324,8 +326,6 @@ def test_failed_launch_is_retried_not_terminal(tmp_path, monkeypatch):
     window is closed, container setup then fails).  Pre-fix this ended the
     loop with ERROR on the first attempt; the fix retries the same
     iteration and collects its own verdict."""
-    import uuid
-
     from pm_core import review_loop as rl
     from pm_core import tmux
 
@@ -360,18 +360,20 @@ def test_failed_launch_is_retried_not_terminal(tmp_path, monkeypatch):
         if len(calls) == 1:
             return MagicMock(returncode=1, stdout="",
                              stderr="Failed to create container")
-        # The child created the iteration transcript before running Claude.
-        t = cmd[cmd.index("--transcript") + 1]
-        link = Path(t)
-        link.parent.mkdir(parents=True, exist_ok=True)
-        link.symlink_to(link.parent / f"{uuid.uuid4()}.jsonl")
+        # The child recorded the attempt's session before running Claude.
+        from pm_core import session_log
+        session_log.register(
+            session_log.SessionLaunch(
+                subject="pr-001", phase="review",
+                loop_id=cmd[cmd.index("--review-loop-id") + 1],
+                iteration=int(cmd[cmd.index("--review-iteration") + 1])),
+            cmd[cmd.index("--session-id") + 1], str(tmp_path))
         return MagicMock(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(rl.subprocess, "run", fake_run)
 
     state = ReviewLoopState(pr_id="pr-001")
-    run_review_loop_sync(state, str(tmp_path), _PR_DATA,
-                         transcript_dir=str(tmp_path))
+    run_review_loop_sync(state, str(tmp_path), _PR_DATA, run_id="run")
     assert len(calls) == 2, "the failed launch must be retried, not terminal"
     assert state.iteration == 1
     assert state.latest_verdict == VERDICT_PASS
@@ -386,10 +388,12 @@ class TestResumeInFlightIteration:
     def test_adopts_live_iteration(self, mock_adopt, mock_review):
         mock_adopt.return_value = "All good.\n\n**PASS**"
         state = ReviewLoopState(pr_id="pr-001", iteration=1,
-                                _transcript_dir="/saved")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+                                run_id="saved-run")
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, run_id="run")
         mock_review.assert_not_called()
-        assert mock_adopt.call_args.args[2] == "/saved"
+        assert mock_adopt.call_args.args[:2] == (state, _PR_DATA)
+        # A resumed loop keeps the run its attempts were recorded under.
+        assert result.run_id == "saved-run"
         assert result.iteration == 1
         assert result.latest_verdict == VERDICT_PASS
         assert [h.iteration for h in result.history] == [1]
@@ -401,7 +405,7 @@ class TestResumeInFlightIteration:
         mock_review.return_value = "**PASS**"
         state = ReviewLoopState(pr_id="pr-001", iteration=2,
                                 history=[ReviewIteration(1, "NEEDS_WORK", "")])
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, run_id="run")
         assert mock_review.call_args.kwargs["iteration"] == 3
         assert [h.iteration for h in result.history] == [1, 2, 3]
 
@@ -411,7 +415,7 @@ class TestResumeInFlightIteration:
         mock_adopt.return_value = None
         mock_review.return_value = "**PASS**"
         state = ReviewLoopState(pr_id="pr-001", iteration=1)
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, run_id="run")
         assert mock_review.call_args.kwargs["iteration"] == 1
         assert result.iteration == 1
 
@@ -421,7 +425,7 @@ class TestResumeInFlightIteration:
         mock_review.return_value = "**PASS**"
         state = ReviewLoopState(pr_id="pr-001", iteration=1,
                                 history=[ReviewIteration(1, "NEEDS_WORK", "")])
-        run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        run_review_loop_sync(state, "/tmp", _PR_DATA, run_id="run")
         mock_adopt.assert_not_called()
         assert mock_review.call_args.kwargs["iteration"] == 2
 
@@ -449,19 +453,24 @@ class TestAdoptWaitsForInFlightLaunch:
 
     def _setup(self, tmp_path, *, symlink=True, started=False):
         import uuid
-        tdir = tmp_path / "t"
-        tdir.mkdir()
-        target = tmp_path / f"{uuid.uuid4()}.jsonl"
+        from pm_core import session_log
+        sid = str(uuid.uuid4())
+        target = tmp_path / f"{sid}.jsonl"
         if started:
             target.write_text("{}\n")
-        if symlink:
-            (tdir / "review-pr-001-i1.jsonl").symlink_to(target)
         # The breadcrumb restores ``iteration_attempted``: the pre-restart
         # loop had started this iteration's launch.
-        state = ReviewLoopState(pr_id="pr-001", iteration=1,
-                                _transcript_dir=str(tdir),
+        state = ReviewLoopState(pr_id="pr-001", iteration=1, run_id="run",
                                 iteration_attempted=True)
-        return state, str(tdir)
+        if symlink:
+            # The in-flight launch already recorded its session.
+            session_log.register(
+                session_log.SessionLaunch(subject="pr-001", phase="review",
+                                          run_id="run",
+                                          loop_id=state.loop_id,
+                                          iteration=1),
+                sid, str(tmp_path), log=target)
+        return state, None
 
     def _adopt(self, state, tdir, panes):
         from pm_core import review_loop
@@ -474,7 +483,7 @@ class TestAdoptWaitsForInFlightLaunch:
              patch("pm_core.hook_events.read_event", return_value=None), \
              patch("pm_core.review_loop._poll_for_verdict",
                    return_value="**PASS**") as poll:
-            out = review_loop._adopt_in_flight_review(state, _PR_DATA, tdir)
+            out = review_loop._adopt_in_flight_review(state, _PR_DATA)
         return out, poll, find, clock
 
     def test_adopts_window_that_opens_after_restart(self, tmp_path):
@@ -501,17 +510,17 @@ class TestAdoptWaitsForInFlightLaunch:
         poll.assert_not_called()
         assert clock.now == _LAUNCH_TIMEOUT
 
-    def test_missing_symlink_waits_only_the_short_grace(self, tmp_path):
-        from pm_core.review_loop import _IN_FLIGHT_SYMLINK_GRACE
+    def test_unrecorded_launch_waits_only_the_short_grace(self, tmp_path):
+        from pm_core.review_loop import _IN_FLIGHT_RECORD_GRACE
         state, tdir = self._setup(tmp_path, symlink=False)
         out, poll, find, clock = self._adopt(state, tdir, [None] * 500)
         assert out is None
-        assert clock.now == _IN_FLIGHT_SYMLINK_GRACE
+        assert clock.now == _IN_FLIGHT_RECORD_GRACE
 
     def test_failed_attempts_symlink_is_not_waited_on(self, tmp_path):
         """S133: after this iteration's last launch attempt failed (an
-        auto-start re-arm, a restart inside the backoff), its dangling
-        symlink is that dead attempt's: nothing is in flight to wait for."""
+        auto-start re-arm, a restart inside the backoff), its recorded
+        session is that dead attempt's: nothing is in flight to wait for."""
         state, tdir = self._setup(tmp_path)
         state.retry_iteration = 1
         state.last_attempt_failed = True
@@ -532,7 +541,7 @@ class TestAdoptWaitsForInFlightLaunch:
     def test_rearmed_loop_relaunches_at_once(self, tmp_path):
         """S133: a re-armed LAUNCH_FAILED loop resumed at iteration 1 with no
         history relaunched only after waiting the whole launch timeout on
-        the failed attempt's symlink.  It now relaunches straight away."""
+        the failed attempt's session.  It now relaunches straight away."""
         from pm_core.review_loop import AttemptDiscovery
         state, tdir = self._setup(tmp_path)
         state.retry_iteration = 1
@@ -555,7 +564,7 @@ class TestAdoptWaitsForInFlightLaunch:
              patch("pm_core.review_loop.time.sleep", clock.sleep), \
              patch("pm_core.review_loop._run_claude_review",
                    side_effect=relaunch) as run:
-            result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir=tdir)
+            result = run_review_loop_sync(state, "/tmp", _PR_DATA, run_id="run")
         assert run.call_count == 1
         assert run.call_args.kwargs["iteration"] == 1
         assert at_launch == [0.0]
@@ -573,7 +582,7 @@ class TestAdoptWaitsForInFlightLaunch:
              patch("pm_core.hook_events.read_event", return_value=None), \
              patch("pm_core.review_loop._poll_for_verdict", return_value="**PASS**"), \
              patch("pm_core.review_loop._run_claude_review") as relaunch:
-            result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir=tdir)
+            result = run_review_loop_sync(state, "/tmp", _PR_DATA, run_id="run")
         relaunch.assert_not_called()
         assert result.iteration == 1
         assert result.latest_verdict == VERDICT_PASS
@@ -586,7 +595,7 @@ class TestStartReviewLoopBackground:
         state = ReviewLoopState(pr_id="pr-001")
         complete_callback = MagicMock()
         thread = start_review_loop_background(
-            state, "/tmp", _PR_DATA, transcript_dir="/tmp",
+            state, "/tmp", _PR_DATA, run_id="run",
             on_complete=complete_callback,
         )
         thread.join(timeout=5)
@@ -701,8 +710,8 @@ class TestMultipleLoops:
         pr_data_a = {"id": "pr-001", "branch": "pm/pr-001"}
         pr_data_b = {"id": "pr-002", "branch": "pm/pr-002"}
 
-        run_review_loop_sync(state_a, "/tmp/a", pr_data_a, transcript_dir="/tmp/a")
-        run_review_loop_sync(state_b, "/tmp/b", pr_data_b, transcript_dir="/tmp/b")
+        run_review_loop_sync(state_a, "/tmp/a", pr_data_a, run_id="a")
+        run_review_loop_sync(state_b, "/tmp/b", pr_data_b, run_id="b")
 
         assert state_a.pr_id == "pr-001"
         assert state_b.pr_id == "pr-002"
@@ -723,7 +732,7 @@ class TestInputRequired:
         mock_follow_up.return_value = "Tests passed.\n\n**PASS**"
 
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, run_id="run")
 
         assert result.latest_verdict == VERDICT_PASS
         assert result.iteration == 1
@@ -744,7 +753,7 @@ class TestInputRequired:
         mock_follow_up.return_value = "Issues found after testing.\n\n**NEEDS_WORK**"
 
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, run_id="run")
 
         # First iteration: INPUT_REQUIRED → NEEDS_WORK from follow-up
         # Second iteration: PASS from fresh review
@@ -759,7 +768,7 @@ class TestInputRequired:
         mock_follow_up.return_value = None  # pane disappeared
 
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, run_id="run")
 
         assert result.latest_verdict == VERDICT_KILLED
         assert result.input_required is False
@@ -779,7 +788,7 @@ class TestInputRequired:
         state = ReviewLoopState(pr_id="pr-001")
         mock_follow_up.side_effect = side_effect
 
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, run_id="run")
 
         assert result.input_required is False
         assert result.running is False
@@ -839,11 +848,15 @@ def test_launch_failure_is_an_error_verdict_without_traceback(caplog):
                 patch.object(review_loop, "REVIEW_LAUNCH_BACKOFF_MAX", 0.01), \
                 patch.object(review_loop, "_run_claude_review", side_effect=launch_only):
             state = ReviewLoopState(pr_id="pr-001")
-            run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+            run_review_loop_sync(state, "/tmp", _PR_DATA, run_id="run")
     finally:
         logger.removeHandler(caplog.handler)
     assert state.latest_verdict == review_loop.VERDICT_LAUNCH_FAILED
-    assert state.latest_output == f"Review window launch failed (rc=1): {err}"
+    # The child's complete output is always kept as an artifact (runtime
+    # state, not a transcript tree).
+    assert state.latest_output.startswith(
+        f"Review window launch failed (rc=1): {err} (artifact: ")
+    assert err in Path(state.last_launch_artifact).read_text()
     failed = [r for r in caplog.records
               if "review launch failed on iteration" in r.getMessage()]
     assert len(failed) == 1 and err in failed[0].getMessage()

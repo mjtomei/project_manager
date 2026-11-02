@@ -13,6 +13,7 @@ import asyncio
 import subprocess
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,6 +30,7 @@ from pm_core.signoff import (SIGNOFF_BLOCKED, SIGNOFF_IMPL, SIGNOFF_MERGE,
 
 PR = "pr-001"
 BRANCH = "pm/pr-001"
+RUN = "run"
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -76,13 +78,21 @@ def pr(w) -> dict:
     return store.get_pr(store.load(w.pm_dir), PR)
 
 
+def record_router_launch(w, head, base=""):
+    """What ``launch_signoff_window`` records for a new router run."""
+    from pm_core import session_log
+    return session_log.register(
+        session_log.SessionLaunch(subject=PR, phase="signoff", run_id=RUN,
+                                  head=head, base=base),
+        str(uuid.uuid4()), str(w.wd))
+
+
 def step(w, verdict, *, launched=None, window="%1"):
-    """One driver tick with *verdict* in the router transcript."""
+    """One driver tick with *verdict* in the router's session."""
     retired = []
-    signoff.stamp_signoff_launch(signoff.signoff_transcript(w.tdir, PR),
-                                 launched or git(w.wd, "rev-parse", "HEAD"))
+    record_router_launch(w, launched or git(w.wd, "rev-parse", "HEAD"))
     res = signoff.step_signoff(
-        w.pm_dir, pr(w), session="s", tdir=w.tdir,
+        w.pm_dir, pr(w), session="s", run_id=RUN,
         read_verdict=lambda t, p: verdict,
         window_pane=lambda s, p: window,
         retire=lambda *a: retired.append(a))
@@ -179,7 +189,7 @@ def test_driver_on_a_pre_hop_snapshot_leaves_the_bounce_alone(w, verdict, hop):
     ret = pr(w)["signoff_return"]
     retired = []
     late = signoff.step_signoff(
-        w.pm_dir, snapshot, session="s", tdir=w.tdir,
+        w.pm_dir, snapshot, session="s", run_id=RUN,
         read_verdict=lambda t, p: verdict, window_pane=lambda s, p: None,
         retire=lambda *a: retired.append(a))
     assert late.action == "running"
@@ -614,11 +624,17 @@ def test_cli_qa_run_whose_window_was_closed_is_left_to_its_driver(
 
 
 def _review_transcripts(tmp_path, *iters):
-    tdir = tmp_path / "transcripts" / "auto-sequence" / PR
-    tdir.mkdir(parents=True)
+    """Auto-sequence review iterations *iters* recorded in the ledger."""
+    from pm_core import session_log
     for i in iters:
-        (tdir / f"review-{PR}-i{i}.jsonl").write_text("")
-    return tdir
+        sid = str(uuid.uuid4())
+        log = tmp_path / "logs" / f"{sid}.jsonl"   # the session's own log
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text("")
+        session_log.register(
+            session_log.SessionLaunch(subject=PR, phase="review",
+                                      run_id="auto-sequence", iteration=i),
+            sid, str(tmp_path / "wd"), log=log)
 
 
 def test_cli_impl_rework_review_continues_iteration_numbering(tmp_path):
@@ -632,7 +648,7 @@ def test_cli_impl_rework_review_continues_iteration_numbering(tmp_path):
     assert "advanced: in_review" in result.output
     kwargs = review.call_args.kwargs
     assert kwargs["review_iteration"] == 4
-    assert kwargs["transcript"].endswith(f"review-{PR}-i4.jsonl")
+    assert kwargs["run_id"] == "auto-sequence"
     # The open window reviewed the pre-return code: replace, don't adopt.
     assert kwargs["fresh"] is True
 
@@ -758,16 +774,15 @@ def test_tui_qa_pass_not_handed_to_signoff_while_reqa_awaits(tmp_path):
 
 
 def test_verdict_from_run_launched_on_another_base_is_not_bound(w):
-    """The launch stamp names the base its check used; a re-recorded check
+    """The launch records the base its check used; a re-recorded check
     against another base mid-run makes the verdict stale (no rebinding)."""
     integration.check_integration(w.pm_dir, PR)
     launched_base = pr(w)["integration"]["base_sha"]
-    signoff.stamp_signoff_launch(signoff.signoff_transcript(w.tdir, PR),
-                                 w.head, launched_base)
+    record_router_launch(w, w.head, launched_base)
     commit(w.repo, "other.txt", "o\n", "base moved mid-run")
     integration.check_integration(w.pm_dir, PR)       # e.g. --record
     res = signoff.step_signoff(
-        w.pm_dir, pr(w), session="s", tdir=w.tdir,
+        w.pm_dir, pr(w), session="s", run_id=RUN,
         read_verdict=lambda t, p: SIGNOFF_MERGE,
         window_pane=lambda s, p: "%1", retire=lambda *a: None)
     assert res.action == "launch" and res.stale
@@ -1229,7 +1244,7 @@ def test_tui_review_catch_up_takes_the_return_launch_claim(tmp_path, claimed):
     app._auto_start_run_id = "run"
     store.save(app._data, tmp_path)
     with patch("pm_core.tui.review_loop_ui._start_loop") as start, \
-         patch.object(auto_start, "get_transcript_dir", return_value=tmp_path):
+         patch.object(auto_start, "get_run_id", return_value="run"):
         auto_start._auto_start_review_loops(app, [p])
     assert start.called is not claimed
     if not claimed:
@@ -1270,7 +1285,7 @@ def test_tui_review_return_written_behind_a_finished_loop_starts_it(
     app._review_loops[PR] = old
     store.save(app._data, tmp_path)
     with patch("pm_core.tui.review_loop_ui._start_loop") as start, \
-         patch.object(auto_start, "get_transcript_dir", return_value=tmp_path):
+         patch.object(auto_start, "get_run_id", return_value="run"):
         auto_start._auto_start_review_loops(app, [p])
     replaced = case == "finished"
     assert start.called is replaced

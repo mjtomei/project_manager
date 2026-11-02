@@ -22,6 +22,7 @@ import pytest
 from pm_core import review_loop
 from pm_core.review_loop import (
     AttemptDiscovery,
+    PaneKilledError,
     ReviewHoldError,
     ReviewIteration,
     ReviewLaunchError,
@@ -49,6 +50,33 @@ def _pr(tmp_path) -> dict:
             "status": "in_review", "workdir": str(wd)}
 
 
+def _turn(text: str) -> str:
+    return json.dumps({"type": "assistant",
+                       "message": {"content": [{"type": "text",
+                                                "text": text}]}}) + "\n"
+
+
+def _record(tmp_path, iteration, sid=None, *, loop_id, text=None,
+            run_id="run"):
+    """A review attempt as ``pm pr review --session-id`` records it in the
+    session ledger; *text* becomes an assistant turn of its native log."""
+    from pm_core import session_log
+    sid = sid or str(uuid.uuid4())
+    log = tmp_path / f"{sid}.jsonl"
+    if text is not None:
+        log.write_text(_turn(text))
+    session_log.register(
+        session_log.SessionLaunch(subject=PR, phase="review", run_id=run_id,
+                                  loop_id=loop_id, iteration=iteration),
+        sid, str(tmp_path / "wd"), log=log)
+    return sid
+
+
+def _artifacts(pattern="*.log"):
+    from pm_core import session_log
+    return list(session_log.artifacts_dir().glob(pattern))
+
+
 @pytest.fixture(autouse=True)
 def _fast_retry(monkeypatch):
     """Keep retries instant in tests; production values are seconds."""
@@ -68,7 +96,7 @@ def _fast_retry(monkeypatch):
 
 def _run(state, tmp_path, **kw):
     return run_review_loop_sync(state, str(tmp_path), _pr(tmp_path),
-                                transcript_dir=str(tmp_path), **kw)
+                                run_id="run", **kw)
 
 
 # ---------------------------------------------------------------------------
@@ -238,8 +266,7 @@ def test_restart_handoff_converts_a_trust_hold_to_HOLD(tmp_path, monkeypatch):
     monkeypatch.setattr(review_loop, "_poll_for_verdict",
                         MagicMock(side_effect=WorkspaceTrustBlocked("trust")))
     with pytest.raises(ReviewHoldError):
-        review_loop._adopt_in_flight_review(state, _pr(tmp_path),
-                                            str(tmp_path))
+        review_loop._adopt_in_flight_review(state, _pr(tmp_path))
 
 
 def test_restart_handoff_does_not_adopt_a_transcript_this_loop_never_launched(
@@ -249,14 +276,13 @@ def test_restart_handoff_does_not_adopt_a_transcript_this_loop_never_launched(
     same iteration number (the manual-<token> dir outlives a loop)."""
     seen: dict = {}
 
-    def fake_discover(state, pr_data, tdir, iteration, *, allow_recovery=True):
+    def fake_discover(state, pr_data, iteration, *, allow_recovery=True):
         seen["allow_recovery"] = allow_recovery
         return AttemptDiscovery("launch")
 
     monkeypatch.setattr(review_loop, "_discover_iteration", fake_discover)
     state = ReviewLoopState(pr_id=PR, iteration=1)
-    assert review_loop._adopt_in_flight_review(
-        state, _pr(tmp_path), str(tmp_path)) is None
+    assert review_loop._adopt_in_flight_review(state, _pr(tmp_path)) is None
     assert seen["allow_recovery"] is False
 
     # Once this loop has launched the iteration (or a resumed breadcrumb
@@ -264,8 +290,7 @@ def test_restart_handoff_does_not_adopt_a_transcript_this_loop_never_launched(
     for state in (ReviewLoopState(pr_id=PR, iteration=1,
                                   iteration_attempted=True),
                   ReviewLoopState(pr_id=PR, iteration=1, launch_attempts=1)):
-        review_loop._adopt_in_flight_review(state, _pr(tmp_path),
-                                            str(tmp_path))
+        review_loop._adopt_in_flight_review(state, _pr(tmp_path))
         assert seen["allow_recovery"] is True
 
 
@@ -279,8 +304,7 @@ def test_restart_handoff_relaunches_when_the_transcript_has_no_session(
                                          transcript=str(tmp_path / "t.jsonl")))
     poll = MagicMock()
     monkeypatch.setattr(review_loop, "_poll_for_verdict", poll)
-    assert review_loop._adopt_in_flight_review(state, _pr(tmp_path),
-                                               str(tmp_path)) is None
+    assert review_loop._adopt_in_flight_review(state, _pr(tmp_path)) is None
     poll.assert_not_called()
 
 
@@ -301,12 +325,7 @@ def test_restart_between_iterations_does_not_adopt_the_old_run(
     monkeypatch.setattr(review_loop, "_get_pm_session", lambda: None)
 
     # An earlier run of this PR already produced iteration 2 with a PASS.
-    old_sid = str(uuid.uuid4())
-    _make_symlink(tmp_path, "review-pr-001-i2.jsonl", old_sid)
-    (tmp_path / f"{old_sid}.jsonl").write_text(json.dumps({
-        "type": "assistant",
-        "message": {"content": [{"type": "text", "text": "old\n\n**PASS**"}]},
-    }) + "\n")
+    _record(tmp_path, 2, loop_id="0ldl00p0", text="old\n\n**PASS**")
 
     # The state a merge restart would persist right after each bump.
     at_bump: list[tuple[int, bool]] = []
@@ -334,8 +353,7 @@ def test_restart_between_iterations_does_not_adopt_the_old_run(
     resumed.history.append(ReviewIteration(iteration=1,
                                            verdict=VERDICT_NEEDS_WORK,
                                            output=""))
-    assert review_loop._adopt_in_flight_review(
-        resumed, _pr(tmp_path), str(tmp_path)) is None
+    assert review_loop._adopt_in_flight_review(resumed, _pr(tmp_path)) is None
 
 
 def test_restart_after_an_adopted_iteration_does_not_adopt_the_old_run(
@@ -356,12 +374,7 @@ def test_restart_after_an_adopted_iteration_does_not_adopt_the_old_run(
     monkeypatch.setattr(review_loop, "_get_pm_session", lambda: None)
 
     # An earlier run of this PR already produced iteration 3 with a PASS.
-    old_sid = str(uuid.uuid4())
-    _make_symlink(tmp_path, "review-pr-001-i3.jsonl", old_sid)
-    (tmp_path / f"{old_sid}.jsonl").write_text(json.dumps({
-        "type": "assistant",
-        "message": {"content": [{"type": "text", "text": "old\n\n**PASS**"}]},
-    }) + "\n")
+    _record(tmp_path, 3, loop_id="0ldl00p0", text="old\n\n**PASS**")
 
     # The state a merge restart would persist right after the bump.
     at_bump: list[tuple[int, bool]] = []
@@ -374,7 +387,7 @@ def test_restart_after_an_adopted_iteration_does_not_adopt_the_old_run(
     # The loop resumes with iteration 2 in flight (launched before restart).
     state = ReviewLoopState(
         pr_id=PR, iteration=2, retry_iteration=2, launch_attempts=1,
-        iteration_attempted=True, _transcript_dir=str(tmp_path),
+        iteration_attempted=True, run_id="run",
         history=[ReviewIteration(iteration=1, verdict=VERDICT_NEEDS_WORK,
                                  output="")])
     with patch.object(review_loop, "_run_iteration_with_retry",
@@ -396,8 +409,7 @@ def test_restart_after_an_adopted_iteration_does_not_adopt_the_old_run(
         ReviewIteration(iteration=1, verdict=VERDICT_NEEDS_WORK, output=""),
         ReviewIteration(iteration=2, verdict=VERDICT_NEEDS_WORK, output=""),
     ])
-    assert review_loop._adopt_in_flight_review(
-        resumed, _pr(tmp_path), str(tmp_path)) is None
+    assert review_loop._adopt_in_flight_review(resumed, _pr(tmp_path)) is None
 
 
 def test_whitespace_only_stderr_falls_back_to_stdout():
@@ -531,15 +543,15 @@ def test_restart_mid_backoff_continues_the_budget(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_launch_artifact_retains_complete_stderr(tmp_path):
-    transcript = tmp_path / "review-pr-001-i1.jsonl"
     big = "container setup failed\n" + ("x" * 10000) + "\nlast actionable line"
     with patch.object(review_loop.subprocess, "run",
                       return_value=MagicMock(returncode=1, stdout="out",
                                              stderr=big)):
         with pytest.raises(ReviewLaunchError) as ei:
             review_loop._launch_review_window(
-                PR, str(tmp_path), iteration=1, transcript=str(transcript),
-                attempt=2, workdir=str(tmp_path / "wd"))
+                PR, str(tmp_path), iteration=1,
+                session_id=str(uuid.uuid4()), attempt=2,
+                workdir=str(tmp_path / "wd"))
     err = ei.value
     assert err.retryable is True
     assert err.artifact and Path(err.artifact).exists()
@@ -558,8 +570,6 @@ def test_artifact_copies_the_failed_attempts_complete_prompt(tmp_path):
     wd = tmp_path / "wd"
     (wd / "pm" / "prompts").mkdir(parents=True)
     sid = str(uuid.uuid4())
-    transcript = tmp_path / "review-pr-001-i1.jsonl"
-    transcript.symlink_to(tmp_path / f"{sid}.jsonl")
     prompt = "REVIEW THIS\n" + ("instruction line\n" * 5000)
     (wd / "pm" / "prompts" / f"pm_prompt_{sid}.txt").write_text(prompt)
     with patch.object(review_loop.subprocess, "run",
@@ -567,38 +577,37 @@ def test_artifact_copies_the_failed_attempts_complete_prompt(tmp_path):
                                              stderr="boom")):
         with pytest.raises(ReviewLaunchError) as ei:
             review_loop._launch_review_window(
-                PR, str(tmp_path), iteration=1, transcript=str(transcript),
+                PR, str(tmp_path), iteration=1, session_id=sid,
                 workdir=str(wd))
-    copies = list((tmp_path / "launch-artifacts").glob("*.prompt.txt"))
+    copies = _artifacts("*.prompt.txt")
     assert len(copies) == 1
     assert copies[0].read_text() == prompt
     assert "prompt_copy" in Path(ei.value.artifact).read_text()
 
 
-def test_artifact_does_not_copy_a_stale_sessions_prompt(tmp_path):
-    """A launch that died before the child rewrote the iteration's symlink
-    leaves the previous run's session in place.  Its prompt file is not this
-    attempt's, so the artifact must say so instead of attaching it."""
+def test_artifact_copies_only_its_own_attempts_prompt(tmp_path):
+    """The artifact names the attempt's own pre-generated session; another
+    session's prompt file in the workdir (an earlier run's) is never
+    attached to this failure."""
     wd = tmp_path / "wd"
     (wd / "pm" / "prompts").mkdir(parents=True)
-    stale = str(uuid.uuid4())
-    transcript = tmp_path / "review-pr-001-i2.jsonl"
-    transcript.symlink_to(tmp_path / f"{stale}.jsonl")
-    (wd / "pm" / "prompts" / f"pm_prompt_{stale}.txt").write_text("old task")
+    other = str(uuid.uuid4())
+    (wd / "pm" / "prompts" / f"pm_prompt_{other}.txt").write_text("old task")
+    ours = str(uuid.uuid4())
     with patch.object(review_loop.subprocess, "run",
                       return_value=MagicMock(returncode=1, stdout="",
                                              stderr="boom")):
         with pytest.raises(ReviewLaunchError) as ei:
             review_loop._launch_review_window(
-                PR, str(tmp_path), iteration=2, transcript=str(transcript),
-                workdir=str(wd), stale_session_id=stale)
-    assert not list((tmp_path / "launch-artifacts").glob("*.prompt.txt"))
+                PR, str(tmp_path), iteration=2, session_id=ours,
+                workdir=str(wd))
+    assert not _artifacts("*.prompt.txt")
     body = Path(ei.value.artifact).read_text()
-    assert "prompt: (skipped" in body
-    assert stale in body
+    assert f"session_id: {ours}" in body
+    assert other not in body
 
 
-def test_window_not_found_and_missing_transcript_are_retryable(tmp_path,
+def test_window_not_found_and_unrecorded_session_are_retryable(tmp_path,
                                                                monkeypatch):
     from pm_core import tmux
     monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
@@ -608,20 +617,52 @@ def test_window_not_found_and_missing_transcript_are_retryable(tmp_path,
     with patch.object(review_loop, "_launch_review_window"):
         with pytest.raises(ReviewLaunchError) as ei:
             review_loop._run_claude_review(PR, str(tmp_path), _pr(tmp_path),
-                                           str(tmp_path / "i1.jsonl"))
+                                           iteration=1)
     assert ei.value.retryable is True
     assert ei.value.reason == "window"
     assert Path(ei.value.artifact).exists()
 
-    # Window found, but the child produced no transcript session id.
+    # Window found, but the child recorded no session for the attempt.
     monkeypatch.setattr(review_loop, "_find_review_claude_pane",
                         lambda *a, **k: "%9")
     with patch.object(review_loop, "_launch_review_window"):
         with pytest.raises(ReviewLaunchError) as ei:
             review_loop._run_claude_review(PR, str(tmp_path), _pr(tmp_path),
-                                           str(tmp_path / "i1.jsonl"))
+                                           iteration=1)
     assert ei.value.retryable is True
-    assert ei.value.reason == "transcript"
+    assert ei.value.reason == "session"
+
+
+def test_pane_gone_reports_the_attempts_missing_log(tmp_path, monkeypatch):
+    """The attempt's pane dies before its session wrote a log: the KILLED
+    report names that exact session and its expected native path (pm keeps
+    no copy) — no other session's log stands in."""
+    from pm_core import session_log, tmux
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
+    monkeypatch.setattr(tmux, "session_exists", lambda _s: True)
+    monkeypatch.setattr(review_loop, "_find_review_claude_pane",
+                        lambda *a, **k: "%9")
+    monkeypatch.setattr(review_loop, "_WINDOW_WAIT", 0)
+
+    def child(pr_id, pm_root, *, session_id, run_id, **kw):
+        session_log.register(
+            session_log.SessionLaunch(subject=pr_id, phase="review",
+                                      run_id=run_id, iteration=1),
+            session_id, str(tmp_path / "wd"))
+        return []
+
+    info: dict = {}
+    with patch.object(review_loop, "_launch_review_window",
+                      side_effect=child), \
+            patch.object(review_loop, "_poll_for_verdict", return_value=None):
+        with pytest.raises(PaneKilledError) as ei:
+            review_loop._run_claude_review(
+                PR, str(tmp_path), _pr(tmp_path), iteration=1,
+                attempt_info=info)
+    msg = str(ei.value)
+    assert msg.startswith("Review pane disappeared")
+    assert f"session {info['session_id']}" in msg and "is missing at" in msg
 
 
 def test_healthy_unrelated_review_continues_during_retry(tmp_path):
@@ -651,10 +692,10 @@ def test_healthy_unrelated_review_continues_during_retry(tmp_path):
             patch.object(review_loop, "_claim_launch", lambda *a, **k: True):
         t = threading.Thread(target=run_review_loop_sync,
                              args=(retrying, str(tmp_path), bad_pr()),
-                             kwargs={"transcript_dir": str(tmp_path)})
+                             kwargs={"run_id": "run"})
         t.start()
         run_review_loop_sync(healthy, str(tmp_path), good_pr(),
-                             transcript_dir=str(tmp_path))
+                             run_id="run")
         t.join(timeout=5)
     assert healthy.latest_verdict == VERDICT_PASS
     assert retrying.latest_verdict == VERDICT_LAUNCH_FAILED
@@ -665,8 +706,7 @@ def test_auth_failure_is_not_retryable(tmp_path):
                       return_value=MagicMock(returncode=1, stdout="",
                                              stderr="401 unauthorized")):
         with pytest.raises(ReviewLaunchError) as ei:
-            review_loop._launch_review_window(PR, str(tmp_path), iteration=1,
-                                              transcript=str(tmp_path / "t.jsonl"))
+            review_loop._launch_review_window(PR, str(tmp_path), iteration=1)
     assert ei.value.retryable is False
     assert ei.value.reason == "auth"
 
@@ -677,8 +717,7 @@ def test_launch_timeout_is_retryable(tmp_path):
                       side_effect=subprocess.TimeoutExpired(["x"], 120,
                                                             stderr=b"slow")):
         with pytest.raises(ReviewLaunchError) as ei:
-            review_loop._launch_review_window(PR, str(tmp_path), iteration=1,
-                                              transcript=str(tmp_path / "t.jsonl"))
+            review_loop._launch_review_window(PR, str(tmp_path), iteration=1)
     assert ei.value.retryable is True
     assert ei.value.reason == "timeout"
     assert Path(ei.value.artifact).exists()
@@ -714,10 +753,10 @@ def test_old_window_then_container_failure_retries_the_same_command(tmp_path,
         return MagicMock(returncode=0, stdout="", stderr="")
 
     def fake_review(pr_id, pm_root, pr_data, *, iteration, loop_id,
-                    transcript, attempt, **_kw):
+                    attempt, **_kw):
         review_loop._launch_review_window(
             pr_id, pm_root, iteration=iteration, loop_id=loop_id,
-            transcript=transcript, attempt=attempt,
+            session_id=str(uuid.uuid4()), run_id="run", attempt=attempt,
             workdir=pr_data.get("workdir"))
         return "All good.\n\n**PASS**"
 
@@ -725,15 +764,28 @@ def test_old_window_then_container_failure_retries_the_same_command(tmp_path,
     with patch.object(review_loop.subprocess, "run", side_effect=fake_run):
         result = _run(state, tmp_path)
     assert len(cmds) == 2
-    # Identical complete task on both attempts; only the attempt artifact
-    # distinguishes them.
-    assert cmds[0] == cmds[1]
+
+    def task(cmd):
+        """The command without the per-attempt identity (each attempt is
+        its own session, recorded under its attempt number)."""
+        out = list(cmd)
+        for flag in ("--session-id", "--review-attempt"):
+            i = out.index(flag)
+            del out[i:i + 2]
+        return out
+
+    # Identical complete task on both attempts; only the attempt's own
+    # session (and its artifact) distinguishes them.
+    assert task(cmds[0]) == task(cmds[1])
+    assert [c[c.index("--review-attempt") + 1] for c in cmds] == ["1", "2"]
+    assert cmds[0][cmds[0].index("--session-id") + 1] != \
+        cmds[1][cmds[1].index("--session-id") + 1]
     assert "--review-iteration" in cmds[0]
     assert cmds[0][cmds[0].index("--review-iteration") + 1] == "1"
     assert "--review-loop-id" in cmds[0]
     assert cmds[0][cmds[0].index("--review-loop-id") + 1] == "ab12"
     assert result.latest_verdict == VERDICT_PASS
-    artifacts = list((tmp_path / "launch-artifacts").glob("*.log"))
+    artifacts = _artifacts("*.log")
     assert len(artifacts) == 1
     assert "Failed to create container" in artifacts[0].read_text()
 
@@ -758,19 +810,18 @@ def test_real_launch_recovery_collects_its_own_verdict(tmp_path, monkeypatch):
                         lambda *a, **k: "%9")
 
     state = ReviewLoopState(pr_id=PR)
-    sid = str(uuid.uuid4())
-    native = tmp_path / f"{sid}.jsonl"
     attempts = []
 
     def fake_launch(pr_id, pm_root, *, iteration=0, loop_id="",
-                    transcript=None, attempt=1, workdir=None,
-                    stale_session_id=""):
+                    session_id=None, run_id="", attempt=1, workdir=None):
         attempts.append(attempt)
         if attempt == 1:
             raise ReviewLaunchError("container setup failed", retryable=True,
                                     artifact=str(tmp_path / "a.log"))
-        transcript_path = Path(transcript)
-        transcript_path.symlink_to(native)
+        # The child records the attempt's session; Claude writes its log.
+        sid = session_id
+        native = tmp_path / f"{sid}.jsonl"
+        _record(tmp_path, iteration, sid, loop_id=loop_id)
         native.write_text(json.dumps({
             "type": "assistant",
             "message": {"content": [{"type": "text",
@@ -792,52 +843,42 @@ def test_real_launch_recovery_collects_its_own_verdict(tmp_path, monkeypatch):
 # Discovery
 # ---------------------------------------------------------------------------
 
-def _make_symlink(tdir: Path, name: str, sid: str) -> Path:
-    link = tdir / name
-    link.symlink_to(tdir / f"{sid}.jsonl")
-    return link
-
-
 def test_discovery_without_a_window_launches(tmp_path, monkeypatch):
     monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
     monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
     monkeypatch.setattr(review_loop, "_find_review_claude_pane",
                         lambda *a, **k: None)
     state = ReviewLoopState(pr_id=PR)
-    disc = review_loop._discover_iteration(state, _pr(tmp_path),
-                                           str(tmp_path), 1)
+    disc = review_loop._discover_iteration(state, _pr(tmp_path), 1)
     assert disc.kind == "launch"
 
 
 def test_discovery_adopts_our_failed_attempt(tmp_path, monkeypatch):
     monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
-    sid = str(uuid.uuid4())
-    _make_symlink(tmp_path, "review-pr-001-i1.jsonl", sid)
+    state = ReviewLoopState(pr_id=PR)
+    sid = _record(tmp_path, 1, loop_id=state.loop_id)
     monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
     monkeypatch.setattr(review_loop, "_find_review_claude_pane",
                         lambda *a, **k: "%9")
     monkeypatch.setattr("pm_core.claude_launcher.pane_transcript_path",
                         lambda *_a, **_k: tmp_path / f"{sid}.jsonl")
-    state = ReviewLoopState(pr_id=PR)
-    disc = review_loop._discover_iteration(state, _pr(tmp_path),
-                                           str(tmp_path), 1)
+    disc = review_loop._discover_iteration(state, _pr(tmp_path), 1)
     assert disc.kind == "adopt"
-    assert disc.transcript == str(tmp_path / "review-pr-001-i1.jsonl")
+    assert (disc.session_id, disc.transcript) == \
+        (sid, str(tmp_path / f"{sid}.jsonl"))
 
 
 def test_discovery_adopts_another_drivers_live_session(tmp_path, monkeypatch):
     monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
-    ours = str(uuid.uuid4())
+    state = ReviewLoopState(pr_id=PR)
+    _record(tmp_path, 1, loop_id=state.loop_id)
     theirs = str(uuid.uuid4())
-    _make_symlink(tmp_path, "review-pr-001-i1.jsonl", ours)
     monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
     monkeypatch.setattr(review_loop, "_find_review_claude_pane",
                         lambda *a, **k: "%9")
     monkeypatch.setattr("pm_core.claude_launcher.pane_transcript_path",
                         lambda *_a, **_k: tmp_path / f"{theirs}.jsonl")
-    state = ReviewLoopState(pr_id=PR)
-    disc = review_loop._discover_iteration(state, _pr(tmp_path),
-                                           str(tmp_path), 1)
+    disc = review_loop._discover_iteration(state, _pr(tmp_path), 1)
     assert disc.kind == "adopt"
     assert disc.transcript == str(tmp_path / f"{theirs}.jsonl")
 
@@ -855,8 +896,7 @@ def test_discovery_treats_the_last_adopted_session_as_historical(
     monkeypatch.setattr("pm_core.claude_launcher.pane_transcript_path",
                         lambda *_a, **_k: tmp_path / f"{sid}.jsonl")
     state = ReviewLoopState(pr_id=PR, iteration=2, last_session_id=sid)
-    disc = review_loop._discover_iteration(state, _pr(tmp_path),
-                                           str(tmp_path), 2)
+    disc = review_loop._discover_iteration(state, _pr(tmp_path), 2)
     assert disc.kind == "launch"
 
 
@@ -898,25 +938,22 @@ def test_discovery_stands_down_for_another_loop(tmp_path, monkeypatch):
     monkeypatch.setattr(review_loop, "_other_loop_owner",
                         lambda _s: "loop:other")
     state = ReviewLoopState(pr_id=PR)
-    disc = review_loop._discover_iteration(state, _pr(tmp_path),
-                                           str(tmp_path), 1)
+    disc = review_loop._discover_iteration(state, _pr(tmp_path), 1)
     assert disc.kind == "other_owner"
     assert disc.owner == "loop:other"
 
 
 def test_discovery_replaces_the_historical_window(tmp_path, monkeypatch):
     monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
-    old = str(uuid.uuid4())
-    _make_symlink(tmp_path, "review-pr-001-i1.jsonl", old)
+    state = ReviewLoopState(pr_id=PR)
+    old = _record(tmp_path, 1, loop_id=state.loop_id)
     monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
     monkeypatch.setattr(review_loop, "_find_review_claude_pane",
                         lambda *a, **k: "%9")
     monkeypatch.setattr("pm_core.claude_launcher.pane_transcript_path",
                         lambda *_a, **_k: tmp_path / f"{old}.jsonl")
-    state = ReviewLoopState(pr_id=PR)
-    # iteration 2: the live session belongs to iteration 1
-    disc = review_loop._discover_iteration(state, _pr(tmp_path),
-                                           str(tmp_path), 2)
+    # iteration 2: the live session is this loop's iteration 1
+    disc = review_loop._discover_iteration(state, _pr(tmp_path), 2)
     assert disc.kind == "launch"
 
 
@@ -937,7 +974,7 @@ def test_discovery_adopts_another_drivers_pane_after_our_attempt(tmp_path,
     # Before this loop has launched the iteration, a live pane is the
     # historical window: a fresh launch replaces it.
     state = ReviewLoopState(pr_id=PR, iteration=2)
-    disc = review_loop._discover_iteration(state, pr, str(tmp_path), 2,
+    disc = review_loop._discover_iteration(state, pr, 2,
                                            allow_recovery=False)
     assert disc.kind == "launch"
 
@@ -945,7 +982,7 @@ def test_discovery_adopts_another_drivers_pane_after_our_attempt(tmp_path,
     # session is the recovery (or another driver's launch): adopt it.
     state = ReviewLoopState(pr_id=PR, iteration=2,
                             iteration_attempted=True, launch_attempts=1)
-    disc = review_loop._discover_iteration(state, pr, str(tmp_path), 2,
+    disc = review_loop._discover_iteration(state, pr, 2,
                                            allow_recovery=True)
     assert disc.kind == "adopt"
     assert disc.pane_id == "%9"
@@ -954,19 +991,14 @@ def test_discovery_adopts_another_drivers_pane_after_our_attempt(tmp_path,
 
 def test_discovery_never_adopts_a_historical_pane_after_a_failed_attempt(
         tmp_path, monkeypatch):
-    """A failed launch can write this iteration's symlink and still leave the
+    """A failed launch can record this iteration's attempt and still leave the
     previous iteration's window live (its removal failed).  That window runs
     an *earlier* iteration's session, so its verdict is not this iteration's:
     replace the window instead of recording a verdict for a review that never
     ran."""
     monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
     old = str(uuid.uuid4())    # iteration 1's live session (the stale window)
-    ours = str(uuid.uuid4())   # iteration 2's symlink, written by the failure
-    _make_symlink(tmp_path, "review-pr-001-i2.jsonl", ours)
-    (tmp_path / f"{old}.jsonl").write_text(json.dumps({
-        "type": "assistant",
-        "message": {"content": [{"type": "text", "text": "old\n\n**PASS**"}]},
-    }) + "\n")
+    (tmp_path / f"{old}.jsonl").write_text(_turn("old\n\n**PASS**"))
     monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
     monkeypatch.setattr(review_loop, "_find_review_claude_pane",
                         lambda *a, **k: "%9")
@@ -975,8 +1007,8 @@ def test_discovery_never_adopts_a_historical_pane_after_a_failed_attempt(
                         lambda *_a, **_k: tmp_path / f"{old}.jsonl")
     state = ReviewLoopState(pr_id=PR, iteration=2, iteration_attempted=True,
                             launch_attempts=1, last_session_id=old)
-    disc = review_loop._discover_iteration(state, _pr(tmp_path),
-                                           str(tmp_path), 2,
+    _record(tmp_path, 2, loop_id=state.loop_id)  # recorded by the failure
+    disc = review_loop._discover_iteration(state, _pr(tmp_path), 2,
                                            allow_recovery=True)
     assert disc.kind == "launch"
 
@@ -1003,12 +1035,9 @@ def test_retry_never_adopts_a_historical_panes_verdict(tmp_path, monkeypatch):
     err = ReviewLaunchError("container setup failed", retryable=True)
 
     def fake_review(*_a, **kw):
-        # The child wrote the iteration-2 symlink before the parent-side
+        # The child recorded the iteration-2 attempt before the parent-side
         # launch failed, leaving the historical window live.
-        link = tmp_path / "review-pr-001-i2.jsonl"
-        if not link.is_symlink():
-            _make_symlink(tmp_path, "review-pr-001-i2.jsonl",
-                          str(uuid.uuid4()))
+        _record(tmp_path, kw["iteration"], loop_id=kw["loop_id"])
         raise err
 
     with patch.object(review_loop, "_run_claude_review",
@@ -1025,9 +1054,8 @@ def test_retry_never_adopts_the_window_that_was_live_at_episode_start(
     """A review window already open when the episode started is the
     historical window, not this iteration's attempt.
 
-    Iteration 1 of a fresh loop has no ``last_session_id`` and its (new)
-    transcript dir holds no earlier symlink, so nothing identifies that
-    pane as old.  A first attempt that fails *before* ``--fresh`` replaces
+    Iteration 1 of a fresh loop has no ``last_session_id`` and no earlier
+    recorded attempt, so nothing identifies that pane as old.  A first attempt that fails *before* ``--fresh`` replaces
     the window (route down, workdir gone, a tmux error on the kill) then
     leaves it live; the retry must replace it rather than record its older
     review's verdict for an iteration that never ran.
@@ -1049,8 +1077,7 @@ def test_retry_never_adopts_the_window_that_was_live_at_episode_start(
     launches = []
 
     def fake_launch(pr_id, pm_root, *, iteration=0, loop_id="",
-                    transcript=None, attempt=1, workdir=None,
-                    stale_session_id=""):
+                    session_id=None, run_id="", attempt=1, workdir=None):
         launches.append(attempt)
         raise ReviewLaunchError("container setup failed", retryable=True)
 
@@ -1079,8 +1106,7 @@ def test_discovery_replaces_the_window_that_was_live_at_episode_start(
     state = ReviewLoopState(pr_id=PR, iteration=1,
                             iteration_attempted=True, launch_attempts=1,
                             stale_pane_session_id=sid)
-    disc = review_loop._discover_iteration(state, _pr(tmp_path),
-                                           str(tmp_path), 1,
+    disc = review_loop._discover_iteration(state, _pr(tmp_path), 1,
                                            allow_recovery=True)
     assert disc.kind == "launch"
 
@@ -1102,8 +1128,7 @@ def test_discovery_still_adopts_a_session_started_after_the_stale_one(
     state = ReviewLoopState(pr_id=PR, iteration=1,
                             iteration_attempted=True, launch_attempts=1,
                             stale_pane_session_id=old)
-    disc = review_loop._discover_iteration(state, _pr(tmp_path),
-                                           str(tmp_path), 1,
+    disc = review_loop._discover_iteration(state, _pr(tmp_path), 1,
                                            allow_recovery=True)
     assert disc.kind == "adopt"
     assert disc.session_id == fresh
@@ -1137,16 +1162,10 @@ def test_episode_start_snapshots_the_live_review_window(tmp_path, monkeypatch):
 
 def test_discovery_reports_a_landed_verdict(tmp_path, monkeypatch):
     monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
-    sid = str(uuid.uuid4())
-    _make_symlink(tmp_path, "review-pr-001-i1.jsonl", sid)
-    (tmp_path / f"{sid}.jsonl").write_text(json.dumps({
-        "type": "assistant",
-        "message": {"content": [{"type": "text", "text": "**PASS**"}]},
-    }) + "\n")
-    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: None)
     state = ReviewLoopState(pr_id=PR)
-    disc = review_loop._discover_iteration(state, _pr(tmp_path),
-                                           str(tmp_path), 1)
+    _record(tmp_path, 1, loop_id=state.loop_id, text="**PASS**")
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: None)
+    disc = review_loop._discover_iteration(state, _pr(tmp_path), 1)
     assert disc.kind == "verdict"
     assert "PASS" in (disc.output or "")
 
@@ -1185,36 +1204,27 @@ def test_verdict_reader_survives_a_later_wakeup_postscript(tmp_path):
     assert review_loop.parse_review_verdict(out) == VERDICT_PASS
 
 
-def test_discovery_ignores_a_transcript_this_loop_never_launched(tmp_path,
-                                                                 monkeypatch):
-    """The transcript dir outlives a loop, so a symlink can be a previous
-    run's iteration N.  Before this loop launches iteration N, that verdict
-    is not ours to adopt."""
+def test_discovery_ignores_a_session_this_loop_never_launched(tmp_path,
+                                                              monkeypatch):
+    """A previous run's (another loop's) iteration N — e.g. the loop that
+    ran before a sign-off return restarted the review at iteration 1 — is
+    never this loop's, whatever the recovery gate says."""
     monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
-    sid = str(uuid.uuid4())
-    _make_symlink(tmp_path, "review-pr-001-i1.jsonl", sid)
-    (tmp_path / f"{sid}.jsonl").write_text(json.dumps({
-        "type": "assistant",
-        "message": {"content": [{"type": "text", "text": "**PASS**"}]},
-    }) + "\n")
+    _record(tmp_path, 1, loop_id="0ldl00p0", text="**PASS**")
     monkeypatch.setattr(review_loop, "_get_pm_session", lambda: None)
-    state = ReviewLoopState(pr_id=PR)
-    disc = review_loop._discover_iteration(state, _pr(tmp_path),
-                                           str(tmp_path), 1,
-                                           allow_recovery=False)
-    assert disc.kind == "launch"
+    state = ReviewLoopState(pr_id=PR, iteration_attempted=True,
+                            launch_attempts=1)
+    for allow in (False, True):
+        disc = review_loop._discover_iteration(state, _pr(tmp_path), 1,
+                                               allow_recovery=allow)
+        assert disc.kind == "launch"
 
 
 def test_fresh_loop_never_adopts_a_previous_runs_verdict(tmp_path, monkeypatch):
-    """A new loop on the same PR (shared ``manual-<token>`` transcript dir)
-    must run its own review, not inherit the last run's PASS."""
+    """A new loop on the same PR (same driver run) must run its own review,
+    not inherit the last loop's iteration-1 PASS."""
     monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
-    sid = str(uuid.uuid4())
-    _make_symlink(tmp_path, "review-pr-001-i1.jsonl", sid)
-    (tmp_path / f"{sid}.jsonl").write_text(json.dumps({
-        "type": "assistant",
-        "message": {"content": [{"type": "text", "text": "old\n\n**PASS**"}]},
-    }) + "\n")
+    _record(tmp_path, 1, loop_id="0ldl00p0", text="old\n\n**PASS**")
     monkeypatch.setattr(review_loop, "_get_pm_session", lambda: None)
     state = ReviewLoopState(pr_id=PR)
     with patch.object(review_loop, "_run_claude_review",
@@ -1228,23 +1238,17 @@ def test_fresh_loop_never_adopts_a_previous_runs_verdict(tmp_path, monkeypatch):
 
 def test_retry_adopts_a_verdict_that_landed_after_the_failure(tmp_path,
                                                               monkeypatch):
-    """After our own failed attempt, a transcript IT created IS adopted."""
+    """After our own failed attempt, the session IT recorded IS adopted."""
     monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
     monkeypatch.setattr(review_loop, "_get_pm_session", lambda: None)
-    sid = str(uuid.uuid4())
-    link = tmp_path / "review-pr-001-i1.jsonl"
     state = ReviewLoopState(pr_id=PR)
     err = ReviewLaunchError("boom", retryable=True)
 
-    def fake_review(*_a, **_kw):
-        # The child wrote the transcript (Claude started) before the
+    def fake_review(*_a, **kw):
+        # The child recorded the attempt (Claude started) before the
         # parent-side launch failed, then the recovery landed a verdict.
-        link.symlink_to(tmp_path / f"{sid}.jsonl")
-        (tmp_path / f"{sid}.jsonl").write_text(json.dumps({
-            "type": "assistant",
-            "message": {"content": [{"type": "text",
-                                     "text": "recovered\n\n**PASS**"}]},
-        }) + "\n")
+        _record(tmp_path, kw["iteration"], loop_id=kw["loop_id"],
+                text="recovered\n\n**PASS**")
         raise err
 
     with patch.object(review_loop, "_run_claude_review",
@@ -1255,19 +1259,14 @@ def test_retry_adopts_a_verdict_that_landed_after_the_failure(tmp_path,
     assert [h.iteration for h in result.history] == [1]
 
 
-def test_retry_never_adopts_a_previous_runs_transcript(tmp_path, monkeypatch):
-    """A launch that fails *before* the child writes its transcript leaves
-    the shared dir's older iteration-N symlink in place.  Its verdict is a
-    previous run's, so it must not be recorded as this iteration's — the
-    loop retries and then reports LAUNCH_FAILED, never a fabricated PASS."""
+def test_retry_never_adopts_a_previous_runs_session(tmp_path, monkeypatch):
+    """A launch that fails *before* the child records its session leaves no
+    attempt of this loop.  A previous run's iteration-N verdict must not be
+    recorded as this iteration's — the loop retries and then reports
+    LAUNCH_FAILED, never a fabricated PASS."""
     monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
     monkeypatch.setattr(review_loop, "_get_pm_session", lambda: None)
-    sid = str(uuid.uuid4())
-    _make_symlink(tmp_path, "review-pr-001-i1.jsonl", sid)
-    (tmp_path / f"{sid}.jsonl").write_text(json.dumps({
-        "type": "assistant",
-        "message": {"content": [{"type": "text", "text": "old\n\n**PASS**"}]},
-    }) + "\n")
+    _record(tmp_path, 1, loop_id="0ldl00p0", text="old\n\n**PASS**")
     state = ReviewLoopState(pr_id=PR)
     err = ReviewLaunchError("container setup failed", retryable=True)
     with patch.object(review_loop, "_run_claude_review", side_effect=err) as run:
@@ -1413,7 +1412,8 @@ def test_follow_up_wait_refreshes_the_launch_lease(tmp_path, monkeypatch):
     """An INPUT_REQUIRED wait can outlast the lease TTL; the loop must keep
     ownership (and stop refreshing once it is stopping)."""
     state = ReviewLoopState(pr_id=PR, iteration=1)
-    state._transcript_dir = str(tmp_path)
+    # The iteration's own session asked the question.
+    state.last_session_id = _record(tmp_path, 1, loop_id=state.loop_id)
     captured: dict = {}
 
     def fake_wait(session, window, transcript, **kw):
@@ -1604,7 +1604,7 @@ def test_breadcrumb_round_trips_retry_episode(tmp_path):
         iteration_attempted=True,
         stale_session_id="sid-0",
         stale_pane_session_id="sid-pane-0",
-        _transcript_dir=str(tmp_path),
+        run_id="run",
     )
     app = MagicMock()
     app._auto_start = True
@@ -1658,7 +1658,7 @@ def test_auto_start_rearms_retryable_failure(tmp_path):
                             latest_verdict=VERDICT_LAUNCH_FAILED,
                             launch_retryable=True, retry_ready_at=0,
                             retry_episodes=0, iteration=1,
-                            _transcript_dir=str(tmp_path))
+                            run_id="run")
     app = _auto_app(tmp_path, state)
     with patch("pm_core.tui.review_loop_ui._start_loop") as start, \
             patch("pm_core.tmux.in_tmux", return_value=True):
@@ -1681,7 +1681,7 @@ def test_auto_start_rearm_announcement_is_held(tmp_path):
                             latest_verdict=VERDICT_LAUNCH_FAILED,
                             launch_retryable=True, retry_ready_at=0,
                             retry_episodes=0, iteration=1,
-                            _transcript_dir=str(tmp_path))
+                            run_id="run")
     app = _auto_app(tmp_path, state)
     with patch("pm_core.tui.review_loop_ui._start_loop"), \
             patch("pm_core.tmux.in_tmux", return_value=True):
@@ -1703,7 +1703,7 @@ def test_auto_start_rearm_clears_the_retry_notice_key(tmp_path):
                             launch_retryable=True, retry_ready_at=0,
                             retry_episodes=0, iteration=1,
                             launch_attempts=3, _ui_notified_retry=3,
-                            _transcript_dir=str(tmp_path))
+                            run_id="run")
     app = _auto_app(tmp_path, state)
     with patch("pm_core.tui.review_loop_ui._start_loop") as start, \
             patch("pm_core.tmux.in_tmux", return_value=True):
@@ -1722,7 +1722,7 @@ def test_auto_start_rearm_restores_the_notice_key_when_it_cannot_start(
                             launch_retryable=True, retry_ready_at=0,
                             retry_episodes=1, iteration=1,
                             launch_attempts=3, _ui_notified_retry=3,
-                            _transcript_dir=str(tmp_path))
+                            run_id="run")
     app = _auto_app(tmp_path, state)
     with patch("pm_core.tui.review_loop_ui._start_loop",
                return_value=False), \
@@ -1776,7 +1776,7 @@ def test_auto_start_keeps_the_failure_retryable_when_rearm_cannot_start(
                             latest_verdict=VERDICT_LAUNCH_FAILED,
                             launch_retryable=True, retry_ready_at=0,
                             retry_episodes=2, iteration=1,
-                            _transcript_dir=str(tmp_path))
+                            run_id="run")
     app = _auto_app(tmp_path, state)
     with patch("pm_core.tui.review_loop_ui._start_loop",
                return_value=False), \
@@ -1797,7 +1797,7 @@ def test_auto_start_rearm_yields_to_a_pending_review_return(tmp_path):
                                latest_verdict=VERDICT_LAUNCH_FAILED,
                                launch_retryable=True, retry_ready_at=0,
                                retry_episodes=0, iteration=1,
-                               _transcript_dir=str(tmp_path))
+                               run_id="run")
 
     # Another driver already owns the return's launch: do not re-arm, keep
     # the retryable failure, and re-check once the claim can expire.
@@ -2044,8 +2044,7 @@ def test_container_permission_error_is_retryable_not_auth(tmp_path):
                           stderr="Error: removing container: permission denied")):
         with pytest.raises(ReviewLaunchError) as ei:
             review_loop._launch_review_window(
-                PR, str(tmp_path), iteration=1,
-                transcript=str(tmp_path / "t.jsonl"))
+                PR, str(tmp_path), iteration=1)
     assert ei.value.retryable is True
     assert ei.value.reason == "launch"
 
@@ -2075,8 +2074,7 @@ def test_auth_failure_reported_on_stdout_is_not_retryable(tmp_path):
                           stderr="warning: retrying connection")):
         with pytest.raises(ReviewLaunchError) as ei:
             review_loop._launch_review_window(
-                PR, str(tmp_path), iteration=1,
-                transcript=str(tmp_path / "t.jsonl"))
+                PR, str(tmp_path), iteration=1)
     assert ei.value.retryable is False
     assert ei.value.reason == "auth"
 
@@ -2097,14 +2095,12 @@ def test_discovery_waits_for_a_starting_pane_after_our_attempt(tmp_path,
 
     state = ReviewLoopState(pr_id=PR, iteration=2,
                             iteration_attempted=True, launch_attempts=1)
-    disc = review_loop._discover_iteration(state, _pr(tmp_path),
-                                           str(tmp_path), 2,
+    disc = review_loop._discover_iteration(state, _pr(tmp_path), 2,
                                            allow_recovery=True)
     assert disc.kind == "pending"
 
     state = ReviewLoopState(pr_id=PR, iteration=2)
-    disc = review_loop._discover_iteration(state, _pr(tmp_path),
-                                           str(tmp_path), 2,
+    disc = review_loop._discover_iteration(state, _pr(tmp_path), 2,
                                            allow_recovery=False)
     assert disc.kind == "launch"
 
@@ -2170,7 +2166,7 @@ def test_start_loop_marks_running_before_the_thread_starts(tmp_path,
             patch("pm_core.tui.review_loop_ui._ensure_poll_timer"):
         store_mock.find_project_root.return_value = Path("/tmp/pm")
         assert review_loop_ui._start_loop(
-            app, PR, pr, transcript_dir=str(tmp_path), resume_state=state)
+            app, PR, pr, run_id="run", resume_state=state)
     assert seen["running"] is True
     assert state.running is True
 
@@ -2197,7 +2193,7 @@ def test_start_loop_clears_running_when_the_thread_cannot_start(tmp_path,
         store_mock.find_project_root.return_value = Path("/tmp/pm")
         with pytest.raises(RuntimeError):
             review_loop_ui._start_loop(
-                app, PR, pr, transcript_dir=str(tmp_path),
+                app, PR, pr, run_id="run",
                 resume_state=state)
     assert state.running is False
 
@@ -2310,7 +2306,7 @@ def test_auto_start_keeps_the_failure_retryable_when_rearm_raises(tmp_path):
                             latest_verdict=VERDICT_LAUNCH_FAILED,
                             launch_retryable=True, retry_ready_at=0,
                             retry_episodes=2, iteration=1,
-                            _transcript_dir=str(tmp_path))
+                            run_id="run")
     app = _auto_app(tmp_path, state)
     with patch("pm_core.tui.review_loop_ui._start_loop",
                side_effect=RuntimeError("no project root")), \

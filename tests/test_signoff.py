@@ -691,7 +691,7 @@ class TestWindowLaunchWorkdir:
     workdir directly.
     """
 
-    def _launch(self, tmp_path, *, transcript=None, existing=None,
+    def _launch(self, tmp_path, *, run_id="", existing=None,
                 head="abc", routed=False, model_settings=None,
                 wrap_error=None):
         from types import SimpleNamespace
@@ -756,8 +756,7 @@ class TestWindowLaunchWorkdir:
             p(patch("pm_core.signoff.store.load", return_value=data))
 
             signoff.launch_signoff_window(
-                data, pr_entry, background=True,
-                transcript=str(transcript) if transcript else None)
+                data, pr_entry, background=True, run_id=run_id)
         return new_window, workdir
 
     def test_signoff_launch_honors_pr_role_exception(self, tmp_path, monkeypatch):
@@ -818,32 +817,49 @@ class TestWindowLaunchWorkdir:
                      existing={"id": "@9", "index": 9, "name": "signoff-pr-001"})
         assert self.checks == []
 
-    def test_new_window_stamps_launched_head(self, tmp_path):
-        """The run is bound to the HEAD it was launched on (verdict binding)."""
-        tdir = tmp_path / "t"
-        transcript = signoff.signoff_transcript(tdir, "pr-001")
-        self._launch(tmp_path, transcript=transcript, head="abc")
-        assert signoff.signoff_launched_sha(tdir, "pr-001") == "abc"
+    def test_new_window_records_launched_head(self, tmp_path):
+        """The run is bound to the HEAD it was launched on (verdict binding):
+        the launch records it, with the integration base, under the run."""
+        self._launch(tmp_path, run_id="run-t", head="abc")
+        launch = self.build.call_args.kwargs["launch"]
+        assert (launch.subject, launch.phase, launch.run_id) == \
+            ("pr-001", "signoff", "run-t")
+        assert (launch.head, launch.base) == ("abc", "b" * 40)
 
-    def test_reused_window_keeps_its_launch_stamp(self, tmp_path):
+    def test_reused_window_keeps_its_launch_record(self, tmp_path):
         """The existing-window fast path reuses a run launched earlier: HEAD
-        now is not what that run reviews, so the stamp must not move."""
-        tdir = tmp_path / "t"
-        transcript = signoff.signoff_transcript(tdir, "pr-001")
-        signoff.stamp_signoff_launch(transcript, "old")
+        now is not what that run reviews, so nothing new is recorded."""
+        from pm_core import session_log
+        session_log.register(
+            session_log.SessionLaunch(subject="pr-001", phase="signoff",
+                                      run_id="run-t", head="old"),
+            "11111111-2222-4333-8444-555555555555", str(tmp_path))
         new_window, _ = self._launch(
-            tmp_path, transcript=transcript, head="new",
+            tmp_path, run_id="run-t", head="new",
             existing={"id": "@9", "index": 9, "name": "signoff-pr-001"})
         new_window.assert_not_called()
-        assert signoff.signoff_launched_sha(tdir, "pr-001") == "old"
+        self.build.assert_not_called()
+        assert signoff.signoff_launched_sha("run-t", "pr-001") == "old"
 
-    def test_retire_removes_launch_stamp(self, tmp_path):
-        tdir = tmp_path / "t"
-        transcript = signoff.signoff_transcript(tdir, "pr-001")
-        signoff.stamp_signoff_launch(transcript, "abc")
+    def test_retire_retires_the_run_without_deleting_it(self, tmp_path,
+                                                         monkeypatch):
+        from pm_core import session_log
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        sid = "11111111-2222-4333-8444-555555555555"
+        rec = session_log.register(
+            session_log.SessionLaunch(subject="pr-001", phase="signoff",
+                                      run_id="run-t", head="abc"),
+            sid, str(tmp_path / "wd"))
+        log = Path(rec.log)
+        log.parent.mkdir(parents=True)
+        log.write_text('{"type":"assistant"}\n')
         with patch("pm_core.tmux.find_window_by_name", return_value=None):
-            signoff.retire_signoff_run("pm-x", {"id": "pr-001"}, tdir)
-        assert signoff.signoff_launched_sha(tdir, "pr-001") is None
+            signoff.retire_signoff_run("pm-x", {"id": "pr-001"}, "run-t")
+        assert signoff.signoff_launched_sha("run-t", "pr-001") is None
+        assert signoff.current_signoff_session("run-t", "pr-001") is None
+        # History, not state: the session and its native log stay.
+        assert session_log.by_session("pr-001", sid).retired
+        assert log.read_text() == '{"type":"assistant"}\n'
 
 
 class TestLatestQaStatusPath:

@@ -138,9 +138,10 @@ def poll_for_verdict(
     ``/loop`` wakeup or Monitor postscript after the verdict cannot hide
     markers from downstream parsers (e.g. :func:`extract_between_markers`).
 
-    Hook-driven only — requires *transcript_path* so we can recover the
-    Claude ``session_id`` via the symlink target and read the assistant
-    output from the JSONL.  No pane-capture fallback for verdicts; the
+    Hook-driven only — requires *transcript_path*, the native log of the
+    exact session being polled: its ``session_id`` is parsed from it and the
+    assistant output is read from that JSONL (re-read on every check, so
+    appended turns stay visible).  No pane-capture fallback for verdicts; the
     pane is only captured, until the first idle event, to catch a session
     stuck at the workspace-trust prompt (*workdir* is the host workdir the
     session was launched for).  Raises

@@ -235,7 +235,7 @@ def test_self_driving_needs_work_race_starts_one_review_loop(tmp_path):
         store.get_pr(app._data, "pr-001")["status"])
 
     with patch("pm_core.tui.review_loop_ui._start_loop") as loop, \
-         patch("pm_core.tui.auto_start.get_transcript_dir", return_value=tmp_path):
+         patch("pm_core.tui.auto_start.get_run_id", return_value="run"):
         with _fail_first_locked_update():
             _poll(app, 1)
             assert not loop.called and snap.exists()

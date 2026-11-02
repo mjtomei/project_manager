@@ -187,52 +187,34 @@ def record_signoff_verdict(root: Path, pr_id: str, verdict: str,
     store.locked_update(root, _apply)
 
 
-def signoff_launch_stamp(transcript) -> Path:
-    """Sidecar of a router transcript holding the HEAD its run launched on.
+def current_signoff_session(run_id: str, pr_id: str, root: Path | None = None):
+    """The driver run's current sign-off router session, or None.
 
-    ``signoff-<pr>.jsonl`` -> ``signoff-<pr>.head``.  A transcript verdict is
-    only bound to the revision the router was launched against: HEAD at
-    verdict-*read* time can be a later, unreviewed commit.
+    The latest ``signoff`` launch record of *run_id* in the session ledger
+    (:mod:`pm_core.session_log`) unless it was retired.  Its ``head``/``base``
+    are the revision the run was launched to review and the base of the
+    integration check it was launched with: a verdict only binds to those
+    (HEAD at verdict-*read* time can be a later, unreviewed commit).  Given
+    the pm *root*, a pre-upgrade ``transcripts/<run>/signoff-<pr>.jsonl``
+    (+ ``.head`` stamp) of this run is adopted once, read-only.
     """
-    return Path(transcript).with_suffix(".head")
+    from pm_core import session_log
+    return session_log.resolve(
+        pr_id, "signoff", run_id or "",
+        legacy_name=f"signoff-{pr_id}.jsonl" if root is not None else None,
+        root=root)
 
 
-def stamp_signoff_launch(transcript, sha: str | None,
-                         base_sha: str | None = None) -> None:
-    """Record *sha* as the revision the run writing *transcript* reviews.
-
-    *base_sha* (second line) is the base revision of the integration check
-    the run was launched with: its verdict may only bind to that check.
-    """
-    stamp = signoff_launch_stamp(transcript)
-    try:
-        if sha:
-            stamp.parent.mkdir(parents=True, exist_ok=True)
-            stamp.write_text(sha + "\n" + (base_sha + "\n" if base_sha else ""))
-        elif stamp.exists():
-            stamp.unlink()
-    except OSError as e:
-        _log.warning("sign-off launch stamp %s: %s", stamp, e)
-
-
-def _launch_stamp_lines(tdir: Path, pr_id: str) -> list[str]:
-    try:
-        return signoff_launch_stamp(
-            signoff_transcript(tdir, pr_id)).read_text().split()
-    except OSError:
-        return []
-
-
-def signoff_launched_sha(tdir: Path, pr_id: str) -> str | None:
+def signoff_launched_sha(run_id: str, pr_id: str) -> str | None:
     """HEAD the driver's current sign-off run launched on, or None."""
-    lines = _launch_stamp_lines(tdir, pr_id)
-    return lines[0] if lines else None
+    rec = current_signoff_session(run_id, pr_id)
+    return (rec.head or None) if rec else None
 
 
-def signoff_launched_base(tdir: Path, pr_id: str) -> str | None:
+def signoff_launched_base(run_id: str, pr_id: str) -> str | None:
     """Base revision of the integration check the run launched with."""
-    lines = _launch_stamp_lines(tdir, pr_id)
-    return lines[1] if len(lines) > 1 else None
+    rec = current_signoff_session(run_id, pr_id)
+    return (rec.base or None) if rec else None
 
 
 def is_legacy_approval(record: dict | None) -> bool:
@@ -400,7 +382,7 @@ def merge_gate_refusal(pr: dict, current_sha: str | None,
 
 def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
                           background: bool = False,
-                          transcript: str | None = None,
+                          run_id: str = "",
                           session_name: str | None = None) -> None:
     """Launch a tmux sign-off window with a single Claude router pane.
 
@@ -484,12 +466,15 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             print(f"Integration check failed: {e}")
 
         # Bind this run to the revision it reviews (and the base it was
-        # checked against): the driver only records its transcript verdict
-        # while HEAD still equals this stamp.  Only a newly created window
-        # stamps; the fast path above reuses a run whose stamp is on disk.
-        if transcript:
-            stamp_signoff_launch(transcript, head_sha(workdir),
-                                 rec.get("base_sha"))
+        # checked against): the launch records both with its session, and
+        # the driver only records the router's verdict while HEAD still
+        # equals it.  Only a newly created window records a launch; the fast
+        # path above reuses the run already recorded.
+        from pm_core.session_log import SessionLaunch
+        launch = SessionLaunch(subject=pr_id, phase="signoff",
+                               run_id=run_id or "",
+                               head=head_sha(workdir) or "",
+                               base=rec.get("base_sha") or "")
 
         _resolution = resolve_model_and_provider(
             "signoff",
@@ -501,8 +486,8 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             data, pr_id, session_name=pm_session)
 
         # Container cwd quirk mirrors review: Claude's cwd is /workspace inside a
-        # container, so the transcript symlink + prompt file must target the
-        # mounted host path via write_dir.
+        # container (its native log lives under that cwd), and the prompt
+        # file must target the mounted host path via write_dir.
         from pm_core.container import (
             is_container_mode_enabled, _CONTAINER_WORKDIR,
             wrap_claude_cmd, remove_container, _make_container_name,
@@ -518,7 +503,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         env: dict[str, str] = {}
         claude_cmd = build_claude_shell_cmd(
             prompt=signoff_prompt,
-            transcript=transcript,
+            launch=launch,
             cwd=_claude_cwd,
             write_dir=_claude_write_dir,
             model=_resolution.model,
@@ -1054,19 +1039,20 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
 # step below owns every sign-off state side effect; launching stays with the
 # caller.
 
-def signoff_transcript(tdir: Path, pr_id: str) -> Path:
-    """The sign-off router's transcript symlink under a driver's *tdir*."""
-    return tdir / f"signoff-{pr_id}.jsonl"
+def signoff_transcript_verdict(run_id: str, pr_id: str) -> str | None:
+    """Return the routing verdict in the run's current router session, or None.
 
-
-def signoff_transcript_verdict(tdir: Path, pr_id: str) -> str | None:
-    """Return the routing verdict in *tdir*'s sign-off transcript, or None."""
+    Read from that session's own native log; a missing log (never written,
+    or pruned) is no verdict, never another session's.
+    """
+    from pm_core import session_log
     from pm_core.verdict_transcript import extract_verdict_from_transcript
 
-    transcript = signoff_transcript(tdir, pr_id)
-    if not (transcript.is_file() or transcript.is_symlink()):
+    rec = current_signoff_session(run_id, pr_id)
+    if rec is None:
         return None
-    return extract_verdict_from_transcript(str(transcript), SIGNOFF_VERDICTS)
+    return extract_verdict_from_transcript(
+        str(session_log.log_path(rec)), SIGNOFF_VERDICTS)
 
 
 def signoff_window_pane(session: str, pr_entry: dict) -> str | None:
@@ -1078,31 +1064,32 @@ def signoff_window_pane(session: str, pr_entry: dict) -> str | None:
     return panes[0][0] if panes else None
 
 
-def retire_signoff_run(session: str, pr_entry: dict, tdir: Path) -> None:
-    """Tear down a PR's sign-off window + transcript when bouncing out of sign_off.
+def retire_signoff_run(session: str, pr_entry: dict, run_id: str) -> None:
+    """Tear down a PR's sign-off window and retire its run when bouncing out.
 
     A bounce hop (re-qa / review / impl) moves the PR out of ``sign_off`` while
-    the router's window and its single ``signoff-<id>.jsonl`` transcript live on
-    (the QA loop only sweeps ``qa-*`` windows).  Unlike review's
-    iteration-numbered transcripts, sign-off reuses one transcript path, so on
-    re-entry the existing-window fast path would switch to the stale window and
-    the transcript check would replay the *old* verdict — re-bouncing forever
-    (a re-qa never changes HEAD, so the consumed record can't guard it).
-    Retiring both forces a genuine fresh router run on the next sign_off entry.
+    the router's window lives on (the QA loop only sweeps ``qa-*`` windows).
+    On re-entry the existing-window fast path would switch to the stale window
+    and the driver would replay the *old* verdict — re-bouncing forever (a
+    re-qa never changes HEAD, so the consumed record can't guard it).
+    Killing the window and retiring the run's session in the ledger forces a
+    genuine fresh router run on the next sign_off entry.  Nothing is deleted:
+    the retired session and its native log stay listed as history.
     Captures / ``report.html`` are left alone.
     """
-    from pm_core import home_window
+    from pm_core import home_window, session_log
     win = tmux_mod.find_window_by_name(session, signoff_window_name(pr_entry))
     if win:
         home_window.park_if_on(session, win["id"])
         tmux_mod.kill_window(session, win["id"])
-    transcript = signoff_transcript(tdir, pr_entry["id"])
-    for f in (transcript, signoff_launch_stamp(transcript)):
+    rec = current_signoff_session(run_id, pr_entry["id"])
+    if rec is not None:
         try:
-            if f.is_symlink() or f.exists():
-                f.unlink()
-        except OSError:
-            pass
+            session_log.retire(pr_entry["id"], rec.session_id,
+                               "sign-off run retired")
+        except OSError as e:
+            _log.warning("sign-off %s: retiring session %s failed: %s",
+                         pr_entry["id"], rec.session_id, e)
 
 
 @dataclass(frozen=True)
@@ -1163,7 +1150,7 @@ def _prepare_bounce(root: Path, pr_id: str, verdict: str, hop: str,
         coerced_reason=coerced, applied=applied, apply_error=apply_error)
 
 
-def step_signoff(root: Path, pr_entry: dict, *, session: str, tdir: Path,
+def step_signoff(root: Path, pr_entry: dict, *, session: str, run_id: str,
                  read_verdict=None, window_pane=None,
                  retire=None) -> SignoffStep:
     """Advance a ``sign_off`` PR one auto-sequence tick (state side only).
@@ -1173,11 +1160,12 @@ def step_signoff(root: Path, pr_entry: dict, *, session: str, tdir: Path,
        picks up a hand-recorded approval without a wasted re-run.
     2. A STALE record (HEAD moved since it ran, the merge gate found the
        base moved, or a legacy approval) is never trusted: retire that run
-       (window + transcript), clear the record -> ``launch``.
+       (window + session), clear the record -> ``launch``.
     3. No record: a run launched on another revision than the current HEAD
-       (see :func:`stamp_signoff_launch`; unstamped counts as unknown) is
-       retired before its verdict can count -> ``launch`` (stale).  Otherwise
-       read this driver's transcript; a verdict there goes through
+       (the HEAD its launch recorded, see :func:`current_signoff_session`;
+       unrecorded counts as unknown) is retired before its verdict can count
+       -> ``launch`` (stale).  Otherwise read this driver run's router
+       session (*run_id*); a verdict there goes through
        :func:`effective_verdict` (a conflicted integration routes to IMPL; a
        MERGE without a conflict-free check of this HEAD is BLOCKED) and is
        recorded (origin ``auto-sequence``, sha = the launched HEAD, bound to
@@ -1215,8 +1203,14 @@ def step_signoff(root: Path, pr_entry: dict, *, session: str, tdir: Path,
             if disk_pr.get("status") != "sign_off":
                 return SignoffStep("running")
             pr_entry = disk_pr
+        # A run launched before the upgrade is adopted (read-only) here,
+        # where the pm root is known; later reads are ledger-only.
+        try:
+            current_signoff_session(run_id, pr_entry["id"], root=root)
+        except OSError as e:
+            _log.warning("sign-off %s: session ledger: %s", pr_entry["id"], e)
         return _step_signoff_locked(root, pr_entry, session=session,
-                                    tdir=tdir, read_verdict=read_verdict,
+                                    run_id=run_id, read_verdict=read_verdict,
                                     window_pane=window_pane, retire=retire)
 
 
@@ -1238,7 +1232,7 @@ def _step_lock(pr_id: str):
 
 
 def _step_signoff_locked(root: Path, pr_entry: dict, *, session: str,
-                         tdir: Path, read_verdict, window_pane,
+                         run_id: str, read_verdict, window_pane,
                          retire) -> SignoffStep:
     from pm_core import integration as integ
     pr_id = pr_entry["id"]
@@ -1251,7 +1245,7 @@ def _step_signoff_locked(root: Path, pr_entry: dict, *, session: str,
 
     if verdict is None and record.get("verdict"):
         reason = stale_reason(record)
-        retire(session, pr_entry, tdir)
+        retire(session, pr_entry, run_id)
 
         def _clear(d):
             p = store.get_pr(d, pr_id)
@@ -1262,23 +1256,23 @@ def _step_signoff_locked(root: Path, pr_entry: dict, *, session: str,
                            reason=reason)
 
     if verdict is None:
-        tverdict = read_verdict(tdir, pr_id)
-        launched = signoff_launched_sha(tdir, pr_id)
+        tverdict = read_verdict(run_id, pr_id)
+        launched = signoff_launched_sha(run_id, pr_id)
         if current_sha and (launched or tverdict is not None) \
                 and launched != current_sha:
             # HEAD moved while the router ran (or the run carries no launch
             # revision): its verdict reviewed other code.  Retire it before
             # it is recorded against the new HEAD.
-            retire(session, pr_entry, tdir)
+            retire(session, pr_entry, run_id)
             return SignoffStep("launch", stale=True, sha=current_sha,
                                reason="HEAD moved")
         irec = pr_entry.get("integration") or {}
-        launched_base = signoff_launched_base(tdir, pr_id)
+        launched_base = signoff_launched_base(run_id, pr_id)
         if tverdict is not None and launched_base \
                 and irec.get("base_sha") != launched_base:
             # The integration was re-recorded against another base while the
             # router ran: its verdict assessed the launch-time base.
-            retire(session, pr_entry, tdir)
+            retire(session, pr_entry, run_id)
             return SignoffStep("launch", stale=True, sha=current_sha,
                                reason="integration re-checked during the run")
         if tverdict is not None:
@@ -1305,6 +1299,6 @@ def _step_signoff_locked(root: Path, pr_entry: dict, *, session: str,
                                         current_sha, original, coerced)
     hop = apply_signoff_hop(root, pr_id, hop, return_record=return_record)
     if hop in _BOUNCE_HOP_STATUS:
-        retire(session, pr_entry, tdir)
+        retire(session, pr_entry, run_id)
     return SignoffStep("hop", hop=hop, verdict=verdict, sha=current_sha,
                        coerced=coerced)

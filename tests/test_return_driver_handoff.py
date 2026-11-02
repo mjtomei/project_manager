@@ -7,7 +7,8 @@ each other instead of replacing it (QA S79, pr-592e4bd).
 * The TUI relaunched an IMPL return; the next tick judged the new impl pane
   by its own ``impl-<pr>.jsonl`` symlink — an earlier, idle session — and
   moved the PR to review 1.2 s into the rework.  Both drivers now judge a
-  pane only by the session it runs.
+  pane only by the session it runs, and only when that session is the one
+  their own run recorded (session ledger).
 """
 
 import os
@@ -18,8 +19,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pm_core import store
-from pm_core.claude_launcher import pane_runs_transcript, transcript_path_for
+from pm_core import session_log, store
+from pm_core.claude_launcher import pane_session_id, transcript_path_for
 
 PR = "pr-s79"
 SID_OLD = "11111111-2222-4333-8444-555555555555"
@@ -44,22 +45,28 @@ def _launch_cmd(wd, sid):
     return f'"cd {wd} && claude --session-id {sid} \\"x\\""'
 
 
-def _link(path: Path, wd, sid) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.symlink_to(transcript_path_for(str(wd), sid))
-    return path
+def _record(phase, run, wd, sid):
+    """A launch of *phase* in driver run *run*, as the child records it."""
+    return session_log.register(
+        session_log.SessionLaunch(subject=PR, phase=phase, run_id=run),
+        sid, str(wd))
 
 
-def test_pane_runs_transcript(home, tmp_path, monkeypatch):
+def test_driver_pane_session(home, tmp_path, monkeypatch):
     wd = tmp_path / "wd"
     _pane_cmds(monkeypatch, {"%1": _launch_cmd(wd, SID_NEW), "%2": "bash"})
-    link = _link(tmp_path / "run" / f"impl-{PR}.jsonl", wd, SID_OLD)
-    assert pane_runs_transcript("%1", str(wd), link) is False
-    link.unlink()
-    _link(link, wd, SID_NEW)
-    assert pane_runs_transcript("%1", str(wd), link) is True
-    # No session id in the pane's command: nothing to check against.
-    assert pane_runs_transcript("%2", str(wd), link) is True
+    assert pane_session_id("%1") == SID_NEW
+    assert pane_session_id("%2") is None
+    _record("impl", "run", wd, SID_OLD)
+    assert session_log.driver_pane_session(PR, "impl", "run", "%1") is None
+    _record("impl", "run", wd, SID_NEW)
+    assert session_log.driver_pane_session(
+        PR, "impl", "run", "%1").session_id == SID_NEW
+    # Another run's session is never this driver's.
+    assert session_log.driver_pane_session(PR, "impl", "other", "%1") is None
+    # No session id in the pane's command: the run's current session.
+    assert session_log.driver_pane_session(
+        PR, "impl", "run", "%2").session_id == SID_NEW
 
 
 # --- tick: impl idle -------------------------------------------------------
@@ -67,12 +74,11 @@ def test_pane_runs_transcript(home, tmp_path, monkeypatch):
 @pytest.mark.parametrize("pane_sid,judged", [(SID_OLD, True), (SID_NEW, False)])
 def test_tick_judges_impl_pane_only_by_its_own_session(
         home, tmp_path, monkeypatch, pane_sid, judged):
-    """The tick's symlink names an earlier (idle) session; a pane another
+    """The tick's run recorded an earlier (idle) session; a pane another
     driver launched since must not be judged idle from it."""
     from pm_core.cli import pr as pr_mod
     wd = tmp_path / "wd"
-    tdir = tmp_path / "auto-sequence"
-    _link(tdir / f"impl-{PR}.jsonl", wd, SID_OLD)
+    _record("impl", "auto-sequence", wd, SID_OLD)
     old = transcript_path_for(str(wd), SID_OLD)
     old.parent.mkdir(parents=True, exist_ok=True)
     old.write_text("{}\n")
@@ -83,7 +89,7 @@ def test_tick_judges_impl_pane_only_by_its_own_session(
     with patch.object(pr_mod, "_impl_window_pane", return_value="%5"), \
             patch("pm_core.pane_idle.PaneIdleTracker", return_value=tracker):
         idle, gone = pr_mod._check_impl_idle(
-            "sess", {"id": PR, "workdir": str(wd)}, tdir)
+            "sess", {"id": PR, "workdir": str(wd)})
     assert (idle, gone) == (judged, False)
     assert tracker.register.called is judged
 
@@ -94,14 +100,13 @@ def test_tick_judges_impl_pane_only_by_its_own_session(
                                                  (SID_NEW, False)])
 def test_tui_tracks_impl_pane_only_by_its_own_session(
         home, tmp_path, monkeypatch, pane_sid, registered):
-    """The TUI's run-dir symlink names its earlier session; a pane a tick
-    relaunched since is left untracked (trust-watched only) instead of
-    being judged idle from that session."""
+    """The TUI's run recorded its earlier session; a pane a tick relaunched
+    since is left untracked (trust-watched only) instead of being judged
+    idle from that session."""
     from types import SimpleNamespace
     from pm_core.tui import review_loop_ui
     wd = tmp_path / "wd"
-    run = tmp_path / "run"
-    _link(run / f"impl-{PR}.jsonl", wd, SID_OLD)
+    _record("impl", "run", wd, SID_OLD)
     _pane_cmds(monkeypatch, {"%5": _launch_cmd(wd, pane_sid)})
     monkeypatch.setattr(review_loop_ui, "_find_impl_pane",
                         lambda session, name: "%5" if name == PR else None)
@@ -117,7 +122,7 @@ def test_tui_tracks_impl_pane_only_by_its_own_session(
         _data={"prs": [pr]}, _review_loops={}, _pending_merge_prs=set(),
         _root=tmp_path / "pm", _auto_start_run_id=None,
         log_message=lambda *a, **k: None)
-    with patch("pm_core.tui.auto_start.get_transcript_dir", return_value=run), \
+    with patch("pm_core.tui.auto_start.get_run_id", return_value="run"), \
             patch("pm_core.tui.auto_start.is_enabled", return_value=False):
         review_loop_ui._poll_impl_idle(app)
     assert tracker.register.called is registered
@@ -146,12 +151,12 @@ def _review_app(tmp_path, pr):
     return app
 
 
-def _run_review_pass(app, pr, run, pane="%7"):
+def _run_review_pass(app, pr, run="run", pane="%7"):
     from pm_core.tui import auto_start
     with patch("pm_core.tui.review_loop_ui._start_loop") as start, \
             patch("pm_core.review_loop._find_claude_pane",
                   return_value=pane), \
-            patch.object(auto_start, "get_transcript_dir", return_value=run):
+            patch.object(auto_start, "get_run_id", return_value=run):
         auto_start._auto_start_review_loops(app, [pr])
     return start
 
@@ -162,16 +167,21 @@ def test_tui_adopts_the_review_a_tick_launched_for_the_return(
     not written a transcript yet): the restarted TUI polls that window as
     iteration 1 of a resumed loop, with no --fresh launch."""
     wd = tmp_path / "wd"
-    run = tmp_path / "run"
     pr = _review_return(wd)
     app = _review_app(tmp_path, pr)
     _pane_cmds(monkeypatch, {"%7": _launch_cmd(wd, SID_NEW)})
-    start = _run_review_pass(app, pr, run)
+    start = _run_review_pass(app, pr)
     start.assert_called_once()
     state = start.call_args.kwargs["resume_state"]
     assert (state.iteration, state.history) == (1, [])
-    link = run / f"review-{PR}-i1.jsonl"
-    assert Path(os.readlink(link)) == transcript_path_for(str(wd), SID_NEW)
+    # The tick's session is recorded as the new loop's iteration 1 (no link,
+    # no copy), so the loop's restart handoff polls it as its own attempt.
+    (rec,) = session_log.find(PR, phase="review", loop_id=state.loop_id,
+                              iteration=1)
+    assert rec.session_id == SID_NEW
+    assert Path(rec.log) == transcript_path_for(str(wd), SID_NEW)
+    assert rec.adopted_from == "unrecorded"
+    assert not (tmp_path / "transcripts").exists()
 
 
 def test_tui_adopts_a_review_active_since_the_return(
@@ -185,7 +195,7 @@ def test_tui_adopts_a_review_active_since_the_return(
     t.parent.mkdir(parents=True, exist_ok=True)
     t.write_text("{}\n")
     _pane_cmds(monkeypatch, {"%7": _launch_cmd(wd, SID_NEW)})
-    start = _run_review_pass(app, pr, tmp_path / "run")
+    start = _run_review_pass(app, pr)
     assert start.call_args.kwargs["resume_state"].iteration == 1
 
 
@@ -202,10 +212,10 @@ def test_tui_does_not_adopt_a_review_older_than_the_return(
     past = time.time() - 60
     os.utime(t, (past, past))
     _pane_cmds(monkeypatch, {"%7": _launch_cmd(wd, SID_OLD)})
-    start = _run_review_pass(app, pr, tmp_path / "run")
+    start = _run_review_pass(app, pr)
     start.assert_called_once()
     assert start.call_args.kwargs.get("resume_state") is None
-    assert not (tmp_path / "run" / f"review-{PR}-i1.jsonl").exists()
+    assert session_log.find(PR, phase="review") == []
 
 
 @pytest.mark.parametrize("case", ["no-window", "no-return", "awaiting"])
@@ -222,7 +232,7 @@ def test_tui_starts_a_fresh_loop_when_nothing_to_adopt(
         pr["signoff_return"]["awaiting"] = "review"
         store.save(app._data, tmp_path)
     _pane_cmds(monkeypatch, {"%7": _launch_cmd(wd, SID_NEW)})
-    start = _run_review_pass(app, pr, tmp_path / "run",
+    start = _run_review_pass(app, pr,
                              pane=None if case == "no-window" else "%7")
     start.assert_called_once()
     assert start.call_args.kwargs.get("resume_state") is None

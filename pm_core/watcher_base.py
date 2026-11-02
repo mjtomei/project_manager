@@ -20,6 +20,7 @@ import secrets
 import subprocess
 import threading
 import time
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -75,7 +76,9 @@ class WatcherState:
     input_required: bool = False
     _ui_notified_done: bool = False
     _ui_notified_input: bool = False
-    _transcript_dir: str | None = None
+    # Driver run (session ledger) and the current iteration's session.
+    run_id: str = ""
+    session_id: str = ""
 
 
 class PaneKilledError(Exception):
@@ -123,8 +126,13 @@ class BaseWatcher(ABC):
 
     @abstractmethod
     def build_launch_cmd(self, iteration: int,
-                         transcript: str | None = None) -> list[str]:
-        """Return the shell command to launch the watcher tmux window."""
+                         session_id: str | None = None,
+                         run_id: str = "") -> list[str]:
+        """Return the shell command to launch the watcher tmux window.
+
+        *session_id* is the iteration's pre-generated Claude session (the
+        child records it in the session ledger); *run_id* the driver run.
+        """
 
     @abstractmethod
     def parse_verdict(self, output: str) -> str:
@@ -139,10 +147,30 @@ class BaseWatcher(ABC):
 
     # --- Shared loop engine ---
 
+    @property
+    def ledger_subject(self) -> str:
+        """This watcher type's subject in the session ledger."""
+        from pm_core.session_log import watcher_subject
+        return watcher_subject(self.WATCHER_TYPE)
+
+    def _iteration_args(self, session_id: str | None,
+                        run_id: str) -> list[str]:
+        """``pm watcher --iteration`` identity flags shared by every type:
+        the loop, the iteration's pre-generated session and the driver run."""
+        args: list[str] = []
+        if self.state.loop_id:
+            args += ["--loop-id", self.state.loop_id]
+        if session_id:
+            args += ["--session-id", session_id]
+        if run_id:
+            args += ["--run-id", run_id]
+        return args
+
     def _launch_window(self, iteration: int,
-                       transcript: str | None = None) -> None:
+                       session_id: str | None = None) -> None:
         """Launch the watcher tmux window via subprocess."""
-        cmd = self.build_launch_cmd(iteration, transcript=transcript)
+        cmd = self.build_launch_cmd(iteration, session_id=session_id,
+                                    run_id=self.state.run_id)
         _log.info("watcher[%s]: launching window: %s", self.WATCHER_TYPE, cmd)
         result = subprocess.run(
             cmd, cwd=self.pm_root, capture_output=True, text=True, timeout=30,
@@ -157,7 +185,7 @@ class BaseWatcher(ABC):
 
     def _poll_for_verdict(self, pane_id: str, transcript_path: str,
                           grace_period: float = 0) -> str | None:
-        """Poll pane for a verdict via hook events + JSONL transcript."""
+        """Poll pane for a verdict via hook events + the session's native log."""
         return _poll_for_verdict_shared(
             pane_id, transcript_path,
             verdicts=self.VERDICTS,
@@ -165,6 +193,12 @@ class BaseWatcher(ABC):
             stop_check=lambda: self.state.stop_requested,
             log_prefix=f"watcher[{self.WATCHER_TYPE}]",
         )
+
+    def _session_log(self, session_id: str | None) -> str | None:
+        """Native log of this watcher's *session_id*, from the ledger."""
+        from pm_core import session_log
+        found = session_log.log_of(self.ledger_subject, session_id)
+        return str(found) if found else None
 
     def _wait_for_follow_up(self, transcript_path: str | None) -> str | None:
         """Wait for a follow-up verdict after INPUT_REQUIRED (hook-driven)."""
@@ -179,8 +213,9 @@ class BaseWatcher(ABC):
         )
 
     def _run_iteration(self, iteration: int,
-                       transcript: str | None = None) -> str:
-        """Launch a window, poll for verdict, return output content."""
+                       session_id: str | None = None) -> str:
+        """Launch a window, poll its session for a verdict, return output."""
+        from pm_core import session_log
         from pm_core import tmux as tmux_mod
 
         session = get_pm_session()
@@ -189,7 +224,9 @@ class BaseWatcher(ABC):
         if not tmux_mod.session_exists(session):
             raise RuntimeError(f"tmux session '{session}' no longer exists")
 
-        self._launch_window(iteration, transcript=transcript)
+        session_id = session_id or str(uuid.uuid4())
+        self.state.session_id = session_id
+        self._launch_window(iteration, session_id=session_id)
 
         time.sleep(2)
 
@@ -202,13 +239,17 @@ class BaseWatcher(ABC):
         _log.info("watcher[%s]: polling pane %s in window %s",
                   self.WATCHER_TYPE, pane_id, self.WINDOW_NAME)
 
-        if not transcript:
+        # The launch must have recorded exactly this session (its child
+        # registers it); the poll then reads only that session's log.
+        record = session_log.by_session(self.ledger_subject, session_id)
+        if record is None:
             raise RuntimeError(
-                f"Watcher[{self.WATCHER_TYPE}] launched without a transcript"
+                f"Watcher[{self.WATCHER_TYPE}] launch registered no session "
+                f"{session_id}"
             )
 
         content = self._poll_for_verdict(
-            pane_id, transcript,
+            pane_id, str(session_log.log_path(record)),
             grace_period=self.VERDICT_GRACE_PERIOD,
         )
         if content is None:
@@ -216,6 +257,7 @@ class BaseWatcher(ABC):
                 raise PaneKilledError("Watcher stopped by user")
             raise PaneKilledError(
                 f"Pane disappeared (window: {self.WINDOW_NAME})"
+                + session_log.missing_suffix(record)
             )
         return content
 
@@ -223,20 +265,20 @@ class BaseWatcher(ABC):
         self,
         on_iteration: Callable[[WatcherState], None] | None = None,
         max_iterations: int = 0,
-        transcript_dir: str | None = None,
+        run_id: str = "",
     ) -> WatcherState:
         """Run the watcher loop synchronously (for a background thread).
 
         Args:
             on_iteration: Callback fired after each iteration.
             max_iterations: Safety cap (0 = unlimited).
-            transcript_dir: Directory for transcript symlinks.
+            run_id: Driver run recorded with each iteration's session.
 
         Returns:
             The final state.
         """
         state = self.state
-        state._transcript_dir = transcript_dir
+        state.run_id = run_id or ""
         state.running = True
         state.stop_requested = False
 
@@ -251,16 +293,8 @@ class BaseWatcher(ABC):
                 _log.info("watcher[%s]: iteration %d",
                           self.WATCHER_TYPE, state.iteration)
 
-                iter_transcript = None
-                if transcript_dir:
-                    iter_transcript = (
-                        f"{transcript_dir}/{self.WATCHER_TYPE}-i{state.iteration}.jsonl"
-                    )
-
                 try:
-                    output = self._run_iteration(
-                        state.iteration, transcript=iter_transcript,
-                    )
+                    output = self._run_iteration(state.iteration)
                 except PaneKilledError as e:
                     _log.warning("watcher[%s]: pane killed on iteration %d: %s",
                                  self.WATCHER_TYPE, state.iteration, e)
@@ -334,12 +368,10 @@ class BaseWatcher(ABC):
         state.input_required = True
         state._ui_notified_input = False
 
-        iter_transcript: str | None = None
-        if state._transcript_dir:
-            iter_transcript = (
-                f"{state._transcript_dir}/{self.WATCHER_TYPE}-i{state.iteration}.jsonl"
-            )
-        follow_up_output = self._wait_for_follow_up(iter_transcript)
+        # The human answers in the iteration's own pane: wait on that exact
+        # session's native log.
+        follow_up_output = self._wait_for_follow_up(
+            self._session_log(state.session_id))
         state.input_required = False
 
         if follow_up_output is None:
@@ -381,14 +413,14 @@ class BaseWatcher(ABC):
         on_iteration: Callable[[WatcherState], None] | None = None,
         on_complete: Callable[[WatcherState], None] | None = None,
         max_iterations: int = 0,
-        transcript_dir: str | None = None,
+        run_id: str = "",
     ) -> threading.Thread:
         """Start the watcher loop in a background thread."""
         def _run():
             self.run_sync(
                 on_iteration=on_iteration,
                 max_iterations=max_iterations,
-                transcript_dir=transcript_dir,
+                run_id=run_id,
             )
             if on_complete:
                 try:

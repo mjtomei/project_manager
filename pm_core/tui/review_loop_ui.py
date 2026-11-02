@@ -11,7 +11,6 @@ Keybindings (mapped to the ``d`` key — "Review" — in the TUI):
              If a loop is already running, make this iteration the last one.
 """
 
-import os
 import time
 
 from pm_core.paths import configure_logger
@@ -172,7 +171,7 @@ def start_or_stop_loop(app) -> None:
                   "with a fresh one", pr_id)
 
     _start_loop(app, pr_id, pr,
-                transcript_dir=str(_auto_start.get_transcript_dir(app)),
+                run_id=_auto_start.get_run_id(app),
                 superseded=superseded)
 
 
@@ -181,16 +180,15 @@ def start_or_stop_loop(app) -> None:
 # ---------------------------------------------------------------------------
 
 def _start_loop(app, pr_id: str, pr: dict | None,
-                transcript_dir: str,
+                run_id: str = "",
                 resume_state: ReviewLoopState | None = None,
                 superseded: bool = False) -> bool:
     """Start a review loop for the given PR.
 
-    ``transcript_dir`` is required — hook-driven verdict polling needs a
-    per-iteration JSONL transcript.  Callers resolve it via
-    :func:`pm_core.tui.auto_start.get_transcript_dir` which is total
-    (lazily synthesises a ``manual-<token>`` run dir when auto-start
-    isn't active).
+    *run_id* is the driver run the loop's attempts are recorded under in the
+    session ledger; callers resolve it via
+    :func:`pm_core.tui.auto_start.get_run_id` (total: a ``manual-<token>``
+    run when auto-start isn't active).  A resumed loop keeps its own run.
 
     When *resume_state* is provided, the loop continues from the saved
     iteration count and history instead of starting fresh.  Used by
@@ -202,8 +200,8 @@ def _start_loop(app, pr_id: str, pr: dict | None,
     rather than a brand-new launch.
 
     Returns False when the loop was not started (missing PR/workdir, no
-    tmux, unusable transcript dir) so callers that pre-cleared retry state
-    can restore it instead of stranding the target.
+    tmux) so callers that pre-cleared retry state can restore it instead of
+    stranding the target.
     """
     from pm_core import tmux as tmux_mod
 
@@ -218,19 +216,6 @@ def _start_loop(app, pr_id: str, pr: dict | None,
     workdir = pr.get("workdir")
     if not workdir:
         app.log_message(f"No workdir for {pr_id}. Start the PR first.")
-        return False
-
-    # Ensure the transcript directory exists on disk.  Fail fast here
-    # (before launching a podman container + review pane) if creation
-    # fails — better than surfacing the error after the pane is up.
-    try:
-        from pathlib import Path as _Path
-        _Path(transcript_dir).mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        app.log_message(
-            f"[red]Cannot create transcript dir[/] {transcript_dir}: {e}"
-        )
-        _log.warning("_start_loop: mkdir %s failed: %s", transcript_dir, e)
         return False
 
     # Get pm_root for launching the review window
@@ -288,7 +273,7 @@ def _start_loop(app, pr_id: str, pr: dict | None,
             pr_data=pr,
             on_iteration=lambda s: _on_iteration_from_thread(app, s),
             on_complete=lambda s: _on_complete_from_thread(app, s),
-            transcript_dir=transcript_dir,
+            run_id=run_id,
         )
     except Exception:
         # The thread never started (e.g. resource exhaustion).  Leaving
@@ -340,20 +325,10 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
     _log.info("review_loop_ui: loop complete for %s — verdict=%s iterations=%d",
               state.pr_id, state.latest_verdict, state.iteration)
 
-    # Finalize review transcript symlinks for this loop's iterations.
-    # Done before the supersede check because the transcripts are this
-    # loop's own work — they need finalizing whether or not we still
-    # own the runtime_state entry.
-    tdir = getattr(state, '_transcript_dir', None)
-    if tdir:
-        from pathlib import Path
-        from pm_core.claude_launcher import finalize_transcript
-        tdir_path = Path(tdir)
-        if tdir_path.is_dir():
-            for p in tdir_path.iterdir():
-                if (p.is_symlink() and p.suffix == ".jsonl"
-                        and p.name.startswith(f"review-{state.pr_id}-")):
-                    finalize_transcript(p)
+    # Nothing to finalize: every iteration's session is read from Claude's
+    # own log and stays in the session ledger.  (A late completion of a
+    # superseded loop used to freeze the *newer* loop's live transcript
+    # here and hide its verdict — #241.)
 
     from pm_core import runtime_state as _rs
     # Release this loop's cross-driver launch lease (only if we still hold
@@ -1100,9 +1075,9 @@ def _attempt_merge(app, pr_id: str, *, resolve_window: bool = False,
     if propagation_only:
         merge_cmd += " --propagation-only"
     merge_cmd += " --background"
-    tdir = _auto_start.get_transcript_dir(app)
-    if tdir:
-        merge_cmd += f" --transcript {tdir / f'merge-{pr_id}.jsonl'}"
+    # Recorded under this TUI's run: _poll_impl_idle tracks the window's
+    # session for MERGED.
+    merge_cmd += f" --run-id {_auto_start.get_run_id(app)}"
     merge_cmd += f" {pr_id}"
     pr_view.run_command(app, merge_cmd)
 
@@ -1238,6 +1213,32 @@ def _handle_merge_input_required(app, pr_id: str, merge_key: str) -> None:
 # Implementation pane idle polling
 # ---------------------------------------------------------------------------
 
+def _driver_pane_session(app, pr_id: str, phase: str, pane_id: str, *,
+                         loop_id: str | None = None,
+                         legacy_name: str | None = None):
+    """The session *pane_id* runs when it is this TUI run's *phase* session.
+
+    See :func:`pm_core.session_log.driver_pane_session`; a pre-upgrade
+    run-dir link of this run (*legacy_name*) is adopted once, read-only.
+    """
+    from pm_core import session_log
+    from pm_core.tui import auto_start as _auto_start
+    try:
+        return session_log.driver_pane_session(
+            pr_id, phase, _auto_start.get_run_id(app), pane_id,
+            loop_id=loop_id, legacy_name=legacy_name,
+            root=getattr(app, "_root", None))
+    except Exception:
+        _log.debug("review_loop_ui: session lookup for %s %s failed",
+                   pr_id, phase, exc_info=True)
+        return None
+
+
+def _record_log(rec) -> str:
+    from pm_core import session_log
+    return str(session_log.log_path(rec))
+
+
 def _find_impl_pane(session: str, window_name: str) -> str | None:
     """Find the first pane ID in an implementation window."""
     from pm_core import tmux as tmux_mod
@@ -1339,32 +1340,28 @@ def _poll_impl_idle(app) -> None:
         window_name = _pr_display_id(pr)
 
         # Lazy pane resolution: register if not yet tracked or pane gone.
-        # Hook-driven tracking requires the transcript path launched by
-        # ``pm pr start --transcript``; skip PRs without one (e.g. manual
-        # launches) — they won't auto-advance but also won't misfire.
+        # Hook-driven tracking needs the pane's own session, launched by
+        # this TUI's run (``pm pr start --run-id``); a pane of another
+        # driver or an earlier TUI run is only trust-watched — it won't
+        # auto-advance but also won't misfire.
         if not tracker.is_tracked(pr_id) or tracker.is_gone(pr_id):
             pane_id = _find_impl_pane(session, window_name)
             if not pane_id:
                 continue
-            tdir = _auto_start.get_transcript_dir(app)
-            if not tdir:
-                continue
-            impl_transcript = str(tdir / f"impl-{pr_id}.jsonl")
-            from pm_core.claude_launcher import pane_runs_transcript
-            if os.path.lexists(impl_transcript) and not pane_runs_transcript(
-                    pane_id, pr.get("workdir"), impl_transcript):
-                # Another driver (a pm pr auto-sequence tick) launched this
-                # pane; the symlink is this TUI's earlier session, whose
-                # idle event would advance the PR mid-rework (S79).
+            rec = _driver_pane_session(app, pr_id, "impl", pane_id,
+                                       legacy_name=f"impl-{pr_id}.jsonl")
+            if rec is None:
+                # Not this run's session: e.g. a pm pr auto-sequence tick
+                # launched this pane, and this TUI's earlier session's idle
+                # event would advance the PR mid-rework (S79), or the launch
+                # has not recorded itself yet (next tick).  Still watch it
+                # for the trust dialog.
                 _watch_untracked_trust(app, pane_id, pr.get("workdir"),
                                        untracked_seen)
                 continue
             try:
-                tracker.register(pr_id, pane_id, impl_transcript)
+                tracker.register(pr_id, pane_id, _record_log(rec))
             except ValueError:
-                # Symlink not yet created — try again next tick.  It never
-                # will be for a pane an earlier TUI launched: still watch
-                # that one for the trust dialog.
                 _watch_untracked_trust(app, pane_id, pr.get("workdir"),
                                        untracked_seen)
                 continue
@@ -1418,18 +1415,18 @@ def _poll_impl_idle(app) -> None:
         merge_key = f"merge:{pr_id}"
         window_name = f"merge-{_pr_display_id(pr)}"
 
-        # Lazy pane resolution — requires the merge transcript launched
-        # by ``pm pr merge --resolve-window --transcript``.
+        # Lazy pane resolution — requires the merge window's session,
+        # launched by this run's ``pm pr merge --resolve-window --run-id``.
         if not tracker.is_tracked(merge_key) or tracker.is_gone(merge_key):
             pane_id = _find_impl_pane(session, window_name)
             if not pane_id:
                 continue
-            tdir = _auto_start.get_transcript_dir(app)
-            if not tdir:
+            rec = _driver_pane_session(app, pr_id, "merge", pane_id,
+                                       legacy_name=f"merge-{pr_id}.jsonl")
+            if rec is None:
                 continue
-            merge_transcript = str(tdir / f"merge-{pr_id}.jsonl")
             try:
-                tracker.register(merge_key, pane_id, merge_transcript)
+                tracker.register(merge_key, pane_id, _record_log(rec))
             except ValueError:
                 continue
 
@@ -1492,16 +1489,21 @@ def _poll_impl_idle(app) -> None:
             pane_id = _find_impl_pane(session, window_name)
             if not pane_id:
                 continue
-            tdir = _auto_start.get_transcript_dir(app)
-            if not tdir:
-                continue
-            review_transcript = str(tdir / f"review-{pr_id}.jsonl")
-            try:
-                tracker.register(review_key, pane_id, review_transcript)
-            except ValueError:
+            # A manual (non-loop) review of this run: loop iterations are
+            # recorded with their loop id and are not this pass's.
+            rec = _driver_pane_session(app, pr_id, "review", pane_id,
+                                       loop_id="",
+                                       legacy_name=f"review-{pr_id}.jsonl")
+            if rec is None:
                 # e.g. a review-loop pane left in flight across a TUI
                 # restart: the loop is gone but the pane may be at the
                 # trust dialog.
+                _watch_untracked_trust(app, pane_id, pr.get("workdir"),
+                                       untracked_seen)
+                continue
+            try:
+                tracker.register(review_key, pane_id, _record_log(rec))
+            except ValueError:
                 _watch_untracked_trust(app, pane_id, pr.get("workdir"),
                                        untracked_seen)
                 continue
@@ -1566,7 +1568,7 @@ def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict]]) -> None:
     from pm_core.tui import pr_view
 
     prs = app._data.get("prs") or []
-    tdir = _auto_start.get_transcript_dir(app)
+    run_id = _auto_start.get_run_id(app)
 
     for pr_id, pr in newly_idle:
         # Scope to the union of the targets' dependency closures
@@ -1595,5 +1597,4 @@ def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict]]) -> None:
             # Start a review loop (same as _auto_start_review_loops)
             loop = app._review_loops.get(pr_id)
             if not loop:
-                _start_loop(app, pr_id, updated_pr,
-                             transcript_dir=str(tdir))
+                _start_loop(app, pr_id, updated_pr, run_id=run_id)

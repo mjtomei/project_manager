@@ -1424,10 +1424,9 @@ class ProjectManagerApp(App):
         # Start watcher
         from pm_core.tui import auto_start
         meta_root = watcher_ui.ensure_watcher_plans(self)
-        tdir = auto_start.get_transcript_dir(self)
         watcher_ui.start_watcher(
             self,
-            transcript_dir=str(tdir) if tdir else None,
+            run_id=auto_start.get_run_id(self),
             meta_pm_root=str(meta_root) if meta_root else None,
         )
 

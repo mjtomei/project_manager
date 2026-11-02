@@ -28,7 +28,12 @@ from pm_core import pane_layout
 from pm_core import pane_registry
 from pm_core import spec_gen
 from pm_core.backend import get_backend
-from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_session, launch_claude, finalize_transcript
+from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_session, launch_claude
+# The CLI auto-sequence driver's run id in the session ledger (its own
+# driver scope, distinct from the TUI's runs).
+from pm_core.session_log import (
+    AUTO_SEQUENCE_RUN as _AUTO_SEQ_RUN, SessionLaunch, launch_run_id,
+)
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
@@ -517,6 +522,40 @@ def pr_cd(identifier: str):
     os.execvp(shell, [shell])
 
 
+@pr.command("sessions")
+@click.argument("pr_id")
+@click.option("--phase", default=None,
+              help="Only this phase (impl, review, signoff, merge, qa)")
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="Machine-readable output")
+def pr_sessions(pr_id: str, phase: str | None, as_json: bool):
+    """List a PR's pm-launched Claude sessions and their native logs.
+
+    One row per recorded launch — implementation, review iterations (by
+    loop / iteration / attempt), sign-off router runs (with the HEAD they
+    reviewed; a retired run is marked), merge windows, QA scenario workers —
+    with the session id and Claude's own JSONL log.  pm keeps no copies: a
+    log Claude pruned (its cleanupPeriodDays) is shown as missing.
+    """
+    import json as _json
+    from pm_core import session_log
+    try:
+        entry = _resolve_pr_id(store.load(state_root()), pr_id)
+    except Exception:
+        entry = None
+    subject = entry["id"] if entry else pr_id
+    recs = [r for r in session_log.records(subject)
+            if phase is None or r.phase == phase]
+    if as_json:
+        click.echo(_json.dumps(session_log.records_as_json(recs), indent=2))
+        return
+    if not recs:
+        click.echo(f"No recorded sessions for {subject}.")
+        return
+    for line in session_log.format_records(recs):
+        click.echo(line)
+
+
 @pr.command("list")
 @click.option("--workdirs", is_flag=True, default=False, help="Show workdir paths and their git status")
 @click.option("-t", "--timestamps", is_flag=True, default=False, help="Show updated_at timestamp and sort by most recently updated")
@@ -884,11 +923,14 @@ def pr_spec_approve(pr_id: str):
 @click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
 @click.option("--background", is_flag=True, default=False, hidden=True,
               help="Create tmux window without switching focus (used by auto-start)")
+@click.option("--run-id", default="", hidden=True,
+              help="Driver run the launch belongs to (session ledger)")
 @click.option("--transcript", default=None, hidden=True,
-              help="Path to save Claude transcript symlink (used by auto-start)")
+              help="Deprecated: names the driver run only; nothing is written")
 @click.option("--companion", is_flag=True, default=False,
               help="Open a companion shell pane in the PR workdir")
-def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, transcript: str | None, companion: bool):
+def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool,
+             transcript: str | None, companion: bool, run_id: str = ""):
     """Start working on a PR: clone, branch, print prompt.
 
     If PR_ID is omitted, uses the active PR if it's pending/ready, or
@@ -1189,8 +1231,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
             # When running in a container, Claude's cwd is /workspace —
-            # transcript symlinks must target where Claude actually writes
-            # (see pr_review for the same pattern).
+            # that is where its native session log lives (see pr_review).
             from pm_core.container import (
                 is_container_mode_enabled as _is_container_enabled,
                 _CONTAINER_WORKDIR,
@@ -1207,7 +1248,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             _stag = pm_session.removeprefix("pm-") if pm_session else None
             env: dict[str, str] = {}
             cmd = build_claude_shell_cmd(prompt=prompt,
-                                         transcript=transcript,
+                                         launch=SessionLaunch(
+                                             subject=pr_id, phase="impl",
+                                             run_id=launch_run_id(
+                                                 run_id, transcript)),
                                          cwd=_claude_cwd,
                                          write_dir=_claude_write_dir,
                                          model=resolved_model,
@@ -1354,7 +1398,9 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                           background: bool = False,
                           review_loop: bool = False, review_iteration: int = 0,
                           review_loop_id: str = "",
-                          transcript: str | None = None) -> None:
+                          run_id: str = "",
+                          session_id: str | None = None,
+                          attempt: int | None = None) -> None:
     """Launch a tmux review window with Claude review + git diff shell."""
     # A background launch (``pm pr auto-sequence``) switches no client, so
     # it may come from a shell outside tmux: the window opens in the pm
@@ -1428,11 +1474,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                                                       review_loop=review_loop,
                                                       review_iteration=review_iteration,
                                                       review_loop_id=review_loop_id)
-    # When the review runs in a container, Claude's cwd is /workspace —
-    # the transcript symlink must target ~/.claude/projects/-workspace/
-    # where Claude actually writes, not the host workdir's mangled dir.
-    # Host path is passed as write_dir so the prompt file lands on the
-    # mounted volume.  Matches the QA pattern in qa_loop.py.
+    # When the review runs in a container, Claude's cwd is /workspace — its
+    # native log is under ~/.claude/projects/-workspace/, not the host
+    # workdir's mangled dir.  Host path is passed as write_dir so the prompt
+    # file lands on the mounted volume.  Matches the QA pattern in qa_loop.py.
     from pm_core.container import is_container_mode_enabled as _is_container_enabled, _CONTAINER_WORKDIR
     if _is_container_enabled():
         _claude_cwd = _CONTAINER_WORKDIR
@@ -1445,7 +1490,14 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     _review_stag = pm_session.removeprefix("pm-")
     env: dict[str, str] = {}
     claude_cmd = build_claude_shell_cmd(prompt=review_prompt,
-                                         transcript=transcript,
+                                         session_id=session_id,
+                                         launch=SessionLaunch(
+                                             subject=pr_id, phase="review",
+                                             run_id=run_id,
+                                             loop_id=review_loop_id or "",
+                                             iteration=(review_iteration
+                                                        or None),
+                                             attempt=attempt),
                                          cwd=_claude_cwd,
                                          write_dir=_claude_write_dir,
                                          model=_resolution.model,
@@ -1623,12 +1675,20 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
 @click.option("--review-loop", is_flag=True, default=False, help="Use review loop prompt (fix/commit/push)")
 @click.option("--review-iteration", default=0, type=int, help="Review loop iteration number (for commit messages)")
 @click.option("--review-loop-id", default="", help="Unique review loop identifier (for commit messages)")
+@click.option("--run-id", default="", hidden=True,
+              help="Driver run the launch belongs to (session ledger)")
+@click.option("--session-id", default=None, hidden=True,
+              help="Session id the caller waits on (review loop attempt)")
+@click.option("--review-attempt", default=None, type=int, hidden=True,
+              help="Review loop launch attempt (session ledger)")
 @click.option("--transcript", default=None, hidden=True,
-              help="Path to save Claude transcript symlink (used by auto-start)")
+              help="Deprecated: names the driver run only; nothing is written")
 @click.option("--no-window", is_flag=True, default=False, hidden=True,
               help="Only transition to in_review; the caller's review loop "
                    "launches the window itself (used by auto-start)")
-def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: bool, review_iteration: int, review_loop_id: str, transcript: str | None, no_window: bool):
+def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: bool, review_iteration: int, review_loop_id: str, transcript: str | None, no_window: bool,
+              run_id: str = "", session_id: str | None = None,
+              review_attempt: int | None = None):
     """Mark a PR as in_review and launch a review window.
 
     On a PR that is already past the review step (``qa`` / ``sign_off``) this
@@ -1679,7 +1739,9 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
                               review_loop=review_loop,
                               review_iteration=review_iteration,
                               review_loop_id=review_loop_id,
-                              transcript=transcript)
+                              **_review_launch_identity(
+                                  run_id, transcript, session_id,
+                                  review_attempt))
         return
     if status == "pending":
         click.echo(f"PR {pr_id} is pending — start it first with: pm pr start {pr_id}", err=True)
@@ -1758,7 +1820,14 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
                           review_loop=review_loop,
                           review_iteration=review_iteration,
                           review_loop_id=review_loop_id,
-                          transcript=transcript)
+                          **_review_launch_identity(
+                              run_id, transcript, session_id,
+                              review_attempt))
+
+
+def _review_launch_identity(run_id, transcript, session_id, attempt) -> dict:
+    return {"run_id": launch_run_id(run_id, transcript),
+            "session_id": session_id or None, "attempt": attempt}
 
 
 class _SignoffGroup(click.Group):
@@ -1789,10 +1858,12 @@ def pr_signoff_group(ctx):
               help="Kill existing sign-off window and create a new one")
 @click.option("--background", is_flag=True, default=False, hidden=True,
               help="Create sign-off window without switching focus (auto-sequence)")
+@click.option("--run-id", default="", hidden=True,
+              help="Driver run the launch belongs to (session ledger)")
 @click.option("--transcript", default=None, hidden=True,
-              help="Path to save Claude transcript symlink (used by auto-sequence)")
+              help="Deprecated: names the driver run only; nothing is written")
 def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
-               transcript: str | None):
+               transcript: str | None = None, run_id: str = ""):
     """Move a PR into sign_off and launch its sign-off window.
 
     Sign-off is the comprehensive PR-level review + verdict router that runs
@@ -1871,7 +1942,7 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
     try:
         signoff_mod.launch_signoff_window(
             data, pr_entry, fresh=fresh, background=background,
-            transcript=transcript)
+            run_id=launch_run_id(run_id, transcript))
     except ContainerError as e:
         # Like impl/review: the TUI's sign-off driver discards stdout and
         # shows a failed launch's last stderr line, so a setup remedy
@@ -2025,8 +2096,7 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool):
         raise SystemExit(1)
 
 
-def _finalize_merge(root, pr_entry: dict, pr_id: str,
-                    transcript: str | None = None) -> None:
+def _finalize_merge(root, pr_entry: dict, pr_id: str) -> None:
     """Mark PR as merged, kill tmux windows, and show newly ready PRs."""
     def apply(data):
         pr = store.get_pr(data, pr_id)
@@ -2046,10 +2116,6 @@ def _finalize_merge(root, pr_entry: dict, pr_id: str,
             kill_pr_windows(session, pr_entry)
     except Exception:
         pass
-
-    # Finalize merge transcript if provided
-    if transcript:
-        finalize_transcript(Path(transcript))
 
     # Show newly unblocked PRs.  The merged line goes last: the TUI's ``g``
     # log line shows only the final stdout line, so it names just the PRs
@@ -2072,7 +2138,7 @@ def _finalize_merge(root, pr_entry: dict, pr_id: str,
 
 def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
                          background: bool = False,
-                         transcript: str | None = None,
+                         run_id: str | None = None,
                          cwd: str | None = None,
                          companion: bool = False) -> None:
     """Launch a tmux window with Claude to update the main repo after a merge.
@@ -2112,6 +2178,20 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
 
     pr_id = pr_entry["id"]
     display_id = _pr_display_id(pr_entry)
+    window_name = f"merge-{display_id}"
+
+    # No-op if a merge window is already running for this PR.  Checked
+    # before the command is built: building records the launch's session,
+    # and a session that never runs would then be this run's current merge
+    # session, so the live window's pane would no longer be tracked.
+    existing = tmux_mod.find_window_by_name(pm_session, window_name)
+    if existing:
+        if background:
+            click.echo(f"Merge window '{window_name}' already exists (background mode, no-op)")
+            return
+        tmux_mod.select_window(pm_session, existing["id"])
+        click.echo(f"Switched to existing merge window '{window_name}'")
+        return
 
     # Resolve model/provider for merge session
     from pm_core.model_config import resolve_model_and_provider
@@ -2124,27 +2204,19 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     merge_prompt = prompt_gen.generate_merge_prompt(
         data, pr_id, error_output, session_name=pm_session)
     env: dict[str, str] = {}
+    # Runs on the host — it updates the main repo checkout, which the
+    # branch-scoped container push proxy is not set up for.
     claude_cmd = build_claude_shell_cmd(prompt=merge_prompt,
-                                         transcript=transcript, cwd=workdir,
+                                         launch=SessionLaunch(
+                                             subject=pr_id, phase="merge",
+                                             run_id=run_id or ""),
+                                         cwd=workdir,
                                          model=_resolution.model,
                                          provider=_resolution.provider,
                                          effort=_resolution.effort,
                                          session_tag=pm_session.removeprefix("pm-"),
                                          session_type="merge",
                                          env_out=env)
-    # Runs on the host — it updates the main repo checkout, which the
-    # branch-scoped container push proxy is not set up for.
-    window_name = f"merge-{display_id}"
-
-    # No-op if a merge window is already running for this PR
-    existing = tmux_mod.find_window_by_name(pm_session, window_name)
-    if existing:
-        if background:
-            click.echo(f"Merge window '{window_name}' already exists (background mode, no-op)")
-            return
-        tmux_mod.select_window(pm_session, existing["id"])
-        click.echo(f"Switched to existing merge window '{window_name}'")
-        return
 
     try:
         if use_companion:
@@ -2178,7 +2250,7 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
 def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
                       base_branch: str, resolve_window: bool,
                       background: bool,
-                      transcript: str | None,
+                      run_id: str | None,
                       companion: bool = False) -> bool:
     """Pull latest base branch into the main repo after a merge.
 
@@ -2231,7 +2303,7 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
         click.echo(error_msg, err=True)
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
-                                 background=background, transcript=transcript,
+                                 background=background, run_id=run_id,
                                  cwd=repo_dir, companion=companion)
             return False
         click.echo("Resolve this manually, then run 'pm pr merge "
@@ -2297,8 +2369,8 @@ def _ref(cwd, ref: str) -> str | None:
     return (r.stdout.strip() or None) if r.returncode == 0 else None
 
 
-def _after_publish(root: Path, data: dict, pr_entry: dict, transcript) -> None:
-    _finalize_merge(root, pr_entry, pr_entry["id"], transcript=transcript)
+def _after_publish(root: Path, data: dict, pr_entry: dict) -> None:
+    _finalize_merge(root, pr_entry, pr_entry["id"])
     # Restart TUI when managing the project_manager repo itself, so it
     # picks up the latest pm code.
     repo = data.get("project", {}).get("repo", "")
@@ -2309,7 +2381,7 @@ def _after_publish(root: Path, data: dict, pr_entry: dict, transcript) -> None:
 def _publish_approved(data: dict, root: Path, pr_entry: dict,
                       backend_name: str, base_branch: str,
                       workdir: str, *, resolve_window: bool,
-                      background: bool, transcript: str | None,
+                      background: bool, run_id: str | None,
                       companion: bool) -> None:
     """Re-validate the approved candidate and publish it (see above)."""
     from pm_core import integration
@@ -2352,14 +2424,14 @@ def _publish_approved(data: dict, root: Path, pr_entry: dict,
         _recover_completed_merge(
             data, root, pr_entry, backend_name, base_branch,
             resolve_window=resolve_window, background=background,
-            transcript=transcript, companion=companion)
+            run_id=run_id, companion=companion)
     elif backend_name == "local":
-        _after_publish(root, data, pr_entry, transcript)
+        _after_publish(root, data, pr_entry)
     else:
         _sync_main_repo_and_finalize(data, root, pr_entry, base_branch,
                                      resolve_window=resolve_window,
                                      background=background,
-                                     transcript=transcript,
+                                     run_id=run_id,
                                      companion=companion)
 
 
@@ -2404,7 +2476,7 @@ def _publish_candidate(data: dict, root: Path, pr_entry: dict,
 
 def _sync_main_repo_and_finalize(data: dict, root: Path, pr_entry: dict,
                                  base_branch: str, *, resolve_window: bool,
-                                 background: bool, transcript: str | None,
+                                 background: bool, run_id: str | None,
                                  companion: bool) -> None:
     """Remote backends, after publication: update the main repo checkout
     from origin, then mark the PR merged.
@@ -2416,8 +2488,8 @@ def _sync_main_repo_and_finalize(data: dict, root: Path, pr_entry: dict,
     repo_dir = str(_resolve_repo_dir(root, data))
     if _pull_after_merge(data, pr_entry, repo_dir, base_branch,
                          resolve_window=resolve_window, background=background,
-                         transcript=transcript, companion=companion):
-        _after_publish(root, data, pr_entry, transcript)
+                         run_id=run_id, companion=companion):
+        _after_publish(root, data, pr_entry)
     elif not resolve_window:
         raise SystemExit(1)
 
@@ -2675,7 +2747,7 @@ def _verify_github_merge(root: Path, pr_entry: dict, workdir: str,
 def _recover_completed_merge(data: dict, root: Path, pr_entry: dict,
                              backend_name: str, base_branch: str, *,
                              resolve_window: bool, background: bool,
-                             transcript: str | None, companion: bool) -> None:
+                             run_id: str | None, companion: bool) -> None:
     """``--no-signoff-check`` / ``--propagation-only``: finalize a merge that
     is already published; refuse to publish anything new."""
     from pm_core import gh_ops, integration
@@ -2712,7 +2784,7 @@ def _recover_completed_merge(data: dict, root: Path, pr_entry: dict,
         raise SystemExit(1)
     click.echo(f"PR {pr_id} is already in {base_branch}; recovering.")
     if backend_name == "local":
-        _after_publish(root, data, pr_entry, transcript)
+        _after_publish(root, data, pr_entry)
         return
     if backend_name == "github":
         # A merge done on GitHub (by someone else) is checked against the
@@ -2727,7 +2799,7 @@ def _recover_completed_merge(data: dict, root: Path, pr_entry: dict,
     _sync_main_repo_and_finalize(data, root, pr_entry, base_branch,
                                  resolve_window=resolve_window,
                                  background=background,
-                                 transcript=transcript, companion=companion)
+                                 run_id=run_id, companion=companion)
 
 
 @pr.command("qa")
@@ -2806,8 +2878,10 @@ def _resolve_window_default() -> bool:
                    "Claude recovery window instead of exiting")
 @click.option("--background", is_flag=True, default=False, hidden=True,
               help="Create merge window without switching focus (used by auto-start)")
+@click.option("--run-id", default="", hidden=True,
+              help="Driver run the launch belongs to (session ledger)")
 @click.option("--transcript", default=None, hidden=True,
-              help="Path to save Claude transcript symlink (used by auto-start)")
+              help="Deprecated: names the driver run only; nothing is written")
 @click.option("--companion", is_flag=True, default=False,
               help="Open a companion shell pane alongside the post-merge repo-update window")
 @click.option("--propagation-only", is_flag=True, default=False, hidden=True,
@@ -2818,7 +2892,7 @@ def _resolve_window_default() -> bool:
                    "base branch. Never publishes unapproved code.")
 def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
              transcript: str | None, companion: bool, propagation_only: bool,
-             no_signoff_check: bool):
+             no_signoff_check: bool, run_id: str = ""):
     """Publish a signed-off PR into the base branch.
 
     Requires a fresh SIGNOFF_MERGE bound to the current PR HEAD and to a
@@ -2833,6 +2907,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     """
     if resolve_window is None:
         resolve_window = _resolve_window_default()
+    run_id = launch_run_id(run_id, transcript)
     root = state_root()
     data = store.load(root)
 
@@ -2895,7 +2970,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
         _recover_completed_merge(
             data, root, pr_entry, backend_name, base_branch,
             resolve_window=resolve_window, background=background,
-            transcript=transcript, companion=companion)
+            run_id=run_id, companion=companion)
         return
 
     # `closed` is a terminal lifecycle record (`pm pr close` keeps it, and the
@@ -2931,7 +3006,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
 
     _publish_approved(data, root, pr_entry, backend_name, base_branch,
                       workdir, resolve_window=resolve_window,
-                      background=background, transcript=transcript,
+                      background=background, run_id=run_id,
                       companion=companion)
 
 
@@ -3963,15 +4038,6 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
 # ready_to_merge; the merge itself stays with the caller)
 # ---------------------------------------------------------------------------
 
-def _auto_seq_transcript_dir(root: Path, pr_id: str) -> Path:
-    """Return the deterministic transcript dir for auto-sequence on *pr_id*.
-
-    Stable across CLI ticks so successive invocations resolve the same
-    impl/review/QA transcript symlinks.
-    """
-    return root / "transcripts" / "auto-sequence" / pr_id
-
-
 def _impl_window_pane(session: str, pr_entry: dict) -> str | None:
     """Return the first pane id of the impl tmux window, or None."""
     win = tmux_mod.find_window_by_name(session, _pr_display_id(pr_entry))
@@ -3991,29 +4057,65 @@ def _review_window_pane(session: str, pr_entry: dict) -> str | None:
     return panes[0][0] if panes else None
 
 
-def _check_review_verdict(tdir: Path, pr_id: str) -> tuple[str | None, int]:
-    """Return (verdict, latest_iteration) by scanning iteration transcripts.
+def _auto_seq_review_session(pr_id: str):
+    """``(record, iteration)`` of the latest auto-sequence review iteration.
 
-    Verdicts: PASS / NEEDS_WORK / INPUT_REQUIRED.  Returns (None, 0) when
-    no iteration transcripts exist.
+    Reads the session ledger.  When it has none, a pre-upgrade
+    ``transcripts/auto-sequence/<pr>/review-<pr>-i<N>.jsonl`` names the
+    latest iteration (numbering continues after it) and its session is
+    adopted once, read-only.  ``(None, 0)`` when no iteration was launched.
     """
+    from pm_core import session_log
+    recs = [r for r in session_log.find(pr_id, phase="review",
+                                        run_id=_AUTO_SEQ_RUN, loop_id="")
+            if r.iteration is not None]
+    if recs:
+        # Highest iteration; for a relaunched iteration the newest record
+        # (ledger order — ``at`` has only second resolution).
+        best = max(enumerate(recs), key=lambda t: (t[1].iteration, t[0]))[1]
+        return best, best.iteration
+    d = session_log.legacy_dir(state_root(), _AUTO_SEQ_RUN, pr_id)
+    best = None
+    try:
+        for p in (d.iterdir() if d is not None and d.is_dir() else ()):
+            m = re.match(rf"review-{re.escape(pr_id)}-i(\d+)\.jsonl$", p.name)
+            if m and (best is None or int(m.group(1)) > best[0]):
+                best = (int(m.group(1)), p.name)
+    except OSError:
+        best = None
+    if best is None:
+        return None, 0
+    rec = session_log.resolve(pr_id, "review", _AUTO_SEQ_RUN, loop_id="",
+                              iteration=best[0], legacy_name=best[1],
+                              root=state_root())
+    return rec, best[0]
+
+
+def _check_review_verdict(pr_id: str) -> tuple[str | None, int]:
+    """Return (verdict, latest_iteration) of the auto-sequence review.
+
+    Verdicts: PASS / NEEDS_WORK / INPUT_REQUIRED, read from the latest
+    iteration's own native session log.  Returns (None, 0) when no iteration
+    was launched.
+    """
+    from pm_core import session_log
     from pm_core.verdict_transcript import extract_verdict_from_transcript
 
-    if not tdir.is_dir():
-        return None, 0
-    iters: list[tuple[int, Path]] = []
-    for p in tdir.iterdir():
-        m = re.match(rf"review-{re.escape(pr_id)}-i(\d+)\.jsonl$", p.name)
-        if m and (p.is_file() or p.is_symlink()):
-            iters.append((int(m.group(1)), p))
-    if not iters:
-        return None, 0
-    iters.sort()
-    latest_iter, latest_path = iters[-1]
+    rec, latest_iter = _auto_seq_review_session(pr_id)
+    if rec is None:
+        return None, latest_iter
     verdict = extract_verdict_from_transcript(
-        str(latest_path), ("PASS", "NEEDS_WORK", "INPUT_REQUIRED"),
+        str(session_log.log_path(rec)), ("PASS", "NEEDS_WORK", "INPUT_REQUIRED"),
     )
     return verdict, latest_iter
+
+
+def _review_iteration_log(pr_id: str, iteration: int) -> Path | None:
+    """Native log of auto-sequence review *iteration*, or None."""
+    from pm_core import session_log
+    rec = session_log.latest(pr_id, phase="review", run_id=_AUTO_SEQ_RUN,
+                             loop_id="", iteration=iteration)
+    return session_log.log_path(rec) if rec else None
 
 
 def _signoff_window_pane(session: str, pr_entry: dict) -> str | None:
@@ -4022,20 +4124,21 @@ def _signoff_window_pane(session: str, pr_entry: dict) -> str | None:
     return signoff_mod.signoff_window_pane(session, pr_entry)
 
 
-def _check_signoff_verdict(tdir: Path, pr_id: str) -> str | None:
+def _check_signoff_verdict(run_id: str, pr_id: str) -> str | None:
     """Return the sign-off routing verdict, or None if none emitted yet."""
     from pm_core import signoff as signoff_mod
-    return signoff_mod.signoff_transcript_verdict(tdir, pr_id)
+    return signoff_mod.signoff_transcript_verdict(run_id, pr_id)
 
 
-def _retire_signoff_window(session: str, pr_entry: dict, tdir: Path) -> None:
-    """Tear down a PR's sign-off window + transcript when bouncing out of
-    sign_off (see :func:`pm_core.signoff.retire_signoff_run`)."""
+def _retire_signoff_window(session: str, pr_entry: dict, run_id: str) -> None:
+    """Tear down a PR's sign-off window and retire its session when bouncing
+    out of sign_off (see :func:`pm_core.signoff.retire_signoff_run`)."""
     from pm_core import signoff as signoff_mod
-    signoff_mod.retire_signoff_run(session, pr_entry, tdir)
+    signoff_mod.retire_signoff_run(session, pr_entry, run_id)
 
 
-def _check_impl_idle(session: str, pr_entry: dict, tdir: Path) -> tuple[bool, bool]:
+def _check_impl_idle(session: str, pr_entry: dict,
+                     run_id: str = _AUTO_SEQ_RUN) -> tuple[bool, bool]:
     """Return (idle, gone): polls the impl pane via PaneIdleTracker.
 
     *idle* is True when the Claude session has emitted ``idle_prompt``.
@@ -4047,17 +4150,17 @@ def _check_impl_idle(session: str, pr_entry: dict, tdir: Path) -> tuple[bool, bo
     pane_id = _impl_window_pane(session, pr_entry)
     if not pane_id:
         return False, True
-    transcript = tdir / f"impl-{pr_id}.jsonl"
-    if not transcript.exists():
-        return False, False
-    from pm_core.claude_launcher import pane_runs_transcript
-    if not pane_runs_transcript(pane_id, pr_entry.get("workdir"), transcript):
-        # Another driver (the TUI) launched this pane; the symlink is an
-        # earlier session's, whose idle event says nothing about it (S79).
+    from pm_core import session_log
+    rec = session_log.driver_pane_session(
+        pr_id, "impl", run_id, pane_id,
+        legacy_name=f"impl-{pr_id}.jsonl", root=state_root())
+    if rec is None:
+        # Not a session this driver launched — e.g. the TUI's pane, whose
+        # idle event says nothing about this driver's work (S79).
         return False, False
     tracker = PaneIdleTracker()
     try:
-        tracker.register(pr_id, pane_id, str(transcript))
+        tracker.register(pr_id, pane_id, str(session_log.log_path(rec)))
     except ValueError:
         return False, False
     tracker.poll(pr_id)
@@ -4178,18 +4281,18 @@ def _qa_run_owned_elsewhere(status_path: Path | None) -> bool:
     return qa_loop.resume_owned_elsewhere(data)
 
 
-def _launch_review_iteration(pr_id: str, tdir: Path, iteration: int, *,
+def _launch_review_iteration(pr_id: str, iteration: int, *,
                              fresh: bool, review_loop: bool = True) -> None:
     """Launch review *iteration* in the background for auto-sequence.
 
-    Its transcript lives under *tdir* with review-loop iteration naming so
-    a later tick finds the verdict (:func:`_check_review_verdict`).
+    The launch records itself as iteration *iteration* of the auto-sequence
+    run, so a later tick reads exactly that session's verdict
+    (:func:`_check_review_verdict`).
     """
-    transcript = tdir / f"review-{pr_id}-i{iteration}.jsonl"
     click.get_current_context().invoke(
         pr_review, pr_id=pr_id, fresh=fresh, background=True,
         review_loop=review_loop, review_iteration=iteration,
-        review_loop_id="", transcript=str(transcript))
+        review_loop_id="", run_id=_AUTO_SEQ_RUN)
 
 
 @pr.command("auto-sequence")
@@ -4216,8 +4319,6 @@ def pr_auto_sequence(pr_id: str):
     pr_id = pr_entry["id"]
     status = pr_entry.get("status", "")
     pm_session = _get_pm_session()
-    tdir = _auto_seq_transcript_dir(root, pr_id)
-    tdir.mkdir(parents=True, exist_ok=True)
 
     if status in TERMINAL_PR_STATES:
         # `closed` is terminal exactly like `merged` (pr-62ad13d retains the
@@ -4229,10 +4330,9 @@ def pr_auto_sequence(pr_id: str):
         return
 
     if status == "pending":
-        impl_transcript = tdir / f"impl-{pr_id}.jsonl"
         ctx = click.get_current_context()
         ctx.invoke(pr_start, pr_id=pr_id, workdir=None, fresh=False,
-                   background=True, transcript=str(impl_transcript),
+                   background=True, run_id=_AUTO_SEQ_RUN,
                    companion=False)
         click.echo("started")
         return
@@ -4256,41 +4356,38 @@ def pr_auto_sequence(pr_id: str):
             if not claim_return_launch(root, pr_id, "impl"):
                 click.echo("running: impl")
                 return
-            impl_transcript = tdir / f"impl-{pr_id}.jsonl"
             ctx = click.get_current_context()
             ctx.invoke(pr_start, pr_id=pr_id, workdir=None, fresh=True,
-                       background=True, transcript=str(impl_transcript),
+                       background=True, run_id=_AUTO_SEQ_RUN,
                        companion=False)
             click.echo("sign_off: returning to impl (relaunched)")
             return
-        idle, gone = _check_impl_idle(pm_session, pr_entry, tdir)
+        idle, gone = _check_impl_idle(pm_session, pr_entry)
         if gone:
             # Window was killed — relaunch impl
-            impl_transcript = tdir / f"impl-{pr_id}.jsonl"
             ctx = click.get_current_context()
             ctx.invoke(pr_start, pr_id=pr_id, workdir=None, fresh=False,
-                       background=True, transcript=str(impl_transcript),
+                       background=True, run_id=_AUTO_SEQ_RUN,
                        companion=False)
             click.echo("restarted: impl window relaunched")
             return
         if not idle:
             click.echo("running: implementation")
             return
-        # Idle and no spec_pending → advance to review.  Persist the
-        # transcript symlink under the auto-sequence dir so the next tick
-        # can locate the verdict.  Use review-loop iteration naming so
-        # NEEDS_WORK retries follow the same scheme; after a sign-off
-        # return the earlier iterations exist, and the next tick reads
-        # the highest one — so continue numbering after them.  An open
+        # Idle and no spec_pending → advance to review.  The launch records
+        # itself as an iteration of the auto-sequence run so the next tick
+        # reads its verdict; NEEDS_WORK retries follow the same numbering.
+        # After a sign-off return the earlier iterations exist, and the next
+        # tick reads the highest one — so continue numbering after them.  An open
         # review window then reviewed the older code: replace it (fresh)
         # rather than switching to it, or no rework review ever runs and
         # the in_review tick waits on that window forever.  That holds for
         # any rework of a sign-off return, also when this dir has no
         # iteration because the TUI ran the earlier reviews (S77).
-        _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
+        _verdict, latest_iter = _check_review_verdict(pr_id)
         next_iter = latest_iter + 1
         _launch_review_iteration(
-            pr_id, tdir, next_iter, review_loop=False,
+            pr_id, next_iter, review_loop=False,
             fresh=latest_iter > 0 or open_return(pr_entry) is not None)
         click.echo("advanced: in_review")
         return
@@ -4307,9 +4404,9 @@ def pr_auto_sequence(pr_id: str):
         if _loop_owner:
             click.echo(f"running: review (owned by {_loop_owner})")
             return
-        verdict, latest_iter = _check_review_verdict(tdir, pr_id)
+        verdict, latest_iter = _check_review_verdict(pr_id)
         if verdict and _older_than(
-                tdir / f"review-{pr_id}-i{latest_iter}.jsonl",
+                _review_iteration_log(pr_id, latest_iter),
                 (open_return(pr_entry) or {}).get("ts")):
             # Reviewed the code sign-off sent back, not the rework.
             verdict = None
@@ -4323,7 +4420,7 @@ def pr_auto_sequence(pr_id: str):
                 click.echo("running: review")
                 return
             next_iter = latest_iter + 1
-            _launch_review_iteration(pr_id, tdir, next_iter, fresh=True)
+            _launch_review_iteration(pr_id, next_iter, fresh=True)
             click.echo(
                 f"sign_off: returning to review (iteration {next_iter})")
             return
@@ -4370,7 +4467,7 @@ def pr_auto_sequence(pr_id: str):
             # machinery in the launched window writes to the next
             # iteration transcript.
             next_iter = latest_iter + 1
-            _launch_review_iteration(pr_id, tdir, next_iter, fresh=True)
+            _launch_review_iteration(pr_id, next_iter, fresh=True)
             click.echo(f"review: needs_work, retrying iteration {next_iter}")
             return
 
@@ -4378,7 +4475,7 @@ def pr_auto_sequence(pr_id: str):
         if _review_window_pane(pm_session, pr_entry) is None:
             # Review window absent — launch a review-loop iteration.
             next_iter = max(latest_iter, 0) + 1
-            _launch_review_iteration(pr_id, tdir, next_iter, fresh=False)
+            _launch_review_iteration(pr_id, next_iter, fresh=False)
             click.echo("advanced: review_relaunched")
             return
         click.echo("running: review")
@@ -4424,10 +4521,9 @@ def pr_auto_sequence(pr_id: str):
                     _record_status_timestamp(p, "sign_off")
             store.locked_update(root, _to_signoff)
             trigger_tui_refresh()
-            signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
             ctx = click.get_current_context()
             ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False, background=True,
-                       transcript=str(signoff_transcript))
+                       run_id=_AUTO_SEQ_RUN)
             click.echo("advanced: sign_off")
             return
         if overall == "INPUT_REQUIRED":
@@ -4446,9 +4542,9 @@ def pr_auto_sequence(pr_id: str):
                     _record_status_timestamp(p, "in_review")
             store.locked_update(root, _to_review)
             trigger_tui_refresh()
-            _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
+            _verdict, latest_iter = _check_review_verdict(pr_id)
             next_iter = latest_iter + 1
-            _launch_review_iteration(pr_id, tdir, next_iter, fresh=True)
+            _launch_review_iteration(pr_id, next_iter, fresh=True)
             click.echo(
                 f"qa: needs_work, returning to review (iteration {next_iter})"
             )
@@ -4547,20 +4643,19 @@ def pr_auto_sequence(pr_id: str):
         from pm_core import signoff as signoff_mod
 
         # Shared state machine (also driven by the TUI scheduler): adopt a
-        # fresh record, retire+relaunch a stale run, record the transcript
+        # fresh record, retire+relaunch a stale run, record the router's
         # verdict, then decide + apply the hop.  Launching is ours.
         step = signoff_mod.step_signoff(
-            root, pr_entry, session=pm_session, tdir=tdir,
+            root, pr_entry, session=pm_session, run_id=_AUTO_SEQ_RUN,
             read_verdict=_check_signoff_verdict,
             window_pane=_signoff_window_pane,
             retire=_retire_signoff_window)
         if step.stale:
             trigger_tui_refresh()
         if step.action == "launch":
-            signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
             ctx = click.get_current_context()
             ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False, background=True,
-                       transcript=str(signoff_transcript))
+                       run_id=_AUTO_SEQ_RUN)
             click.echo("advanced: sign_off_relaunched")
             return
         if step.action == "running":
@@ -4608,14 +4703,13 @@ def pr_auto_sequence(pr_id: str):
         # A review/impl hop's return record already holds the launch claim
         # for this driver (signoff.build_return_record).
         if hop == "review":
-            _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
+            _verdict, latest_iter = _check_review_verdict(pr_id)
             next_iter = latest_iter + 1
-            _launch_review_iteration(pr_id, tdir, next_iter, fresh=True)
+            _launch_review_iteration(pr_id, next_iter, fresh=True)
             click.echo(
                 f"sign_off: returning to review (iteration {next_iter})")
             return
         if hop == "impl":
-            impl_transcript = tdir / f"impl-{pr_id}.jsonl"
             ctx = click.get_current_context()
             # fresh=True: a bounce must RELAUNCH the impl agent so it actually
             # reworks against the sign-off feedback.  With fresh=False the
@@ -4626,7 +4720,7 @@ def pr_auto_sequence(pr_id: str):
             # workdir (status is in_progress) but kills the stale window and
             # starts a fresh session, mirroring the sign_off->review hop.
             ctx.invoke(pr_start, pr_id=pr_id, workdir=None, fresh=True,
-                       background=True, transcript=str(impl_transcript),
+                       background=True, run_id=_AUTO_SEQ_RUN,
                        companion=False)
             click.echo("sign_off: returning to impl")
             return

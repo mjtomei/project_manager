@@ -53,7 +53,7 @@ class WatcherManager:
         watcher_id: str,
         on_iteration: Callable[[WatcherState], None] | None = None,
         on_complete: Callable[[WatcherState], None] | None = None,
-        transcript_dir: str | None = None,
+        run_id: str = "",
     ) -> bool:
         """Start a registered watcher. Returns True if started."""
         with self._lock:
@@ -76,7 +76,7 @@ class WatcherManager:
             thread = watcher.start_background(
                 on_iteration=on_iteration,
                 on_complete=_on_complete_wrapper,
-                transcript_dir=transcript_dir,
+                run_id=run_id,
             )
             self._threads[watcher_id] = thread
             _log.info("watcher_manager: started %s", watcher_id)

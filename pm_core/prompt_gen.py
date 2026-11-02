@@ -1995,8 +1995,9 @@ For stuck PRs:
 - Emit `INPUT_REQUIRED` at the end of the tick so a human can triage.
   Otherwise emit `READY`.
 
-You can inspect review-loop transcripts under
-`transcripts/auto-sequence/<pr-id>/review-*.jsonl` for context if needed.
+You can inspect a PR's review sessions for context if needed:
+`pm pr sessions <pr-id> --phase review` lists each iteration's session and
+its native Claude log (JSONL) path.
 
 ### 5. Append a work-log entry
 
@@ -2866,8 +2867,7 @@ IMPORTANT: Always end your response with the verdict keyword on its own line."""
 
 
 def generate_watcher_review_prompt(session_name: str | None = None,
-                                   meta_pm_root: str | None = None,
-                                   transcript_dir: str | None = None) -> str:
+                                   meta_pm_root: str | None = None) -> str:
     """Generate the system prompt for the watcher review session.
 
     The session is a chat-driven human surface for the autonomous watchers
@@ -2881,21 +2881,15 @@ def generate_watcher_review_prompt(session_name: str | None = None,
 
     tui_block = tui_section(session_name) if session_name else ""
 
-    transcript_block = ""
-    if transcript_dir:
-        transcript_block = f"""
-## Per-test transcripts
+    transcript_block = """
+## Per-iteration session logs
 
-Regression-test Claude sessions launched by the discovery supervisor write
-JSONL transcripts under:
-
-```
-{transcript_dir}
-```
-
-`ls` the directory and `tail` specific files on demand if you need to dig
-into what a particular test session did. Don't read the whole tree
-proactively — it gets large.
+Each watcher iteration's Claude session keeps its own JSONL log (Claude's
+native session history). `pm watcher sessions [TYPE]` lists them with their
+log paths (e.g. `pm watcher sessions discovery`); `pm pr sessions <pr-id>`
+does the same for a PR's sessions. `tail` specific logs on demand if you
+need to dig into what a particular session did. Don't read them all
+proactively — they get large.
 """
 
     discovery_log = f"{meta_pm_root}/watchers/discovery.log"

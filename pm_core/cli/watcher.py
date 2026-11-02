@@ -22,7 +22,8 @@ import click
 
 from pm_core import store, prompt_gen
 from pm_core import tmux as tmux_mod
-from pm_core.claude_launcher import build_claude_shell_cmd, finalize_transcript
+from pm_core.claude_launcher import build_claude_shell_cmd
+from pm_core.session_log import SessionLaunch, watcher_subject
 from pm_core.watchers.auto_start_watcher import AutoStartWatcher
 
 from pm_core.paths import configure_logger
@@ -48,33 +49,27 @@ def _run_user_watcher_loop(wait: int, max_iterations: int) -> None:
     watcher = AutoStartWatcher(pm_root=str(root))
     watcher.state.iteration_wait = wait
 
-    # Create transcript directory
-    tdir = root / "transcripts" / f"watcher-{secrets.token_hex(4)}"
-    tdir.mkdir(parents=True, exist_ok=True)
+    # Driver run recorded with every iteration's session (session ledger).
+    run_id = f"watcher-{secrets.token_hex(4)}"
 
     def _on_iteration(s) -> None:
         ts = datetime.now().strftime("%H:%M:%S")
         click.echo(f"[{ts}] Iteration {s.iteration}: {s.latest_verdict}")
 
     click.echo(f"Starting watcher loop (wait={wait}s, max={max_iterations or 'unlimited'}) ...")
-    click.echo(f"Transcripts: {tdir}")
+    click.echo(f"Sessions: pm watcher sessions {watcher.WATCHER_TYPE} "
+               f"(run {run_id})")
     click.echo("Press Ctrl+C to stop.\n")
 
     try:
         watcher.run_sync(
             on_iteration=_on_iteration,
             max_iterations=max_iterations,
-            transcript_dir=str(tdir),
+            run_id=run_id,
         )
     except KeyboardInterrupt:
         watcher.state.stop_requested = True
         click.echo("\nStopping watcher loop...")
-
-    # Finalize transcript symlinks
-    from pathlib import Path
-    for p in Path(tdir).iterdir():
-        if p.is_symlink() and p.suffix == ".jsonl":
-            finalize_transcript(p)
 
     click.echo(
         f"\nWatcher finished: {watcher.state.iteration} iteration(s), "
@@ -85,8 +80,12 @@ def _run_user_watcher_loop(wait: int, max_iterations: int) -> None:
 @cli.group("watcher", invoke_without_command=True)
 @click.option("--iteration", default=None, type=int, help="Watcher loop iteration number (internal)")
 @click.option("--loop-id", default=None, help="Unique watcher loop identifier (internal)")
+@click.option("--session-id", default=None, hidden=True,
+              help="Session id the watcher loop waits on (internal)")
+@click.option("--run-id", default="", hidden=True,
+              help="Driver run the launch belongs to (internal)")
 @click.option("--transcript", default=None, hidden=True,
-              help="Path to save Claude transcript symlink")
+              help="Deprecated: names the driver run only; nothing is written")
 @click.option("--wait", default=120, type=int, help="Seconds between iterations")
 @click.option("--max-iterations", default=0, type=int,
               help="Maximum iterations (0 = unlimited)")
@@ -100,7 +99,8 @@ def _run_user_watcher_loop(wait: int, max_iterations: int) -> None:
 def watcher_cmd(ctx, iteration: int | None, loop_id: str | None,
                 transcript: str | None, wait: int, max_iterations: int,
                 auto_start_targets: tuple[str, ...], meta_pm_root: str | None,
-                watcher_type: str):
+                watcher_type: str, session_id: str | None = None,
+                run_id: str = ""):
     """Manage watchers.
 
     With no subcommand, starts a blocking watcher loop that periodically
@@ -111,6 +111,7 @@ def watcher_cmd(ctx, iteration: int | None, loop_id: str | None,
       start [TYPE]   Start a watcher (default: auto-start)
       stop [TYPE]    Stop a running watcher
       list           List watcher types and status
+      sessions [TYPE]  List recorded watcher sessions and their native logs
 
     \b
     Options (blocking mode):
@@ -129,7 +130,10 @@ def watcher_cmd(ctx, iteration: int | None, loop_id: str | None,
 
     if iteration is not None:
         # Internal mode: create a single tmux window for this iteration
-        _create_watcher_window(iteration, loop_id or "", transcript,
+        from pm_core.session_log import launch_run_id
+        _create_watcher_window(iteration, loop_id or "",
+                               session_id=session_id,
+                               run_id=launch_run_id(run_id, transcript),
                                auto_start_targets=list(auto_start_targets),
                                meta_pm_root=meta_pm_root,
                                watcher_type=watcher_type)
@@ -182,12 +186,10 @@ def watcher_start(watcher_type: str, wait: int | None):
     if wait is not None:
         watcher.state.iteration_wait = wait
 
-    # Create transcript directory
-    tdir = root / "transcripts" / f"{watcher_type}-{secrets.token_hex(4)}"
-    tdir.mkdir(parents=True, exist_ok=True)
+    run_id = f"{watcher_type}-{secrets.token_hex(4)}"
 
     click.echo(f"Starting {watcher.DISPLAY_NAME} ...")
-    click.echo(f"Transcripts: {tdir}")
+    click.echo(f"Sessions: pm watcher sessions {watcher_type} (run {run_id})")
     click.echo("Press Ctrl+C to stop.\n")
 
     def _on_iter(s):
@@ -197,7 +199,7 @@ def watcher_start(watcher_type: str, wait: int | None):
     try:
         watcher.run_sync(
             on_iteration=_on_iter,
-            transcript_dir=str(tdir),
+            run_id=run_id,
         )
     except KeyboardInterrupt:
         watcher.state.stop_requested = True
@@ -240,8 +242,7 @@ def _run_regression_loop(wait: int | None) -> None:
             watcher.state.iteration_wait = wait
         manager.register(watcher)
 
-        tdir = root / "transcripts" / f"{wtype}-{secrets.token_hex(4)}"
-        tdir.mkdir(parents=True, exist_ok=True)
+        run_id = f"{wtype}-{secrets.token_hex(4)}"
 
         def _make_cb(name: str):
             def _cb(s):
@@ -254,10 +255,11 @@ def _run_regression_loop(wait: int | None) -> None:
         if manager.start(
             watcher.state.watcher_id,
             on_iteration=_make_cb(watcher.DISPLAY_NAME),
-            transcript_dir=str(tdir),
+            run_id=run_id,
         ):
             started.append(watcher.DISPLAY_NAME)
-            click.echo(f"Started {watcher.DISPLAY_NAME} (transcripts: {tdir})")
+            click.echo(f"Started {watcher.DISPLAY_NAME} (run {run_id}; "
+                       f"pm watcher sessions {wtype})")
 
     if not started:
         click.echo("regression-loop: no watchers started.", err=True)
@@ -292,6 +294,39 @@ def watcher_stop(watcher_type: str):
     )
 
 
+@watcher_cmd.command("sessions")
+@click.argument("watcher_type", default=None, required=False)
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="Machine-readable output")
+def watcher_sessions(watcher_type: str | None, as_json: bool):
+    """List recorded watcher sessions and their native Claude logs.
+
+    One row per iteration launch: run, loop, iteration, session id, native
+    log path and whether Claude still has it.  pm keeps no copies — a log
+    Claude pruned (its cleanupPeriodDays) is shown as missing.
+    """
+    import json as _json
+    from pm_core import session_log
+    from pm_core.watchers import list_watcher_types
+    types = ([watcher_type] if watcher_type
+             else [t["type"] for t in list_watcher_types()])
+    out = {}
+    for wtype in types:
+        recs = session_log.records(watcher_subject(wtype))
+        if as_json:
+            out[wtype] = session_log.records_as_json(recs)
+            continue
+        if not recs:
+            if watcher_type:
+                click.echo(f"No recorded sessions for watcher '{wtype}'.")
+            continue
+        click.echo(f"{wtype}:")
+        for line in session_log.format_records(recs):
+            click.echo(f"  {line}")
+    if as_json:
+        click.echo(_json.dumps(out, indent=2))
+
+
 @watcher_cmd.command("list")
 def watcher_list():
     """List all registered watcher types."""
@@ -314,7 +349,8 @@ def watcher_list():
 
 
 def _create_watcher_window(iteration: int, loop_id: str,
-                           transcript: str | None,
+                           session_id: str | None = None,
+                           run_id: str = "",
                            auto_start_targets: list[str] | None = None,
                            meta_pm_root: str | None = None,
                            watcher_type: str = "auto-start") -> None:
@@ -376,7 +412,10 @@ def _create_watcher_window(iteration: int, loop_id: str,
     env: dict[str, str] = {}
     claude_cmd = build_claude_shell_cmd(
         prompt=watcher_prompt,
-        transcript=transcript,
+        session_id=session_id,
+        launch=SessionLaunch(subject=watcher_subject(watcher_type),
+                             phase="watcher", run_id=run_id,
+                             loop_id=loop_id or "", iteration=iteration),
         cwd=repo_dir,
         model=_resolution.model,
         provider=_resolution.provider,

@@ -123,29 +123,29 @@ def _launching(app) -> set:
     return s
 
 
-def get_transcript_dir(app) -> Path:
-    """Return the transcript directory for the current TUI session.
+def get_run_id(app) -> str:
+    """Return the driver run id launches of this TUI are recorded under.
 
-    Total function: callers always receive a usable directory.  Priority:
+    Total function: callers always receive a run id.  Priority:
 
-    1. The active auto-start run dir (``app._auto_start_run_id``) when
+    1. The active auto-start run (``app._auto_start_run_id``) when
        auto-start is active.
-    2. A lazily-created ``manual-<token>`` run dir cached on the app as
-       ``_manual_transcript_run_id``.  Used for manually-started review
-       loops (``zz d``) that never go through auto-start.
+    2. A lazily-created ``manual-<token>`` run cached on the app as
+       ``_manual_run_id``.  Used for manually-started review
+       loops (``zz d``) and other launches outside auto-start.
 
-    The returned path is always under ``app._root / "transcripts"``.
-    The directory itself is created by callers on demand when they
-    write files into it.
+    The run id scopes this TUI's sessions in the session ledger
+    (:mod:`pm_core.session_log`) — sign-off steps read the run's own router
+    session, and impl/merge/review panes are tracked only when they run a
+    session of this run.  It names no directory.
     """
     run_id = app._auto_start_run_id
     if not run_id:
-        run_id = getattr(app, "_manual_transcript_run_id", None)
+        run_id = getattr(app, "_manual_run_id", None)
         if not run_id:
             run_id = f"manual-{secrets.token_hex(3)}"
-            app._manual_transcript_run_id = run_id
-    root = app._root or pm_home()
-    return root / "transcripts" / run_id
+            app._manual_run_id = run_id
+    return run_id
 
 
 def has_merge_restart_marker(session: str | None = None) -> bool:
@@ -244,7 +244,7 @@ def save_breadcrumb(app) -> None:
             "latest_verdict": rstate.latest_verdict,
             "loop_id": rstate.loop_id,
             "input_required": rstate.input_required,
-            "_transcript_dir": rstate._transcript_dir,
+            "run_id": rstate.run_id,
             # Failed-launch retry episode: a restart mid-backoff must
             # continue the same bounded budget and deadline.
             "retry_iteration": rstate.retry_iteration,
@@ -383,6 +383,7 @@ def _loop_record_fields(loop_data: dict) -> dict | None:
     failed-launch retry fields are validated the same way so a corrupt
     record cannot raise on restore.
     """
+    from pm_core.review_loop import _generate_loop_id
     iteration = loop_data.get("iteration", 0)
     if not _is_int(iteration):
         return None
@@ -395,9 +396,17 @@ def _loop_record_fields(loop_data: dict) -> dict | None:
     input_required = loop_data.get("input_required", False)
     if not isinstance(input_required, bool):
         return None
-    transcript_dir = loop_data.get("_transcript_dir")
-    if transcript_dir is not None and not isinstance(transcript_dir, str):
+    run_id = loop_data.get("run_id", "")
+    if run_id is not None and not isinstance(run_id, str):
         return None
+    # A pre-upgrade breadcrumb names the loop's run by its transcript dir:
+    # that dir's name is the run, and the dir itself is read once (read-only)
+    # to adopt the in-flight iteration's session.
+    legacy_dir = loop_data.get("_transcript_dir")
+    if legacy_dir is not None and not isinstance(legacy_dir, str):
+        return None
+    if not run_id and legacy_dir:
+        run_id = Path(legacy_dir).name
 
     retry_iteration = loop_data.get("retry_iteration", 0)
     launch_attempts = loop_data.get("launch_attempts", 0)
@@ -435,9 +444,10 @@ def _loop_record_fields(loop_data: dict) -> dict | None:
 
     return {"iteration": iteration,
             "latest_verdict": latest_verdict,
-            "loop_id": loop_id or secrets.token_hex(2),
+            "loop_id": loop_id or _generate_loop_id(),
             "input_required": input_required,
-            "_transcript_dir": transcript_dir,
+            "run_id": run_id or "",
+            "legacy_transcript_dir": legacy_dir or "",
             "retry_iteration": retry_iteration,
             "launch_attempts": launch_attempts,
             "next_retry_at": next_retry_at,
@@ -616,12 +626,7 @@ async def consume_breadcrumb(app) -> None:
         app._auto_start = True
         app._auto_start_targets = dict(targets)
         app._auto_start_run_id = run_id
-
-        # Recreate transcript directory if needed
-        if run_id and app._root:
-            tdir = app._root / "transcripts" / run_id
-            tdir.mkdir(parents=True, exist_ok=True)
-        elif not run_id:
+        if not run_id:
             _ensure_run(app)
 
     # Restore review loop state before check_and_start so it sees existing
@@ -681,16 +686,14 @@ async def consume_breadcrumb(app) -> None:
             if rstate and not rstate.running:
                 pr = store.get_pr(app._data, pr_id)
                 if pr and pr.get("status") == "in_review":
-                    # Keep the loop's own dir: an in-flight iteration's
-                    # transcript lives there, and a manual loop would
-                    # otherwise get a fresh ``manual-<hex>`` dir, so an
-                    # adopted INPUT_REQUIRED follow-up (and finalize)
-                    # would look in the wrong place.
-                    tdir = rstate._transcript_dir or get_transcript_dir(app)
+                    # Keep the loop's own run: its attempts are recorded
+                    # under it (a manual loop would otherwise get a fresh
+                    # ``manual-<hex>`` run).  The in-flight iteration itself
+                    # is found by loop id + iteration.
                     try:
                         started = _start_loop(
                             app, pr_id, pr,
-                            transcript_dir=str(tdir),
+                            run_id=rstate.run_id or get_run_id(app),
                             resume_state=rstate,
                         )
                     except Exception:
@@ -703,7 +706,7 @@ async def consume_breadcrumb(app) -> None:
                         started = False
                     if not started:
                         # The loop could not be started (missing workdir, no
-                        # tmux, unusable transcript dir); _start_loop already
+                        # tmux); _start_loop already
                         # said why.  Drop the restored entry: a non-running
                         # loop entry makes `_auto_start_review_loops` skip this
                         # PR forever, so keeping it would strand the target
@@ -742,7 +745,7 @@ async def consume_breadcrumb(app) -> None:
                           "meta_pm_root": watcher_data.get("meta_pm_root")}]
     if watchers_data:
         from pm_core.tui import watcher_ui
-        tdir = get_transcript_dir(app)
+        run_id = get_run_id(app)
         resumed = 0
         for wd in watchers_data:
             if not isinstance(wd, dict):
@@ -751,7 +754,7 @@ async def consume_breadcrumb(app) -> None:
                 continue
             watcher_ui.start_watcher(
                 app,
-                transcript_dir=str(tdir),
+                run_id=run_id,
                 meta_pm_root=wd.get("meta_pm_root"),
                 watcher_type=wd.get("type", "auto-start"),
             )
@@ -796,72 +799,13 @@ def _adopt_live_qa(app) -> None:
         _log.warning("auto_start: QA adoption scan failed", exc_info=True)
 
 
-# Transcripts the TUI's idle polling (_poll_impl_idle) keeps reading after
-# auto-start is disabled; it registers them lazily on a later poll.
-_LAZY_TRACKED_RE = re.compile(r"^(?:impl|merge|review)-(?!.*-i\d+\.jsonl$).+\.jsonl$")
-
-
-def _live_read_transcripts(app, tdir: Path) -> set[str]:
-    """Paths in *tdir* that a reader still polls after auto-start is off.
-
-    - live idle-tracker entries (impl / merge / non-loop review panes);
-    - a running review loop's current iteration transcript (the loop polls
-      it itself; ``_poll_impl_idle`` skips PRs with running loops);
-    - impl / merge / review windows not registered yet: a live pane of the
-      pm session runs that session (its ``--session-id`` / ``--resume``).
-    Sign-off transcripts are not among them: the sign-off driver only
-    steps auto-start-driven PRs.
-    """
-    from pm_core import tmux as tmux_mod
-    from pm_core.claude_launcher import _PANE_SESSION_RE, session_id_from_transcript
-    live: set[str] = set()
-    tracker = getattr(app, "_pane_idle_tracker", None)
-    if tracker is not None:
-        for key in tracker.tracked_keys():
-            path = tracker.get_transcript_path(key)
-            if path and not tracker.is_gone(key):
-                live.add(os.path.abspath(path))
-    for pr_id, state in (getattr(app, "_review_loops", None) or {}).items():
-        if state.running and getattr(state, "_transcript_dir", None):
-            live.add(os.path.abspath(os.path.join(
-                state._transcript_dir, f"review-{pr_id}-i{state.iteration}.jsonl")))
-    session = getattr(app, "_session_name", None)
-    if session:
-        ids: set[str] = set()
-        for cmd in tmux_mod.live_pane_start_commands(session):
-            ids.update(_PANE_SESSION_RE.findall(cmd))
-        for p in tdir.iterdir():
-            if (_LAZY_TRACKED_RE.match(p.name) and p.is_symlink()
-                    and session_id_from_transcript(p) in ids):
-                live.add(os.path.abspath(p))
-    return live
-
-
-def _finalize_all_transcripts(app) -> None:
-    """Finalize all transcript symlinks in the current run directory.
-
-    Skips transcripts a reader still polls: a copy freezes them, so e.g. a
-    repo-update (merge) window waiting on INPUT_REQUIRED would never have
-    its later MERGED detected, and a running review loop would never see
-    its verdict.  Those stay symlinks to Claude's own transcript (as in a
-    run that is never disabled).
-    """
-    tdir = get_transcript_dir(app)
-    if not tdir or not tdir.is_dir():
-        return
-    from pm_core.claude_launcher import finalize_transcript
-    live = _live_read_transcripts(app, tdir)
-    for p in tdir.iterdir():
-        if p.is_symlink() and p.suffix == ".jsonl":
-            if os.path.abspath(p) in live:
-                _log.info("transcript: %s is still read live — not finalized", p)
-                continue
-            finalize_transcript(p)
-
-
 def _disable(app) -> None:
-    """Disable auto-start mode (in-memory only) and drop all targets."""
-    _finalize_all_transcripts(app)
+    """Disable auto-start mode (in-memory only) and drop all targets.
+
+    Nothing is finalized: every session pm launched is read from Claude's
+    own log, which no sweep may freeze (#241), and stays in the session
+    ledger as history.
+    """
     # Stop the watcher loop if it's running
     from pm_core.tui import watcher_ui
     if watcher_ui.is_running(app):
@@ -873,17 +817,14 @@ def _disable(app) -> None:
 
 
 def _ensure_run(app) -> None:
-    """Create the shared transcript run dir on first enablement."""
+    """Name the shared auto-start run on first enablement."""
     if app._auto_start_run_id:
         return
     targets = get_targets(app)
     tag = targets[0] if targets else "none"
     run_id = f"autostart-{tag}-{secrets.token_hex(4)}"
     app._auto_start_run_id = run_id
-    if app._root:
-        tdir = app._root / "transcripts" / run_id
-        tdir.mkdir(parents=True, exist_ok=True)
-        _log.info("auto_start: created transcript dir %s", tdir)
+    _log.info("auto_start: started run %s", run_id)
 
 
 def _sync_enabled(app) -> None:
@@ -1474,10 +1415,10 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
                 loop.launch_retryable = False
                 loop.retry_ready_at = 0.0
                 loop._ui_notified_retry = 0
-                tdir = loop._transcript_dir or str(get_transcript_dir(app))
                 try:
                     started = _start_loop(app, pr_id, pr,
-                                          transcript_dir=str(tdir),
+                                          run_id=(loop.run_id
+                                                  or get_run_id(app)),
                                           resume_state=loop)
                 except Exception:
                     # A raising starter must not silently disarm the failure
@@ -1520,8 +1461,7 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
             continue
         _log.info("auto_start: starting review loop for %s", pr_id)
         app.log_message(f"Auto-start: review loop for {pr_id}")
-        tdir = get_transcript_dir(app)
-        _start_loop(app, pr_id, pr, transcript_dir=str(tdir))
+        _start_loop(app, pr_id, pr, run_id=get_run_id(app))
 
 
 QA_HOLD_VERDICTS = ("PASS", "INPUT_REQUIRED")
@@ -1722,23 +1662,28 @@ def _adopt_return_review(app, pr: dict) -> bool:
             return False
     except (OSError, TypeError, ValueError):
         return False
-    tdir = get_transcript_dir(app)
-    link = tdir / f"review-{pr_id}-i1.jsonl"
+    from pm_core import session_log
+    from pm_core.claude_launcher import session_id_from_transcript
+    sid = session_id_from_transcript(transcript)
+    run_id = get_run_id(app)
+    state = ReviewLoopState(pr_id=pr_id, iteration=1, run_id=run_id)
+    # The adopted session becomes the new loop's iteration 1 in the session
+    # ledger (no link, no copy): the loop's restart handoff then finds it as
+    # its own attempt and polls it instead of launching over it.
     try:
-        tdir.mkdir(parents=True, exist_ok=True)
-        if link.is_symlink() or link.exists():
-            link.unlink()
-        link.symlink_to(transcript)
-    except OSError as e:
+        session_log.adopt(
+            session_log.SessionLaunch(subject=pr_id, phase="review",
+                                      run_id=run_id, loop_id=state.loop_id,
+                                      iteration=1),
+            sid, session_log.log_of(pr_id, sid) or transcript)
+    except (OSError, ValueError) as e:
         _log.warning("auto_start: cannot adopt review window of %s: %s",
                      pr_id, e)
         return False
     _log.info("auto_start: adopting the open review window of %s "
-              "(pane %s, session transcript %s)", pr_id, pane_id, transcript)
+              "(pane %s, session %s)", pr_id, pane_id, sid)
     from pm_core.tui.review_loop_ui import _start_loop
-    state = ReviewLoopState(pr_id=pr_id, iteration=1,
-                            _transcript_dir=str(tdir))
-    _start_loop(app, pr_id, pr, transcript_dir=str(tdir), resume_state=state)
+    _start_loop(app, pr_id, pr, run_id=run_id, resume_state=state)
     return True
 
 
@@ -1774,9 +1719,9 @@ async def _start_pr_quiet(app, pr_id: str, fresh: bool = False) -> None:
     cmd = [sys.executable, "-m", "pm_core.wrapper", "pr", "start", "--background"]
     if fresh:
         cmd.append("--fresh")
-    tdir = get_transcript_dir(app)
-    if tdir:
-        cmd.extend(["--transcript", str(tdir / f"impl-{pr_id}.jsonl")])
+    # The launch records itself under this TUI's run, which is how
+    # _poll_impl_idle recognises the pane as this TUI's session.
+    cmd.extend(["--run-id", get_run_id(app)])
     cmd.append(pr_id)
     cwd = str(app._root) if app._root else None
 

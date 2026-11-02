@@ -70,7 +70,7 @@ def _make_running_state(pr_id: str = "pr-001", iteration: int = 3) -> ReviewLoop
         iteration=iteration,
         latest_verdict="NEEDS_WORK",
         loop_id="ab12",
-        _transcript_dir="/tmp/pm-test/transcripts/autostart-pr-001-abcd1234",
+        run_id="autostart-pr-001-abcd1234",
     )
     state.history = [
         ReviewIteration(iteration=1, verdict="NEEDS_WORK", output="output1",
@@ -581,9 +581,11 @@ class TestConsumeBreadcrumbReviewLoops:
         mock_start.assert_called_once()
         _, kwargs = mock_start.call_args
         assert kwargs.get("resume_state") is rstate
-        # Resumed in its saved transcript dir, not a fresh manual-<hex> one
-        # (an in-flight iteration's transcript lives there).
-        assert kwargs.get("transcript_dir") == "/tmp/transcripts"
+        # A pre-upgrade breadcrumb names the loop's run by its old transcript
+        # dir: resumed in that run (not a fresh manual-<hex> one), with the
+        # dir kept for the one read-only adoption of its in-flight session.
+        assert kwargs.get("run_id") == "transcripts"
+        assert rstate.legacy_transcript_dir == "/tmp/transcripts"
 
     def test_breadcrumb_deleted_after_consumption(self, tmp_path):
         breadcrumb_data = {"target": "pr-001", "run_id": "run-123"}
@@ -637,7 +639,7 @@ class TestStartLoopResumeState:
              patch("pm_core.tui.review_loop_ui.start_review_loop_background") as mock_bg, \
              patch("pm_core.tui.review_loop_ui._ensure_poll_timer"):
             mock_store.find_project_root.return_value = Path("/tmp/pm")
-            _start_loop(app, "pr-001", pr, transcript_dir="/tmp",
+            _start_loop(app, "pr-001", pr, run_id="r",
                         resume_state=state)
 
         # State should be in app._review_loops
@@ -666,7 +668,7 @@ class TestStartLoopResumeState:
              patch("pm_core.tui.review_loop_ui.start_review_loop_background"), \
              patch("pm_core.tui.review_loop_ui._ensure_poll_timer"):
             mock_store.find_project_root.return_value = Path("/tmp/pm")
-            _start_loop(app, "pr-002", pr, transcript_dir="/tmp")
+            _start_loop(app, "pr-002", pr, run_id="r")
 
         state = app._review_loops["pr-002"]
         assert state.pr_id == "pr-002"

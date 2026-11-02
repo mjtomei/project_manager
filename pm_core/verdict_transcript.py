@@ -56,17 +56,17 @@ _USER_RE = re.compile(r'"type"\s*:\s*"user"')
 
 
 def _read_transcript_text(transcript_path: str | Path | None) -> str:
-    """Read a Claude transcript, tolerating slug-mismatched symlinks.
+    """Read a Claude transcript, tolerating a slug-mismatched path.
 
-    Band-aid for pr-488b748: when ``build_claude_shell_cmd`` creates the
-    transcript symlink it derives the target's parent dir from the cwd
-    *we* passed in, but Claude writes to a parent derived from its
-    actual runtime cwd. If those diverge (e.g. a worktree symlinked to a
-    different canonical path, or a nested pm invocation that registered
-    one workdir while launching the pane at another), the symlink
-    target never appears. The session_id is unique, though, so we can
-    recover the real path by scanning ``~/.claude/projects/*/`` for the
-    matching ``<session_id>.jsonl``.
+    Band-aid for pr-488b748: the native path pm predicts (and the session
+    ledger records) for a launch derives its parent dir from the cwd *we*
+    passed in, but Claude writes to a parent derived from its actual
+    runtime cwd. If those diverge (e.g. a worktree symlinked to a different
+    canonical path, or a nested pm invocation that registered one workdir
+    while launching the pane at another), the predicted file never appears.
+    The session_id is unique, though, so we can recover the real path by
+    looking up ``~/.claude/projects/*/<session_id>.jsonl`` (a pre-upgrade
+    symlink names the session by its target).
     """
     if not transcript_path:
         return ""
@@ -84,18 +84,12 @@ def _read_transcript_text(transcript_path: str | Path | None) -> str:
         sid = None
     if not sid:
         sid = p.stem
-    if not (len(sid) == 36 and sid.count("-") == 4):
+    # The session ledger's lookup by id (the most recently modified match,
+    # should a stale file with the same sid linger from a prior run).
+    from pm_core.session_log import find_native_log
+    real = find_native_log(sid)
+    if real is None:
         return ""
-    projects_dir = Path.home() / ".claude" / "projects"
-    try:
-        matches = list(projects_dir.glob(f"*/{sid}.jsonl"))
-    except OSError:
-        return ""
-    if not matches:
-        return ""
-    # Pick the most recently modified — handles edge cases where stale
-    # files with the same sid linger from a prior run.
-    real = max(matches, key=lambda m: m.stat().st_mtime)
     try:
         return real.read_text(errors="replace")
     except OSError:

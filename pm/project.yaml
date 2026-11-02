@@ -6168,11 +6168,23 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/144
   gh_pr_number: 144
   created_at: '2026-03-08T23:09:07.312432+00:00'
-  updated_at: '2026-04-07T13:53:49.302231+00:00'
+  updated_at: '2026-11-02T06:48:03.587812+00:00'
   started_at: '2026-03-14T17:21:14.310809+00:00'
   reviewed_at: '2026-03-14T21:54:58.823224+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-955f5a9
+    text: 'Coordination with pr-ec5bc84 (native session logs): once it merges, pm/transcripts
+      is gone. build_claude_shell_cmd(transcript=), finalize_transcript, pane_runs_transcript,
+      auto_start.get_transcript_dir, ReviewLoopState._transcript_dir and the signoff
+      .head stamp helpers are removed. Launches now pass launch=session_log.SessionLaunch(...)
+      (CLI: --run-id, and --session-id for review/watcher loop attempts), and collectors
+      read the exact session with session_log.by_session/latest/log_path/log_of. A
+      deprecated --transcript PATH still parses, but it only names the run: nothing
+      is written at PATH, so code that reads that path will find nothing. This branch
+      adds such usages: port them when integrating master.'
+    created_at: '2026-11-02T06:48:03Z'
+    last_edited: '2026-11-02T06:48:03Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-871dbf5-add-high-effort-watcher-supervisors--cbe54f5e
 - id: pr-b7ada6a
   plan: tui-ux
@@ -6366,7 +6378,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/184
   gh_pr_number: 184
   created_at: '2026-03-09T15:17:01.313859+00:00'
-  updated_at: '2026-05-05T12:15:18.337503+00:00'
+  updated_at: '2026-11-02T06:33:04.459201+00:00'
   started_at: '2026-05-03T11:57:41.026322+00:00'
   reviewed_at: '2026-05-05T12:15:18.337503+00:00'
   merged_at: null
@@ -6375,6 +6387,16 @@ prs:
     text: 'QA INPUT_REQUIRED:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-18ac983-e21fdbbf66b41d89)'
     created_at: '2026-04-04T14:56:24Z'
     last_edited: '2026-04-04T14:56:24Z'
+  - id: note-52742e1
+    text: 'pr-ec5bc84 (native session logs) changes the watcher launch API: BaseWatcher.build_launch_cmd(iteration,
+      session_id=None, run_id="") replaces transcript=, and BaseWatcher._iteration_args(session_id,
+      run_id) builds the --loop-id/--session-id/--run-id flags. SessionHealthWatcher.build_launch_cmd
+      still takes transcript= and passes --transcript, so after master integration
+      _launch_window raises TypeError (unexpected kwarg session_id). Adapt it like
+      the other watchers (cmd.extend(self._iteration_args(session_id, run_id))) when
+      merging master.'
+    created_at: '2026-11-02T06:33:04Z'
+    last_edited: '2026-11-02T06:33:04Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-18ac983-session-health-watcher-detect-and-re-f6381eb7
 - id: pr-945546e
   plan: watchers
@@ -10923,7 +10945,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-04-09T22:11:09.274855+00:00'
+  updated_at: '2026-11-02T06:48:00.713370+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -10993,6 +11015,18 @@ prs:
       matches correctly: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-eb2dbfc-92a70215734d8ef3)'
     created_at: '2026-04-10T13:33:17Z'
     last_edited: '2026-04-10T13:33:17Z'
+  - id: note-0b50368
+    text: 'Coordination with pr-ec5bc84 (native session logs): once it merges, pm/transcripts
+      is gone. build_claude_shell_cmd(transcript=), finalize_transcript, pane_runs_transcript,
+      auto_start.get_transcript_dir, ReviewLoopState._transcript_dir and the signoff
+      .head stamp helpers are removed. Launches now pass launch=session_log.SessionLaunch(...)
+      (CLI: --run-id, and --session-id for review/watcher loop attempts), and collectors
+      read the exact session with session_log.by_session/latest/log_path/log_of. A
+      deprecated --transcript PATH still parses, but it only names the run: nothing
+      is written at PATH, so code that reads that path will find nothing. This branch
+      adds such usages: port them when integrating master.'
+    created_at: '2026-11-02T06:48:00Z'
+    last_edited: '2026-11-02T06:48:00Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
@@ -29555,7 +29589,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/222
   gh_pr_number: 222
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-10-21T23:45:02.916394+00:00'
+  updated_at: '2026-11-02T06:48:02.153011+00:00'
   started_at: '2026-05-25T02:58:20.169677+00:00'
   reviewed_at: '2026-05-25T03:13:02.415469+00:00'
   merged_at: null
@@ -29657,6 +29691,18 @@ prs:
       this PR''s lock/_NEVER_STASH approach when rebasing.'
     created_at: '2026-10-21T23:45:02Z'
     last_edited: '2026-10-21T23:45:02Z'
+  - id: note-f6c1659
+    text: 'Coordination with pr-ec5bc84 (native session logs): once it merges, pm/transcripts
+      is gone. build_claude_shell_cmd(transcript=), finalize_transcript, pane_runs_transcript,
+      auto_start.get_transcript_dir, ReviewLoopState._transcript_dir and the signoff
+      .head stamp helpers are removed. Launches now pass launch=session_log.SessionLaunch(...)
+      (CLI: --run-id, and --session-id for review/watcher loop attempts), and collectors
+      read the exact session with session_log.by_session/latest/log_path/log_of. A
+      deprecated --transcript PATH still parses, but it only names the run: nothing
+      is written at PATH, so code that reads that path will find nothing. This branch
+      adds such usages: port them when integrating master.'
+    created_at: '2026-11-02T06:48:02Z'
+    last_edited: '2026-11-02T06:48:02Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
@@ -30605,7 +30651,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/223
   gh_pr_number: 223
   created_at: '2026-05-25T03:25:04.533357+00:00'
-  updated_at: '2026-05-25T03:47:14.237012+00:00'
+  updated_at: '2026-11-02T06:48:05.038198+00:00'
   started_at: '2026-05-25T03:27:03.889385+00:00'
   reviewed_at: '2026-05-25T03:39:45.883451+00:00'
   merged_at: null
@@ -30655,6 +30701,18 @@ prs:
       without treating either as the assumed cause.'
     created_at: '2026-10-22T14:36:15Z'
     last_edited: '2026-10-22T14:36:15Z'
+  - id: note-006f9a6
+    text: 'Coordination with pr-ec5bc84 (native session logs): once it merges, pm/transcripts
+      is gone. build_claude_shell_cmd(transcript=), finalize_transcript, pane_runs_transcript,
+      auto_start.get_transcript_dir, ReviewLoopState._transcript_dir and the signoff
+      .head stamp helpers are removed. Launches now pass launch=session_log.SessionLaunch(...)
+      (CLI: --run-id, and --session-id for review/watcher loop attempts), and collectors
+      read the exact session with session_log.by_session/latest/log_path/log_of. A
+      deprecated --transcript PATH still parses, but it only names the run: nothing
+      is written at PATH, so code that reads that path will find nothing. This branch
+      adds such usages: port them when integrating master.'
+    created_at: '2026-11-02T06:48:04Z'
+    last_edited: '2026-11-02T06:48:04Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-8409c64-bug-zz-d-review-loop-popup-spinner-n-e36fbe82
 - id: pr-0b4e1a9
   plan: bugs
@@ -38617,11 +38675,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T14:05:49.183704+00:00'
-  updated_at: '2026-10-21T14:05:49.183704+00:00'
+  updated_at: '2026-11-02T06:48:06.490083+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-f3a9629
+    text: 'Coordination with pr-ec5bc84 (native session logs): once it merges, pm/transcripts
+      is gone. build_claude_shell_cmd(transcript=), finalize_transcript, pane_runs_transcript,
+      auto_start.get_transcript_dir, ReviewLoopState._transcript_dir and the signoff
+      .head stamp helpers are removed. Launches now pass launch=session_log.SessionLaunch(...)
+      (CLI: --run-id, and --session-id for review/watcher loop attempts), and collectors
+      read the exact session with session_log.by_session/latest/log_path/log_of. A
+      deprecated --transcript PATH still parses, but it only names the run: nothing
+      is written at PATH, so code that reads that path will find nothing. This branch
+      adds such usages: port them when integrating master.'
+    created_at: '2026-11-02T06:48:06Z'
+    last_edited: '2026-11-02T06:48:06Z'
 - id: pr-8020495
   plan: improvements
   title: PR action history and active timers in CLI and actions pane
@@ -38667,11 +38737,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-21T21:40:00.306182+00:00'
+  updated_at: '2026-11-02T06:10:48.842062+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-9623a19
+    text: 'From pr-ec5bc84 (native session logs, replaces pm/transcripts): run dirs
+      are gone - transcript_dir/_transcript_dir/get_transcript_dir become run ids
+      (auto_start.get_run_id, ReviewLoopState.run_id, run_review_loop_sync(..., run_id));
+      pane_runs_transcript/finalize_transcript are removed. Every collected launch
+      records its session in pm_core/session_log (per-PR ledger; session_log.by_session(pr,
+      sid) gives the native JSONL log). Action history should key on session_id and
+      take the log path from the ledger (or pm pr sessions) rather than session_id_from_transcript(<run-dir
+      link>). No history feature was added by pr-ec5bc84.'
+    created_at: '2026-11-02T06:10:48Z'
+    last_edited: '2026-11-02T06:10:48Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
@@ -39727,11 +39808,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-22T17:19:46.224920+00:00'
+  updated_at: '2026-11-02T06:47:59.268446+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-ad583c8
+    text: 'Coordination with pr-ec5bc84 (native session logs): once it merges, pm/transcripts
+      is gone. build_claude_shell_cmd(transcript=), finalize_transcript, pane_runs_transcript,
+      auto_start.get_transcript_dir, ReviewLoopState._transcript_dir and the signoff
+      .head stamp helpers are removed. Launches now pass launch=session_log.SessionLaunch(...)
+      (CLI: --run-id, and --session-id for review/watcher loop attempts), and collectors
+      read the exact session with session_log.by_session/latest/log_path/log_of. A
+      deprecated --transcript PATH still parses, but it only names the run: nothing
+      is written at PATH, so code that reads that path will find nothing. This branch
+      adds such usages: port them when integrating master.'
+    created_at: '2026-11-02T06:47:59Z'
+    last_edited: '2026-11-02T06:47:59Z'
 - id: pr-f98ac63
   plan: bugs
   title: 'Bug: prefix+P popup dispatch from a PR window resolves the session tag from
@@ -45402,11 +45495,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
-  updated_at: '2026-10-25T21:27:23.093198+00:00'
+  updated_at: '2026-11-02T06:48:07.991111+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-23a7961
+    text: 'Coordination with pr-ec5bc84 (native session logs): once it merges, pm/transcripts
+      is gone. build_claude_shell_cmd(transcript=), finalize_transcript, pane_runs_transcript,
+      auto_start.get_transcript_dir, ReviewLoopState._transcript_dir and the signoff
+      .head stamp helpers are removed. Launches now pass launch=session_log.SessionLaunch(...)
+      (CLI: --run-id, and --session-id for review/watcher loop attempts), and collectors
+      read the exact session with session_log.by_session/latest/log_path/log_of. A
+      deprecated --transcript PATH still parses, but it only names the run: nothing
+      is written at PATH, so code that reads that path will find nothing. This branch
+      adds such usages: port them when integrating master.'
+    created_at: '2026-11-02T06:48:07Z'
+    last_edited: '2026-11-02T06:48:07Z'
 - id: pr-154595f
   plan: bugs
   title: QA scenario numbering leaks across projects that share a PR id
@@ -46247,11 +46352,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-27T23:16:14.111057+00:00'
-  updated_at: '2026-10-27T23:16:14.111057+00:00'
+  updated_at: '2026-11-02T06:15:11.751799+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-61e0201
+    text: 'From pr-ec5bc84 review (c71c i1): the TUI --transcript {tdir}/... interpolations
+      this bug names (pr_view.start_pr/review_pr, review_loop_ui merge command) are
+      gone; they now pass --run-id <run> (autostart-*/manual-<hex>, no path). Only
+      the unquoted workdir prompt-file path in claude_launcher.build_claude_shell_cmd
+      remains in scope here.'
+    created_at: '2026-11-02T06:15:11Z'
+    last_edited: '2026-11-02T06:15:11Z'
 - id: pr-a9803aa
   plan: bugs
   title: 'Bug: push proxy local-path origin rejection is bypassed by git push --repo=<path>'
@@ -51591,6 +51704,325 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T03:23:55.443880+00:00'
   updated_at: '2026-11-02T03:23:55.443880+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ec5bc84
+  plan: bugs
+  title: Use native session logs and remove pm/transcripts indirection
+  branch: pm/pr-ec5bc84-use-native-session-logs-and-remove-pm-transcripts-
+  status: in_progress
+  depends_on: []
+  description: 'Replace the PM-owned transcript symlink/copy/archive tree with direct
+    references to harness-native session history. Supersedes closed #275 / pr-9ee4d64
+    by eliminating the mutable indirection that caused the bug, rather than adding
+    another archive layer. User explicitly approved closing #275 and starting this
+    simpler design on 2026-11-02.
+
+
+    Why: Claude already retains the original JSONL; the current installation has cleanupPeriodDays=365000.
+    PM currently reuses phase/iteration paths and sometimes freezes a live symlink
+    into a copy. A real #241 incident let an obsolete review completion freeze the
+    next loop''s live file and hide its eventual NEEDS_WORK. Earlier sign-off return
+    history was also lost from PM''s run directory even though native sessions survived.
+
+
+    Desired design: keep the smallest durable mapping needed to associate project/PR,
+    phase and exact run/loop/attempt with native session ID and native log location,
+    reusing existing session/runtime metadata. Launches register their own identity;
+    collectors and history readers read that session directly. Do not derive identity
+    from a mutable alias, scan the entire history when a known session ID suffices,
+    or replace this with a new copy/archive service. Use native retention; do not
+    silently change global retention or promise history beyond the configured harness
+    retention. A missing/pruned native log must be reported accurately, never treated
+    as a verdict or another session.
+
+
+    Retire all new writes and runtime dependence on pm/transcripts, including implementation,
+    reviews, QA roles, sign-off, watchers and CLI flows that use it. Keep genuine
+    execution stdout/stderr, recordings and non-native artifacts in their existing
+    appropriate capture/state locations; do not throw away evidence merely because
+    it is called a transcript. Reuse launch/session plumbing and one small common
+    resolver rather than adding parallel role-specific machinery. Review any proposed
+    compatibility code against the simplification goal.
+
+
+    Upgrade safely: existing in-flight sessions and saved runtime records must remain
+    identifiable, and earlier evidence/unsent drafts must not be deleted. Preserve
+    legacy copies that are the only remaining evidence. A bounded read-only compatibility/adoption
+    path is acceptable; new runs must not recreate the old tree. Do not delete the
+    live installation''s pm/transcripts or alter the running host during implementation/QA.
+
+
+    Acceptance: exact-session verdict collection across sign-off returns, fresh review
+    loops restarting at iteration one, concurrent PRs, late completion from an obsolete
+    loop, TUI restart/adoption and human follow-up in the existing pane. Reproduce
+    #241''s stale-finalizer failure and show it cannot freeze or retarget a newer
+    native log. Verify newly appended outcomes remain readable and prior session identities
+    remain discoverable. Include representative coverage of every affected producer/consumer;
+    use isolated test projects, HOME/PM state and tmux servers inside the configured
+    containers. Preserve manual merge/spec gates and the existing verdict policy.
+    No broad workflow rewrite, new archive retention subsystem or unrelated recipe
+    hardening.
+
+
+    Coordination: #248 INPUT_REQUIRED adoption, #260 fresh implementation handoff
+    and #274 integration-return gate currently depend on #275''s session ownership
+    fixes. The approved scheduling holds now target this replacement for downstream
+    review/QA; their existing implementation/evidence remain preserved. Coordinate
+    with #237 action history without expanding into that feature. Start fresh from
+    current master, not from #275''s unmerged archive implementation; use its incident
+    evidence and focused regression intent where useful.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/297
+  gh_pr_number: 297
+  created_at: '2026-11-02T05:06:16.376330+00:00'
+  updated_at: '2026-11-02T10:14:43.932937+00:00'
+  started_at: '2026-11-02T05:06:42.121417+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-dcc1cd1
+    text: 'User authorized this replacement to start immediately. Use main-account
+      Opus 5.5/xhigh for all roles/helpers/sign-off, matching the superseded PR current
+      routing. The provider pins the effective xhigh setting. Keep wait_for_merge.
+      No spec-approval pause requested for this code simplification; do not expand
+      into prompt redesign. No live host PM/tmux/settings mutation in tests. Preserve
+      old #275 source and evidence; it is closed by user choice despite its historical
+      passing sign-off.'
+    created_at: '2026-11-02T05:06:19Z'
+    last_edited: '2026-11-02T05:06:19Z'
+  - id: note-b97d085
+    text: 'Impl done at 9d8ad1c9 (spec 6760e349). Design: pm_core/session_log.py append-only
+      ledger <runtime>/sessions/<pr>.jsonl (watchers: watcher-<type>); build_claude_shell_cmd(launch=SessionLaunch)
+      registers each launch with native session id + log path; review/watcher loops
+      pre-generate per-attempt --session-id, other launches pass --run-id; hidden
+      --transcript is write-free (run id only, for an old-code parent mid-upgrade).
+      All finalize/copy code removed (#241 finalizer included); sign-off .head stamp
+      -> record head/base, bounce = ledger retire event (logs kept). Legacy pm/transcripts
+      adopted once, read-only (breadcrumb _transcript_dir, run-dir links/frozen copies/.head,
+      auto-sequence dir, orphan sign-off by pane sid); never written or deleted. Review
+      loop ids widened to 8 hex (ledger key). Launch-failure artifacts -> <runtime>/launch-artifacts.
+      New read-only CLI: pm pr sessions <pr> [--phase] [--json], pm watcher sessions
+      [type]. Captures: $CAP/impl/pre-fix/stale-finalizer (bug on master 5b352d16),
+      $CAP/impl/post-fix/{stale-finalizer,review-loop-e2e} (real pm pr review children
+      on a private tmux server + fake Claude: NEEDS_WORK->PASS, each iteration its
+      own recorded session, no pm/transcripts), suite logs in $CAP/impl/test-runs.
+      Full suite 5554 passed / 12 failed, failure set identical to master (5526/12,
+      all markdown_render env). Tests: tests/test_session_log.py, tests/test_native_session_lifecycle.py,
+      sign-off returns test in test_tui_signoff_handoff.py + adapted suites. Coordination:
+      #248/#260/#274 records are not in this clone registry; they integrate against
+      run_id/session_log instead of transcript_dir/finalize_transcript.'
+    created_at: '2026-11-02T06:10:47Z'
+    last_edited: '2026-11-02T06:10:47Z'
+  - id: note-8990811
+    text: 'QA S1 refiner (rehearsed live at b7137091): `pm session` installs pm hooks
+      into ~/.claude/settings.json, so take the settings checksum AFTER the session
+      starts (later launches never rewrite it; cleanupPeriodDays untouched). Fake
+      impl commits nothing: pre-commit on pm/pr-<id>-<slug> or sign-off coerces SIGNOFF_MERGE
+      to BLOCKED. A PR added after setup needs `pm push` + `git merge pm/sync-*` before
+      `s`. The #241 check is driven from the TUI (`zz d` superseding a held loop);
+      the killed fake attempt correctly reads log[missing].'
+    created_at: '2026-11-02T07:43:17Z'
+    last_edited: '2026-11-02T07:43:17Z'
+  - id: note-8defac9
+    text: 'QA S1 run (6cf1e4b1, PASS): story-4 "same second" Then is timing-dependent,
+      not a product bug. A held fake (delay 240) writes no idle hook, so loop A re-checks
+      its pane only at its 15 s wait_for_event timeout (poll start + 15 s; poll start
+      is about first zz d + 2.9 s). The 4 supersede/KILLED lines share one second
+      only when the second zz d lands early in the second that A boundary falls in,
+      with that boundary at least ~0.45 s into the second. Observed both ways: Y 2
+      s apart, Z 1 s, W same second (driver: /pm-captures/scenarios/1/driver/timed_zzd.py).'
+    created_at: '2026-11-02T08:04:28Z'
+    last_edited: '2026-11-02T08:04:28Z'
+  - id: note-5307001
+    text: 'QA S4 refiner 2026-11-02 (rehearsed live at 6cf1e4b1): a TUI review loop
+      waiting on INPUT_REQUIRED does NOT keep waiting across a state-preserving restart
+      (`pm tui restart --breadcrumb`). The breadcrumb stores i1=INPUT_REQUIRED in
+      history, so run_review_loop_sync sees adopt = iteration > last_done as False
+      and launches i2 with --fresh, which replaces the pane the human was answering
+      in (observed: a new i2 row and session, a fresh INPUT_REQUIRED notice). origin/master
+      has the same logic, so this predates the PR and is not a regression; it is outside
+      R2.5/R5.3. S4 story 1 now restarts while i1 is still in flight (it adopts the
+      same pane and session, then INPUT_REQUIRED and the follow-up PASS land on that
+      session). A plain Ctrl+R keeps no review-loop state at all: only the merge-restart
+      marker (`--breadcrumb`) writes the breadcrumb.'
+    created_at: '2026-11-02T08:34:19Z'
+    last_edited: '2026-11-02T08:34:19Z'
+  - id: note-8254254
+    text: 'QA S5 refiner (2026-11-02, 6cf1e4b1, rehearsed live): upgrade = one pm
+      shim on PATH whose PYTHONPATH flips from a master tree (git archive origin/master)
+      to the branch; TUI upgrade is `pm tui restart --breadcrumb` after the flip (execvp
+      re-runs pm from PATH; quitting writes no breadcrumb on master). Master deletes
+      signoff-<pr>.jsonl+.head on any sign-off bounce, so an in-flight sign-off and
+      an in-flight review loop need two PRs in one auto-start run. Master-made frozen
+      copies (finished loop iterations) are never adopted or listed; the adopted-frozen-copy
+      path (log = the copy) needs a hand freeze (cp -p over the link, like finalize_transcript)
+      of an auto-sequence iteration. Fake writes its JSONL only at verdict time, so
+      an adopted in-flight row reads log[missing] until then.'
+    created_at: '2026-11-02T09:15:21Z'
+    last_edited: '2026-11-02T09:15:21Z'
+  - id: note-82e3458
+    text: 'QA S6 refiner (rehearsed live at 6cf1e4b1): two auto-start watcher runs
+      in one pm session share the tmux window "watcher", and each iteration launch
+      kills the existing window. So an overlapping CLI `pm watcher start auto-start`
+      and TUI `ws` watcher KILL each other (TUI showed "Auto-Start Watcher stopped:
+      X KILLED"). This is pre-existing: master `_create_watcher_window` also kills
+      the window. It is not a ledger bug. Stagger them: start the CLI one about 75
+      s after `ws`, both with a 120 s wait (iterations take about 34 s: 30 s grace
+      plus the 2 s settle). The regression-loop types have their own windows and run
+      truly in parallel. Pre-create ~/.pm/workdirs/meta-<tag> so `ws` does not clone
+      pm from GitHub. Ctrl+C through `| tee` loses the final stop lines.'
+    created_at: '2026-11-02T09:36:15Z'
+    last_edited: '2026-11-02T09:36:15Z'
+  - id: note-088f4d8
+    text: 'QA S5 run (2026-11-02, bb54d8f2 = 6cf1e4b1 code, PASS 4/4 stories, captures
+      /pm-captures/scenarios/5): put the scenario Q dir OUTSIDE the workdir (used
+      /scratch/q5/s<n>). With Q=/workspace/q5 the pm wrapper cwd walk (cwd + 3 parents)
+      finds /workspace/pm_core from $Q/proj, so every "master" command silently runs
+      branch code and no pm/transcripts tree appears; check `pm which` from inside
+      $Q/proj, not only from /tmp. TUI-launched pm children use sys.executable -m
+      pm_core.wrapper with the TUI env, so the TUI flips only on `pm tui restart --breadcrumb`.'
+    created_at: '2026-11-02T09:38:24Z'
+    last_edited: '2026-11-02T09:38:24Z'
+  - id: note-67b9ac3
+    text: 'QA S7 refiner (6cf1e4b1, rehearsed live): killed-pane missing-log report
+      reaches only the L pane / ~/.pm/debug/<tag>.log (TUI line is just "Review loop
+      done: ☠ KILLED (1 iteration)", by design). CLAUDE_CONFIG_DIR change needs pm
+      session kill + fresh tmux server (check /proc/<TUI pid>/environ). Container
+      story: enable with podman, then `pm container set runtime docker` (absent);
+      error is raw "[Errno 2] No such file or directory: docker" from remove_container
+      (pre-existing, container.py untouched) and each failed attempt still gets a
+      log[missing] review row (recorded at command build). Reset runtime to podman
+      before `pm session kill`, else kill prints the same Errno 2.'
+    created_at: '2026-11-02T09:54:24Z'
+    last_edited: '2026-11-02T09:54:24Z'
+  - id: note-063eba2
+    text: 'QA S7 run (bb54d8f2 = 6cf1e4b1 code, INPUT_REQUIRED, captures /pm-captures/scenarios/7):
+      every Then observed except one literal one. Story 1 "find $HOME -name <i1 sid>*
+      finds nothing" matches ~/.pm/hooks/<sid>.json, a 301-byte idle_prompt hook record
+      (no log content) that master writes for every idle session and never deletes
+      (hook_events.clear_event has no callers); *.jsonl find = 0. Spec owner to rule.
+      Killed-pane KILLED latency is 0-15 s by design (held fake sends no hooks, so
+      pane-gone is checked on the 15 s wait_for_event timeout): 9 s when the kill
+      landed 6 s into the poll, 2.2 s when timed 13 s in (story2b). Filed pr-2592e3d
+      (pm hard-codes ~/.claude for logs/hooks while retention honours CLAUDE_CONFIG_DIR)
+      and pr-27ac16c (retry line err[:200] cuts the "(artifact: ...)" path); both
+      pre-existing on master.'
+    created_at: '2026-11-02T10:11:21Z'
+    last_edited: '2026-11-02T10:14:43Z'
+  - id: note-36a18aa
+    text: 'QA S6 (2026-11-02, bb54d8f2): every watcher-session Then held in 2 full
+      runs (per-iteration sessions, attribution, ledger integrity under 5 concurrent
+      runs, no copy on stop, no pm/transcripts). Two story-2 Thens fail as written.
+      (1) "w2 prints each burst of all three types in the same second": run 1 burst
+      5 printed :43/:44/:44; run 2 (Enter timed to x.77 s) bursts 3 and 5 straddled.
+      (2) "the same iteration of all three types launched in the same second": run
+      1 i3 :03/:03/:04, run 2 i4 :39/:38/:39. The three prints in a burst are 0.20-0.63
+      s apart and the phase drifts about 0.4 s per 63 s period, so no start time keeps
+      5 bursts within whole seconds. Spec owner: should the Then read "the same burst,
+      within about 1 s"? Evidence: /pm-captures/scenarios/6/{story2,rerun-timed/story2}/cli-w2/burst-timing.txt.'
+    created_at: '2026-11-02T10:12:26Z'
+    last_edited: '2026-11-02T10:12:26Z'
+  model: provider:claude-main-xhigh-pm
+  effort: high
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ec5bc84-use-native-session-logs-and-remove-p-4d0c07a5
+- id: pr-573af1c
+  plan: bugs
+  title: 'Bug: TUI auto-start never advances its own sign-off IMPL rework impl; pm
+    pr start clears signoff_return.awaiting after the TUI last reloaded, so the TUI
+    idle check sees awaiting=impl forever'
+  branch: pm/pr-573af1c-bug-tui-auto-start-never-advances-its-own-sign-off
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/pr.py pr start (window branch ~L1294 and the
+    interactive fall-through ~L1307): trigger_tui_refresh() runs at ~L1204, BEFORE
+    clear_return_awaiting(root, pr_id, "impl", session_opened=True); nothing reloads
+    the TUI after the clear. pm_core/tui/review_loop_ui.py _poll_impl_idle (~L1374)
+    then reads the stale in-memory pr: return_awaiting(pr) == "impl" -> logs "impl_idle:
+    <pr> awaiting sign-off rework launch", mark_active, continue — every 5 s, forever.
+    Repro (isolated HOME, fake claude, local backend, skip-qa on): fake config {"_all":{},
+    "impl":{"delay":30}, "review":{"verdicts":{"PASS":100},"delay":5}, "signoff":{"verdicts":["SIGNOFF_IMPL","SIGNOFF_MERGE"]}};
+    pm autostart add <pr> --wait-for-merge with the TUI open and nothing else driving.
+    TUI: impl idle -> review PASS -> sign-off SIGNOFF_IMPL -> "Sign-off routed <pr>
+    back to implementation (SIGNOFF_IMPL)" -> pr start --background --fresh --run-id
+    autostart-... relaunches impl; the rework goes idle 30 s later but the TUI never
+    starts the review: 24 "awaiting sign-off rework launch" lines over 2 min, pm autostart
+    status stays "running/implementation — implementing", while pm/project.yaml already
+    has signoff_return.awaiting: null (last "[tui] action: reload" was at the relaunch
+    second, before the clear). Reproduced identically on origin/master 5b352d16 and
+    on pr-ec5bc84 @ 6cf1e4b1 (pre-existing). Evidence: QA S3 of pr-ec5bc84, /pm-captures/scenarios/3/incidental-tui-rework-stall/{master-5b352d16,branch-6cf1e4b1}/
+    (TUI + CLI casts, debug logs, project.yaml after). Likely fix: trigger_tui_refresh()
+    after clear_return_awaiting in pr start (or the TUI re-reads the PR from disk
+    before honouring awaiting=impl / reloads when its async pr start returns). A user
+    kill + pm pr auto-sequence relaunch, or any later reload, unsticks it.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T08:41:58.306660+00:00'
+  updated_at: '2026-11-02T08:41:58.306660+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-2592e3d
+  plan: bugs
+  title: 'Bug: pm reads native session logs and installs hooks only under ~/.claude,
+    ignoring CLAUDE_CONFIG_DIR (missing-log report cites $CLAUDE_CONFIG_DIR retention
+    but a ~/.claude path)'
+  branch: pm/pr-2592e3d-bug-pm-reads-native-session-logs-and-installs-hook
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/session_log.py find_native_log (Path.home()/.claude/projects),
+    claude_launcher._claude_project_dir/transcript_path_for (record.log), verdict_transcript,
+    router_route, hook_install/hook_events (~/.claude/settings.json) and fake_claude
+    all hard-code ~/.claude, while session_log.retention_days (pr-ec5bc84 review c71c
+    i4) and workspace_trust honour $CLAUDE_CONFIG_DIR. Claude Code keeps projects/<mangled>/<sid>.jsonl
+    and settings.json (hooks) under $CLAUDE_CONFIG_DIR when it is set, so with a non-default
+    config dir pm reports a log that exists as missing, never sees verdict/idle hooks,
+    and the missing-log report mixes sources. Repro (QA S7 pr-ec5bc84, 2026-11-02,
+    isolated HOME + fake claude): write $HOME/cfg7/settings.json = {"cleanupPeriodDays":
+    7}; `CLAUDE_CONFIG_DIR=$HOME/cfg7 pm session`; zz d on a PR with a held fake review;
+    tmux kill-window review-<pr>. The L pane says "native log of review session <sid>
+    is missing at $HOME/.claude/projects/<mangled>/<sid>.jsonl ... (cleanupPeriodDays=7)":
+    a ~/.claude path next to cfg7 retention; pm session wrote no hooks into cfg7/settings.json.
+    Pre-existing on master for the path/hooks (QA S2 note-b53cf82 of 2026-10-13 saw
+    real claude break transcript/hook verdict detection with a scratch CLAUDE_CONFIG_DIR).
+    Fix: one claude_config_dir() helper used by every reader/writer (keep the container/PM_HOST_HOME
+    mapping in mind).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T10:10:56.640567+00:00'
+  updated_at: '2026-11-02T10:10:56.640567+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-27ac16c
+  plan: bugs
+  title: 'Bug: TUI review launch-retry line cuts the launch error at 200 chars, truncating
+    its ''(artifact: ...)'' path mid-way'
+  branch: pm/pr-27ac16c-bug-tui-review-launch-retry-line-cuts-the-launch-e
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/review_loop_ui.py (~L518) builds ''Review launch
+    retry for <pr> (attempt N; attempt N-1 failed: {escape(err[:200])})'' where err
+    already ends with '' (artifact: <path>)'' (appended in pm_core/review_loop.py
+    ~L370/397/974/989), then adds ''\n  Artifact: <full path>''. Any real artifact
+    path pushes err past 200 chars, so the retry line shows a cut duplicate path.
+    Repro (QA S7 pr-ec5bc84, 2026-11-02): pm pr start <B>; pm container enable; pm
+    container set runtime docker (docker absent); zz d on B. The TUI shows "... No
+    such file or directory: ''docker'' (artifact: /tmp/.../.pm/runtime/pm-p)" followed
+    by the full Artifact: line. Same code on master. Fix: drop the '' (artifact: ...)''
+    suffix from err before truncating (the full path is on the next line) or truncate
+    only the error text.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T10:11:03.814517+00:00'
+  updated_at: '2026-11-02T10:11:03.814517+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

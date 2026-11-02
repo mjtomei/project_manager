@@ -898,26 +898,33 @@ class TestSignOff:
         assert "sign_off: returning to review (iteration 3)" in result.output
         assert pr["status"] == "in_review"
 
-    def test_retire_signoff_window_kills_and_unlinks(self, tmp_path):
+    def test_retire_signoff_window_kills_and_retires(self, tmp_path):
+        from pm_core import session_log
         from pm_core.cli.pr import _retire_signoff_window
         pr = _pr("sign_off")
-        transcript = tmp_path / "signoff-pr-001.jsonl"
-        transcript.write_text("{}")
+        sid = "11111111-2222-4333-8444-555555555555"
+        session_log.register(
+            session_log.SessionLaunch(subject="pr-001", phase="signoff",
+                                      run_id="auto-sequence", head="h"),
+            sid, str(tmp_path), log=tmp_path / f"{sid}.jsonl")
+        (tmp_path / f"{sid}.jsonl").write_text("{}")
         with patch("pm_core.tmux.find_window_by_name",
                    return_value={"id": "@7", "index": 3, "name": "signoff-pr-001"}), \
              patch("pm_core.home_window.park_if_on") as mock_park, \
              patch("pm_core.tmux.kill_window") as mock_kill:
-            _retire_signoff_window("pm-test", pr, tmp_path)
+            _retire_signoff_window("pm-test", pr, "auto-sequence")
         mock_park.assert_called_once_with("pm-test", "@7")
         mock_kill.assert_called_once_with("pm-test", "@7")
-        assert not transcript.exists()  # stale transcript removed
+        # The stale run no longer counts, but its log is never removed.
+        assert session_log.by_session("pr-001", sid).retired
+        assert (tmp_path / f"{sid}.jsonl").read_text() == "{}"
 
     def test_retire_signoff_window_no_window_is_safe(self, tmp_path):
         from pm_core.cli.pr import _retire_signoff_window
         pr = _pr("sign_off")
         with patch("pm_core.tmux.find_window_by_name", return_value=None), \
              patch("pm_core.tmux.kill_window") as mock_kill:
-            _retire_signoff_window("pm-test", pr, tmp_path)  # no transcript, no window
+            _retire_signoff_window("pm-test", pr, "auto-sequence")  # no run, no window
         mock_kill.assert_not_called()
 
     def test_impl_relaunches_impl(self, runner, tmp_path):
