@@ -4,7 +4,8 @@ Manages four categories of files under pm/qa/, all markdown with YAML
 frontmatter:
 
 - pm/qa/instructions/ — reusable test-environment procedures
-- pm/qa/regression/   — migrated TUI tests
+- pm/qa/regression/   — regression tests: Claude prompts run in an isolated
+                        QA run by ``pm qa regression`` (may be empty)
 - pm/qa/artifacts/    — recipes for capturing concrete evidence of
                         behavior (recordings, logs) consumable by
                         humans or downstream agents

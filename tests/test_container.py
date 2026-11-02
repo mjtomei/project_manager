@@ -888,10 +888,32 @@ class TestCreateQAContainer:
             config=config,
             workdir=Path("/clones/c1"),
             extra_rw_mounts={Path("/scratch/s1"): _CONTAINER_SCRATCH},
+            extra_ro_mounts=None,
             allowed_push_branch=None,
             session_tag=None,
             pr_id=None,
         )
+
+    @patch("pm_core.container.create_container")
+    def test_passes_extra_rw_mounts(self, mock_create):
+        """Caller-granted mounts (a regression run's registry) are added to
+        the QA mounts."""
+        mock_create.return_value = "qa-id"
+        config = ContainerConfig()
+        create_qa_container(
+            name="pm-qa-test-s1",
+            config=config,
+            workdir=Path("/clones/c1"),
+            scratch_path=Path("/scratch/s1"),
+            extra_rw_mounts={Path("/proj/pm"): "/pm-project"},
+            extra_ro_mounts={Path("/proj/pm/qa"): "/pm-project/qa"},
+        )
+        assert mock_create.call_args.kwargs["extra_rw_mounts"] == {
+            Path("/scratch/s1"): _CONTAINER_SCRATCH,
+            Path("/proj/pm"): "/pm-project",
+        }
+        assert mock_create.call_args.kwargs["extra_ro_mounts"] == {
+            Path("/proj/pm/qa"): "/pm-project/qa"}
 
     @patch("pm_core.container.create_container")
     def test_passes_push_branch(self, mock_create):
@@ -909,6 +931,7 @@ class TestCreateQAContainer:
             config=config,
             workdir=Path("/clones/c1"),
             extra_rw_mounts={Path("/scratch/s1"): _CONTAINER_SCRATCH},
+            extra_ro_mounts=None,
             allowed_push_branch="pm/pr-123-feature",
             session_tag=None,
             pr_id=None,
@@ -932,6 +955,7 @@ class TestCreateQAContainer:
             config=config,
             workdir=Path("/clones/c1"),
             extra_rw_mounts={Path("/scratch/s1"): _CONTAINER_SCRATCH},
+            extra_ro_mounts=None,
             allowed_push_branch="pm/pr-123-feature",
             session_tag="repo-abc",
             pr_id="pr-123",
