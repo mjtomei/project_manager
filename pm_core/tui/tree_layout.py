@@ -92,7 +92,7 @@ def _component_sort_key(
     """Sort key for components: active first, then by timestamp, then size."""
     # Active PRs (in_progress/in_review) first
     has_active = any(
-        pr.get("status") in ("in_progress", "in_review", "qa")
+        pr.get("status") in ("in_progress", "in_review", "qa", "sign_off")
         for pr in component
     )
     # Best timestamp across all PRs in the component (most recent wins).
@@ -151,6 +151,16 @@ def compute_tree_layout(
     if hidden_plans:
         prs = [p for p in prs if (p.get("plan") or "_standalone") not in hidden_plans]
         if not prs:
+            # All PRs hidden — still create hidden plan labels so the user can
+            # navigate to them and selectively unhide individual plans.
+            hidden_row = 0
+            for plan_id in sorted(hidden_plans):
+                virtual_id = f"_hidden:{plan_id}"
+                layout.hidden_plan_label_rows[plan_id] = hidden_row
+                layout.node_positions[virtual_id] = (0, hidden_row)
+                layout.ordered_ids.append(virtual_id)
+                layout.hidden_label_ids.append(virtual_id)
+                hidden_row += 1
             return layout
 
     # Filter by status
@@ -319,7 +329,7 @@ def _activity_sort_key(
 ) -> tuple:
     """Sort key for PRs: active statuses first, then by most recent activity.
 
-    Order: in_progress > in_review > pending > merged > closed.
+    Order: in_progress > in_review/qa/sign_off > pending > merged > closed.
     Within each status group, sort by *sort_field* timestamp (descending).
 
     When *sort_field* is ``None`` (the default), uses ``updated_at`` with
@@ -334,6 +344,7 @@ def _activity_sort_key(
         "in_progress": 0,
         "in_review": 1,
         "qa": 1,
+        "sign_off": 1,
         "pending": 2,
         "merged": 3,
         "closed": 4,

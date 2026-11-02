@@ -13,12 +13,12 @@ class TestStatusIcons:
         assert STATUS_ICONS["pending"] == "○"
 
     def test_in_progress_icon(self):
-        """In-progress status has filled circle icon."""
-        assert STATUS_ICONS["in_progress"] == "●"
+        """In-progress status has double-circle icon."""
+        assert STATUS_ICONS["in_progress"] == "◎"
 
     def test_in_review_icon(self):
-        """In-review status has target circle icon."""
-        assert STATUS_ICONS["in_review"] == "◎"
+        """In-review status has circled-bullet icon."""
+        assert STATUS_ICONS["in_review"] == "◉"
 
     def test_merged_icon(self):
         """Merged status has checkmark icon."""
@@ -92,7 +92,7 @@ class TestStatusBackground:
 class TestAllStatusesCovered:
     """Tests to ensure all expected statuses are covered."""
 
-    EXPECTED_STATUSES = {"pending", "in_progress", "in_review", "qa", "merged", "closed", "blocked"}
+    EXPECTED_STATUSES = {"pending", "in_progress", "in_review", "qa", "sign_off", "merged", "closed", "blocked"}
 
     def test_icons_cover_all_statuses(self):
         """STATUS_ICONS covers all expected statuses."""

@@ -1,9 +1,11 @@
 """Tmux session management for pm."""
 
 import os
+import re
+import shlex
 import subprocess
 
-from pm_core.paths import configure_logger
+from pm_core.paths import configure_logger, write_env_file
 
 _log = configure_logger("pm.tmux")
 
@@ -23,6 +25,87 @@ def _tmux_cmd(*args: str, socket_path: str | None = None) -> list[str]:
     return cmd
 
 
+class TmuxCommandError(subprocess.CalledProcessError):
+    """A failed tmux command whose message ends with tmux's own stderr
+    (e.g. "no space for new pane"), so a logged traceback says why."""
+
+    def __str__(self) -> str:
+        err = self.stderr
+        if isinstance(err, bytes):
+            err = err.decode(errors="replace")
+        err = (err or "").strip() if isinstance(err, str) else ""
+        base = super().__str__()
+        return f"{base} tmux: {err}" if err else base
+
+
+def _run(*args, **kwargs) -> subprocess.CompletedProcess:
+    """Run subprocess.run with capture_output=True by default.
+
+    Suppresses tmux's stderr (e.g. "can't find pane: %5") from leaking
+    into the TUI terminal when targeting stale pane IDs.  With
+    ``check=True`` a failure raises :class:`TmuxCommandError` (a
+    ``CalledProcessError``) that names that stderr.
+    """
+    kwargs.setdefault("capture_output", True)
+    try:
+        return subprocess.run(*args, **kwargs)
+    except subprocess.CalledProcessError as e:
+        if isinstance(e, TmuxCommandError):
+            raise
+        raise TmuxCommandError(e.returncode, e.cmd, e.output,
+                               e.stderr) from None
+
+
+# ``cd <dir> && `` prefix produced by build_claude_shell_cmd.  It is kept
+# outside the env wrapper so pane_start_command parsing (transcript/cwd
+# recovery in claude_launcher.pane_transcript_path) still sees it.
+_LEADING_CD_RE = re.compile(r"^(cd (?:'[^']*'|\"[^\"]*\"|[^\s;&]+) && )")
+
+
+def _wrap_cmd_env(cmd: str, env: dict[str, str]) -> tuple[str, str]:
+    """Return ``(wrapped_command, env_file_path)`` for a pane command.
+
+    The values are written to a private file that the pane's shell sources
+    and deletes before running the real command, so they never appear in the
+    command string (logged and kept as ``#{pane_start_command}``).
+
+    ``tmux -e NAME`` is not an option: on tmux 3.2 (the supported floor)
+    ``new-window``/``split-window`` resolve a bare name from the server or
+    session environment, not the client's, so it would silently drop the
+    variable — or worse, inject a different value that happens to be there.
+    ``sh -c`` makes the POSIX ``set -a; . file`` prefix work under a
+    non-POSIX ``default-shell`` such as fish.
+    """
+    prefix, path = write_env_file(env)
+    m = _LEADING_CD_RE.match(cmd)
+    head = m.group(1) if m else ""
+    body = cmd[len(head):]
+    return f"{head}sh -c {shlex.quote(prefix + body)}", path
+
+
+def _run_with_env(args: list[str], env: dict[str, str] | None,
+                  **kwargs) -> subprocess.CompletedProcess:
+    """Run a tmux command whose last argument is the pane's shell command.
+
+    When *env* is given, the command is wrapped so the new pane receives the
+    values through its environment (see ``_wrap_cmd_env``).
+    """
+    path: str | None = None
+    if env:
+        args = list(args)
+        args[-1], path = _wrap_cmd_env(args[-1], env)
+    try:
+        return _run(args, **kwargs)
+    except BaseException:
+        # tmux never created the pane, so nothing will source the file.
+        if path is not None:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        raise
+
+
 def has_tmux() -> bool:
     """Check if tmux is installed."""
     import shutil
@@ -36,11 +119,21 @@ def in_tmux() -> bool:
 
 def session_exists(name: str, socket_path: str | None = None) -> bool:
     """Check if a tmux session with the given name exists."""
-    result = subprocess.run(
+    result = _run(
         _tmux_cmd("has-session", "-t", name, socket_path=socket_path),
-        capture_output=True,
     )
     return result.returncode == 0
+
+
+def session_group(name: str) -> str:
+    """The group of session *name* (named after the session it was
+    grouped with), or '' when it is not grouped or does not exist."""
+    result = _run(
+        _tmux_cmd("display-message", "-p", "-t", f"={name}:",
+                  "#{session_group}"),
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
 
 
 def grant_server_access(users: list[str], socket_path: str | None = None) -> None:
@@ -51,30 +144,43 @@ def grant_server_access(users: list[str], socket_path: str | None = None) -> Non
     via ``server-access -a <user>``.
     """
     for user in users:
-        subprocess.run(
+        _run(
             _tmux_cmd("server-access", "-a", user, socket_path=socket_path),
-            capture_output=True,
         )
 
 
-def create_session(name: str, cwd: str, cmd: str, socket_path: str | None = None) -> None:
-    """Create a detached tmux session running cmd."""
-    subprocess.run(
-        _tmux_cmd("new-session", "-d", "-s", name, "-n", "main", "-c", cwd, cmd,
-                   socket_path=socket_path),
+def create_session(name: str, cwd: str, cmd: str, socket_path: str | None = None,
+                   env: dict[str, str] | None = None) -> None:
+    """Create a detached tmux session running cmd.
+
+    *env* is exported into the new session's panes through a private file
+    (see ``_wrap_cmd_env``).
+    """
+    _run_with_env(
+        _tmux_cmd("new-session", "-d", "-s", name, "-n", "main", "-c", cwd,
+                  cmd, socket_path=socket_path),
+        env,
         check=True,
     )
 
 
-def split_pane(session: str, direction: str, cmd: str) -> str:
+def split_pane(session: str, direction: str, cmd: str,
+               window: str | None = None,
+               env: dict[str, str] | None = None) -> str:
     """Split a pane and run cmd. Returns new pane ID.
 
     direction: 'h' for horizontal (left/right), 'v' for vertical (top/bottom)
+    window: optional tmux window id/name to target. When omitted, splits
+        the active pane of the session's active window.
+    env: environment variables for the new pane, exported via a private
+        file (see ``_wrap_cmd_env``).
     """
     flag = "-h" if direction == "h" else "-v"
-    result = subprocess.run(
-        _tmux_cmd("split-window", flag, "-t", session, "-P", "-F", "#{pane_id}", cmd),
-        capture_output=True,
+    target = f"{session}:{window}" if window else session
+    result = _run_with_env(
+        _tmux_cmd("split-window", flag, "-t", target, "-P", "-F",
+                  "#{pane_id}", cmd),
+        env,
         text=True,
         check=True,
     )
@@ -83,7 +189,7 @@ def split_pane(session: str, direction: str, cmd: str) -> str:
 
 def send_keys(pane_target: str, keys: str) -> None:
     """Send keys to a tmux pane (followed by Enter)."""
-    subprocess.run(
+    _run(
         _tmux_cmd("send-keys", "-t", pane_target, keys, "Enter"),
         check=True,
     )
@@ -91,7 +197,7 @@ def send_keys(pane_target: str, keys: str) -> None:
 
 def send_keys_literal(pane_target: str, keys: str) -> None:
     """Send literal keys to a tmux pane (no Enter appended)."""
-    subprocess.run(
+    _run(
         _tmux_cmd("send-keys", "-t", pane_target, keys),
         check=True,
     )
@@ -99,7 +205,7 @@ def send_keys_literal(pane_target: str, keys: str) -> None:
 
 def attach(name: str, socket_path: str | None = None) -> None:
     """Attach to a tmux session."""
-    subprocess.run(
+    _run(
         _tmux_cmd("attach-session", "-t", name, socket_path=socket_path),
         check=True,
     )
@@ -107,22 +213,22 @@ def attach(name: str, socket_path: str | None = None) -> None:
 
 def kill_session(name: str, socket_path: str | None = None) -> None:
     """Kill a tmux session."""
-    subprocess.run(
+    _run(
         _tmux_cmd("kill-session", "-t", name, socket_path=socket_path),
-        check=False,
     )
 
 
 def kill_window(session: str, window: str) -> None:
     """Kill a tmux window by index or name."""
-    subprocess.run(
+    _log.info("kill_window: session=%s window=%s", session, window)
+    _run(
         _tmux_cmd("kill-window", "-t", f"{session}:{window}"),
-        check=False,
     )
 
 
 def new_window(session: str, name: str, cmd: str, cwd: str,
-               switch: bool = True) -> None:
+               switch: bool = True,
+               env: dict[str, str] | None = None) -> None:
     """Create a new tmux window with the given name, running cmd.
 
     Uses 'session:' format to ensure numeric session names aren't
@@ -131,26 +237,33 @@ def new_window(session: str, name: str, cmd: str, cwd: str,
 
     Set *switch* to False to create the window without changing the
     active window (useful for background operations like the review loop).
+    *env* is exported into the new pane through a private file (see
+    ``_wrap_cmd_env``).
     """
     # Use session: format to explicitly target session, not window index
     target = f"{session}:"
-    subprocess.run(
-        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd, cmd),
+    _run_with_env(
+        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd,
+                  cmd),
+        env,
         check=True,
     )
-    if switch:
-        # Switch only the current grouped session to the new window
-        win = find_window_by_name(session, name)
-        if win:
-            current = current_or_base_session(session)
-            subprocess.run(
-                _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
-                capture_output=True,
-            )
+    win = find_window_by_name(session, name)
+    _log.info("new_window: session=%s name=%s id=%s index=%s switch=%s",
+              session, name,
+              (win or {}).get("id"), (win or {}).get("index"), switch)
+    if switch and win:
+        current = current_or_base_session(session)
+        result = _run(
+            _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
+        )
+        _log.info("new_window: select-window target=%s:%s rc=%d",
+                  current, win["index"], result.returncode)
 
 
 def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
-                        switch: bool = True) -> str | None:
+                        switch: bool = True,
+                        env: dict[str, str] | None = None) -> str | None:
     """Create a new tmux window and return its initial pane ID.
 
     Like new_window but returns the pane ID so callers can split on it.
@@ -158,22 +271,45 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
 
     Set *switch* to False to create the window without changing the
     active window (useful for background operations like the review loop).
+    *env* is exported into the new pane through a private file (see
+    ``_wrap_cmd_env``).
     """
     target = f"{session}:"
-    subprocess.run(
-        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd, cmd),
-        check=True,
+    result = _run_with_env(
+        _tmux_cmd("new-window", "-d", "-P", "-F",
+                  "#{pane_id} #{window_id} #{window_index}",
+                  "-t", target, "-n", name, "-c", cwd, cmd),
+        env,
+        check=True, text=True,
     )
+    # Use the pane tmux reports for the window it just made: a lookup by
+    # name finds an older window of the same name first (e.g. a QA
+    # scenario window that its refiner pane keeps alive after the worker
+    # pane died) and would return that window's first pane instead.
+    out = result.stdout.split() if isinstance(result.stdout, str) else []
+    if len(out) == 3 and out[0].startswith("%"):
+        pane_id, win_id, win_index = out
+        _log.info("new_window_get_pane: session=%s name=%s id=%s index=%s "
+                  "pane=%s switch=%s", session, name, win_id, win_index,
+                  pane_id, switch)
+        if switch:
+            current = current_or_base_session(session)
+            _run(_tmux_cmd("select-window", "-t", f"{current}:{win_index}"))
+        return pane_id
     win = find_window_by_name(session, name)
+    _log.info("new_window_get_pane: session=%s name=%s id=%s index=%s switch=%s",
+              session, name,
+              (win or {}).get("id"), (win or {}).get("index"), switch)
     if not win:
         return None
     if switch:
         # Switch the current grouped session to the new window
         current = current_or_base_session(session)
-        subprocess.run(
+        result = _run(
             _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
-            capture_output=True,
         )
+        _log.info("new_window_get_pane: select-window target=%s:%s rc=%d",
+                  current, win["index"], result.returncode)
     # Discover the pane ID
     panes = get_pane_indices(session, win["index"])
     if panes:
@@ -181,58 +317,77 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
     return None
 
 
-def create_window(session: str, cmd: str) -> tuple[str, str]:
+def create_window(session: str, cmd: str,
+                  env: dict[str, str] | None = None) -> tuple[str, str]:
     """Create a new window in *session* running *cmd*.
 
     Returns ``(pane_id, window_id)`` of the newly created window.
+    *env* is exported into the new pane through a private file (see
+    ``_wrap_cmd_env``).
     """
-    result = subprocess.run(
+    result = _run_with_env(
         _tmux_cmd("new-window", "-t", f"{session}:",
                   "-P", "-F", "#{pane_id} #{window_id}", cmd),
-        capture_output=True, text=True, check=True,
+        env,
+        text=True, check=True,
     )
     parts = result.stdout.strip().split()
     return parts[0], parts[1]
 
 
-def split_pane_background(session: str, direction: str, cmd: str) -> str:
+def split_pane_background(session: str, direction: str, cmd: str,
+                          env: dict[str, str] | None = None) -> str:
     """Split a pane without switching focus. Returns new pane ID.
 
     Like split_pane but uses -d to keep focus on the current pane.
     direction: 'h' for horizontal (left/right), 'v' for vertical (top/bottom)
+    *env* is exported into the new pane through a private file (see
+    ``_wrap_cmd_env``).
     """
     flag = "-h" if direction == "h" else "-v"
-    result = subprocess.run(
-        _tmux_cmd("split-window", "-d", flag, "-t", session, "-P", "-F", "#{pane_id}", cmd),
-        capture_output=True,
+    result = _run_with_env(
+        _tmux_cmd("split-window", "-d", flag, "-t", session, "-P", "-F",
+                  "#{pane_id}", cmd),
+        env,
         text=True,
         check=True,
     )
     return result.stdout.strip()
 
 
-def split_pane_at(pane_id: str, direction: str, cmd: str, background: bool = False) -> str:
+def split_pane_at(pane_id: str, direction: str, cmd: str,
+                  background: bool = False, cwd: str | None = None,
+                  env: dict[str, str] | None = None) -> str:
     """Split a specific pane. Returns new pane ID.
 
     direction: 'h' for horizontal (left/right), 'v' for vertical (top/bottom)
+    cwd: starting directory for the new pane. Without this, tmux inherits
+        the target pane's current /proc cwd, which can drift if the
+        target's shell has been chdir'd by a long-running process
+        (e.g. Claude Code's persistent Bash tool).
+    *env* is exported into the new pane through a private file (see
+    ``_wrap_cmd_env``).
     """
     flag = "-h" if direction == "h" else "-v"
-    args = ["split-window", flag, "-t", pane_id, "-P", "-F", "#{pane_id}", cmd]
+    args = ["split-window", flag, "-t", pane_id, "-P", "-F", "#{pane_id}"]
+    if cwd:
+        args += ["-c", cwd]
+    args.append(cmd)
     if background:
         args.insert(2, "-d")
-    result = subprocess.run(_tmux_cmd(*args), capture_output=True, text=True, check=True)
+    result = _run_with_env(_tmux_cmd(*args), env, text=True, check=True)
     return result.stdout.strip()
 
 
 def select_pane(pane_id: str) -> None:
     """Focus a specific pane."""
-    subprocess.run(_tmux_cmd("select-pane", "-t", pane_id), check=True)
+    _run(_tmux_cmd("select-pane", "-t", pane_id), check=True)
 
 
 def resize_pane(pane_id: str, direction: str, size: int) -> None:
     """Resize a pane. direction: 'x' for width, 'y' for height."""
     flag = "-x" if direction == "x" else "-y"
-    subprocess.run(
+    _run(
         _tmux_cmd("resize-pane", "-t", pane_id, flag, str(size)),
         check=True,
     )
@@ -240,7 +395,7 @@ def resize_pane(pane_id: str, direction: str, size: int) -> None:
 
 def set_hook(session: str, hook_name: str, cmd: str) -> None:
     """Register a tmux hook on a session."""
-    subprocess.run(
+    _run(
         _tmux_cmd("set-hook", "-t", session, hook_name, cmd),
         check=True,
     )
@@ -248,10 +403,10 @@ def set_hook(session: str, hook_name: str, cmd: str) -> None:
 
 def get_window_size(session: str, window: str = "0") -> tuple[int, int]:
     """Get window dimensions as (width, height)."""
-    result = subprocess.run(
+    result = _run(
         _tmux_cmd("display", "-t", f"{session}:{window}", "-p",
                    "#{window_width} #{window_height}"),
-        capture_output=True, text=True,
+        text=True,
     )
     if result.returncode != 0:
         return (0, 0)
@@ -263,15 +418,21 @@ def get_window_size(session: str, window: str = "0") -> tuple[int, int]:
 
 def apply_layout(session: str, window: str, layout_string: str) -> bool:
     """Apply a custom layout string via tmux select-layout. Returns True on success."""
-    import logging
-    result = subprocess.run(
+    result = _run(
         _tmux_cmd("select-layout", "-t", f"{session}:{window}", layout_string),
-        capture_output=True, text=True,
+        text=True,
     )
     if result.returncode != 0:
-        logging.getLogger("pm.pane_layout").warning(
+        _log.warning(
             "tmux select-layout failed: %s", result.stderr.strip())
-    return result.returncode == 0
+        return False
+    refresh_client(session, window)
+    return True
+
+
+# Set by the popup dispatchers to the session of the client that opened
+# the popup; read by get_session_name().
+POPUP_SESSION_ENV = "PM_POPUP_SESSION"
 
 
 def get_session_name() -> str:
@@ -280,29 +441,39 @@ def get_session_name() -> str:
     Uses $TMUX_PANE to target the specific pane, which is more reliable
     than display-message without a target (which uses "current client"
     and can return wrong session in background processes).
+
+    Popups have no pane, so the popup dispatchers (prefix+P / prefix+M)
+    export the opening client's session as $PM_POPUP_SESSION; without
+    it, "current client" is whichever client was active last, which is
+    another client's session when two clients use popups at once.
     """
     pane = os.environ.get("TMUX_PANE")
+    popup_session = os.environ.get(POPUP_SESSION_ENV)
+    # The variable is inherited by anything the popup spawns, so only
+    # trust it while that session still exists ("=" = exact name match).
+    if not pane and popup_session and session_exists(f"={popup_session}"):
+        return popup_session
     if pane:
         # Target the specific pane to get accurate session name
-        result = subprocess.run(
+        result = _run(
             _tmux_cmd("display-message", "-p", "-t", pane, "#{session_name}"),
-            capture_output=True, text=True,
+            text=True,
         )
     else:
         # Fallback to current client
-        result = subprocess.run(
+        result = _run(
             _tmux_cmd("display-message", "-p", "#{session_name}"),
-            capture_output=True, text=True,
+            text=True,
         )
     return result.stdout.strip()
 
 
 def get_pane_indices(session: str, window: str = "0") -> list[tuple[str, int]]:
     """Get list of (pane_id, pane_index) for all panes in a window."""
-    result = subprocess.run(
+    result = _run(
         _tmux_cmd("list-panes", "-t", f"{session}:{window}",
                    "-F", "#{pane_id} #{pane_index}"),
-        capture_output=True, text=True,
+        text=True,
     )
     if result.returncode != 0:
         return []
@@ -316,10 +487,10 @@ def get_pane_indices(session: str, window: str = "0") -> list[tuple[str, int]]:
 
 def get_pane_geometries(session: str, window: str = "0") -> list[tuple[str, int, int, int, int]]:
     """Get pane geometries as list of (pane_id, x, y, width, height)."""
-    result = subprocess.run(
+    result = _run(
         _tmux_cmd("list-panes", "-t", f"{session}:{window}",
                    "-F", "#{pane_id} #{pane_left} #{pane_top} #{pane_width} #{pane_height}"),
-        capture_output=True, text=True,
+        text=True,
     )
     if result.returncode != 0:
         return []
@@ -339,16 +510,16 @@ def get_window_id(session: str) -> str:
     window matches what the user actually sees.
     """
     target = current_or_base_session(session)
-    result = subprocess.run(
+    result = _run(
         _tmux_cmd("display", "-t", target, "-p", "#{window_id}"),
-        capture_output=True, text=True,
+        text=True,
     )
     return result.stdout.strip()
 
 
 def swap_pane(src_pane: str, dst_pane: str) -> None:
     """Swap two panes."""
-    subprocess.run(
+    _run(
         _tmux_cmd("swap-pane", "-s", src_pane, "-t", dst_pane, "-d"),
         check=True,
     )
@@ -356,10 +527,10 @@ def swap_pane(src_pane: str, dst_pane: str) -> None:
 
 def list_windows(session: str) -> list[dict]:
     """List windows in a session. Returns list of {id, index, name}."""
-    result = subprocess.run(
+    result = _run(
         _tmux_cmd("list-windows", "-t", session, "-F",
                    "#{window_id} #{window_index} #{window_name}"),
-        capture_output=True, text=True,
+        text=True,
     )
     if result.returncode != 0:
         return []
@@ -385,24 +556,52 @@ def select_window(session: str, window: str) -> bool:
     Targets the current grouped session so only the caller's terminal switches.
     """
     target = current_or_base_session(session)
-    result = subprocess.run(
+    result = _run(
         _tmux_cmd("select-window", "-t", f"{target}:{window}"),
-        capture_output=True,
     )
+    _log.info("select_window: target=%s:%s rc=%d",
+              target, window, result.returncode)
     return result.returncode == 0
+
+
+def select_window_in_session(session: str, window: str) -> bool:
+    """Select a window in a specific (grouped) session, not the calling client's.
+
+    Used by cross-session park: a kill in session A may need to park session B
+    on the home window before tmux processes the kill.
+    """
+    result = _run(
+        _tmux_cmd("select-window", "-t", f"{session}:{window}"),
+    )
+    _log.info("select_window_in_session: target=%s:%s rc=%d",
+              session, window, result.returncode)
+    return result.returncode == 0
+
+
+def refresh_client(session: str, window: str = "") -> None:
+    """Force tmux to repaint all clients attached to a session.
+
+    Fixes visual artifacts (ghost prompt bars, stale content at wrong
+    offsets) that appear after select-layout changes pane dimensions.
+    The window parameter is unused — refresh-client targets a client
+    (TTY or session name), not a session:window pair.
+    """
+    _run(
+        _tmux_cmd("refresh-client", "-t", session),
+    )
 
 
 def zoom_pane(pane_id: str) -> None:
     """Zoom (maximize) a pane within its window."""
-    subprocess.run(_tmux_cmd("resize-pane", "-t", pane_id, "-Z"), check=False)
+    _run(_tmux_cmd("resize-pane", "-t", pane_id, "-Z"))
 
 
 def is_zoomed(session: str, window: str = "0") -> bool:
     """Check if the active pane in a window is currently zoomed."""
-    result = subprocess.run(
+    result = _run(
         _tmux_cmd("display", "-t", f"{session}:{window}", "-p",
                    "#{window_zoomed_flag}"),
-        capture_output=True, text=True,
+        text=True,
     )
     return result.stdout.strip() == "1"
 
@@ -411,9 +610,8 @@ def unzoom_pane(session: str, window: str = "0") -> None:
     """Unzoom the window if it's currently zoomed."""
     if is_zoomed(session, window):
         # Toggle zoom off by zooming the active pane again
-        subprocess.run(
+        _run(
             _tmux_cmd("resize-pane", "-t", f"{session}:{window}", "-Z"),
-            check=False,
         )
 
 
@@ -427,9 +625,8 @@ def select_pane_smart(pane_id: str, session: str, window: str) -> None:
 
 def set_session_option(session: str, option: str, value: str, socket_path: str | None = None) -> None:
     """Set a tmux session option."""
-    subprocess.run(
+    _run(
         _tmux_cmd("set-option", "-t", session, option, value, socket_path=socket_path),
-        check=False,
     )
 
 
@@ -444,12 +641,11 @@ def set_shared_window_size(session: str, window: str) -> None:
     No-op when ``PM_SHARE_MODE`` is not set (i.e. non-shared sessions).
     """
     if os.environ.get("PM_SHARE_MODE"):
-        subprocess.run(
+        _run(
             _tmux_cmd(
                 "set-window-option", "-t", f"{session}:{window}",
                 "window-size", "smallest",
             ),
-            capture_output=True,
         )
 
 
@@ -463,21 +659,24 @@ def current_or_base_session(base: str) -> str:
     """
     if in_tmux():
         current = get_session_name()
-        if current and (current == base or current.startswith(base + "~")):
+        # A user's own view grouped with *base* under any name counts
+        # as the same group (S124).
+        if current and (current == base or current.startswith(base + "~")
+                        or session_group(current) == base):
             # Only return current if it has attached clients — otherwise
             # fall through to find an attached grouped session.
-            result = subprocess.run(
+            result = _run(
                 _tmux_cmd("display-message", "-t", current, "-p", "#{session_attached}"),
-                capture_output=True, text=True,
+                text=True,
             )
             if result.returncode == 0 and result.stdout.strip() != "0":
                 return current
     # Current pane is in a different group (or not in tmux).
     # The base session may have no clients; prefer an attached grouped session.
     for name in list_grouped_sessions(base):
-        result = subprocess.run(
+        result = _run(
             _tmux_cmd("display-message", "-t", name, "-p", "#{session_attached}"),
-            capture_output=True, text=True,
+            text=True,
         )
         if result.returncode == 0 and result.stdout.strip() != "0":
             return name
@@ -487,7 +686,7 @@ def current_or_base_session(base: str) -> str:
 
 def create_grouped_session(base: str, name: str, socket_path: str | None = None) -> None:
     """Create a grouped session sharing windows with the base session."""
-    subprocess.run(
+    _run(
         _tmux_cmd("new-session", "-d", "-t", base, "-s", name,
                    socket_path=socket_path),
         check=True,
@@ -496,10 +695,10 @@ def create_grouped_session(base: str, name: str, socket_path: str | None = None)
 
 def list_grouped_sessions(base: str, socket_path: str | None = None) -> list[str]:
     """List grouped sessions matching base~*, sorted by suffix number."""
-    result = subprocess.run(
+    result = _run(
         _tmux_cmd("list-sessions", "-F", "#{session_name}",
                    socket_path=socket_path),
-        capture_output=True, text=True,
+        text=True,
     )
     if result.returncode != 0:
         return []
@@ -515,10 +714,10 @@ def list_grouped_sessions(base: str, socket_path: str | None = None) -> list[str
 def find_unattached_grouped_session(base: str, socket_path: str | None = None) -> str | None:
     """Find the earliest grouped session with no clients attached."""
     for name in list_grouped_sessions(base, socket_path=socket_path):
-        result = subprocess.run(
+        result = _run(
             _tmux_cmd("display-message", "-t", name, "-p", "#{session_attached}",
                        socket_path=socket_path),
-            capture_output=True, text=True,
+            text=True,
         )
         if result.returncode == 0 and result.stdout.strip() == "0":
             return name
@@ -538,6 +737,36 @@ def next_grouped_session_name(base: str, socket_path: str | None = None) -> str:
     return f"{base}~{max_n + 1}"
 
 
+def get_pane_option(pane_id: str, name: str) -> str | None:
+    """Return a pane-scoped (user) option's value, or None if unset/gone."""
+    result = _run(_tmux_cmd("show-options", "-p", "-q", "-v", "-t",
+                            pane_id, name), text=True)
+    value = result.stdout.strip() if result.returncode == 0 else ""
+    return value or None
+
+
+def set_pane_option(pane_id: str, name: str, value: str) -> None:
+    """Set a pane-scoped (user) option; silently ignores a gone pane."""
+    _run(_tmux_cmd("set-option", "-p", "-t", pane_id, name, value))
+
+
+def pane_start_command(pane_id: str) -> str:
+    """Return the command a pane was started with, or "" if it is gone."""
+    result = _run(_tmux_cmd("display-message", "-p", "-t", pane_id,
+                            "#{pane_start_command}"), text=True)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def live_pane_start_commands(session: str) -> list[str]:
+    """Start commands of the live (not dead) panes in *session*'s windows."""
+    result = _run(_tmux_cmd("list-panes", "-s", "-t", session, "-F",
+                            "#{pane_dead} #{pane_start_command}"), text=True)
+    if result.returncode != 0:
+        return []
+    return [line[2:] for line in result.stdout.splitlines()
+            if line.startswith("0 ")]
+
+
 def capture_pane(pane_id: str, full_scrollback: bool = False) -> str:
     """Capture the contents of a tmux pane.
 
@@ -546,7 +775,7 @@ def capture_pane(pane_id: str, full_scrollback: bool = False) -> str:
     args = ["capture-pane", "-p", "-t", pane_id]
     if full_scrollback:
         args.extend(["-S", "-"])
-    result = subprocess.run(_tmux_cmd(*args), capture_output=True, text=True)
+    result = _run(_tmux_cmd(*args), text=True)
     return result.stdout if result.returncode == 0 else ""
 
 
@@ -556,11 +785,58 @@ def pane_exists(pane_id: str) -> bool:
     Uses ``list-panes`` which reliably returns non-zero for invalid
     targets (``display -p`` returns 0 with empty output instead).
     """
-    result = subprocess.run(
+    result = _run(
         _tmux_cmd("list-panes", "-t", pane_id),
-        capture_output=True, text=True,
+        text=True,
     )
     return result.returncode == 0
+
+
+def pane_window_id(pane_id: str) -> str | None:
+    """Return the window ID (e.g. ``@1``) that contains *pane_id*, or ``None``."""
+    result = _run(
+        _tmux_cmd("display", "-t", pane_id, "-p", "#{window_id}"),
+        text=True,
+    )
+    return result.stdout.strip() or None
+
+
+def attached_group_active_windows(base: str, socket_path: str | None = None) -> dict[str, str]:
+    """Map attached sessions in a group to active windows in one tmux query.
+
+    Used by the popup picker to show which windows a *collaborator* is
+    currently viewing.  An unattached session (e.g. the base session when
+    the TUI runs in grouped sessions) has an "active window" in tmux's
+    bookkeeping but no client focusing it, so it is omitted.  Returns an
+    empty map on any tmux error.
+
+    The separator must be printable: tmux rewrites control characters in
+    format output to ``_`` when the server runs under a non-UTF-8 locale
+    (``LC_ALL=C``), which silently turned a tab-separated query into one
+    unparsable field.  The session name comes last (``maxsplit=3``) so it
+    may itself contain the separator.  A user's own view grouped with
+    *base* under another name (``tmux new-session -t base -s myview``)
+    belongs to the group too (S121).
+    """
+    result = _run(
+        _tmux_cmd("list-sessions", "-F",
+                  "#{session_attached}|#{window_id}|#{session_group}|#{session_name}",
+                  socket_path=socket_path),
+        text=True,
+    )
+    if result.returncode != 0:
+        return {}
+    active = {}
+    for line in result.stdout.splitlines():
+        parts = line.split("|", 3)
+        if len(parts) != 4:
+            continue
+        attached, wid, group, name = parts
+        if (name == base or name.startswith(base + "~") or group == base) \
+                and attached.isdigit():
+            if int(attached) > 0 and wid:
+                active[name] = wid
+    return active
 
 
 def sessions_on_window(base: str, window_id: str) -> list[str]:
@@ -573,9 +849,9 @@ def sessions_on_window(base: str, window_id: str) -> list[str]:
     _log.info("sessions_on_window: base=%s window_id=%s candidates=%s", base, window_id, candidates)
     result = []
     for name in candidates:
-        r = subprocess.run(
+        r = _run(
             _tmux_cmd("display", "-t", name, "-p", "#{window_id}"),
-            capture_output=True, text=True,
+            text=True,
         )
         cur_wid = r.stdout.strip() if r.returncode == 0 else f"<err:{r.returncode}>"
         _log.info("sessions_on_window:   %s → current_window_id=%s match=%s",
@@ -609,9 +885,9 @@ def switch_sessions_to_window(sessions: list[str], session: str, window_name: st
 
     # Map session names → client TTYs for switch-client.
     client_map: dict[str, str] = {}
-    r = subprocess.run(
+    r = _run(
         _tmux_cmd("list-clients", "-F", "#{session_name} #{client_tty}"),
-        capture_output=True, text=True,
+        text=True,
     )
     if r.returncode == 0:
         for line in r.stdout.strip().splitlines():
@@ -621,17 +897,15 @@ def switch_sessions_to_window(sessions: list[str], session: str, window_name: st
     _log.info("switch_sessions_to_window: client_map=%s", client_map)
 
     for sess_name in sessions:
-        sel_r = subprocess.run(
+        sel_r = _run(
             _tmux_cmd("select-window", "-t", f"{sess_name}:{win['index']}"),
-            capture_output=True,
         )
         _log.info("switch_sessions_to_window: select-window -t %s:%s → rc=%d",
                    sess_name, win["index"], sel_r.returncode)
         client_tty = client_map.get(sess_name)
         if client_tty:
-            sw_r = subprocess.run(
+            sw_r = _run(
                 _tmux_cmd("switch-client", "-t", sess_name, "-c", client_tty),
-                capture_output=True,
             )
             _log.info("switch_sessions_to_window: switch-client -t %s -c %s → rc=%d",
                        sess_name, client_tty, sw_r.returncode)
@@ -641,10 +915,9 @@ def switch_sessions_to_window(sessions: list[str], session: str, window_name: st
 
 def set_environment(session: str, key: str, value: str, socket_path: str | None = None) -> None:
     """Set an environment variable in a tmux session."""
-    subprocess.run(
+    _run(
         _tmux_cmd("set-environment", "-t", session, key, value,
                    socket_path=socket_path),
-        check=False,
     )
 
 
@@ -653,10 +926,10 @@ def list_clients_in_group(base: str, socket_path: str | None = None) -> list[dic
 
     Returns list of dicts with keys: tty, session.
     """
-    result = subprocess.run(
+    result = _run(
         _tmux_cmd("list-clients", "-F", "#{client_tty} #{session_name}",
                    socket_path=socket_path),
-        capture_output=True, text=True,
+        text=True,
     )
     if result.returncode != 0:
         return []
@@ -671,7 +944,6 @@ def list_clients_in_group(base: str, socket_path: str | None = None) -> list[dic
 
 def detach_client(tty: str, socket_path: str | None = None) -> None:
     """Detach a tmux client by its TTY."""
-    subprocess.run(
+    _run(
         _tmux_cmd("detach-client", "-t", tty, socket_path=socket_path),
-        check=False,
     )

@@ -2,3 +2,5 @@
 # Nothing else is needed since we don't COPY any repo files.
 *
 !Dockerfile
+!Dockerfile.pm-project
+!pyproject.toml

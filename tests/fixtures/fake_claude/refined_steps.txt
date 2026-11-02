@@ -1,0 +1,9 @@
+I'll review the changes carefully.
+Looking at the diff and the surrounding context…
+The implementation looks clean and well-structured.
+
+REFINED_STEPS_START
+1. Build the project
+2. Run the test suite
+3. Verify output
+REFINED_STEPS_END

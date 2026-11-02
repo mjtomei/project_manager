@@ -1,23 +1,15 @@
 """Watcher loop UI integration for the TUI.
 
-Manages starting/stopping the autonomous watcher loop and updating
-the TUI display.  The watcher runs alongside auto-start and watches
-all active tmux panes for issues.
+Manages starting/stopping watchers and updating the TUI display
+via the WatcherManager framework.
 
-Only one watcher loop can run at a time (unlike review loops which
-are per-PR).
+Watchers can run independently of auto-start mode.
 """
 
 from pathlib import Path
 
 from pm_core.paths import configure_logger
 from pm_core import store
-from pm_core.watcher_loop import (
-    WatcherLoopState,
-    start_watcher_loop_background,
-    VERDICT_READY,
-    VERDICT_INPUT_REQUIRED,
-)
 
 _log = configure_logger("pm.tui.watcher_ui")
 
@@ -58,30 +50,38 @@ def ensure_watcher_plans(app) -> Path | None:
     if not project_yaml.exists():
         store.save({"project": {"name": "pm-meta"}, "plans": [], "prs": []}, root)
 
-    data = store.load(root)
+    try:
+        data = store.load(root)
+    except store.ProjectYamlParseError as e:
+        _log.warning("ensure_watcher_plans: %s", e)
+        return None
     existing_plan_ids = {p["id"] for p in (data.get("plans") or [])}
     if data.get("plans") is None:
         data["plans"] = []
 
-    changed = False
+    new_entries = []
     for plan_id, info in WATCHER_PLANS.items():
         if plan_id in existing_plan_ids:
             continue
-        data["plans"].append({
-            "id": plan_id,
-            "name": info["name"],
-            "file": info["file"],
-            "status": "draft",
-        })
+        new_entries.append(store.make_plan_entry(plan_id, info["name"], info["file"]))
         plan_path = root / info["file"]
         if not plan_path.exists():
             plan_path.write_text(info["description"])
-        changed = True
         _log.info("watcher_ui: created watcher plan %s (%s) in %s", plan_id, info["file"], root)
 
-    if changed:
-        from pm_core.cli.helpers import save_and_push
-        save_and_push(data, root, "pm: register watcher plans")
+    if new_entries:
+        def apply(data):
+            if data.get("plans") is None:
+                data["plans"] = []
+            current_ids = {p["id"] for p in data["plans"]}
+            for entry in new_entries:
+                if entry["id"] not in current_ids:
+                    data["plans"].append(entry)
+
+        try:
+            store.locked_update(root, apply)
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+            _log.warning("ensure_watcher_plans: %s: %s", type(e).__name__, e)
 
     return root
 
@@ -91,8 +91,8 @@ def load_watcher_plan_prs(app) -> int:
 
     Returns the number of PRs created.
     """
-    from pm_core.plan_parser import parse_plan_prs
-    from pm_core.cli.helpers import _make_pr_entry, save_and_push
+    from pm_core.plans.parser import parse_plan_prs
+    from pm_core.cli.helpers import _make_pr_entry
     from pm_core.cli.plan import _build_pr_description
     from pm_core.cli.meta import ensure_meta_workdir
 
@@ -106,13 +106,14 @@ def load_watcher_plan_prs(app) -> int:
     if not root.is_dir():
         return 0
 
-    data = store.load(root)
-    if data.get("prs") is None:
-        data["prs"] = []
-
-    existing_ids = {p["id"] for p in data["prs"]}
-    existing_titles = {p.get("title", ""): p["id"] for p in data["prs"]}
-    total_created = 0
+    try:
+        data = store.load(root)
+    except store.ProjectYamlParseError as e:
+        _log.warning("load_watcher_plan_prs: %s", e)
+        return 0
+    existing_ids = {p["id"] for p in (data.get("prs") or [])}
+    existing_titles = {p.get("title", ""): p["id"] for p in (data.get("prs") or [])}
+    new_entries = []
 
     for plan_id, info in WATCHER_PLANS.items():
         plan_path = root / info["file"]
@@ -145,21 +146,32 @@ def load_watcher_plan_prs(app) -> int:
 
             entry = _make_pr_entry(pr_id, pr["title"], branch,
                                    plan=plan_id, description=desc)
-            data["prs"].append(entry)
+            new_entries.append(entry)
             existing_titles[pr["title"]] = pr_id
-            total_created += 1
             _log.info("watcher_ui: loaded PR %s: %s (plan=%s) in %s", pr_id, pr["title"], plan_id, root)
 
-    if total_created:
-        save_and_push(data, root, "pm: load watcher plan PRs")
+    if new_entries:
+        def apply(data):
+            if data.get("prs") is None:
+                data["prs"] = []
+            current_ids = {p["id"] for p in data["prs"]}
+            for entry in new_entries:
+                if entry["id"] not in current_ids:
+                    data["prs"].append(entry)
 
-    return total_created
+        try:
+            store.locked_update(root, apply)
+        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+            _log.warning("load_watcher_plan_prs: %s: %s", type(e).__name__, e)
+            return 0
+
+    return len(new_entries)
 
 
 # Icons for watcher verdicts (used in log line)
 WATCHER_VERDICT_ICONS = {
-    VERDICT_READY: "[green bold]OK READY[/]",
-    VERDICT_INPUT_REQUIRED: "[red bold]!! INPUT_REQUIRED[/]",
+    "READY": "[green bold]OK READY[/]",
+    "INPUT_REQUIRED": "[red bold]!! INPUT_REQUIRED[/]",
     "KILLED": "[red bold]X KILLED[/]",
     "ERROR": "[red bold]! ERROR[/]",
     "": "[dim]--[/]",
@@ -171,61 +183,75 @@ WATCHER_VERDICT_ICONS = {
 # ---------------------------------------------------------------------------
 
 def start_watcher(app, transcript_dir: str | None = None,
-                   meta_pm_root: str | None = None) -> None:
-    """Start the watcher loop."""
+                   meta_pm_root: str | None = None,
+                   watcher_type: str = "auto-start") -> None:
+    """Start a watcher via the WatcherManager."""
     from pm_core import tmux as tmux_mod
 
     if not tmux_mod.in_tmux():
         app.log_message("Watcher requires tmux.")
         return
 
-    # Don't start if already running
-    if app._watcher_state and app._watcher_state.running:
-        app.log_message("Watcher is already running.")
+    manager = app._watcher_manager
+    existing = manager.find_by_type(watcher_type)
+    if existing and existing.state.running:
+        app.log_message(f"Watcher '{watcher_type}' is already running.")
+        return
+
+    # Create and register a new watcher instance
+    from pm_core.watchers import get_watcher_class
+    cls = get_watcher_class(watcher_type)
+    if not cls:
+        app.log_message(f"Unknown watcher type: {watcher_type}")
         return
 
     pm_root = str(store.find_project_root())
+    kwargs = {}
+    if watcher_type == "auto-start":
+        from pm_core.tui import auto_start as _auto_start
+        kwargs["auto_start_targets"] = _auto_start.get_targets(app)
+        kwargs["meta_pm_root"] = meta_pm_root
+    watcher = cls(pm_root=pm_root, **kwargs)
+    manager.register(watcher)
 
-    state = WatcherLoopState(
-        auto_start_target=getattr(app, '_auto_start_target', None),
-        meta_pm_root=meta_pm_root,
-    )
-    app._watcher_state = state
-
-    _log.info("watcher_ui: starting watcher loop=%s", state.loop_id)
+    _log.info("watcher_ui: starting watcher: %s (id=%s)",
+              watcher_type, watcher.state.watcher_id)
     app.log_message(
-        "[bold]Watcher started[/] -- watching for issues",
+        f"[bold]{watcher.DISPLAY_NAME} started[/] -- watching for issues",
         sticky=3,
     )
 
-    # Ensure the poll timer is running (shared with review loops)
+    # Ensure the poll timer is running
     from pm_core.tui.review_loop_ui import _ensure_poll_timer
     _ensure_poll_timer(app)
 
-    start_watcher_loop_background(
-        state=state,
-        pm_root=pm_root,
+    manager.start(
+        watcher.state.watcher_id,
         on_iteration=lambda s: _on_iteration_from_thread(app, s),
         on_complete=lambda s: _on_complete_from_thread(app, s),
         transcript_dir=transcript_dir,
     )
 
 
-def stop_watcher(app) -> None:
-    """Request graceful stop of the watcher loop."""
-    state = app._watcher_state
-    if not state or not state.running:
-        app.log_message("No watcher loop running.")
+def stop_watcher(app, watcher_type: str = "auto-start") -> None:
+    """Request graceful stop of a watcher."""
+    manager = app._watcher_manager
+    watcher = manager.find_by_type(watcher_type)
+    if watcher and watcher.state.running:
+        _log.info("watcher_ui: stopping watcher: %s", watcher_type)
+        manager.stop(watcher.state.watcher_id)
+        app.log_message(
+            f"[bold]{watcher.DISPLAY_NAME} stopping[/] (finishing current iteration)..."
+        )
         return
 
-    _log.info("watcher_ui: stopping watcher loop")
-    state.stop_requested = True
-    app.log_message("[bold]Watcher stopping[/] (finishing current iteration)...")
+    app.log_message("No watcher running.")
 
 
-def is_running(app) -> bool:
-    """Check if the watcher loop is running."""
-    state = app._watcher_state
+def is_running(app, watcher_type: str = "auto-start") -> bool:
+    """Check if a watcher is running."""
+    manager = app._watcher_manager
+    state = manager.find_state_by_type(watcher_type)
     return bool(state and state.running)
 
 
@@ -233,13 +259,13 @@ def is_running(app) -> bool:
 # Background thread callbacks
 # ---------------------------------------------------------------------------
 
-def _on_iteration_from_thread(app, state: WatcherLoopState) -> None:
+def _on_iteration_from_thread(app, state) -> None:
     """Called from the background thread after each iteration."""
     _log.info("watcher_ui: iteration %d verdict=%s",
               state.iteration, state.latest_verdict)
 
 
-def _on_complete_from_thread(app, state: WatcherLoopState) -> None:
+def _on_complete_from_thread(app, state) -> None:
     """Called from the background thread when the loop finishes."""
     _log.info("watcher_ui: loop complete -- verdict=%s iterations=%d",
               state.latest_verdict, state.iteration)
@@ -252,8 +278,7 @@ def _on_complete_from_thread(app, state: WatcherLoopState) -> None:
         tdir_path = Path(tdir)
         if tdir_path.is_dir():
             for p in tdir_path.iterdir():
-                if (p.is_symlink() and p.suffix == ".jsonl"
-                        and p.name.startswith("watcher-")):
+                if p.is_symlink() and p.suffix == ".jsonl":
                     finalize_transcript(p)
 
 
@@ -266,29 +291,31 @@ def poll_watcher_state(app) -> None:
 
     Called from the shared 1-second poll timer in review_loop_ui.
     """
-    state = app._watcher_state
-    if not state:
-        return
-
-    if state.running:
-        # Notify when waiting for input
-        if state.input_required and not state._ui_notified_input:
-            state._ui_notified_input = True
-            app.log_message(
-                "[red bold]!! Watcher INPUT_REQUIRED[/]: "
-                "check the watcher pane for details",
-                sticky=30,
+    manager = app._watcher_manager
+    for info in manager.list_watchers():
+        watcher = manager.get_watcher(info["id"])
+        if not watcher:
+            continue
+        s = watcher.state
+        if s.running:
+            if s.input_required and not s._ui_notified_input:
+                s._ui_notified_input = True
+                app.log_message(
+                    f"[red bold]!! {watcher.DISPLAY_NAME} INPUT_REQUIRED[/]: "
+                    "check the watcher pane for details",
+                    sticky=30,
+                )
+        elif not s._ui_notified_done and s.iteration > 0:
+            s._ui_notified_done = True
+            verdict_icon = WATCHER_VERDICT_ICONS.get(
+                s.latest_verdict, s.latest_verdict)
+            msg = (
+                f"{watcher.DISPLAY_NAME} stopped: {verdict_icon} "
+                f"({s.iteration} iteration{'s' if s.iteration != 1 else ''})"
             )
-    elif not state._ui_notified_done:
-        state._ui_notified_done = True
-        verdict_icon = WATCHER_VERDICT_ICONS.get(state.latest_verdict, state.latest_verdict)
-        msg = (
-            f"Watcher stopped: {verdict_icon} "
-            f"({state.iteration} iteration{'s' if state.iteration != 1 else ''})"
-        )
-        if state.latest_verdict == "ERROR" and state.latest_summary:
-            err_text = state.latest_summary[:300]
-            msg += f"\n  Error: {err_text}"
-            from pm_core.paths import command_log_file
-            msg += f"\n  See log: {command_log_file()}"
-        app.log_message(msg, sticky=10)
+            if s.latest_verdict == "ERROR" and s.latest_summary:
+                err_text = s.latest_summary[:300]
+                msg += f"\n  Error: {err_text}"
+                from pm_core.paths import command_log_file
+                msg += f"\n  See log: {command_log_file()}"
+            app.log_message(msg, sticky=10)

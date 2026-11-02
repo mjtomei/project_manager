@@ -21,6 +21,8 @@ import click
 
 from pm_core import store, git_ops, prompt_gen
 from pm_core.backend import detect_backend
+from pm_core.providers import PROVIDER_SETTING_HINT, ProviderNotFoundError
+from pm_core.workspace_trust import DEFAULT_PROMPT_GRACE_SECONDS
 
 # Import helpers used directly in this module.  Submodules import from
 # ``pm_core.cli.helpers`` directly rather than via re-export.
@@ -224,18 +226,85 @@ def push_cmd():
             click.echo(f"  git merge {result['branch']}")
 
 
+@cli.command("edit")
+def edit_cmd():
+    """Open project.yaml in $EDITOR with file locking.
+
+    Acquires the project.yaml lock so no concurrent pm process can
+    overwrite your changes while you edit.  On save-and-quit the file
+    is validated, the standard header is restored, and permissions are
+    set back to read-only.
+    """
+    root = state_root()
+    path = root / "project.yaml"
+    click.echo(f"Opening {path} in $EDITOR (lock held until you quit)...")
+    try:
+        store.locked_edit(root)
+    except store.StoreLockTimeout:
+        click.echo("Could not acquire lock — another pm process may be writing project.yaml.", err=True)
+        raise SystemExit(1)
+    except RuntimeError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
+    click.echo("Saved.")
+    from pm_core.cli.helpers import trigger_tui_refresh
+    trigger_tui_refresh()
+
+
 @cli.command("which")
 def which_cmd():
     """Print the path to the pm_core package being used."""
-    import pm_core
-    click.echo(pm_core.__path__[0])
+    from pm_core.paths import pm_core_path
+    click.echo(str(pm_core_path()))
+
+
+_BOOLEAN_SETTINGS = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanup",
+                     "qa-verify-pass"}
+_INT_SETTINGS = {"min-pane-width", "mobile-width-threshold",
+                 "qa-max-scenarios", "qa-verify-retries",
+                 "qa-verdict-reminder-timeout", "trust-prompt-grace-seconds"}
+_ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"},
+                  "container-runtime": {"docker", "podman"}}
+_SETTING_DEFAULTS = {
+    "hide-assist": "off",
+    "hide-merged": "off",
+    "beginner-mode": "off",
+    "auto-cleanup": "off",
+    "qa-verify-pass": "on",
+    "min-pane-width": "100",
+    "mobile-width-threshold": "110",
+    "qa-max-scenarios": "(unset)",
+    "qa-verify-retries": "(unset)",
+    "qa-verdict-reminder-timeout": "(unset)",
+    "trust-prompt-grace-seconds": str(DEFAULT_PROMPT_GRACE_SECONDS),
+    "spec-mode": "prompt",
+}
+_LIST_ALIASES = {"list", "ls", "l"}
+
+
+def _list_settings():
+    """Print all settings and their current values."""
+    from pm_core.paths import get_global_setting, get_global_setting_value
+    all_settings = sorted(_BOOLEAN_SETTINGS | _INT_SETTINGS | set(_ENUM_SETTINGS))
+    width = max(map(len, all_settings))
+    for name in all_settings:
+        if name in _BOOLEAN_SETTINGS:
+            val = "on" if get_global_setting(name) else "off"
+        else:
+            raw = get_global_setting_value(name, "")
+            val = raw if raw else _SETTING_DEFAULTS.get(name, "(unset)")
+        default = _SETTING_DEFAULTS.get(name, "")
+        marker = " (default)" if val == default else ""
+        click.echo(f"  {name:<{width}} {val}{marker}")
 
 
 @cli.command("set")
 @click.argument("setting")
-@click.argument("value")
+@click.argument("value", required=False, default=None)
 def set_cmd(setting, value):
     """Configure a global pm setting.
+
+    Run 'pm set list' to see all settings and their current values.
 
     Boolean settings (on/off):
 
@@ -249,22 +318,49 @@ def set_cmd(setting, value):
 
     Value settings:
 
-      min-pane-width  Minimum characters per horizontal pane (default 100)
+      min-pane-width       Minimum characters per horizontal pane (default 100)
+
+      mobile-width-threshold  Window width below which mobile mode auto-activates
+                              (default 110; widen if mobile triggers on a normal
+                              terminal split, narrow if it should be more eager)
+
+      qa-max-scenarios     Max QA scenarios to run (0 = unlimited, default 0)
+
+      qa-verify-retries    Max verification retries before marking NEEDS_WORK (default 3)
+
+      qa-verdict-reminder-timeout  Seconds of pane silence before sending a verdict-format
+                                   reminder to a scenario agent (0 or unset = disabled)
+
+      qa-verify-pass       Enable/disable PASS verdict verification (on/off, default on)
+
+      trust-prompt-grace-seconds  Seconds an unattended session may sit at Claude's
+                                  workspace-trust prompt before pm fails it (default 120)
+
+      spec-mode            Spec generation mode: auto, review, or prompt (default: prompt)
     """
+    if setting in _LIST_ALIASES:
+        _list_settings()
+        return
+    if value is None:
+        raise click.UsageError("Missing argument 'VALUE'.")
     from pm_core.paths import set_global_setting, set_global_setting_value
-    boolean_settings = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanup"}
-    int_settings = {"min-pane-width"}
-    known = boolean_settings | int_settings
+    known = _BOOLEAN_SETTINGS | _INT_SETTINGS | set(_ENUM_SETTINGS)
     if setting not in known:
         click.echo(f"Unknown setting: {setting}", err=True)
         click.echo(f"Available: {', '.join(sorted(known))}", err=True)
         raise SystemExit(1)
-    if setting in boolean_settings:
+    if setting in _BOOLEAN_SETTINGS:
         if value not in ("on", "off"):
             click.echo(f"Setting '{setting}' takes 'on' or 'off'", err=True)
             raise SystemExit(1)
         set_global_setting(setting, value == "on")
-    elif setting in int_settings:
+    elif setting in _ENUM_SETTINGS:
+        valid = _ENUM_SETTINGS[setting]
+        if value not in valid:
+            click.echo(f"Setting '{setting}' takes one of: {', '.join(sorted(valid))}", err=True)
+            raise SystemExit(1)
+        set_global_setting_value(setting, value)
+    elif setting in _INT_SETTINGS:
         try:
             int(value)
         except ValueError:
@@ -276,7 +372,7 @@ def set_cmd(setting, value):
 
 @cli.command("setting")
 @click.argument("setting")
-@click.argument("value")
+@click.argument("value", required=False, default=None)
 @click.pass_context
 def setting_cmd(ctx, setting, value):
     """Alias for 'pm set'. Configure a global pm setting."""
@@ -317,9 +413,9 @@ def status_cmd():
     click.echo(f"\nPRs: {len(prs)} total")
     status_icons = {
         "pending": "⏳", "in_progress": "🔨", "in_review": "👀",
-        "qa": "🧪", "merged": "✅", "closed": "🚫",
+        "qa": "🧪", "sign_off": "✔️", "merged": "✅", "closed": "🚫",
     }
-    for s in ("pending", "in_progress", "in_review", "qa", "merged", "closed"):
+    for s in ("pending", "in_progress", "in_review", "qa", "sign_off", "merged", "closed"):
         if s in counts:
             click.echo(f"  {status_icons.get(s, '?')} {s}: {counts[s]}")
 
@@ -359,6 +455,25 @@ def prompt(pr_id: str | None):
         raise SystemExit(1)
 
     click.echo(prompt_gen.generate_prompt(data, pr_entry["id"]))
+
+
+@cli.command("md-render")
+@click.argument("md_path", type=click.Path(exists=True, dir_okay=False,
+                                           readable=True))
+def md_render(md_path: str):
+    """Render a ``.md`` file to body-only HTML on stdout.
+
+    Used by the sign-off agent to inline-embed `.md` evidence into
+    ``report.html`` inside a collapsed ``<details>`` block. Body-only output
+    inherits the embedding page's styling and stays in sync with the source
+    `.md` because rendering happens at report-write time.
+    """
+    from pathlib import Path
+    from pm_core.markdown_render import render_markdown_body
+    # Evidence files can carry stray binary bytes (e.g. NULs piped into a
+    # log) — decode with replacement rather than tracebacking mid-report.
+    text = Path(md_path).read_text(encoding="utf-8", errors="replace")
+    click.echo(render_markdown_body(text), nl=False)
 
 
 @cli.command("_check", hidden=True)
@@ -492,6 +607,7 @@ COMMANDS
   pm pr select <pr-id>          Set the active PR
   pm pr cd <pr-id>              Open a shell in a PR's workdir
   pm pr list                    List PRs with status (* = active)
+  pm pr show <pr-id>            Show a PR's full detail (description, tests, files, notes, sign-off return)
   pm pr graph                   Show dependency tree
   pm pr ready                   Show PRs ready to start
   pm pr start [pr-id]           Clone, branch, launch Claude (tmux window or blocking)
@@ -499,22 +615,47 @@ COMMANDS
   pm pr sync                    Check for merged PRs
   pm pr sync-github             Fetch and update PR statuses from GitHub
   pm pr import-github           Import existing GitHub PRs into project yaml
-  pm pr close [pr-id]           Close and remove a PR (also closes GitHub PR)
-  pm pr cleanup [pr-id]         Remove workdir for merged PR
+  pm pr close [pr-id]           Close a PR (keeps entry, branch and workdir)
+  pm pr cleanup [pr-id]         Remove a PR's workdir (explicit cleanup)
+  pm pr signoff [pr-id]         Launch the sign-off review window (writes report.html)
+  pm pr signoff record <pr-id>  Record reviewer approval of report.html (feeds merge gate)
+  pm pr signoff integrate <pr-id>  Check integration with the latest base (isolated candidate)
+  pm pr dashboard               Serve the all-PR behavior dashboard (HTTP, localhost)
   pm pr note add <pr-id> <text>        Add a note to a PR
   pm pr note edit <pr-id> <id> <text>  Edit a note's text
   pm pr note list <pr-id>              List notes on a PR
   pm pr note delete <pr-id> <id>       Delete a note from a PR
+  pm pr model show <pr-id>             Per role: model, effort, command and which setting chose them
+  pm pr model set <pr-id> [VALUE]      Set a PR's model/provider [--role, --effort]
+  pm pr model unset <pr-id>            Remove a PR's model/effort settings [--role, --all]
+
+  pm model show                 Effective model/effort per session type, PR overrides, routes
+  pm model set <type> <value>   Set a session type's model [--effort, --project]
+  pm provider list|show|add|edit|remove|default|test   Manage ~/.pm/providers.yaml
 
   pm cluster auto               Discover feature clusters automatically
   pm cluster explore            Interactively explore code clusters with Claude
 
-  pm qa list                     List QA instructions and regression tests
-  pm qa add <name>               Create a new QA instruction
-  pm qa edit <id>                Edit a QA instruction
-  pm qa show <id>                Show full content of a QA instruction
-  pm qa run <id> --pr <pr-id>    Run a QA instruction against a PR
-  pm qa standalone <id>          Run a QA instruction against master
+  pm qa list                       List QA instructions, regression tests, and artifact recipes
+  pm qa docs                       Print the QA library reference (schema, conventions)
+  pm qa add-instruction <name>     Scaffold a new QA instruction (drops into $EDITOR)
+  pm qa add-regression <name>      Scaffold a new regression test
+  pm qa add-artifact <name>        Scaffold a new artifact recipe
+  pm qa author-instruction <name>  Author a new QA instruction with a guided Claude session
+  pm qa author-regression <name>   Author a new regression test with a guided Claude session
+  pm qa author-artifact <name>     Author a new artifact recipe with a guided Claude session
+  pm qa edit <id>                  Edit a QA instruction or artifact recipe
+  pm qa show <id>                  Show full content of a QA instruction or artifact recipe
+  pm qa run <id> --pr <pr-id>      Run a QA instruction against a PR
+  pm qa standalone <id>            Run a QA instruction against master
+  pm qa regression <test-id>       Run a regression test (replaces `pm tui test`)
+  pm qa captures-path <pr-id>      Print the host path of a PR's captures directory
+
+  pm qa mocks list               List shared mock definitions
+  pm qa mocks show <id>          Show a mock definition
+  pm qa mocks add <name>         Create a new mock definition
+  pm qa mocks edit <id>          Edit a mock definition
+  pm qa mocks prompt             Print the mocks block injected into scenario prompts
 
   pm container status            Show container isolation settings
   pm container enable            Enable container isolation for Claude sessions
@@ -530,11 +671,18 @@ COMMANDS
   pm guide                      Guided workflow (init → plan → PRs → start)
   pm notes                      Open session notes in editor
   pm prompt [pr-id]             Print Claude prompt for a PR
+  pm md-render <path>           Render a .md file to body-only HTML (report embedding)
   pm tui                        Launch interactive dashboard
   pm meta [task]                Work on pm itself (meta-development session)
   pm watcher                    Run autonomous watcher loop (blocking)
+  pm autostart add <id>...      Add auto-start targets in the running TUI
+  pm autostart remove <id>...   Remove auto-start targets (never kills windows)
+  pm autostart list|status      Targets / per-run progress (--json)
+  pm trust status|list          Workspace trust for unattended Claude sessions
+  pm trust add|remove <path>    Authorize a non-pm directory for automatic trust
   pm rebalance                  Re-enable auto-balanced pane layout
   pm set <setting> <value>      Configure a global pm setting
+  pm edit                       Open project.yaml in $EDITOR (with locking)
   pm which                      Print path to pm_core package being used
   pm getting-started            Show getting started guide
 
@@ -578,8 +726,25 @@ def getting_started_cmd():
 # Import submodules to register their commands on ``cli``.
 # This must be at the bottom of the file, after ``cli`` is defined.
 # ---------------------------------------------------------------------------
-from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher, qa, container  # noqa: E402, F401
+from pm_core.cli import pr, plan, session, tui, guide, meta, cluster, bench, watcher, qa, container, model, provider, log, project, fake_claude, fake_github, autostart, trust  # noqa: E402, F401
 
 
 def main():
-    cli()
+    try:
+        cli()
+    except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+        import sys
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    except FileNotFoundError as e:
+        import sys
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    except ProviderNotFoundError as e:
+        # A session's selected provider is missing.  Launches never fall
+        # back to another account, so say how to fix it: a traceback
+        # buries this line, and callers that show only the head of stderr
+        # (the review loop) would lose it.
+        import sys
+        click.echo(f"Error: {e}; {PROVIDER_SETTING_HINT}", err=True)
+        sys.exit(1)

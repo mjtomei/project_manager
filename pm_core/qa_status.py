@@ -19,16 +19,18 @@ Invocation:
 import json
 import logging
 import os
+import re
 import select
 import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
 
 logging.basicConfig(
     filename="/tmp/qa_status_debug.log",
     level=logging.DEBUG,
-    format="%(asctime)s %(levelname)s %(message)s",
+    format="%(asctime)s %(levelname)-5s [qa_status] %(message)s",
     datefmt="%H:%M:%S",
 )
 _log = logging.getLogger("pm.qa_status")
@@ -46,22 +48,41 @@ _HIDE_CURSOR = "\033[?25l"
 _SHOW_CURSOR = "\033[?25h"
 _CLEAR_SCREEN = "\033[H\033[2J"
 
+# Appended to a scenario's verdict while its worker waits for input.
+_WAITING_SUFFIX = " (waiting)"
+_WAITING_SUFFIX_WIDTH = len(_WAITING_SUFFIX)
+
 _VERDICT_COLORS = {
     "PASS": _GREEN,
     "NEEDS_WORK": _YELLOW,
     "INPUT_REQUIRED": _RED,
     "interactive": _DIM,
+    "queued": _DIM,
+    # Sign-off router verdicts (shown when a sign-off verdict surfaces here).
+    "SIGNOFF_MERGE": _GREEN,
+    "SIGNOFF_REQA": _YELLOW,
+    "SIGNOFF_REVIEW": _YELLOW,
+    "SIGNOFF_IMPL": _YELLOW,
+    "SIGNOFF_BLOCKED": _RED,
 }
 
-_REFRESH_INTERVAL = 2.0  # seconds
+_REFRESH_INTERVAL = 1.0  # seconds
+_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 
 
 def _load_status(path: Path) -> dict | None:
     """Load qa_status.json, returning None if missing or invalid."""
     try:
-        return json.loads(path.read_text())
+        data = json.loads(path.read_text())
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return None
+    # ``qa_loop._write_status_file`` always writes an object, but a
+    # hand-edited or corrupt file can hold any valid JSON.  A non-dict would
+    # raise AttributeError on ``.get()`` in _render and kill the status pane
+    # (it would stop refreshing, leaving a frozen or one-pane window).
+    # Treat it exactly like an unreadable file: show "Waiting for
+    # qa_status.json..." and keep refreshing.
+    return data if isinstance(data, dict) else None
 
 
 def _truncate(text: str, width: int) -> str:
@@ -85,7 +106,8 @@ def _pad_line(text: str, cols: int) -> str:
     return text
 
 
-def _render(status: dict | None, selected: int, rows: int, cols: int) -> str:
+def _render(status: dict | None, selected: int, rows: int, cols: int,
+            tick: int = 0) -> str:
     """Render the status dashboard as an ANSI string."""
     lines: list[str] = []
 
@@ -97,24 +119,86 @@ def _render(status: dict | None, selected: int, rows: int, cols: int) -> str:
     pr_id = status.get("pr_id", "?")
     scenarios = status.get("scenarios", [])
     overall = status.get("overall", "")
+    error = status.get("error", "")
 
     lines.append(f"{_BOLD}QA Status: {pr_id}{_RESET}")
     lines.append("")
 
-    # Fixed columns: prefix(2) + idx(3) + gap(2) + gap(2) + verdict(14) = 23
-    title_width = max(cols - 28, 10)
+    # Show error block if present (spec missing, no scenarios, etc.)
+    if error:
+        lines.append(f"  {_RED}{_BOLD}ERROR{_RESET}")
+        lines.append("")
+        # Wrap to the pane width: an error line longer than the terminal
+        # (a fail-closed container cause + remedy is ~190 columns) wraps
+        # on its own, adding a row per overflow and scrolling the header
+        # — the pane's own "QA Status:" line — off the top of the screen.
+        # Same rule as the table branch below, which reserves width for
+        # the "(waiting)" suffix instead of letting a row wrap.
+        avail = max(cols - 2, 10)
+        for err_line in error.split("\n"):
+            if not err_line.strip():
+                lines.append("")
+                continue
+            # Keep any leading indent (the remedy list's "  - " bullets)
+            # and re-apply it to wrapped continuations.
+            indent = err_line[:len(err_line) - len(err_line.lstrip())]
+            for chunk in textwrap.wrap(err_line.strip(), avail,
+                                       initial_indent=indent,
+                                       subsequent_indent=indent,
+                                       break_long_words=True,
+                                       break_on_hyphens=False):
+                lines.append(f"  {_RED}{chunk}{_RESET}")
+        lines.append("")
+        lines.append(f"{_DIM}  q: quit{_RESET}")
+        padded = [_pad_line(l, cols) for l in lines]
+        while len(padded) < rows:
+            padded.append(" " * cols)
+        return _CLEAR_SCREEN + "\n".join(padded)
+
+    # Fixed columns: prefix(2) + idx(3) + gap(2) + gap(2) + verdict(14) = 23.
+    # A scenario waiting for input appends " (waiting)" to its verdict, so
+    # reserve that width when any row uses it — otherwise the line exceeds
+    # the terminal width and wraps, pushing the footer off screen.
+    waiting_any = any(sc.get("waiting_for_input") for sc in scenarios)
+    reserve = _WAITING_SUFFIX_WIDTH if waiting_any else 0
+    title_width = max(cols - 28 - reserve, 10)
     lines.append(f"  {'#':>3}  {'Scenario':<{title_width}}  {'Verdict'}")
     lines.append(f"  {'---':>3}  {'-' * title_width}  {'-' * 14}")
+
+    spinner = _SPINNER_FRAMES[tick % len(_SPINNER_FRAMES)]
 
     for i, sc in enumerate(scenarios):
         idx = sc.get("index", "?")
         title = _truncate(sc.get("title", ""), title_width)
         verdict = sc.get("verdict", "")
+        verdict_reason = sc.get("verdict_reason", "")
 
-        color = _VERDICT_COLORS.get(verdict, _DIM)
-        verdict_display = verdict if verdict else f"{_DIM}pending{_RESET}"
-        if verdict:
+        if "(verifying" in verdict:
+            # Animated spinner for verdicts being verified
+            # Format: "PASS (verifying)" or "PASS (verifying:2)"
+            m = re.search(r'\(verifying(?::(\d+))?\)', verdict)
+            fails = int(m.group(1)) if m and m.group(1) else 0
+            fail_hint = f" {_RED}({fails}){_RESET}" if fails else ""
+            verdict_display = (
+                f"{_YELLOW}{spinner} verifying{_RESET}{fail_hint}"
+            )
+        elif "(retrying" in verdict:
+            # Back to pending after verification flagged — show retry count
+            m = re.search(r'\(retrying:(\d+)\)', verdict)
+            fails = int(m.group(1)) if m else 0
+            verdict_display = (
+                f"{_DIM}pending{_RESET} "
+                f"{_RED}({fails}){_RESET}"
+            )
+        elif verdict:
+            color = _VERDICT_COLORS.get(verdict, _DIM)
             verdict_display = f"{color}{verdict}{_RESET}"
+            if sc.get("waiting_for_input"):
+                # The worker asked for input; the loop is still watching its
+                # pane for a follow-up verdict after the user answers.
+                verdict_display += f"{_DIM}{_WAITING_SUFFIX}{_RESET}"
+        else:
+            verdict_display = f"{_DIM}pending{_RESET}"
 
         prefix = "  "
         suffix = ""
@@ -123,6 +207,14 @@ def _render(status: dict | None, selected: int, rows: int, cols: int) -> str:
             suffix = _RESET
 
         lines.append(f"{prefix}{idx:>3}  {title:<{title_width}}  {verdict_display}{suffix}")
+        if verdict_reason:
+            # Render the reason on a continuation line, indented to align
+            # under the title column and dimmed so it doesn't compete with
+            # the verdict colour above.
+            reason_indent = " " * (2 + 3 + 2)  # prefix + idx col + gap
+            reason_text = _truncate(verdict_reason,
+                                    max(cols - len(reason_indent) - 4, 10))
+            lines.append(f"{reason_indent}{_DIM}↳ {reason_text}{_RESET}")
 
     lines.append("")
 
@@ -131,9 +223,19 @@ def _render(status: dict | None, selected: int, rows: int, cols: int) -> str:
         lines.append(f"  Overall: {color}{_BOLD}{overall}{_RESET}")
     else:
         done = sum(1 for s in scenarios
-                   if s.get("verdict") and s.get("verdict") != "interactive")
+                   if s.get("verdict") and s.get("verdict") not in ("interactive", "queued")
+                   and "(retrying" not in s.get("verdict", "")
+                   and "(verifying" not in s.get("verdict", ""))
         total = sum(1 for s in scenarios if s.get("verdict") != "interactive")
-        lines.append(f"  {_DIM}Progress: {done}/{total} scenarios complete{_RESET}")
+        queued = sum(1 for s in scenarios if s.get("verdict") == "queued")
+        verifying = sum(1 for s in scenarios if "(verifying" in s.get("verdict", ""))
+        progress = f"  {_DIM}Progress: {done}/{total} scenarios complete"
+        if verifying:
+            progress += f" ({verifying} verifying)"
+        if queued:
+            progress += f" ({queued} queued)"
+        progress += f"{_RESET}"
+        lines.append(progress)
 
     lines.append("")
     lines.append(f"{_DIM}  j/k: navigate  Enter: go to window  q: quit{_RESET}")
@@ -250,6 +352,7 @@ def _run_interactive(path: Path, session: str) -> None:
     import tty
 
     selected = 0
+    tick = 0
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
 
@@ -267,8 +370,9 @@ def _run_interactive(path: Path, session: str) -> None:
             if num_scenarios > 0:
                 selected = max(0, min(selected, num_scenarios - 1))
 
-            sys.stdout.write(_render(status, selected, rows, cols))
+            sys.stdout.write(_render(status, selected, rows, cols, tick=tick))
             sys.stdout.flush()
+            tick += 1
 
             # Wait for input or timeout
             ready, _, _ = select.select([fd], [], [], _REFRESH_INTERVAL)
@@ -304,12 +408,14 @@ def _run_interactive(path: Path, session: str) -> None:
 
 def _run_passive(path: Path) -> None:
     """Passive mode: just refresh the display, no keyboard input."""
+    tick = 0
     while True:
         status = _load_status(path)
         rows, cols = _get_terminal_size()
 
-        sys.stdout.write(_render(status, -1, rows, cols))
+        sys.stdout.write(_render(status, -1, rows, cols, tick=tick))
         sys.stdout.flush()
+        tick += 1
 
         # Exit when overall verdict is set (QA complete)
         if status and status.get("overall"):

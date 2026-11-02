@@ -5,8 +5,11 @@ from pathlib import Path
 import pytest
 from unittest.mock import patch, MagicMock
 
+from pm_core.verdict_transcript import VerdictHit
 from pm_core.qa_loop import (
     parse_qa_plan,
+    parse_new_mocks_from_plan,
+    NewMockRequest,
     QAScenario,
     QALoopState,
     create_qa_workdir,
@@ -14,9 +17,18 @@ from pm_core.qa_loop import (
     VERDICT_PASS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
+    ALL_VERDICTS,
     _scenario_window_name,
     _cleanup_stale_scenario_windows,
     _tail_has_marker_on_own_line,
+    _build_verification_prompt,
+    _verify_single_scenario,
+    _is_verification_enabled,
+    _extract_flagged_reason,
+    _get_verification_max_retries,
+    _install_instruction_file,
+    _VERIFICATION_MAX_PANE_LINES,
+    _DEFAULT_VERIFICATION_MAX_RETRIES,
 )
 
 
@@ -126,6 +138,74 @@ QA_PLAN_END
         assert parse_qa_plan("") == []
         assert parse_qa_plan("No plan here") == []
 
+    def test_artifact_field_unresolved(self):
+        """Without pm_root, ARTIFACT value is stored verbatim and STEPS doesn't
+        eat the ARTIFACT line."""
+        output = """
+QA_PLAN_START
+SCENARIO 1: TUI smoke
+FOCUS: pane layout
+INSTRUCTION: none
+ARTIFACT: tmux-screen-recording.md
+STEPS: Drive the TUI and capture.
+QA_PLAN_END
+"""
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 1
+        assert scenarios[0].artifact_paths == ["tmux-screen-recording.md"]
+        assert scenarios[0].steps == "Drive the TUI and capture."
+
+    def test_artifact_field_none_clears(self):
+        output = """
+QA_PLAN_START
+SCENARIO 1: T
+FOCUS: x
+ARTIFACT: none
+STEPS: do.
+QA_PLAN_END
+"""
+        scenarios = parse_qa_plan(output)
+        assert len(scenarios) == 1
+        assert scenarios[0].artifact_paths == []
+
+    def test_artifact_field_resolves_against_pm_root(self, tmp_path):
+        # Set up a fake pm/qa/artifacts/ with one recipe
+        art = tmp_path / "qa" / "artifacts"
+        art.mkdir(parents=True)
+        (art / "tmux-screen-recording.md").write_text(
+            "---\ntitle: t\n---\nbody")
+        output = """
+QA_PLAN_START
+SCENARIO 1: T
+FOCUS: x
+ARTIFACT: tmux-screen-recording
+STEPS: do.
+QA_PLAN_END
+"""
+        scenarios = parse_qa_plan(output, pm_root=tmp_path)
+        assert len(scenarios) == 1
+        assert scenarios[0].artifact_paths == ["artifacts/tmux-screen-recording.md"]
+
+    def test_artifact_field_supports_multiple(self, tmp_path):
+        art = tmp_path / "qa" / "artifacts"
+        art.mkdir(parents=True)
+        (art / "tmux-screen-recording.md").write_text("---\ntitle: t\n---\nbody")
+        (art / "cli-recording.md").write_text("---\ntitle: c\n---\nbody")
+        output = """
+QA_PLAN_START
+SCENARIO 1: T
+FOCUS: x
+ARTIFACT: tmux-screen-recording, cli-recording
+STEPS: do.
+QA_PLAN_END
+"""
+        scenarios = parse_qa_plan(output, pm_root=tmp_path)
+        assert len(scenarios) == 1
+        assert scenarios[0].artifact_paths == [
+            "artifacts/tmux-screen-recording.md",
+            "artifacts/cli-recording.md",
+        ]
+
     def test_malformed_heading(self):
         output = """
 QA_PLAN_START
@@ -186,6 +266,41 @@ QA_PLAN_END
         assert scenarios[0].instruction_path == "pm/qa/regression/qa-parser.md"
         assert scenarios[1].title == "CLI Integration"
         assert scenarios[1].instruction_path is None
+
+    def test_real_plan_not_numbered_from_one_ignores_prompt_spec(self):
+        """A committed qa.md echoed in the prompt can hold its own
+        "SCENARIO 1:" line.  When the planner numbers its plan from 2, the
+        body must still start at the planner's QA_PLAN_START, not at that
+        earlier spec line (pr-b53bfe2 QA r5 S10: planned 1, launched 2)."""
+        output = """You are a QA planner analyzing PR pr-001: "Add yellow.txt"
+
+## QA Spec
+
+SCENARIO 1: yellow.txt content
+- GIVEN a fresh clone of the PR branch
+- WHEN the user prints yellow.txt with cat
+- THEN the output is yellow
+
+## Output Format
+
+QA_PLAN_START
+SCENARIO 2: <descriptive title for this scenario>
+FOCUS: <what area or behavior to test>
+STEPS: <concrete test steps>
+QA_PLAN_END
+
+The spec asks for one scenario, so the plan has one.
+
+QA_PLAN_START
+SCENARIO 2: Fresh clone shows yellow.txt containing exactly "yellow"
+FOCUS: yellow.txt is a one-line file holding yellow
+INSTRUCTION: none
+STEPS: cat yellow.txt
+QA_PLAN_END
+"""
+        scenarios = parse_qa_plan(output)
+        assert [s.title for s in scenarios] == [
+            'Fresh clone shows yellow.txt containing exactly "yellow"']
 
     def test_pane_with_only_prompt_template(self):
         """When pane content only has the prompt template, placeholder
@@ -317,14 +432,16 @@ class TestQAWorkdirs:
         assert "pr-001-abc123" in str(wd)
 
     def test_create_scenario_workdir(self, tmp_path):
-        d, scratch, venv = create_scenario_workdir(tmp_path, 1)
+        d, scratch = create_scenario_workdir(tmp_path, 1)
         assert d.exists()
-        assert d.name == "scenario-1"
+        assert d.name == "repo"
+        assert d.parent.name == "s-1"
         assert scratch.exists()
-        assert venv is None
+        assert scratch.name == "scratch"
+        assert scratch.parent.name == "s-1"
 
-    def test_create_scenario_workdir_venv(self, tmp_path):
-        """Clone mode creates a --system-site-packages venv."""
+    def test_create_scenario_workdir_with_clone(self, tmp_path):
+        """Clone mode creates repo + scratch under s-N/."""
         qa_workdir = tmp_path / "qa"
         qa_workdir.mkdir()
 
@@ -332,48 +449,22 @@ class TestQAWorkdirs:
         repo_root.mkdir()
 
         def fake_run_git(*args):
-            # Simulate git clone --local by creating the directory
-            clone_path = qa_workdir / "worktree-1"
+            clone_path = qa_workdir / "s-1" / "repo"
             clone_path.mkdir(parents=True, exist_ok=True)
             return MagicMock(returncode=0)
 
         with patch("pm_core.git_ops.run_git", side_effect=fake_run_git):
-            _, _, venv_path = create_scenario_workdir(
+            clone_path, scratch = create_scenario_workdir(
                 qa_workdir, 1, repo_root=repo_root,
                 pr_id="pr-001", loop_id="abc",
             )
 
-        assert venv_path is not None
-        assert venv_path.name == "venv-1"
-        assert venv_path.exists()
-        # Verify the venv has the expected bin directory
-        assert (venv_path / "bin" / "python").exists() or (venv_path / "bin" / "python3").exists()
-
-    def test_create_scenario_workdir_venv_failure_nonfatal(self, tmp_path):
-        """Venv creation failure is non-fatal — returns venv_path=None."""
-        qa_workdir = tmp_path / "qa"
-        qa_workdir.mkdir()
-
-        repo_root = tmp_path / "repo"
-        repo_root.mkdir()
-
-        def fake_run_git(*args):
-            clone_path = qa_workdir / "worktree-1"
-            clone_path.mkdir(parents=True, exist_ok=True)
-            return MagicMock(returncode=0)
-
-        with patch("pm_core.git_ops.run_git", side_effect=fake_run_git), \
-             patch("pm_core.qa_loop.subprocess.run",
-                   side_effect=OSError("venv failed")):
-            clone_path, scratch, venv_path = create_scenario_workdir(
-                qa_workdir, 1, repo_root=repo_root,
-                pr_id="pr-001", loop_id="abc",
-            )
-
-        # Clone and scratch still created, venv is None
-        assert clone_path is not None
+        assert clone_path.exists()
+        assert clone_path.name == "repo"
+        assert clone_path.parent.name == "s-1"
         assert scratch.exists()
-        assert venv_path is None
+        assert scratch.name == "scratch"
+        assert scratch.parent.name == "s-1"
 
 
 class TestQALoopState:
@@ -467,212 +558,6 @@ class TestVerdictConstants:
 # Verdict edge cases: dead windows, grace period, failed creation
 # ---------------------------------------------------------------------------
 
-class TestVerdictEdgeCases:
-    """Edge cases for verdict detection — window death, grace period, etc."""
-
-    def test_dead_window_gets_input_required(self):
-        """A window killed without verdict should be marked INPUT_REQUIRED."""
-        from pm_core.qa_loop import _get_scenario_pane
-
-        scenario = QAScenario(index=1, title="Test", focus="t")
-        scenario.window_name = "qa-#42-s1"
-        state = QALoopState(pr_id="pr-001")
-        state.scenarios = [scenario]
-        state.scenario_verdicts = {}
-
-        # Simulate: window is dead (find_window_by_name returns None)
-        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None):
-            pane_id = _get_scenario_pane("sess", scenario.window_name)
-            assert pane_id is None
-            # This is what the polling loop does:
-            state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-
-        assert state.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
-
-    def test_dead_window_detected_during_grace_period(self):
-        """Dead windows should be detected even within the 30s grace period.
-
-        The polling loop checks window liveness BEFORE applying the grace
-        period skip, so a killed window is caught immediately.
-        """
-        scenario = QAScenario(index=1, title="Test", focus="t")
-        scenario.window_name = "qa-#42-s1"
-        state = QALoopState(pr_id="pr-001")
-        state.scenarios = [scenario]
-        state.scenario_verdicts = {}
-
-        pending = {scenario.index}
-        in_grace = True  # Simulate being within grace period
-
-        # Simulate: pane is dead
-        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None):
-            pane_id = None  # _get_scenario_pane returns None
-            # In the actual loop, dead window check comes BEFORE grace check:
-            if pane_id is None:
-                state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-                pending.discard(scenario.index)
-            elif in_grace:
-                pass  # Would skip verdict reading — but we never reach here
-
-        # Dead window should be detected despite grace period
-        assert scenario.index not in pending
-        assert state.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
-
-    def test_failed_window_creation_gets_input_required(self):
-        """Scenarios that fail to create a window should get INPUT_REQUIRED,
-        not be silently ignored (which would default to PASS)."""
-        # Scenario without window_name (creation failed)
-        scenario_ok = QAScenario(index=1, title="OK", focus="t")
-        scenario_ok.window_name = "qa-#42-s1"
-        scenario_fail = QAScenario(index=2, title="Failed", focus="t")
-        scenario_fail.window_name = None  # Creation failed
-
-        state = QALoopState(pr_id="pr-001")
-        state.scenarios = [scenario_ok, scenario_fail]
-        state.scenario_verdicts = {}
-
-        # This is the fix: scenarios without window_name get INPUT_REQUIRED
-        for s in state.scenarios:
-            if not s.window_name:
-                state.scenario_verdicts[s.index] = VERDICT_INPUT_REQUIRED
-
-        assert state.scenario_verdicts[2] == VERDICT_INPUT_REQUIRED
-
-    def test_all_scenarios_failed_creation_overall_not_pass(self):
-        """If ALL scenario windows fail to create, overall must NOT be PASS."""
-        s1 = QAScenario(index=1, title="A", focus="t")
-        s1.window_name = None
-        s2 = QAScenario(index=2, title="B", focus="t")
-        s2.window_name = None
-
-        state = QALoopState(pr_id="pr-001")
-        state.scenarios = [s1, s2]
-        state.scenario_verdicts = {}
-
-        # Apply the fix: failed windows get INPUT_REQUIRED
-        for s in state.scenarios:
-            if not s.window_name:
-                state.scenario_verdicts[s.index] = VERDICT_INPUT_REQUIRED
-
-        # Overall verdict aggregation (same as qa_loop.py)
-        verdicts = list(state.scenario_verdicts.values())
-        if VERDICT_NEEDS_WORK in verdicts:
-            overall = VERDICT_NEEDS_WORK
-        elif VERDICT_INPUT_REQUIRED in verdicts:
-            overall = VERDICT_INPUT_REQUIRED
-        else:
-            overall = VERDICT_PASS
-
-        assert overall == VERDICT_INPUT_REQUIRED
-
-    def test_overall_verdict_one_dead_one_pass(self):
-        """One dead window (INPUT_REQUIRED) + one PASS = overall INPUT_REQUIRED."""
-        state = QALoopState(pr_id="pr-001")
-        state.scenario_verdicts = {1: VERDICT_PASS, 2: VERDICT_INPUT_REQUIRED}
-
-        verdicts = list(state.scenario_verdicts.values())
-        if VERDICT_NEEDS_WORK in verdicts:
-            overall = VERDICT_NEEDS_WORK
-        elif VERDICT_INPUT_REQUIRED in verdicts:
-            overall = VERDICT_INPUT_REQUIRED
-        else:
-            overall = VERDICT_PASS
-
-        assert overall == VERDICT_INPUT_REQUIRED
-
-    def test_overall_verdict_dead_window_plus_needs_work(self):
-        """Dead window + NEEDS_WORK = overall NEEDS_WORK (worst wins)."""
-        state = QALoopState(pr_id="pr-001")
-        state.scenario_verdicts = {
-            1: VERDICT_INPUT_REQUIRED,
-            2: VERDICT_NEEDS_WORK,
-        }
-
-        verdicts = list(state.scenario_verdicts.values())
-        if VERDICT_NEEDS_WORK in verdicts:
-            overall = VERDICT_NEEDS_WORK
-        elif VERDICT_INPUT_REQUIRED in verdicts:
-            overall = VERDICT_INPUT_REQUIRED
-        else:
-            overall = VERDICT_PASS
-
-        assert overall == VERDICT_NEEDS_WORK
-
-    def test_failed_creation_not_in_pending_set(self):
-        """Scenarios without window_name must NOT be in the pending set,
-        so the polling loop doesn't hang waiting for them."""
-        s1 = QAScenario(index=1, title="OK", focus="t")
-        s1.window_name = "qa-#42-s1"
-        s2 = QAScenario(index=2, title="Failed", focus="t")
-        s2.window_name = None
-
-        pending = {s.index for s in [s1, s2] if s.window_name}
-        assert pending == {1}, "Failed scenario must not be in pending"
-
-    def test_all_failed_creation_yields_empty_pending(self):
-        """When ALL scenarios fail to create, pending is empty and the
-        polling loop is skipped entirely (no hang)."""
-        s1 = QAScenario(index=1, title="A", focus="t")
-        s1.window_name = None
-        s2 = QAScenario(index=2, title="B", focus="t")
-        s2.window_name = None
-
-        pending = {s.index for s in [s1, s2] if s.window_name}
-        assert len(pending) == 0, "All failed → empty pending → no hang"
-
-    def test_failed_creation_excluded_from_polling_iteration(self):
-        """Inside the polling loop, scenarios without window_name are
-        skipped by the 'not scenario.window_name' guard."""
-        s1 = QAScenario(index=1, title="OK", focus="t")
-        s1.window_name = "qa-#42-s1"
-        s2 = QAScenario(index=2, title="Failed", focus="t")
-        s2.window_name = None
-
-        pending = {s1.index}
-        polled = []
-        for s in [s1, s2]:
-            if s.index not in pending or not s.window_name:
-                continue
-            polled.append(s.index)
-
-        assert polled == [1], "Only scenarios with windows should be polled"
-
-    def test_create_scenario_workdir_failure_nonfatal_to_loop(self):
-        """If create_scenario_workdir raises, the scenario is skipped but
-        remaining scenarios still launch (exception doesn't crash the loop)."""
-        s1 = QAScenario(index=1, title="Will Fail", focus="t")
-        s2 = QAScenario(index=2, title="Will Succeed", focus="t")
-        scenarios = [s1, s2]
-
-        launched = []
-        calls = []
-
-        def fake_create(qa_workdir, idx, **kw):
-            calls.append(idx)
-            if idx == 1:
-                raise OSError("corrupt repo")
-            return (Path("/tmp/clone"), Path("/tmp/scratch"), None)
-
-        # Simulate the loop logic from run_qa_sync
-        for scenario in scenarios:
-            try:
-                clone_path, scratch_path, venv_path = fake_create(
-                    Path("/tmp/qa"), scenario.index,
-                )
-            except Exception:
-                continue
-            scenario.worktree_path = str(clone_path)
-            launched.append(scenario.index)
-
-        assert len(calls) == 2, "Both scenarios attempted"
-        assert launched == [2], "Only non-failing scenario launched"
-        assert s1.worktree_path is None, "Failed scenario has no clone"
-
-
-# ---------------------------------------------------------------------------
-# QA completion: _on_qa_complete lifecycle transitions
-# ---------------------------------------------------------------------------
-
 class TestOnQAComplete:
     """Tests for qa_loop_ui._on_qa_complete lifecycle transitions."""
 
@@ -693,7 +578,7 @@ class TestOnQAComplete:
         app._root = pm_dir
         app._data = data
         app._auto_start = True
-        app._auto_start_target = "pr-001"
+        app._auto_start_targets = {"pr-001": {}}
         app._qa_loops = {}
         app._review_loops = {}
         app._self_driving_qa = {}
@@ -708,7 +593,7 @@ class TestOnQAComplete:
         state.latest_verdict = VERDICT_PASS
 
 
-        with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
+        with patch("pm_core.tui.qa_loop_ui._trigger_signoff") as mock_merge, \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"):
             _on_qa_complete(app, state)
 
@@ -724,15 +609,16 @@ class TestOnQAComplete:
         state.latest_verdict = VERDICT_PASS
 
 
-        with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
+        with patch("pm_core.tui.qa_loop_ui._trigger_signoff") as mock_merge, \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"):
             _on_qa_complete(app, state)
 
         mock_merge.assert_not_called()
-        # Should inform user to merge manually
+        # Should point the user at manual sign-off (never "ready to merge")
         app.log_message.assert_called()
         msg = app.log_message.call_args[0][0]
-        assert "merge manually" in msg
+        assert "press i to sign off" in msg
+        assert "ready to merge" not in msg
 
     def test_needs_work_transitions_to_in_review(self, tmp_path):
         """QA NEEDS_WORK should transition PR from qa → in_review."""
@@ -908,7 +794,7 @@ class TestMaybeStartQA:
         app._root = pm_dir
         app._data = data
         app._auto_start = auto_start
-        app._auto_start_target = "pr-001"
+        app._auto_start_targets = {"pr-001": {}}
         app._qa_loops = {}
         app._self_driving_qa = {}
         return app
@@ -929,7 +815,8 @@ class TestMaybeStartQA:
         data = store.load(app._root)
         pr = store.get_pr(data, "pr-001")
         assert pr["status"] == "qa"
-        mock_start.assert_called_once_with(app, "pr-001")
+        mock_start.assert_called_once_with(
+            app, "pr-001", lock_timeout=0.0)  # store.NO_WAIT: retried per tick (RQ38)
 
     def test_no_transition_without_auto_start_or_self_driving(self, tmp_path):
         """Without auto-start or self-driving, _maybe_start_qa should be a no-op."""
@@ -975,7 +862,7 @@ class TestMaybeStartQAScoping:
         app._root = pm_dir
         app._data = data
         app._auto_start = auto_start
-        app._auto_start_target = target
+        app._auto_start_targets = {target: {}} if target else {}
         app._qa_loops = {}
         app._self_driving_qa = {}
         return app
@@ -999,7 +886,8 @@ class TestMaybeStartQAScoping:
         data = store.load(app._root)
         pr = store.get_pr(data, "pr-a")
         assert pr["status"] == "qa"
-        mock_start.assert_called_once_with(app, "pr-a")
+        mock_start.assert_called_once_with(
+            app, "pr-a", lock_timeout=0.0)  # store.NO_WAIT: retried per tick (RQ38)
 
     def test_transitions_target_pr_itself(self, tmp_path):
         """The auto-start target PR itself transitions to qa."""
@@ -1020,7 +908,8 @@ class TestMaybeStartQAScoping:
         data = store.load(app._root)
         pr = store.get_pr(data, "pr-b")
         assert pr["status"] == "qa"
-        mock_start.assert_called_once_with(app, "pr-b")
+        mock_start.assert_called_once_with(
+            app, "pr-b", lock_timeout=0.0)  # store.NO_WAIT: retried per tick (RQ38)
 
     def test_skips_pr_outside_target_dep_tree(self, tmp_path):
         """PR NOT in the target's dependency tree is NOT transitioned."""
@@ -1046,8 +935,9 @@ class TestMaybeStartQAScoping:
         assert pr["status"] == "in_review"  # unchanged
         mock_start.assert_not_called()
 
-    def test_no_target_allows_all_prs(self, tmp_path):
-        """Without a target, any in_review PR transitions to qa."""
+    def test_no_target_does_not_transition_any_pr(self, tmp_path):
+        """No explicit target means no scope: auto-start must not fall back
+        to the whole backlog."""
         from pm_core.tui.review_loop_ui import _maybe_start_qa
         from pm_core import store
 
@@ -1062,8 +952,8 @@ class TestMaybeStartQAScoping:
 
         data = store.load(app._root)
         pr = store.get_pr(data, "pr-x")
-        assert pr["status"] == "qa"
-        mock_start.assert_called_once_with(app, "pr-x")
+        assert pr["status"] == "in_review"  # unchanged
+        mock_start.assert_not_called()
 
     def test_skips_pr_not_in_review_status(self, tmp_path):
         """PR that is not in_review status is not transitioned even if in tree."""
@@ -1105,11 +995,12 @@ class TestPollTriggersQA:
         app._root = pm_dir
         app._data = data
         app._auto_start = auto_start
-        app._auto_start_target = target
+        app._auto_start_targets = {target: {}} if target else {}
         app._review_loops = {}
         app._qa_loops = {}
         app._self_driving_qa = {}
-        app._watcher_state = None
+        from pm_core.watcher_manager import WatcherManager
+        app._watcher_manager = WatcherManager()
         app._impl_poll_counter = 0
         return app
 
@@ -1132,34 +1023,9 @@ class TestPollTriggersQA:
         state.iteration = 1
         app._review_loops["pr-001"] = state
 
-        with patch("pm_core.tui.review_loop_ui._maybe_start_qa") as mock_qa, \
-             patch("pm_core.tui.review_loop_ui._refresh_tech_tree"), \
-             patch("pm_core.tui.review_loop_ui._poll_impl_idle"), \
-             patch("pm_core.tui.watcher_ui.poll_watcher_state"), \
-             patch("pm_core.tui.qa_loop_ui.poll_qa_state"):
-            _poll_loop_state(app)
-
-        mock_qa.assert_called_once_with(app, "pr-001")
-
-    def test_verdict_pass_with_suggestions_triggers_qa(self, tmp_path):
-        """PASS_WITH_SUGGESTIONS also triggers auto-QA."""
-        from pm_core.tui.review_loop_ui import _poll_loop_state
-        from pm_core.review_loop import ReviewLoopState, VERDICT_PASS_WITH_SUGGESTIONS
-        from pm_core import store
-
-        prs = [
-            {"id": "pr-001", "title": "T", "branch": "b", "status": "in_review",
-             "workdir": "/tmp/w", "depends_on": [], "notes": []},
-        ]
-        app = self._make_app(tmp_path, prs=prs, target="pr-001")
-
-        state = ReviewLoopState(pr_id="pr-001")
-        state.running = False
-        state.latest_verdict = VERDICT_PASS_WITH_SUGGESTIONS
-        state.iteration = 1
-        app._review_loops["pr-001"] = state
-
-        with patch("pm_core.tui.review_loop_ui._maybe_start_qa") as mock_qa, \
+        # _maybe_start_qa returns None (handed off) or (stage, reason).
+        with patch("pm_core.tui.review_loop_ui._maybe_start_qa",
+                   return_value=None) as mock_qa, \
              patch("pm_core.tui.review_loop_ui._refresh_tech_tree"), \
              patch("pm_core.tui.review_loop_ui._poll_impl_idle"), \
              patch("pm_core.tui.watcher_ui.poll_watcher_state"), \
@@ -1200,7 +1066,7 @@ class TestPollTriggersQA:
 # ---------------------------------------------------------------------------
 
 class TestSelfDrivingQALoop:
-    """Tests for the self-driving QA loop (zz t / zzz t).
+    """Tests for the self-driving QA loop (zz t).
 
     Verifies that when QA completes with NEEDS_WORK in self-driving mode,
     the review loop is started directly (not via auto-start), and that
@@ -1224,11 +1090,11 @@ class TestSelfDrivingQALoop:
         app._root = pm_dir
         app._data = data
         app._auto_start = False  # Self-driving works independently of auto-start
-        app._auto_start_target = None
+        app._auto_start_targets = {}
         app._qa_loops = {}
         app._review_loops = {}
         app._self_driving_qa = {
-            "pr-001": {"strict": False, "pass_count": 0, "required_passes": 1}
+            "pr-001": {"pass_count": 0, "required_passes": 1}
         }
         return app
 
@@ -1248,7 +1114,7 @@ class TestSelfDrivingQALoop:
              patch("pm_core.tui.qa_loop_ui._record_qa_note"):
             _on_qa_complete(app, state)
 
-        mock_review.assert_called_once_with(app, "pr-001", False)
+        mock_review.assert_called_once_with(app, "pr-001")
         # run_worker should NOT be called (not using auto-start path)
         app.run_worker.assert_not_called()
 
@@ -1271,25 +1137,6 @@ class TestSelfDrivingQALoop:
 
         assert app._self_driving_qa["pr-001"]["pass_count"] == 0
 
-    def test_strict_mode_passes_through(self, tmp_path):
-        """zzz t (strict=True) should pass strict=True to _start_self_driving_review."""
-        from pm_core.tui.qa_loop_ui import _on_qa_complete
-
-        app = self._make_app(tmp_path)
-        app._self_driving_qa["pr-001"]["strict"] = True
-
-        state = QALoopState(pr_id="pr-001")
-        state.latest_verdict = VERDICT_NEEDS_WORK
-
-        state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
-        state.scenario_verdicts = {1: VERDICT_NEEDS_WORK}
-
-        with patch("pm_core.tui.qa_loop_ui._start_self_driving_review") as mock_review, \
-             patch("pm_core.tui.qa_loop_ui._record_qa_note"):
-            _on_qa_complete(app, state)
-
-        mock_review.assert_called_once_with(app, "pr-001", True)
-
     def test_pass_increments_pass_count(self, tmp_path):
         """Self-driving QA PASS should increment pass_count."""
         from pm_core.tui.qa_loop_ui import _on_qa_complete
@@ -1311,8 +1158,9 @@ class TestSelfDrivingQALoop:
         assert app._self_driving_qa["pr-001"]["pass_count"] == 1
         mock_start.assert_called_once_with(app, "pr-001")
 
-    def test_pass_with_enough_passes_triggers_merge(self, tmp_path):
-        """Self-driving QA with enough consecutive passes triggers merge."""
+    def test_pass_with_enough_passes_no_auto_merge_without_auto_start(self, tmp_path):
+        """Manual zz t with enough consecutive passes clears state but does
+        NOT trigger a merge unless auto-start is enabled."""
         from pm_core.tui.qa_loop_ui import _on_qa_complete
 
         app = self._make_app(tmp_path)
@@ -1325,10 +1173,1331 @@ class TestSelfDrivingQALoop:
         state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
         state.scenario_verdicts = {1: VERDICT_PASS}
 
-        with patch("pm_core.tui.qa_loop_ui._trigger_auto_merge") as mock_merge, \
+        with patch("pm_core.tui.qa_loop_ui._trigger_signoff") as mock_merge, \
+             patch("pm_core.tui.auto_start.is_enabled", return_value=False), \
+             patch("pm_core.tui.qa_loop_ui._record_qa_note"):
+            _on_qa_complete(app, state)
+
+        mock_merge.assert_not_called()
+        # Self-driving state should be removed after reaching required passes
+        assert "pr-001" not in app._self_driving_qa
+
+    def test_pass_with_enough_passes_triggers_merge_when_auto_start(self, tmp_path):
+        """When auto-start is enabled, the merge still fires after enough passes."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = self._make_app(tmp_path)
+        # Explicit target: the hand-off is scoped to a target closure.
+        app._auto_start = True
+        app._auto_start_targets = {"pr-001": {}}
+        app._self_driving_qa["pr-001"]["required_passes"] = 2
+        app._self_driving_qa["pr-001"]["pass_count"] = 1
+
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_PASS
+
+        state.scenarios = [QAScenario(index=1, title="Test", focus="test")]
+        state.scenario_verdicts = {1: VERDICT_PASS}
+
+        with patch("pm_core.tui.qa_loop_ui._trigger_signoff") as mock_merge, \
+             patch("pm_core.tui.auto_start.is_enabled", return_value=True), \
              patch("pm_core.tui.qa_loop_ui._record_qa_note"):
             _on_qa_complete(app, state)
 
         mock_merge.assert_called_once_with(app, "pr-001")
-        # Self-driving state should be removed after reaching required passes
         assert "pr-001" not in app._self_driving_qa
+
+
+# ---------------------------------------------------------------------------
+# Verdict verification tests
+# ---------------------------------------------------------------------------
+
+class TestBuildVerificationPrompt:
+    """Tests for _build_verification_prompt."""
+
+    def test_includes_scenario_details_inline(self):
+        scenario = QAScenario(index=1, title="Login Flow", focus="auth",
+                              steps="1. Test login\n2. Test logout")
+        prompt = _build_verification_prompt(scenario, "PASS",
+                                            pane_output="Some output here")
+        assert "Login Flow" in prompt
+        assert "auth" in prompt
+        assert "Test login" in prompt
+        assert "PASS" in prompt
+        assert "Some output here" in prompt
+
+    def test_truncates_long_inline_output(self):
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        total = _VERIFICATION_MAX_PANE_LINES + 100
+        long_output = "\n".join([f"line {i}" for i in range(total)])
+        prompt = _build_verification_prompt(scenario, "PASS",
+                                            pane_output=long_output)
+        assert "omitted" in prompt.lower()
+        # Head lines should be present
+        assert "line 0" in prompt
+        # Tail lines (including the last line) should be present
+        assert f"line {total - 1}" in prompt
+
+    def test_file_path_mode_plain(self):
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        prompt = _build_verification_prompt(scenario, "PASS",
+                                            pane_output_path="/tmp/qa_verify.txt")
+        assert "/tmp/qa_verify.txt" in prompt
+        assert "Read that file" in prompt
+        assert "<scenario_output>" not in prompt
+        # Plain text file — no JSONL hint
+        assert "JSON Lines" not in prompt
+
+    def test_file_path_mode_jsonl(self):
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        prompt = _build_verification_prompt(
+            scenario, "PASS",
+            pane_output_path="/tmp/transcript-s1.jsonl")
+        assert "transcript-s1.jsonl" in prompt
+        assert "JSON Lines" in prompt
+
+    def test_includes_verification_instructions(self):
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        prompt = _build_verification_prompt(scenario, "PASS",
+                                            pane_output="output")
+        assert "VERIFIED" in prompt
+        assert "FLAGGED_START" in prompt
+        assert "FLAGGED_END" in prompt
+
+    def test_no_artifact_check_when_no_recipes(self):
+        # A scenario with no assigned artifact recipes must not get the
+        # artifact-completeness step; the judgment step stays at Step 3.
+        scenario = QAScenario(index=1, title="Test", focus="test", steps="steps")
+        prompt = _build_verification_prompt(scenario, "PASS",
+                                            pane_output="output")
+        assert "expected artifacts" not in prompt.lower()
+        assert "### Step 3: Make your judgment" in prompt
+
+    def test_artifact_check_present_when_recipes_assigned(self):
+        # When the scenario carries artifact recipes, the verifier is told to
+        # confirm the captures actually landed, the judgment step shifts to
+        # Step 4, and the recipe name + captures dir are named.
+        scenario = QAScenario(
+            index=2, title="Loop e2e", focus="loop", steps="steps",
+            artifact_paths=["/scratch/qa-artifacts/tmux-screen-recording.md"])
+        prompt = _build_verification_prompt(
+            scenario, "PASS", pane_output="output",
+            captures_scenario_dir="/caps/pr-x/scenarios/2")
+        assert "tmux-screen-recording.md" in prompt
+        assert "/caps/pr-x/scenarios/2" in prompt
+        # The judgment step is renumbered to Step 4 and the artifact rule
+        # is part of the FLAGGED criteria.
+        assert "### Step 4: Make your judgment" in prompt
+        assert ".cast" in prompt  # recording-vs-dump guidance present
+        # Missing/downgraded artifact without a valid reason -> FLAGGED.
+        assert "FLAGGED" in prompt
+
+
+class TestVerifySingleScenario:
+    """Tests for _verify_single_scenario."""
+
+    def _mock_verify(self, scenario, verdict, pane_output, poll_content,
+                     pr_data=None, project_data=None, qa_workdir="/tmp/qa",
+                     pr_workdir="/tmp/prworkdir"):
+        """Helper: run _verify_single_scenario with mocked tmux ops."""
+        mock_wid = MagicMock()
+        mock_wid.stdout = "@1"
+        mock_reg = {"windows": {}}
+        mock_wdata = {"user_modified": True}
+
+        def fake_extract(path, verdicts):
+            from pm_core.verdict_transcript import extract_verdict_from_transcript as real_extract
+            if path is None:
+                return None
+            # Scan the mocked poll_content with the same boundary rules as
+            # the real extractor by wrapping it as a fake assistant JSONL.
+            import json
+            fake = json.dumps({"type": "assistant", "message": {
+                "content": [{"type": "text", "text": poll_content or ""}],
+            }})
+            from pathlib import Path as _P
+            import tempfile, os
+            fd, fp = tempfile.mkstemp(suffix=".jsonl")
+            os.write(fd, fake.encode())
+            os.close(fd)
+            try:
+                return real_extract(fp, verdicts)
+            finally:
+                os.unlink(fp)
+
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.tmux.split_pane_at", return_value="%2"), \
+             patch("pm_core.qa_loop.poll_for_verdict", return_value=poll_content), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript", side_effect=fake_extract), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd", return_value="claude ..."), \
+             patch("subprocess.run", return_value=mock_wid), \
+             patch("pm_core.tmux.set_shared_window_size"), \
+             patch("pm_core.pane_registry.register_pane"), \
+             patch("pm_core.pane_registry.load_registry", return_value=mock_reg), \
+             patch("pm_core.pane_registry.get_window_data", return_value=mock_wdata), \
+             patch("pm_core.pane_registry.locked_read_modify_write"), \
+             patch("pm_core.pane_layout.rebalance"):
+            return _verify_single_scenario(
+                scenario, verdict, pane_output,
+                pr_data or {}, project_data or {},
+                session="pm-session",
+                qa_workdir=qa_workdir,
+                pr_workdir=pr_workdir,
+            )
+
+    def test_verified_result(self):
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        content = "The scenario looks good.\n\nVERIFIED"
+        passed, reason, _ = self._mock_verify(scenario, "PASS", "output", content)
+        assert passed is True
+        assert reason == ""
+
+    def test_flagged_result(self):
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        # Build realistic pane content: prompt + verifier output.
+        # The prompt itself contains example FLAGGED_END markers, so the
+        # content must include the prompt prefix for the filtering logic
+        # to correctly distinguish prompt examples from real output.
+        prompt = _build_verification_prompt(scenario, "PASS", pane_output="output")
+        content = (
+            prompt + "\n\n"
+            "FLAGGED_START\nThe scenario did not run any tests.\nFLAGGED_END"
+        )
+        passed, reason, _ = self._mock_verify(scenario, "PASS", "output", content)
+        assert passed is False
+        assert "did not run" in reason.lower()
+
+    def test_pane_split_failure_marks_unverified(self):
+        """If we can't split a pane, the scenario stays unverified so
+        finalize blocks instead of trusting the original verdict."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.tmux.split_pane_at", side_effect=Exception("split failed")), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd", return_value="claude ..."):
+            passed, reason, _ = _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+                session="pm-session", qa_workdir="/tmp/qa",
+                pr_workdir="/tmp/prworkdir",
+            )
+        assert passed is False
+        assert "split" in reason.lower()
+
+    def test_no_pane_marks_unverified(self):
+        """If scenario pane is gone, the scenario stays unverified."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None):
+            passed, reason, _ = _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+                session="pm-session", qa_workdir="/tmp/qa",
+            )
+        assert passed is False
+        assert "pane" in reason.lower()
+
+    def test_poll_returns_none_marks_unverified(self):
+        """If polling returns None (pane died), scenario stays unverified."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        passed, reason, _ = self._mock_verify(scenario, "PASS", "output", None)
+        assert passed is False
+        assert reason
+
+    def test_uses_transcript_when_available(self, tmp_path):
+        """When scenario has a transcript, prompt references the file."""
+        transcript = tmp_path / "transcript-s1.jsonl"
+        transcript.write_text('{"role":"assistant","content":"done"}\n')
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1",
+                              transcript_path=str(transcript))
+        mock_wid = MagicMock()
+        mock_wid.stdout = "@1"
+        mock_reg = {"windows": {}}
+        mock_wdata = {"user_modified": True}
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.tmux.split_pane_at", return_value="%2"), \
+             patch("pm_core.qa_loop.poll_for_verdict", return_value="VERIFIED"), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value="VERIFIED"), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   return_value="claude ...") as mock_cmd, \
+             patch("subprocess.run", return_value=mock_wid), \
+             patch("pm_core.tmux.set_shared_window_size"), \
+             patch("pm_core.pane_registry.register_pane"), \
+             patch("pm_core.pane_registry.load_registry", return_value=mock_reg), \
+             patch("pm_core.pane_registry.get_window_data", return_value=mock_wdata), \
+             patch("pm_core.pane_registry.locked_read_modify_write"), \
+             patch("pm_core.pane_layout.rebalance"):
+            passed, _, _ = _verify_single_scenario(
+                scenario, "PASS", "pane output", {}, {},
+                session="pm-session", pr_workdir="/tmp/prworkdir")
+        assert passed is True
+        # The prompt passed to build_claude_shell_cmd should reference transcript
+        call_kwargs = mock_cmd.call_args
+        assert str(transcript) in (call_kwargs.kwargs.get("prompt", "") or "")
+
+    def test_falls_back_to_pane_when_no_transcript(self):
+        """Without a transcript, pane output is inlined in the prompt."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        mock_wid = MagicMock()
+        mock_wid.stdout = "@1"
+        mock_reg = {"windows": {}}
+        mock_wdata = {"user_modified": True}
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.tmux.split_pane_at", return_value="%2"), \
+             patch("pm_core.qa_loop.poll_for_verdict", return_value="VERIFIED"), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   return_value="claude ...") as mock_cmd, \
+             patch("subprocess.run", return_value=mock_wid), \
+             patch("pm_core.tmux.set_shared_window_size"), \
+             patch("pm_core.pane_registry.register_pane"), \
+             patch("pm_core.pane_registry.load_registry", return_value=mock_reg), \
+             patch("pm_core.pane_registry.get_window_data", return_value=mock_wdata), \
+             patch("pm_core.pane_registry.locked_read_modify_write"), \
+             patch("pm_core.pane_layout.rebalance"):
+            _verify_single_scenario(
+                scenario, "PASS", "pane output", {}, {},
+                session="pm-session", qa_workdir="/tmp/qa",
+                pr_workdir="/tmp/prworkdir")
+        call_kwargs = mock_cmd.call_args
+        assert "pane output" in (call_kwargs.kwargs.get("prompt", "") or "")
+
+    def test_verifier_runs_in_pr_workdir(self, tmp_path):
+        """The verifier launches in the PR's canonical workdir (already
+        trusted) rather than the per-run hashed QA dir — so it never stalls
+        on Claude's interactive workspace-trust dialog."""
+        transcript = tmp_path / "qa" / "pr-x-deadbeef" / "transcript-s1.jsonl"
+        transcript.parent.mkdir(parents=True)
+        transcript.write_text('{"role":"assistant","content":"done"}\n')
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1",
+                              transcript_path=str(transcript))
+        pr_workdir = str(tmp_path / "workdirs" / "pm-pr-x")
+        mock_wid = MagicMock()
+        mock_wid.stdout = "@1"
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.tmux.split_pane_at", return_value="%2") as mock_split, \
+             patch("pm_core.qa_loop.poll_for_verdict", return_value="VERIFIED"), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value="VERIFIED"), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   return_value="claude ...") as mock_cmd, \
+             patch("subprocess.run", return_value=mock_wid), \
+             patch("pm_core.tmux.set_shared_window_size"), \
+             patch("pm_core.pane_registry.register_pane"), \
+             patch("pm_core.pane_registry.load_registry", return_value={"windows": {}}), \
+             patch("pm_core.pane_registry.get_window_data", return_value={"user_modified": True}), \
+             patch("pm_core.pane_registry.locked_read_modify_write"), \
+             patch("pm_core.pane_layout.rebalance"):
+            _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+                session="pm-session", qa_workdir="/tmp/qa",
+                pr_workdir=pr_workdir)
+        # Both the launch command and the tmux split use the PR workdir,
+        # not the hashed QA transcript dir.
+        assert mock_cmd.call_args.kwargs.get("cwd") == pr_workdir
+        assert mock_split.call_args.kwargs.get("cwd") == pr_workdir
+
+    def test_reverify_into_a_vanished_verifier_starts_a_new_one(
+            self, tmp_path):
+        """The verifier pane passes the liveness check, then dies before
+        the re-verification message lands: a new verifier pane runs the
+        check instead of the scenario being flagged as crashed."""
+        import subprocess
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1",
+                              pane_id="%1")
+        scenario.verifier_pane_id = "%7"
+        scenario.verifier_cwd = str(tmp_path)
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys", side_effect=subprocess.CalledProcessError(1, ["tmux"])), \
+             patch("pm_core.loop_shared.wait_for_follow_up_verdict") as wait:
+            passed, reason, vpane = self._mock_verify(
+                scenario, "PASS", "output", "Looks right.\n\nVERIFIED")
+        assert (passed, reason, vpane) == (True, "", "%2")
+        wait.assert_not_called()
+
+    def test_reverify_waits_on_the_verifier_pane(self, tmp_path):
+        """The follow-up wait watches the verifier pane itself: the worker
+        pane sharing the window would keep a dead verifier's wait alive."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1",
+                              pane_id="%1")
+        scenario.verifier_pane_id = "%7"
+        scenario.verifier_cwd = str(tmp_path)
+        scenario.verifier_transcript = str(tmp_path / "v.jsonl")
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.tmux.send_keys"), \
+             patch("pm_core.loop_shared.wait_for_follow_up_verdict",
+                   return_value=None) as wait:
+            passed, reason, _ = _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+                session="pm-session", qa_workdir="/tmp/qa",
+                pr_workdir="/tmp/prworkdir")
+        assert wait.call_args.kwargs["pane_id"] == "%7"
+        assert (passed, reason) == (False, "verifier pane disappeared")
+
+    def test_follow_up_wait_ends_when_its_pane_dies(self, tmp_path):
+        """wait_for_follow_up_verdict(pane_id=...) ends once that pane is
+        gone even though another pane keeps the window alive."""
+        from pm_core import loop_shared
+        tr = tmp_path / "00000000-0000-0000-0000-000000000001.jsonl"
+        tr.write_text("")
+        with patch("pm_core.loop_shared.find_claude_pane", return_value="%1"), \
+             patch("pm_core.tmux.pane_exists", return_value=False), \
+             patch("pm_core.hook_events.wait_for_event",
+                   side_effect=AssertionError("waited on a dead pane")):
+            assert loop_shared.wait_for_follow_up_verdict(
+                "sess", "qa-s1", str(tr), ("VERIFIED",), pane_id="%7") is None
+
+    def test_no_pr_workdir_marks_unverified(self):
+        """Without a PR workdir we fail loud rather than silently fall back
+        to the untrusted hashed QA dir (which would re-introduce the
+        trust-dialog stall)."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1")
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"):
+            passed, reason, _ = _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+                session="pm-session", qa_workdir="/tmp/qa",
+                pr_workdir=None)
+        assert passed is False
+        assert "cwd" in reason.lower()
+
+    def test_reverification_baselines_before_prompting_the_verifier(
+            self, tmp_path):
+        """pr-8efa789: the re-verification prompts the verifier and only then
+        waits, so the baseline must be snapshotted *before* the prompt — the
+        answer can land during the send/settle window, and a waiter scanning
+        at call time would reject it and block for a second verdict."""
+        import json
+
+        transcript = tmp_path / "verify-s1.jsonl"
+        transcript.write_text("\n".join([
+            json.dumps({"type": "user", "message": {
+                "role": "user", "content": [
+                    {"type": "text", "text": "verify the scenario"}]}}),
+            json.dumps({"type": "assistant", "message": {
+                "role": "assistant", "content": [
+                    {"type": "text", "text": "Reason: first round\nVERIFIED"}]}}),
+        ]) + "\n")
+        scenario = QAScenario(
+            index=1, title="Test", focus="test", steps="steps",
+            window_name="qa-s1", pane_id="%1",
+            verifier_pane_id="%7", verifier_session_id="vsid",
+            verifier_transcript=str(transcript),
+            verifier_cwd=str(tmp_path),
+        )
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   return_value="claude ..."), \
+             patch("pm_core.loop_shared.wait_for_follow_up_verdict",
+                   return_value="Reason: re-checked\nVERIFIED") as mock_wait, \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value="VERIFIED"):
+            passed, reason, _ = _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+                session="pm-session", qa_workdir=str(tmp_path),
+                pr_workdir="/tmp/prworkdir",
+            )
+        assert passed is True, reason
+        # The previous round's verdict sits on line 1; anything later is the
+        # answer to the prompt we just sent.
+        assert mock_wait.call_args.kwargs["baseline_line"] == 1
+
+
+class TestVerificationSetting:
+    """Tests for _is_verification_enabled global setting."""
+
+    def test_default_is_enabled(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value=""):
+            assert _is_verification_enabled() is True
+
+    def test_disabled_with_false(self):
+        for val in ("0", "false", "no", "off", "disabled", "False", "OFF"):
+            with patch("pm_core.paths.get_global_setting_value", return_value=val):
+                assert _is_verification_enabled() is False, f"Expected disabled for {val!r}"
+
+    def test_enabled_with_truthy(self):
+        for val in ("1", "true", "yes", "on"):
+            with patch("pm_core.paths.get_global_setting_value", return_value=val):
+                assert _is_verification_enabled() is True, f"Expected enabled for {val!r}"
+
+
+class TestExtractFlaggedReason:
+    """Tests for _extract_flagged_reason."""
+
+    def test_basic_extraction(self):
+        content = "Some preamble\nFLAGGED_START\nThe test was not run.\nFLAGGED_END"
+        assert _extract_flagged_reason(content) == "The test was not run."
+
+    def test_multiline_reason(self):
+        content = (
+            "FLAGGED_START\n"
+            "Step 2 was skipped entirely.\n"
+            "Step 4 used code reading instead of execution.\n"
+            "The scenario substituted unit tests for runtime testing.\n"
+            "FLAGGED_END"
+        )
+        reason = _extract_flagged_reason(content)
+        assert "Step 2" in reason
+        assert "Step 4" in reason
+        assert "substituted" in reason
+        assert "\n" in reason  # multiline preserved
+
+    def test_missing_end_marker(self):
+        content = "FLAGGED_START\nPartial reason without end"
+        reason = _extract_flagged_reason(content)
+        assert "Partial reason" in reason
+
+    def test_no_markers_returns_default(self):
+        content = "Some random output with no markers"
+        reason = _extract_flagged_reason(content)
+        assert reason == "Scenario did not properly exercise test cases"
+
+    def test_strips_markdown_formatting(self):
+        content = "FLAGGED_START\n**Bold** and `code` formatting\nFLAGGED_END"
+        reason = _extract_flagged_reason(content)
+        assert "Bold" in reason
+        assert "code" in reason
+
+    def test_empty_between_markers(self):
+        content = "FLAGGED_START\nFLAGGED_END"
+        reason = _extract_flagged_reason(content)
+        assert reason == "Scenario did not properly exercise test cases"
+
+    def test_skips_prompt_template_markers(self):
+        """Extracts reason from verifier output, not prompt template."""
+        content = (
+            "FLAGGED_START\n"
+            "<explanation of what went wrong>\n"
+            "FLAGGED_END\n"
+            "\n"
+            "Checklist analysis...\n"
+            "\n"
+            "FLAGGED_START\n"
+            "The scenario never ran the actual CLI tool\n"
+            "FLAGGED_END\n"
+        )
+        reason = _extract_flagged_reason(content)
+        assert reason == "The scenario never ran the actual CLI tool"
+
+
+class TestVerificationMaxRetries:
+    """Tests for _get_verification_max_retries global setting."""
+
+    def test_default_value(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value=""):
+            assert _get_verification_max_retries() == _DEFAULT_VERIFICATION_MAX_RETRIES
+
+    def test_custom_value(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value="3"):
+            assert _get_verification_max_retries() == 3
+
+    def test_zero_value(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value="0"):
+            assert _get_verification_max_retries() == 0
+
+    def test_invalid_value_returns_default(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value="abc"):
+            assert _get_verification_max_retries() == _DEFAULT_VERIFICATION_MAX_RETRIES
+
+    def test_negative_clamped_to_zero(self):
+        with patch("pm_core.paths.get_global_setting_value", return_value="-1"):
+            assert _get_verification_max_retries() == 0
+
+
+class TestInstallInstructionFile:
+    """Tests for _install_instruction_file."""
+
+    def test_copies_file_and_updates_path(self, tmp_path):
+        pm_root = tmp_path / "pm"
+        instr = pm_root / "qa" / "instructions"
+        instr.mkdir(parents=True)
+        (instr / "my-test.md").write_text("# Test\n")
+
+        scratch = tmp_path / "scratch"
+        scratch.mkdir()
+        scenario = QAScenario(index=1, title="T", focus="f", steps="s",
+                              instruction_path="instructions/my-test.md")
+        _install_instruction_file(pm_root, scenario, scratch,
+                                  scratch_dir="/scratch")
+        assert scenario.instruction_path == "/scratch/qa-instructions/my-test.md"
+        assert (scratch / "qa-instructions" / "my-test.md").exists()
+
+    def test_clears_path_when_file_missing(self, tmp_path):
+        pm_root = tmp_path / "pm"
+        (pm_root / "qa" / "instructions").mkdir(parents=True)
+        scratch = tmp_path / "scratch"
+        scratch.mkdir()
+        scenario = QAScenario(index=1, title="T", focus="f", steps="s",
+                              instruction_path="instructions/gone.md")
+        _install_instruction_file(pm_root, scenario, scratch,
+                                  scratch_dir="/scratch")
+        assert scenario.instruction_path is None
+
+    def test_noop_when_no_instruction(self, tmp_path):
+        scenario = QAScenario(index=1, title="T", focus="f", steps="s")
+        _install_instruction_file(tmp_path, scenario, tmp_path,
+                                  scratch_dir="/scratch")
+        assert scenario.instruction_path is None
+
+
+# ---------------------------------------------------------------------------
+# Retry logic for dead scenario windows
+# ---------------------------------------------------------------------------
+
+class TestScenarioRetryLogic:
+    """Tests for _poll_tmux_verdicts retry logic when windows die."""
+
+    def test_dead_window_triggers_relaunch(self, tmp_path):
+        """When _get_scenario_pane returns None, _relaunch_scenario_window is called."""
+        from pm_core.qa_loop import (
+            _poll_tmux_verdicts,
+            _SCENARIO_MAX_RETRIES,
+            _SCENARIO_RETRY_BASE,
+        )
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+
+        call_count = 0
+
+        def pane_side_effect(session, win_name):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 2:
+                return None  # Window dead for first 2 polls
+            return "%42"  # Window alive after relaunch
+
+        status_path = tmp_path / "status.json"
+
+        # With hook-driven polling, the scenario must have a session_id
+        # and read_event must return a fresh idle_prompt.
+        scenario.session_id = "sid-dead-window-1"
+        import time as _time
+        fake_event = {"event_type": "idle_prompt",
+                      "timestamp": _time.time() + 1000,
+                      "session_id": scenario.session_id}
+
+        with patch("pm_core.qa_loop._get_scenario_pane", side_effect=pane_side_effect), \
+             patch("pm_core.qa_loop._relaunch_scenario_window", return_value=True) as mock_relaunch, \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", side_effect=[
+                 0,    # grace_start
+                 100,  # 1st poll: past grace
+                 100,  # 1st poll: relaunch grace reset -> new grace_start
+                 200,  # 2nd poll: past grace
+                 200,  # 2nd poll: relaunch grace reset -> new grace_start
+                 300,  # 3rd poll: past grace
+             ]), \
+             patch("pm_core.hook_events.read_event", return_value=fake_event), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   return_value=VerdictHit("PASS", "PASS")), \
+             patch("pm_core.tmux.capture_pane", return_value="PASS"), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
+
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,
+            )
+
+        assert mock_relaunch.call_count == 2
+        assert state.scenario_verdicts[1] == VERDICT_PASS
+
+    def test_relaunched_pane_is_persisted_before_the_next_tick(self, tmp_path):
+        """S43 review: one tick relaunches dead scenarios one after another,
+        each after its retry backoff, and the snapshot used to be rewritten
+        only at the next tick.  A TUI death in between (here: during
+        scenario 2's backoff, after scenario 1 was relaunched) left the dead
+        pane id on disk, so the resumed run relaunched scenario 1 again
+        while its relaunched worker kept running.  The relaunched pane must
+        be on disk as soon as the relaunch returns."""
+        import itertools
+        from pm_core.qa_loop import _poll_tmux_verdicts, _load_resume_file
+
+        class TuiDied(Exception):
+            pass
+
+        state = QALoopState(pr_id="pr-001")
+        state.loop_id = "l1"
+        state.qa_workdir = str(tmp_path)
+        state.scenario_verdicts = {}
+        state.scenarios = []
+        for i in (1, 2):
+            sc = QAScenario(index=i, title=f"S{i}", focus="t")
+            sc.window_name = f"qa-pr-001-s{i}"
+            sc.pane_id = f"%dead{i}"
+            sc.session_id = f"sid-{i}"
+            state.scenarios.append(sc)
+
+        def relaunch(scenario, *a, **kw):
+            scenario.pane_id = f"%new{scenario.index}"
+            scenario.session_id = f"sid-new-{scenario.index}"
+            return True
+
+        sleeps = []
+
+        def sleep(secs):
+            sleeps.append(secs)
+            # 1: poll interval; 2: scenario 1 backoff; 3: scenario 2 backoff
+            if len(sleeps) == 3:
+                raise TuiDied
+
+        with patch("pm_core.qa_loop._relaunch_scenario_window",
+                   side_effect=relaunch) as mock_relaunch, \
+             patch("pm_core.qa_loop.time.sleep", side_effect=sleep), \
+             patch("pm_core.qa_loop.time.monotonic",
+                   side_effect=itertools.count(0, 100)), \
+             patch("pm_core.tmux.pane_exists",
+                   side_effect=lambda p: p.startswith("%new")), \
+             patch("pm_core.qa_loop._is_verification_enabled",
+                   return_value=False), \
+             pytest.raises(TuiDied):
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work",
+                tmp_path / "status.json", lambda *a: None,
+            )
+
+        assert mock_relaunch.call_count == 1
+        snap = _load_resume_file(tmp_path)
+        panes = {s["index"]: s.get("pane_id") for s in snap["scenarios"]}
+        assert panes == {1: "%new1", 2: "%dead2"}
+
+    def test_stop_during_backoff_does_not_relaunch(self, tmp_path):
+        """A stop (``z t`` fresh start) kills the scenario windows; the
+        stopped loop must not relaunch them after its retry backoff."""
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+
+        def sleep_side_effect(secs):
+            if secs >= 1:  # the retry backoff, not the poll interval
+                state.stop_requested = True
+
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
+             patch("pm_core.qa_loop._relaunch_scenario_window", return_value=True) as mock_relaunch, \
+             patch("pm_core.qa_loop.time.sleep", side_effect=sleep_side_effect), \
+             patch("pm_core.qa_loop.time.monotonic", return_value=100), \
+             patch("pm_core.qa_loop._write_status_file"):
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", tmp_path / "status.json",
+                lambda *a: None,
+            )
+
+        mock_relaunch.assert_not_called()
+        assert 1 not in state.scenario_verdicts
+
+    def test_retries_exhausted_gives_input_required(self, tmp_path):
+        """When all retries are used, scenario gets INPUT_REQUIRED."""
+        from pm_core.qa_loop import (
+            _poll_tmux_verdicts,
+            _SCENARIO_MAX_RETRIES,
+        )
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+
+        status_path = tmp_path / "status.json"
+
+        # Window always dead, relaunch always succeeds but window keeps dying
+        monotonic_values = [0]  # grace_start
+        for i in range(_SCENARIO_MAX_RETRIES + 1):
+            monotonic_values.append(100 + i)  # past grace
+            if i < _SCENARIO_MAX_RETRIES:
+                monotonic_values.append(100 + i)  # grace reset
+
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
+             patch("pm_core.qa_loop._relaunch_scenario_window", return_value=True) as mock_relaunch, \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", side_effect=monotonic_values), \
+             patch("pm_core.qa_loop._write_status_file"):
+
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,
+            )
+
+        assert mock_relaunch.call_count == _SCENARIO_MAX_RETRIES
+        assert state.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
+
+    def test_failed_relaunch_still_retries(self, tmp_path):
+        """A failed relaunch should not immediately give up — it should
+        increment the retry counter and try again on the next poll."""
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+
+        status_path = tmp_path / "status.json"
+
+        relaunch_results = [False, True]  # Fail first, succeed second
+        pane_results = [None, None, "%42"]  # Dead, dead, alive
+
+        # monotonic calls: grace_start, then per-poll in_grace check,
+        # plus grace_start reset on successful relaunch
+        monotonic_vals = [
+            0,    # initial grace_start
+            100,  # poll 1 in_grace check (past grace) → pane None → relaunch fails → continue
+            200,  # poll 2 in_grace check (past grace) → pane None → relaunch succeeds
+            200,  # grace_start reset after successful relaunch
+            300,  # poll 3 in_grace check (past grace) → pane alive → read verdict
+        ]
+
+        scenario.session_id = "sid-failed-relaunch-1"
+        import time as _time
+        fake_event = {"event_type": "idle_prompt",
+                      "timestamp": _time.time() + 1000,
+                      "session_id": scenario.session_id}
+
+        with patch("pm_core.qa_loop._get_scenario_pane", side_effect=pane_results), \
+             patch("pm_core.qa_loop._relaunch_scenario_window", side_effect=relaunch_results) as mock_relaunch, \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", side_effect=monotonic_vals), \
+             patch("pm_core.hook_events.read_event", return_value=fake_event), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   return_value=VerdictHit("PASS", "PASS")), \
+             patch("pm_core.tmux.capture_pane", return_value="PASS"), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
+
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,
+            )
+
+        # Should have attempted relaunch twice (once failed, once succeeded)
+        assert mock_relaunch.call_count == 2
+        assert state.scenario_verdicts[1] == VERDICT_PASS
+
+    def _container_relaunch(self, tmp_path, running, create=None):
+        """_relaunch_scenario_window in container mode with the scenario's
+        container *running* or not; returns (result, scenario, state, mock)."""
+        from pm_core import qa_loop
+        clone = tmp_path / "s-5" / "repo"
+        clone.mkdir(parents=True)
+        sc = QAScenario(index=5, title="S78 one", focus="f")
+        sc.window_name = "qa-pr-001-s5"
+        sc.worktree_path = str(clone)
+        sc.container_name = "pm-tag-qa-pr-001-l1-s5"
+        state = QALoopState(pr_id="pr-001")
+        state.qa_workdir = str(tmp_path)
+        state.session_tag = "tag"
+        state.scenario_verdicts = {}
+        pr_data = {"id": "pr-001", "branch": "pm/pr-001-x"}
+        with patch("pm_core.container.is_container_mode_enabled", return_value=True), \
+             patch("pm_core.container._runtime_available", return_value=True), \
+             patch("pm_core.container.container_is_running", return_value=running), \
+             patch("pm_core.container.load_container_config", return_value="cfg"), \
+             patch("pm_core.container.create_qa_container",
+                   side_effect=create) as mock_create, \
+             patch("pm_core.qa_loop._route_mounts",
+                   return_value={Path("/b"): "/run/pm-route"}), \
+             patch("pm_core.qa_loop._resolve_qa_model"), \
+             patch("pm_core.qa_loop._build_scenario_run_cmd",
+                   return_value=("podman exec -it x claude", str(clone))), \
+             patch("pm_core.tmux.find_window_by_name", return_value=None), \
+             patch("pm_core.tmux.new_window_get_pane", return_value="%9") as mock_win, \
+             patch("pm_core.tmux.pane_window_id", return_value=None):
+            ok = qa_loop._relaunch_scenario_window(
+                sc, state, {}, pr_data, "sess", str(tmp_path),
+                use_containers=True)
+        return ok, sc, state, mock_create, mock_win
+
+    def test_relaunch_recreates_a_removed_container(self, tmp_path):
+        """S78: ``pm container cleanup`` removed the scenario's container
+        under a live run.  The relaunch recreates it (same name, clone,
+        scratch, push branch and route mounts) before exec'ing into it,
+        instead of exec'ing into a missing container on every retry."""
+        ok, sc, state, mock_create, mock_win = self._container_relaunch(
+            tmp_path, running=False)
+        assert ok and sc.pane_id == "%9"
+        mock_create.assert_called_once_with(
+            name="pm-tag-qa-pr-001-l1-s5", config="cfg",
+            workdir=tmp_path / "s-5" / "repo",
+            scratch_path=tmp_path / "s-5" / "scratch",
+            allowed_push_branch="pm/pr-001-x", session_tag="tag",
+            pr_id="pr-001", route_mounts={Path("/b"): "/run/pm-route"})
+        mock_win.assert_called_once()
+        assert 5 not in state.scenario_verdicts
+
+    def test_relaunch_leaves_a_running_container_alone(self, tmp_path):
+        ok, sc, state, mock_create, _ = self._container_relaunch(
+            tmp_path, running=True)
+        assert ok
+        mock_create.assert_not_called()
+
+    def test_unrecreatable_container_fails_closed(self, tmp_path):
+        """When the container cannot be recreated the relaunch raises
+        ContainerLaunchError (infrastructure ERROR) and launches nothing:
+        container mode is an execution boundary, so it must not relaunch on
+        the host or record an invented INPUT_REQUIRED verdict."""
+        import pytest as _pytest
+        from pm_core.qa_loop import ContainerLaunchError
+        with _pytest.raises(ContainerLaunchError) as excinfo:
+            self._container_relaunch(
+                tmp_path, running=False, create=RuntimeError("image gone"))
+        msg = str(excinfo.value)
+        assert "pm-tag-qa-pr-001-l1-s5" in msg
+        assert "image gone" in msg
+        assert "pm container disable" in msg
+
+    def _container_first_launch(self, tmp_path, running):
+        """_launch_scenarios_in_containers for one scenario of a ``pm qa
+        run`` (loop id ``cli-<pr>``) with a container of that name *running*
+        or not; returns the ordered container calls."""
+        from pm_core import qa_loop
+        calls = MagicMock()
+        calls.create.side_effect = RuntimeError("stop after create")
+        calls.running.return_value = running
+        sc = QAScenario(index=1, title="S130 check", focus="f")
+        state = QALoopState(pr_id="pr-001", loop_id="cli-pr-001")
+        state.qa_workdir = str(tmp_path)
+        state.session_tag = "tag"
+        state.scenarios = [sc]
+        with patch("pm_core.qa_loop._route_mounts", return_value={}), \
+             patch("pm_core.container.load_container_config"), \
+             patch("pm_core.container.container_is_running", calls.running), \
+             patch("pm_core.container.remove_container", calls.remove), \
+             patch("pm_core.container.create_qa_container", calls.create), \
+             patch("pm_core.qa_loop.create_scenario_workdir",
+                   return_value=(tmp_path / "repo", tmp_path / "scratch")):
+            # The create failure is a fail-closed launch error now: the
+            # container call order is what this helper observes, and the
+            # raise is the contract under test elsewhere.
+            with pytest.raises(qa_loop.ContainerLaunchError):
+                qa_loop._launch_scenarios_in_containers(
+                    state, {}, {"id": "pr-001"}, "sess", None, str(tmp_path))
+        return [c[0] for c in calls.mock_calls], sc
+
+    def test_rerun_replaces_the_earlier_runs_container(self, tmp_path):
+        """S130: a second ``pm qa run`` of a PR re-clones the fixed
+        ``cli-<pr>`` scenario workdir.  The first run's container, still
+        running under the same name, mounts the deleted clone; it is removed
+        before the new one is created, not reused (a reused one died at once,
+        window after window)."""
+        names, _ = self._container_first_launch(tmp_path, running=True)
+        # The failed create also releases only its own (half-made) container.
+        assert names == ["running", "remove", "create", "remove"]
+
+    def test_first_run_creates_without_removing(self, tmp_path):
+        names, _ = self._container_first_launch(tmp_path, running=False)
+        # The failed create releases only its own container (never the
+        # earlier run's or another scenario's).
+        assert names == ["running", "create", "remove"]
+
+    def test_failed_recreate_stops_the_retry_ladder(self, tmp_path):
+        """A scenario that already carries a verdict is not retried.
+
+        The relaunch no longer records a verdict (a lost container now fails
+        the run closed with ``ContainerLaunchError``), so this exercises the
+        poll loop's defensive guard: when a scenario already has a verdict,
+        one relaunch attempt is made, the scenario is dropped from the retry
+        ladder, and the retry and outcome are surfaced as latest_output for
+        the TUI."""
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = QAScenario(index=5, title="S78 one", focus="t")
+        scenario.window_name = "qa-test-s5"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+        outputs = []
+
+        def relaunch(sc, st, *a, **kw):
+            st.scenario_verdicts[sc.index] = VERDICT_INPUT_REQUIRED
+            st.scenario_verdict_reasons[sc.index] = "container gone"
+            return False
+
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
+             patch("pm_core.qa_loop._relaunch_scenario_window",
+                   side_effect=relaunch) as mock_relaunch, \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", return_value=100), \
+             patch("pm_core.qa_loop._write_status_file"):
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", tmp_path / "status.json",
+                lambda *a: outputs.append(state.latest_output),
+            )
+
+        assert mock_relaunch.call_count == 1
+        assert state.scenario_verdicts[5] == VERDICT_INPUT_REQUIRED
+        assert "Scenario 5 window died — retry 1/10 (backoff 5s)" in outputs
+        assert state.latest_output == (
+            "Scenario 5 (S78 one): INPUT_REQUIRED (relaunch failed; keeping "
+            "its recorded verdict)")
+
+    def test_backoff_formula(self):
+        """Verify exponential backoff: 5 * 2^retries = 5, 10, 20, 40..."""
+        from pm_core.qa_loop import _SCENARIO_RETRY_BASE
+        assert _SCENARIO_RETRY_BASE == 5
+        for retries in range(5):
+            expected = 5 * (2 ** retries)
+            assert _SCENARIO_RETRY_BASE * (2 ** retries) == expected
+
+    def test_max_retries_constant(self):
+        from pm_core.qa_loop import _SCENARIO_MAX_RETRIES
+        assert _SCENARIO_MAX_RETRIES == 10
+
+
+class TestPollVerdictsAfterLoopWakeup:
+    """pr-8efa789: a /loop wakeup postscript must not hide the verdict."""
+
+    def _write_transcript(self, path):
+        import json
+
+        def assistant(text, uuid=""):
+            rec = {"type": "assistant", "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": text}],
+            }}
+            if uuid:
+                rec["uuid"] = uuid
+                rec["timestamp"] = "2026-05-13T14:00:00.000Z"
+            return json.dumps(rec)
+
+        tick = json.dumps({
+            "type": "user",
+            "isMeta": True,
+            "message": {"role": "user", "content": (
+                "# Autonomous loop tick (dynamic pacing)\n\n"
+                "Run the autonomous check using the loop instructions "
+                "established earlier in this conversation."
+            )},
+        })
+        prompt = json.dumps({
+            "type": "user",
+            "message": {"role": "user", "content": (
+                'You are running QA scenario 44: "INPUT_REQUIRED gate"'
+            )},
+        })
+        path.write_text("\n".join([
+            prompt,
+            assistant("Running the steps..."),
+            assistant("Reason: CP4/CP5 could not be exercised\nINPUT_REQUIRED",
+                      uuid="turn-verdict-44"),
+            tick,
+            assistant("Scenario 44 is complete; verdict already submitted as "
+                      "INPUT_REQUIRED with captures pushed. No further work "
+                      "to do — ending the loop.", uuid="turn-postscript-44"),
+        ]) + "\n")
+
+    def test_verdict_and_reason_survive_loop_wakeup(self, tmp_path):
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        transcript = tmp_path / "transcript-s1.jsonl"
+        self._write_transcript(transcript)
+        scenario = QAScenario(
+            index=1, title="Test", focus="t",
+            window_name="qa-test-s1", pane_id="%1",
+            transcript_path=str(transcript), session_id="sid-loop-1",
+        )
+        state = QALoopState(pr_id="pr-001")
+        state.qa_workdir = None  # skip snapshot writes inside the loop
+        state.scenarios = [scenario]
+        fake_event = {"event_type": "idle_prompt",
+                      "timestamp": 1e12, "session_id": scenario.session_id}
+        status_path = tmp_path / "status.json"
+
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", side_effect=[0, 100]), \
+             patch("pm_core.hook_events.read_event", return_value=fake_event), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._is_verification_enabled",
+                   return_value=False):
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,
+            )
+
+        assert state.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
+        assert state.scenario_verdict_reasons[1] == (
+            "CP4/CP5 could not be exercised"
+        )
+        source = state.scenario_verdict_sources[1]
+        assert source["session_id"] == "sid-loop-1"
+        assert source["turn_id"] == "turn-verdict-44"
+        assert source["pr_id"] == "pr-001"
+
+
+# ---------------------------------------------------------------------------
+# state._error wiring: written to status file and preserved through verdict aggregation
+# ---------------------------------------------------------------------------
+
+class TestStateErrorWiring:
+    """Tests that state._error is written to the status file and that it
+    prevents the verdict aggregation from overwriting INPUT_REQUIRED with PASS."""
+
+    def test_error_written_to_status_file(self, tmp_path):
+        """_write_status_file called with error=state._error writes the field."""
+        from pm_core.qa_loop import _write_status_file
+        import json
+
+        status_path = tmp_path / "status.json"
+        _write_status_file(
+            status_path, "pr-001", [], {},
+            error="Something went wrong.",
+        )
+        data = json.loads(status_path.read_text())
+        assert data["error"] == "Something went wrong."
+
+    def test_no_error_field_empty_by_default(self, tmp_path):
+        """Without error argument the field defaults to empty string."""
+        from pm_core.qa_loop import _write_status_file
+        import json
+
+        status_path = tmp_path / "status.json"
+        _write_status_file(status_path, "pr-001", [], {})
+        data = json.loads(status_path.read_text())
+        assert data.get("error", "") == ""
+
+    def test_error_prevents_pass_verdict(self, tmp_path):
+        """When state._error is set and no scenario verdicts exist, the
+        overall verdict should stay INPUT_REQUIRED, not be overwritten with PASS."""
+        from pm_core.qa_loop import _write_status_file
+        import json
+
+        # Simulate the verdict aggregation logic from run_qa_sync
+        verdicts = []
+        error = "No parseable scenarios found."
+        # Old (buggy) logic would pick PASS; new logic should pick INPUT_REQUIRED
+        if VERDICT_NEEDS_WORK in verdicts:
+            result = VERDICT_NEEDS_WORK
+        elif VERDICT_INPUT_REQUIRED in verdicts or error:
+            result = VERDICT_INPUT_REQUIRED
+        else:
+            result = VERDICT_PASS
+
+        assert result == VERDICT_INPUT_REQUIRED
+
+
+# ---------------------------------------------------------------------------
+# Spec gate: state.running is set to False on early return
+# ---------------------------------------------------------------------------
+
+class TestSpecGateRunningFlag:
+    """The spec gate early-return must set state.running = False so that
+    the QA loop UI's _on_qa_complete callback fires."""
+
+    def test_spec_gate_sets_running_false(self, tmp_path, monkeypatch):
+        """run_qa_sync must set state.running=False when spec gate fires."""
+        from pm_core.qa_loop import run_qa_sync, QALoopState
+        from pm_core import store
+
+        # The QA workdir lives under ~/.pm/workdirs/qa — keep it out of the
+        # real home (it leaked pr-specgate-* dirs into live QA sessions).
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+        pr_id = "pr-specgate"
+        pm_dir = tmp_path / "pm"
+        pm_dir.mkdir()
+        workdir = tmp_path / "work"
+        workdir.mkdir()
+        (workdir / ".git").mkdir()
+
+        pr_entry = {
+            "id": pr_id,
+            "title": "Test PR",
+            "description": "Test",
+            "branch": "pm/test",
+            "status": "qa",
+            "workdir": str(workdir),
+        }
+        data = {
+            "project": {
+                "name": "test",
+                "repo": str(tmp_path),
+                "base_branch": "master",
+                "backend": "local",
+            },
+            "prs": [pr_entry],
+            "plans": [],
+        }
+        store.save(data, pm_dir)
+
+        state = QALoopState(pr_id=pr_id)
+        # planning_phase=False + pre-loaded scenarios skips Phase 1
+        state.planning_phase = False
+        state.scenarios = [QAScenario(index=1, title="T", focus="t")]
+
+        with patch("pm_core.qa_loop.get_pm_session", return_value="pm-session"), \
+             patch("pm_core.store.load", return_value=data), \
+             patch("pm_core.store.get_pr", return_value=pr_entry), \
+             patch("pm_core.qa_loop._get_qa_spec", return_value=None), \
+             patch("pm_core.cli.helpers._ensure_workdir", return_value=str(workdir)), \
+             patch("pm_core.qa_loop._resolve_qa_model", return_value=(None, None, None)):
+            run_qa_sync(state, pm_dir, pr_entry, lambda *a: None)
+
+        assert not state.running, "state.running must be False after spec gate fires"
+        assert state.latest_verdict == VERDICT_INPUT_REQUIRED
+
+
+class TestParseNewMocksFromPlan:
+    def _wrap(self, body: str) -> str:
+        return f"QA_PLAN_START\n{body}\nQA_PLAN_END"
+
+    def test_empty_output_returns_empty(self):
+        assert parse_new_mocks_from_plan("") == []
+
+    def test_no_new_mock_blocks(self):
+        output = self._wrap("SCENARIO 1: Test\nFOCUS: f\nSTEPS: s\n")
+        assert parse_new_mocks_from_plan(output) == []
+
+    def test_single_new_mock(self):
+        output = self._wrap(
+            "NEW_MOCK: claude-session\n"
+            "DEPENDENCY: Anthropic Claude API\n"
+            "REASON: Avoid real API calls in tests\n\n"
+            "SCENARIO 1: Test\nFOCUS: f\nSTEPS: s\n"
+        )
+        mocks = parse_new_mocks_from_plan(output)
+        assert len(mocks) == 1
+        assert mocks[0].mock_id == "claude-session"
+        assert "Anthropic" in mocks[0].dependency
+        assert "real API" in mocks[0].reason
+
+    def test_multiple_new_mocks(self):
+        output = self._wrap(
+            "NEW_MOCK: claude-session\n"
+            "DEPENDENCY: Claude API\n"
+            "REASON: Scripted responses\n\n"
+            "NEW_MOCK: git-ops\n"
+            "DEPENDENCY: Git operations\n"
+            "REASON: Avoid side effects\n\n"
+            "SCENARIO 1: Test\nFOCUS: f\nSTEPS: s\n"
+        )
+        mocks = parse_new_mocks_from_plan(output)
+        assert len(mocks) == 2
+        ids = {m.mock_id for m in mocks}
+        assert ids == {"claude-session", "git-ops"}
+
+    def test_mock_id_sanitised(self):
+        """Spaces and special chars in mock ID are normalised."""
+        output = self._wrap(
+            "NEW_MOCK: Claude Session Mock\n"
+            "DEPENDENCY: Claude API\n"
+            "REASON: x\n"
+        )
+        mocks = parse_new_mocks_from_plan(output)
+        assert mocks[0].mock_id == "claude-session-mock"
+
+    def test_placeholder_mock_id_skipped(self):
+        output = self._wrap("NEW_MOCK: <mock-id>\nDEPENDENCY: x\nREASON: y\n")
+        assert parse_new_mocks_from_plan(output) == []
+
+
+class TestParseQaPlanMocksField:
+    def test_mocks_parsed_per_scenario(self):
+        output = """QA_PLAN_START
+SCENARIO 1: Test spec generation
+FOCUS: spec impl
+INSTRUCTION: none
+MOCKS: claude-session, git-ops
+STEPS: run pm pr spec
+
+SCENARIO 2: Test without mocks
+FOCUS: cli
+INSTRUCTION: none
+MOCKS: none
+STEPS: run pm pr list
+QA_PLAN_END"""
+        scenarios = parse_qa_plan(output)
+        assert scenarios[0].mock_ids == ["claude-session", "git-ops"]
+        assert scenarios[1].mock_ids == []
+
+    def test_missing_mocks_field_defaults_to_empty(self):
+        output = """QA_PLAN_START
+SCENARIO 1: Legacy scenario
+FOCUS: something
+INSTRUCTION: none
+STEPS: do something
+QA_PLAN_END"""
+        scenarios = parse_qa_plan(output)
+        assert scenarios[0].mock_ids == []
+
+
+class TestStoppedRunAggregation:
+    """A run stopped before every scenario has a verdict is not a PASS."""
+
+    def _finalize(self, state, tmp_path):
+        from pm_core import qa_loop
+        with patch("pm_core.qa_loop._poll_tmux_verdicts"), \
+             patch("pm_core.qa_loop._write_status_file") as write_status, \
+             patch("pm_core.qa_loop._write_resume_file"), \
+             patch("pm_core.qa_loop._persist_scenario_verdicts"), \
+             patch("pm_core.qa_loop._run_qa_finalize_pane", return_value=None):
+            qa_loop._execute_and_finalize(
+                state, tmp_path, {"branch": "b"}, {}, "pm-test", "qa-w",
+                str(tmp_path), tmp_path / "status.json", None,
+                use_containers=False, concurrency_cap=0,
+                queued_scenarios=[], notify=lambda: None)
+        return write_status.call_args.kwargs["overall"]
+
+    def test_missing_verdict_is_input_required(self, tmp_path):
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [QAScenario(index=3, title="A", focus="a"),
+                           QAScenario(index=4, title="B", focus="b")]
+        state.scenario_verdicts = {3: VERDICT_PASS}
+        state.stop_requested = True
+        overall = self._finalize(state, tmp_path)
+        assert state.latest_verdict == VERDICT_INPUT_REQUIRED
+        assert overall == VERDICT_INPUT_REQUIRED
+
+    def test_all_verdicts_pass(self, tmp_path):
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [QAScenario(index=3, title="A", focus="a"),
+                           QAScenario(index=4, title="B", focus="b")]
+        state.scenario_verdicts = {3: VERDICT_PASS, 4: VERDICT_PASS}
+        assert self._finalize(state, tmp_path) == VERDICT_PASS
+
+
+class TestSnapshotBeforeOverall:
+    """S47: the snapshot carries the final verdicts before overall is
+    published (a restart recovers a run with an overall from it)."""
+
+    def test_snapshot_has_verdicts_when_overall_is_published(self, tmp_path):
+        from pm_core import qa_loop
+        state = QALoopState(pr_id="pr-001")
+        state.qa_workdir = str(tmp_path)
+        state.scenarios = [QAScenario(index=3, title="A", focus="a"),
+                           QAScenario(index=4, title="B", focus="b")]
+        seen = {}
+
+        def poll(st, *a, **k):  # the verdicts land during the poll
+            st.scenario_verdicts.update({3: VERDICT_PASS, 4: VERDICT_PASS})
+
+        def status(*a, overall=None, **k):  # the driver may die right after
+            if overall:
+                seen.update(qa_loop._load_resume_file(tmp_path) or {})
+
+        with patch("pm_core.qa_loop._poll_tmux_verdicts", side_effect=poll), \
+             patch("pm_core.qa_loop._write_status_file", side_effect=status), \
+             patch("pm_core.qa_loop._persist_scenario_verdicts"), \
+             patch("pm_core.qa_loop._run_qa_finalize_pane", return_value=None):
+            qa_loop._execute_and_finalize(
+                state, tmp_path, {"branch": "b"}, {}, "pm-test", "qa-w",
+                str(tmp_path), tmp_path / "status.json", None,
+                use_containers=False, concurrency_cap=0,
+                queued_scenarios=[], notify=lambda: None)
+
+        assert seen.get("scenario_verdicts") == {"3": VERDICT_PASS,
+                                                 "4": VERDICT_PASS}
+        rebuilt = qa_loop.build_resume_state(seen)
+        assert qa_loop.qa_outcome_detail(rebuilt) == "A: PASS; B: PASS"

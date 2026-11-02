@@ -1,5 +1,6 @@
 """Tests for pm_core.review_loop and pm_core.prompt_gen review loop prompt."""
 
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -12,18 +13,11 @@ from pm_core.review_loop import (
     PaneKilledError,
     ReviewLoopState,
     ReviewIteration,
-    _extract_verdict_from_content,
     _match_verdict,
     VERDICT_PASS,
-    VERDICT_PASS_WITH_SUGGESTIONS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
     VERDICT_KILLED,
-    _REVIEW_KEYWORDS,
-)
-from pm_core.loop_shared import (
-    build_prompt_verdict_lines as _build_prompt_verdict_lines,
-    is_prompt_line as _is_prompt_line,
 )
 
 
@@ -35,13 +29,6 @@ class TestParseReviewVerdict:
 
     def test_pass_plain(self):
         assert parse_review_verdict("PASS") == VERDICT_PASS
-
-    def test_pass_with_suggestions(self):
-        output = "Minor style issues.\n\n**PASS_WITH_SUGGESTIONS**\n\n- Consider renaming foo"
-        assert parse_review_verdict(output) == VERDICT_PASS_WITH_SUGGESTIONS
-
-    def test_pass_with_suggestions_bold(self):
-        assert parse_review_verdict("**PASS_WITH_SUGGESTIONS**") == VERDICT_PASS_WITH_SUGGESTIONS
 
     def test_needs_work(self):
         output = "Found bugs.\n\n**NEEDS_WORK**\n\n- Fix the null check"
@@ -55,11 +42,6 @@ class TestParseReviewVerdict:
 
     def test_no_verdict_defaults_to_needs_work(self):
         assert parse_review_verdict("This code has issues but no clear verdict") == VERDICT_NEEDS_WORK
-
-    def test_pass_not_confused_with_suggestions(self):
-        """A line with just PASS should not match PASS_WITH_SUGGESTIONS."""
-        output = "All good.\n\nPASS"
-        assert parse_review_verdict(output) == VERDICT_PASS
 
     def test_verdict_on_own_line_wins(self):
         """Only a keyword on its own line is detected."""
@@ -109,9 +91,6 @@ class TestMatchVerdictFalsePositives:
     def test_pr_title_with_needs_work(self):
         assert _match_verdict("Fix NEEDS_WORK detection in review loop verdict parser") is None
 
-    def test_pr_title_with_pass_with_suggestions(self):
-        assert _match_verdict("Handle PASS_WITH_SUGGESTIONS in auto-merge logic") is None
-
     def test_pm_pr_list_table_row(self):
         assert _match_verdict("| pr-473ac84 | Add INPUT_REQUIRED verdict to review loop | merged |") is None
 
@@ -123,7 +102,6 @@ class TestMatchVerdictFalsePositives:
         """Bare keyword on a line by itself."""
         assert _match_verdict("PASS") == VERDICT_PASS
         assert _match_verdict("NEEDS_WORK") == VERDICT_NEEDS_WORK
-        assert _match_verdict("PASS_WITH_SUGGESTIONS") == VERDICT_PASS_WITH_SUGGESTIONS
         assert _match_verdict("INPUT_REQUIRED") == VERDICT_INPUT_REQUIRED
 
     def test_bold_verdicts_match(self):
@@ -131,7 +109,6 @@ class TestMatchVerdictFalsePositives:
         assert _match_verdict("**PASS**") == VERDICT_PASS
         assert _match_verdict("**NEEDS_WORK**") == VERDICT_NEEDS_WORK
         assert _match_verdict("**INPUT_REQUIRED**") == VERDICT_INPUT_REQUIRED
-        assert _match_verdict("**PASS_WITH_SUGGESTIONS**") == VERDICT_PASS_WITH_SUGGESTIONS
 
     def test_whitespace_around_keyword(self):
         """Leading/trailing whitespace should be stripped."""
@@ -181,199 +158,16 @@ def _get_real_prompt() -> str:
 from tests.conftest import simulate_terminal_wrap as _simulate_terminal_wrap
 
 
-class TestExtractVerdictFromContent:
-    """Tests for _extract_verdict_from_content with prompt filtering."""
-
-    def test_real_verdict_detected_without_prompt(self):
-        content = "\n".join(["line"] * 40 + ["**PASS**"])
-        assert _extract_verdict_from_content(content) == VERDICT_PASS
-
-    def test_real_verdict_after_prompt(self):
-        """A standalone verdict after long Claude output IS detected."""
-        prompt = _get_real_prompt()
-        content = prompt + "\n\n" + "\n".join(["review text"] * 40) + "\n\n**PASS**"
-        assert _extract_verdict_from_content(content, prompt_text=prompt) == VERDICT_PASS
-
-    def test_real_needs_work_after_prompt(self):
-        prompt = _get_real_prompt()
-        content = prompt + "\n\n" + "\n".join(["review text"] * 40) + "\n\n**NEEDS_WORK**"
-        assert _extract_verdict_from_content(content, prompt_text=prompt) == VERDICT_NEEDS_WORK
-
-    def test_real_pass_with_suggestions_after_prompt(self):
-        prompt = _get_real_prompt()
-        content = prompt + "\n\n" + "\n".join(["review text"] * 40) + "\n\n**PASS_WITH_SUGGESTIONS**"
-        assert _extract_verdict_from_content(content, prompt_text=prompt) == VERDICT_PASS_WITH_SUGGESTIONS
-
-    def test_no_prompt_text_no_false_positive(self):
-        """Without prompt text, verdict keywords embedded in sentences are NOT detected."""
-        prompt = _get_real_prompt()
-        assert _extract_verdict_from_content(prompt) is None
-
-    # --- Reproduce the actual failure from the log ---
-    # The pane shows the prompt as a CLI argument.  The terminal wraps
-    # the long command line.  Verdict keywords from the prompt end up
-    # in the tail 30 lines of captured pane content.
-
-    def test_raw_prompt_not_detected(self):
-        """The raw prompt text (unwrapped) should not produce a verdict."""
-        prompt = _get_real_prompt()
-        assert _extract_verdict_from_content(prompt, prompt_text=prompt) is None
-
-    def test_terminal_wrapped_prompt_not_detected(self):
-        """The prompt displayed on a terminal (wrapped at 80 cols) should not produce a verdict."""
-        prompt = _get_real_prompt()
-        wrapped = _simulate_terminal_wrap(prompt, width=80)
-        assert _extract_verdict_from_content(wrapped, prompt_text=prompt) is None
-
-    def test_terminal_wrapped_prompt_narrow_not_detected(self):
-        """Same test but for a narrow terminal (e.g. split pane at 60 cols)."""
-        prompt = _get_real_prompt()
-        wrapped = _simulate_terminal_wrap(prompt, width=60)
-        assert _extract_verdict_from_content(wrapped, prompt_text=prompt) is None
-
-    def test_exact_failure_from_log(self):
-        """Reproduce the exact line that caused a false positive in the log.
-
-        The log showed:
-          ACCEPTED verdict line: [PASS**, **PASS_WITH_SUGGESTIONS**, or **NEEDS_WORK**.]
-        This is a terminal-wrapped fragment of the IMPORTANT line in the prompt.
-        The IMPORTANT line now includes INPUT_REQUIRED, so test the updated fragment.
-        """
-        prompt = _get_real_prompt()
-        # Build pane content where the tail contains wrapped IMPORTANT line fragments
-        pane_lines = ["$ claude 'prompt...'"] + ["loading..."] * 60
-        # Old format (without INPUT_REQUIRED)
-        pane_lines.append("PASS**, **PASS_WITH_SUGGESTIONS**, **NEEDS_WORK**, or **INPUT_REQUIRED**.")
-        content = "\n".join(pane_lines)
-        assert _extract_verdict_from_content(content, prompt_text=prompt) is None
-
-    def test_important_line_fragments_at_various_widths(self):
-        """The IMPORTANT line wraps differently at different terminal widths.
-
-        All fragments must be filtered as prompt text, not real verdicts.
-        """
-        prompt = _get_real_prompt()
-        # Find the IMPORTANT line in the prompt
-        important_line = ""
-        for line in prompt.splitlines():
-            if "IMPORTANT" in line and "PASS" in line:
-                important_line = line
-                break
-        assert important_line, "Prompt should contain an IMPORTANT line with verdict keywords"
-
-        # Wrap at various widths and check each fragment
-        for width in (60, 80, 100, 120):
-            wrapped_lines = []
-            remaining = important_line
-            while len(remaining) > width:
-                wrapped_lines.append(remaining[:width])
-                remaining = remaining[width:]
-            wrapped_lines.append(remaining)
-
-            for fragment in wrapped_lines:
-                stripped = fragment.strip().strip("*").strip()
-                if any(v in stripped for v in ("PASS", "NEEDS_WORK")):
-                    # This fragment has a verdict keyword — it must be identified as prompt
-                    pane = "\n".join(["other text"] * 40 + [fragment])
-                    result = _extract_verdict_from_content(pane, prompt_text=prompt)
-                    assert result is None, (
-                        f"Fragment at width={width} falsely detected as {result}: [{fragment}]"
-                    )
-
-    def test_verdict_line_variations_from_prompt_all_filtered(self):
-        """Every line in the prompt that contains a verdict keyword should be filtered."""
-        prompt = _get_real_prompt()
-        for line in prompt.splitlines():
-            stripped = line.strip().strip("*").strip()
-            if not stripped:
-                continue
-            has_verdict = any(v in stripped for v in ("PASS_WITH_SUGGESTIONS", "NEEDS_WORK", "PASS"))
-            if not has_verdict:
-                continue
-            # This prompt line has a verdict keyword — build pane content
-            # with it in the tail and check it's filtered
-            pane = "\n".join(["other text"] * 40 + [line])
-            result = _extract_verdict_from_content(pane, prompt_text=prompt)
-            assert result is None, (
-                f"Prompt line falsely detected as {result}: [{line.strip()}]"
-            )
-
-
-class TestBuildPromptVerdictLines:
-    def test_extracts_verdict_lines_from_real_prompt(self):
-        prompt = _get_real_prompt()
-        lines = _build_prompt_verdict_lines(prompt, _REVIEW_KEYWORDS)
-        assert any("PASS" in line for line in lines)
-        assert any("NEEDS_WORK" in line for line in lines)
-        assert any("PASS_WITH_SUGGESTIONS" in line for line in lines)
-        assert len(lines) >= 7  # at least 7 lines in the prompt mention verdicts (including INPUT_REQUIRED)
-
-    def test_empty_prompt(self):
-        assert _build_prompt_verdict_lines("", _REVIEW_KEYWORDS) == set()
-
-
-class TestIsPromptLine:
-    def test_exact_match(self):
-        prompt_lines = {"PASS — No changes needed. The code is ready to merge as-is."}
-        assert _is_prompt_line("PASS — No changes needed. The code is ready to merge as-is.", prompt_lines, _REVIEW_KEYWORDS) is True
-
-    def test_substring_match_wrapped_line(self):
-        prompt_lines = {"PASS_WITH_SUGGESTIONS — Only non-blocking suggestions remain (style nits, minor refactors, optional improvements)."}
-        assert _is_prompt_line("PASS_WITH_SUGGESTIONS — Only non-blocking suggestions remain", prompt_lines, _REVIEW_KEYWORDS) is True
-
-    def test_standalone_verdict_not_prompt(self):
-        """A standalone verdict keyword like 'PASS' is NOT from the prompt."""
-        prompt_lines = {"PASS — No changes needed. The code is ready to merge as-is."}
-        assert _is_prompt_line("PASS", prompt_lines, _REVIEW_KEYWORDS) is False
-
-    def test_standalone_needs_work_not_prompt(self):
-        prompt_lines = {"NEEDS_WORK — Blocking issues found."}
-        assert _is_prompt_line("NEEDS_WORK", prompt_lines, _REVIEW_KEYWORDS) is False
-
-    def test_standalone_pass_with_suggestions_not_prompt(self):
-        prompt_lines = {"PASS_WITH_SUGGESTIONS — Only non-blocking suggestions remain."}
-        assert _is_prompt_line("PASS_WITH_SUGGESTIONS", prompt_lines, _REVIEW_KEYWORDS) is False
-
-    def test_real_verdict_with_context_from_claude(self):
-        """Claude says 'Overall: PASS' — context 'Overall' not in prompt."""
-        prompt_lines = {"PASS — No changes needed. The code is ready to merge as-is."}
-        assert _is_prompt_line("Overall: PASS", prompt_lines, _REVIEW_KEYWORDS) is False
-
-    def test_prompt_output_line(self):
-        """The prompt line 'Output: PASS' IS from the prompt."""
-        prompt_lines = {"- Output: PASS"}
-        assert _is_prompt_line("Output: PASS", prompt_lines, _REVIEW_KEYWORDS) is True
-
-    def test_exact_failure_line_from_log(self):
-        """The exact line from the log that caused a false positive."""
-        prompt = _get_real_prompt()
-        prompt_lines = _build_prompt_verdict_lines(prompt, _REVIEW_KEYWORDS)
-        # After strip().strip("*").strip(), the log showed a wrapped fragment
-        # of the IMPORTANT line.  Updated to include INPUT_REQUIRED.
-        line = "PASS**, **PASS_WITH_SUGGESTIONS**, **NEEDS_WORK**, or **INPUT_REQUIRED**."
-        assert _is_prompt_line(line, prompt_lines, _REVIEW_KEYWORDS) is True
-
-
-# --- should_stop tests ---
 
 class TestShouldStop:
-    def test_pass_always_stops(self):
+    def test_pass_stops(self):
         assert should_stop(VERDICT_PASS) is True
-        assert should_stop(VERDICT_PASS, stop_on_suggestions=False) is True
-
-    def test_suggestions_stops_by_default(self):
-        assert should_stop(VERDICT_PASS_WITH_SUGGESTIONS) is True
-
-    def test_suggestions_continues_when_configured(self):
-        assert should_stop(VERDICT_PASS_WITH_SUGGESTIONS, stop_on_suggestions=False) is False
 
     def test_needs_work_never_stops(self):
         assert should_stop(VERDICT_NEEDS_WORK) is False
-        assert should_stop(VERDICT_NEEDS_WORK, stop_on_suggestions=False) is False
 
     def test_input_required_never_stops(self):
         assert should_stop(VERDICT_INPUT_REQUIRED) is False
-        assert should_stop(VERDICT_INPUT_REQUIRED, stop_on_suggestions=False) is False
 
 
 # --- ReviewLoopState tests ---
@@ -387,13 +181,8 @@ class TestReviewLoopState:
         assert state.iteration == 0
         assert state.latest_verdict == ""
         assert state.history == []
-        assert state.stop_on_suggestions is True
         # loop_id is auto-generated
         assert len(state.loop_id) == 4  # 2 bytes = 4 hex chars
-
-    def test_strict_mode(self):
-        state = ReviewLoopState(pr_id="pr-001", stop_on_suggestions=False)
-        assert state.stop_on_suggestions is False
 
     def test_unique_loop_ids(self):
         """Each state gets a unique loop_id."""
@@ -424,7 +213,7 @@ class TestRunReviewLoopSync:
     def test_stops_on_pass(self, mock_review):
         mock_review.return_value = "All good.\n\n**PASS**"
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
         assert result.iteration == 1
         assert result.latest_verdict == VERDICT_PASS
         assert result.running is False
@@ -439,34 +228,13 @@ class TestRunReviewLoopSync:
             "All good.\n\n**PASS**",
         ]
         state = ReviewLoopState(pr_id="pr-001")
-        run_review_loop_sync(state, "/tmp", _PR_DATA)
+        run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
         # First call: iteration=1, second call: iteration=2
         calls = mock_review.call_args_list
         assert calls[0].kwargs["iteration"] == 1
         assert calls[0].kwargs["loop_id"] == state.loop_id
         assert calls[1].kwargs["iteration"] == 2
         assert calls[1].kwargs["loop_id"] == state.loop_id
-
-    @patch("pm_core.review_loop._run_claude_review")
-    def test_stops_on_suggestions_by_default(self, mock_review):
-        mock_review.return_value = "Minor nits.\n\n**PASS_WITH_SUGGESTIONS**"
-        state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
-        assert result.iteration == 1
-        assert result.latest_verdict == VERDICT_PASS_WITH_SUGGESTIONS
-        assert result.running is False
-
-    @patch("pm_core.review_loop._run_claude_review")
-    def test_continues_past_suggestions_when_configured(self, mock_review):
-        mock_review.side_effect = [
-            "Minor nits.\n\n**PASS_WITH_SUGGESTIONS**",
-            "All good.\n\n**PASS**",
-        ]
-        state = ReviewLoopState(pr_id="pr-001", stop_on_suggestions=False)
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
-        assert result.iteration == 2
-        assert result.latest_verdict == VERDICT_PASS
-        assert len(result.history) == 2
 
     @patch("pm_core.review_loop._run_claude_review")
     def test_loops_on_needs_work(self, mock_review):
@@ -476,7 +244,7 @@ class TestRunReviewLoopSync:
             "All good.\n\n**PASS**",
         ]
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
         assert result.iteration == 3
         assert result.latest_verdict == VERDICT_PASS
         assert len(result.history) == 3
@@ -485,7 +253,7 @@ class TestRunReviewLoopSync:
     def test_respects_max_iterations(self, mock_review):
         mock_review.return_value = "**NEEDS_WORK**"
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA, max_iterations=3)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp", max_iterations=3)
         assert result.iteration == 3
         assert result.latest_verdict == VERDICT_NEEDS_WORK
         assert mock_review.call_count == 3
@@ -500,7 +268,7 @@ class TestRunReviewLoopSync:
 
         mock_review.side_effect = side_effect
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
         assert result.iteration == 1
         assert result.running is False
 
@@ -514,7 +282,7 @@ class TestRunReviewLoopSync:
 
         mock_review.side_effect = side_effect
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
         assert result.iteration == 1
         assert result.running is False
         # Iteration completed and verdict was recorded
@@ -526,14 +294,14 @@ class TestRunReviewLoopSync:
         mock_review.return_value = "**PASS**"
         callback = MagicMock()
         state = ReviewLoopState(pr_id="pr-001")
-        run_review_loop_sync(state, "/tmp", _PR_DATA, on_iteration=callback)
+        run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp", on_iteration=callback)
         callback.assert_called_once_with(state)
 
     @patch("pm_core.review_loop._run_claude_review")
     def test_handles_exception(self, mock_review):
         mock_review.side_effect = RuntimeError("setup failure")
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
         assert result.latest_verdict == "ERROR"
         assert result.running is False
 
@@ -542,11 +310,273 @@ class TestRunReviewLoopSync:
         """When the pane is killed externally, loop stops with KILLED verdict."""
         mock_review.side_effect = PaneKilledError("pane disappeared")
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
         assert result.latest_verdict == VERDICT_KILLED
         assert result.running is False
         assert result.iteration == 1
         mock_review.assert_called_once()
+
+
+# --- pr-e040aeb: a failed next-iteration launch is retried -----------------
+
+def test_failed_launch_is_retried_not_terminal(tmp_path, monkeypatch):
+    """The next iteration's ``pm pr review`` child fails (the historical
+    window is closed, container setup then fails).  Pre-fix this ended the
+    loop with ERROR on the first attempt; the fix retries the same
+    iteration and collects its own verdict."""
+    import uuid
+
+    from pm_core import review_loop as rl
+    from pm_core import tmux
+
+    monkeypatch.setattr(rl, "_get_pm_session", lambda: "pm-s")
+    monkeypatch.setattr(tmux, "session_exists", lambda _s: True)
+    monkeypatch.setattr(rl, "_find_claude_pane", lambda *a, **k: "%9")
+    monkeypatch.setattr(rl, "_find_review_claude_pane", lambda *a, **k: "%9",
+                        raising=False)
+    monkeypatch.setattr(rl, "_poll_for_verdict", lambda *a, **k: "**PASS**")
+    # Post-fix seams: discovery says nothing is live; retries are instant.
+    if hasattr(rl, "_discover_iteration"):
+        monkeypatch.setattr(
+            rl, "_discover_iteration",
+            lambda *a, **k: rl.AttemptDiscovery("launch"))
+        monkeypatch.setattr(rl, "REVIEW_LAUNCH_BACKOFF_BASE", 0.0)
+        monkeypatch.setattr(rl, "REVIEW_LAUNCH_BACKOFF_MAX", 0.0)
+        monkeypatch.setattr(rl, "_WINDOW_WAIT", 0.0)
+        monkeypatch.setattr(rl, "_pr_is_terminal", lambda *a, **k: False)
+        monkeypatch.setattr(rl, "_claim_launch", lambda *a, **k: True)
+
+    calls = []
+
+    def fake_run(cmd, **_kw):
+        # Only the launch child counts: ``rl.subprocess`` *is* the global
+        # ``subprocess`` module, so the episode-start pane snapshot's ambient
+        # ``tmux display-message`` probe would otherwise consume the "first
+        # call fails" slot — the loop would succeed on its first real launch
+        # and this test would pass without ever exercising a retry.
+        if "--review-loop" not in cmd:
+            return MagicMock(returncode=0, stdout="", stderr="")
+        calls.append(cmd)
+        if len(calls) == 1:
+            return MagicMock(returncode=1, stdout="",
+                             stderr="Failed to create container")
+        # The child created the iteration transcript before running Claude.
+        t = cmd[cmd.index("--transcript") + 1]
+        link = Path(t)
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(link.parent / f"{uuid.uuid4()}.jsonl")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(rl.subprocess, "run", fake_run)
+
+    state = ReviewLoopState(pr_id="pr-001")
+    run_review_loop_sync(state, str(tmp_path), _PR_DATA,
+                         transcript_dir=str(tmp_path))
+    assert len(calls) == 2, "the failed launch must be retried, not terminal"
+    assert state.iteration == 1
+    assert state.latest_verdict == VERDICT_PASS
+
+
+class TestResumeInFlightIteration:
+    """A breadcrumb-resumed loop adopts the iteration still running in its
+    review window instead of relaunching (which killed the window)."""
+
+    @patch("pm_core.review_loop._run_claude_review")
+    @patch("pm_core.review_loop._adopt_in_flight_review")
+    def test_adopts_live_iteration(self, mock_adopt, mock_review):
+        mock_adopt.return_value = "All good.\n\n**PASS**"
+        state = ReviewLoopState(pr_id="pr-001", iteration=1,
+                                _transcript_dir="/saved")
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        mock_review.assert_not_called()
+        assert mock_adopt.call_args.args[2] == "/saved"
+        assert result.iteration == 1
+        assert result.latest_verdict == VERDICT_PASS
+        assert [h.iteration for h in result.history] == [1]
+
+    @patch("pm_core.review_loop._run_claude_review")
+    @patch("pm_core.review_loop._adopt_in_flight_review")
+    def test_continues_after_adopted_needs_work(self, mock_adopt, mock_review):
+        mock_adopt.return_value = "**NEEDS_WORK**"
+        mock_review.return_value = "**PASS**"
+        state = ReviewLoopState(pr_id="pr-001", iteration=2,
+                                history=[ReviewIteration(1, "NEEDS_WORK", "")])
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        assert mock_review.call_args.kwargs["iteration"] == 3
+        assert [h.iteration for h in result.history] == [1, 2, 3]
+
+    @patch("pm_core.review_loop._run_claude_review")
+    @patch("pm_core.review_loop._adopt_in_flight_review")
+    def test_reruns_same_iteration_when_nothing_live(self, mock_adopt, mock_review):
+        mock_adopt.return_value = None
+        mock_review.return_value = "**PASS**"
+        state = ReviewLoopState(pr_id="pr-001", iteration=1)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        assert mock_review.call_args.kwargs["iteration"] == 1
+        assert result.iteration == 1
+
+    @patch("pm_core.review_loop._run_claude_review")
+    @patch("pm_core.review_loop._adopt_in_flight_review")
+    def test_completed_iteration_not_adopted(self, mock_adopt, mock_review):
+        mock_review.return_value = "**PASS**"
+        state = ReviewLoopState(pr_id="pr-001", iteration=1,
+                                history=[ReviewIteration(1, "NEEDS_WORK", "")])
+        run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        mock_adopt.assert_not_called()
+        assert mock_review.call_args.kwargs["iteration"] == 2
+
+
+class _Clock:
+    """Fake monotonic clock: each sleep() advances it."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps = 0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, s):
+        self.sleeps += 1
+        self.now += s
+
+
+class TestAdoptWaitsForInFlightLaunch:
+    """S82: a TUI restart while the loop's container-mode ``pm pr review``
+    was still creating its container left no window to adopt yet, so the
+    resumed loop relaunched the same iteration and two review windows ran.
+    The resumed loop now waits for that launch's window."""
+
+    def _setup(self, tmp_path, *, symlink=True, started=False):
+        import uuid
+        tdir = tmp_path / "t"
+        tdir.mkdir()
+        target = tmp_path / f"{uuid.uuid4()}.jsonl"
+        if started:
+            target.write_text("{}\n")
+        if symlink:
+            (tdir / "review-pr-001-i1.jsonl").symlink_to(target)
+        # The breadcrumb restores ``iteration_attempted``: the pre-restart
+        # loop had started this iteration's launch.
+        state = ReviewLoopState(pr_id="pr-001", iteration=1,
+                                _transcript_dir=str(tdir),
+                                iteration_attempted=True)
+        return state, str(tdir)
+
+    def _adopt(self, state, tdir, panes):
+        from pm_core import review_loop
+        clock = _Clock()
+        find = MagicMock(side_effect=panes)
+        with patch("pm_core.review_loop._get_pm_session", return_value="pm-s"), \
+             patch("pm_core.review_loop._find_claude_pane", find), \
+             patch("pm_core.review_loop.time.monotonic", clock.monotonic), \
+             patch("pm_core.review_loop.time.sleep", clock.sleep), \
+             patch("pm_core.hook_events.read_event", return_value=None), \
+             patch("pm_core.review_loop._poll_for_verdict",
+                   return_value="**PASS**") as poll:
+            out = review_loop._adopt_in_flight_review(state, _PR_DATA, tdir)
+        return out, poll, find, clock
+
+    def test_adopts_window_that_opens_after_restart(self, tmp_path):
+        state, tdir = self._setup(tmp_path)
+        # (discovery looks the window's pane up again once it opened)
+        out, poll, find, clock = self._adopt(
+            state, tdir, [None] * 12 + ["%7"] * 3)
+        assert out == "**PASS**"
+        assert poll.call_args.args[0] == "%7"
+        assert clock.sleeps == 11  # the first of the 12 misses is the pre-wait lookup
+
+    def test_session_that_ran_without_window_is_rerun(self, tmp_path):
+        state, tdir = self._setup(tmp_path, started=True)
+        out, poll, find, clock = self._adopt(state, tdir, [None] * 5)
+        assert out is None
+        poll.assert_not_called()
+        assert clock.sleeps == 0
+
+    def test_launch_that_never_opens_gives_up_at_launch_timeout(self, tmp_path):
+        from pm_core.review_loop import _LAUNCH_TIMEOUT
+        state, tdir = self._setup(tmp_path)
+        out, poll, find, clock = self._adopt(state, tdir, [None] * 500)
+        assert out is None
+        poll.assert_not_called()
+        assert clock.now == _LAUNCH_TIMEOUT
+
+    def test_missing_symlink_waits_only_the_short_grace(self, tmp_path):
+        from pm_core.review_loop import _IN_FLIGHT_SYMLINK_GRACE
+        state, tdir = self._setup(tmp_path, symlink=False)
+        out, poll, find, clock = self._adopt(state, tdir, [None] * 500)
+        assert out is None
+        assert clock.now == _IN_FLIGHT_SYMLINK_GRACE
+
+    def test_failed_attempts_symlink_is_not_waited_on(self, tmp_path):
+        """S133: after this iteration's last launch attempt failed (an
+        auto-start re-arm, a restart inside the backoff), its dangling
+        symlink is that dead attempt's: nothing is in flight to wait for."""
+        state, tdir = self._setup(tmp_path)
+        state.retry_iteration = 1
+        state.last_attempt_failed = True
+        out, poll, find, clock = self._adopt(state, tdir, [None] * 500)
+        assert out is None
+        poll.assert_not_called()
+        assert clock.sleeps == 0
+
+    def test_failed_attempt_of_an_earlier_iteration_still_waits(self, tmp_path):
+        from pm_core.review_loop import _LAUNCH_TIMEOUT
+        state, tdir = self._setup(tmp_path)
+        state.retry_iteration = 0  # the flag is about another iteration
+        state.last_attempt_failed = True
+        out, poll, find, clock = self._adopt(state, tdir, [None] * 500)
+        assert out is None
+        assert clock.now == _LAUNCH_TIMEOUT
+
+    def test_rearmed_loop_relaunches_at_once(self, tmp_path):
+        """S133: a re-armed LAUNCH_FAILED loop resumed at iteration 1 with no
+        history relaunched only after waiting the whole launch timeout on
+        the failed attempt's symlink.  It now relaunches straight away."""
+        from pm_core.review_loop import AttemptDiscovery
+        state, tdir = self._setup(tmp_path)
+        state.retry_iteration = 1
+        state.last_attempt_failed = True
+        state.latest_verdict = "LAUNCH_FAILED"
+        clock = _Clock()
+        at_launch = []
+
+        def relaunch(*_a, **kw):
+            at_launch.append(clock.now)
+            return "**PASS**"
+
+        with patch("pm_core.review_loop._get_pm_session", return_value="pm-s"), \
+             patch("pm_core.review_loop._find_claude_pane", return_value=None), \
+             patch("pm_core.review_loop._discover_iteration",
+                   return_value=AttemptDiscovery("launch")), \
+             patch("pm_core.review_loop._claim_launch", return_value=True), \
+             patch("pm_core.review_loop._pr_is_terminal", return_value=False), \
+             patch("pm_core.review_loop.time.monotonic", clock.monotonic), \
+             patch("pm_core.review_loop.time.sleep", clock.sleep), \
+             patch("pm_core.review_loop._run_claude_review",
+                   side_effect=relaunch) as run:
+            result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir=tdir)
+        assert run.call_count == 1
+        assert run.call_args.kwargs["iteration"] == 1
+        assert at_launch == [0.0]
+        assert result.latest_verdict == VERDICT_PASS
+        assert result.last_attempt_failed is False
+
+    def test_resumed_loop_does_not_relaunch_late_window(self, tmp_path):
+        state, tdir = self._setup(tmp_path)
+        clock = _Clock()
+        with patch("pm_core.review_loop._get_pm_session", return_value="pm-s"), \
+             patch("pm_core.review_loop._find_claude_pane",
+                   side_effect=[None, None] + ["%7"] * 5), \
+             patch("pm_core.review_loop.time.monotonic", clock.monotonic), \
+             patch("pm_core.review_loop.time.sleep", clock.sleep), \
+             patch("pm_core.hook_events.read_event", return_value=None), \
+             patch("pm_core.review_loop._poll_for_verdict", return_value="**PASS**"), \
+             patch("pm_core.review_loop._run_claude_review") as relaunch:
+            result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir=tdir)
+        relaunch.assert_not_called()
+        assert result.iteration == 1
+        assert result.latest_verdict == VERDICT_PASS
 
 
 class TestStartReviewLoopBackground:
@@ -556,7 +586,7 @@ class TestStartReviewLoopBackground:
         state = ReviewLoopState(pr_id="pr-001")
         complete_callback = MagicMock()
         thread = start_review_loop_background(
-            state, "/tmp", _PR_DATA,
+            state, "/tmp", _PR_DATA, transcript_dir="/tmp",
             on_complete=complete_callback,
         )
         thread.join(timeout=5)
@@ -609,13 +639,14 @@ class TestGenerateReviewPrompt:
         prompt = generate_review_prompt(data, "pr-001", review_loop=True)
         assert "pm/pr-001-add-feature" in prompt
 
-    def test_includes_all_three_verdicts(self):
+    def test_includes_all_verdicts(self):
         from pm_core.prompt_gen import generate_review_prompt
         data = self._make_data()
         prompt = generate_review_prompt(data, "pr-001", review_loop=True)
         assert "PASS" in prompt
-        assert "PASS_WITH_SUGGESTIONS" in prompt
         assert "NEEDS_WORK" in prompt
+        assert "INPUT_REQUIRED" in prompt
+        assert "PASS_WITH_SUGGESTIONS" not in prompt
 
     def test_includes_base_review_content(self):
         from pm_core.prompt_gen import generate_review_prompt
@@ -665,20 +696,18 @@ class TestMultipleLoops:
         """Two loops for different PRs track state independently."""
         mock_review.return_value = "**PASS**"
         state_a = ReviewLoopState(pr_id="pr-001")
-        state_b = ReviewLoopState(pr_id="pr-002", stop_on_suggestions=False)
+        state_b = ReviewLoopState(pr_id="pr-002")
 
         pr_data_a = {"id": "pr-001", "branch": "pm/pr-001"}
         pr_data_b = {"id": "pr-002", "branch": "pm/pr-002"}
 
-        run_review_loop_sync(state_a, "/tmp/a", pr_data_a)
-        run_review_loop_sync(state_b, "/tmp/b", pr_data_b)
+        run_review_loop_sync(state_a, "/tmp/a", pr_data_a, transcript_dir="/tmp/a")
+        run_review_loop_sync(state_b, "/tmp/b", pr_data_b, transcript_dir="/tmp/b")
 
         assert state_a.pr_id == "pr-001"
         assert state_b.pr_id == "pr-002"
         assert state_a.iteration == 1
         assert state_b.iteration == 1
-        assert state_a.stop_on_suggestions is True
-        assert state_b.stop_on_suggestions is False
         # Each loop has a unique ID
         assert state_a.loop_id != state_b.loop_id
 
@@ -694,7 +723,7 @@ class TestInputRequired:
         mock_follow_up.return_value = "Tests passed.\n\n**PASS**"
 
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
 
         assert result.latest_verdict == VERDICT_PASS
         assert result.iteration == 1
@@ -715,7 +744,7 @@ class TestInputRequired:
         mock_follow_up.return_value = "Issues found after testing.\n\n**NEEDS_WORK**"
 
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
 
         # First iteration: INPUT_REQUIRED → NEEDS_WORK from follow-up
         # Second iteration: PASS from fresh review
@@ -730,7 +759,7 @@ class TestInputRequired:
         mock_follow_up.return_value = None  # pane disappeared
 
         state = ReviewLoopState(pr_id="pr-001")
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
 
         assert result.latest_verdict == VERDICT_KILLED
         assert result.input_required is False
@@ -750,7 +779,7 @@ class TestInputRequired:
         state = ReviewLoopState(pr_id="pr-001")
         mock_follow_up.side_effect = side_effect
 
-        result = run_review_loop_sync(state, "/tmp", _PR_DATA)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
 
         assert result.input_required is False
         assert result.running is False
@@ -776,7 +805,7 @@ class TestGenerateReviewPromptInputRequired:
         data = self._make_data()
         prompt = generate_review_prompt(data, "pr-001")
         assert "INPUT_REQUIRED" in prompt
-        assert "human judgment" in prompt
+        assert "needs the user's attention" in prompt
 
     def test_review_loop_prompt_includes_input_required(self):
         from pm_core.prompt_gen import generate_review_prompt
@@ -784,4 +813,61 @@ class TestGenerateReviewPromptInputRequired:
         prompt = generate_review_prompt(data, "pr-001", review_loop=True)
         assert "INPUT_REQUIRED" in prompt
         # Should explain that it's reserved for genuine ambiguities
-        assert "human judgment" in prompt
+        assert "needs the user's attention" in prompt
+
+
+# --- _launch_review_window failure ---
+
+def test_launch_failure_is_an_error_verdict_without_traceback(caplog):
+    """A ``pm pr review`` launch that exits non-zero (a work route down)
+    ends the loop with a LAUNCH_FAILED verdict (pr-e040aeb: retryable, not
+    an agent verdict) naming the child's stderr, and is logged without a
+    traceback (S84: one ERROR line in the pm debug log)."""
+    import logging
+    from pm_core import review_loop
+    err = "work route 'w' unavailable: router not reachable at 127.0.0.1:1"
+
+    def launch_only(pr_id, pm_root, pr_data, **kw):
+        review_loop._launch_review_window(pr_id, pm_root, iteration=kw["iteration"])
+
+    logger = logging.getLogger("pm.review_loop")  # propagate=False
+    logger.addHandler(caplog.handler)
+    try:
+        with patch.object(review_loop.subprocess, "run", return_value=MagicMock(
+                returncode=1, stdout="", stderr=err)), \
+                patch.object(review_loop, "REVIEW_LAUNCH_BACKOFF_BASE", 0.01), \
+                patch.object(review_loop, "REVIEW_LAUNCH_BACKOFF_MAX", 0.01), \
+                patch.object(review_loop, "_run_claude_review", side_effect=launch_only):
+            state = ReviewLoopState(pr_id="pr-001")
+            run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+    finally:
+        logger.removeHandler(caplog.handler)
+    assert state.latest_verdict == review_loop.VERDICT_LAUNCH_FAILED
+    assert state.latest_output == f"Review window launch failed (rc=1): {err}"
+    failed = [r for r in caplog.records
+              if "review launch failed on iteration" in r.getMessage()]
+    assert len(failed) == 1 and err in failed[0].getMessage()
+    assert caplog.records and all(r.exc_info is None for r in caplog.records)
+
+
+# --- _launch_review_window child timeout ---
+
+def test_launch_child_outlives_the_return_clear_wait():
+    """The ``pm pr review --fresh --review-loop`` child may wait up to
+    RETURN_CLEAR_WAIT_SECONDS past its lock timeout to clear a sign-off
+    return's ``awaiting`` after its window opened; the loop must not kill
+    it first (S81: a 150 s project.yaml holder left ``awaiting`` and the
+    claim behind the live window, and a tick relaunched over it)."""
+    from pm_core import review_loop, store
+    from pm_core.signoff import RETURN_CLEAR_WAIT_SECONDS
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen.update(kw)
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with patch.object(review_loop.subprocess, "run", side_effect=fake_run):
+        review_loop._launch_review_window("pr-x", "/tmp", iteration=1)
+    assert seen["timeout"] >= (review_loop._LAUNCH_TIMEOUT
+                               + store.LOCK_TIMEOUT_SECONDS
+                               + RETURN_CLEAR_WAIT_SECONDS)
