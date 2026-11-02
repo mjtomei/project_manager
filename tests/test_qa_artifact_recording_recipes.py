@@ -7260,7 +7260,10 @@ class TestCaptureFlowExecution:
             "recorder session anyway: "
             + (calls.read_text() if calls.exists() else ""))
 
-    def test_tmux_driving_step_refuses_a_missing_capture_dir(self, tmp_path):
+    @pytest.mark.parametrize(
+        "shape", ["missing", 0o600], ids=["missing", "no-search-bit"])
+    def test_tmux_driving_step_refuses_a_capture_dir_it_cannot_read(
+            self, tmp_path, shape):
         """Step 4's failure path saves the pane into ``<capture-dir>``.
 
         The save is `capture-pane … > <capture-dir>/recorder-pane.log
@@ -7271,18 +7274,38 @@ class TestCaptureFlowExecution:
         with the same path then reports as a missing recording. Refuse it
         before any send, so the block neither drives a TUI nor acts on a
         recorder it cannot report on.
+
+        Mode 600 is the same state for a reader: the directory exists with
+        the write bit and no search bit, so only the guard's ``-x`` half sees
+        it. That half had no case — the missing-path shape fails on ``-d``
+        either way — and removing it left the whole file green (392 passed,
+        verified) while the block then drove the TUI and exited 0. Every
+        other capture-directory guard here runs in both permission shapes
+        for exactly this reason.
         """
+        if shape == "missing":
+            capture = tmp_path / "missing"
+        else:
+            if not hasattr(os, "geteuid") or os.geteuid() == 0:
+                pytest.skip("root bypasses the directory permission bits")
+            capture = tmp_path / "cap"
+            capture.mkdir()
+            capture.chmod(shape)
         sends = tmp_path / "sends"
         calls = tmp_path / "tmux-calls"
-        r, _cast = _run_block(
-            _driving_block(), "ok", tmp_path, target=True,
-            sessions=("pm-recorder",), capture=tmp_path / "missing",
-            env_extra={"STUB_TMUX_LOG": str(calls),
-                       "STUB_PM_SEND_LOG": str(sends)})
+        try:
+            r, _cast = _run_block(
+                _driving_block(), "ok", tmp_path, target=True,
+                sessions=("pm-recorder",), capture=capture,
+                env_extra={"STUB_TMUX_LOG": str(calls),
+                           "STUB_PM_SEND_LOG": str(sends)})
+        finally:
+            if shape != "missing":
+                capture.chmod(0o700)
 
         assert r.returncode != 0, (
-            "the driving step accepted a capture directory that does not "
-            "exist, so its failure path would save the pane nowhere")
+            f"{shape}: the driving step accepted a capture directory it "
+            "cannot read, so its failure path would save the pane nowhere")
         assert "missing or cannot be read" in r.stderr, r.stderr
         assert not sends.exists(), (
             "the driving step sent keys before refusing its capture "

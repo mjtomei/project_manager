@@ -46,9 +46,13 @@ substitutes the actual captures directory for `<capture-dir>`):
 - `recorder.command-done` — the mark the recorded command leaves when it
   returns: the completion handle step 4 reads, because asciinema's own exit
   status is 0 when it is *stopped* as well as when it finishes (step 4
-  explains why). It is present in every finished capture; name it in the
-  manifest's `## Files` section, and its absence means the recording did not
-  finish.
+  explains why). It is present in every finished capture **of the no-TTY
+  scaffold**, the only form below that writes it: the one-command, manual
+  and scripted forms run asciinema directly, with no mark and no step 4 —
+  asciinema exits 0 when it is stopped there too, so an automated capture
+  uses the scaffold rather than one of them. Name the mark in the
+  manifest's `## Files` section when the scaffold produced it, and its
+  absence there means the recording did not finish.
 - `manifest.md` — frontmatter + prose: workdir, the exact command(s)
   recorded, what the recording demonstrates, pre/post-fix state if
   relevant. Include a `## Files` section listing every non-default
