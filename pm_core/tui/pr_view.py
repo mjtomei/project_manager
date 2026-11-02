@@ -803,6 +803,8 @@ def handle_command_submitted(app, cmd: str) -> None:
     if len(parts) >= 3 and parts[0] == "plan" and parts[1] == "add":
         pane_ops.launch_pane(app, f"pm {cmd}", "plan-add")
         app._load_state()
+    elif len(parts) >= 2 and parts[0] == "qa" and parts[1] == "regression":
+        pane_ops.launch_regression_command(app, parts[2:])
     else:
         # Detect if this should run async (PR commands are long-running)
         working_message = None

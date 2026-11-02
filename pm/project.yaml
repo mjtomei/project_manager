@@ -25576,45 +25576,71 @@ prs:
   notes: []
 - id: pr-7d5d036
   plan: plan-regression
-  title: 'Bug: pm tui test hardcodes "testing against the pm tmux session" — wrong
-    for containers and for non-pm targets'
+  title: Retire legacy regression scenarios and reuse the container/recipe launch
+    path
   branch: pm/pr-7d5d036-bug-pm-tui-test-hardcodes-testing-against-the-pm-t
-  status: pending
+  status: in_progress
   depends_on:
   - pr-abcf70f
   - pr-9603d04
-  description: "## Symptom\n\n`pm tui test <id>` always prepends a Session Context\
-    \ that says:\n\n    You are testing against tmux session: <pm-session>\n\n   \
-    \ To interact with this session, use commands like:\n    - pm tui view -s <pm-session>\n\
-    \    - pm tui send <keys> -s <pm-session>\n    - tmux list-panes -t <pm-session>\
-    \ ...\n    - cat ~/.pm/pane-registry/<pm-session>.json\n\nThat framing assumes\
-    \ (a) every regression test drives a tmux session,\nand (b) that session is the\
-    \ user's running pm session.\n\nBoth assumptions are wrong:\n\n- A regression\
-    \ test running inside a container has no tmux session\n  to target (there isn't\
-    \ one in the container).\n- Even outside a container, pointing the test at the\
-    \ user's main pm\n  session is the wrong default — it pollutes the user's actual\
-    \ work\n  state, can race with whatever the user is doing, and isn't isolated\n\
-    \  from one test run to the next.\n\n## Diagnosis\n\n`pm_core/cli/tui.py:574-583`\
-    \ builds `full_prompt` with the session\nname interpolated as a hard \"you are\
-    \ testing against this session\"\npreamble, plus pm-flavored helpers. `pm_core/cli/helpers.py:_find_tui_pane`\n\
-    also forces the runner to bail out if the user doesn't have a pm\nsession up.\n\
-    \n## Proposed direction\n\nRegression tests should be like QA scenarios: run in\
-    \ their own\nephemeral environment (container or scratch dir) and let the test\n\
-    body set up whatever surface it needs.\n\nConcretely:\n- Drop the hardcoded \"\
-    testing against tmux session: X\" preamble.\n- Remove the requirement that a pm\
-    \ session is running. The test runs\n  wherever the runner is invoked.\n- If a\
-    \ test wants to drive a tmux session, it spins one up itself in\n  its body (or\
-    \ via an `INSTRUCTION:` reference). Same for any other\n  surface — server, CLI,\
-    \ web app.\n- Keep `pm tui send` / `pm tui view` available as helpers for tests\n\
-    \  that DO want to drive a pm TUI, but don't bake them into the\n  Session Context\
-    \ for every test.\n\n## Out of scope\n\n- Changing the QA scenario runner.\n-\
-    \ Adding new driving primitives."
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  description: 'User direction, 2026-11-01: remove the legacy agent regression scenarios
+    instead of porting them now. The cost of reviewing and executing the whole migrated
+    corpus is not justified for the delivery MVP. This is the first of two near-term
+    PRs; pr-2680fbf owns standard-scenario reuse and automatic authoring. Full historical
+    porting remains pr-c77561b, deferred until costs fall and the user chooses to
+    resume it.
+
+
+    Scope:
+
+    - Inventory and remove the old-style agent regression definitions under pm/qa/regression
+    from the active library/discovery inputs. Record their exact paths and pre-removal
+    Git revision so the later port can recover every definition. Record the intentional
+    coverage gap; removal is not equivalent coverage or a passing rerun.
+
+    - Keep the existing automated unit/integration tests, shared setup/execution/capture
+    recipes, mocks, historical QA evidence and unrelated current work. Do not delete
+    historical captures or all QA scenario records.
+
+    - Remove stale live-PM targeting instructions/requirements in the regression launch
+    surface. Reuse the existing containerized QA execution path and setup recipes
+    that create disposable test projects, plus recipes for driving/capturing them.
+    Containers supply the execution boundary; recipe-created projects supply the test
+    target. Do not create another sandbox/runner/recipe framework, assume the user''s
+    live PM session is the target, or fall back to host execution when container mode
+    is enabled.
+
+    - Handle an empty active regression library cleanly and reconcile discovery, CLI/TUI
+    references and docs. Only the minimum launch integration needed by this cleanup
+    belongs here; broad container-launch hardening remains in its existing PRs.
+
+    - Supersede the old captures-in-Git and exhaustive new-instruction audit notes:
+    captures remain in the existing external evidence store. Do not turn removal into
+    a corpus port, whole-project coverage audit or bulk QA campaign.
+
+
+    Acceptance: bounded checks demonstrate that retired entries are no longer selected/discovered,
+    the empty-library case is honest, retained recipes/tests remain available, and
+    any supported regression launch uses the intended container/test target. Keep
+    an inventory and recoverable source revision, not a requirement to execute or
+    verify every removed legacy scenario. The later reuse/authoring PR demonstrates
+    the complete durable-regression loop.
+
+
+    User authorized starting this cleanup on work Opus on 2026-11-01 and explicitly
+    removed the mandatory spec-review pause (review_spec=false). Generate the normal
+    implementation spec and proceed. Any prompt edits are limited to removing stale
+    live-PM targeting instructions in the existing regression launch surface; the
+    new planner/authoring/worker workflow belongs to pr-2680fbf. Manual merge approval
+    remains required.
+
+    '
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/284
+  gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-05-14T01:12:48.557344+00:00'
-  started_at: null
+  updated_at: '2026-11-02T14:01:37.242465+00:00'
+  started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
   notes:
@@ -25683,6 +25709,1072 @@ prs:
       that drives it end-to-end so future scenarios have a Given to build on.'
     created_at: '2026-05-14T01:12:48Z'
     last_edited: '2026-05-14T01:12:48Z'
+  - id: note-b68a2206
+    text: '2026-11-01 user scope revision: the current description governs. Remove
+      legacy scenarios now to avoid bulk verification expense; deliver reuse/authoring
+      together; defer the complete port and historical-PR QA backfill. Use existing
+      containers and setup/execution/capture recipes. No launch authorized by this
+      planning edit.'
+    created_at: '2026-11-01T18:48:08.515632+00:00'
+    last_edited: '2026-11-01T18:48:08.515632+00:00'
+  - id: note-5cdd78d
+    text: User authorized both near-term regression PRs on work Opus5.5/xhigh, all
+      PR roles/helpers/sign-off. The current description supersedes historical porting,
+      captures-in-Git and whole-library audit notes. No mandatory spec-review pause
+      for this cleanup. Preserve recipes, automated tests, evidence and exact recoverable
+      legacy source revision.
+    created_at: '2026-11-01T19:44:04.458343+00:00'
+    last_edited: '2026-11-01T19:44:04.458343+00:00'
+  - id: note-8b2ac22
+    text: 'Impl done at 0742a4b4 (pushed; full suite 5472 passed/1 skipped). Decisions
+      worth reviewing: (1) --file-prs from a container mounts the project pm dir rw
+      at /pm-project, only when filing is requested; findings use pm -C <registry>,
+      because a bare pm pr add in the clone is lost. (2) Default clone is project.base_branch;
+      --branch overrides. (3) TUI and pm qa launch run `pm -C <root> qa regression
+      <id> --file-prs` in the pane. Not done: no real container run (no pm-dev image
+      in this env; argv verified in tests). Plan docs plan-delivery/plan-regression
+      still describe the corpus port; left for the user. Pre-existing, untouched:
+      discovery reconciles `--plan ux`, but the filing addendum files to `--plan improvements`
+      (no ux plan exists). The TUI was unreachable from the impl container, so the
+      review is not marked; press d.'
+    created_at: '2026-11-01T20:15:45Z'
+    last_edited: '2026-11-01T20:15:45Z'
+  - id: note-e8997d3
+    text: 'Review fc31 i6: pm qa regression now resolves the code repo to clone with
+      cli.helpers._resolve_repo_dir (in-repo pm/ -> parent; standalone pm repo from
+      pm init --dir -> project.repo local checkout, else cwd), the resolution pm cluster/plan/PR
+      sync use, instead of root.parent, which failed or picked an unrelated repo for
+      a standalone pm repo. Test: test_standalone_pm_repo_clones_the_code_repo. pm
+      qa debug has the same root.parent assumption; filed as pr-f5325d4 rather than
+      widened here.'
+    created_at: '2026-11-01T21:57:43Z'
+    last_edited: '2026-11-01T21:57:43Z'
+  - id: note-5dc2ab1
+    text: 'QA S3 refiner (container-mode regression): all 4 stories ran for real in
+      a pm QA container (nested podman 3.4.4). Traps for the next run: (1) pm container
+      set runtime accepts only docker|podman; use docker (not installed) for an unavailable
+      runtime, after pm container enable. (2) pm session opens a guide pane that runs
+      claude on the host, so a claude stand-in logs once at session start; truncate
+      its log before each When. (3) No pm-dev image is present. pm container build
+      is a Claude session, not a build. pm-dev auto-builds quietly with a 600 s timeout.
+      A slim image (python:3.12-slim + git + click/pyyaml/textual/pyperclip + /usr/local/bin/pm
+      shim + a uid-1000 pm user with home /home/pm + PATH starting /home/pm/.local/bin)
+      builds in about 20 s with podman build --uts host. Without the pm user the pane
+      prints "env: fake-claude: No such file or directory". (4) Keep the test project
+      outside /workspace, which is mounted at /opt/pm-src:ro in every pm container.
+      (5) A new top-level file in /pm-project is writable by design (registry_mounts
+      docstring).'
+    created_at: '2026-11-01T23:55:02Z'
+    last_edited: '2026-11-01T23:55:02Z'
+  - id: note-1f72b60
+    text: 'QA S3 (container-mode regression): found and fixed (9f81a0fc) qa_loop.create_scenario_workdir
+      cloning with an explicit `git clone --local`, which makes a failed hardlink
+      fatal ("failed to create link ... Invalid cross-device link"). A pm qa regression
+      (or pm qa debug) run of a project on a different filesystem than ~/.pm therefore
+      failed at the clone, before the container check. A plain path clone hardlinks
+      when it can and copies otherwise. Test: test_clone_does_not_force_hardlinks.
+      All 4 stories then held for real (nested podman, slim image). The push from
+      the S3 container failed: /run/pm-push-proxy is a deleted host bind mount ("git-proxy:
+      cannot connect"), so 9f81a0fc may be local-only in the S3 clone.'
+    created_at: '2026-11-02T00:10:11Z'
+    last_edited: '2026-11-02T00:10:11Z'
+  - id: note-0ff919a
+    text: 'QA S4 (TUI launch): with the disposable project in /scratch (a different
+      filesystem from ~/.pm), TUI Enter on a regression item logged "Launched qa-item
+      pane" and the pane closed within a second: create_scenario_workdir ran git clone
+      --local, which dies with "Invalid cross-device link". The error is visible only
+      when the pane command is run in a shell. Pushed QA S3''s unpushed fix (9f81a0fc,
+      applied with git am as 2f6c2fc9: plain path clone, no --local). After it, all
+      7 TUI stories held. Captures: /pm-captures/scenarios/4/ (pre-fix/ and post-fix/).
+      Scenario wording, not product bugs: Refreshed clears 1 s after r (sync.py),
+      so S4 story 6 sees a blank log line during the 8 s check rather than Refreshed;
+      in a one-row PR tree j/k do not move the selection (l/h do).'
+    created_at: '2026-11-02T00:27:01Z'
+    last_edited: '2026-11-02T00:27:01Z'
+  - id: note-a978035
+    text: 'QA S5 refiner (2026-11-02): all 4 stories held live, real Claude for the
+      discovery watcher included. Traps: (1) the watcher real Claude stops at the
+      folder-trust prompt unless the test dir is added with pm trust add (pm only
+      auto-trusts ~/.pm/workdirs); (2) the pm session guide pane starts a real Claude,
+      so kill it; (3) TEST_DIR must be on the same filesystem as ~/.pm (/tmp, not
+      /scratch or /workspace) while create_scenario_workdir still runs git clone --local;
+      (4) there is no CLI for base_branch, so rename the branch away (git branch -m
+      master master-moved) to force the clone failure; (5) set remain-on-exit on the
+      discovery window to read the dead pane; tmux 3.2a leaves pane_dead_status empty;
+      (6) the watcher kills and recreates the discovery window every tick.'
+    created_at: '2026-11-02T00:29:20Z'
+    last_edited: '2026-11-02T00:29:20Z'
+  - id: note-5d7ed83
+    text: 'QA S6 refiner (2026-11-02): all 5 stories held live at 795722d4 (project
+      in /scratch, private PM_TMUX_SOCKET, fake {"qa_regression": {}}). 3 runs started
+      in one second got distinct ids/workdirs/captures; 3 concurrent registry filings
+      all landed, no project.yaml.tmp; a test pm session started from a run''s scratch
+      left the user''s windows/panes/pane-registry byte-identical; --branch no-such-branch
+      removed only its own workdir (path is in the git clone error); two container
+      runs got distinct containers, own /pm-captures, and each was removed ~10 s after
+      its own Ctrl-C. Traps: a slim QA image needs ENV PATH=/home/pm/.local/bin:...
+      (else ''env: fake-claude: No such file or directory'' and the TUI pane closes
+      at once) plus a uid-1000 pm user; the TUI''s qa-item dedup allows one TUI-launched
+      run at a time, so start the others from CLI shells; filing from a clone of a
+      project with a local bare origin prints a benign ''PM repo targets <origin.git>
+      but you''re in a repo with remote <proj>'' warning (resolve_real_origin keeps
+      the local origin).'
+    created_at: '2026-11-02T00:43:31Z'
+    last_edited: '2026-11-02T00:43:31Z'
+  - id: note-7ca507f
+    text: 'QA S7 refiner (2026-11-02): all 4 container stories ran live with the project
+      in /scratch (cross-device from ~/.pm) at a610bc87; the clone fix holds (no "Invalid
+      cross-device link"). Two draft Thens were wrong, not bugs: (1) git fetch inside
+      a regression container fails when the upstream is a local path. resolve_real_origin
+      keeps origin = the host project checkout, and the container does not mount it
+      ("does not appear to be a git repository"). Only the push block is checkable
+      there. (2) A nested pm qa regression inside the container does not refuse. The
+      container has its own ~/.pm with container mode off, so it runs there ("Runs
+      in: host") and writes its captures to the container-local ~/.pm/sessions/<tag>/captures/.
+      /pm-captures keeps only prompt.md. It execs the host claude, which is mounted
+      at /usr/local/bin/claude. Traps: run pm container enable before set runtime
+      docker (enable runs <runtime> info); the missing image must not be pm-dev:latest,
+      which auto-builds; an in-repo pm/ has no .git, so use pm/.gitignore for the
+      ro check.'
+    created_at: '2026-11-02T02:10:56Z'
+    last_edited: '2026-11-02T02:10:56Z'
+  - id: note-ca96045
+    text: 'QA S8 refiner (2026-11-02): all S8 stories held live at a610bc87 (project
+      in /scratch, private PM_TMUX_SOCKET, stand-in claude + fake {"qa_regression":
+      {"preamble": 3}}). Two pre-existing bugs, neither caused by this PR: (1) any
+      command-bar line with an unbalanced quote (qa regression x --branch "side, or
+      pr list "x) kills the TUI with ValueError: No closing quotation, from the unguarded
+      shlex.split at pm_core/tui/pr_view.py:644 (on master since Feb). Not filed as
+      of this note; the S8 worker files it once. (2) launch_pane interpolates the
+      tmux session name unquoted into its bash -c trap (pane_ops.py:191, also :674).
+      A project whose git-root basename has an apostrophe gets a session name like
+      pm-it''s here-<hash>, and every TUI pane dies at once (TUI logs Error: select-pane
+      -t %N). Noted on pr-e847a7a. So put the space and apostrophe in a parent dir
+      (/scratch/.../o''brien dir/proj2), not the basename. Traps: the TUI crash closes
+      its window. pm session re-run from outside restarts it, but the grouped <ses>~1
+      then has the driver window current, so TUI panes open in the driver window until
+      you select-window -t <ses>~1:0. Run the unbalanced-quote story last. A slow
+      docker stand-in (sleep 8; exit 1) on the TUI PATH makes the off-loop check observable.
+      A missing binary returns at once.'
+    created_at: '2026-11-02T02:14:16Z'
+    last_edited: '2026-11-02T02:14:16Z'
+  - id: note-556553d
+    text: 'QA S8 (2026-11-02): all 12 TUI stories held live at 01680d54 with the project
+      in /scratch (different device from ~/.pm). The TUI regression pane stays alive,
+      the clone copies objects (link count 1), d (qa debug) clones across filesystems,
+      the command bar quotes --branch "side''q" and a registry path with a space and
+      apostrophe. The pre-existing unbalanced-quote command-bar crash (pr_view.py:644)
+      is now filed as pr-f51600e; do not refile. Captures: /pm-captures/scenarios/8/.'
+    created_at: '2026-11-02T02:31:44Z'
+    last_edited: '2026-11-02T02:31:44Z'
+  - id: note-812c8b2
+    text: 'QA S9 refiner (2026-11-02, a610bc87): all 4 stories held live. Traps: (1)
+      a pm session for /workspace dies at startup here: the TUI''s GitHub sync hits
+      _check_gh with no gh installed and the SystemExit kills the TUI and the tmux
+      server (pre-existing, not this PR). Seed the fake first: pm fake-github config
+      set --tag project_manager-eab0d61a ''{"default_branch": "master"}'', and clear
+      it afterwards. (2) The path-like id ../instructions/<x> is refused only by the
+      regression surfaces (pm qa regression, pm qa launch regression:). pm qa show/standalone/run/debug
+      look in instructions/ first, where instructions/../instructions/<x>.md is the
+      instruction itself, so show prints it (rc 0) and the others would launch it
+      (pre-existing get_instruction lookup). Never run standalone/run/debug with that
+      id in /workspace. (3) pm qa list exits 0 on an empty library, and it has no
+      mocks section. pm/qa/mocks never existed (not on c1fcecc5 either), so pm qa
+      mocks list says none. (4) To discard a restore, git checkout <rev> -- pm/qa/regression/
+      stages the files, so use git rm -rfq pm/qa/regression (without -f it refuses).
+      (5) pm qa list/show recreate an empty pm/qa/regression/ (pr-8984bc7); rmdir
+      it.'
+    created_at: '2026-11-02T02:43:16Z'
+    last_edited: '2026-11-02T02:43:16Z'
+  - id: note-c254280
+    text: 'QA S10 refiner (2026-11-02): all 7 host-mode CLI stories held live at a610bc87
+      (project under /scratch, ~/.pm on the overlay). Draft corrections, not bugs:
+      (1) PM_PROJECT is the -C envvar, so a bogus exported PM_PROJECT redirects the
+      run (empty library); export it as the real <proj>/pm, as the TUI does, and only
+      PM_SESSION bogus; unset it before the outside-a-project check. (2) A plain-path
+      bare upstream is "local-only" to resolve_real_origin, so the clone origin stays
+      the project checkout; use a file:// upstream to get the real-upstream case.
+      (3) The prompt does name "pm/tmux session" in its generic isolation rule; assert
+      it names no specific session/pane instead. (4) pm init --dir inside another
+      git repo skips git init; keep the pm repo outside any repo. Drive from a non-pm-named
+      tmux session (or env -u TMUX), else captures go under the driver session tag.
+      Overlay hardlinks work: same-fs clone objects show link count 2.'
+    created_at: '2026-11-02T02:53:08Z'
+    last_edited: '2026-11-02T02:53:08Z'
+  - id: note-14f875c
+    text: 'QA S9 (2026-11-02): PASS, all 4 retirement/recovery stories live at 4537058b,
+      no fix. 14/14 retired + path-like ids exit 1 inside a /workspace pm session
+      (fake-github seeded) with identical before/after snapshots and a silent claude
+      stand-in; 20/20 inventory blobs match c1fcecc5 (hash-object and rev-parse);
+      authored-then-removed only-one returns every surface to the empty messages.
+      Unscoped doc nit: the "minimal example" in pm_core/docs/qa_library.md "## Regression
+      tests" points at a `throwaway-pm-test-project` setup recipe that does not exist
+      (pm/qa/instructions/ has only tui-manual-test; master had the same reference
+      as an instruction).'
+    created_at: '2026-11-02T02:54:13Z'
+    last_edited: '2026-11-02T02:54:13Z'
+  - id: note-f7dd4f1
+    text: 'QA S10 (2026-11-02): PASS at ce57b4d9, all 7 host-mode CLI stories held
+      live with no fix. Cross-device /scratch clone copies (links 1); a same-device
+      /tmp clone hardlinks (links 2, same inodes); the standalone pm repo clones the
+      code checkout; error paths exit 1 and leave no workdir. For a future "clone
+      has no pm-repo files" Then: a clone of a repo without an in-repo pm/ still gets
+      an empty untracked pm/prompts/ dir. The generic claude launcher (build_claude_shell_cmd)
+      writes the prompt file there and rm -f s it after; it is not pm-repo content.
+      Captures in /pm-captures/scenarios/10/.'
+    created_at: '2026-11-02T03:02:18Z'
+    last_edited: '2026-11-02T03:02:18Z'
+  - id: note-fa468f2
+    text: 'QA S11 refiner (2026-11-02): all 4 stories held live at a610bc87 (no pm_core
+      change through 414dd863) with the project in /scratch (device differs from ~/.pm;
+      clone objects link count 1, i.e. copied). Draft fixes, not bugs: (1) pm qa launch
+      runs the bare `pm -C <proj>/pm qa regression <id> --file-prs` as the pane start
+      command; only TUI launches add the pm _pane-exited trap. (2) --target-window
+      discovery needs an existing window named discovery (create it with tmux new-window
+      -d -n discovery before the watcher runs). (3) Renamed-away master gives "Could
+      not clone ''master'' for the regression run: ... exit status 128" + "fatal:
+      Remote branch master not found in upstream origin"; tmux 3.2a showed "Pane is
+      dead (status 1, ...)" with remain-on-exit. Real-Claude discovery watcher (pm
+      trust add $TEST_DIR, pm watcher start discovery --wait 150 in a driver window):
+      tick 1 took ~70 s and logged "regression library empty, nothing scheduled";
+      tick 2 started ~4 min in, launched beta into discovery and logged "launched
+      regression:beta ... in flight". No guide pane started this time. Teardown: Ctrl-C
+      the watcher and the run pane, kill-server, rm ~/.pm/tui-<ses>.{pid,cmd-queue}
+      and the runs'' ~/.pm/sessions/repo-*/override dirs.'
+    created_at: '2026-11-02T03:08:26Z'
+    last_edited: '2026-11-02T03:08:26Z'
+  - id: note-dc5f81f
+    text: 'QA S12 refiner (2026-11-02, live at a3b94a44, project in /scratch): stories
+      1, 2, 4 and 5 held (4 same-second runs + a user commit: distinct ids/clones/captures,
+      all clones copied not hardlinked and fsck rc 0, headers = clone HEAD; 2 run
+      filings + user pm pr add all landed, no project.yaml.tmp; --branch failure removed
+      only its own workdir; 2 container runs isolated, each removed ~11 s after its
+      own Ctrl-C). Story 3 (R28) FAILED when driven from the run''s own pane: a claude
+      stand-in that execs an interactive shell makes the run pane the session''s real
+      environment, and pm session from <scratch>/pm-test-* logged ''checking if session
+      exists: pm-<user tag>'' + ''reusing unattached grouped session: pm-<user tag>~1''
+      + ''scheduled background rebalance for 5 window(s)'' in ~/.pm/debug/pm-test-*.log,
+      then died on attach (''sessions should be nested with care''); no test session
+      was created. Cause: _session_start prefers _get_current_pm_session() (from $TMUX_PANE),
+      and host-mode regression runs scrub only PM_PROJECT/PM_SESSION, so TMUX/TMUX_PANE
+      still point at the user''s pm session. S6 passed R28 only because its test-session
+      commands ran in a separate non-pm ''drv'' tmux session. The user''s windows/panes/registry
+      stayed identical here only because ~1 was unattached and the layout was already
+      balanced; with a client on ~1 it would create pm-<user tag>~2.'
+    created_at: '2026-11-02T03:23:36Z'
+    last_edited: '2026-11-02T03:23:36Z'
+  - id: note-e48c201
+    text: 'QA S11 (2026-11-02): PASS at a3b94a44 (code unchanged since; later commits
+      are notes), all 4 stories live from a /scratch project (device differs from
+      ~/.pm), real-Claude discovery watcher, no fix. Traps: (1) tmux 3.2a in the QA
+      container often does not reap a pane process that exits within about a second:
+      it stays a zombie of the tmux server until some other child exits, so a remain-on-exit
+      pane shows no "Pane is dead (status N, ...)" line and an empty pane_dead_status
+      until then. A plain python3 sys.exit(1) pane does the same, so it is not pm.
+      Read the pane text, and check the status after another pane exits. (2) A pm
+      session started from the QA agent shell copies CLAUDECODE, CLAUDE_CODE_SESSION_ID
+      and CLAUDE_CODE_MESSAGING_SOCKET/TOKEN into the tmux global env. Unset them
+      with tmux set-environment -g -u before starting a real-Claude watcher. (3) pm/transcripts/*.jsonl
+      are symlinks, so use grep -R, not -r. Captures: /pm-captures/scenarios/11/.'
+    created_at: '2026-11-02T03:29:11Z'
+    last_edited: '2026-11-02T03:29:11Z'
+  - id: note-5f8e222
+    text: 'QA S13 refiner (live at a610bc87; qa debug/QA-loop code unchanged at 634a4c05;
+      /scratch project, private tmux socket): all 3 stories held, no bug. Draft Givens
+      that fail as written: (1) the bare upstream must be a file:// URL; a plain-path
+      bare origin is local-only to resolve_real_origin, so scenario/debug clones keep
+      the PR workdir/project as origin. (2) Commit pm/project.yaml after pm pr add,
+      or TUI s says ''not committed on master yet''. (3) The fake planner writes no
+      QA spec: commit pm/specs/<pr>/qa.md in the PR workdir, or the run ends INPUT_REQUIRED
+      ''QA spec was not generated during planning''. (4) A fake config with _all also
+      fakes pm qa debug''s qa_author session; clear it before a claude-stand-in debug
+      story. (5) --foreground prints ''Debug: <title>'' + Workdir (not ''Launched
+      debug session'') and runs in the calling pane. Loop PASS about 2 min after t;
+      a /scratch debug clone is a copy (link count 1), QA scenario clones hardlink
+      to the PR workdir.'
+    created_at: '2026-11-02T03:45:18Z'
+    last_edited: '2026-11-02T03:45:18Z'
+  - id: note-90cbd8a
+    text: 'QA S12 (2026-11-02): NEEDS_WORK, fixed in 634a4c05. Story 3 (R28) failed
+      at 0e12d832 as the refiner saw: a run launched from a pane of the user''s pm
+      session kept TMUX/TMUX_PANE, so a pm session the test started in its own project
+      reused pm-proj-<hash>~1, re-applied the user''s layout and died on attach (SESSION-rc=1).
+      Fix: _REGRESSION_SCRUBBED_ENV (cli/qa.py) also drops TMUX, TMUX_PANE, PM_POPUP_SESSION
+      and PM_IN_TMUX_SESSION; PM_TMUX_SOCKET is kept (host mode still shares the user''s
+      server, A2). Test: test_host_run_is_isolated_and_needs_no_pm_session; full suite
+      5487 passed/1 skipped. Post-fix the run-pane pm session creates pm-pm-test-<ts>-<hash>
+      (attached nested inside the run pane; send C-b d to the pane) and the user''s
+      windows/panes/registry sha stay identical. Stories 1, 2, 4, 5 held live from
+      /scratch/s12. Scenario wording to update: story 2''s ''TMUX_PANE = that run
+      pane'' and story 3''s ''TMUX and TMUX_PANE inherited'' are now ''unset''. Harness
+      trap: TUI launch_pane splits the session''s current window, so send C-b 0 through
+      a panning recorder before TUI Enter. Captures: /pm-captures/scenarios/12/.'
+    created_at: '2026-11-02T03:46:19Z'
+    last_edited: '2026-11-02T03:46:19Z'
+  - id: note-17d435b
+    text: 'QA S13 (2026-11-02): PASS at faf02162, all 3 stories live from /scratch/s13
+      (device differs from ~/.pm), no fix needed. QA loop: s-1/s-2 plain-cloned in
+      the same second (no --local), origin set to the file:// upstream, objects hardlinked
+      (link count 4); PASS 1:55 after t. pm qa debug: the /scratch clone copies (link
+      1), with no cross-device error; --foreground runs in the calling pane; container
+      mode with docker missing fails closed (rc=1, nothing created). Capture trap:
+      when the loop starts, pm selects the planner window on the session, so an attach-client
+      recorder misses the TUI log lines. Run a camera loop that selects window 0 again
+      (captures helpers/cam1.sh).'
+    created_at: '2026-11-02T04:06:14Z'
+    last_edited: '2026-11-02T04:06:14Z'
+  - id: note-e31e1fb
+    text: 'QA S14 refiner (live at ddd0ed30, /scratch fixture, all 5 drafted stories
+      driven): R26/R28/R29/E20 held: 3 runs in one second (TUI Enter, pm qa launch,
+      CLI) got distinct ids, stand-in env scrubbed, PM_TMUX_SOCKET kept; prompt names
+      the socket; ztest pm sessions from run panes nest + detach on C-b d, user sessions
+      byte-identical; --branch failure cleans only itself. R35 FAILS: a --file-prs
+      filing (pm -C <registry> pr add) from a run clone SIGUSR1-reloads the first
+      pm- session TUI by name (aproj), and from inside a ztest project reloads that
+      ztest TUI; the user TUI only shows run PRs via the 300 s sync or r. A concurrent
+      user pm pr add masks it (its reload reads all saves), so S14 checks R35 with
+      a solo filing. Evidence: "action: reload (state only)" in ~/.pm/debug/<tag>.log
+      and ~/.pm/runtime/home-refresh-<session> mtimes. Helpers: /pm-captures/scenarios/14/refiner-helpers.'
+    created_at: '2026-11-02T04:56:18Z'
+    last_edited: '2026-11-02T04:56:18Z'
+  - id: note-52f9ecc
+    text: 'QA S15 (2026-11-02): PASS at c54e22ce, all 6 stories live from /scratch/s15
+      (spaced private socket "/scratch/s15/sock dir/pm sock"), no fix. CLI outside
+      tmux (with and without PM_TMUX_SOCKET), TUI Enter, the command bar (--branch
+      side, no --file-prs), pm qa launch and the CLI typed in a session pane all gave
+      the stand-in cwd=clone with PM_PROJECT/PM_SESSION/TMUX/TMUX_PANE/PM_POPUP_SESSION/PM_IN_TMUX_SESSION
+      unset. PM_TMUX_SOCKET was kept only when set. prompt.md names it once as tmux
+      -S ''<path>'' …, and pasting that with list-sessions into env -i bash worked.
+      The qa_regression fake drove TUI and qa-demo runs until Ctrl-C. Container mode:
+      no socket note, only PM_CAPTURES_PR + PM_HOST_HOME in the container and the
+      fake environ, and the container was gone 10.5 s after Ctrl-C. Docs/help: no
+      CAUTION; the example points at the Recipes list. Observation, not this scope:
+      after Ctrl-C a container-mode pm qa regression exits 0, because the status comes
+      from the build_exec_cmd cleanup trap. Captures: /pm-captures/scenarios/15/.'
+    created_at: '2026-11-02T05:09:23Z'
+    last_edited: '2026-11-02T05:09:23Z'
+  - id: note-7087275
+    text: 'QA S14 (2026-11-02): NEEDS_WORK, R35 fixed. Pre-fix (c54e22ce), a host-mode
+      run filing with pm -C <registry> pr add, with TMUX scrubbed, made _find_tui_pane
+      resolve the TUI from its cwd. From a clone (no session) it reloaded the first
+      pm session with a TUI (aproj); from the disposable test project it reloaded
+      that project''s own TUI. The user''s TUI stayed at 4 PRs for 15 s after each
+      solo filing and showed them only after r. A concurrent user filing hid this.
+      Fix: _find_tui_pane (cli/helpers.py) tries the -C/PM_PROJECT project''s session
+      after the in-tmux check and before the cwd, the same order as _get_pm_session.
+      Test: TestFindTuiPaneProjectOverride (3 of 5 fail pre-fix). Full suite 5493
+      passed/1 skipped. After the fix, all 6 stories held live on a rebuilt /scratch
+      fixture; each solo filing showed in mproj''s TUI at +0 s. A bare pm pr add in
+      a clone still writes the clone registry (by design) and signals the any-session
+      fallback TUI (a no-op reload). Captures: /pm-captures/scenarios/14/{pre-fix,post-fix}/.
+      Filed pr-60d2e79: the pytest suite writes into the real ~/.pm; do not run it
+      during a debug-log-diff story.'
+    created_at: '2026-11-02T05:20:36Z'
+    last_edited: '2026-11-02T05:20:36Z'
+  - id: note-16936d8
+    text: 'QA S16 refiner (2026-11-02, live at 44f6e5fc, /scratch/s16r): story 1 FAILS
+      as the draft anticipated (R7/R34). A TUI-Enter run from a `pm session --global`
+      session keeps PM_SHARE_MODE=global; the stand-in record shows PM_PROJECT/PM_SESSION/TMUX/TMUX_PANE/PM_POPUP_SESSION/PM_IN_TMUX_SESSION
+      unset and PM_TMUX_SOCKET=/tmp/pm-sessions/pm-<user tag>. In the run pane, `pm
+      session` in a zz-test-a project under the run scratch still creates the non-shared
+      pm-zz-test-a-<md5(root)> on the shared server (_session_start pops PM_SHARE_MODE)
+      with no reuse/rebalance of the user session. But `pm tui view` with no -s prints
+      [Session: pm-proj-<user tag>, Pane: %0] (the user TUI) and appends a frame to
+      ~/.pm/pane-registry/tui-history/pm-proj-<user tag>.json. get_session_tag mixes
+      PM_SHARE_MODE into the hash, so the cwd lookup misses and _find_tui_pane falls
+      back to the first pm- session with a TUI. Same leak: `pm session name` there
+      prints a nonexistent share-mode name, and its pm commands log to ~/.pm/debug/zz-test-a-<share-mode
+      hash>.log. A plain shell with only PM_TMUX_SOCKET sees its own TUI; adding PM_SHARE_MODE=global
+      there reproduces it. Likely fix: add PM_SHARE_MODE to _REGRESSION_SCRUBBED_ENV.
+      Incidental, out of scope: pm session --global starts the tmux server with PM_SHARE_MODE
+      in its environ, so the server global env gives it to every pane of every session
+      on that server (the zz guide panes logged it). Stories 2-3 (prefix+M popup,
+      private socket, active pane cwd /tmp) held: the header names proj master/commit
+      and ~/.pm/sessions/<proj tag>/captures/regression/demo/<run>/; the record has
+      cwd=clone, the private socket and all 6 vars unset; tty printed "not a tty"
+      (E19; no matching bugs-plan entry seen here); nope/--branch errors keep the
+      popup on "Press q/Esc/Enter to close..." and leave no workdir or captures. Traps:
+      no `pm pr add` in zz projects (it triggers a reload of the user TUI via the
+      cwd fallback); each zz session starts a guide pane running the stand-in, so
+      the stand-in should exec bash only in the regression clone; with no client attached,
+      resize the shared window to 200x50 before Enter.'
+    created_at: '2026-11-02T05:26:31Z'
+    last_edited: '2026-11-02T05:26:31Z'
+  - id: note-ea2dd54
+    text: 'QA S17 refiner (2026-11-02, live at ded48cf8): the real-Claude host run
+      held end to end from a /scratch project on a private PM_TMUX_SOCKET. TUI Enter
+      took 1m12s to PASS. Every tmux call was `tmux -S <sock>`, `pm tui view` got
+      -s, the default server never started, one PR was filed via -C, and the user
+      TUI showed it without r. Traps: (1) Claude Code switches to the alternate screen,
+      so `capture-pane -S -` of the run pane holds only the last screen. Use after-split-window
+      pipe-pane hooks or the Bash tool_use entries in ~/.claude/projects/<clone-slug>/*.jsonl.
+      (2) The disposable project`s bare `pm pr add` runs before its session exists
+      and reloads the user TUI (any-session fallback, S14, no-op). Only the reload
+      at filing time is R35. (3) The filing moves active_pr (pr-a571291). (4) Commit
+      pm/project.yaml.lock in the fixture, or git status gains ??. (5) End the run
+      with /exit typed in the pane; Ctrl-C twice 1 s apart did not exit.'
+    created_at: '2026-11-02T05:37:56Z'
+    last_edited: '2026-11-02T05:37:56Z'
+  - id: note-7dd7dbf
+    text: 'QA S16 (2026-11-02): NEEDS_WORK, fixed in a7b2e4c4. A regression run launched
+      from a pm session --global session (TUI Enter) kept PM_SHARE_MODE=global. In
+      the run pane, `pm tui view` in the test project printed [Session: pm-proj-<gtag>,
+      Pane: %0] (the user QA view) and wrote a frame to the user tui-history, and
+      `pm session name` printed a nonexistent share-mode-hash session (R7/R34). Fix:
+      PM_SHARE_MODE added to _REGRESSION_SCRUBBED_ENV (cli/qa.py). test_host_run_is_isolated_and_needs_no_pm_session
+      now sets it and fails pre-fix. Full suite 5481 passed/1 skipped; the 12 failures
+      are all test_markdown_render (markdown dep missing in the container). Post-fix
+      live rerun at the same paths: the run pane matches the plain PM_TMUX_SOCKET-only
+      shell (own TUI, real session name, no user tui-history frame). The run captures
+      stay under the shared tag (computed before the exec). Popup stories held: the
+      prefix+M run from a /tmp pane targets the session project with a scrubbed env
+      and closed 5.1 s after the stand-in exited; nope and --branch no-such-branch
+      refuse, stay open until q/Esc and leave nothing. Popup stdin=/dev/null (E19,
+      tty=not a tty) filed as pr-a589f09. Out of scope, unchanged: the shared tmux
+      server global env still gives PM_SHARE_MODE to the zz sessions panes. Captures:
+      /pm-captures/scenarios/16/ (pre-fix/, post-fix/, s2-popup-run/, s3-popup-refusals/,
+      helpers/).'
+    created_at: '2026-11-02T05:48:32Z'
+    last_edited: '2026-11-02T05:48:32Z'
+  - id: note-ca14165
+    text: 'QA S17 (2026-11-02): PASS at 0de73f70, live from /scratch/s17 with real
+      Claude 2.1.316. TUI q, j, Enter went to PASS in about 1m50s with no prompts.
+      All 4 tmux calls were tmux -S <private sock>, both pm tui views passed -s, one
+      pm -C filing reloaded the user TUI at the same second (05:45:26), the default
+      server never existed (77/77 polls rc=1), /exit closed the pane and cleared the
+      registry. Harness trap: on tmux 3.2a, `set-hook -g after-split-window "pipe-pane
+      ..."` overwrites pm''s own after-split-window[0] (pm _pane-opened; pm sets it
+      with -gw, which lands in the same global slot). Put the pipe hook at after-split-window[1].
+      Captures: /pm-captures/scenarios/17/.'
+    created_at: '2026-11-02T05:51:12Z'
+    last_edited: '2026-11-02T05:51:12Z'
+  - id: note-e13cc34
+    text: 'Review 0140 i2: the PM_SHARE_MODE scrub (a7b2e4c4) had undone R35 for pm
+      session --global/--group sessions. With it dropped, pm -C <registry> pr add
+      computed the plain tag, which names no session, so a filing from the disposable
+      test project reloaded that project own TUI again (real tmux, private socket:
+      pre-fix [Session: pm-ztest-..], post-fix the user global pm-proj-<share tag>).
+      Fix: _find_tui_pane -C step goes through helpers._project_sessions, which falls
+      back to the live pm session that persisted the -C pm dir as its pm_root. Tests:
+      TestFindTuiPaneProjectOverride share-mode cases (1 fails pre-fix). Filed pr-e6d0439
+      (pre-existing): _setup_clone_override writes the clone override under the PM_SHARE_MODE
+      tag, which the wrapper never reads.'
+    created_at: '2026-11-02T06:14:50Z'
+    last_edited: '2026-11-02T06:14:50Z'
+  - id: note-19703fd
+    text: 'QA S18 refiner (2026-11-02, live at 9a919d0a): both stories held from a
+      real pm session --global (pm-proj-<gtag> on /tmp/pm-sessions/pm-<gtag>); all
+      5 surfaces logged a scrubbed env with only PM_TMUX_SOCKET kept, captures under
+      the shared tag, 5 distinct run ids. Draft fixes: pm qa launch regression:<id>
+      also passes --file-prs (Filing Findings in 3 of 5 prompts: TUI Enter, command
+      bar, qa launch); the socket note names the path twice and shlex leaves a space-free
+      path unquoted; name the test project zz-* (sorts after proj) - with aaa-* the
+      any-session fallback would pick aaa-* and mask a missed cwd lookup (PM_SHARE_MODE=global
+      pm tui view falls back to pm-proj). tui-history/<user>.json is absent until
+      a pm tui view -s writes it. The test project TUI and guide pane carry PM_SHARE_MODE=global
+      (pr-50e1e3f) and log to <name>-<share hash>.log; its pm session start logs to
+      <name>-<plain hash>.log. Popup run closes <0.5 s after Enter (stand-in bash
+      -i hits EOF). Helpers: /pm-captures/scenarios/18/refiner-helpers.'
+    created_at: '2026-11-02T06:49:33Z'
+    last_edited: '2026-11-02T06:49:33Z'
+  - id: note-14e10a5
+    text: 'QA S19 refiner (2026-11-02, live at 9a919d0a, /scratch/s19r): all 4 stories
+      held (R37/R35/E21-E23). 4 solo -C filings (aaa-test, clone, symlink, relative+slash)
+      and the --group filing each reloaded only the user share-mode TUI at +0 s; TUI
+      down: rc 0, no TUI reloaded, stale pidfile removed; pm session --global respawns
+      it; plain+global: each run reloads its own TUI, the other needs r. Traps: a
+      test-project TUI on a shared server logs to ~/.pm/debug/<name>-<share-mode hash>.log,
+      not its session hash (pr-50e1e3f), so find logs by the TUI mount pid; the test
+      project seed pm pr add reloads the user TUI before its session exists (baseline
+      after); after TUI Enter press q to get the PR list back; C-b d detaches the
+      nested test session from the run pane; end the old run (type exit) before a
+      2nd TUI Enter. Helpers: /pm-captures/scenarios/19/refiner-helpers.'
+    created_at: '2026-11-02T06:53:22Z'
+    last_edited: '2026-11-02T06:53:22Z'
+  - id: note-93bfd17
+    text: 'QA S18 (2026-11-02): PASS at a3777520 (head 677702dd), live from /scratch/s18
+      with pm session --global (pm-proj-c2327f8c; plain tag proj-de7d7b9b). All 5
+      host-mode surfaces (TUI Enter, command bar, pm qa launch, pm qa regression,
+      prefix+M popup) gave the stand-in cwd = its own clone, PM_PROJECT/PM_SESSION/TMUX/TMUX_PANE/PM_POPUP_SESSION/PM_IN_TMUX_SESSION/PM_SHARE_MODE
+      unset and PM_TMUX_SOCKET=/tmp/pm-sessions/pm-proj-c2327f8c; headers and prompt.md
+      under ~/.pm/sessions/proj-c2327f8c/ (shared tag), one master commit, 5 distinct
+      ids, socket note on every prompt, Filing Findings (pm -C /scratch/s18/proj/pm)
+      only on the 3 --file-prs runs; panes/windows/registry back to the snapshot after
+      each run; popup closed ~0.2 s after Enter (stdin_tty=no, pr-a589f09). From a
+      run pane, zz-test pm session/name/tui view matched a PM_TMUX_SOCKET-only plain
+      shell (pm-zz-test-30918c17, own TUI %8; user tui-history sha unchanged; no grouped-session
+      reuse); PM_SHARE_MODE=global reproduces the old fallback to the user TUI. Trap:
+      after a command-bar submit from the QA view, focus stays on the hidden PR tree,
+      so the next Enter opens pr-edit (press q twice first); noted on pr-adfdce3.
+      Captures: /pm-captures/scenarios/18/.'
+    created_at: '2026-11-02T07:01:29Z'
+    last_edited: '2026-11-02T07:01:29Z'
+  - id: note-a90fda1
+    text: 'QA S19 (2026-11-02): PASS at 677702dd (pm_core = a3777520), all 4 share-mode
+      filing stories live from /scratch/s19, no fix. --global session: solo pm -C
+      filings from the aaa-test project, the clone, a symlink and a relative path
+      with a trailing slash each took the user TUI 1->5 PRs within 1 s, one reload
+      line at the filing second each; aaa-test (log aaa-test-<share hash>.log) and
+      the leftover plain pm_root never reloaded. --group proj2: 1->2 at +0 s, proj
+      untouched. TUI SIGTERMed: filing rc=0, no reload anywhere, home-refresh touched,
+      stale pidfile removed; pm session --global printed "TUI pane missing — respawning..."
+      and the respawned TUI showed 6 then 7 at +0 s. Plain + global sessions of one
+      project: each filing reloaded only its own server TUI (8 / 9); the plain TUI
+      caught up on r. Captures: /pm-captures/scenarios/19/ (story1-4 tui + cli, evidence/).'
+    created_at: '2026-11-02T07:10:03Z'
+    last_edited: '2026-11-02T07:10:03Z'
+  - id: note-69930d9
+    text: 'QA S20 refiner (2026-11-02, live at 9a919d0a, /scratch/s20r): all 5 R38/A13/E21/E22
+      stories held on a private PM_TMUX_SOCKET with alpha sorting first. From a plain
+      shell (TMUX unset), every -C beta / PM_PROJECT=beta pr add and note add reloaded
+      only beta at +0 s, from a neutral dir and from alpha cwd. tui view and tui send
+      named pm-beta. A shell window in alpha session ran a -C beta add: it landed
+      in beta registry but reloaded alpha, and tui view showed [Session: pm-alpha-…~1].
+      Beta listed b4 only after r, which logs "action: refresh", not a reload line.
+      With beta TUI killed (add a keep window first, kill -TERM the pidfile pid, not
+      kill-pane): the -C beta add exited 0, reloaded nothing and removed the stale
+      pidfile, and tui view printed "No TUI pane found…" rc 1. The -C gamma (no session)
+      add reloaded alpha, and gamma tui view showed [Session: pm-alpha-…]. Re-running
+      `pm session` in beta printed "TUI pane missing — respawning..." and the next
+      add hit beta. The relative, trailing-slash and symlink spellings all reloaded
+      beta (cli resolve()s -C). No origin remote means no "PM repo targets" warning.
+      Helpers: /pm-captures/scenarios/20/refiner-helpers. Trap: touching reaper.stop
+      right after kill-server left 7 PID-1 zombies; reaper.py now drains its children
+      before it exits.'
+    created_at: '2026-11-02T07:13:18Z'
+    last_edited: '2026-11-02T07:13:18Z'
+  - id: note-c31bf69
+    text: 'QA S21 refiner (2026-11-02, live at 9a919d0a): both container stories held
+      from a pm session --global TUI on /scratch. Story 1: TUI Enter with runtime
+      docker logged the unavailable message; no pane, workdir, captures dir, container
+      or stand-in run. Story 2: header names pm-<share tag>-qa-regression-demo-<run>-s0,
+      the qa_regression fake (config under the share tag) drove it, no markers or
+      share/tmux vars visible in the container, and pm -C /pm-project pr add exited
+      0 with no traceback (tmux is absent in the slim image; the -C lookup fails quietly).
+      The user TUI showed the PR only after r (A14, pre-existing; no bug filed yet).
+      Writes to plans/specs/qa/.gitignore gave Read-only file system; rm of a top-level
+      entry gives Device or resource busy. Container gone 10.8 s after Ctrl-C, pane
+      11.4 s. Draft fixes: the fixture needs an instruction and an artifact so j/k
+      can move; create pm/plans and pm/specs; the filing leaves pm/project.yaml modified
+      in proj. Helpers: /pm-captures/scenarios/21/refiner-helpers.'
+    created_at: '2026-11-02T07:25:21Z'
+    last_edited: '2026-11-02T07:25:21Z'
+  - id: note-43dddfa
+    text: 'QA S20 (2026-11-02): PASS at 87a2c327, no fix. All 5 plain multi-project
+      stories (R38/A13/E21/E22) held live on /scratch/s20, with a private socket and
+      alpha sorting first. Outside a session, -C and PM_PROJECT filings reloaded only
+      the named project TUI, in the same second and without r, and tui view/send hit
+      it even from alpha cwd. Inside alpha session, -C beta reloaded alpha and tui
+      view named alpha (A13). With beta TUI stopped, the add reloaded nothing and
+      removed the stale pidfile, and tui view gave "No TUI pane found" rc 1. A no-session
+      project fell back to alpha (E21). Relative, trailing-slash and symlinked -C
+      all found beta (E22). Capture note: with a recorder client attached to the base
+      session, the in-session tui view header names pm-alpha-<h>, not ~1. Zombies
+      7 before and after (reaper). Captures: /pm-captures/scenarios/20/.'
+    created_at: '2026-11-02T07:28:54Z'
+    last_edited: '2026-11-02T07:28:54Z'
+  - id: note-7f07a39
+    text: 'QA S21 (2026-11-02): PASS at 7cf77655, both stories live from /scratch/s21
+      (device differs from ~/.pm) with pm session --global, no fix. Story 1: Enter
+      with container mode on and docker absent logged the refusal in the TUI and the
+      share-tag debug log (Cause, docker remedy, pm container disable); k/j moved
+      right after Enter; panes, registry and 200x50 were unchanged; nothing was created;
+      the stand-in never ran. Story 2 (slim podman image, fake qa_regression): the
+      header and container name use the share tag; mounts, env (only PM_CAPTURES_PR
+      + PM_HOST_HOME, no tmux) and the read-only entries held; neither marker was
+      visible; pm -C /pm-project pr add exited 0 into the host registry. The TUI was
+      not reloaded at filing (A14), and r showed 2 PRs. Filed A14 once as pr-7ebc650.
+      Container removed 10.7 s after Ctrl-C (podman events). Scenario wording, not
+      a bug: rm /pm-project/.gitignore from a tty shell says Read-only file system
+      (coreutils rm checks faccessat first); with stdin </dev/null it says Device
+      or resource busy. The run pane closed within 0.1 s of the removal, not 0.5 s
+      after. Rig traps: no bc in this container; tmux 3.2a after-split-window[1] pipe
+      hook for the run pane transcript. Captures: /pm-captures/scenarios/21/.'
+    created_at: '2026-11-02T07:38:27Z'
+    last_edited: '2026-11-02T07:38:27Z'
+  - id: note-b415c6f
+    text: 'QA S24 refiner (2026-11-02, live at c5c85a6b): R36/R37 with a real Claude
+      (2.1.316) from a `pm session --global` TUI held end to end. Fixture /scratch/s24r/proj
+      (file:// upstream, seed PR, tui-manual-test.md, `smoke` regression naming its
+      project `aaa-smoke`), TUI q, j, Enter: the session finished in ~30 s with no
+      prompts. One `tmux -S /tmp/pm-sessions/pm-<share tag>` call, `pm tui view -s
+      pm-aaa-smoke-<h>` twice, the test session plain-named on the shared server,
+      one `pm -C <proj>/pm pr add` from the clone at 08:25:52 that reloaded the user
+      TUI that second (the test TUI, ~/.pm/debug/aaa-smoke-<share hash>.log, logged
+      no reload). The default server never existed. /exit put the user registry back
+      byte-identical. Traps: Enter leaves the TUI in the QA view, so send q to the
+      TUI pane right after the run pane opens to watch the PR tree; from a tool shell
+      `pm tui view -s <ses>` needs PM_TMUX_SOCKET=<shared socket> exported; the filing
+      logs to ~/.pm/debug/repo-<clone hash>.log; the clone override is written under
+      the share-mode tag (pr-e6d0439, known); start the reaper with run_in_background,
+      not `( … &)`, or it ends as a PID-1 zombie. Helpers: /pm-captures/scenarios/24/refiner-helpers.'
+    created_at: '2026-11-02T08:28:14Z'
+    last_edited: '2026-11-02T08:28:14Z'
+  - id: note-28adcfc
+    text: 'QA S23 refiner (2026-11-02, live at c5c85a6b, pm_core a3777520): all 3
+      R39/R26-R29 stories held live from /scratch/s23r with no fix. Four runs started
+      in one second (TUI Enter, pm qa launch, pm qa regression --file-prs in a proj2
+      driver pane, --branch no-such-branch) and got distinct ids. D exited 1 and left
+      no workdir or captures. The aaa-one/aaa-two/aaa-three test sessions were created
+      on their own servers, each with its own pm_root. User windows, panes and registries
+      were unchanged, and the default server never appeared. With 4 simultaneous filings,
+      the proj TUI got 3 reloads and the proj2 TUI 1, all in the same second; the
+      aaa-* TUIs got 0. Solo B (from aaa-two) and solo C (from the clone) each showed
+      in their own TUI in under 0.4 s. Draft fixes: aaa-one still exists after run
+      A ends, so it, not aaa-two, sorts first on the shared server. The stand-in must
+      exec a shell only for */s-0/repo, because test projects sit under s-0/scratch
+      of the same regression-* dir. pm qa launch opens qa-demo at 80x24, so resize
+      it. pm session --global logs its session_cmd lines to proj-<plain hash>.log,
+      while the shared TUI logs to proj-<share hash>.log, so check both. Helpers:
+      /pm-captures/scenarios/23/refiner-helpers.'
+    created_at: '2026-11-02T08:33:01Z'
+    last_edited: '2026-11-02T08:33:01Z'
+  - id: note-1dfd729
+    text: 'QA S24 (2026-11-02): PASS at ec6facc1, no fix. Live from /scratch/s24 with
+      pm session --global (pm-proj-6d768c04) and real Claude 2.1.316. TUI q, j, Enter
+      opened the run pane in 0.12 s, and Claude reached PASS at an idle prompt in
+      44 s. Both tmux calls were tmux -S <shared sock>, both pm tui view calls used
+      -s pm-aaa-smoke-20126cbe, and the default server never existed (124/124 polls
+      absent). The test session pm-aaa-smoke-20126cbe(+~1) on the shared server had
+      a single plain pm _tui pane and no guide. The user log shows nothing between
+      the run pane launch and its exit. The filing (pr-c8098ec, only in proj) reloaded
+      the user TUI at 08:34:06, the same second, with no r. The test TUI (aaa-smoke-<share
+      hash>.log, pr-50e1e3f) logged no reload action. /exit closed the pane in 0.44
+      s. The registry sha is identical, and windows/panes are unchanged apart from
+      the aaa-smoke sessions. Cited, not filed: pr-e6d0439 (clone override under repo-<share
+      tag>), pr-5a1f570 (no-TTY attach traceback), pr-a571291 (active_pr moved). Rig
+      trap: grep -c reload on a TUI log also counts the startup line "Installed SIGUSR1
+      reload ... handlers", so grep for "action: reload". Captures: /pm-captures/scenarios/24/
+      (tui/, cli/, evidence/).'
+    created_at: '2026-11-02T08:39:32Z'
+    last_edited: '2026-11-02T08:39:32Z'
+  - id: note-7b9d77b
+    text: 'QA S23 (2026-11-02): PASS at 633f3537 (pm_core = a3777520), all 3 stories
+      live from /scratch/s23 with a pm session --global proj and a private-socket
+      proj2, no fix. Runs A (TUI Enter), B (pm qa launch), C (proj2 CLI --file-prs)
+      and D (--branch failure) started in one second with distinct ids, clones and
+      prompts. The stand-in env was scrubbed, with PM_TMUX_SOCKET = GS/priv. D left
+      nothing. aaa-one/two/three test sessions from the run panes were all SESSION-RC=0
+      in their own groups, and the user windows/panes/registry sha stayed identical
+      with 0 new user-log lines. Four simultaneous filings gave proj +3 and proj2
+      +1 reloads at T2 (aaa-* 0), and both TUIs updated in 0.25 s. After A exited
+      (pane gone in 0.11 s, rebalance 200x50), the B and C solo filings showed in
+      0.11 s, each reloading only its own TUI. The default server never existed. Rig
+      trap: tmux after-split-window[1]/after-new-window[1] pipe-pane hooks for the
+      run panes fired but wrote no file (cause unknown), so save run-pane text with
+      capture-pane -S - before ending a run. Captures: /pm-captures/scenarios/23/.'
+    created_at: '2026-11-02T08:50:54Z'
+    last_edited: '2026-11-02T08:50:54Z'
+  - id: note-9b365bc
+    text: 'Master integration (2026-11-02, after SIGNOFF_IMPL): merged master@5b352d16
+      as 7518aa8a. Only pm/project.yaml conflicted. It was resolved with store.merge_3way(base,
+      ours=master, theirs=branch): 599 unique PR ids, all 46 pr-7d5d036 notes kept,
+      and the branch-only stale duplicate pr-049649a record (ac21fd89, old SIGNOFF_MERGE)
+      dropped. The tree equals the sign-off trial candidate d0a08db6 minus those 275
+      registry lines, so the code is unchanged from review 0140 i3 / QA. Full suite
+      on 7518aa8a: 5588 passed/1 skipped. The user model switch (provider:claude-main-xhigh-pm)
+      stays uncommitted in the workdir. Ready for a fresh sign-off.'
+    created_at: '2026-11-02T09:23:30Z'
+    last_edited: '2026-11-02T09:23:30Z'
+  - id: note-7ef0960
+    text: 'QA S26 refiner (2026-11-02, live at 4126cee0 = merged 7518aa8a code): all
+      4 stories held with no fix (TUI Enter, command bar 1 good + 5 malformed lines,
+      pm qa launch into discovery/new window, prefix+M popup from a /tmp pane, then
+      4 runs in one second + aaa-one/two test sessions + 4 simultaneous -C filings:
+      proj TUI +4 reloads at T2, aaa-* 0, solo aaa-one filing visible in 0.29 s).
+      Traps: pm qa launch must run inside tmux (driver window); after the popup over
+      another window, select window 0 in the attached ~1 client before TUI Enter,
+      or the run pane splits that window; the test projects'' seed pm pr add reloads
+      the user TUI via the fallback, so baseline reloads after the test sessions are
+      up; ''qa regression nope'' logs ''Unknown regression test'' with no usage line.
+      Helpers: /pm-captures/scenarios/26/refiner-helpers.'
+    created_at: '2026-11-02T10:16:21Z'
+    last_edited: '2026-11-02T10:16:21Z'
+  - id: note-437bf0e
+    text: 'QA S25 refiner (2026-11-02, live at 4126cee0 = 7518aa8a merged code; helpers
+      + rehearsal evidence: /pm-captures/scenarios/25/refiner-helpers): all 4 stories
+      held from /scratch with no fix. Draft corrections, not bugs: (1) the path-like
+      id ../instructions/tui-manual-test is refused only by pm qa regression and pm
+      qa launch regression: (empty-library message on the empty pm repo, "Unknown
+      regression test" once a test exists); show -c regression prints the instruction
+      (rc 0, pre-existing get_instruction lookup, note-812c8b2); never pass it to
+      standalone/run/debug. (2) pm qa list has no mocks section and pm/qa/mocks never
+      existed: pm qa mocks list says "No mock definitions found". (3) pm help has
+      only the one-line "isolated QA run" entry; the full description is pm qa docs.
+      (4) The socket note names the socket twice (backticked path, then tmux -S).
+      (5) With PM_SHARE_MODE=global exported in the launching shell, captures go under
+      ~/.pm/sessions/<proj>-<share-mode hash>/, not the user plain session tag. (6)
+      The project needs an instruction and an artifact for Recipes to list paths.
+      (7) A plain pm pr add from the clone also logs a second "action: reload (state
+      only)" in the user TUI (first-TUI fallback, harmless). (8) Two runs in one second
+      sort by random hex: take each run id from its header, not ls | tail -1. (9)
+      A pm session on a /scratch project ran no guide pane here.'
+    created_at: '2026-11-02T10:19:22Z'
+    last_edited: '2026-11-02T10:19:22Z'
+  - id: note-c10715d
+    text: 'QA S25 (2026-11-02): PASS at 41c71fa0 (pm_core = merged 7518aa8a), all
+      4 stories live from /scratch/s25 (device differs from ~/.pm), no fix. Library:
+      Regression Tests (0), retired + path-like ids refused by regression/launch (empty-library
+      message) and show/standalone/run/debug (rc 1), no launch; 3 recovered blobs
+      match the inventory, the c1fcecc5 clone lists 20; docs/help have no CAUTION
+      and cover every required point. Host run from a shell exporting bogus PM_PROJECT/PM_SESSION/TMUX/TMUX_PANE/PM_POPUP_SESSION/PM_IN_TMUX_SESSION/PM_SHARE_MODE=global:
+      stand-in saw all 7 unset with PM_TMUX_SOCKET kept, copied clone (links 1), push
+      blocked rc 128, refs unchanged; captures under the share-mode tag proj-7c2dc5ce.
+      The -C filing reached the user TUI in 0.1 s with one reload line; a plain clone
+      pm pr add stayed in the clone (second, harmless fallback reload). --branch alt/--session/--file-bugs
+      and all failure cases matched; no new workdir/captures/session dir after failures.
+      Rig trap: pm/qa/mocks is recreated by pm qa mocks list too (pr-8984bc7 covers
+      it). Captures: /pm-captures/scenarios/25/.'
+    created_at: '2026-11-02T10:32:21Z'
+    last_edited: '2026-11-02T10:32:21Z'
+  - id: note-8744867
+    text: 'QA S26 (2026-11-02): PASS at 41c71fa0 (pm_core = 7518aa8a merge), all 5
+      stories live from /scratch/s26 with pm session --global (pm-proj-dfc0df42, share
+      tag proj-dfc0df42, plain proj-6ca247fc), no fix. TUI Enter: 99x50+100x50 split,
+      captures under the share tag, stand-in cwd=clone stdin_tty=yes with the 7 vars
+      unset and PM_TMUX_SOCKET=GS, socket note + Filing Findings (-C), pane gone 0.11
+      s after exit, registry sha restored. Command bar: --branch alt runs as typed
+      (no --file-prs/Filing Findings); the 5 malformed lines are refused in order
+      with no pane or record. pm qa launch --target-window / new window (rc 0, no
+      switch) and the prefix+M popup from a /tmp pane (targets proj, closed 0.32 s,
+      stdin_tty=no = pr-a589f09) all scrubbed. 4 runs in one second: A/B/C distinct
+      ids/clones/prompts, D (--branch no-such-branch) rc 1 leaves nothing; aaa-one/aaa-two
+      test sessions in their own groups/pm_roots, user windows/panes/registry s1==s2,
+      only the 2 seed-fallback reloads. 4 simultaneous filings: proj +4 reloads in
+      the T2 second, aaa-* 0, 5 PRs without r; solo shows 6 PRs in 0.12 s. Observation:
+      pm qa launch --target-window adds an empty @<win> user_modified entry to the
+      user registry via the generic _pane-opened hook (pane itself not registered).
+      Rig: per-story recorder = attach client on US~1 from tmux -L s26rec under asciinema
+      (restart per story, destroy-unattached is off); CLI = recorded inspection shell
+      on -L s26cli. Captures: /pm-captures/scenarios/26/.'
+    created_at: '2026-11-02T10:33:35Z'
+    last_edited: '2026-11-02T10:33:35Z'
+  - id: note-7c8fcf9
+    text: 'QA S27 refiner (2026-11-02, live at 4126cee0 = merged 7518aa8a code; pm_core
+      unchanged at 2c0953a8): host-mode provider integration (R40/R42/R43-host/E24/E25/A15)
+      held 4/4 with no fix. p-env (type claude, --api-base + --skip-check, --env PM_QA_SECRET)
+      as default: CLI and TUI Enter runs got the token only in env, --model p-env-model,
+      ANTHROPIC_MODEL + subagent pin, ambient alias vars unset, R7 scrubbed, PM_TMUX_SOCKET
+      kept; token absent from ps, pane start commands, headers, prompt.md and every
+      ~/.pm file except providers.yaml. Router r-host with --launcher: launcher (not
+      claude) ran in the clone with ANTHROPIC_BASE_URL=api_base, PM_ROUTE_BASE_URL
+      set, API_KEY/AUTH_TOKEN unset, header token env-only; its GET reached the HTTP
+      log. r-bad: the CLI cannot clear a router model (edit --clear model / add without
+      --model are refused), so use --api-base http://:8080 ("api_base ... has no host.
+      Remedy: fix its api_base in ~/.pm/providers.yaml", rc 1); a hand-edited no-model
+      entry gives "no model configured. Remedy: ...". TUI Enter and pm qa launch open
+      a pane/window that dies in ~0.1-0.2 s without showing the error (pr-089af69;
+      qa launch prints "Launched ..." rc 0); nothing left in workdirs/captures/sessions.
+      Two same-second runs (default p-env effort=high, PM_PROVIDER=p-two) each got
+      only their own token/model, no --effort, CLAUDE_CODE_EFFORT_LEVEL=low passed
+      through. E25: pm in the PM_PROVIDER run shell sees p-two, but the test session
+      it starts does not (its TUI environ lacks PM_PROVIDER; its guide pane launched
+      on p-env with p-env token) since panes take the shared server env: record only.
+      Traps: grep ps from a file (grep matches itself); `pm session` from a run shell
+      attaches in that pane (detach-client); serve the HTTP log from an empty dir;
+      remove ~/.pm/providers.yaml at teardown. Helpers: /pm-captures/scenarios/27/refiner-helpers.'
+    created_at: '2026-11-02T10:46:07Z'
+    last_edited: '2026-11-02T10:46:07Z'
+  - id: note-f340586
+    text: 'QA S27 (2026-11-02): PASS at 6aec1bb3 (pm_core = 7518aa8a), all 4 provider
+      stories live from /scratch/s27 on a private socket, with no fix. p-env with
+      an --env token: the CLI run and the TUI Enter run (pane start cmd pm -C …/proj/pm
+      qa regression demo --file-prs) recorded cwd=clone, --model p-env-model <prompt>
+      with no --effort, the token only in the env, aliases and PM_ROUTE_BASE_URL unset,
+      the ambient API key passed through, R7 unset and PM_TMUX_SOCKET kept. The token
+      count was 0 in a ps -eo args file, the pane start cmds, both headers, both prompt.md
+      files and ~/.pm/debug, and grep -rl ~/.pm listed only providers.yaml. Router
+      r-host + --launcher: exe=rlaunch in the clone, API_KEY/AUTH_TOKEN unset, the
+      header token in the env only, GET /v1/s27-launcher-ping?pid=<pid> 404 in the
+      HTTP log, only env -u names in ps. r-bad (http://:8080): the CLI printed "has
+      no host. Remedy" rc=1 (hand-edited no-model: "no model configured. Remedy" rc=1);
+      the TUI Enter pane lived 0.21 s and the pm qa launch qa-demo window ~0.1 s (pr-089af69);
+      nothing was left behind. Same-second p-env / PM_PROVIDER=p-two runs (105658Z-ed4b/-6d5a):
+      no crossover, no --effort, CLAUDE_CODE_EFFORT_LEVEL=low (E24/A15). E25 recorded:
+      the zz-e25 test TUI environ has no PM_PROVIDER, and its guide ran on p-env with
+      TOK1. Incidental, filed as pr-659c098 (pre-existing on master): with an unlaunchable
+      default provider, TUI Enter on a QA instruction or artifact recipe makes the
+      TUI exit (uncaught RouteSetupError from in-process build_claude_shell_cmd).
+      Trap: after q, the QA cursor resumes where it was left, so check pm tui view
+      before j/Enter. Captures: /pm-captures/scenarios/27/.'
+    created_at: '2026-11-02T11:02:04Z'
+    last_edited: '2026-11-02T11:02:04Z'
+  - id: note-a089f33
+    text: 'QA S28 refiner (2026-11-02, live at 4126cee0 = merged 7518aa8a code; branch
+      code unchanged through 431504a2): R41 FAILS. A container-mode regression run
+      on a router default provider (r-ctr, api_base http://127.0.0.1:<port>) dies
+      at the bridge step, on both the CLI and TUI Enter: ''pm route: route ''r-ctr''
+      socket /run/pm-route/router.sock is not mounted in this container. Remedy: ...''.
+      The stand-in never starts, the host server gets no request, and the CLI pane
+      prints rc=0. pm provider test r-ctr --container passes and leaves the host bridge
+      running. Even with that bridge up, the regression run still fails, because cli/qa.py
+      qa_regression calls create_qa_container with no route_mounts. A scratch-copy
+      prototype (not on the branch) that passes route_mounts=router_route.container_mounts(ModelResolution(provider=get_provider(None).name),
+      strict=True) for a router default made R41 and R43 hold live: two same-second
+      runs got distinct names, workdirs and captures, both mounted ~/.pm/route-bridge/r-ctr
+      at /run/pm-route behind one host bridge, and the survivor''s request reached
+      the server after the other container was removed. Fail-closed (docker runtime,
+      missing image), p-env token by name only (-e PM_QA_SECRET; the token is in no
+      argv, header, prompt.md or ~/.pm/debug log), the /pm-project ro overlay, and
+      the no-model router in container mode (''...could not be set up: provider ''r-ctr'':
+      no model configured. Remedy: ...'', rc 1, nothing left) all held. Traps: pm
+      bind-mounts the host PATH''s claude at /usr/local/bin/claude, so put the stand-in
+      on the host PATH, not in the image. ''pm provider edit --clear model'' is refused
+      for a router, so delete the model line in ~/.pm/providers.yaml. Check the TUI
+      cursor reads ''demo: Demo'' before Enter. The slim image has no ps. Helpers,
+      the prototype diff and rehearsal evidence are in /pm-captures/scenarios/28/refiner-helpers.'
+    created_at: '2026-11-02T11:03:11Z'
+    last_edited: '2026-11-02T11:03:11Z'
+  - id: note-870b381
+    text: 'QA S28 (2026-11-02): NEEDS_WORK, R41 fixed in ef4f5c19. Pre-fix (f710bb11),
+      a container-mode regression run on a router default (r-ctr -> 127.0.0.1:18428
+      request log) died at the bridge step on the CLI and TUI Enter (''pm route: route
+      r-ctr socket /run/pm-route/router.sock is not mounted in this container''),
+      rc 0, with no stand-in and no request, even with the ''pm provider test r-ctr
+      --container'' bridge up. Fix: cli/qa.py _regression_route_mounts resolves the
+      session''s provider (PM_PROVIDER, the session file, then the default), runs
+      router_route.require_setup(container=True), skips a qa_regression fake, and
+      passes router_route.container_mounts(strict=True) as create_qa_container route_mounts.
+      Tests: test_regression_launch.py (6 fail pre-fix). Full suite: 5581 passed/1
+      skipped/12 failed, all test_markdown_render (markdown dep missing). Post-fix
+      live: in CLI and TUI runs the stand-in got ANTHROPIC_BASE_URL=http://127.0.0.1:18428
+      with the DEFAULT_*_MODEL vars, and its GET reached the server; route-bridge/r-ctr
+      is mounted at /run/pm-route; podman exec passes -e NAME only. The p-env rerun
+      gets no route mount. R43: two same-second runs behind one host bridge each logged
+      their own GET, and the survivor''s route-ping reached the server after the other
+      container was removed. Stories 1 (docker/missing image fail closed), 2 (p-env
+      token by name only, /pm-project ro overlay, -C filing) and 4 held. Behaviour
+      change for story 4 (R42 no-model router): the same message now comes in 0.45
+      s, before any container exists; before, a container was created and removed
+      over about 12 s. Not checked here: pm qa debug''s container path likely lacks
+      the same mount (A15); confirm before filing. Captures: /pm-captures/scenarios/28/
+      (story1, story2, pre-fix, post-fix).'
+    created_at: '2026-11-02T11:29:23Z'
+    last_edited: '2026-11-02T11:29:23Z'
+  - id: note-398ea0c
+    text: 'Review f51f i1 (2026-11-02, c5a5dd14 pushed): the route-mount fix (ef4f5c19)
+      is sound. It resolves the provider the same way build_claude_shell_cmd does,
+      checks router settings before the fake check (as the launch does), and mounts
+      the bridge like qa_loop._route_mounts but with strict=True. One fix: a container-mode
+      run whose provider cannot launch (a no-model router, or a host bridge that will
+      not start) printed the container retry advice ("fix the container runtime/image",
+      "pm container disable"), which cannot fix a provider setting. A ProviderNotFoundError
+      now prints "Container mode is enabled, but the regression session''s provider
+      cannot launch it: <provider error + Remedy>" and "No session was launched on
+      the host."; a real container failure keeps the runtime remedy (tests assert
+      both). Spec E10 updated for the route mount. Full suite 5593 passed/1 skipped
+      (markdown dep from pip --target).'
+    created_at: '2026-11-02T11:44:59Z'
+    last_edited: '2026-11-02T11:44:59Z'
+  - id: note-2a2f5e6
+    text: 'Review f51f i2 (2026-11-02, 2d1d19fd): NEEDS_WORK, one small fix. The route-mount
+      code (ef4f5c19) and the i1 provider-error message (c5a5dd14) are sound: _regression_route_mounts
+      resolves the provider exactly as build_claude_shell_cmd does (get_provider()
+      with no name). Fix: the container name was set before _regression_route_mounts,
+      so a provider refusal still ran remove_container (rm -f + inspect) on a container
+      that never existed. Now cname is assigned right before create_qa_container and
+      the provider branch keys on use_containers; the router-cannot-launch test asserts
+      remove_container is not called (fails on c5a5dd14). Incidental, filed as pr-a016b21
+      (pre-existing on master): pm qa debug in container mode passes no route_mounts
+      and builds its command without container=True, so a router provider gets a host-style
+      launch inside the container. Full suite 5593 passed/1 skipped.'
+    created_at: '2026-11-02T11:58:32Z'
+    last_edited: '2026-11-02T11:58:32Z'
+  - id: note-cfff31a
+    text: 'Review f51f i3 (2026-11-02, bc940b76): NEEDS_WORK, test + doc only, no
+      pm_core change. The route-mount code (ef4f5c19) and the i1/i2 fixes (c5a5dd14,
+      2d1d19fd) are sound. Added test_container_setup_failure_before_create_is_not_a_runtime_problem:
+      the i2 message for a pre-create failure that is neither runtime nor provider
+      (registry_mounts error) is "Could not build the regression session", with no
+      container advice and no create/remove (fails on c5a5dd14). pm/qa/retired-regressions.md
+      no longer calls c1fcecc5 "the last revision with the files present" (master@5b352d16
+      still has them unchanged); it is the revision the removal started from. Full
+      suite 5594 passed/1 skipped.'
+    created_at: '2026-11-02T12:10:51Z'
+    last_edited: '2026-11-02T12:10:51Z'
+  - id: note-920d3d6
+    text: 'QA S30 refiner (2026-11-02, live at 7b66d161 = pm_core bc940b76): all 5
+      stories held with no fix (retired corpus + empty-library refusals with a router
+      default; no-model/no-host router refusals on CLI, pm qa launch, TUI Enter and
+      host mode; bridge-dir leftover file/symlink refusals + recovery; qa_regression
+      fake gets no route mount; E26-E29). Draft fixes: a missing image logs no podman
+      create/run, only inspect/rm -f/inspect of the one name, image inspect, then
+      rm -f/inspect again (pm pre-create cleanup + release); every container-mode
+      run logs a podman info (runtime preflight); the regression container is made
+      with run -d; pm provider test <route> --container on a bridge-dir leftover says
+      "cannot start the host route bridge: ... Remedy: check permissions on <dir>";
+      a type: bogus message has no Remedy: but "(fix it there, or replace it with
+      pm provider add ...)". Stop a bridge by removing its router.sock. Do your own
+      podman checks with /usr/bin/podman so the wrapper log holds only pm calls. Helpers
+      + rehearsal: /pm-captures/scenarios/30/refiner-helpers.'
+    created_at: '2026-11-02T12:49:11Z'
+    last_edited: '2026-11-02T12:49:11Z'
+  - id: note-db8c5fe
+    text: 'QA S29 refiner (2026-11-02, live at 7b66d161, pm_core with ef4f5c19): container-mode
+      regression on router default r-ctr (127.0.0.1:18429 HTTP log, --env PM_QA_RTOKEN
+      token) held 5/5 with no fix: CLI --file-prs, TUI Enter, command bar --branch
+      alt, pm qa launch --target-window discovery, host mode. One host bridge (route_bridge.py
+      host ~/.pm/route-bridge/r-ctr/router.sock 127.0.0.1 18429) shared by all container
+      runs, same pid; podman exec carries bare -e names only; token only in ~/.pm/providers.yaml
+      (0 hits in ps dumps, podman inspect CreateCommand, debug logs, prompt.md, panes).
+      Draft fixes: one q leaves the QA view (q toggles, twice re-opens it); the TUI
+      pane start command is wrapped (bash -c trap pm _pane-exited ...; pm -C <proj>/pm
+      qa regression demo --file-prs), qa launch is exact; pm init makes no project.yaml.lock
+      until the first write (seed PR); pm does not log the create argv, read it with
+      podman inspect -f {{.Config.CreateCommand}}; in-container ANTHROPIC_BASE_URL
+      equals the api_base string (forwarder on the router port), so the bridge proof
+      is the mount + host bridge + HTTP log; on the host the stand-in sees /run/pm-route
+      from the agent container itself; TUI cards truncate titles, grep the PR id;
+      rm router.sock stops the bridge at once. Helpers + rehearsal: /pm-captures/scenarios/29/refiner-helpers.'
+    created_at: '2026-11-02T12:48:41Z'
+    last_edited: '2026-11-02T12:48:41Z'
+  - id: note-ece185b
+    text: 'QA S29 (2026-11-02): PASS at de47f015 (pm_core with route-mount fix ef4f5c19
+      + review f51f i1-i3), all 5 stories live from /scratch/s29 (device differs from
+      ~/.pm), router default r-ctr -> 127.0.0.1:18429 request log, token via --env
+      PM_QA_RTOKEN, no fix. Container runs from the CLI (--file-prs), TUI Enter, the
+      command bar (--branch alt) and pm qa launch --target-window discovery each got
+      route-bridge/r-ctr -> /run/pm-route, in-container ANTHROPIC_BASE_URL=http://127.0.0.1:18429,
+      PM_QA_RTOKEN=set, and a GET that reached the server in the same second, all
+      behind ONE host bridge (route_bridge.py host ~/.pm/route-bridge/r-ctr/router.sock
+      127.0.0.1 18429, pid unchanged across 4 runs). podman exec carried 11 bare -e
+      names (0 with =); token in 0 ps dumps, podman inspect CreateCommand, prompt.md,
+      ~/.pm/debug, pane start cmds, drv scrollbacks; only ~/.pm/providers.yaml. CLI:
+      header in 1.3 s; pm -C /pm-project filing rc 0 (pr list + sha changed, tui view
+      0 until r = A14/pr-7ebc650); plans/specs Read-only file system rc 1; exit ->
+      rc=0 in 10.49 s, container removed. TUI Enter: pane in 0.21 s with the trap
+      wrapper; user pane kept id/pid/text, rebalanced (TUI+run left, user right);
+      pane gone 10.54 s. Command bar: exact command (no --file-prs), alt commit =
+      rev-parse, prompt.md 4 sections/no pm -C, /pm-project absent, TUI answered in
+      0.11 s. qa launch: rc 0 "Launched ... (pane %7)", outside tmux rc 1; 4 distinct
+      ids/workdirs/captures/containers, each captures dir prompt.md + 1 stand-in record.
+      Host mode after disable + rm router.sock: Runs in host, captures prompt.md only,
+      GET direct to api_base, no bridge, no router.sock. Rig trap: "Runs in:" is indented
+      two spaces in the header, so anchor waits on "^  Runs in:" or the prompt. Captures:
+      /pm-captures/scenarios/29/ (s1-s5 cli/tui, evidence/).'
+    created_at: '2026-11-02T13:03:00Z'
+    last_edited: '2026-11-02T13:03:00Z'
+  - id: note-75eb684
+    text: 'QA S30 (2026-11-02): PASS at de47f015 (pm_core = bc940b76), all 5 stories
+      live from /scratch/s30 (podman 3.4.4, slim image localhost/pm-s30:qa, request
+      log on 127.0.0.1:18430), no fix. S1: pm qa list rc 0 (Regression Tests (0) +
+      hint), both launches print the empty-library message rc 1 in 0.08 s, podman.log
+      empty, no bridge; 20/20 blobs at c1fcecc5 and 5b352d16. S2: no-model and bad
+      api_base (http://:8080) give "provider cannot launch it: ... Remedy" + blank
+      + "No session was launched on the host." rc 1 in 0.3-0.4 s with one podman info
+      each and no container advice; pm qa launch (qa-demo lived ~0.3 s) and TUI Enter
+      (pane %4 ~0.3 s, TUI alive, k/j work) are pr-089af69; host mode "Could not build
+      the regression session" rc 1 in 0.1 s. S3: leftover file -> [Errno 17] File
+      exists, symlink -> "not a directory owned by uid 1000", both with the provider
+      framing; the remedy reports the same cause rc 1; target untouched; after removal
+      run 3 mounted route-bridge/r-ctr at /run/pm-route behind one bridge and the
+      GET reached the server. S4: fake run gets no /run/pm-route, no bridge, no request;
+      no-model still refused. S5: E26 podman.log sequence exact (bridge started and
+      kept), E27 docker message with no provider text and empty podman.log, E28 bogus
+      type both modes, E29 host refusal + container run via claude (launcher never
+      ran). Observation, not filed: every refused run clones ~/.pm/workdirs/qa/regression-demo-<run>/s-0/repo
+      before the provider check and removes it before exit (debug log git clone lines),
+      so snapshots stay clean. Rig: snap.sh must call /usr/bin/podman (the refiner
+      copy used PATH podman, which logs ps -a to podman.log). Captures: /pm-captures/scenarios/30/.'
+    created_at: '2026-11-02T13:03:51Z'
+    last_edited: '2026-11-02T13:03:51Z'
+  - id: note-0253105
+    text: 'QA S31 refiner (2026-11-02, live at 7b66d161 = pm_core bc940b76): all 4
+      stories held with no fix (cold-start trio on one bridge, same-second filings,
+      bridge kill + restart, three providers at once). KEY TRAP for every container
+      route story: this QA image sets netns = "host" in /etc/containers/containers.conf,
+      so nested pm containers share the QA container network, the in-container ensure
+      step finds the router port already answering and starts no forwarder, and no
+      request goes through the host bridge (a killed bridge changes nothing). So S28-S30
+      "through the bridge" evidence never exercised it. Before any run, write ~/.config/containers/containers.conf
+      with [containers] netns = "slirp4netns" and check podman inspect -f {{.HostConfig.NetworkMode}}
+      = slirp4netns. Under slirp4netns R41/R43/R46 held: after kill, the GET fails
+      with ConnectionResetError(104) in 0.01 s, the next run starts a new bridge (new
+      pid), and the running container reaches the router through it without a restart.
+      p-env needs --api-base (claude type). Helpers: /pm-captures/scenarios/31/refiner-helpers.'
+    created_at: '2026-11-02T13:19:14Z'
+    last_edited: '2026-11-02T13:19:14Z'
+  - id: note-c9d8de0
+    text: 'QA S31 (2026-11-02): PASS at 68e372c55 (pm_core unchanged since the S31
+      refiner), all 4 shared route-bridge stories live under slirp4netns from /scratch/s31,
+      no fix. Cold start: pm qa regression --file-prs (CLI), pm qa launch regression:demo
+      (qa-cli window in the user pm session) and pm provider test r-ctr --container
+      started in one second and shared ONE host bridge (one pid, one "route bridge
+      for r-ctr started" debug line, r-ctr dir 0700 with .lock + srw------- router.sock);
+      provider test "Container route: OK" rc 0, throwaway removed; the two runs got
+      distinct ids/workdirs/captures/containers, both mounted route-bridge/r-ctr at
+      /run/pm-route, and each start GET was logged once; prompt.md files identical
+      (container paths only). Three same-second filings (2 container pm -C /pm-project,
+      1 host) all rc 0: registry 1->4, no tmp, 444; active = last writer (pr-a571291).
+      kill <bridge pid>: stale socket kept, run A GET -> ConnectionResetError(104)
+      in 0.01 s; the next pm qa regression started a new bridge (new pid, 2nd debug
+      line) that served run C and the still-running A (same container, restarts 0).
+      Three providers in one second (PM_PROVIDER r-ctr / r-two, default p-env): each
+      run got only its own mount/token/model, podman exec -e names only, two bridges,
+      every token only in providers.yaml; 6 runs -> 6 workdirs + 6 captures. Rig traps:
+      this QA container is reused from the refiner, so move its ~/.pm/workdirs/qa
+      and ~/.pm/sessions leftovers aside first; a redaction sed "s/$(cat token)/.../"
+      puts the token in ps argv (use a redactor that reads the token file); pane-scrollback
+      prompt waits match old prompts after a cast roll. Captures: /pm-captures/scenarios/31/.'
+    created_at: '2026-11-02T13:31:39Z'
+    last_edited: '2026-11-02T13:31:39Z'
+  - id: note-11756c0
+    text: 'QA S32 refiner (2026-11-02, live at 7b66d161 = pm_core bc940b76): R47 held
+      end to end with real Claude 2.1.316 in a nested QA container. TUI Enter on `smoke`
+      reached PASS in 1m31s, with no trust prompt ("workspace trust: seeded /workspace
+      trust for container ..." in ~/.pm/debug/<tag>.log). The session used plain `tmux`
+      on its own server, ran the aaa-smoke session under /scratch, and wrote tui.txt
+      + manifest.md beside prompt.md in the host captures dir. Its `pm -C /pm-project
+      pr add` exit 0 added only that PR (+active_pr, pr-a571291). Socket sessions/windows/panes
+      were unchanged and the default server never existed. /exit closed the pane in
+      ~11 s, the container went at the same moment, and podman ps -a was empty. Fixture
+      fix this environment needs (pre-existing master create_container, nested pm
+      only, not this PR): pm gives a nested container PM_HOST_HOME=$HOME and mounts
+      the hook receiver only from $HOME/.pm, while the shared ~/.claude/settings.json
+      names $PM_HOST_HOME/.pm/hook_receiver.py. With a stock image, the first prompt
+      is blocked ("UserPromptSubmit operation blocked by hook: python3: cannot open
+      file /home/matt/.pm/hook_receiver.py"), and in-container `pm session` refuses
+      ("Refusing to install pm''s Claude Code hooks"). Bake the receiver at $PM_HOST_HOME/.pm/hook_receiver.py
+      into the QA image and make its pm shim export that PM_HOST_HOME. Never edit
+      the shared settings.json. Keep ANTHROPIC_BASE_URL in the session env (agent
+      forwarder; nested podman is netns=host). Use a fresh registry: a pre-existing
+      "S32 smoke finding" makes the session add a note instead of filing. The in-container
+      Claude shares and appends to the agent auto-memory (~/.claude/projects/-workspace/memory).
+      Helpers: /pm-captures/scenarios/32/refiner-helpers. Nested podman networking:
+      the API path is 127.0.0.1:8790 inside the container, so keep netns=host. A ~/.config/containers/containers.conf
+      netns=slirp4netns override (the S31 route-bridge fix) cuts it; remove it for
+      S32.'
+    created_at: '2026-11-02T13:49:22Z'
+    last_edited: '2026-11-02T13:49:22Z'
+  - id: note-563ed65
+    text: 'QA S32 (2026-11-02): PASS at 9f4953cc (pm_core unchanged since 2d1d19fd),
+      no fix. R47 held live with real Claude 2.1.316 in a nested podman QA container,
+      from TUI Enter on `smoke` in a fresh /scratch/s32 fixture (private socket, pm
+      session pm-proj-6fb71706). The run pane opened 0.2 s after Enter. Its header
+      showed the clone, "Runs in:  container pm-proj-6fb71706-qa-regression-smoke-20261102T135436Z-c886-s0"
+      and the captures dir. The debug log has "workspace trust: seeded /workspace
+      trust". There was no trust prompt, no blocked-hook entry, and the first Bash
+      call came 3 s after the prompt. The session reached PASS 63 s after Enter. It
+      made 10 Bash calls: /scratch/aaa-smoke with git init, pm init and pm pr add
+      "test seed"; a plain pm session; plain `tmux ls` (never -S/-L); `pm tui view
+      -s pm-aaa-smoke-29f31c6a`; tui.txt + manifest.md beside prompt.md; and `pm -C
+      /pm-project pr add` -> "Created pr-0538cde: S32 smoke finding (now active)".
+      prompt.md had the container wording (/workspace, /scratch, /pm-captures, -C
+      /pm-project) and no socket note. The registry diff was the new PR plus active_pr
+      (pr-a571291). The TUI showed 1 PR until r (A14, pr-7ebc650), then 2 PRs. In
+      156 polls, the user socket listed only the two pm-proj sessions and the default
+      server never existed. After /exit, the container was gone in 10.6 s and the
+      pane in 10.9 s. podman ps -a was empty, windows/panes matched the baseline,
+      the clone git status was clean, the settings.json sha was unchanged, and the
+      shared auto-memory was unchanged this time. Filed the nested hook gap (stock
+      image blocks every prompt; note-11756c0) as pr-05283a9. Captures: /pm-captures/scenarios/32/
+      (tui/, cli/, evidence/).'
+    created_at: '2026-11-02T14:01:37Z'
+    last_edited: '2026-11-02T14:01:37Z'
+  review_spec: false
+  model: provider:claude-work-xhigh-249
+  effort: high
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7d5d036-bug-pm-tui-test-hardcodes-testing-ag-c7b9ae91
 - id: pr-f4dc8a2
   plan: plan-regression
   title: 'QA library auditor: scan a project and propose regression-test fills (with
@@ -27540,133 +28632,110 @@ prs:
   notes: []
 - id: pr-2680fbf
   plan: plan-regression
-  title: QA scenario planner creates new regression test when none fits
+  title: 'QA uses standard regression scenarios: reuse existing flows and author missing
+    ones'
   branch: pm/pr-2680fbf-qa-scenario-planner-creates-new-regression-test-wh
   status: pending
   depends_on:
-  - pr-06a96fa
-  description: '## Goal
+  - pr-7d5d036
+  description: 'User direction, 2026-11-01: combine regression binding/reuse (formerly
+    pr-06a96fa) and missing-regression authoring in one PR, following legacy-scenario
+    removal/minimum launch integration in pr-7d5d036. This is the second near-term
+    PR. Do not wait for the expensive historical corpus port or historical-PR QA backfill.
 
 
-    When the QA scenario planner is producing scenarios for a PR and finds no existing
-    regression test in pm/qa/regression/ that drives the user flow a scenario needs,
-    it authors a new regression test as part of the QA run rather than falling back
-    to ad-hoc INSTRUCTION + ARTIFACT scaffolding. The new regression test lands in
-    pm/qa/regression/ in the same PR''s branch, becomes a durable asset the discovery
-    supervisor (pr-271cb3a) can rerun, and is bound to the scenario via the REGRESSION:
-    field introduced by pr-06a96fa.
+    Goal: standard, durable regression scenarios become the normal QA flow driver.
+    Reuse a suitable existing scenario; if none fits, author and save one, then execute
+    it through that same path with the PR-specific observable assertions. The library
+    grows from work we are already paying to QA instead of a mandatory upfront corpus
+    conversion.
 
 
-    ## Why
+    Reuse the infrastructure that exists: containerized QA execution, setup recipes
+    for disposable projects, execution/capture recipes, the pm/qa regression library
+    and discovery machinery. Recipes remain reusable building blocks; a standard regression
+    references them and defines its flow/assertions. No parallel recipe mechanism,
+    new isolation framework, or implicit targeting of the user''s live project/tmux.
+    Respect configured container mode and its failure behavior.
 
 
-    After pr-06a96fa lands, QA scenarios prefer binding to existing regression tests.
-    INSTRUCTION + ARTIFACT remain only as a fallback. But fallback-as-permanent-strategy
-    is exactly the dynamic that prevents the regression library from growing — the
-    planner takes the easy path and the library never accumulates new drivers. The
-    compounding-value of the regression flow only kicks in when ''no regression fits
-    → write one'' is the planner''s default, not an afterthought.
+    Scope:
+
+    - Define the shared regression template/reference contract and add REGRESSION
+    binding to planner, concretizer and execution worker. Check fit to the user-visible
+    flow and preserve the scenario''s PR-specific Given/When/Then assertions.
+
+    - Add NEW_REGRESSION authoring when coverage is missing, then bind and run the
+    durable result through the same execution path. Reuse or extend a fitting definition
+    instead of creating duplicates. Keep a narrow escape for genuinely one-off probes/oracles,
+    not the default way to avoid authoring.
+
+    - Store regression source and recipe edits on the PR branch and include them in
+    the ordinary QA handoff/finalization. Captures stay outside Git in the existing
+    evidence store with test/recipe and target revision, run identity and artifact
+    links. Do not leave new definitions as uncommitted planner output or claim historical
+    recordings as fresh verification.
+
+    - A failed setup, draft or execution remains failed/blocked according to the existing
+    flow; authoring alone is not PASS. A later QA/discovery run reuses the persisted
+    definition and produces fresh evidence. New mock-selection automation remains
+    pr-51586d2; existing mock recipes can still be used.
 
 
-    ## Shape
+    Acceptance: exercise existing-scenario reuse; an initially empty library/no-fit
+    case that authors, commits and executes a scenario; later reuse without duplicate
+    authoring; and a meaningful failed/blocked setup or execution. Verify recipe resolution,
+    intended container/test-project targeting and independently checked evidence.
+    Keep this bounded rather than porting or rerunning the historical corpus.
 
 
-    1. **Planner decision:** during scenario planning, for each candidate scenario
-    the planner classifies its driving flow. If an existing regression test matches
-    the flow, emit REGRESSION: <id>. If none matches, emit NEW_REGRESSION: <slug>
-    with a one-line description and the planner proceeds to draft the regression test.
+    Required for plan-delivery D3/D9 and sign-off prompt/report pr-5f4f595. The complete
+    new/changed planner, authoring and worker prompts must be ready at implementation
+    spec review for the user''s approval (review_spec=true). Do not self-approve,
+    launch the future backfills or treat a sign-off recommendation as authority for
+    unrelated work. This scope supersedes the old pr-06a96fa split and capture-commit
+    wording.
 
-
-    2. **New-regression authoring sub-step:** for each NEW_REGRESSION, a sub-session
-    (or a planner-extension turn) drafts pm/qa/regression/<slug>.md following the
-    existing regression-test conventions (frontmatter, setup, drive, capture, assertions).
-    The drafted file lands in the PR''s branch as part of the scenario''s QA workdir
-    commits, the same way scenario captures already do.
-
-
-    3. **Scenario rebinding:** the scenario emitted by the planner references the
-    newly-drafted regression test by its slug. Concretizer and worker treat it the
-    same as an existing regression test — load and run it.
-
-
-    4. **Discovery-supervisor pickup:** because the new regression lives in pm/qa/regression/,
-    it''s automatically in scope for the discovery supervisor (pr-271cb3a) on subsequent
-    ticks. The library grows by accumulation as designed.
-
-
-    ## Awareness handoff to mocks
-
-
-    This is the point where the mocks library becomes relevant — NOT during scenario
-    authoring (the pr-942aa21 / pr-6be8ee6 failure mode), but when a regression test
-    is being drafted. A regression test specifies a flow against a surface; that surface
-    may have mocks the test should use (e.g. FakeGitHubBackend if the test exercises
-    github-backend behavior). The new-regression authoring prompt is where the diff-scoped
-    mocks block belongs. Sequencing: this PR first, pr-51586d2 (mocks reconnection)
-    reads its hand-off contract from here.
-
-
-    ## Failure paths
-
-
-    - Planner thinks a regression fits but it doesn''t quite — the scenario fails
-    to bind and falls back to NEW_REGRESSION. Handled by treating REGRESSION: as a
-    hint that can be downgraded mid-concretization.
-
-    - Drafted regression test fails to run on first attempt — same retry/INPUT_REQUIRED
-    pattern that exists for scenarios today; the half-drafted file stays on the branch
-    for next iteration.
-
-    - INSTRUCTION + ARTIFACT fallback still exists for scenarios where authoring a
-    regression doesn''t make sense (one-shot probes, oracle questions, etc.); planner
-    is taught the bar: prefer existing regression, then draft new regression, then
-    fall back.
-
-
-    ## Scope
-
-
-    - Extend QA planner output schema with NEW_REGRESSION block (sibling of REGRESSION).
-
-    - Add new-regression authoring sub-step to the planner pipeline (prompt-builder
-    + invocation).
-
-    - Concretizer + worker accept newly-drafted regression by slug.
-
-    - pr-06a96fa''s REGRESSION-binding code path consumes the new entries seamlessly.
-
-    - Tests: planner emits NEW_REGRESSION when no fit; authoring sub-step produces
-    a well-formed markdown file; scenario binds to the drafted regression; falls back
-    to INSTRUCTION when neither REGRESSION nor NEW_REGRESSION is appropriate.
-
-
-    ## Depends on
-
-
-    - pr-06a96fa (scenarios bind to regression tests as their flow driver — this PR
-    extends that binding to newly-authored regressions)
-
-
-    ## Related
-
-
-    - pr-51586d2 (mocks reconnection) — depends on this PR; the mocks-awareness block
-    lives in the new-regression authoring prompt, not in scenario generation.
-
-    - pr-f4dc8a2 (QA library auditor) — scans for missing fills; this PR is the runtime
-    equivalent (write the fill on the spot when a scenario needs one).
-
-    - pr-271cb3a (discovery supervisor) — picks up newly-authored regressions on next
-    tick.'
+    '
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-14T01:59:40.177233+00:00'
-  updated_at: '2026-05-17T20:19:45.579340+00:00'
+  updated_at: '2026-11-01T19:44:04.458343+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-02b32b2
+    text: 'User correction 2026-10-26: automatic regression authoring is required
+      for the new sign-off feature. pr-5f4f595 now depends on pr-2680fbf, preserving
+      pr-2680fbf -> pr-06a96fa -> pr-7d5d036. plan-delivery D3 handoff and D9 qualification
+      require the authoring flow alongside runner/corpus migration. Retain full human
+      review of the new sign-off prompt and recipe modification/removal recommendations.
+      This records dependencies only; no implementation, autostart, account, merge-gate
+      or timed-message changes.'
+    created_at: '2026-10-26T19:11:30.136983+00:00'
+    last_edited: '2026-10-26T19:11:30.136983+00:00'
+  - id: note-7a9cd950
+    text: '2026-11-01 user scope revision: the current description governs. Remove
+      legacy scenarios now to avoid bulk verification expense; deliver reuse/authoring
+      together; defer the complete port and historical-PR QA backfill. Use existing
+      containers and setup/execution/capture recipes. No launch authorized by this
+      planning edit.'
+    created_at: '2026-11-01T18:48:08.515632+00:00'
+    last_edited: '2026-11-01T18:48:08.515632+00:00'
+  - id: note-00d65ed
+    text: User authorized both near-term regression PRs on work Opus5.5/xhigh, all
+      PR roles/helpers/sign-off. The current description supersedes historical porting,
+      captures-in-Git and whole-library audit notes. Start the spec session now and
+      present complete planner/authoring/worker prompts for owner review. Do not implement
+      product changes before spec approval. Keep downstream review/QA held until pr-7d5d036
+      merges and its changes are integrated.
+    created_at: '2026-11-01T19:44:04.458343+00:00'
+    last_edited: '2026-11-01T19:44:04.458343+00:00'
+  review_spec: true
+  model: provider:claude-work-xhigh-249
+  effort: high
 - id: pr-eb4b7e3
   plan: bugs
   title: 'Bug: editor subprocess inherits TUI''s process group — orphaned editors
@@ -33722,11 +34791,24 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T23:10:18.419956+00:00'
-  updated_at: '2026-05-26T00:28:05.814378+00:00'
+  updated_at: '2026-11-01T20:07:26.901069+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-508f8ed
+    text: 'pr-7d5d036 retired all 20 legacy pm/qa/regression/*.md scenarios instead
+      of porting them (user direction 2026-11-01). Inventory with paths, titles, blob
+      SHAs and recovery commands: pm/qa/retired-regressions.md. Recover from c1fcecc58b09695602043094b44c8d96ca66bfe0
+      (master; last revision with the files), e.g. git checkout c1fcecc5 -- pm/qa/regression/.
+      This is an intentional coverage gap: nothing was ported or re-run. A port should
+      restyle onto the shared setup/capture recipes, because regression runs are now
+      isolated: pm qa regression clones the project into a QA workdir, runs in a QA
+      container when container mode is on, and the test drives a disposable project
+      built from pm/qa/instructions/. The restored monolithic text assumes it drives
+      a live tmux session.'
+    created_at: '2026-11-01T20:07:26Z'
+    last_edited: '2026-11-01T20:07:26Z'
 - id: pr-6412997
   plan: bugs
   title: 'Bug: TUI input lag + dropped/garbled keystrokes when the event loop is blocked
@@ -36857,7 +37939,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T05:08:39.944928+00:00'
-  updated_at: '2026-11-02T05:34:35.194135+00:00'
+  updated_at: '2026-11-02T07:01:20.034134+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36871,6 +37953,20 @@ prs:
       a new helper.'
     created_at: '2026-11-02T05:34:35Z'
     last_edited: '2026-11-02T05:34:35Z'
+  - id: note-1451e3c
+    text: 'pr-7d5d036 QA S18 (2026-11-02): the same hidden-tree focus steal also follows
+      every command-bar submit made from the QA view, not only autostart. handle_command_submitted
+      (pm_core/tui/pr_view.py, the common tail after run_command/launch_regression_command)
+      focuses #plans-pane if _plans_visible, else #tech-tree, and ignores _qa_visible.
+      Live repro on a real TUI: q (QA view), / qa regression demo --file-prs Enter
+      (run launches), later Enter on the still-highlighted regression item launched
+      role=pr-edit for the hidden selected PR instead of a second run (~/.pm/debug
+      log: "launch_pane ... role=pr-edit", "Selected: pr-..."); q, q restored focus.
+      Fix together: refocus the visible view (QA pane when _qa_visible) in that tail
+      and in the guard early-return, and add a pilot test for a QA-view command-bar
+      submit.'
+    created_at: '2026-11-02T07:01:19Z'
+    last_edited: '2026-11-02T07:01:19Z'
 - id: pr-291ed27
   plan: bugs
   title: 'Bug: TUI cursor ignores external pm pr select of the previously followed
@@ -38028,11 +39124,30 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-14T15:34:14.432857+00:00'
-  updated_at: '2026-10-14T15:34:14.432857+00:00'
+  updated_at: '2026-11-02T00:45:28.966024+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-042c162
+    text: 'Same fix site, second file: pm init also leaves pm/project.yaml.lock out
+      of the ensured pm/.gitignore entries, so the first locked registry write (pm
+      pr add, pm pr note add) leaves "?? pm/project.yaml.lock" in a pm-init project.
+      Seen in pr-7d5d036 QA S2: after pm qa regression --file-prs filed a bug into
+      a disposable project registry via pm -C <pm-dir>, git status in that project
+      showed " M pm/project.yaml" (intended) plus "?? pm/project.yaml.lock". pm own
+      repo ignores it only because pm/.gitignore lists it by hand. Fix: add project.yaml.lock
+      alongside notes.txt/.pm-sessions.json (pm_core/cli/__init__.py ~L156).'
+    created_at: '2026-11-01T23:37:43Z'
+    last_edited: '2026-11-01T23:37:43Z'
+  - id: note-b1040c2
+    text: 'Same fix site, more dirs: pm watcher start discovery in a pm init --backend
+      local project leaves "?? pm/watchers/" (discovery.log work log) and "?? pm/transcripts/"
+      (discovery-<hex>/ symlinks) untracked beside pm/prompts/. Seen in pr-7d5d036
+      QA S5 story 4 (git status --short after tick 1). Consider ensuring all three
+      in pm/.gitignore.'
+    created_at: '2026-11-02T00:45:28Z'
+    last_edited: '2026-11-02T00:45:28Z'
 - id: pr-4bde874
   plan: bugs
   title: 'Bug: test_installer_writes_standalone_receiver fails whenever PM_HOST_HOME
@@ -40080,11 +41195,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T14:55:00.518596+00:00'
-  updated_at: '2026-10-22T14:55:00.518596+00:00'
+  updated_at: '2026-11-02T01:33:17.481060+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-13954b8
+    text: 'pr-7d5d036 (seen in its QA S4) adds another instance. The TUI''s regression
+      launches (QA pane Enter, and `qa regression <id>` typed in the command bar)
+      run `pm -C <root> qa regression <id> --file-prs` in a qa-item pane. The TUI
+      checks the library, the id and the container runtime before it opens the pane.
+      A failure after that, such as cloning a base branch that is missing locally
+      or a missing/unbuildable container image, prints its error and remedy into a
+      pane that closes at once. If the fix holds panes open on failure, it must not
+      apply to `pm qa launch regression:<id>` panes in the discovery window: the supervisor
+      treats an open pane as an in-flight test and would stop scheduling.'
+    created_at: '2026-11-02T01:33:17Z'
+    last_edited: '2026-11-02T01:33:17Z'
 - id: pr-ea4fffa
   plan: bugs
   title: 'Bug: claude launches from a PR-workdir cwd (prefix+P picker) read fake-claude
@@ -46847,11 +47974,18 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-27T22:20:00.072106+00:00'
-  updated_at: '2026-10-27T22:20:00.072106+00:00'
+  updated_at: '2026-11-02T00:27:04.769260+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-dd3a638
+    text: 'Fixed on pr-7d5d036 branch (commit 2f6c2fc9, from QA S3/S4 of that PR):
+      create_scenario_workdir now runs a plain path git clone instead of git clone
+      --local, so a project on another filesystem than ~/.pm clones by copying. Covers
+      pm qa debug/launch and pm qa regression. Close this PR once pr-7d5d036 merges.'
+    created_at: '2026-11-02T00:27:04Z'
+    last_edited: '2026-11-02T00:27:04Z'
 - id: pr-e847a7a
   plan: bugs
   title: 'Bug: launch commands interpolate the workdir prompt path and TUI transcript
@@ -46873,11 +48007,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-27T23:16:14.111057+00:00'
-  updated_at: '2026-10-27T23:16:14.111057+00:00'
+  updated_at: '2026-11-02T02:14:18.339501+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-0d81055
+    text: 'Related site found in pr-7d5d036 QA S8 refiner (2026-11-02), pre-existing
+      on master: pm_core/tui/pane_ops.py launch_pane builds bash -c ''trap "pm _pane-exited
+      {session} {window} ..." EXIT; <cmd>'' with the tmux session name unquoted (line
+      191; same shape at line 674). The session name is pm-<git-root basename>-<hash>,
+      so a project dir named like it''s here makes every TUI-launched pane die at
+      once (the single quote ends the bash -c string; the TUI logs Error: ... select-pane
+      -t %N ... can''t find pane). A space in the basename splits the trap args. Fix
+      together with the other unquoted interpolations here (shlex.quote the session
+      name, or pass it through the environment).'
+    created_at: '2026-11-02T02:14:18Z'
+    last_edited: '2026-11-02T02:14:18Z'
 - id: pr-a9803aa
   plan: bugs
   title: 'Bug: push proxy local-path origin rejection is bypassed by git push --repo=<path>'
@@ -50726,281 +51872,6 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
-- id: pr-049649a
-  plan: bugs
-  title: Remove all-PR autostart and fail closed on malformed or targetless saved
-    state
-  branch: pm/pr-049649a-remove-all-pr-autostart-and-fail-closed-on-malform
-  status: in_progress
-  depends_on: []
-  description: 'Remove every route to whole-backlog/all-PR autostart. Autostart must
-    require a validated explicit nonempty collection of target PR IDs; only their
-    dependency closures may run. User explicitly requested removing the feature entirely,
-    not just fixing the malformed-state case.
-
-
-    Incident 2026-10-27 18:52 UTC: recovery supplied a targets mapping instead of
-    the required list in ~/.pm/autostart-resume.json, with auto_start=true and all_mode=false.
-    targets_from_breadcrumb fell through to legacy targetless migration and returned
-    all_mode=true. That broadened scope, dropped per-target wait_for_merge gates,
-    merged #254, started unrelated work and created drafts #265/#266. Evidence: /home/matt/.local/state/pm-pr-shepherd/tui-popup-close-crash-20261027T185235Z/
-    (recovery-breadcrumb.json, incident.json, logs). The malformed input was a shepherd
-    error; the product must reject it without expanding authority.
-
-
-    Audit and remove ALL paths: TUI command-bar autostart all; any CLI/API/IPC variants;
-    keybindings; app._auto_start_all and other mode flags; watchers and background
-    drivers; scheduler targetless fallbacks; current and legacy breadcrumb/resume
-    migration; persisted all_mode=true; examples/docs/help and tests relying on whole-backlog
-    mode. Search callers and data flow, not only text occurrences. Preserve explicit
-    multi-target autostart and explicitly selected targets'' dependencies, per-target
-    manual merge holds, model routing and spec gates. Absence, empty targets, wrong
-    types, invalid IDs, malformed records, targetless legacy data, and all-mode requests
-    must fail closed or remain off with an actionable diagnostic; none may become
-    wildcard authority. Preserve/reject malformed evidence safely rather than silently
-    dropping merge gates. Valid legacy single-target data may migrate only to that
-    exact validated target with no broadened merge authority; define the conservative
-    handling explicitly.
-
-
-    Regressions must include command/IPC rejection, valid explicit multi-target and
-    dependency scheduling, empty/missing/dict/string/null targets, malformed records,
-    legacy auto_start/run_id without target, all_mode true, corrupt/truncated JSON,
-    reload/restart and watcher paths. Prove unrelated eligible PRs never start and
-    signed-off PRs held for manual merge never merge. Use isolated fixtures/fake launch
-    and merge callbacks; never test whole-backlog start or merge against a live PM
-    project. Do not merge any product PR or change global provider policy. Keep this
-    bug independent of the separate AutoRunsScreen dismissal crash.'
-  agent_machine: spark-424d
-  gh_pr: https://github.com/mjtomei/project_manager/pull/267
-  gh_pr_number: 267
-  created_at: '2026-10-27T19:03:40.643246+00:00'
-  updated_at: '2026-10-31T18:07:25.345765+00:00'
-  started_at: '2026-10-27T19:04:56.616056+00:00'
-  reviewed_at: '2026-10-29T02:22:47.161757+00:00'
-  merged_at: null
-  notes:
-  - id: note-a2c68b1
-    text: 'QA INPUT_REQUIRED: Malformed saved state is rejected instead of becoming
-      whole-backlog authority (incident reproduction): PASS; Every all-PR entry point
-      is gone and reports why: PASS; Explicit multi-target state survives a merge
-      restart exactly: PASS; Legacy saved state migrates only to its exact validated
-      target: PASS; Malformed saved-state shapes all fail closed with preserved evidence:
-      PASS; The auto-start watcher is observation-only when it has no targets: PASS;
-      Concurrent CLI clients cannot produce wildcard or corrupted state: INPUT_REQUIRED;
-      Saved state from another project never grants authority: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-049649a-fb7eecdb7ab986be)'
-    created_at: '2026-10-28T02:03:38Z'
-    last_edited: '2026-10-28T02:03:38Z'
-  - id: note-recovery-master-20261029
-    text: 'USER AUTHORIZED RECOVERY: restart through implementation to merge the latest
-      batch from origin/master before further review or QA. Preserve all existing
-      dirty source, local PR registry/routing, notes, stashes, QA planner/spec edits,
-      untracked evidence and transcripts; interrupted changes are owned work, not
-      disposable noise. First inspect the saved prior review/QA evidence and current
-      git state. Safely preserve and reconcile that work, fetch origin/master, merge
-      it INTO this existing PR branch, resolve conflicts preserving both master fixes
-      and this PR''s behavior, run relevant checks, commit and push only this PR branch
-      when complete. Do not reset/force-push master or merge the PR into master. Record
-      exact integrated master SHA and validation; do not hand off until integration
-      and needed checks are complete. All pending user decisions remain unwaived;
-      if any blocks implementation, report INPUT_REQUIRED. Keep primary DeepSeek1017/high
-      and explicit work Opus5.5/xhigh signoff override. Native review/QA must follow
-      implementation; prior QA evidence is not a pass for the integrated head.
-
-
-      Incident 2026-10-29 01:06 UTC: #267 QA S10 refiner inherited the REAL tmux session,
-      launched a scratch PR there, then mistakenly killed pm-project_manager-5b29c418
-      as test cleanup. S9/S12 recreated scratch TUIs under that real session and S12
-      polluted shared tmux PATH/PYTHONPATH and shared autostart breadcrumb state.
-      Original transcripts, dirty patches, untracked files and QA results are preserved
-      under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z.
-      This was infrastructure interruption, not an acceptance verdict. NEVER operate
-      on the user''s real tmux session or shared host configuration for test setup/cleanup.
-      Test with an explicit dedicated tmux socket, isolated PM state/config paths,
-      and verified fixture identity; inherited TMUX/TMUX_PANE, global tmux set-environment,
-      shared ~/.pm breadcrumbs and broad cleanup are unsafe. If isolation cannot be
-      established, stop and report INPUT_REQUIRED. #278 is the existing per-session
-      tmux isolation PR; this is concrete incident evidence for its coverage.
-
-      This new implementation handoff must preserve unfinished S9-S12 QA evidence
-      and revise future test setup to avoid the proven ambient targeting/shared state
-      leak; do not relaunch the old fixture workers. No scenario verdict was supplied
-      by recovery.'
-    created_at: '2026-10-29T01:30:33.195814+00:00'
-  - id: note-user-restart-all-20261029
-    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart
-      this PR in implementation and merge latest origin/master INTO this existing
-      PR branch before any new review/QA. User explicitly released old review/QA holds
-      for this restart; preserve all earlier questions, answers, verdicts and evidence
-      and re-evaluate after integration rather than invent answers or waive acceptance.
-      Preserve dirty source, planner/spec edits, local registry/routing, stashes,
-      untracked files and all evidence. The interrupted work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
-      inspect its per-PR backup and original transcripts as needed. Safely reconcile
-      interrupted changes and current master, test, commit and push only this PR branch.
-      Never force-push/reset master or merge the PR into master. Report integrated
-      master SHA and tests; only then hand off to native review/QA. Keep assigned
-      primary/helper model and explicit work Opus5.5/xhigh signoff override. No new
-      dependencies or unrelated work are authorized.
-
-      Test isolation is mandatory: #267 S10 refiner killed the REAL pm-project_manager-5b29c418
-      session after mistaking a test PR launch for ownership of that session. S9/S12
-      inherited ambient tmux context and recreated test TUIs under that real name;
-      S12 changed global tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use
-      an explicit dedicated test tmux socket and isolated state/config, verify fixture
-      ownership; never mutate the user''s real session or shared host configuration
-      as test cleanup. Preserve the failed-run evidence. #278 is the existing per-session
-      tmux-isolation fix. Do not relaunch old QA fixture workers.'
-    created_at: '2026-10-29T01:33:53.678599+00:00'
-    last_edited: '2026-10-29T01:33:53.678599+00:00'
-  - id: note-fc1581d
-    text: 'MASTER INTEGRATION 2026-10-29 (implementation restart): merged origin/master
-      4a74d88085edffcc300cb21f31777a798d647782 (352 commits) INTO this PR branch.
-      Merge commit 314ef61f; QA-isolation doc 924caeb2; final docs fdb1eb3d. No force-push,
-      no reset, PR not merged.
-
-
-      Conflict resolutions (preserving both master fixes and this PR''s behavior):
-
-      1) pm_core/autostart_state.py keeps master''s pr-25f4038 single-manual-policy
-      work (legacy record policy folding, bare-string/legacy single target -> wait_for_merge,
-      saved stop_before_merge marks -> wait targets, migrate_legacy_stop for stale
-      build_status inputs) under this PR''s fail-closed parser: all_mode rejected
-      (truthy or non-boolean), targets must be a list of valid records (dict/string/null/number
-      reject; duplicate ids reject), empty/targetless requests reject, saved stop_before_merge
-      must be a list of valid ids (dict/string/set/padded ids reject), unknown restored
-      ids reject the whole restore. build_status requires an explicit target for mode=targets.
-
-      2) pm_core/tui/auto_start.py consume_breadcrumb is one fail-closed flow: corrupt/non-object/rejected
-      state resets in-memory scope, logs an actionable diagnostic, quarantines the
-      bytes (autostart-resume.rejected-<stamp>.json), and never calls check_and_start.
-      Master''s session-owner check, QA-run adoption, loop-restart ordering and retry
-      fields are preserved (retry fields now type-validated so corrupt records cannot
-      raise on restore). Dead stop-marks helper and all-mode label branch removed;
-      the `all` verb still returns all_mode_removed.
-
-      3) Tests: record-shape conflicts resolved to wait_for_merge; master tests that
-      expected permissive/all-mode behavior (non-list targets, all_mode honored, bare/empty
-      entries kept, string stop set, non-string run_id) updated to the fail-closed
-      contract; targets_from_breadcrumb call sites moved to the BreadcrumbTargets
-      result.
-
-      4) pm/project.yaml: union of both registries (516 unique PRs), preserving this
-      PR''s notes and the provider:claude-work-xhigh-249 signoff override.
-
-
-      Validation on integrated head 924caeb2 (docs-only fdb1eb3d after it): full suite
-      4581 passed, 1 skipped, 0 failed. Focused autostart/parser/multi-target/single-policy/merge-wait/breadcrumb-loop/log-message/signoff-handoff/owed-REQA/launch-retry
-      suites all pass. Spec pm/specs/pr-049649a/impl.md has an Integration section
-      (master SHA + reconciliation); qa.md updated for the single-policy semantics
-      and MANDATORY test isolation: dedicated HOME (so pm_home() is not ~/.pm) + PM_TMUX_SOCKET;
-      never inherit TMUX/TMUX_PANE, never touch the real pm-project_manager-5b29c418
-      session or shared ~/.pm breadcrumbs; stop with INPUT_REQUIRED if isolation cannot
-      be established.
-
-
-      QA evidence: prior S0-S8 results and the interrupted S9-S12 fixtures are preserved
-      (test-session-leak-20261029T012237Z) but are NOT a verdict for this integrated
-      head; native review/QA must re-run on the current head. Do not merge: manual
-      merge gate applies.'
-    created_at: '2026-10-29T02:22:26Z'
-    last_edited: '2026-10-29T02:22:26Z'
-  - id: note-6ce8318
-    text: 'QA PASS: Incident replay — malformed saved state never becomes whole-backlog
-      authority: PASS; Saved merge-gate evidence — valid stop marks become holds,
-      malformed sets fail closed: PASS; Restart lifecycle — downtime completion, plain-restart
-      consumption, and save purity: PASS; Concurrent actors across the shared saved
-      state, command queue and reply files: PASS; Watcher scope follows explicit targets
-      and never inherits rejected state: PASS; Restored target set carries its merge
-      holds — sign-off never auto-merges: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-049649a-92642b9a5777115f)'
-    created_at: '2026-10-29T06:03:04Z'
-    last_edited: '2026-10-29T06:03:04Z'
-  - id: note-3d47f88
-    text: 'User-authorized restart from the main PM session on 2026-10-31 after #249
-      merged as eaf3372e60d1717bd97cc50b5e0b04c6df881fa1. Resume this existing PR
-      in its existing workdir. First integrate current origin/master INTO THIS PR
-      branch, preserving its intended behavior and all earlier review/QA corrections;
-      resolve real code/test conflicts and validate the combined behavior before handing
-      off for a fresh review/QA/sign-off sequence. Do not merge this PR into master
-      or push/reset/delete master or other branches. This is a user-directed implementation
-      return, not a reviewer/sign-off verdict. The read-only integration check found
-      substantive conflicts in: pm/project.yaml, pm_core/tui/auto_start.py, tests/test_qa_loop.py.
-      The prior SIGNOFF_MERGE is historical evidence for its recorded revisions, not
-      approval of a new integration. Retain all original source, dirty files, stashes,
-      drafts, fixtures and captures. Existing uncommitted content may have been intentionally
-      excluded; inspect its provenance instead of automatically committing it. Preserve
-      every PR record and unrelated local metadata during project.yaml reconciliation.
-      Do not weaken acceptance criteria, choose unresolved user policy questions or
-      reuse stale PASS results. Historical captures have been copied intact to the
-      main session captures; overwritten filename collisions are backed up in the
-      host migration record. Main session is pm-project_manager-c5a1006b; keep old
-      restored sessions idle. Assigned models and explicit work-Opus sign-off override
-      remain unchanged. Autostart will use wait_for_merge; no PR merge is authorized
-      by this request.'
-    created_at: '2026-10-31T18:07:25.345765+00:00'
-    last_edited: '2026-10-31T18:07:25.345765+00:00'
-  model: provider:deepseek-flash
-  session_models:
-    impl: provider:deepseek-flash
-    review: provider:deepseek-flash
-    qa: provider:deepseek-flash
-    qa_planning: provider:deepseek-flash
-    qa_scenario: provider:deepseek-flash
-    qa_concretize: provider:deepseek-flash
-    qa_verification: provider:deepseek-flash
-    qa_finalize: provider:deepseek-flash
-    qa_interactive: provider:deepseek-flash
-    signoff: provider:claude-work-xhigh-249
-    merge: provider:deepseek-flash
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-049649a-remove-all-pr-autostart-and-fail-clo-registered-20261027
-  signed_off_at: '2026-10-29T06:03:05.752461+00:00'
-  integration:
-    checked_at: '2026-10-31T18:03:29.079979+00:00'
-    target_repo: https://github.com/mjtomei/project_manager.git
-    base_branch: master
-    head: e0cdd55bd95b624246f5bc117fefcbac06efdff0
-    base_sha: eaf3372e60d1717bd97cc50b5e0b04c6df881fa1
-    conflicts:
-    - pm/project.yaml
-    - pm_core/tui/auto_start.py
-    - tests/test_qa_loop.py
-    overlap:
-    - pm/project.yaml
-    - pm_core/autostart_state.py
-    - pm_core/tui/app.py
-    - pm_core/tui/auto_start.py
-    - pm_core/tui/screens.py
-    - tests/test_auto_start_qa.py
-    - tests/test_autostart_multi_target.py
-    - tests/test_breadcrumb_review_loop.py
-    - tests/test_log_message_force.py
-    - tests/test_owed_reqa.py
-    - tests/test_qa_background_focus.py
-    - tests/test_qa_loop.py
-    - tests/test_review_launch_retry.py
-    - tests/test_tui_signoff_handoff.py
-    candidate_tree: null
-    merge_base: 4a74d88085edffcc300cb21f31777a798d647782
-    status: conflict
-    pr_id: pr-049649a
-    number: 267
-    workdir_head: e0cdd55bd95b624246f5bc117fefcbac06efdff0
-    remote_head: e0cdd55bd95b624246f5bc117fefcbac06efdff0
-    dirty: " M pm/project.yaml\n M pm/specs/pr-049649a/qa.md\n?? verify-s17-followup.md\n\
-      ?? verify-s18-followup.md\n?? verify-s4-followup.md\n"
-    signoff_sha: e0cdd55bd95b624246f5bc117fefcbac06efdff0
-    base_files_count: 113
-  signoff:
-    verdict: SIGNOFF_MERGE
-    sha: e0cdd55bd95b624246f5bc117fefcbac06efdff0
-    ts: '2026-10-29T06:13:27.551021+00:00'
-    origin: auto-sequence
-    integration:
-      target_repo: https://github.com/mjtomei/project_manager.git
-      base_branch: master
-      base_sha: 4a74d88085edffcc300cb21f31777a798d647782
-      candidate_tree: e99283693f2375209f8ac7eb69f15f03a37dabf9
-      status: up_to_date
-      head: e0cdd55bd95b624246f5bc117fefcbac06efdff0
 - id: pr-f0f4129
   plan: bugs
   title: Check base integration before review iterations and QA; return conflicts
@@ -52443,11 +53314,18 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-29T13:47:39.297913+00:00'
-  updated_at: '2026-10-29T13:47:39.297913+00:00'
+  updated_at: '2026-11-02T00:27:03.332427+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-a757241
+    text: 'Fixed on pr-7d5d036 branch (commit 2f6c2fc9, from QA S3/S4 of that PR):
+      create_scenario_workdir now runs a plain path git clone instead of git clone
+      --local, so a project on another filesystem than ~/.pm clones by copying. Covers
+      pm qa debug/launch and pm qa regression. Close this PR once pr-7d5d036 merges.'
+    created_at: '2026-11-02T00:27:03Z'
+    last_edited: '2026-11-02T00:27:03Z'
 - id: pr-849a3e6
   plan: bugs
   title: 'Bug: container-mode review/sign-off with a missing runtime binary dies with
@@ -54020,12 +54898,342 @@ prs:
   effort: high
   session_models:
     signoff: provider:claude-work-xhigh-249
+- id: pr-f5325d4
+  plan: bugs
+  title: 'Bug: pm qa debug clones the pm dir''s parent, wrong for a standalone pm
+    repo'
+  branch: pm/pr-f5325d4-bug-pm-qa-debug-clones-the-pm-dir-s-parent-wrong-f
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/qa.py qa_debug sets repo_root = root.parent unconditionally
+    ("The repo root is the parent of the pm/ state directory"). For a standalone pm
+    repo (pm init --dir, project.yaml at the root of a repo holding only pm state;
+    store.is_internal_pm_dir(root) is False) the parent is not the code repo: git
+    clone --local fails, or clones an unrelated repo if the parent happens to be one,
+    and the default branch is read from that directory. Repro: pm init --dir ../app-pm
+    from a code checkout, add pm/qa/instructions/x.md in the pm repo, run pm -C ../app-pm
+    qa debug x. Expected: clone the code checkout, as pm cluster / pm plan / PR sync
+    resolve it with cli.helpers._resolve_repo_dir (parent of an in-repo pm/ dir, else
+    project.repo when local, else cwd). pm qa regression switched to _resolve_repo_dir
+    in pr-7d5d036 review fc31 i6 (test_standalone_pm_repo_clones_the_code_repo); qa_debug
+    does not load project.yaml before that point, so the fix also needs a store.load
+    and fixture updates in tests/test_container_fail_closed.py.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-01T21:57:30.306829+00:00'
+  updated_at: '2026-11-01T21:57:30.306829+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c414c76
+  plan: bugs
+  title: 'Bug: QA and regression workdirs under ~/.pm/workdirs/qa are never reaped;
+    discovery-scheduled regression runs add a full clone per launch'
+  branch: pm/pr-c414c76-bug-qa-and-regression-workdirs-under-pm-workdirs-q
+  status: pending
+  depends_on: []
+  description: 'Nothing removes ~/.pm/workdirs/qa/<id>-<run>/ (s-N/repo clone + scratch)
+    or the per-clone ~/.pm/sessions/<clone-tag>/override dir that qa_loop._setup_clone_override
+    writes, for QA scenario runs, pm qa debug/standalone or (since pr-7d5d036) pm
+    qa regression runs. Repro: run pm qa regression <id> (or pm qa debug <id>) several
+    times; each leaves a new regression-<id>-<run-id>/s-0/{repo,scratch} and a new
+    sessions/<repo>-<hash>/override, and grep finds no reaper/retention for workdirs/qa.
+    Impact grows with the discovery supervisor: once pr-2680fbf authors regression
+    tests, every scheduled pm qa launch regression:<id> adds a full working-tree checkout
+    plus its disposable project, unattended and unbounded. Captures (captures/regression/<id>/<run-id>/)
+    are the durable evidence; the clone is reproducible from the base-branch sha in
+    prompt.md. Expected: a retention policy (e.g. keep the last N runs per test/PR
+    or runs newer than T, never a running one), applied on new launches or via pm
+    pr cleanup.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-01T22:52:52.821559+00:00'
+  updated_at: '2026-11-01T22:52:52.821559+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8984bc7
+  plan: bugs
+  title: 'Bug: read-only pm qa list and pm qa mocks list create empty pm/qa/regression/
+    and pm/qa/mocks/ directories in the project'
+  branch: pm/pr-8984bc7-bug-read-only-pm-qa-list-and-pm-qa-mocks-list-crea
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_instructions.py dir helpers (qa_dir, instructions_dir,
+    regression_dir, mocks_dir, artifacts_dir) all mkdir on every call, and the list/show
+    paths use them. Repro (found in pr-7d5d036 QA scenario 1, after that PR retired
+    the whole pm/qa/regression/ corpus): in a checkout where pm/qa/regression/ and
+    pm/qa/mocks/ do not exist, run `pm qa list` (or `pm qa mocks list`); both empty
+    directories appear (untracked, so git status stays clean). After `git restore
+    --source=HEAD --staged --worktree pm/qa/regression/` removes the restored corpus,
+    the next `pm qa list` re-creates an empty pm/qa/regression/. Expected: listing/show
+    commands treat a missing category dir as empty and do not write to the project;
+    only add/author/edit paths create the directory.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-01T23:39:00.983588+00:00'
+  updated_at: '2026-11-01T23:39:00.983588+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a571291
+  plan: bugs
+  title: 'Bug: regression --file-prs filings switch the user''s active PR'
+  branch: pm/pr-a571291-bug-regression-file-prs-filings-switch-the-user-s-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/regression_prompts.py Filing Findings addendum runs
+    ''pm -C <user registry> pr add ...'', and pm_core/cli/pr.py pr add always sets
+    project.active_pr to the new PR. With --file-prs the registry is the user''s live
+    pm/project.yaml, so each finding a regression run files moves the user''s active
+    PR to that bug; commands run without a PR id fall back to active_pr (cli/helpers.py
+    ~L1296), e.g. pm pr start/review then target the filed bug. Repro (QA S6 on pr-7d5d036,
+    host mode): start ''pm qa regression alpha --file-prs'' twice; from each run''s
+    clone run its prompt''s ''pm -C $Q/proj/pm pr add ... --plan bugs'' while the
+    user runs ''pm pr add "User PR during runs"'' in $Q/proj. All three print ''(now
+    active)''; ''pm pr list'' then shows ''*'' on whichever write landed last (a run''s
+    bug pr-b3159b6, not the user''s pr-9c65185). Expected: filings from a regression
+    run add the PR without changing the user''s active PR (e.g. a pr add flag such
+    as --no-activate used by the addendum, or the runner restoring active_pr). Same
+    pr add path is used by pm qa incidental filings, but those write to a workdir
+    clone''s registry, not the live one.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T00:59:38.996898+00:00'
+  updated_at: '2026-11-02T00:59:38.996898+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-f51600e
+  plan: bugs
+  title: 'Bug: a command-bar line with an unbalanced quote crashes the TUI (unguarded
+    shlex.split in handle_command_submitted)'
+  branch: pm/pr-f51600e-bug-a-command-bar-line-with-an-unbalanced-quote-cr
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/pr_view.py:644, handle_command_submitted runs
+    parts = shlex.split(cmd) with no try/except, before any command dispatch. Repro:
+    in any pm TUI press /, type a line with an unbalanced quote, e.g. qa regression
+    smoke-check --branch "side   or   pr list "x   and press Enter. Actual: shlex
+    raises ValueError: No closing quotation, the Textual app exits, the TUI pane closes
+    and window 0 disappears (traceback in ~/.pm/debug/tui-stderr.log via app.py:1228
+    on_command_submitted -> pr_view.py:644 -> shlex.split). Re-running pm session
+    respawns the TUI, but the grouped <ses>~1 is left on another window, so new TUI
+    panes open there until select-window -t <ses>~1:0. Expected: one TUI log line
+    such as "Command not parsed: No closing quotation" and the TUI keeps running,
+    like the qa regression UsageError path does. Seen in QA S8 of pr-7d5d036 (pre-existing;
+    on master since Feb). Captures: /pm-captures/scenarios/8/story10-unbalanced-quote/.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T02:27:48.995190+00:00'
+  updated_at: '2026-11-02T02:27:48.995190+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-60d2e79
+  plan: bugs
+  title: 'Bug: the pytest suite writes into the real ~/.pm (debug logs, workdirs locks
+    and dirs, run/env-*.sh canaries, sessions dirs)'
+  branch: pm/pr-60d2e79-bug-the-pytest-suite-writes-into-the-real-pm-debug
+  status: pending
+  depends_on: []
+  description: 'Observed in QA S14 of pr-7d5d036 (2026-11-02): one full `python3 -m
+    pytest -q` run in /workspace with HOME=/home/pm left behind in the real ~/.pm:
+    ~/.pm/debug/{proj-deadbeef,my-notes-app-a4a85c68,wt-31c1b47d}.log plus ~40 repo-<hash>.log
+    (and lines appended to workspace-<hash>.log); ~/.pm/workdirs/.signoff-step-{a,b,c,d,f,pr-001,pr-aaa1111}.lock
+    and .merge--pr-001.lock (signoff.py:1235 bounded_flock on workdirs_base()), ~/.pm/workdirs/{test,test-abc12345,test-project}/;
+    ~/.pm/run/env-*.sh holding ANTHROPIC_API_KEY=canary-... (test_tmux.py / test_container.py
+    / test_provider_integration.py use canary values); an empty ~/.pm/sessions/project_manager-<hash>/.
+    Suspects: tests that do not redirect HOME/PM_HOME (the debug logger in pm_core
+    writes ~/.pm/debug/<tag>.log at import), test_fake_github.py and test_init_scenarios.py
+    (proj-deadbeef, my-notes-app). Effect: a QA run that diffs ~/.pm/debug or ~/.pm/workdirs
+    while the suite runs sees foreign files, and canary env files accumulate. Expected:
+    the suite leaves ~/.pm untouched (autouse fixture pointing HOME or the pm home
+    at tmp_path).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T05:20:24.558509+00:00'
+  updated_at: '2026-11-02T05:20:24.558509+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a589f09
+  plan: bugs
+  title: 'Bug: the prefix+M popup runs qa regression in the popup with stdin from
+    /dev/null, while the command bar opens a pane'
+  branch: pm/pr-a589f09-bug-the-prefix-m-popup-runs-qa-regression-in-the-p
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/session.py popup_cmd_cmd routes only ''pr qa''
+    and ''review-loop'' to the TUI command bar; every other command (including ''qa
+    regression <id>'') runs inside the 80-column popup via _run_with_abort_keys, which
+    spawns it with stdin=subprocess.DEVNULL (session.py:2681). Repro (QA S16 story
+    2, pr-7d5d036, 2026-11-02): pm session for a project with a regression test ''demo'';
+    press prefix+M, type ''qa regression demo'', Enter. The run header prints in the
+    popup and the regression session''s claude starts there with stdin not a tty (a
+    stand-in logging ''tty 2>&1'' records ''not a tty''), so an interactive Claude
+    session cannot take input, and the popup closes when it exits. The TUI command
+    bar (/ qa regression demo) and QA-pane Enter open a qa-item pane with a real tty
+    instead. Expected: route ''qa regression'' (and other session-launching commands)
+    from the popup to a pane like the command bar does, or refuse with a pointer to
+    the command bar. E19; master shares the behavior.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T05:38:48.530599+00:00'
+  updated_at: '2026-11-02T05:38:48.530599+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e6d0439
+  plan: bugs
+  title: 'Bug: QA/regression clone override is written under the PM_SHARE_MODE session
+    tag, which the pm wrapper never reads'
+  branch: pm/pr-e6d0439-bug-qa-regression-clone-override-is-written-under-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_loop._setup_clone_override computes the clone
+    tag with paths.get_session_tag(start_path=clone), which mixes PM_SHARE_MODE into
+    the hash; pm_core/wrapper._find_active_override derives the cwd tag with wrapper._get_session_tag,
+    which never does. So in a pm session --global/--group TUI (its env has PM_SHARE_MODE),
+    every QA scenario, pm qa debug and pm qa regression clone gets ~/.pm/sessions/<repo>-<md5(clone\0global)>/override,
+    while pm run in the clone reads ~/.pm/sessions/<repo>-<md5(clone)>/override, misses
+    it, and falls back to pm_root/cwd_walk/installed pm_core instead of the pm_core
+    that launched the run. Repro (found in pr-7d5d036 review 0140 i2): in an empty
+    git repo r, python -c "from pm_core import paths, wrapper; ..." prints wrapper
+    tag r-2731b1fe and paths tag r-2731b1fe, but with PM_SHARE_MODE=global paths gives
+    r-ca4bdeac. pm qa regression makes it worse, since it scrubs PM_SHARE_MODE from
+    the session env but writes the override before exec. Expected: writer and reader
+    agree (probably compute the clone override tag ignoring PM_SHARE_MODE, as the
+    wrapper does). Care: making the override effective changes which pm_core a share-mode
+    QA scenario clone of the pm repo runs (today cwd_walk picks the clone own pm_core),
+    so check that is the intended code.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T06:14:41.358727+00:00'
+  updated_at: '2026-11-02T06:14:41.358727+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-50e1e3f
+  plan: bugs
+  title: 'Bug: pm session --global/--group starts the shared tmux server with PM_SHARE_MODE
+    in its global environment, so every other session on that server inherits it'
+  branch: pm/pr-50e1e3f-bug-pm-session-global-group-starts-the-shared-tmux
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/session.py. _session_start sets os.environ["PM_SHARE_MODE"]
+    (via _set_share_mode_env, ~line 259) before tmux_mod.create_session starts the
+    shared server on /tmp/pm-sessions/pm-<tag>. tmux copies the starting process environment
+    into the server global environment, so PM_SHARE_MODE=global (or group:<g>) becomes
+    a global variable on that server, not just a session variable (the session already
+    gets it explicitly via set_environment and the TUI command prefix). Any other
+    session later created on the same server inherits it in every pane. Repro (seen
+    live by QA S16 on pr-7d5d036, tmux 3.2a): pm session --global in proj; from a
+    pane of it, with PM_SHARE_MODE unset and PM_TMUX_SOCKET kept (a host-mode pm qa
+    regression run does exactly this), run pm session in a second project zz. zz gets
+    a plain-named session pm-zz-<hash> on the shared server, but tmux -S <sock> show-environment
+    -g PM_SHARE_MODE prints global and the zz guide pane process environ has PM_SHARE_MODE=global.
+    pm commands in zz panes therefore mix the share mode into get_session_tag (pm
+    session name, debug-log tag, fake-claude config tag, cwd session lookup) for a
+    session that is not shared. Likely fix: after creating a shared session, tmux
+    set-environment -g -u PM_SHARE_MODE on that server (the session env and TUI prefix
+    already carry it), or start the server with the variable removed. Not caused by
+    pr-7d5d036, which only scrubs PM_SHARE_MODE from the regression run itself.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T06:33:02.505900+00:00'
+  updated_at: '2026-11-02T06:33:02.505900+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7ebc650
+  plan: bugs
+  title: 'Bug: a container-mode regression run''s --file-prs filing (pm -C /pm-project
+    pr add) never reloads the user''s TUI; the PR shows only after r or the 300 s
+    sync'
+  branch: pm/pr-7ebc650-bug-a-container-mode-regression-run-s-file-prs-fil
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/helpers.py trigger_tui_reload/_find_tui_pane
+    run inside the regression container at filing time. The container has its own
+    ~/.pm and PID namespace, no tmux binary (slim image) and no view of the host tmux
+    server or the TUI pidfile, so the reload attempt fails quietly and no SIGUSR1
+    reaches the host TUI. Repro (pr-7d5d036 QA S21, 2026-11-02, nested podman, project
+    in /scratch/s21/proj, pm session --global): enable container mode with a working
+    image, press Enter on a regression test in the shared TUI QA view, open podman
+    exec -it -w /workspace <run container> bash, run pm -C /pm-project pr add ''S21
+    container finding''. Expected: like a host-mode run (R35/R37), the user TUI reloads
+    at filing time and lists the PR. Actual: the filing exits 0 and lands in the host
+    pm/project.yaml, but the TUI debug log gains no reload line and the PR tree still
+    shows 1 PRs; only r (or the 300 s sync) shows 2 PRs. Predates the -C TUI lookup
+    (QA spec A14). Possible fixes: have the host-side runner (build_exec_cmd cleanup
+    or a watcher on the mounted pm dir) trigger the reload, or pass a reload channel
+    into the container. Captures: /pm-captures/scenarios/21/story2/ (TUI cast + ex
+    shell cast) under the pr-7d5d036 QA captures dir.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T07:36:24.056218+00:00'
+  updated_at: '2026-11-02T07:36:24.056218+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7f0daef
+  plan: bugs
+  title: 'Bug: one transient podman timeout on a queued QA scenario launch ends the
+    whole container-mode QA run and drops an in-flight scenario verdict'
+  branch: pm/pr-7f0daef-bug-one-transient-podman-timeout-on-a-queued-qa-sc
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_loop.py _poll_tmux_verdicts -> queued launch
+    (_launch_next_queued -> create_qa_container -> container.create_container -> container_is_running,
+    a podman inspect with timeout=10 and no retry); the subprocess.TimeoutExpired
+    surfaces as ContainerLaunchError, and run_qa_sync calls _fail_run_infrastructure
+    at once. Repro (pr-7d5d036 QA loop 7d9d67512107bb12, 2026-11-02, container mode,
+    nested podman, concurrency cap 2): S21 was still running and finished both stories
+    at 07:35 UTC; queued S22 was launched at 07:36, podman inspect -f {{.State.Running}}
+    pm-...-s22 timed out after 10 s (podman was busy with S21 container teardown),
+    and the run ended ERROR at 07:37. qa_status.json kept S21 with an empty verdict,
+    S22/S23 never ran, and S21 worker wrote PASS and committed its notes plus a bug
+    filing (pr-7ebc650) at 07:38 into its clone, where nothing pushed them (recovered
+    by hand). Expected: fail-closed means never fall back to the host, not abort on
+    the first slow inspect; retry the inspect/create (or requeue the scenario) and
+    let in-flight scenarios finish and record their verdicts before the run reports
+    ERROR. Related: pr-7ab0a99, pr-f8acf21, #280.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T08:18:28.627726+00:00'
+  updated_at: '2026-11-02T08:18:28.627726+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
 - id: pr-3d3b3ce
   plan: bugs
   title: 'Bug: pm provider test --live inlines a router provider''s secret env values
     in the probe''s bash -c / podman exec argv'
   branch: pm/pr-3d3b3ce-bug-pm-provider-test-live-inlines-a-router-provide
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Found at #249 (pr-592e4bd) sign-off 2026-10-29 on HEAD 1987cb9c. worker_route._probe_shell_cmd
     builds ''env -u ... NAME=value ... claude -p ...'' and live_probe passes it as
@@ -54048,7 +55256,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/293
   gh_pr_number: 293
   created_at: '2026-10-29T14:01:10.973333+00:00'
-  updated_at: '2026-11-02T01:59:10.010658+00:00'
+  updated_at: '2026-11-02T03:34:44.184884+00:00'
   started_at: '2026-11-02T01:59:27.402561+00:00'
   reviewed_at: null
   merged_at: null
@@ -54130,9 +55338,9 @@ prs:
       contains.'
     created_at: '2026-11-02T03:34:44Z'
     last_edited: '2026-11-02T03:34:44Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3d3b3ce-bug-pm-provider-test-live-inlines-a--0eb88069
   model: provider:claude-main-xhigh-pm
   effort: high
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3d3b3ce-bug-pm-provider-test-live-inlines-a--0eb88069
 - id: pr-5f30bdf
   plan: improvements
   title: 'Hardening after #249: providers.yaml lock timeout + set-default re-check
@@ -54532,6 +55740,105 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T09:50:08.146101+00:00'
   updated_at: '2026-11-02T09:50:08.146101+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-659c098
+  plan: bugs
+  title: 'Bug: TUI exits with an uncaught RouteSetupError on Enter on a QA instruction
+    or artifact recipe when the default provider cannot launch'
+  branch: pm/pr-659c098-bug-tui-exits-with-an-uncaught-routesetuperror-on-
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/pane_ops.py launch_qa_item, non-regression branch (line
+    ~634 on pr-7d5d036, 576 on origin/master 5b352d16): it calls claude_launcher.build_claude_shell_cmd
+    inside the TUI process, and build_claude_shell_cmd -> router_route.launch_parts
+    raises RouteSetupError for an unlaunchable provider (seen: router api_base "http://:8080"
+    -> "has no host. Remedy: fix its api_base in ~/.pm/providers.yaml"). Nothing in
+    pm_core catches RouteSetupError, so the Textual app exits: the debug log says
+    "TUI unmount", the TUI pane disappears ~0.5 s after Enter and ~/.pm/debug/tui-stderr.log
+    holds the traceback (app.py on_qaitem_activated -> pane_ops.launch_qa_item ->
+    build_claude_shell_cmd -> launch_parts). pm session then prints "TUI pane missing
+    - respawning...". Repro: pm provider add r-bad --type router --api-base http://:8080
+    --model m; pm provider default r-bad; in the TUI press q, put the cursor on an
+    instruction or an artifact recipe, press Enter. Reproduced twice (artifact cli-recording,
+    instruction tui-manual-test). Regression items do not crash (they run pm qa regression
+    in a pane, whose error is lost: pr-089af69). The other in-process build_claude_shell_cmd
+    calls in pane_ops.py (discuss at :391/:456, watcher_review at :510) probably share
+    this exposure; not driven. Expected: log the error and remedy in the TUI log and
+    keep the TUI running. Found in pr-7d5d036 QA S27; captures /pm-captures/scenarios/27/incidental-tui-crash/.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T10:59:16.128416+00:00'
+  updated_at: '2026-11-02T10:59:16.128416+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a016b21
+  plan: bugs
+  title: 'Bug: pm qa debug in container mode gets no route bridge for a router provider
+    (no route_mounts, command built for the host)'
+  branch: pm/pr-a016b21-bug-pm-qa-debug-in-container-mode-gets-no-route-br
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/qa.py qa_debug, container branch (unchanged from master):
+    create_qa_container() is called without route_mounts, and build_claude_shell_cmd()
+    without container=True. With a router default provider (pm provider default <router>,
+    or PM_PROVIDER), the session command is built as a host launch: router_route.launch_parts(container=False)
+    gives no in-container bridge step, ANTHROPIC_BASE_URL = the router''s host api_base
+    (e.g. http://127.0.0.1:<port>, the container''s own loopback inside the container),
+    and a configured host ''launcher'' path replaces claude even though it does not
+    exist in the container. The container also gets no ~/.pm/route-bridge/<route>
+    mount at /run/pm-route. Expected: the same handling pm qa regression got in ef4f5c19
+    (pr-7d5d036, QA S28 R41) and QA scenario containers get (qa_loop._route_mounts):
+    resolve the provider, router_route.require_setup(container=True), container_mounts(strict=True)
+    as route_mounts for a non-faked session, and build_claude_shell_cmd(container=True);
+    a provider refusal should give the provider''s error + remedy, not the container
+    retry advice. Repro: container mode on, router default r-ctr with api_base http://127.0.0.1:<port>
+    and a request-log HTTP server; pm qa debug --foreground <instruction>; the session
+    never reaches the server (or the launcher is missing in the container). Found
+    by code reading in review f51f i2 of pr-7d5d036 (QA S28 flagged it as unconfirmed).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T11:51:09.215239+00:00'
+  updated_at: '2026-11-02T11:51:09.215239+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-05283a9
+  plan: bugs
+  title: 'Bug: a pm-created container nested inside a pm container gets PM_HOST_HOME=$HOME
+    and no hook receiver, so every Claude prompt is blocked by the shared hooks'
+  branch: pm/pr-05283a9-bug-a-pm-created-container-nested-inside-a-pm-cont
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/container.py create_container (receiver mount from
+    Path.home()/.pm/hook_receiver.py, and -e PM_HOST_HOME={Path.home()}); pre-existing
+    master code. Repro (pr-7d5d036 QA S32 refiner, 2026-11-02): inside a pm QA container
+    (HOME=/home/pm, PM_HOST_HOME=/home/matt, the receiver mounted only at /home/matt/.pm/hook_receiver.py),
+    run a container-mode regression (pm qa regression / TUI Enter) with a stock image
+    (python:3.12-slim + git tmux, pm shim without PM_HOST_HOME). The shared ~/.claude/settings.json
+    hooks run python3 /home/matt/.pm/hook_receiver.py, but the nested container gets
+    PM_HOST_HOME=/home/pm and no file at /home/matt/.pm. Actual: the first prompt
+    is refused with "UserPromptSubmit operation blocked by hook: [python3 /home/matt/.pm/hook_receiver.py
+    user_prompt]: python3: cannot open file /home/matt/.pm/hook_receiver.py: [Errno
+    2] No such file or directory", and an in-container pm session exits 1 with "Refusing
+    to install pm Claude Code hooks". Expected: when PM_HOST_HOME is already set (pm-in-pm),
+    create_container passes it through unchanged and mounts $PM_HOST_HOME/.pm/hook_receiver.py
+    at that same path, so nested sessions work without a custom image. Workaround
+    used in QA: bake the receiver at /home/matt/.pm/hook_receiver.py into the image
+    and have its pm shim export PM_HOST_HOME=/home/matt. Evidence: /pm-captures/scenarios/32/refiner-helpers/README.md
+    and rehearsal/run1-blocked-hook.jsonl.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T13:58:00.818355+00:00'
+  updated_at: '2026-11-02T13:58:00.818355+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
