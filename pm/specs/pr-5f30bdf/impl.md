@@ -201,6 +201,14 @@ suite 5461 passed / 1 skipped) and at 8.2.7/8.2.8.
   `tests/test_providers.py tests/test_router_route.py
   tests/test_model_settings.py` (418 passed), so sign-off can integrate the
   base without rework.  This branch does not merge master itself.
+  Sign-off (2026-11-02): master had moved to `5b352d16` (adds #293 /
+  `pr-3d3b3ce`).  The integration check conflicts only in `pm/project.yaml`
+  (registry; resolvable with `store.merge_3way(base, ours=master,
+  theirs=branch)` -- 586 unique ids, this PR's notes intact); every code
+  file auto-merges, and the trial-merged candidate passes the full suite at
+  textual 2.0.1 (5554 passed / 1 skipped) and 8.2.7 (5553 passed / 1
+  skipped, plus one load-related `test_push_proxy` lifecycle flake that
+  passes 3/3 when re-run alone).
 
 No **[UNRESOLVED]** ambiguities.
 
@@ -236,8 +244,18 @@ No **[UNRESOLVED]** ambiguities.
   the floor names 2.0.1.
 - A modal screen is on top of the default screen (the model popup): every
   App-level command-bar lookup returns `None` instead of raising
-  `NoMatches`, so Esc, prefix keys and background reloads keep working at
-  the textual floor (R4).
+  `NoMatches`, so Esc and prefix keys keep working and a background reload
+  no longer crashes at the textual floor (R4).  The reload itself is still
+  *dropped* at textual 2.x while a modal is up (sign-off probe): its other
+  default-screen queries (`#tech-tree` in `_update_status_bar` /
+  `_update_display`) raise `NoMatches` after `_data` is replaced, so the
+  tree stays stale and `auto_start.on_state_loaded` is skipped for that
+  reload; the 5-minute sync tick logs `Sync error: No nodes match
+  '#tech-tree'`.  textual >= 3.0.0 lets `App.query_one` reach the default
+  screen and is unaffected; master is worse at 2.x (any key in the popup
+  crashes).  Out of this PR's scope -- a follow-up (raise the floor to
+  `textual>=3.0` or make the reload's default-screen queries screen-aware)
+  was recommended at sign-off.
 
 ## Tests to add/update
 
