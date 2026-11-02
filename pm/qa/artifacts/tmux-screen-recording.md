@@ -741,6 +741,13 @@ if [ "$(tmux display-message -p -t "=$TARGET:0.0" '#{pane_pipe}' 2>/dev/null)" !
         "or fail for a capture that has none" >&2
     exit 1
 fi
+# The rejection a failed attempt left goes with the rest, in both handles: step
+# 5 reads them whichever state its recorder is in, so a mark left on the
+# session would have this restart's own finished recording refused for the
+# attempt it replaces. The session option is cleared here (the target session
+# was asserted above, so the handle resolves); the file half goes with the `rm`
+# below. Step 2 clears both for a fresh capture, for the same reason.
+tmux set-option -u -t "=$TARGET:0.0" @pm_capture_rejected 2>/dev/null || true
 rm -f <capture-dir>/recording.cast <capture-dir>/recorder.status \
       <capture-dir>/recorder.command-done \
       <capture-dir>/recorder-stderr.log <capture-dir>/recorder-pane.log \
@@ -1013,7 +1020,8 @@ pm tui send a -s "$TARGET" || send_failed   # open the picker
 #    and is what rejects a failed start whose target ended with the attach).
 #    Step 2 clears both once the re-record attaches its pipe — not when it
 #    takes the claim, which it releases again if that pipe cannot be attached
-#    — so it can only mean "the last capture in this session was rejected".
+#    — and step 3's restart clears both for the attempt it replaces, so a mark
+#    can only mean "a step of the last attempt in this session rejected it".
 #    (Every pipe stop and recorder-session
 #    kill below is best-effort: when the session is already gone the pipe is
 #    gone with it, and `tmux pipe-pane`/`tmux kill-session` would otherwise
@@ -1092,6 +1100,45 @@ fi
 # not a hard-coded C-b; it is read just before the send below. Initialised
 # here so the stop-timeout message can always name the key it relied on.
 detach_key=C-b
+# A capture a step rejected must not be accepted, whichever state its recorder
+# is in when this step is pasted. The driving step's failed send marks the
+# capture *before* it tears the recorder down, and a worker or its session
+# torn down in that gap leaves the mark with the recorder still attached — the
+# state the mark exists for. The detach would then end that recorder cleanly:
+# asciinema exits 0 and the returning attach writes the completion mark, so
+# every check after the branch below passes on a cast that stops before the
+# scenario step the failed send never ran (verified in this container with the
+# stub harness: a live recorder, a complete-looking cast, status, completion
+# mark and transcript, and either rejection handle left this block exiting 0
+# with no message; verified live too, on tmux 3.2a + asciinema 2.1.0: a real
+# recorder attached to a real target session with the mark set on the session,
+# this block without the live-branch read exited 0, and the fixed block exited
+# 1 with the refusal). The recorder-gone branch reads the marks after its status
+# and claim checks; this function is also called at the top of the live branch,
+# *before* the detach, so neither state can hide a mark. Two handles, because
+# each outlives the other: the session option (which works when the capture
+# directory has gone read-only) and `recorder.rejected` in the capture
+# directory (which survives the session). Step 2 clears both for a new
+# capture, and step 3's restart clears both for the attempt it replaces.
+capture_rejected() {
+    rejected=$(tmux show-options -t "=$TARGET:0.0" -v @pm_capture_rejected 2>/dev/null || true)
+    if [ -z "$rejected" ] && [ -e <capture-dir>/recorder.rejected ]; then
+        rejected=1
+    fi
+    [ -n "$rejected" ] || return 0
+    echo "an earlier step rejected this capture — a step of it failed" \
+        "before the scenario finished (the recorder never attached, a" \
+        "detach from outside, or a step that could not drive the TUI), so" \
+        "the cast is incomplete and not a finished recording; re-record" \
+        "the scenario. (If that step was itself killed after its checks," \
+        "the recording is complete: clear the marks with 'tmux set-option" \
+        "-u -t =$TARGET:0.0 @pm_capture_rejected' and 'rm -f" \
+        "<capture-dir>/recorder.rejected', and re-run this step.)" >&2
+    tmux kill-session -t "=pm-recorder" 2>/dev/null || true
+    tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
+    tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
+    exit 1
+}
 # "The recorder is gone" is its *pane* having ended, not only its session:
 # with `set -g remain-on-exit on` (a common way to keep a crashed pane
 # visible, and what this project's own QA notes prescribe) tmux keeps the
@@ -1179,37 +1226,14 @@ if ! tmux has-session -t "=pm-recorder" 2>/dev/null || \
     # release, and must be checked *after* the target-alive branch so it covers
     # the both-gone case too: a failed start (step 3's "recorder exited before
     # it drew") is exactly the case where the target session can have ended,
-    # and a session option dies with it. Two handles, because each outlives the
-    # other — the session option (set by step 3's failed start, the in-progress
-    # refusal above, the driving step's failed send and this step's detach
-    # race; it works even when the capture directory has gone read-only) and
-    # `recorder.rejected` in the capture directory (set by step 3's failed
-    # start). Either one means a step of this capture rejected it; step 2
-    # clears both once a new capture attaches its pipe, so it can only mean
-    # "the last capture in this session
-    # was rejected". Without this the state a failed start leaves — recorder
+    # and a session option dies with it. The reads and the refusal are the
+    # `capture_rejected` above, which the live branch also runs before it ends
+    # the recorder. Without this the state a failed start leaves — recorder
     # gone, status 0, a cast holding only asciinema's error, the transcript
     # step 2 wrote — passes the checks below and the stop step exits 0 on it
     # (verified live on tmux 3.2a + asciinema 2.1.0: a 168-byte cast holding
     # "can't find session: pm-test", status 0, step 5 rc 0).
-    rejected=$(tmux show-options -t "=$TARGET:0.0" -v @pm_capture_rejected 2>/dev/null || true)
-    if [ -z "$rejected" ] && [ -e <capture-dir>/recorder.rejected ]; then
-        rejected=1
-    fi
-    if [ -n "$rejected" ]; then
-        echo "an earlier step rejected this capture — the recording ended" \
-            "before the scenario finished (the recorder never attached, a" \
-            "detach from outside, or a step that could not drive the TUI), so" \
-            "the cast is incomplete and not a finished recording; re-record" \
-            "the scenario. (If that step was itself killed after its checks," \
-            "the recording is complete: clear the marks with 'tmux set-option" \
-            "-u -t =$TARGET:0.0 @pm_capture_rejected' and 'rm -f" \
-            "<capture-dir>/recorder.rejected', and re-run this step.)" >&2
-        tmux kill-session -t "=pm-recorder" 2>/dev/null || true
-        tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
-        tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
-        exit 1
-    fi
+    capture_rejected
     # Both are gone (or the recorder already ended with a clean status and
     # this capture's claim released): the session itself ended, which ended
     # the attach and so the recording, or this step's own detach already ran.
@@ -1232,6 +1256,11 @@ else
     # while the session it attached to is *still there* died mid-scenario),
     # and when it is gone too the status check below decides, exactly as in
     # the both-gone branch.
+    #    A rejection an earlier step left is read here too, *before* the
+    # detach: a live recorder does not make the capture acceptable, and ending
+    # it would hand the checks below the finished state the mark exists to
+    # refuse (see `capture_rejected` above).
+    capture_rejected
     #    The key is the server's prefix, not a hard-coded C-b:
     #    `~/.tmux.conf` may set another one (the dev container this recipe was
     #    last exercised in sets `C-\`), and then `C-b d` is ordinary input to

@@ -1396,6 +1396,20 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   alive, status 0, claim and marks clear), where the mark is the only
   handle left (review loop 928f i43, R109). S21/S22/S23
   re-check that a finished capture still passes.
+- A rejection mark with the recorder still *live* → the stop step must not end
+  that recorder and accept the capture. Every failure path writes the mark
+  before it tears the recorder down (the driving step's failed send writes the
+  session option, then `recorder.rejected`, then kills the session), so a
+  worker or session torn down in that gap leaves the mark with the recorder
+  still attached. The detach then ended it cleanly — asciinema exited 0 and
+  the returning attach wrote the completion mark — and step 5's checks
+  accepted a cast that stops before the scenario step the failed send never
+  ran. Step 5 now reads both handles before the detach, and step 3's restart
+  clears both for the attempt it replaces. The stub harness reproduces it (a
+  live `pm-recorder`, a complete-looking cast, status, mark and transcript,
+  and either rejection handle: rc 0 before, rc 1 "an earlier step rejected
+  this capture" after) (review loop 928f i45, R111). S21/S22/S23 re-check that
+  a finished capture with no mark still passes.
 
 ## Pass / Fail criteria
 

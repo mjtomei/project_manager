@@ -254,7 +254,16 @@ hits, regardless of how it waits for a background job:
   holds it from step 2 until the stop step's last statement releases it, so
   a re-paste finds it clear and a recorder that ended under a claim that is
   still set is failed with a message that names the early detach (review
-  loop 928f i35, R100).
+  loop 928f i35, R100);
+- a rejection mark is read whichever state the recorder is in: a step's
+  failure path writes the mark *before* it tears the recorder down, so a
+  worker or session torn down in that gap leaves the mark with the recorder
+  still attached — and the stop step's detach then ended it cleanly (status
+  0, the returning attach writes the completion mark) and its cast/status/
+  mark/transcript checks accepted a capture that stops before the scenario
+  step the failed send never ran. The live branch reads both handles before
+  the detach, and step 3's restart clears both for the attempt it replaces
+  (review loop 928f i45, R111).
 
 The capture flow's readiness and stop logic is also *executed* against stub
 ``tmux``/``pm`` (``TestCaptureFlowExecution``), because its failure modes are
@@ -8607,6 +8616,57 @@ class TestCaptureFlowExecution:
             "the recording, so the documented remedy cannot work: "
             + r2.stderr)
 
+    @pytest.mark.parametrize(
+        "mark", ["session", "file"], ids=["session-mark", "file-mark"])
+    def test_a_live_recorder_does_not_hide_a_rejection_mark(self, tmp_path,
+                                                            mark):
+        """A rejected capture is not ended and accepted because its recorder lives.
+
+        The driving step's failed send marks the capture *before* it tears the
+        recorder down, so a worker or its session torn down in that gap leaves
+        the mark with the recorder still attached — the recorder is still
+        drawing the session, and the cast is being written. Step 5 used to read
+        the marks only in its recorder-gone branch, so this state took the
+        detach path: the attach returned normally, the completion mark was
+        written, asciinema's status was 0 and the cast and transcript were
+        non-empty — every check passed on a cast that stops before the
+        scenario step the failed send never ran (verified with the stub
+        harness: rc 0, no message). The marks are now read before the detach
+        as well, so a live recorder cannot hide the rejection. Both handles
+        are read: the session option and ``recorder.rejected``.
+        """
+        cap = tmp_path / "cap"
+        state = {"claim.pm-test": str(cap)}
+        files = {"recording.cast": '{"version": 2}\n',
+                 "transcript.log": "pane output\n",
+                 "recorder.status": "0\n",
+                 "recorder.command-done": "done\n"}
+        if mark == "session":
+            state["rejected.pm-test"] = "1\n"
+        else:
+            files["recorder.rejected"] = ""
+        r, _ = _run_block(
+            _stop_block("tmux-screen-recording.md"), "ok", tmp_path,
+            target=True, sessions=("pm-recorder",),
+            state_files=state, files=files)
+
+        assert r.returncode != 0, (
+            "step 5 ended a live recorder and accepted the capture a step had "
+            "rejected, so the detach turned the rejected state into the "
+            "finished one its checks accept")
+        assert "rejected this capture" in r.stderr, r.stderr
+        assert not (tmp_path / "state" / "pm-recorder").exists(), (
+            "the refusal left the rejected capture's recorder running")
+        assert not (tmp_path / "state" / "claim.pm-test").exists(), (
+            "the refusal left its capture-directory claim behind (R25)")
+        if mark == "session":
+            assert (tmp_path / "state" / "rejected.pm-test").exists(), (
+                "the refusal cleared the session mark its own remedy names")
+        else:
+            assert (cap / "recorder.rejected").exists(), (
+                "the refusal cleared the capture-directory mark its own "
+                "remedy names")
+
     def test_step_two_clears_a_previous_rejection(self, tmp_path):
         """A re-record is not refused by the attempt it replaces.
 
@@ -9175,6 +9235,52 @@ class TestCaptureFlowExecution:
                 f"the restart kept the previous attempt's {name}, which the "
                 "manifest would present as this attempt's evidence although "
                 "the cast it came from was cleared")
+
+    def test_step_three_restart_clears_a_previous_rejection(self, tmp_path):
+        """A restart is not refused for the attempt it replaces.
+
+        Step 3 is the paste-alone restart: it clears the cast, status, mark
+        and logs the replaced attempt left, because the new attempt's step 5
+        judges its own evidence. The rejection has two handles — the session
+        option and ``recorder.rejected`` — and step 5 now reads them whichever
+        state its recorder is in, so a restart that cleared only the file half
+        would have its own finished recording refused for the attempt it
+        replaced. The session half is cleared here (the target session is
+        asserted before the clear, so the handle resolves); the file half goes
+        with the ``rm`` beside it. Verified with the stub harness: without the
+        session clear, the new attempt's step 5 refuses "rejected this
+        capture".
+        """
+        cap = tmp_path / "cap"
+        r, _cast = _run_block(
+            _step_three_block(), "ok", tmp_path, target=True,
+            state_files={"pipe.pm-test": "", "pane": "TUI drawn\n",
+                         "rejected.pm-test": "1\n"},
+            files={"recording.cast": "previous attempt cast\n",
+                   "recorder.rejected": ""})
+
+        assert r.returncode == 0, r.stderr
+        assert not (tmp_path / "state" / "rejected.pm-test").exists(), (
+            "the restart left the previous attempt's rejection mark on the "
+            "session, so the new attempt's step 5 refuses it")
+        assert not (cap / "recorder.rejected").exists(), (
+            "the restart left the previous attempt's capture-directory "
+            "rejection mark, so the new attempt's step 5 refuses it")
+
+        # ... and the restarted attempt's own stop step accepts it: the live
+        # recorder is the one this restart started, and the evidence is the
+        # one it produced. Without the session clear, the live branch reads
+        # the previous attempt's mark and refuses a finished recording.
+        (cap / "recording.cast").write_text('{"version": 2}\n')
+        (cap / "transcript.log").write_text("pane output\n")
+        (cap / "recorder.status").write_text("0\n")
+        (cap / "recorder.command-done").write_text("done\n")
+        r2, _ = _run_block(
+            _stop_block("tmux-screen-recording.md"), "ok", tmp_path,
+            target=True, capture=cap, reuse=True)
+        assert r2.returncode == 0, (
+            "the restart's own finished recording was refused for the "
+            "attempt it replaced: " + r2.stderr)
 
     def test_a_restarted_recorder_killed_before_its_status_is_not_a_finish(
             self, tmp_path):

@@ -4883,7 +4883,58 @@ R110. **Step 4's no-search-bit guard had no case, and the CLI produced-files
      `related-suites.log`, `suite.log`, `README.md`). Amends R84's test list;
      R109's mark rules are unchanged.
 
+R111. **A rejection mark was only read once the recorder was gone (review
+   loop 928f i45).** One leftover in the kept tmux-recipe scope, the PR's own
+   class (a completion check that reads the state a failed run left behind,
+   one branch short); no `pm_core/` change.
+
+   - **The defect.** Every failure path writes the rejection mark *before* it
+     tears the recorder down — the driving step's `send_failed` sets the
+     session option, then `recorder.rejected`, then kills the session, stops
+     the pipe and releases the claim. A worker or session torn down in that
+     gap (the state the mark exists for) leaves the mark with the recorder
+     still attached. Step 5 read the marks only inside its recorder-gone
+     branch, so this state took the live branch: the detach ended the
+     recorder cleanly, asciinema exited 0, the returning attach wrote
+     `recorder.command-done`, and the cast and transcript were non-empty — so
+     the cast/status/mark/transcript checks accepted a cast that stops before
+     the scenario step the failed send never ran. Verified with the stub
+     harness: a live `pm-recorder`, a complete-looking cast, status `0`,
+     completion mark and transcript, plus either mark (the session option or
+     the capture-directory file), left the stop block exiting 0 with no
+     message. Verified live too, on tmux 3.2a + asciinema 2.1.0: a real
+     recorder attached to a real target session, with the session mark set,
+     step 5 without the live-branch read exited 0 (the detach ended the
+     recorder cleanly and its own completion mark and status `0` were
+     written), while the fixed block exited 1 with the refusal. A second
+     worker pasting step 5 on a shared server reaches the
+     same state while the first worker's failed send is marking the capture.
+   - **Fix.** The mark read and refusal (both handles, the refusal cleanup and
+     the remedy text) are one `capture_rejected` function in step 5's own
+     paste, called where the gone branch called the inline block and at the
+     top of the live branch *before* the detach. A live recorder therefore no
+     longer hides a mark, and a refused capture is not ended and then
+     accepted. Step 3's restart now clears the session half of the rejection
+     as well as the file half it already cleared: step 5 reads the marks in
+     both recorder states, so a restart that left the session mark would have
+     its own finished recording refused for the attempt it replaces.
+   - **Tests.** `test_a_live_recorder_does_not_hide_a_rejection_mark`
+     (parametrized over the session and file handles) runs the stop block
+     against a live recorder with each mark and requires the refusal message,
+     the recorder ended, the claim released and the mark left for its remedy.
+     `test_step_three_restart_clears_a_previous_rejection` runs a successful
+     restart over a previous attempt's marks and requires both gone.
+     Mutations: removing the live-branch call exits 0 in the first case (the
+     reported false pass); removing step 3's session clear leaves the mark,
+     so the restart's own step 5 refuses it. Recipe file **396 passed** (was
+     393); related suites **210 passed**; full suite **5593 passed, 1 skipped,
+     0 failed** (503.10 s, once on the final tree). Evidence:
+     `/pm-captures/review-928f-i45/` (`live-check.log`, `mutation-check.log`,
+     `recipe-file.log`, `related-suites.log`, `suite.log`, `README.md`,
+     `scripts/`).
+
 ## Non-goals
+
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
 - **No new helper, prompt block, verifier text, or QA-loop change.** Those
   were the dropped scope above.
