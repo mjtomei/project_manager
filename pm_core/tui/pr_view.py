@@ -829,8 +829,11 @@ def handle_command_submitted(app, cmd: str) -> None:
             tree = app.query_one("#tech-tree", TechTree)
             qa_pr_id = tree.selected_pr_id
         if not qa_pr_id:
-            app.log_message("No PR specified for QA — select one, or run "
-                            "`pr qa <id>` (TUI: t)")
+            # Name the mode the user asked for: suggesting plain `pr qa`
+            # after a fresh/loop request would start the wrong kind of run.
+            mode_hint = f" {qa_mode}" if qa_mode else ""
+            app.log_message(f"No PR specified for QA — select one, or run "
+                            f"`pr qa{mode_hint} <id>` (TUI: t)")
         else:
             qa_pr = _resolve_command_bar_pr(app, qa_pr_id)
             if qa_pr:

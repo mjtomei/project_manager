@@ -7,6 +7,8 @@ from textual.geometry import Region
 from textual.widgets import Label, Static
 from textual.screen import ModalScreen
 
+from pm_core import command_surface
+
 
 class MergeLockScreen(ModalScreen):
     """Overlay shown while pm/ files are stashed during merge.
@@ -297,7 +299,6 @@ class HelpScreen(ModalScreen):
             yield Label("Command Bar", classes="help-section")
             yield Label("  [bold]/[/]  Open the command bar (type help there for this screen)",
                         classes="help-row")
-            from pm_core import command_surface
             for _line in command_surface.command_bar_help_lines_textual()[1:]:
                 yield Label(_line, classes="help-row")
             yield Label("")

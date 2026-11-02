@@ -381,3 +381,17 @@ the routed form and `--fresh` so help is complete.
   `zz d`/`G` modifiers and `Y` (cleanup workdir) is listed — they had
   drifted exactly where the two surfaces overlap. The Textual render test
   asserts those rows.
+
+- Review-loop i7: final consistency pass. `command_surface` now names its
+  section header (`COMMAND_BAR_HEADER`) instead of re-deriving it from the
+  rendered text, and `HelpScreen` imports the module at top level (it has
+  no imports, so there is no cycle to dodge). Wording: `pm pr qa` help no
+  longer implies you must already be inside a session ("If no pm session is
+  running, start one with `pm session`"); `pm pr merge` on a pending PR no
+  longer repeats "start" twice; the TUI's "No watcher running" now names
+  `ws` / `pm watcher start`; `pm tui keys`' summary matches its command-bar
+  section; `HELP_TEXT`'s `pr start` line names the real `[--companion]`.
+  Tests added: command-bar `help`/`?`/`commands` open the HelpScreen (the
+  branch was previously untested), an unknown command-bar PR id names
+  `pr list`, the CLI deliberately rejects `--fresh` on `qa`/`merge`, and
+  `pm pr qa`'s own wrong-status refusal carries `pm pr start`.

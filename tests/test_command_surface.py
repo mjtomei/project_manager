@@ -91,6 +91,19 @@ def test_pr_signoff_help_names_routed_form_and_record():
     assert "record" in out and "integrate" in out
 
 
+def test_cli_merge_and_qa_deliberately_reject_fresh():
+    """`--fresh` is a command-bar spelling for QA, and meaningless for merge.
+
+    The help says so; this asserts the CLI really has no such option, so
+    the documented absence cannot silently become a supported flag (or a
+    positional that swallows the id).
+    """
+    for args in (["pr", "qa", "--fresh"], ["pr", "merge", "--fresh"]):
+        result = CliRunner().invoke(cli, args)
+        assert result.exit_code != 0, result.output
+        assert "No such option" in result.output, result.output
+
+
 @pytest.mark.parametrize("name", ["start", "review", "merge", "signoff"])
 def test_lifecycle_help_matches_the_shared_table(name):
     """The hand-written equivalent blocks and the shared table agree.
@@ -291,6 +304,25 @@ def test_tui_keys_documents_prefix_keys_as_prefixes():
     assert "ys start" in out and "yd review" in out and "yt QA" in out
 
 
+@pytest.mark.parametrize("cmd", ["help", "?", "commands", "command bar",
+                                 "command-bar", "help pr"])
+def test_command_bar_help_opens_the_help_screen(cmd):
+    """`help` in the command bar shows the screen, not one truncated line.
+
+    Before this the command shelled out to `pm help`, whose multi-line
+    output the command bar displays as a single (last) line — no help.
+    """
+    from types import SimpleNamespace
+
+    from pm_core.tui import pr_view
+
+    shown = []
+    app = SimpleNamespace(action_show_help=lambda: shown.append(True),
+                          log_message=lambda *a, **k: None)
+    pr_view.handle_command_submitted(app, cmd)
+    assert shown == [True]
+
+
 def test_non_github_backend_remedies_name_a_working_command(tmp_path,
                                                             monkeypatch):
     """A wrong-backend refusal must not point at another GitHub-only command.
@@ -425,6 +457,53 @@ def test_command_bar_qa_resolves_a_github_display_id(tmp_path):
     assert not logs, logs
 
 
+def test_command_bar_qa_unknown_id_names_the_listing_command(tmp_path):
+    """A typo'd PR id in the command bar must name the way to see them.
+
+    The branch used to answer a bare "PR not found: <id>"; every other
+    not-found path now names `pr list`.
+    """
+    from types import SimpleNamespace
+    from unittest import mock
+
+    from pm_core.tui import pr_view
+
+    (tmp_path / "project.yaml").write_text(
+        "project:\n  backend: vanilla\n  base_branch: master\nprs: []\n")
+    logs = []
+    app = SimpleNamespace(
+        _root=tmp_path, _inflight_pr_action=None, _plans_visible=False,
+        log_message=lambda msg, **kw: logs.append(msg),
+        query_one=lambda *a, **k: mock.Mock())
+
+    pr_view.handle_command_submitted(app, "pr qa pr-999")
+
+    assert "PR not found: pr-999" in logs[-1]
+    assert "pr list" in logs[-1]
+
+
+def test_command_bar_qa_no_selection_names_the_requested_mode():
+    """A fresh/loop request with no PR must not fall back to a plain run.
+
+    The remedy used to say `pr qa <id>` even when the user typed `--fresh`,
+    i.e. it named a different action than the one they asked for.
+    """
+    from types import SimpleNamespace
+
+    from pm_core.tui import pr_view
+
+    logs = []
+    app = SimpleNamespace(
+        _root=None, _inflight_pr_action=None, _plans_visible=False,
+        log_message=lambda msg, **kw: logs.append(msg),
+        query_one=lambda *a, **k: SimpleNamespace(selected_pr_id=None,
+                                                  focus=lambda: None))
+
+    pr_view.handle_command_submitted(app, "pr qa --fresh")
+
+    assert "pr qa fresh <id>" in logs[-1]
+
+
 def _github_display_id_app(tmp_path, logs, tree):
     """An app double over a GitHub-backed PR whose display id is `#42`."""
     from types import SimpleNamespace
@@ -551,6 +630,22 @@ def test_status_next_step_does_not_name_the_diagnostic_qa_command():
     assert "pm pr qa" not in remedy
     assert "pr qa pr-001" in remedy
     assert "press t" in remedy
+
+
+def test_pr_qa_wrong_status_names_the_next_command(tmp_path):
+    """The CLI's own refusal must carry the same corrective command."""
+    from unittest import mock
+
+    from pm_core.cli import pr as pr_mod
+
+    (tmp_path / "project.yaml").write_text(
+        "project:\n  backend: vanilla\n  base_branch: master\n"
+        "prs:\n- id: pr-001\n  title: T\n  status: pending\n")
+    with mock.patch.object(pr_mod, "state_root", return_value=tmp_path):
+        result = CliRunner().invoke(pr_mod.pr, ["qa", "pr-001"])
+
+    assert result.exit_code == 1, result.output
+    assert "pm pr start pr-001" in result.output
 
 
 # ---------------------------------------------------------------------------

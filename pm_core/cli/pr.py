@@ -2820,7 +2820,7 @@ _QA_HELP = f"""Validate a PR for QA and print the exact command to start it.
 The full QA loop (planner + scenarios) needs the TUI: it manages
 scenario windows and tracks run state.  This CLI form therefore does
 not launch QA itself — it checks the PR and prints the command-bar
-form to use.  Run it inside a pm session (`pm session`).
+form to use.  If no pm session is running, start one with `pm session`.
 
 This CLI command has no --fresh or --loop flag: both are command-bar
 spellings (see the examples below), not CLI options.
@@ -2983,7 +2983,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
         raise SystemExit(1)
     if pr_entry.get("status") == "pending":
         click.echo(
-            f"PR {pr_id} is pending — start and review it first. "
+            f"PR {pr_id} is pending and cannot be merged. "
             f"{_next_step_for_status(pr_id, 'pending')}", err=True)
         raise SystemExit(1)
 

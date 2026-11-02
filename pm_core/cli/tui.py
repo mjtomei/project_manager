@@ -262,7 +262,7 @@ def tui_send(keys: str, session: str | None):
 
 @tui.command("keys")
 def tui_keys():
-    """Show available TUI keybindings."""
+    """Print TUI keybindings and their command-bar equivalents."""
     from pm_core import command_surface
     click.echo("""\
 TUI Keybindings:

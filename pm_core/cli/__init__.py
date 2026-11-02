@@ -610,7 +610,7 @@ COMMANDS
   pm pr show <pr-id>            Show a PR's full detail (description, tests, files, notes, sign-off return)
   pm pr graph                   Show dependency tree
   pm pr ready                   Show PRs ready to start
-  pm pr start [pr-id]           Clone, branch, launch Claude (tmux window or blocking) [--fresh]
+  pm pr start [pr-id]           Clone, branch, launch Claude (tmux window or blocking) [--fresh] [--companion]
   pm pr review [pr-id]          Mark PR as in_review, open review window [--fresh]
   pm pr qa [pr-id]              Validate a PR and print the QA start command (TUI: t; z t fresh, zz t loop)
   pm pr merge [pr-id]           Publish a signed-off PR into the base branch

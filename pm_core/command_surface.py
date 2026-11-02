@@ -48,6 +48,8 @@ _QA_COMMAND_BAR_ROWS: tuple[tuple[str, str, str, str], ...] = tuple(
     for _mode, form, keys, desc in QA_MODES
 )
 
+COMMAND_BAR_HEADER: str = "Command bar (press /):"
+
 # (command-bar form, CLI form, TUI keys, description)
 COMMAND_BAR_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
     ("pr start [--fresh] [--companion] [PR_ID]",
@@ -138,14 +140,13 @@ def qa_help_table() -> str:
 
 def command_bar_help_text() -> str:
     """The command-bar section for ``pm tui keys`` (plain text)."""
-    header = "Command bar (press /):"
-    return "\n".join([header, *command_bar_lines(indent="  "), "",
+    return "\n".join([COMMAND_BAR_HEADER, *command_bar_lines(indent="  "), "",
                       *_flag_note_lines("  ")])
 
 
 def command_bar_help_lines_textual() -> list[str]:
     """The command-bar section for the TUI ``?`` HelpScreen (escaped markup)."""
-    return [command_bar_help_text().splitlines()[0],
+    return [COMMAND_BAR_HEADER,
             *command_bar_lines(textual=True, indent="  "),
             "",
             *_flag_note_lines("  ", textual=True)]

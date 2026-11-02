@@ -249,7 +249,7 @@ def stop_watcher(app, watcher_type: str = "auto-start") -> None:
         )
         return
 
-    app.log_message("No watcher running.")
+    app.log_message("No watcher running — start one with `ws` (or `pm watcher start`).")
 
 
 def is_running(app, watcher_type: str = "auto-start") -> bool:
