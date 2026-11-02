@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T07:35:22.914244+00:00'
+  updated_at: '2026-11-02T07:36:41.365322+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7510,6 +7510,27 @@ prs:
       /pm-captures/scenarios/29/recheck-78b7b2fa5/.'
     created_at: '2026-11-02T07:35:22Z'
     last_edited: '2026-11-02T07:35:22Z'
+  - id: note-7df0251
+    text: 'QA S30 refiner (2026-11-02, a7169e96): all 3 draft stories smoke-run live
+      with nested podman 3.4.4 in the QA container (pm-dev built by `pm container
+      build-base` in ~3.5 min; run it from a project with nested_podman: true or the
+      RUN steps die on sethostname). Draft corrections: (1) a fake-claude config makes
+      build_claude_shell_cmd return before any prompt file or $(cat ...) exists, so
+      the prompt-path checks use a stand-in `claude` first on PATH (pm mounts shutil.which(claude)
+      at /usr/local/bin/claude) and NO fake-claude config; (2) TUI `s` refuses "PR
+      ... is not committed on master yet" until `pm push` + `git merge pm/sync-...`;
+      (3) the launch already embeds "$(cat /workspace/pm/prompts/pm_prompt_<sid>.txt)"
+      (no host-path rewrite, the DEBUG "rewrote" line never appears); (4) /run/.containerenv
+      is empty in pm containers. Disposable HOME plus XDG_DATA_HOME=/home/pm/.local/share
+      XDG_CONFIG_HOME=/home/pm/.config keeps the image store. Finding (added as story
+      4): `pm session kill` typed in a shell window inside the session it kills dies
+      on SIGHUP when the server exits. No "Killed session" line, no container/proxy
+      cleanup (the proxy daemon, its dir and .lock leak, and the container goes only
+      via the pane EXIT trap), and the /tmp/pm-sessions socket file is left behind.
+      The socket leak is this PR''s; master has the same kill-then-cleanup order for
+      containers/proxies.'
+    created_at: '2026-11-02T07:36:41Z'
+    last_edited: '2026-11-02T07:36:41Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
