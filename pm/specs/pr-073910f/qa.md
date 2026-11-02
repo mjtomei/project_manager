@@ -48,8 +48,10 @@ simultaneously.
 5. **`$TMUX`** — inherited by panes, `run-shell` hooks and
    `display-popup` bodies; resolved into `PM_TMUX_SOCKET` at entry.
 6. **The pane registry** (`~/.pm/pane-registry/<session>.json`) — one file
-   per session, keyed by the *base* session name; written by the TUI, read
-   by every discovery path.
+   per session, keyed by the *base* session name, guarded by a sidecar
+   `.lock` file; written by the TUI (its heal on mount) and by
+   `pm session` when it adopts a running TUI the registry does not list,
+   read by every discovery path.
 7. **tmux pane ids (`%N`)** — now only unique *within* one server, while
    `pm tui send` delivers keys to a bare pane id.
 8. **Per-server tmux state** — hooks (`set-hook -g`), global environment,
@@ -111,6 +113,42 @@ pane unless stated otherwise.
   the one-line rollout note; no private twin is created), and after
   `pm session kill` the next `pm session` starts it on its private socket
   (QA planning 2026-11-02, from the S28 tag change).
+- **GIVEN** a running session whose pane registry does not list its
+  running TUI — the registry file was removed or emptied, the TUI pane is
+  not in window index 0 (the user's tmux config sets `base-index 1`, or
+  the TUI was respawned into a new window after its own window closed),
+  or a joining user's `HOME` has no registry for the session at all —
+  **WHEN** the user runs `pm session`,
+  **THEN** the running TUI is adopted.  The attach proceeds with no "TUI
+  pane missing — respawning..." line, no second TUI pane appears even
+  briefly, the TUI keeps its pid, and the registry lists that pane as its
+  window's TUI exactly once.  That holds also when several `pm session`
+  runs and a TUI restart (the TUI re-registers itself when it mounts)
+  write the registry at the same moment.  Only the session's own server
+  is read, so another session's identical pane id is never recorded (QA
+  S35, commit 7a32e665; review e661 i1).
+- **GIVEN** the TUI is really gone (its process crashed, or its window
+  was closed) while other panes of the session still run, or its pane is
+  dead but kept by `remain-on-exit` and the registry does not list it
+  (with the dead pane still registered, pm attaches to it without a
+  respawn, as master does; that case is out of scope), including in a
+  session whose name
+  contains `_tui` because the repo directory does (`rich_tui`), so every
+  pane pm launches carries that text in its command line,
+  **WHEN** the user runs `pm session`,
+  **THEN** it prints "TUI pane missing — respawning..." and starts a
+  fresh TUI.  A notes, agent or shell pane, or a dead pane, is never
+  recorded as the TUI, and `pm tui view`/`send` afterwards drive the new
+  TUI.  Before the respawn, `pm tui view`/`send` report that no TUI pane
+  was found rather than capturing or typing into another pane (QA
+  planning 2026-11-02 pass 2: the adopt and the discovery fallback
+  recognise a TUI by `_tui` anywhere in a pane's start command; not yet
+  verified live).
+- **GIVEN** another pm process holds the session's pane-registry lock
+  (a stuck command), **WHEN** the user runs `pm session` while the
+  registry lacks the running TUI, **THEN** the attach still completes
+  after the lock wait, with no traceback and no second TUI; a later
+  attach records the entry once the lock is free (review e661 i1).
 
 ### R3 — `pm session list` enumerates every pm session across servers
 
@@ -147,13 +185,21 @@ pane unless stated otherwise.
   others, so its entries cannot be enumerated —
   **WHEN** the user, with a private session running, runs `pm session
   list`,
-  **THEN** it does not silently report "No pm sessions found." as if
-  nothing were running: it either lists the sessions it can still reach
-  or says that the socket directory cannot be read; it never crashes, and
-  `pm session`, `--print-connect`, `pm tui view` and `pm session kill` in
-  the project's directory still find the session through its
-  deterministic socket path (QA planning 2026-11-02; `list` now applies
-  `paths.shared_socket_dir_is_usable`, review-loop 68bd i4).
+  **THEN** it never prints a bare "No pm sessions found." as if nothing
+  were running, and never crashes (exit 0).  It lists the sessions it can
+  still reach: the cwd project's session through its deterministic socket
+  (also from a subdirectory, and through a long name's hashed socket),
+  plus any legacy session on the default server.  On stderr it says the
+  socket directory cannot be read, so other sessions may be running; run
+  from outside any project, it adds that running it from a project
+  directory checks that project's session (QA S34, commit 43b35445).  Run
+  from *inside* a pm pane, whose cwd may be a PR workdir clone, a
+  subdirectory or a directory outside any repo, it also lists the session
+  the pane belongs to (the same-set rule above; ambiguity 12).  `pm
+  session`, `--print-connect`, `pm tui view` and `pm session kill` in the
+  project's directory still find the session through its deterministic
+  socket path (`list` applies `paths.shared_socket_dir_is_usable`,
+  review-loop 68bd i4).
 
 ### R4 — Connect commands name the right server
 
@@ -424,7 +470,10 @@ pane unless stated otherwise.
 - **GIVEN** that shared session, **WHEN** a second user joins with `pm
   session --global --dir <A's project>`,
   **THEN** they attach to the *same* session on the same server and see
-  A's windows.
+  A's windows.  No second TUI is started in A's window, not even
+  briefly: the joiner's empty pane registry adopts A's running TUI (R2),
+  and A's TUI keeps its pid.  The same holds when two users join at the
+  same moment.
 - **GIVEN** A also has a private session for a different project,
   **WHEN** A runs `pm session --global` from inside the private session,
   **THEN** it attaches to / creates the shared session, not the private
@@ -747,6 +796,14 @@ them.
 - A window killed outside pm whose `@N` id is still live on another pm
   session's server.
 - Command-bar and popup lines with unbalanced quotes.
+- A pane registry that has lost track of a running TUI: the file was
+  removed, the TUI is outside window index 0 (`base-index 1`, or a
+  respawn into a new window), or a joiner's `HOME` has no registry.  Also
+  a registry lock held by a stuck pm process.
+- A TUI that is really gone in a session whose name contains `_tui`, or
+  whose pane is dead under `remain-on-exit`.
+- `pm session list` on an unreadable socket directory, run from inside a
+  pm pane whose cwd is a PR workdir clone or outside any repo.
 
 ## Pass / fail criteria
 
@@ -819,3 +876,17 @@ Resolved by judgement (no **[UNRESOLVED]** items):
    session override / pm_root, exactly as that session's popups resolve
    it (review-loop 68bd i1/i2). A private twin of the same project is a
    different session with its own tag and its own override.
+11. **What a fresh `pm session` prints** — the create path prints
+   "Creating tmux session '<name>'..." and attaches its `~1` without an
+   "Attaching to session '<name>~1'..." line.  It does the same on
+   master, and QA S1 passed on exactly that.  The extra line QA S35's L3
+   story expected was a drafting error, not a requirement (resolved by
+   the 2026-11-02 second planning pass).
+12. **`pm session list` on an unreadable socket directory from inside a
+   pm pane** — added by the 2026-11-02 second planning pass.  The
+   implementation probes only the cwd project's socket.  A pane's cwd can
+   be a PR workdir clone, which has a different tag, or a directory
+   outside any repo, while the session the pane belongs to is reachable
+   through the pane's own socket.  Resolved by judgement from R3's
+   same-set rule: not listing the session the command runs in is a
+   failure, even with the "cannot read" warning printed.
