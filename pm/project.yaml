@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T04:53:36.233388+00:00'
+  updated_at: '2026-11-02T05:19:02.257326+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39568,6 +39568,30 @@ prs:
       (README) and .../51/rerun.'
     created_at: '2026-11-02T04:53:36Z'
     last_edited: '2026-11-02T04:53:36Z'
+  - id: note-f164702
+    text: 'QA S52 (2026-11-02, held QA run, cap 2): fixed 626b1240, both defects seen
+      live and pre-pinned by the refiner (note-6cb6ded). (1) history_query._compute_concurrency
+      took a scenario interval as [first non-wait span, attempt end], so W held in
+      waiting_human (its slot already given to the queued s3) counted as running:
+      every held run under cap 2 read "up to 3 at once" and its wall grew through
+      the hold (129 s -> 191 s over 62 s). Intervals are now the non-wait spans; post-fix
+      "wall 1m37s, up to 2 at once", wall/sum fixed across 107 hold reads. (2) after
+      a stopped held run the runtime keeps qa=done INPUT_REQUIRED until the next run
+      launches scenarios, so a fresh z t run listed the stale derived "QA INPUT_REQUIRED
+      (auto-start will not relaunch QA)" hold + "Waiting for: human:" for 36.5 s (62
+      reads) while its planner worked; _derived_holds now skips it while a QA run
+      attempt is open (still shown once the run is over, story 4). Tests: test_human_wait_is_not_execution_in_the_summary,
+      test_derived_hold_hidden_while_a_new_qa_run_is_open (fail on 27730e66). Full
+      suite 5584 passed, 1 skipped. All six stories held in both runs apart from the
+      two defects: planner deadline, s3 queued->launching at the grace end, one hold
+      (null due, owner_alive) 107/107 reads, popup [hold: ...], restart re-adopt 1.2
+      s with 2 lost-gap reads then re-armed, close W -> released 4.3 s, vanished +
+      retry 1 backoff fired, PASS 1m53s, pager == | cat, z z t cancel + one derived
+      row, leave-qa release exactly 60 s after the hold armed, R2 == R1 everywhere,
+      no tracebacks. Spec nit: the window-died log line carries the "QA [Q]: " prefix.
+      Captures /pm-captures/scenarios/52 (pre-fix/, post-fix/, README).'
+    created_at: '2026-11-02T05:19:02Z'
+    last_edited: '2026-11-02T05:19:02Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
