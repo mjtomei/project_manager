@@ -421,24 +421,29 @@ Key concepts:
 
 Common keyboard shortcuts in the TUI:
 - Arrow keys / hjkl: Navigate the PR tree
-- s: Start working on a PR (launches Claude in a new window)
-- d: Review PR (send for review)
-- g: Merge PR
+- s: Start working on a PR (z s: fresh, S: companion pane)
+- d: Review PR (z d: fresh, zz d: loop)
+- g: Merge PR (G: companion pane)
+- i: Sign-off router
 - e: Edit PR details
 - c: Launch Claude session
 - p: Toggle plans view
-- ?: Show help
-- /: Open command bar
+- ?: Show help (including command-bar forms)
+- /: Open command bar (type `help` there for the same screen)
 - b: Rebalance panes
 - q: Toggle QA instructions view
-- t: Start QA on selected PR
+- t: Start QA on selected PR (z t: fresh, zz t: loop)
+- Y: Cleanup a PR workdir
 
 Common commands:
 - pm pr list: List all PRs
 - pm pr start <id>: Start a PR
 - pm pr review <id>: Send PR for review
+- pm pr qa <id>: Print the QA start command (the full loop runs in the TUI)
+- pm pr merge <id>: Publish a signed-off PR
 - pm plan list: List plans
 - pm plan add <name>: Add a new plan
+- pm tui keys: Print keybindings and command-bar equivalents
 
 Common problems:
 - **Uppercase vs lowercase keys**: Some shortcuts require the Shift modifier. \

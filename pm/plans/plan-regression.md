@@ -26,7 +26,7 @@ The autonomous loops are deliberately built on existing primitives. New code is 
 - **Notes infrastructure** (`pr-83b98d5`, merged): `notes.txt` has sections including `Watcher`. `notes_for_prompt(root, "watcher")` returns the General + Watcher blocks already; new watchers get user-specified guidance for free without any per-watcher work. Users can leave guidance like "always run the auth-regression test daily" or "prioritize fixing memory leaks before UI polish" and it flows into every tick automatically.
 - **Regression test list**: `pm/qa/regression/*.md`, loaded by `qa_instructions.list_all()`, launched via `launch_qa_item()` (`pm_core/tui/pane_ops.py`).
 - **Verdict collection**: `poll_for_verdict()` (`pm_core/loop_shared.py`) and `extract_verdict_from_transcript()` (`pm_core/verdict_transcript.py`).
-- **Plans as pools**: a "pool of PRs" is just a pm plan (`plan=bugs`, `plan=ux`). No new pool construct, no priority field. Watchers judge priority dynamically each tick using prompt-supplied generic guidance plus user notes from the Watcher section, always ranking security and critical-incident risk first (see **Prioritization** below).
+- **Plans as pools**: a "pool of PRs" is just a pm plan (`plan=bugs`, `plan=improvements`). No new pool construct, no priority field. Watchers judge priority dynamically each tick using prompt-supplied generic guidance plus user notes from the Watcher section, always ranking security and critical-incident risk first (see **Prioritization** below).
 - **Unified pm log** (`pr-9bf8b0b`, merged) is available for project-wide visibility; per-watcher continuity uses dedicated text files at `pm/watchers/<name>.log` so each watcher's tick has tight, relevant context to read.
 
 ## Architecture
@@ -35,7 +35,7 @@ The autonomous loops are deliberately built on existing primitives. New code is 
 
 1. **Discovery supervisor** (`pr-271cb3a`) — schedules runs of the existing regression tests at `pm/qa/regression/*.md`. Test sessions themselves file findings via `pm pr add` (taught by `pr-47940bc`); the supervisor reconciles post-hoc (dedup, route confirmation, work-log).
 2. **Bug-fix implementation watcher** (`pr-e3a711c`) — drives the bug-fix flow against `plan=bugs`. Picks the best candidate dynamically each tick (security and critical-incident bugs first), advances PRs through `pm pr auto-sequence`, auto-merges on QA PASS.
-3. **Improvement-fix implementation watcher** (`pr-d39a7fb`) — same shape against `plan=ux`. Gated merge — PRs that PASS QA are held for a human taste check.
+3. **Improvement-fix implementation watcher** (`pr-d39a7fb`) — same shape against `plan=improvements`. Gated merge — PRs that PASS QA are held for a human taste check.
 
 > **Phase 11 generalization:** replace the plan-specific watchers and programmatic phase engine with agent-controlled execution and plan supervision. Participating sessions record handoffs and request next actions; watchers inspect tmux, reconcile gaps, maintain plans and choose priorities, security and critical-incident risk first. Discovery continues to generate findings and reusable regressions. PM provides launches and shared operations without requiring hooks or automatic state detection. See Phase 11 and [[plan-delivery]].
 
@@ -126,7 +126,7 @@ Chain start → review → QA on a single PR, halting at existing pause conditio
 ### PR: Regression test sessions file bugs and improvements into correct plans ✅ MERGED (#171)
 `pr-47940bc` (depends on: pr-539110b)
 
-Prompt-addendum at the launch-path wrapper in `launch_qa_item()` so the existing Claude-based regression test sessions know to file findings via `pm pr add --plan bugs` or `--plan ux`. Mirror of `pr-539110b` for regression tests. Verdicts unchanged.
+Prompt-addendum at the launch-path wrapper in `launch_qa_item()` so the existing Claude-based regression test sessions know to file findings via `pm pr add --plan bugs` or `--plan improvements`. Mirror of `pr-539110b` for regression tests. Verdicts unchanged.
 
 ### PR: Watcher-target window for regression test launches ✅ MERGED (#173)
 `pr-97ddabf` (depends on: pr-47940bc)
@@ -148,7 +148,7 @@ New `pm_core/watchers/bug_fix_impl_watcher.py` + `generate_bug_fix_impl_prompt()
 ### PR: Improvement-fix implementation watcher (BaseWatcher subclass) ✅ MERGED (#176)
 `pr-d39a7fb` (depends on: pr-e58459b)
 
-Mirror of `pr-e3a711c` against `plan=ux`. Differences: longer cadence, gated merge (PRs that PASS QA are advanced to ready-for-merge and held for human taste check), taste-shaped prioritization guidance.
+Mirror of `pr-e3a711c` against `plan=improvements`. Differences: longer cadence, gated merge (PRs that PASS QA are advanced to ready-for-merge and held for human taste check), taste-shaped prioritization guidance.
 
 ## Phase 4: Human surface (after Phases 2-3)
 
@@ -418,7 +418,7 @@ It is distinct from the review loop. Review asks *is the code correct/clean*; si
 
 This replaces the programmatic phase engine and consolidates overlapping watcher logic. Agents may initiate their own next activities; a watcher need not authorize every transition. Prompts carry the usual workflows and recovery guidance, while PM supplies launches, durable records and explicit operations. Keep observation through tmux and make the whole path usable without hooks or automatic agent-state interpretation.
 
-**The regression loop stays and closes through the plan watchers.** The discovery supervisor keeps scheduling regression runs, and *any* session — regression, review, QA, sign-off, impl — auto-files bug/improvement PRs (building on `pr-539110b` and `pr-47940bc`). Those land in the `bugs` and `ux` plans, where the per-plan auto-start watchers pick them up and drive them through sign-off. That's the closed loop: discovery → auto-filed PR → plan watcher → sign-off → merge (or back).
+**The regression loop stays and closes through the plan watchers.** The discovery supervisor keeps scheduling regression runs, and *any* session — regression, review, QA, sign-off, impl — auto-files bug/improvement PRs (building on `pr-539110b` and `pr-47940bc`). Those land in the `bugs` and `improvements` plans, where the per-plan auto-start watchers pick them up and drive them through sign-off. That's the closed loop: discovery → auto-filed PR → plan watcher → sign-off → merge (or back).
 
 **Two invariants that make autonomy trustworthy:**
 
@@ -540,7 +540,7 @@ A later optimization, deferred out of `pr-2d5f712`. Re-run the sign-off step **i
 - Every PR that finalizes QA gets an auto-generated BDD behavior report, and the dashboard (both `pr-8e693f6`) reviews all PRs by behavior + status with merged/unmerged filtering and regenerates missing reports
 - The verdict router (`pr-2d5f712`) maps every terminal verdict to a next hop, edits no code, and escalates to INPUT_REQUIRED on genuine ambiguity rather than merging incomplete work
 - A single **plan auto-start watcher** (`pr-ff9b728`) replaces the two impl watchers, the `AutoStartWatcher`, and the programmatic `auto_start.py` engine: it starts PRs from a plan, chooses max-in-flight concurrency, resolves high-level issues, and defers per-PR merge/route decisions to sign-off; the superseded watchers, gated-merge/taste-check, and `pr-b77702b` `auto_merge` code are removed
-- The regression loop is closed end to end: discovery still schedules regression runs, any session auto-files bug/improvement PRs, and the per-plan watchers for `bugs` and `ux` drive them through sign-off. Plan-watcher continuity is carried as **plan notes** in the plan files (the old `pm/watchers/*.log` recast), and the behavior interface (`pr-8e693f6`) surfaces plan notes, PR descriptions, and PR notes alongside the reports
+- The regression loop is closed end to end: discovery still schedules regression runs, any session auto-files bug/improvement PRs, and the per-plan watchers for `bugs` and `improvements` drive them through sign-off. Plan-watcher continuity is carried as **plan notes** in the plan files (the old `pm/watchers/*.log` recast), and the behavior interface (`pr-8e693f6`) surfaces plan notes, PR descriptions, and PR notes alongside the reports
 - The gate runs both on a single PR on demand and via the plan watcher; agents revalidate affected evidence after substantive changes under the product policy, never merely for note-only actions; the loop guard (default 10) + repeated-root-cause escalation prevent infinite bounce loops
 - When the router needs a new PR mid-run (missing dependency / assumed-missing feature / new feature), auto-start mutates the plan and graph live — files the upstream PR(s), inserts plan sections additively, re-resolves the dependency tree, and starts the new upstream work before resuming the blocked target — a case static auto-start can't handle today
 - With the **plan watcher** in autonomous mode (acting on sign-off's `ready_to_merge` recommendations without a human), the measured defect count trends **down** without per-change human review — the pitch's decisive open question answered in the affirmative

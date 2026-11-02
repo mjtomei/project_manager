@@ -199,7 +199,7 @@ def cluster_explore(bridged, fresh):
         from pm_core.claude_launcher import launch_bridge_in_tmux
 
         if not tmux_mod.in_tmux():
-            click.echo("--bridged requires running inside tmux.", err=True)
+            click.echo("--bridged requires running inside tmux. Start a pm session first with: pm session", err=True)
             raise SystemExit(1)
 
         session_name = tmux_mod.get_session_name()

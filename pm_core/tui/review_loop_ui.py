@@ -208,7 +208,7 @@ def _start_loop(app, pr_id: str, pr: dict | None,
     from pm_core import tmux as tmux_mod
 
     if not pr:
-        app.log_message(f"PR {pr_id} not found")
+        app.log_message(f"PR {pr_id} not found — see `pr list` (TUI: r to refresh)")
         return False
 
     if not tmux_mod.in_tmux():
@@ -217,7 +217,7 @@ def _start_loop(app, pr_id: str, pr: dict | None,
 
     workdir = pr.get("workdir")
     if not workdir:
-        app.log_message(f"No workdir for {pr_id}. Start the PR first.")
+        app.log_message(f"No workdir for {pr_id} — start the PR first with `pm pr start {pr_id}` (TUI: s).")
         return False
 
     # Ensure the transcript directory exists on disk.  Fail fast here
@@ -303,7 +303,7 @@ def _stop_loop(app, pr_id: str) -> None:
     """Request graceful stop of a running loop."""
     loop = app._review_loops.get(pr_id)
     if not loop or not loop.running:
-        app.log_message(f"No review loop running for {pr_id}")
+        app.log_message(f"No review loop running for {pr_id} — start one with `pr review {pr_id}` (TUI: zz d).")
         return
 
     _log.info("review_loop_ui: stopping loop for %s", pr_id)

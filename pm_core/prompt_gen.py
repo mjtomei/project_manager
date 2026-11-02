@@ -1719,7 +1719,7 @@ def generate_discovery_supervisor_prompt(data: dict, session_name: str | None = 
 
     The discovery supervisor schedules regression tests and reconciles their
     filings (newly-opened bug/improvement PRs) against existing open PRs in
-    the ``bugs`` and ``ux`` plans.
+    the ``bugs`` and ``improvements`` plans.
     """
     if not meta_pm_root:
         meta_pm_root = "pm"
@@ -1811,17 +1811,17 @@ pm qa launch regression:<id> --target-window discovery
 ```
 
 This spawns a Claude pane in the discovery window running the regression test.
-The test session itself files any bugs / improvements into the `bugs` / `ux`
+The test session itself files any bugs / improvements into the `bugs` / `improvements`
 plans (see the regression filing addendum baked into its prompt).
 
 ### 5. Reconcile recently-filed PRs
 
 For tests that completed since the last tick (visible in the work log or by a
-pane that has since exited), inspect any new PRs in the `bugs` and `ux` plans:
+pane that has since exited), inspect any new PRs in the `bugs` and `improvements` plans:
 
 ```
 pm pr list --plan bugs
-pm pr list --plan ux
+pm pr list --plan improvements
 ```
 
 For each newly-filed PR:
@@ -2029,7 +2029,7 @@ def generate_improvement_fix_impl_prompt(data: dict, session_name: str | None = 
                                          meta_pm_root: str | None = None) -> str:
     """Generate a prompt for one tick of the improvement-fix implementation watcher.
 
-    Picks a candidate from ``plan=ux`` and advances it via
+    Picks a candidate from ``plan=improvements`` and advances it via
     ``pm pr auto-sequence``.  Unlike the bug-fix watcher, PRs that PASS
     QA are NOT auto-merged — they are held in their post-QA state for a
     human taste check.  The watcher does not call ``pm pr merge``.
@@ -2059,7 +2059,7 @@ def generate_improvement_fix_impl_prompt(data: dict, session_name: str | None = 
 
 ## Role
 
-You drive PRs in the `ux` plan through implementation → review → QA
+You drive PRs in the `improvements` plan through implementation → review → QA
 using `pm pr auto-sequence`. **You do NOT merge.** PRs that pass QA are
 left in their post-QA state and held for a human taste check. The
 human merge cadence is the throttle — your job ends at "ready_to_merge".
@@ -2091,10 +2091,10 @@ merge so you do not pick the same candidate redundantly.
 ### 1. Inventory candidates
 
 ```
-pm pr list --plan ux
+pm pr list --plan improvements
 ```
 
-Build the candidate set: PRs in `plan=ux` whose status is `pending`,
+Build the candidate set: PRs in `plan=improvements` whose status is `pending`,
 `in_progress`, `in_review`, or `qa`. Skip `merged` PRs and skip PRs
 already noted in the work log as "ready_to_merge — held for human"
 on a recent tick (re-pinging auto-sequence on those is harmless but
@@ -2919,7 +2919,7 @@ tmux window that does its specific job and emits a verdict.
 1. **Discovery supervisor** — schedules regression tests from
    `pm/qa/regression/*.md`, monitors the test sessions (which file new
    bug / improvement PRs themselves), and reconciles those filings
-   (dedup against open PRs in the `bugs` / `ux` plans).
+   (dedup against open PRs in the `bugs` / `improvements` plans).
    Work log: `{discovery_log}`.
 
 2. **Bug-fix implementation watcher** — picks the best candidate from
@@ -2928,7 +2928,7 @@ tmux window that does its specific job and emits a verdict.
    Work log: `{bug_fix_log}`.
 
 3. **Improvement-fix implementation watcher** — same shape against
-   `plan=ux`, but with a gated merge: PRs that PASS QA wait for a
+   `plan=improvements`, but with a gated merge: PRs that PASS QA wait for a
    human taste check before merging.
    Work log: `{improvement_fix_log}`.
 
@@ -2938,7 +2938,7 @@ section of `notes.txt` (read via `pm notes` or directly).
 ## Your data sources
 
 - **Work logs** (above) — primary. Each line is one tick's summary.
-- **`pm pr list`**, **`pm pr list --plan bugs`**, **`pm pr list --plan ux`**.
+- **`pm pr list`**, **`pm pr list --plan bugs`**, **`pm pr list --plan improvements`**.
 - **`pm pr graph`** — full PR dependency tree.
 - **`pm plan list`** — plan inventory.
 - `notes.txt` Watcher section — current user guidance.
@@ -2963,7 +2963,7 @@ After the summary, stop and wait for the human to drive.
 
 ## Read-only commands (safe to run any time)
 
-- `pm pr list`, `pm pr list --plan bugs`, `pm pr list --plan ux`
+- `pm pr list`, `pm pr list --plan bugs`, `pm pr list --plan improvements`
 - `pm plan list`
 - `pm pr graph`
 - `tail` / `cat` / `ls` on the work logs and transcript directory

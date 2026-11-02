@@ -189,20 +189,20 @@ def start_watcher(app, transcript_dir: str | None = None,
     from pm_core import tmux as tmux_mod
 
     if not tmux_mod.in_tmux():
-        app.log_message("Watcher requires tmux.")
+        app.log_message("Watcher requires tmux — start a pm session first with `pm session`.")
         return
 
     manager = app._watcher_manager
     existing = manager.find_by_type(watcher_type)
     if existing and existing.state.running:
-        app.log_message(f"Watcher '{watcher_type}' is already running.")
+        app.log_message(f"Watcher '{watcher_type}' is already running — stop it with `pm watcher stop {watcher_type}`.")
         return
 
     # Create and register a new watcher instance
     from pm_core.watchers import get_watcher_class
     cls = get_watcher_class(watcher_type)
     if not cls:
-        app.log_message(f"Unknown watcher type: {watcher_type}")
+        app.log_message(f"Unknown watcher type: {watcher_type} — see `pm watcher list`.")
         return
 
     pm_root = str(store.find_project_root())

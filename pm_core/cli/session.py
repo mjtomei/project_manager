@@ -411,7 +411,8 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # If --dir was specified, the session must already exist (we're joining, not creating)
     if start_dir:
         click.echo(f"No shared session '{session_name}' found to join.", err=True)
-        click.echo("The session owner must start it first.", err=True)
+        click.echo("The session owner must start it first (with the same "
+                   "--global or --group flag).", err=True)
         raise SystemExit(1)
 
     _log.info("session does not exist or was killed, creating new session")

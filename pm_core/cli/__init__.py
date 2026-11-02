@@ -441,7 +441,7 @@ def prompt(pr_id: str | None):
             pr_id = _infer_pr_id(data, status_filter=("in_progress",))
         if pr_id is None:
             prs = data.get("prs") or []
-            click.echo("No active or in_progress PR. Specify a PR ID.", err=True)
+            click.echo("No active or in_progress PR. Specify a PR ID (see 'pm pr list').", err=True)
             if prs:
                 click.echo(f"Available PRs: {', '.join(p['id'] for p in prs)}", err=True)
             raise SystemExit(1)
@@ -449,7 +449,7 @@ def prompt(pr_id: str | None):
     pr_entry = _resolve_pr_id(data, pr_id)
     if not pr_entry:
         prs = data.get("prs") or []
-        click.echo(f"PR '{pr_id}' not found.", err=True)
+        click.echo(f"PR '{pr_id}' not found. Run 'pm pr list' to see every PR.", err=True)
         if prs:
             click.echo(f"Available PRs: {', '.join(_pr_display_id(p) for p in prs)}", err=True)
         raise SystemExit(1)
@@ -610,14 +610,20 @@ COMMANDS
   pm pr show <pr-id>            Show a PR's full detail (description, tests, files, notes, sign-off return)
   pm pr graph                   Show dependency tree
   pm pr ready                   Show PRs ready to start
-  pm pr start [pr-id]           Clone, branch, launch Claude (tmux window or blocking)
-  pm pr review [pr-id]          Mark PR as in_review, open review window
+  pm pr start [pr-id]           Clone, branch, launch Claude (tmux window or blocking) [--fresh]
+  pm pr review [pr-id]          Mark PR as in_review, open review window [--fresh]
+  pm pr qa [pr-id]              Validate a PR and print the QA start command (TUI: t; z t fresh, zz t loop)
+  pm pr merge [pr-id]           Publish a signed-off PR into the base branch
+  pm pr auto-sequence <pr-id>   Advance a PR through start → review → QA → sign-off
+  pm pr spec <pr-id> [phase]    View or generate a PR's impl/qa spec [--regenerate]
+  pm pr spec-approve <pr-id>    Approve a pending spec review (TUI: V)
+  pm pr spec-path <pr-id> <phase>  Print a PR's spec file path
   pm pr sync                    Check for merged PRs
   pm pr sync-github             Fetch and update PR statuses from GitHub
   pm pr import-github           Import existing GitHub PRs into project yaml
   pm pr close [pr-id]           Close a PR (keeps entry, branch and workdir)
   pm pr cleanup [pr-id]         Remove a PR's workdir (explicit cleanup)
-  pm pr signoff [pr-id]         Launch the sign-off review window (writes report.html)
+  pm pr signoff [pr-id]         Launch the sign-off review window (writes report.html) [--fresh]
   pm pr signoff record <pr-id>  Record reviewer approval of report.html (feeds merge gate)
   pm pr signoff integrate <pr-id>  Check integration with the latest base (isolated candidate)
   pm pr dashboard               Serve the all-PR behavior dashboard (HTTP, localhost)
@@ -646,9 +652,11 @@ COMMANDS
   pm qa author-artifact <name>     Author a new artifact recipe with a guided Claude session
   pm qa edit <id>                  Edit a QA instruction or artifact recipe
   pm qa show <id>                  Show full content of a QA instruction or artifact recipe
-  pm qa run <id> --pr <pr-id>      Run a QA instruction against a PR
+  pm qa run <id> --pr <pr-id>      Run ONE instruction against a PR (not the full loop)
   pm qa standalone <id>            Run a QA instruction against master
   pm qa regression <test-id>       Run a regression test (replaces `pm tui test`)
+  pm qa debug <id>                 Interactive session to verify an instruction works
+  pm qa launch <id>                Launch a QA item as a Claude pane
   pm qa captures-path <pr-id>      Print the host path of a PR's captures directory
 
   pm qa mocks list               List shared mock definitions
@@ -678,13 +686,28 @@ COMMANDS
   pm autostart add <id>...      Add auto-start targets in the running TUI
   pm autostart remove <id>...   Remove auto-start targets (never kills windows)
   pm autostart list|status      Targets / per-run progress (--json)
+  pm autostart clear            Remove every auto-start target (auto-start off)
   pm trust status|list          Workspace trust for unattended Claude sessions
   pm trust add|remove <path>    Authorize a non-pm directory for automatic trust
   pm rebalance                  Re-enable auto-balanced pane layout
   pm set <setting> <value>      Configure a global pm setting
+  pm setting <setting> <value>  Alias for 'pm set'
+  pm project set <key> <value>  Configure a project-level setting
+  pm log tail|grep|show         Tail or search the pm session log
+  pm session home|kill|mobile|name|tag  Manage the pm tmux session
+  pm container build-base       Build the pm developer base image
+  pm fake-claude config|emit    Scriptable Claude stand-in (integration testing)
+  pm fake-github config         Scriptable GitHub stand-in (integration testing)
   pm edit                       Open project.yaml in $EDITOR (with locking)
   pm which                      Print path to pm_core package being used
   pm getting-started            Show getting started guide
+
+TUI / COMMAND BAR
+  pm session                    Start or attach the TUI + notes editor
+  ?                             In the TUI: keyboard shortcuts + command-bar forms
+  /                             In the TUI: command bar (type 'help' there for the same screen)
+  pm tui keys                   Print keybindings and command-bar equivalents
+  QA restart:  pr qa fresh <id>  = TUI z t      QA loop: pr qa loop <id> = TUI zz t
 
 OPTIONS
   -C <path>                     Path to PM directory (or set PM_PROJECT env var)

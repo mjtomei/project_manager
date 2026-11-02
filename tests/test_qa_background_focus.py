@@ -258,7 +258,9 @@ class TestEntryPointFocus:
 
     @pytest.mark.parametrize("running,held,said", [
         (False, True, "QA for pr-001 is waiting for input — answer in its "
-                      "scenario worker pane; the loop is still watching"),
+                      "scenario worker pane; the loop is still watching. To "
+                      "stop it: `pr qa loop pr-001` (TUI: zz t); to restart: "
+                      "`pr qa fresh pr-001` (TUI: z t)."),
         (True, False, "Focused QA window for pr-001"),
         (False, False, "Focused QA window for pr-001"),
     ])

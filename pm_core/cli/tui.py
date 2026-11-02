@@ -186,7 +186,7 @@ def tui_view(no_history: bool, session: str | None):
     """
     pane_id, sess = _find_live_tui_pane(session)
     if not pane_id:
-        click.echo("No TUI pane found. Is there a pm tmux session running?", err=True)
+        click.echo("No TUI pane found. Is there a pm tmux session running? Start one with: pm session", err=True)
         raise SystemExit(1)
 
     frame = _capture_tui_frame(pane_id)
@@ -208,7 +208,7 @@ def tui_history(frames: int, show_all: bool, session: str | None):
     """
     pane_id, sess = _find_tui_pane(session)
     if not sess:
-        click.echo("No pm tmux session found.", err=True)
+        click.echo("No pm tmux session found. Start one with: pm session", err=True)
         raise SystemExit(1)
 
     history = _load_tui_history(sess)
@@ -253,7 +253,7 @@ def tui_send(keys: str, session: str | None):
     import subprocess
     pane_id, sess = _find_live_tui_pane(session)
     if not pane_id:
-        click.echo("No TUI pane found. Is there a pm tmux session running?", err=True)
+        click.echo("No TUI pane found. Is there a pm tmux session running? Start one with: pm session", err=True)
         raise SystemExit(1)
 
     subprocess.run(tmux_mod._tmux_cmd("send-keys", "-t", pane_id, keys), check=True)
@@ -263,6 +263,7 @@ def tui_send(keys: str, session: str | None):
 @tui.command("keys")
 def tui_keys():
     """Show available TUI keybindings."""
+    from pm_core import command_surface
     click.echo("""\
 TUI Keybindings:
 
@@ -273,11 +274,17 @@ Navigation:
   Enter            Select/expand PR
 
 PR Actions:
-  s                Start selected PR
-  d                Review (zz d: loop)
-  g                Merge PR
+  s                Start selected PR           (z s: fresh, S: companion)
+  d                Review                      (z d: fresh, zz d: loop)
+  g                Merge PR                    (G: companion pane)
+  i                Sign-off (router)
+  t                Start QA                    (z t: fresh, zz t: loop)
   e                Edit selected PR
-  t                Start QA (z t: fresh, zz t: loop)
+  Y                Cleanup PR workdir
+  V                Review oldest pending spec
+  o                Models: PR/project model, effort, command
+  O                Add selected PR as auto-start target, wait for merge
+  A                Toggle selected PR as auto-merge target
 
 Views:
   p                Toggle plans view
@@ -285,6 +292,7 @@ Views:
   n                Open notes
   c                Launch Claude session
   L                View TUI log
+  w                Focus watcher window
   ?                Show help
 
 Auto-start (multiple targets; also `pm autostart --help`):
@@ -292,12 +300,13 @@ Auto-start (multiple targets; also `pm autostart --help`):
   A                Toggle selected PR as auto-merge target (no PR: all off)
   a                Runs popup: targets + running/queued deps (Enter/f focus,
                    r refresh, Esc/q/a close)
-  /autostart add|remove ID...   Command bar (also: list, status, clear)
 
 Other:
   r                Refresh / sync
   b                Rebalance panes
   ctrl+b d         Detach from session
+
+""" + command_surface.command_bar_help_text() + """
 
 Targets are additive — A/O/`autostart target X` do not replace the previous
 target. Bare `autostart` only turns auto-start off. There is no all-PR
@@ -323,7 +332,7 @@ def tui_restart(breadcrumb: bool, session: str | None):
     """
     pane_id, sess = _find_live_tui_pane(session)
     if not pane_id:
-        click.echo("No TUI pane found. Is there a pm tmux session running?", err=True)
+        click.echo("No TUI pane found. Is there a pm tmux session running? Start one with: pm session", err=True)
         raise SystemExit(1)
 
     marker = None
@@ -350,7 +359,7 @@ def tui_clear_history(session: str | None):
     """Clear the TUI frame history for a session."""
     pane_id, sess = _find_tui_pane(session)
     if not sess:
-        click.echo("No pm tmux session found.", err=True)
+        click.echo("No pm tmux session found. Start one with: pm session", err=True)
         raise SystemExit(1)
 
     history_file = _tui_history_file(sess)
@@ -398,7 +407,7 @@ def tui_capture_config(frame_rate: int | None, buffer_size: int | None, session:
     """
     pane_id, sess = _find_tui_pane(session)
     if not sess:
-        click.echo("No pm tmux session found.", err=True)
+        click.echo("No pm tmux session found. Start one with: pm session", err=True)
         raise SystemExit(1)
 
     config_file = _capture_config_file(sess)
@@ -450,7 +459,7 @@ def tui_frames(count: int, show_all: bool, session: str | None, as_json: bool):
     """
     pane_id, sess = _find_tui_pane(session)
     if not sess:
-        click.echo("No pm tmux session found.", err=True)
+        click.echo("No pm tmux session found. Start one with: pm session", err=True)
         raise SystemExit(1)
 
     frames_file = _capture_frames_file(sess)
@@ -509,7 +518,7 @@ def tui_clear_frames(session: str | None):
     """Clear captured frames for a session."""
     pane_id, sess = _find_tui_pane(session)
     if not sess:
-        click.echo("No pm tmux session found.", err=True)
+        click.echo("No pm tmux session found. Start one with: pm session", err=True)
         raise SystemExit(1)
 
     frames_file = _capture_frames_file(sess)

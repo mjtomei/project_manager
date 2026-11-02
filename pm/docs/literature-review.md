@@ -19,7 +19,7 @@ a regression run is triggered   (on a timer, or inside a
         │                        QA loop running for another fix)
         │  files bug / improvement PRs via `pm pr add`
         ▼
-two PR pools          bug pool (plan=bugs)   improvement pool (plan=ux)
+two PR pools          bug pool (plan=bugs)   improvement pool (plan=improvements)
         │
         │  discovery supervisor — a loop that reconciles
         │  the pools post-hoc (dedup, routing)

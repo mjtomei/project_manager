@@ -37,12 +37,13 @@ def _run_user_watcher_loop(wait: int, max_iterations: int) -> None:
     root = state_root()
 
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
-        click.echo("Watcher requires tmux.", err=True)
+        click.echo("Watcher requires tmux. Start a pm session first with: pm session", err=True)
         raise SystemExit(1)
 
     pm_session = _get_pm_session()
     if not pm_session or not tmux_mod.session_exists(pm_session):
-        click.echo(f"Watcher: tmux session '{pm_session}' not found.", err=True)
+        click.echo(f"Watcher: tmux session '{pm_session}' not found — start it "
+                   f"with 'pm session'.", err=True)
         raise SystemExit(1)
 
     watcher = AutoStartWatcher(pm_root=str(root))
@@ -154,7 +155,7 @@ def watcher_start(watcher_type: str, wait: int | None):
                              observation-only when started from the CLI)
       bug-fix-impl           Drive the bug-fix flow (auto-merge on PASS)
       discovery              Schedule regression tests and reconcile filings
-      improvement-fix-impl   Drive plan=ux PRs through auto-sequence (gated at QA PASS)
+      improvement-fix-impl   Drive plan=improvements PRs through auto-sequence (gated at QA PASS)
       regression-loop        Meta: start discovery + bug-fix-impl + improvement-fix-impl
                              together (the canonical "turn on the regression loop" command)
     """
@@ -172,7 +173,7 @@ def watcher_start(watcher_type: str, wait: int | None):
         raise SystemExit(1)
 
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
-        click.echo("Watcher requires tmux.", err=True)
+        click.echo("Watcher requires tmux. Start a pm session first with: pm session", err=True)
         raise SystemExit(1)
 
     root = state_root()
@@ -221,7 +222,7 @@ def _run_regression_loop(wait: int | None) -> None:
     from pm_core.watchers import get_watcher_class
 
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
-        click.echo("Watcher requires tmux.", err=True)
+        click.echo("Watcher requires tmux. Start a pm session first with: pm session", err=True)
         raise SystemExit(1)
 
     root = state_root()
@@ -325,12 +326,13 @@ def _create_watcher_window(iteration: int, loop_id: str,
     data = store.load(root)
 
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
-        click.echo("Watcher window requires tmux.", err=True)
+        click.echo("Watcher window requires tmux. Start a pm session first with: pm session", err=True)
         raise SystemExit(1)
 
     pm_session = _get_pm_session()
     if not pm_session or not tmux_mod.session_exists(pm_session):
-        click.echo(f"Watcher: tmux session '{pm_session}' not found.", err=True)
+        click.echo(f"Watcher: tmux session '{pm_session}' not found — start it "
+                   f"with 'pm session'.", err=True)
         raise SystemExit(1)
 
     cls = get_watcher_class(watcher_type)

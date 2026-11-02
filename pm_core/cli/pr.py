@@ -19,6 +19,7 @@ import click
 import yaml
 
 from pm_core import store, graph, git_ops, prompt_gen, merge_integrity
+from pm_core import command_surface
 from pm_core.pr_utils import TERMINAL_PR_STATES, VALID_PR_STATES, usable_prs
 from pm_core.model_config import EFFORT_LEVELS, PR_SESSION_TYPES
 from pm_core.shell import shell_quote
@@ -503,11 +504,16 @@ def pr_cd(identifier: str):
     data = store.load(root)
     pr_entry = _resolve_pr_id(data, identifier)
     if not pr_entry:
-        click.echo(f"PR '{identifier}' not found.", err=True)
+        click.echo(
+            f"PR '{identifier}' not found. Run 'pm pr list' to see every PR.",
+            err=True)
         raise SystemExit(1)
     workdir = pr_entry.get("workdir")
     if not workdir or not Path(workdir).is_dir():
-        click.echo(f"Workdir for {pr_entry['id']} does not exist: {workdir}", err=True)
+        click.echo(
+            f"Workdir for {pr_entry['id']} does not exist: {workdir}. "
+            f"Create it with 'pm pr start {pr_entry['id']}' (TUI: s).",
+            err=True)
         raise SystemExit(1)
     shell = os.environ.get("SHELL", "/bin/sh")
     click.echo(f"Entering workdir for {pr_entry['id']} ({pr_entry.get('title', '???')})")
@@ -894,6 +900,15 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     If PR_ID is omitted, uses the active PR if it's pending/ready, or
     auto-selects the next ready PR (when there's exactly one).
 
+    \b
+    Equivalent forms:
+      CLI          pm pr start [--fresh] [--companion] [PR_ID]
+      command bar  pr start [--fresh] [--companion] [PR_ID]
+      TUI          s      start
+                   z s    fresh restart (kill the existing window first)
+                   S      start with a companion shell pane
+                   z S    fresh restart + companion pane
+
     With --companion (or the ``companion-pane`` global setting), a second
     shell pane is opened alongside the Claude pane, cd'ed into the workdir.
     """
@@ -916,7 +931,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             pr_id = ready[0]["id"]
             click.echo(f"Auto-selected {_pr_display_id(ready[0])}: {ready[0].get('title', '???')}")
         elif len(ready) == 0:
-            click.echo("No PRs are ready to start.", err=True)
+            click.echo("No PRs are ready to start — add one with 'pm pr add <title>' "
+                       "or load a plan with 'pm plan load'.", err=True)
             raise SystemExit(1)
         else:
             click.echo("Multiple PRs are ready. Specify one:", err=True)
@@ -955,7 +971,9 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             click.echo(f"PR {pr_id} workdir missing, creating a new one.")
 
     if pr_entry.get("status") == "merged":
-        click.echo(f"PR {pr_id} is already merged.", err=True)
+        click.echo(
+            f"PR {pr_id} is already merged. "
+            f"{_next_step_for_status(pr_id, 'merged')}", err=True)
         raise SystemExit(1)
 
     if pr_entry.get("status") == "closed":
@@ -1639,6 +1657,14 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
 
     If PR_ID is omitted, infers from cwd (if inside a workdir) or
     auto-selects when there's exactly one in_progress PR.
+
+    \b
+    Equivalent forms:
+      CLI          pm pr review [--fresh] [PR_ID]
+      command bar  pr review [--fresh] [PR_ID]
+      TUI          d      review (inspection once past review)
+                   z d    kill a running loop, open a fresh review
+                   zz d   start/stop the review loop
     """
     root = state_root()
     data = store.load(root)
@@ -1649,7 +1675,9 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
             prs = data.get("prs") or []
             in_progress = [p for p in prs if p.get("status") == "in_progress"]
             if len(in_progress) == 0:
-                click.echo("No in_progress PRs to review.", err=True)
+                click.echo(
+                    "No in_progress PRs to review — start one with "
+                    "'pm pr start' (TUI: s).", err=True)
             else:
                 click.echo("Multiple in_progress PRs. Specify one:", err=True)
                 for p in in_progress:
@@ -1669,7 +1697,9 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
             # into the lifecycle.
             click.echo(_closed_reopen_hint(pr_id), err=True)
         else:
-            click.echo(f"PR {pr_id} is already {status}.", err=True)
+            click.echo(
+                f"PR {pr_id} is already {status}. "
+                f"{_next_step_for_status(pr_id, status)}", err=True)
         raise SystemExit(1)
     if status == "in_review":
         click.echo(f"PR {pr_id} is already in_review.")
@@ -1778,7 +1808,17 @@ class _SignoffGroup(click.Group):
 @pr.group("signoff", cls=_SignoffGroup, invoke_without_command=True)
 @click.pass_context
 def pr_signoff_group(ctx):
-    """Sign-off: PR-level review + verdict router; `record` approves a report."""
+    """Sign-off: PR-level review + verdict router; `record` approves a report.
+
+    \b
+    Forms:
+      pm pr signoff [--fresh] [PR_ID]   run the router (the hidden `run` form)
+      pm pr signoff record PR_ID        record approval of report.html
+      pm pr signoff integrate PR_ID     check integration with the latest base
+      command bar: pr signoff [--fresh] [PR_ID]     = TUI i
+
+    ``--fresh`` kills an existing sign-off window and opens a new one.
+    """
     if ctx.invoked_subcommand is None:
         ctx.invoke(pr_signoff)
 
@@ -1809,7 +1849,9 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
     if pr_id is None:
         pr_id = _infer_pr_id(data, status_filter=("sign_off", "qa"))
         if pr_id is None:
-            click.echo("No qa/sign_off PR to sign off. Specify one.", err=True)
+            click.echo(
+                "No qa/sign_off PR to sign off. Specify one — run QA first "
+                "with 'pm pr qa <id>' (TUI: t).", err=True)
             raise SystemExit(1)
         click.echo(f"Auto-selected {pr_id}")
 
@@ -1818,7 +1860,9 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
     status = pr_entry.get("status")
 
     if status == "merged":
-        click.echo(f"PR {pr_id} is already merged.", err=True)
+        click.echo(
+            f"PR {pr_id} is already merged. "
+            f"{_next_step_for_status(pr_id, 'merged')}", err=True)
         raise SystemExit(1)
     if status == "closed":
         # A retained closed record (pr-62ad13d) is terminal: name the way out
@@ -1832,7 +1876,8 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
     if status not in entry_statuses + ("sign_off",):
         click.echo(
             f"PR {pr_id} is {status} — sign-off runs after QA "
-            f"(expected qa or sign_off).", err=True)
+            f"(expected qa or sign_off). "
+            f"{_next_step_for_status(pr_id, status)}", err=True)
         raise SystemExit(1)
 
     # The transition and the launch are separated by the store lock: a
@@ -2730,18 +2775,62 @@ def _recover_completed_merge(data: dict, root: Path, pr_entry: dict,
                                  transcript=transcript, companion=companion)
 
 
-@pr.command("qa")
+def _next_step_for_status(pr_id: str, status: str | None) -> str:
+    """A corrective sentence for a lifecycle command run in the wrong state.
+
+    Every wrong-state refusal names the command that moves the PR forward
+    (or, for a terminal PR, how to inspect it), so the operator does not
+    have to guess the lifecycle order.  The TUI key is named where one
+    exists.
+    """
+    if status == "pending":
+        return f"Start it first with 'pm pr start {pr_id}' (TUI: s)."
+    if status == "in_progress":
+        return f"Review it first with 'pm pr review {pr_id}' (TUI: d)."
+    if status == "in_review":
+        return f"Run QA next with 'pm pr qa {pr_id}' (TUI: t)."
+    if status == "qa":
+        return f"Sign it off next with 'pm pr signoff {pr_id}' (TUI: i)."
+    if status == "sign_off":
+        return f"Merge it with 'pm pr merge {pr_id}' (TUI: g)."
+    if status == "merged":
+        return f"Nothing to do — inspect it with 'pm pr show {pr_id}'."
+    if status == "closed":
+        return _closed_reopen_hint(pr_id)
+    return f"Inspect it with 'pm pr show {pr_id}'."
+
+
+_QA_HELP = f"""Validate a PR for QA and print the exact command to start it.
+
+The full QA loop (planner + scenarios) needs the TUI: it manages
+scenario windows and tracks run state.  This CLI form therefore does
+not launch QA itself — it checks the PR and prints the command-bar
+form to use.  Run it inside a pm session (``pm session``).
+
+\b
+QA modes (command bar, and the TUI key that does the same):
+{command_surface.qa_help_table()}
+
+\b
+Examples:
+  pm pr qa pr-001            # validate; print the command-bar form
+  # then, in the TUI command bar (press /):
+  pr qa pr-001               # focus or start        (= t)
+  pr qa fresh pr-001         # fresh restart         (= z t)
+  pr qa pr-001 --fresh       # same as `pr qa fresh`
+  pr qa loop pr-001          # start/stop the loop   (= zz t)
+
+A single QA instruction — not the full loop — runs with
+``pm qa run <instruction-id> --pr <pr-id>``.
+
+If PR_ID is omitted, infers from cwd (if inside a workdir) or
+auto-selects when there's exactly one in_review/qa PR."""
+
+
+@pr.command("qa", help=_QA_HELP,
+            short_help="Validate a PR for QA and print the exact command to start it.")
 @click.argument("pr_id", default=None, required=False)
 def pr_qa(pr_id: str | None):
-    """Start the full QA loop for a PR (planner + scenarios).
-
-    This command must be run from within a pm tmux session (or via the
-    TUI command bar as ``/pr qa <pr_id>``).  The QA process requires the
-    TUI for managing scenario windows and tracking QA state.
-
-    If PR_ID is omitted, infers from cwd (if inside a workdir) or
-    auto-selects when there's exactly one in_review/qa PR.
-    """
     root = state_root()
     data = store.load(root)
 
@@ -2751,7 +2840,10 @@ def pr_qa(pr_id: str | None):
             prs = data.get("prs") or []
             candidates = [p for p in prs if p.get("status") in ("in_review", "qa")]
             if len(candidates) == 0:
-                click.echo("No PRs in in_review or qa status.", err=True)
+                click.echo(
+                    "No PRs in in_review or qa status — start one with "
+                    "'pm pr start' (TUI: s), then review with 'pm pr review' "
+                    "(TUI: d).", err=True)
             else:
                 click.echo("Multiple PRs eligible for QA. Specify one:", err=True)
                 for p in candidates:
@@ -2769,7 +2861,11 @@ def pr_qa(pr_id: str | None):
         click.echo(_closed_reopen_hint(pr_id), err=True)
         raise SystemExit(1)
     if pr_entry.get("status") not in ("in_progress", "in_review", "qa"):
-        click.echo(f"PR {pr_id} has status '{pr_entry.get('status')}' — QA requires in_progress, in_review, or qa.", err=True)
+        click.echo(
+            f"PR {pr_id} has status '{pr_entry.get('status')}' — QA requires "
+            f"in_progress, in_review, or qa. "
+            f"{_next_step_for_status(pr_id, pr_entry.get('status'))}",
+            err=True)
         raise SystemExit(1)
 
     # QA requires the TUI for managing scenario windows and state tracking.
@@ -2784,7 +2880,7 @@ def pr_qa(pr_id: str | None):
         raise SystemExit(1)
 
     click.echo(f"Use the TUI command bar to start QA: /pr qa {_pr_display_id(pr_entry)}", err=True)
-    click.echo("Or press 't' on the PR in the TUI.", err=True)
+    click.echo("Or press 't' on the PR in the TUI (z t = fresh restart, zz t = loop).", err=True)
     raise SystemExit(1)
 
 
@@ -2830,6 +2926,17 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     lease on the approved base revision; GitHub: ``gh pr merge
     --match-head-commit`` (or directs the user to merge on GitHub).
     If PR_ID is omitted, infers from cwd or auto-selects.
+
+    \b
+    Equivalent forms:
+      CLI          pm pr merge [PR_ID]
+      command bar  pr merge [PR_ID]
+      TUI          g      merge
+                   G      merge with a companion shell pane
+
+    Merge starts no Claude session, so there is no --fresh option: a merge
+    either passes the sign-off gate or is refused (and the PR returns to
+    sign-off).
     """
     if resolve_window is None:
         resolve_window = _resolve_window_default()
@@ -2839,7 +2946,9 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     if pr_id is None:
         pr_id = _infer_pr_id(data, status_filter=("sign_off", "in_review"))
         if pr_id is None:
-            click.echo("No sign_off/in_review PR to merge.", err=True)
+            click.echo(
+                "No sign_off/in_review PR to merge. Specify one — sign it "
+                "off first with 'pm pr signoff <id>' (TUI: i).", err=True)
             raise SystemExit(1)
         click.echo(f"Auto-selected {pr_id}")
 
@@ -2847,10 +2956,14 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     pr_id = pr_entry["id"]
 
     if pr_entry.get("status") == "merged":
-        click.echo(f"PR {pr_id} is already merged.", err=True)
+        click.echo(
+            f"PR {pr_id} is already merged. "
+            f"{_next_step_for_status(pr_id, 'merged')}", err=True)
         raise SystemExit(1)
     if pr_entry.get("status") == "pending":
-        click.echo(f"PR {pr_id} is pending — start and review it first.", err=True)
+        click.echo(
+            f"PR {pr_id} is pending — start and review it first. "
+            f"{_next_step_for_status(pr_id, 'pending')}", err=True)
         raise SystemExit(1)
 
     # Serialize concurrent `pm pr merge` of the SAME PR (the cross-PR
@@ -2882,7 +2995,9 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
     if pr_entry.get("status") == "merged":
-        click.echo(f"PR {pr_id} is already merged.", err=True)
+        click.echo(
+            f"PR {pr_id} is already merged. "
+            f"{_next_step_for_status(pr_id, 'merged')}", err=True)
         raise SystemExit(1)
 
     backend_name = data["project"].get("backend", "vanilla")
@@ -3049,7 +3164,9 @@ def pr_sync_github():
 
     backend_name = data["project"].get("backend", "vanilla")
     if backend_name != "github":
-        click.echo("This command only works with the GitHub backend.", err=True)
+        click.echo(f"This command only works with the GitHub backend "
+                   f"(this project uses '{backend_name}'). Use "
+                   f"'pm pr sync' instead.", err=True)
         raise SystemExit(1)
 
     # Use the shared sync function
@@ -3099,7 +3216,9 @@ def pr_import_github(gh_state: str):
 
     backend_name = data["project"].get("backend", "vanilla")
     if backend_name != "github":
-        click.echo("This command only works with the GitHub backend.", err=True)
+        click.echo(f"This command only works with the GitHub backend "
+                   f"(this project uses '{backend_name}'). Use "
+                   f"'pm plan import' instead.", err=True)
         raise SystemExit(1)
 
     from pm_core import gh_ops
@@ -3326,11 +3445,13 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
 
     if resources:
         if pr_id is None:
-            click.echo("--resources requires a PR id.", err=True)
+            click.echo("--resources requires a PR id. Run 'pm pr list' to choose one.", err=True)
             raise SystemExit(1)
         target = _resolve_pr_id(data, pr_id)
         if not target:
-            click.echo(f"PR '{pr_id}' not found.", err=True)
+            click.echo(
+                f"PR '{pr_id}' not found. Run 'pm pr list' to see every PR.",
+                err=True)
             raise SystemExit(1)
         from pm_core import pr_cleanup as pr_cleanup_mod
         from pm_core.loop_shared import get_pm_session
@@ -3419,7 +3540,9 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
 
     pr_entry = _resolve_pr_id(data, pr_id)
     if not pr_entry:
-        click.echo(f"PR '{pr_id}' not found.", err=True)
+        click.echo(
+            f"PR '{pr_id}' not found. Run 'pm pr list' to see every PR.",
+            err=True)
         raise SystemExit(1)
 
     # `closed` is a normal terminal state (pr-62ad13d retains those records and
@@ -3632,7 +3755,8 @@ def pr_note_edit(pr_id: str, note_id: str, text: str):
             target = n
             break
     if target is None:
-        click.echo(f"Note '{note_id}' not found on {_pr_display_id(pr_entry)}.", err=True)
+        click.echo(f"Note '{note_id}' not found on {_pr_display_id(pr_entry)} — "
+                   f"run 'pm pr note list {pr_id}' to see them.", err=True)
         if notes:
             click.echo("Available notes:", err=True)
             for n in notes:
@@ -3687,7 +3811,8 @@ def pr_note_delete(pr_id: str, note_id: str):
     # Validate note exists
     notes = pr_entry.get("notes") or []
     if not any(n["id"] == note_id for n in notes):
-        click.echo(f"Note '{note_id}' not found on {_pr_display_id(pr_entry)}.", err=True)
+        click.echo(f"Note '{note_id}' not found on {_pr_display_id(pr_entry)} — "
+                   f"run 'pm pr note list {pr_id}' to see them.", err=True)
         if notes:
             click.echo("Available notes:", err=True)
             for n in notes:
@@ -3752,7 +3877,7 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
     if pr_id is None:
         pr_id = data.get("project", {}).get("active_pr")
         if not pr_id:
-            click.echo("No active PR. Specify a PR ID.", err=True)
+            click.echo("No active PR. Specify a PR ID (see 'pm pr list').", err=True)
             raise SystemExit(1)
         click.echo(f"Using active PR: {pr_id}")
 
@@ -4623,7 +4748,7 @@ def pr_auto_sequence(pr_id: str):
         click.echo("running: sign_off")
         return
 
-    click.echo(f"unknown status: {status}", err=True)
+    click.echo(f"unknown status: {status} — inspect with 'pm pr show {pr_id}'", err=True)
     raise SystemExit(2)
 
 

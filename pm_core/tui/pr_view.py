@@ -18,6 +18,53 @@ _log = configure_logger("pm.tui.pr_view")
 # PR command prefixes that require in-flight action guarding
 PR_ACTION_PREFIXES = ("pr start", "pr review", "pr qa", "pr merge")
 
+# QA command-bar modes: positional (`pr qa fresh <id>`) and flag
+# (`pr qa <id> --fresh`) spellings are equivalent.  Kept here (not in the
+# CLI) because `pm pr qa` is diagnostic-only; the command bar is where QA
+# actually starts.
+_QA_MODES = ("fresh", "loop")
+_QA_FLAGS = {"--fresh": "fresh", "--loop": "loop"}
+
+
+def parse_qa_command(args: list[str]) -> tuple[str | None, str | None]:
+    """Parse ``pr qa`` arguments into ``(mode, pr_id)``.
+
+    Accepts both spellings, anywhere in the argument list::
+
+        pr qa fresh pr-001
+        pr qa pr-001 --fresh
+        pr qa --loop pr-001
+
+    ``mode`` is ``None`` (plain one-shot run), ``"fresh"`` or ``"loop"``.
+    Raises :class:`ValueError` with a corrective message for a conflicting
+    mode or an unknown option — a typo must not silently start the wrong
+    kind of run.
+    """
+    mode: str | None = None
+    pr_id: str | None = None
+    for tok in args:
+        if tok in _QA_FLAGS:
+            candidate = _QA_FLAGS[tok]
+        elif tok in _QA_MODES:
+            candidate = tok
+        elif tok.startswith("-"):
+            raise ValueError(
+                f"unknown QA option {tok!r} — use --fresh or --loop "
+                f"(or the positional forms `fresh` / `loop`)")
+        elif pr_id is None:
+            pr_id = tok
+            continue
+        else:
+            raise ValueError(
+                f"unexpected extra argument {tok!r} — usage: "
+                f"pr qa [fresh|loop] [PR_ID]")
+        if mode is not None and mode != candidate:
+            raise ValueError(
+                f"conflicting QA modes {mode!r} and {candidate!r} — pick "
+                f"one of `fresh` or `loop`")
+        mode = candidate
+    return mode, pr_id
+
 
 # ---------------------------------------------------------------------------
 # Action guard
@@ -31,7 +78,7 @@ def guard_pr_action(app, action_desc: str) -> bool:
     """
     if app._inflight_pr_action:
         _log.info("action blocked: %s (busy: %s)", action_desc, app._inflight_pr_action)
-        app.log_message(f"Busy: {app._inflight_pr_action}", sticky=1.0)
+        app.log_message(f"Busy: {app._inflight_pr_action} — wait for it to finish", sticky=1.0)
         app.clear_log_message_later(1.0)
         return False
     return True
@@ -413,7 +460,7 @@ def move_to_plan(app) -> None:
         return
     pr = store.get_pr(app._data, pr_id)
     if not pr:
-        app.log_message("PR not found")
+        app.log_message("PR not found — see `pr list` (TUI: r to refresh)")
         return
     plans = app._data.get("plans") or []
     current_plan = pr.get("plan") or None
@@ -529,7 +576,7 @@ def _do_cleanup(app, pr_id: str) -> dict | None:
         return None
     pr_entry = store.get_pr(data, pr_id)
     if not pr_entry:
-        app.log_message(f"PR not found: {pr_id}")
+        app.log_message(f"PR not found: {pr_id} — see `pr list` (TUI: r to refresh)")
         return None
 
     session = get_pm_session()
@@ -622,6 +669,14 @@ def handle_command_submitted(app, cmd: str) -> None:
     _log.info("command submitted: %s", cmd)
     cmd = cmd.strip()
 
+    # Command-bar help: show the same HelpScreen as `?` rather than shelling
+    # out to `pm help` (whose output the command bar only shows one line of,
+    # i.e. no help at all).  The screen now carries the command-bar forms.
+    if (cmd.lower() in ("help", "?", "commands", "command bar", "command-bar")
+            or cmd.lower().startswith("help ")):
+        app.action_show_help()
+        return
+
     # Guard PR action commands from the command bar too
     action_key = None
     for prefix in PR_ACTION_PREFIXES:
@@ -665,7 +720,7 @@ def handle_command_submitted(app, cmd: str) -> None:
                     app.log_message(f"Error: {e}")
                     return
                 if not store.get_pr(_rl_data, _rl_pr_id):
-                    app.log_message(f"PR not found: {_rl_pr_id}")
+                    app.log_message(f"PR not found: {_rl_pr_id} — see `pr list` (TUI: r to refresh)")
                     return
             tree.select_pr(_rl_pr_id)
 
@@ -693,7 +748,7 @@ def handle_command_submitted(app, cmd: str) -> None:
                     app.log_message(f"Error: {e}")
                     return
                 if not store.get_pr(edit_data, edit_pr_id):
-                    app.log_message(f"PR not found: {edit_pr_id}")
+                    app.log_message(f"PR not found: {edit_pr_id} — see `pr list` (TUI: r to refresh)")
                     return
             tree = app.query_one("#tech-tree", TechTree)
             tree.select_pr(edit_pr_id)
@@ -730,26 +785,32 @@ def handle_command_submitted(app, cmd: str) -> None:
         return
 
     # Handle QA commands — route to qa_loop_ui instead of CLI.
-    # Forms:
-    #   pr qa [PR_ID]           — focus existing or one-shot start (= TUI 't')
-    #   pr qa fresh [PR_ID]     — fresh restart            (= TUI 'z t')
-    #   pr qa loop  [PR_ID]     — start/stop QA loop        (= TUI 'zz t')
+    # Forms (positional and flag spellings are equivalent):
+    #   pr qa [PR_ID]               — focus existing or one-shot start (= t)
+    #   pr qa fresh [PR_ID]         — fresh restart                    (= z t)
+    #   pr qa [PR_ID] --fresh       — same as `pr qa fresh`
+    #   pr qa loop [PR_ID]          — start/stop QA loop                (= zz t)
+    #   pr qa [PR_ID] --loop        — same as `pr qa loop`
     if len(parts) >= 2 and parts[0] == "pr" and parts[1] == "qa":
         from pm_core.tui import qa_loop_ui
         from pm_core import store as _store
-        # Parse optional modifier ('fresh' or 'loop') and PR id.
-        rest = parts[2:]
-        qa_mode = None
-        if rest and rest[0] in ("fresh", "loop"):
-            qa_mode = rest[0]
-            rest = rest[1:]
-        if rest:
-            qa_pr_id = rest[0]
-        else:
+        try:
+            qa_mode, qa_pr_id = parse_qa_command(parts[2:])
+        except ValueError as e:
+            app.log_message(f"QA: {e}")
+            qa_mode = qa_pr_id = None
+            app._inflight_pr_action = None
+            if app._plans_visible:
+                app.query_one("#plans-pane", PlansPane).focus()
+            else:
+                app.query_one("#tech-tree", TechTree).focus()
+            return
+        if qa_pr_id is None:
             tree = app.query_one("#tech-tree", TechTree)
             qa_pr_id = tree.selected_pr_id
         if not qa_pr_id:
-            app.log_message("No PR specified for QA")
+            app.log_message("No PR specified for QA — select one, or run "
+                            "`pr qa <id>` (TUI: t)")
         else:
             if app._root:
                 try:
@@ -767,7 +828,9 @@ def handle_command_submitted(app, cmd: str) -> None:
                         else:
                             qa_loop_ui.focus_or_start_qa(app, qa_pr["id"])
                     else:
-                        app.log_message(f"PR not found: {qa_pr_id}")
+                        app.log_message(
+                            f"PR not found: {qa_pr_id} — see `pr list` "
+                            f"(TUI: r to refresh)")
             else:
                 app.log_message("No project root")
         # QA is handled directly (not via run_command), so clear the guard

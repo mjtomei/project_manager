@@ -382,6 +382,7 @@ def _require_pr(data: dict, pr_id: str) -> dict:
         for p in prs:
             ids.append(_pr_display_id(p))
         click.echo(f"Available PRs: {', '.join(ids)}", err=True)
+    click.echo("Run 'pm pr list' to see every PR (TUI: press r to refresh).", err=True)
     raise SystemExit(1)
 
 
@@ -394,6 +395,7 @@ def _require_plan(data: dict, plan_id: str) -> dict:
     click.echo(f"Plan {plan_id} not found.", err=True)
     if plans:
         click.echo(f"Available plans: {', '.join(p['id'] for p in plans)}", err=True)
+    click.echo("Run 'pm plan list' to see every plan.", err=True)
     raise SystemExit(1)
 
 
