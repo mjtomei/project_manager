@@ -52513,3 +52513,33 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-a571291
+  plan: bugs
+  title: 'Bug: regression --file-prs filings switch the user''s active PR'
+  branch: pm/pr-a571291-bug-regression-file-prs-filings-switch-the-user-s-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/regression_prompts.py Filing Findings addendum runs
+    ''pm -C <user registry> pr add ...'', and pm_core/cli/pr.py pr add always sets
+    project.active_pr to the new PR. With --file-prs the registry is the user''s live
+    pm/project.yaml, so each finding a regression run files moves the user''s active
+    PR to that bug; commands run without a PR id fall back to active_pr (cli/helpers.py
+    ~L1296), e.g. pm pr start/review then target the filed bug. Repro (QA S6 on pr-7d5d036,
+    host mode): start ''pm qa regression alpha --file-prs'' twice; from each run''s
+    clone run its prompt''s ''pm -C $Q/proj/pm pr add ... --plan bugs'' while the
+    user runs ''pm pr add "User PR during runs"'' in $Q/proj. All three print ''(now
+    active)''; ''pm pr list'' then shows ''*'' on whichever write landed last (a run''s
+    bug pr-b3159b6, not the user''s pr-9c65185). Expected: filings from a regression
+    run add the PR without changing the user''s active PR (e.g. a pr add flag such
+    as --no-activate used by the addendum, or the runner restoring active_pr). Same
+    pr add path is used by pm qa incidental filings, but those write to a workdir
+    clone''s registry, not the live one.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T00:59:38.996898+00:00'
+  updated_at: '2026-11-02T00:59:38.996898+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
