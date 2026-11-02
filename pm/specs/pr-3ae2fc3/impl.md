@@ -6,8 +6,10 @@
 - `pm autostart add <ids> --review-specs` (`pm_core/cli/autostart.py:autostart_add`) and the
   command bar `autostart add <ids> --review-specs` (`pm_core/tui/auto_start.py:handle_command`)
   set a boolean `review_specs` on the target record (`autostart_state.REVIEW_KEY = "review_specs"`),
-  like `wait_for_merge` (`WAIT_KEY`). Composes with any one merge-policy flag
-  (`--wait-for-merge`, `--auto-merge`, `--stop-before-merge`); it is not a policy and never conflicts.
+  like `wait_for_merge` (`WAIT_KEY`). Composes with either merge policy (`--wait-for-merge`, the
+  default for new targets, or `--auto-merge`; `--stop-before-merge` is only master's deprecated alias
+  for `--wait-for-merge`); it is not a policy and never conflicts. There is no all-PR mode and no
+  separate stop-before-merge policy to compose with (master pr-049649a removed both).
 - `--no-review-specs` clears it on a re-add. Re-adding without either flag keeps the current
   value (same rule as policies). `--review-specs` together with `--no-review-specs` → `conflicting_flags`, nothing changes.
 - `add_targets(..., review_specs: bool | None)` reports the change. A re-add that flips only the
@@ -17,7 +19,9 @@
   `autostart list` (`_list_summary`: `(review-specs)`), status `targets[].review_specs`,
   `_print_changes` and the "targets +=" confirmation.
 - Restart: the flag rides on the target record, which `targets_to_breadcrumb` /
-  `targets_from_breadcrumb` already round-trip; nothing else needs persisting.
+  `targets_from_breadcrumb` already round-trip; nothing else needs persisting. `review_specs` is
+  type-checked with the other record fields (`_RECORD_TYPES`): a non-boolean value rejects the
+  saved target set (fail-closed, like a wrong-typed `wait_for_merge`) rather than being coerced.
 
 ### R2. Derived review requirement (no global change)
 - `autostart_state.spec_review_holds(prs, targets) -> {pr_id: [target ids]}`: the union of the
@@ -125,7 +129,7 @@
   in its own style, before the `S` marker (e.g. `in_progress ⇤ S impl`).
 - PR Actions picker (`cli/session.py:_build_picker_lines`), added at the user's request: a
   `[spec review]` badge goes on the `start` row for a pending impl spec and on the `qa` row for a pending QA spec.
-  The picker's h/l navigation (`_picker_nav_pr_ids`) also includes PRs with a pending spec, so a
+  The picker's h/l navigation (`_build_nav_entries`) also includes non-terminal PRs with a pending spec, so a
   windowless impl-spec pause is reachable (QA S5).
 
 ## 2. Implicit Requirements
@@ -173,3 +177,19 @@
   rework then launches `--fresh` as usual. The approval records survive a return, so a returned PR
   is not paused again. `_spec_phase_due` passes `pr` to `recorded_qa_verdict`, so a QA verdict
   recorded before an open return does not count as "QA already done".
+- A refused or failed rework start (e.g. `pm pr start --fresh` refused because the impl spec went
+  pending) releases the hop's return-launch claim (`signoff.release_return_launch`), so the pass
+  after the approval launches the rework at once instead of waiting out the claim (QA S30).
+- Impl idle tracking registers the newest impl transcript symlink (this run's, or the
+  `transcripts/auto-sequence/<pr>/` one when a `pm pr auto-sequence` tick launched the rework), and
+  then applies master's S79 guard: if even that symlink names an earlier session than the pane runs,
+  the pane is not tracked (only watched for the trust prompt), so a stale session's idle never
+  advances the PR mid-rework.
+- The QA planner poll's spec gate loads the PR itself (`_qa_spec_gate(state, pm_root)`); master's
+  merge guard there reads only the status (`_live_pr_status`, skipped while project.yaml is
+  unparseable), and the gate keeps its last pending state on a load failure. The poll consults the
+  gate (and defers a complete plan) only while spec review applies to the run (`spec_review` /
+  `planner_spec_gate`) or a pause is already shown, so a plain QA run keeps master's load sequence.
+  The post-planning `_wait_for_qa_spec_approval` still holds the scenario launch on any pending QA
+  spec; it loads through `_load_project_waiting`, so an unloadable project.yaml keeps it waiting
+  (RQ37) and a stop meanwhile ends the run without launching scenarios.

@@ -27,6 +27,7 @@ from click.testing import CliRunner
 from pm_core import autostart_state as st
 from pm_core import qa_loop, spec_gen, store
 from pm_core.autostart_state import POLICY_WAIT, REVIEW_KEY
+from pm_core.cli.helpers import TuiIpcResult
 from pm_core.tui import auto_start, review_loop_ui, signoff_ui
 
 from tests.test_autostart_merge_wait import DiskApp as _DiskApp, _SIGNED, _set
@@ -115,9 +116,20 @@ class TestSpecReviewHolds:
         recs = {"b": {**st.make_target_record("cli"), REVIEW_KEY: True,
                       st.WAIT_KEY: True}}
         data = {"targets": st.targets_to_breadcrumb(recs), "all_mode": False}
-        targets, _, _ = st.targets_from_breadcrumb(json.loads(json.dumps(data)))
-        assert targets["b"][REVIEW_KEY] is True
-        assert targets["b"][st.WAIT_KEY] is True
+        res = st.targets_from_breadcrumb(json.loads(json.dumps(data)))
+        assert res.error is None
+        assert res.targets["b"][REVIEW_KEY] is True
+        assert res.targets["b"][st.WAIT_KEY] is True
+
+    def test_breadcrumb_wrong_typed_option_fails_closed(self):
+        """A non-boolean ``review_specs`` is malformed saved state: like a
+        wrong-typed ``wait_for_merge`` it rejects the whole target set
+        rather than being coerced (a truthy string would add pauses, a
+        dropped one would silently remove them)."""
+        data = {"targets": [{"pr_id": "pr-b", "review_specs": "yes"}]}
+        res = st.targets_from_breadcrumb(data)
+        assert res.targets == {}
+        assert "review_specs" in res.error
 
 
 class TestStatus:
@@ -433,7 +445,7 @@ class TestTargets:
         res = auto_start.handle_command(app, ["add", "a", "--no-review-specs"])
         assert res["changes"][0] == {
             "pr_id": "a", "action": "options_changed",
-            "policy": "stop_before_merge", "review_specs": False,
+            "policy": "wait_for_merge", "review_specs": False,
             "previous_review_specs": True}
         assert not auto_start.spec_review_required(app, "a")
 
@@ -456,7 +468,7 @@ class TestTargets:
                     "prs": [_pr("a")]}, pm_dir)
         monkeypatch.setattr("pm_core.cli.autostart.state_root", lambda: pm_dir)
         from pm_core.cli import cli
-        with patch("pm_core.cli.autostart.trigger_tui_command") as trig:
+        with patch("pm_core.cli.autostart.submit_tui_command") as trig:
             res = CliRunner().invoke(cli, [
                 "autostart", "add", "a", *order, "--json", "-s", "pm-x"])
         assert res.exit_code == 1
@@ -474,10 +486,12 @@ class TestTargets:
 
     def test_list_summary_shows_option(self, tmp_path):
         app = _app([_pr("a"), _pr("b")], tmp_path,
-                   {"a": {REVIEW_KEY: True}, "b": {}})
-        app._stop_before_merge = {"a"}
+                   {"a": {REVIEW_KEY: True, st.WAIT_KEY: True}, "b": {},
+                    "c": {REVIEW_KEY: True}})
         auto_start.handle_command(app, ["list"])
-        assert app.logs[-1] == "Auto-start targets: a (stop, review-specs), b"
+        assert app.logs[-1] == ("Auto-start targets: "
+                                "a (wait-for-merge, review-specs), b, "
+                                "c (review-specs)")
 
     def test_shared_dep_and_removal_never_approves(self, tmp_path):
         wd = tmp_path / "wa"
@@ -745,6 +759,43 @@ class TestQASpecGate:
             assert not qa_loop._wait_for_qa_spec_approval(state, root,
                                                           lambda: None)
 
+    def test_wait_holds_while_project_yaml_unloadable(self, tmp_path):
+        """A load failure is not "no pending spec": the wait keeps holding
+        the scenario launch until the file loads again (RQ37), and a stop
+        meanwhile ends it without launching."""
+        root = _disk(tmp_path, [_pr("a", status="qa",
+                                    spec_pending={"phase": "qa"})])
+        state = qa_loop.QALoopState(pr_id="a")
+        real_load = store.load
+        calls = {"n": 0}
+
+        def flaky(*a, **kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise store.ProjectYamlMissingError("gone for a moment")
+            if calls["n"] == 2:
+                # Loads again; the human approves in the meantime.
+                spec_gen.approve_spec(real_load(root), "a", root=root)
+            return real_load(*a, **kw)
+
+        with patch("pm_core.store.load", side_effect=flaky), \
+                patch("pm_core.qa_loop.time.sleep"):
+            assert qa_loop._wait_for_qa_spec_approval(state, root,
+                                                      lambda: None)
+        assert calls["n"] >= 2
+
+        state = qa_loop.QALoopState(pr_id="a")
+        _set(root, "a", spec_pending={"phase": "qa"})
+
+        def broken(*a, **kw):
+            state.stop_requested = True
+            raise store.ProjectYamlMissingError("gone")
+
+        with patch("pm_core.store.load", side_effect=broken), \
+                patch("pm_core.qa_loop.time.sleep"):
+            assert not qa_loop._wait_for_qa_spec_approval(state, root,
+                                                          lambda: None)
+
 
 # ---------------------------------------------------------------------------
 # Tree marker + PR Actions picker
@@ -765,13 +816,17 @@ def test_picker_badges_waiting_step():
 def test_picker_navigates_windowless_spec_pause():
     """An autostart impl-spec pause holds the PR before any window
     exists; the picker opened from the TUI window still reaches it."""
-    from pm_core.cli.session import _picker_nav_pr_ids
+    from pm_core.cli.session import _build_nav_entries
     prs = [{"id": "pr-1", "title": "T", "status": "pending",
             "spec_pending": {"phase": "impl"}},
            {"id": "pr-2", "title": "U", "status": "pending"},
-           {"id": "pr-3", "title": "W", "status": "in_progress"}]
-    assert _picker_nav_pr_ids(prs, {"main", "pr-3"}, None) == ["pr-1", "pr-3"]
-    assert _picker_nav_pr_ids(prs[1:2], {"main"}, None) == []
+           {"id": "pr-3", "title": "W", "status": "in_progress"},
+           {"id": "pr-4", "title": "X", "status": "merged",
+            "spec_pending": {"phase": "qa"}}]
+    nav, _, _ = _build_nav_entries(prs, None, {"main", "pr-3"})
+    assert nav == ["pr-1", "pr-3"]
+    nav, _, _ = _build_nav_entries(prs[1:2], None, {"main"})
+    assert nav == []
 
 
 def test_tree_marker_names_phase_and_outranks_loop_marker():
@@ -856,7 +911,7 @@ def test_chain_pauses_at_both_spec_steps_end_to_end(tmp_path):
     def fake_trigger(session, cmd):
         with patch("pm_core.tui.auto_start.pm_home", return_value=home):
             auto_start.handle_command(app, shlex.split(cmd)[1:])
-        return True
+        return TuiIpcResult(True)
 
     def cli_status():
         out = CliRunner().invoke(cli, ["autostart", "status", "--json",
@@ -893,7 +948,7 @@ def test_chain_pauses_at_both_spec_steps_end_to_end(tmp_path):
          patch("pm_core.cli.autostart.pm_home", lambda: home), \
          patch("pm_core.cli.autostart._tui_pidfile_for_session",
                return_value=pidfile), \
-         patch("pm_core.cli.autostart.trigger_tui_command", fake_trigger):
+         patch("pm_core.cli.autostart.submit_tui_command", fake_trigger):
         res = CliRunner().invoke(cli, ["autostart", "add", "b",
                                        "--review-specs", "--wait-for-merge",
                                        "-s", "pm-x"])
@@ -1063,6 +1118,8 @@ def _plan_under_review(tmp_path, monkeypatch, *, edit_on_approval: bool):
         transcript_turns=[("user", h.TEMPLATE_PROMPT),
                           ("assistant", h.FULL_PLAN)],
         extra_patches=(
+            # The run is under spec review (start_qa sets spec_review).
+            patch("pm_core.qa_loop._spec_review_applies", return_value=True),
             patch("pm_core.qa_loop._qa_spec_gate", side_effect=gate),
             patch("pm_core.qa_loop._qa_spec_text", side_effect=spec_text),
             patch("pm_core.qa_loop._set_spec_review_pending",
@@ -1082,13 +1139,45 @@ def test_planner_plan_deferred_until_approval(tmp_path, monkeypatch):
 
 
 def test_planner_rechecks_spec_gate_at_poll_cadence(tmp_path, monkeypatch):
-    # Once the QA spec is under review the planner wait is bounded by the
-    # poll interval, so a pause (or approval) surfaces within seconds
-    # instead of after the 15 s idle-event wait.
+    # Under spec review the planner wait is bounded by the poll interval
+    # from the start, so a QA spec written mid-planning is held (and an
+    # approval seen) within seconds instead of after the 15 s idle-event
+    # wait a plain run uses.
     _, flags, _ = _plan_under_review(tmp_path, monkeypatch,
                                      edit_on_approval=False)
-    assert flags["timeouts"][0] == 15.0
-    assert flags["timeouts"][1] <= qa_loop._POLL_INTERVAL
+    assert flags["timeouts"]
+    assert all(t <= qa_loop._POLL_INTERVAL for t in flags["timeouts"])
+
+
+def test_plain_planner_run_does_not_defer_its_plan(tmp_path, monkeypatch):
+    """Without spec review (and no pause shown) the planner poll neither
+    consults the spec gate nor shortens its wait: a plain QA run keeps
+    master's load sequence.  (A pending QA spec still holds the scenario
+    launch after planning, in _wait_for_qa_spec_approval; this harness's
+    PR has no QA spec, so the run ends at the spec check before that.)"""
+    from tests import test_qa_planner_handoff as h
+    gate_calls = []
+    timeouts = []
+
+    def gate(state, pm_root, pr=None):
+        gate_calls.append(pr is not None)
+        return False
+
+    def wait(session_id, **kw):
+        timeouts.append(kw.get("timeout"))
+        return {"event_type": "idle_prompt", "timestamp": time.time()}
+
+    state = h._run_planning(
+        tmp_path, monkeypatch, pane_content="",
+        transcript_turns=[("user", h.TEMPLATE_PROMPT),
+                          ("assistant", h.FULL_PLAN)],
+        extra_patches=(
+            patch("pm_core.qa_loop._qa_spec_gate", side_effect=gate),
+            patch("pm_core.hook_events.wait_for_event", side_effect=wait),
+        ))
+    assert [s.index for s in state.scenarios] == [1, 2, 3, 4]
+    assert timeouts == [15.0]
+    assert gate_calls == []
 
 
 def test_planner_replans_after_edited_approval(tmp_path, monkeypatch):

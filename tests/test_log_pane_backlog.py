@@ -45,8 +45,8 @@ def _run_pane(cmd: str) -> list[str]:
 
 def test_log_pane_shows_old_autostart_lines_at_bottom(tmp_path):
     log = tmp_path / "s 1.log"   # space: path must be quoted
-    armed = ["01:00:00 INFO  [tui] log: Auto-sequence armed for pr-a (will stop before merge)",
-             "01:00:09 INFO  [tui] log: Auto-sequence armed for pr-b (will stop before merge)"]
+    armed = ["01:00:00 INFO  [tui] log: Auto-sequence armed for pr-a (will wait for merge)",
+             "01:00:09 INFO  [tui] log: Auto-sequence armed for pr-b (will wait for merge)"]
     lines = list(armed)
     # A minute of other activity: many status messages and debug noise.
     for i in range(700):
@@ -61,15 +61,15 @@ def test_log_pane_shows_old_autostart_lines_at_bottom(tmp_path):
     assert out[:500] == lines[-500:]
     assert out[500:] == [
         "── recent auto-start messages ──",
-        "01:00:00 log: Auto-sequence armed for pr-a (will stop before merge)",
-        "01:00:09 log: Auto-sequence armed for pr-b (will stop before merge)",
+        "01:00:00 log: Auto-sequence armed for pr-a (will wait for merge)",
+        "01:00:09 log: Auto-sequence armed for pr-b (will wait for merge)",
         "── following log ──",
     ]
 
 
 def test_log_pane_recap_keeps_last_autostart_lines(tmp_path):
     log = tmp_path / "tui.log"
-    msgs = [f"01:00:{i:02d} INFO  [tui] log: Auto-start: targets += pr-{i} (stop)"
+    msgs = [f"01:00:{i:02d} INFO  [tui] log: Auto-start: targets += pr-{i} (wait-for-merge + deps)"
             for i in range(20)]
     log.write_text("\n".join(msgs + ["01:02:00 INFO  [tui] log: Review loop done"]) + "\n")
 
@@ -77,7 +77,7 @@ def test_log_pane_recap_keeps_last_autostart_lines(tmp_path):
 
     recap = out[out.index("── recent auto-start messages ──") + 1:
                 out.index("── following log ──")]
-    assert recap == [f"01:00:{i:02d} log: Auto-start: targets += pr-{i} (stop)"
+    assert recap == [f"01:00:{i:02d} log: Auto-start: targets += pr-{i} (wait-for-merge + deps)"
                      for i in range(20 - pane_ops.LOG_PANE_RECAP_LINES, 20)]
 
 

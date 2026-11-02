@@ -6,6 +6,7 @@ sticky "Review loop done … PASS" message was up, so the TUI never showed
 """
 
 import time
+import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -40,6 +41,57 @@ def _log(app, msg, **kw):
     ProjectManagerApp.log_message(app, msg, **kw)
 
 
+@pytest.mark.parametrize("verdict, expected", [
+    ("PASS", "(1/2 consecutive) — restarting QA"),
+    ("NEEDS_WORK", "returning to review"),
+])
+def test_qa_confirmation_visible_over_sticky_review(verdict, expected):
+    from pm_core.qa_loop import QALoopState
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = None
+    app._review_loops = {}
+    app._self_driving_qa = {"pr-001": {"pass_count": 0, "required_passes": 2}}
+    _log(app, "Review loop done for pr-other: PASS", sticky=10)
+    state = QALoopState(pr_id="pr-001", latest_verdict=verdict)
+
+    def followup(*args):
+        app.log_message("Starting follow-up")
+
+    with patch.object(qa_loop_ui, "_record_qa_note"), \
+         patch.object(qa_loop_ui, "_transition_pr_status"), \
+         patch.object(qa_loop_ui, "start_qa", side_effect=followup), \
+         patch.object(qa_loop_ui, "_start_self_driving_review", side_effect=followup):
+        qa_loop_ui._on_qa_complete(app, state)
+
+    assert expected in shown[-1]
+    assert app._log_hold_until > time.monotonic()
+    app._log_hold_until = 0.0  # the three-second confirmation hold expires
+    app._flush_held_log_message()
+    assert shown[-1] == " Starting follow-up"
+
+
+def test_qa_loop_start_visible_during_autostart_confirmation():
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    app._qa_loops = {}
+    app._self_driving_qa = {}
+    _log(app, "Auto-start: already off", force=True, hold=3)
+    with patch.object(qa_loop_ui.store, "load", return_value={}), \
+         patch.object(qa_loop_ui.store, "get_pr", return_value={"id": "pr-001"}), \
+         patch.object(qa_loop_ui, "_enter_qa_status", return_value=True), \
+         patch.object(qa_loop_ui, "_ensure_qa_poll_timer"), \
+         patch.object(qa_loop_ui, "_get_qa_pass_count", return_value=3), \
+         patch.object(qa_loop_ui, "start_qa_background"):
+        qa_loop_ui.start_or_stop_qa_loop(app, "pr-001")
+    assert "3 passes required" in shown[-1]
+    _log(app, "Planning QA scenarios...")
+    assert "3 passes required" in shown[-1]
+
+
 def test_plain_message_dropped_while_sticky():
     app, shown = _stub_app()
     _log(app, "Review loop done: PASS", sticky=10)
@@ -59,9 +111,8 @@ def test_forced_message_shown_without_extending_sticky():
 
 def test_autostart_target_changes_are_forced():
     app = MagicMock()
-    app._auto_start_targets = {"pr-x": {"policy": "stop_before_merge"},
-                               "pr-y": {"policy": "stop_before_merge"}}
-    app._auto_start_all = False
+    app._auto_start_targets = {"pr-x": {"wait_for_merge": True},
+                               "pr-y": {"wait_for_merge": True}}
     app._data = {"prs": [{"id": "pr-x"}, {"id": "pr-y"}]}
     with patch.object(auto_start, "_sync_enabled"):
         auto_start.remove_targets(app, ["pr-x"])
@@ -146,20 +197,16 @@ def test_newer_hold_not_cut_short_by_older_timer():
     assert shown[-1] == " chatter"
 
 
-def test_autostart_add_and_all_confirmations_hold():
+def test_autostart_add_confirmation_holds():
     app = MagicMock()
     app._auto_start_targets = {}
-    app._auto_start_all = False
-    app._stop_before_merge = set()
     app._data = {"prs": [{"id": "pr-x", "status": "pending"}]}
     with patch.object(auto_start, "_sync_enabled"), \
             patch.object(auto_start, "check_and_start", MagicMock()):
         auto_start.add_targets(app, ["pr-x"])
-        auto_start.enable_all(app)
-    for needle in ("targets += pr-x", "ON (all ready PRs"):
-        calls = [c for c in app.log_message.call_args_list
-                 if needle in c.args[0]]
-        assert calls and calls[0].kwargs.get("hold", 0) > 0, needle
+    calls = [c for c in app.log_message.call_args_list
+             if "targets += pr-x" in c.args[0]]
+    assert calls and calls[0].kwargs.get("hold", 0) > 0
 
 
 def test_command_bar_status_popup_returns_focus_to_tree():
@@ -185,9 +232,9 @@ def test_starting_message_deferred_by_confirmation_hold(tmp_path):
                           "branch": "b", "depends_on": []}]}
     app._root = tmp_path
     for attr, val in (("_auto_start", False), ("_auto_start_targets", {}),
-                      ("_auto_start_all", False), ("_auto_start_run_id", None),
+                      ("_auto_start_run_id", None),
                       ("_auto_start_launching", set()),
-                      ("_stop_before_merge", set()), ("_review_loops", {}),
+                      ("_review_loops", {}),
                       ("_qa_loops", {}), ("_self_driving_qa", {}),
                       ("_pending_merge_prs", set()),
                       ("_merge_input_required_prs", set()),
@@ -209,19 +256,21 @@ def test_starting_message_deferred_by_confirmation_hold(tmp_path):
             patch.object(auto_start, "_start_pr_quiet", _noop):
         asyncio.run(auto_start.check_and_start(app))
     assert shown[-1] == " Auto-start: targets += pr-x (1 total)"
-    assert app._log_held[0] == "Auto-start: starting pr-x"
+    assert [q[0] for q in app._log_held_queue] == ["Auto-start: starting pr-x"]
+    app._log_hold_until = 0.0
+    app.timers.pop(0)()  # the hold's flush
+    assert shown[-1] == " Auto-start: starting pr-x"
 
 
-# QA s13 (pr-0b87a97): ``g`` on a stop-before-merge target — the merge's
+# QA s13 (pr-0b87a97): ``g`` on a wait-for-merge target — the merge's
 # own reload pruned the target and logged "target Y merged — removed", but
 # the "Merging Y..." spinner (0.1s ticks) and the merge's result line
 # overwrote it before it painted.
 
 def test_merged_target_message_survives_merge_spinner():
     app, shown = _stub_app()
-    app._auto_start_targets = {"pr-y": {"policy": "stop_before_merge"},
-                               "pr-t": {"policy": "stop_before_merge"}}
-    app._auto_start_all = False
+    app._auto_start_targets = {"pr-y": {"wait_for_merge": True},
+                               "pr-t": {"wait_for_merge": True}}
     _log(app, "⠋ Merging pr-y...", capture=False)
     with patch.object(auto_start, "_sync_enabled"):
         auto_start._prune_completed_targets(
@@ -240,8 +289,7 @@ def test_last_merged_target_one_line_with_off():
     # A separate "all targets complete — OFF" line overwrote the merged
     # line in the same frame; the last completion is now one message.
     app, shown = _stub_app()
-    app._auto_start_targets = {"pr-y": {"policy": "stop_before_merge"}}
-    app._auto_start_all = False
+    app._auto_start_targets = {"pr-y": {"wait_for_merge": True}}
     with patch.object(auto_start, "_disable") as disable:
         auto_start._prune_completed_targets(
             app, [{"id": "pr-y", "status": "merged"}])
@@ -257,9 +305,8 @@ def test_last_merged_target_one_line_with_off():
 
 def test_autostart_remove_and_clear_confirmations_hold():
     app = MagicMock()
-    app._auto_start_targets = {"pr-x": {"policy": "stop_before_merge"},
-                               "pr-y": {"policy": "stop_before_merge"}}
-    app._auto_start_all = False
+    app._auto_start_targets = {"pr-x": {"wait_for_merge": True},
+                               "pr-y": {"wait_for_merge": True}}
     app._data = {"prs": [{"id": "pr-x"}, {"id": "pr-y"}]}
     with patch.object(auto_start, "_sync_enabled"), \
             patch.object(auto_start, "is_enabled", return_value=True), \
@@ -294,9 +341,8 @@ def test_remove_confirmation_survives_merge_spinner():
 
 def test_held_confirmation_not_replaced_by_next_held_line():
     app, shown = _stub_app()
-    app._auto_start_targets = {"pr-w": {"policy": "stop_before_merge"},
-                               "pr-t": {"policy": "stop_before_merge"}}
-    app._auto_start_all = False
+    app._auto_start_targets = {"pr-w": {"wait_for_merge": True},
+                               "pr-t": {"wait_for_merge": True}}
     _log(app, "⠋ Merging pr-w...", capture=False)
     _log(app, "Auto-start: pr-z not a target", force=True, hold=3)
     with patch.object(auto_start, "_sync_enabled"):
@@ -531,3 +577,329 @@ def test_prefix_timeout_clears_its_own_hint():
     app, shown = _prefix_app()
     ProjectManagerApp._cancel_w_mode(app)
     assert shown[-1] == ""
+
+
+# QA S50 (pr-592e4bd): a fast skip_qa sign-off's forced, held "✓ X signed
+# off" arrived after the "skipping QA" line's hold had expired but before
+# its flush timer ran; it was shown at once and dropped the queued
+# "Auto-start: X → sign-off", which was never painted.
+
+def test_message_after_expiry_waits_for_the_pending_flush():
+    app, shown = _stub_app()
+    _log(app, "Auto-start: pr-x review passed, skipping QA", force=True, hold=3)
+    _log(app, "Auto-start: pr-x → sign-off", force=True, hold=3)  # queued
+    app._log_hold_until = 0.0  # the hold expired; its timer has not run yet
+    _log(app, "✓ pr-x signed off — ready to merge", force=True, hold=3)
+    _log(app, "Selected: pr-y")  # plain chatter in the same gap
+    assert shown == [" Auto-start: pr-x review passed, skipping QA"]
+    app.timers.pop(0)()  # the first hold's flush
+    assert shown[-1] == " Auto-start: pr-x → sign-off"
+    app._log_hold_until = 0.0
+    app.timers.pop(0)()
+    assert shown[-1] == " ✓ pr-x signed off — ready to merge"
+    app._log_hold_until = 0.0
+    app.timers.pop(0)()
+    assert shown[-1] == " Selected: pr-y"
+
+
+# Review loop 350f i1 (pr-592e4bd): since the S50 fix above, a non-empty
+# queue keeps holding the line until its flush runs.  Textual sleeps 0.5 ms
+# short of a timer's delay, so the flush can fire just before the hold ends
+# and find it still active; it returned "a newer hold is active" with no
+# other timer pending, and the queue then held the line for good: every
+# later unforced or held message was deferred and never painted.
+
+def test_flush_timer_firing_just_before_the_hold_ends_rearms():
+    import time
+    app, shown = _stub_app()
+    _log(app, "A held", force=True, hold=3)
+    _log(app, "B queued", force=True, hold=3)
+    app._log_hold_until = time.monotonic() + 0.0005
+    delays, set_timer = [], app.set_timer
+    app.set_timer = lambda delay, cb: delays.append(delay) or set_timer(delay, cb)
+    app.timers.pop(0)()  # fires early: the hold is still active
+    assert len(app.timers) == 1  # re-armed for the rest of the hold
+    assert 0 < delays[0] <= 0.0005  # only the rest, not a whole new hold
+    time.sleep(0.001)
+    _log(app, "C plain")
+    _log(app, "D confirmation", force=True, hold=3)
+    for _ in range(3):
+        app._log_hold_until = 0.0
+        if app.timers:
+            app.timers.pop(0)()
+    assert shown == [" A held", " B queued", " D confirmation"]
+    assert not app.timers and not app._log_held_queue
+
+
+def test_queue_without_a_pending_flush_holds_nothing():
+    app, shown = _stub_app()
+    _log(app, "A held", force=True, hold=3)
+    _log(app, "B queued", force=True, hold=3)
+    app._log_hold_until = 0.0
+    app._log_flush_timers = 0  # its flush timer is gone
+    _log(app, "C plain")
+    assert shown[-1] == " C plain"
+
+
+# Review loop 350f i3 (pr-592e4bd): a flush timer delayed past a later hold
+# (an event loop blocked for longer than the hold) runs while that hold's
+# own timer is still pending.  Its replays must be judged by the hold's time
+# alone: judged by log_line_held, the queue with a flush pending counts as
+# holding the line, so each replay was queued again behind the next and the
+# flush never returned (the TUI hangs).
+
+def test_late_flush_with_another_flush_pending_releases_the_queue():
+    app, shown = _stub_app()
+    _log(app, "A held", force=True, hold=3)
+    app._log_hold_until = 0.0  # A's hold is over; its timer runs late
+    _log(app, "B held", force=True, hold=3)  # a second hold and timer
+    _log(app, "C queued", force=True, hold=3)
+    _log(app, "D queued", force=True, hold=3)
+    app._log_hold_until = 0.0  # B's hold is over too: both timers late
+    real, calls = app.log_message, []
+
+    def bounded(msg, **kw):
+        calls.append(msg)
+        assert len(calls) < 20, "flush replays re-queue each other"
+        return real(msg, **kw)
+    app.log_message = bounded
+    app.timers.pop(0)()  # A's late flush releases the queue
+    assert shown[-1] == " C queued"
+    app.timers.pop(0)()  # B's, right after: C's hold is active
+    assert shown[-1] == " C queued"
+    app._log_hold_until = 0.0
+    app.timers.pop(0)()  # C's flush
+    assert shown == [" A held", " B held", " C queued", " D queued"]
+
+
+# Review loop 350f i2 (pr-592e4bd): auto-start's "starting <pr>" decided
+# whether a hold was active from the hold's time alone.  Since S50 a hold
+# also lasts while its queued confirmations wait for their flush, so in
+# that gap the line was forced and dropped them.
+
+def test_starting_message_waits_for_queued_confirmations_flush(tmp_path):
+    import asyncio
+    app, shown = _stub_app()
+    app._data = {"project": {"name": "t", "repo": "/r",
+                             "base_branch": "master"},
+                 "prs": [{"id": "pr-x", "title": "X", "status": "pending",
+                          "branch": "b", "depends_on": []}]}
+    app._root = tmp_path
+    for attr, val in (("_auto_start", False), ("_auto_start_targets", {}),
+                      ("_auto_start_run_id", None),
+                      ("_auto_start_launching", set()),
+                      ("_stop_before_merge", set()), ("_review_loops", {}),
+                      ("_qa_loops", {}), ("_self_driving_qa", {}),
+                      ("_pending_merge_prs", set()),
+                      ("_merge_input_required_prs", set()),
+                      ("_session_name", None)):
+        setattr(app, attr, val)
+    app._watcher_manager = MagicMock()
+    app._watcher_manager.find_by_type.return_value = None
+    app._pane_idle_tracker = MagicMock()
+    app._pane_idle_tracker.is_tracked.return_value = False
+    app._update_display = app._load_state = lambda: None
+    app.run_worker = lambda coro, *a, **k: coro.close()
+
+    async def _noop(*a, **k):
+        return None
+
+    auto_start.add_targets(app, ["pr-x"], default_policy=None,
+                           source="key:A")
+    _log(app, "Auto-start: pr-y → sign-off", force=True, hold=3)  # queued
+    app._log_hold_until = 0.0  # the hold expired; its flush has not run
+    with patch("pm_core.tui.watcher_ui.is_running", return_value=False), \
+            patch.object(auto_start, "_start_pr_quiet", _noop):
+        asyncio.run(auto_start.check_and_start(app))
+    assert shown[-1] == " Auto-start: targets += pr-x (1 total)"
+    assert [q[0] for q in app._log_held_queue] == [
+        "Auto-start: pr-y → sign-off", "Auto-start: starting pr-x"]
+    app.timers.pop(0)()  # the hold's flush
+    assert shown[-1] == " Auto-start: pr-y → sign-off"
+    app._log_hold_until = 0.0
+    app.timers.pop(0)()
+    assert shown[-1] == " Auto-start: starting pr-x"
+
+
+# QA S53 story 2 (pr-592e4bd): with the work route down, ``A`` on a target
+# whose dependency is pending logged "targets +=" (held), then "starting
+# <dep>" (deferred by that hold), and ``pm pr start`` failed within the hold.
+# The failure line is a held confirmation, so it was queued, and being newer
+# it dropped the deferred "starting" line at the flush: the user never saw
+# that a start was attempted.
+
+def test_starting_message_survives_a_start_that_fails_within_the_hold(tmp_path):
+    import asyncio
+    app, shown = _stub_app()
+    app._data = {"project": {"name": "t", "repo": "/r",
+                             "base_branch": "master"},
+                 "prs": [{"id": "pr-x", "title": "X", "status": "pending",
+                          "branch": "b", "depends_on": []}]}
+    app._root = tmp_path
+    for attr, val in (("_auto_start", False), ("_auto_start_targets", {}),
+                      ("_auto_start_run_id", None),
+                      ("_auto_start_launching", set()),
+                      ("_stop_before_merge", set()), ("_review_loops", {}),
+                      ("_qa_loops", {}), ("_self_driving_qa", {}),
+                      ("_pending_merge_prs", set()),
+                      ("_merge_input_required_prs", set()),
+                      ("_session_name", None)):
+        setattr(app, attr, val)
+    app._watcher_manager = MagicMock()
+    app._watcher_manager.find_by_type.return_value = None
+    app._pane_idle_tracker = MagicMock()
+    app._pane_idle_tracker.is_tracked.return_value = False
+    app._update_display = app._load_state = lambda: None
+    app.run_worker = lambda coro, *a, **k: coro.close()
+    reason = ("work route 'claude-work' unavailable: router not reachable "
+              "at 127.0.0.1:1. Remedy: start the router; then launch the "
+              "impl session again")
+
+    class _P:
+        returncode = 1
+
+        async def communicate(self):
+            return b"", reason.encode()
+
+    async def fake_shell(*a, **k):
+        return _P()
+
+    auto_start.add_targets(app, ["pr-x"], default_policy=None,
+                           source="key:A")
+    with patch("pm_core.tui.watcher_ui.is_running", return_value=False), \
+            patch.object(auto_start, "_run_shell_async", fake_shell):
+        asyncio.run(auto_start.check_and_start(app))
+    assert shown[-1] == " Auto-start: targets += pr-x (1 total)"
+    app._log_hold_until = 0.0
+    app.timers.pop(0)()  # the "targets +=" hold ends
+    assert shown[-1] == " Auto-start: starting pr-x"
+    app._log_hold_until = 0.0
+    app.timers.pop(0)()  # the "starting" hold ends
+    assert "Auto-start: pm pr start pr-x failed" in shown[-1]
+    assert shown[-1].endswith(reason)
+
+
+# QA s1 (pr-f094946): ``L`` pressed as auto-QA started landed inside the
+# sticky "Review loop done … PASS" window, so the log pane opened but the
+# TUI never showed "Launched log pane".
+
+def test_launch_pane_confirmation_shown_while_sticky(monkeypatch):
+    from pm_core.tui import pane_ops
+    app, shown = _stub_app()
+    _log(app, "Review loop done: PASS", sticky=10)
+    monkeypatch.setattr(pane_ops, "get_session_and_window",
+                        lambda a: ("sess", "@0"))
+    monkeypatch.setattr(pane_ops.pane_registry, "find_live_pane_by_role",
+                        lambda *a, **k: None)
+    monkeypatch.setattr(pane_ops.pane_registry, "load_registry",
+                        lambda s: {"generation": "1"})
+    monkeypatch.setattr(pane_ops.pane_layout, "preferred_split_direction",
+                        lambda *a: "h")
+    monkeypatch.setattr(pane_ops.pane_layout, "register_and_rebalance",
+                        lambda *a: None)
+    monkeypatch.setattr(pane_ops.tmux_mod, "split_pane", lambda *a, **k: "%8")
+    monkeypatch.setattr(pane_ops.tmux_mod, "select_pane_smart",
+                        lambda *a: None)
+    pane_ops.launch_pane(app, "tail -f log", "log")
+    assert shown[-1] == " Launched log pane"
+    monkeypatch.setattr(pane_ops.pane_registry, "find_live_pane_by_role",
+                        lambda *a, **k: "%8")
+    pane_ops.launch_pane(app, "tail -f log", "log")
+    assert shown[-1] == " Focused existing log pane"
+
+
+def test_new_plan_pane_confirmation_shown_while_sticky():
+    from pm_core.tui import pane_ops
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    _log(app, "Review loop done: PASS", sticky=10)
+    with patch.object(pane_ops.tmux_mod, "in_tmux", return_value=True), \
+         patch.object(pane_ops.tmux_mod, "get_session_name", return_value="sess"), \
+         patch.object(pane_ops.tmux_mod, "find_window_by_name",
+                      side_effect=[None, {"id": "@8"}]), \
+         patch.object(pane_ops.tmux_mod, "new_window_get_pane", return_value="%8"), \
+         patch.object(pane_ops, "_wrap_pane_cmd", return_value="wrapped"), \
+         patch.object(pane_ops.pane_layout, "register_and_rebalance") as register, \
+         patch.object(pane_ops, "_focus_plans_window") as focus:
+        pane_ops._launch_in_plans_window(app, "plan-001", "less plan.md", "plan")
+
+    register.assert_called_once_with(
+        "sess", "@8", [("%8", "plan", "less plan.md")])
+    focus.assert_called_once_with(app, "plan-001")
+    assert shown[-1] == " Launched plan pane"
+
+
+# QA s22 (pr-f094946): a user `t` landing in the gap where a background QA
+# run is accepted but has no window yet answers "QA already running for X".
+# Auto-start's "targets += X" confirmation holds the log line, so the answer
+# was dropped and never painted.
+
+def test_qa_already_running_visible_during_autostart_confirmation():
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    state = SimpleNamespace(running=True, held=False, focus_on_create=False)
+    app._qa_loops = {"pr-001": state}
+    _log(app, "Auto-start: targets += pr-001 (1 total)", force=True, hold=3)
+    with patch.object(qa_loop_ui.store, "load", return_value={}), \
+         patch.object(qa_loop_ui.store, "get_pr",
+                      return_value={"id": "pr-001", "status": "qa"}):
+        qa_loop_ui.start_qa(app, "pr-001", focus=True)
+    assert shown[-1] == " QA already running for pr-001"
+    assert state.focus_on_create is True
+
+
+def test_qa_held_run_reports_waiting_instead_of_running():
+    """A held run is still tracked; pressing t must tell the user to answer
+    in the scenario worker pane rather than claim a run is in progress."""
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    state = SimpleNamespace(running=False, held=True, focus_on_create=False)
+    app._qa_loops = {"pr-001": state}
+    with patch.object(qa_loop_ui.store, "load", return_value={}), \
+         patch.object(qa_loop_ui.store, "get_pr",
+                      return_value={"id": "pr-001", "status": "qa"}):
+        qa_loop_ui.start_qa(app, "pr-001", focus=True)
+    assert "waiting for input" in shown[-1]
+    assert "scenario worker pane" in shown[-1]
+    # No duplicate run was spawned and no window focus was requested.
+    assert state.focus_on_create is False
+
+
+def test_qa_run_reopened_from_a_hold_reports_running():
+    """The hold's reopen publishes ``running=True`` before clearing ``held``,
+    so pressing t in that window must not claim the run is still waiting."""
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    state = SimpleNamespace(running=True, held=True, focus_on_create=False)
+    app._qa_loops = {"pr-001": state}
+    with patch.object(qa_loop_ui.store, "load", return_value={}), \
+         patch.object(qa_loop_ui.store, "get_pr",
+                      return_value={"id": "pr-001", "status": "qa"}):
+        qa_loop_ui.start_qa(app, "pr-001", focus=True)
+    assert shown[-1] == " QA already running for pr-001"
+    assert state.focus_on_create is True
+
+
+def test_focus_suppressed_answer_visible_over_sticky():
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    app._qa_loops = {}
+    _log(app, "Auto-start: targets += pr-001 (1 total)", force=True, hold=3)
+    with patch.object(qa_loop_ui.store, "load", return_value={}), \
+         patch.object(qa_loop_ui.store, "get_pr",
+                      return_value={"id": "pr-001", "status": "qa"}), \
+         patch.object(qa_loop_ui, "get_pm_session", return_value="pm-x"), \
+         patch("pm_core.tmux.find_window_by_name", return_value="@3"), \
+         patch("pm_core.runtime_state.consume_suppress_switch",
+               return_value=True):
+        qa_loop_ui.focus_or_start_qa(app, "pr-001")
+    assert shown[-1] == " QA window for pr-001 ready (focus suppressed)"

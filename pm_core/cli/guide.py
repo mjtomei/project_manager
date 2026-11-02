@@ -93,8 +93,10 @@ def _run_guide(fresh=False):
 
         if _in_pm_tmux_session():
             _prepare_guide_workspace()
-            cmd = build_claude_shell_cmd(prompt=prompt, session_type="guide")
-            os.execvp("bash", ["bash", "-c", cmd])
+            env: dict[str, str] = {}
+            cmd = build_claude_shell_cmd(prompt=prompt, session_type="guide",
+                                         env_out=env)
+            os.execvpe("bash", ["bash", "-c", cmd], {**os.environ, **env})
         else:
             launch_claude(prompt, session_type="guide")
     else:
@@ -130,14 +132,16 @@ def _run_guide(fresh=False):
                 session_id = str(uuid_mod.uuid4())
                 save_cmd = f"pm _save-session '{session_key}' '{session_id}' '{root}' ; "
 
+            env: dict[str, str] = {}
             claude_cmd = build_claude_shell_cmd(prompt=prompt, session_id=session_id,
-                                                resume=is_resuming, session_type="guide")
+                                                resume=is_resuming, session_type="guide",
+                                                env_out=env)
 
             # On failure (non-zero exit), clear the session so next launch starts fresh
             clear_cmd = f"pm _clear-session '{session_key}' '{root}'" if root else "true"
             cmd = f"{save_cmd}{claude_cmd} ; rc=$? ; if [ $rc -ne 0 ]; then {clear_cmd}; fi"
 
-            os.execvp("bash", ["bash", "-c", cmd])
+            os.execvpe("bash", ["bash", "-c", cmd], {**os.environ, **env})
         else:
             launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh,
                           session_type="guide")

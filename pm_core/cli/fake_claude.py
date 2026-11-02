@@ -48,6 +48,10 @@ def fake_claude() -> None:
               help="Claude session id. When set, the fake also writes a "
                    "Claude-format JSONL transcript and emits the idle_prompt "
                    "hook event, then stays open.")
+@click.option("--idle-once-after", type=float, default=None,
+              help="With --session-id: emit the idle_prompt hook once, this "
+                   "many seconds after the output, instead of refreshing it "
+                   "every couple of seconds (real Claude sends one per turn).")
 @click.option("--display-bullet", default=None,
               help="Render stdout like Claude Code's pane: prefix the first "
                    "non-blank line with this bullet and indent later lines. "
@@ -56,7 +60,8 @@ def emit_cmd(verdict: str, preamble: int, preamble_delay: float,
              delay: float, body: str | None,
              body_lines: int, body_batch: int, body_delay: float,
              stream: bool, char_delay: float, hold: float | None,
-             session_id: str | None, display_bullet: str | None) -> None:
+             session_id: str | None, idle_once_after: float | None,
+             display_bullet: str | None) -> None:
     """Emit a verdict for integration testing without calling the real Claude API.
 
     Output sequence: preamble lines → generated body lines (batched) →
@@ -102,6 +107,7 @@ def emit_cmd(verdict: str, preamble: int, preamble_delay: float,
         hold=hold,
         session_id=session_id,
         display_bullet=display_bullet,
+        idle_once_after=idle_once_after,
     )
 
 

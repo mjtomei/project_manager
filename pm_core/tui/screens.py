@@ -249,10 +249,11 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]e[/] / [bold]Enter[/]  Edit selected PR", classes="help-row")
                 yield Label("  [bold]v[/]  View plan file", classes="help-row")
                 yield Label("  [bold]M[/]  Move to plan", classes="help-row")
-                yield Label("  [bold]O[/]  Auto-start target (stop before merge)", classes="help-row")
+                yield Label("  [bold]O[/]  Auto-start target (wait for merge)", classes="help-row")
                 yield Label("  [bold]A[/]  Toggle auto-merge target", classes="help-row")
                 yield Label("  [bold]a[/]  Auto-start runs popup", classes="help-row")
                 yield Label("  [bold]V[/]  Review oldest pending spec", classes="help-row")
+                yield Label("  [bold]o[/]  Models: PR/project model, effort, command (⇄ = PR has its own)", classes="help-row")
                 yield Label("  [bold]w[/]  Focus watcher window", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
             if not self._in_plans:
@@ -670,8 +671,7 @@ class AutoRunsScreen(ModalScreen):
     }
     """
 
-    _POLICY_STYLES = {"stop": "magenta", "wait": "bold magenta",
-                      "auto": "green"}
+    _POLICY_STYLES = {"wait": "bold magenta", "auto": "green"}
 
     _STATE_STYLES = {
         "running": "bold green",
@@ -723,7 +723,7 @@ class AutoRunsScreen(ModalScreen):
             return None
         owner = None
         for r in rows[:idx + 1]:
-            if r["kind"] in ("target", "run"):
+            if r["kind"] == "target":
                 owner = r["pr_id"]
         return (owner, rows[idx]["pr_id"])
 
@@ -757,8 +757,6 @@ class AutoRunsScreen(ModalScreen):
         title = "Auto-start runs"
         if mode == "targets":
             title += f" — {len(st.get('targets') or [])} target(s)"
-        elif mode == "all":
-            title += " — all ready PRs (backlog mode)"
         if st.get("run_id"):
             title += f"  [dim]{st['run_id']}[/]"
         self.query_one("#runs-title", Label).update(title)
@@ -771,7 +769,7 @@ class AutoRunsScreen(ModalScreen):
                 body.append("No auto-start targets (auto-start off).\n", style="bold")
             else:
                 body.append("No active runs.\n", style="bold")
-            body.append("Add a target with O (stop before merge) or A on a PR,\n"
+            body.append("Add a target with O (wait for merge) or A on a PR,\n"
                         "or `pm autostart add PR_ID`.", style="dim")
             body_widget.update(body)
             return
@@ -789,7 +787,7 @@ class AutoRunsScreen(ModalScreen):
             if r.get("display_id") and r.get("display_id") != r["pr_id"]:
                 line.append(f" {r['pr_id']}", style="dim")
             # Target headers always name their policy (R14); a dep shows
-            # only a hold — a stop mark or the wait target(s) holding it.
+            # only a hold — the wait target(s) holding it.
             for label, kind in policy_labels(row):
                 line.append(f" [{label}]", style=self._POLICY_STYLES[kind])
             for label in review_labels(row):
