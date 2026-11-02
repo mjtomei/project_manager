@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T02:31:44.614887+00:00'
+  updated_at: '2026-11-02T02:43:16.828204+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25428,6 +25428,25 @@ prs:
       is now filed as pr-f51600e; do not refile. Captures: /pm-captures/scenarios/8/.'
     created_at: '2026-11-02T02:31:44Z'
     last_edited: '2026-11-02T02:31:44Z'
+  - id: note-812c8b2
+    text: 'QA S9 refiner (2026-11-02, a610bc87): all 4 stories held live. Traps: (1)
+      a pm session for /workspace dies at startup here: the TUI''s GitHub sync hits
+      _check_gh with no gh installed and the SystemExit kills the TUI and the tmux
+      server (pre-existing, not this PR). Seed the fake first: pm fake-github config
+      set --tag project_manager-eab0d61a ''{"default_branch": "master"}'', and clear
+      it afterwards. (2) The path-like id ../instructions/<x> is refused only by the
+      regression surfaces (pm qa regression, pm qa launch regression:). pm qa show/standalone/run/debug
+      look in instructions/ first, where instructions/../instructions/<x>.md is the
+      instruction itself, so show prints it (rc 0) and the others would launch it
+      (pre-existing get_instruction lookup). Never run standalone/run/debug with that
+      id in /workspace. (3) pm qa list exits 0 on an empty library, and it has no
+      mocks section. pm/qa/mocks never existed (not on c1fcecc5 either), so pm qa
+      mocks list says none. (4) To discard a restore, git checkout <rev> -- pm/qa/regression/
+      stages the files, so use git rm -rfq pm/qa/regression (without -f it refuses).
+      (5) pm qa list/show recreate an empty pm/qa/regression/ (pr-8984bc7); rmdir
+      it.'
+    created_at: '2026-11-02T02:43:16Z'
+    last_edited: '2026-11-02T02:43:16Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
