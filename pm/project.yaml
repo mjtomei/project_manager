@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T07:30:31.701200+00:00'
+  updated_at: '2026-11-02T07:35:22.914244+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7495,6 +7495,21 @@ prs:
       0-setup..6-teardown, 24 casts+mp4, scripts/).'
     created_at: '2026-11-02T07:30:31Z'
     last_edited: '2026-11-02T07:30:31Z'
+  - id: note-144c894
+    text: 'QA S29 recheck on head 848bd8089 (code 78b7b2fa5, QA S28 fix landed mid-run;
+      it changes popup -d cwd, new-session/new-window format escaping and _schedule_rebalance):
+      stories 1, 2 and 4 re-driven on a fresh fixture, all PASS. 6 concurrent prefix+M
+      popups only on the pressers with width=80 / 95%, own names, own Sent keys n;
+      prefix+P pickers show only their own PR (B popup cwd in the PR workdir), one
+      queue dispatch pr qa <own id> per <tag>.log, qa windows only on their own server;
+      40 s concurrent hook cycle 13/13 cycles, 39 opened / 26 exited per session,
+      0 cross-session lines, rebalance widths all match, prefix+R resets user_modified.
+      Filed pr-90591e9 (pre-existing, single-session): a pane that exits within ~100
+      ms of launch makes launch_pane select-pane fail with a spurious Error ... cannot
+      find pane (1 of 13 cycles when x hit the notes splash immediately). Captures:
+      /pm-captures/scenarios/29/recheck-78b7b2fa5/.'
+    created_at: '2026-11-02T07:35:22Z'
+    last_edited: '2026-11-02T07:35:22Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
@@ -52047,6 +52062,39 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T07:14:50.211853+00:00'
   updated_at: '2026-11-02T07:14:50.211853+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-90591e9
+  plan: bugs
+  title: 'Bug: a pane that exits within ~100 ms of launch makes launch_pane report
+    "Error: ... select-pane -t %N ... can''t find pane" (failed to launch <role> pane)'
+  branch: pm/pr-90591e9-bug-a-pane-that-exits-within-100-ms-of-launch-make
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/pane_ops.py launch_pane(): split_pane -> pane_layout.register_and_rebalance
+    -> tmux_mod.select_pane_smart(pane_id). If the new pane exits before select_pane_smart
+    runs (the after-kill-pane/_pane-exited hook already unregistered it), select-pane
+    raises CalledProcessError, the except logs ERROR "failed to launch notes pane"
+    with a traceback, and the TUI log line shows "Error: Command [tmux -S <sock> select-pane
+    -t %28] returned non-zero exit status 1. tmux: can''t find pane: %28". Repro (QA
+    S29 recheck on pr-073910f, tmux 3.2a, EDITOR=true): press n in the TUI and press
+    x the moment the notes splash text appears (scripted: wait for "Press any key
+    to start editing" then send x); 1 of 13 cycles hit it. Debug log order: handle_pane_opened
+    (unknown pane, user_modified) -> register_pane -> handle_pane_exited (user_modified,
+    skipping) -> unregister_pane -> rebalance 1 pane -> ERROR failed to launch notes
+    pane. Registry ends correct ([%0 tui]); only the error message is wrong. A real
+    user hits it when a launched pane command exits immediately (e.g. a failing EDITOR
+    or claude binary). Pre-existing on master (launch_pane unchanged by pr-073910f).
+    Suggested fix: treat a select-pane failure for a pane that no longer exists as
+    "pane exited immediately" (info log, a plain "<role> pane exited" message) instead
+    of an exception.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T07:34:43.481544+00:00'
+  updated_at: '2026-11-02T07:34:43.481544+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
