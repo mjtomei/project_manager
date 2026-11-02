@@ -9,7 +9,10 @@ lease and HOLD/CLOSED/LAUNCH_FAILED outcomes (#259 pr-e040aeb), held QA
 runs that wait for a follow-up after INPUT_REQUIRED (#271 pr-2c67d50),
 wait-for-merge as the only manual merge hold (#261 pr-25f4038, which
 removed stop-before-merge), and a restructured popup picker (#242, #240,
-#263).*
+#263).  origin/master@c3bac6ce (197 more commits: #283 effort warnings,
+#293, #284 QA regression runs, #136 fuzzy select, #296) was merged for
+sign-off r1; only pm/project.yaml conflicted and none of it touches the
+history paths, so nothing below changed.*
 
 - **Runtime mirror** — `pm_core/runtime_state.py`,
   `~/.pm/runtime/{pm-session}/{pr}.json` (per pm session since S93;
