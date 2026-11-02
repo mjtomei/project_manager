@@ -33029,11 +33029,45 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-05-25T23:07:46.493552+00:00'
+  updated_at: '2026-11-02T02:24:43.719441+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-b6a37bf
+    text: 'User approved starting this CLI consistency improvement. Reconcile the
+      older description against current implemented commands before changing behavior.
+      In particular, current pm pr qa directs users to the TUI; pm qa run is a separate
+      interface. Do not blindly add the obsolete pr qa fresh syntax, resurrect removed
+      review-loop stop/all-PR-autostart paths, or invent --fresh semantics merely
+      for uniform spelling. Cover accurate CLI and command-bar help, actionable corrective
+      errors and consistent options where their behavior really matches. Preserve
+      compatibility and existing command authority, manual merge/spec gates and target
+      isolation. Coordinate with #278 targeting, #260 reimplementation handoff and
+      #244 status presentation without duplicating their lifecycle changes. Current
+      plan names and descriptions, rather than stale ux references, are authoritative.
+      No additional hard prerequisite was identified for this scoped help/error/consistency
+      work.
+
+
+      Routing authorized 2026-11-02: use DeepSeek Flash 1017/high for implementation,
+      review, QA and helpers because the current main-account usage pace approaches
+      exhaustion tomorrow morning; retain MAIN-account Opus5.5/xhigh for sign-off.
+      This overrides the earlier proposed all-main routing for this PR only. Start
+      from current master and leave ordinary implementation handoff/review/QA to PM.
+      Use isolated containers, test projects, HOME/settings and tmux servers; never
+      drive the live user PM session or shared host configuration. Preserve unrelated
+      source, dirty files, stashes, drafts and evidence. No force push, master reset/deletion,
+      PR merge, spec approval, unrelated launch or host fallback is authorized. Manual
+      wait-for-merge remains required.'
+    created_at: '2026-11-02T02:24:43Z'
+    last_edited: '2026-11-02T02:24:43Z'
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    signoff: provider:claude-main-xhigh-pm
+  session_effort:
+    signoff: high
 - id: pr-71e9ec7
   plan: bugs
   title: 'Bug: review-window diff pane pipes through `less -R` with no fallback —
