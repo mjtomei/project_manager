@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T17:38:18.619258+00:00'
+  updated_at: '2026-11-02T17:55:26.709393+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40425,6 +40425,23 @@ prs:
       still agent working (K3 fallback kept).'
     created_at: '2026-11-02T17:38:18Z'
     last_edited: '2026-11-02T17:38:18Z'
+  - id: note-957967f
+    text: 'QA S72 (2026-11-02) PASS on 520db9423 (app f5d778bf3), no code edits: S68
+      re-run with the refiner drivers (G started from the CLI before T). Sandbox /scratch/r72
+      (torn down); captures + per-Then README in /pm-captures/scenarios/72. (1) F
+      honest-empty text/JSON/popup, pr-deadbee rc 1 + Available PRs, derived spec
+      hold; T after close --remove: 50 reads rc 0, header without status/title/milestones,
+      start untracked 1.7 s after the close. (2) command-bar review: 45 reads, 2 allowed
+      idle reads around the verdict, never idle (last …), Actions-before note, [1
+      run]. (3) 13 damage lines during i2: 59 reads 0 problems, events +1 only at
+      line 4, one ? row, Waiting-for working -> grace -> ?: running (no post-grace
+      read this run), fragment followed by pm timer_clear on its own line, pager ==
+      CLI. (4) 1e20 safe (TUI alive, Down moved the selection); abc/list crash the
+      TUI at pane_idle.py:167 (pr-28b84d4), the immediate reads still won; exactly
+      2 Tracebacks. (5) five storage forms in parallel: same loop/QA outcomes, honest-empty
+      (a)-(d), 0 Tracebacks.'
+    created_at: '2026-11-02T17:55:26Z'
+    last_edited: '2026-11-02T17:55:26Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
