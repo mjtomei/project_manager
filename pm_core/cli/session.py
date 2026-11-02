@@ -1494,6 +1494,26 @@ def _parse_tui_action(tui_cmd: str) -> tuple[str | None, str | None, bool]:
     return None, None, False
 
 
+def _resolve_spinner_ids(data: dict, pr_id: str) -> tuple[str, str | None]:
+    """Map a parsed picker id to ``(internal id, display id)``.
+
+    The command bar (and therefore the picker) accepts the same
+    identifiers as the CLI — ``pr-001``, ``42``, ``#42`` — but the
+    runtime-state and window lookups below are keyed by the internal id
+    and the window name by the display id (``qa-#42``).  Without this,
+    ``pr qa #42 --fresh`` started QA for the right PR while the spinner
+    watched a window that could never appear (it polled state for
+    ``#42`` and matched no window), so the popup sat until dismissal
+    instead of following the rebuilt window.
+    """
+    from pm_core.cli.helpers import _pr_display_id, _resolve_pr_id
+
+    entry = _resolve_pr_id(data, pr_id)
+    if entry is None:
+        return pr_id, None
+    return entry["id"], _pr_display_id(entry)
+
+
 # While the picker spinner runs, re-validate the TUI's pidfile so a TUI
 # that died after accepting the command aborts the spinner instead of
 # leaving it on "queued…" forever.  The owner must be continuously
@@ -1541,12 +1561,9 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     try:
         root = state_root()
         data = store.load(root)
-        from pm_core.cli.helpers import _pr_display_id
-        display_id = None
-        for p in data.get("prs") or []:
-            if p.get("id") == pr_id:
-                display_id = _pr_display_id(p)
-                break
+        # Resolve a display id (`#42` / `42`) to the internal one: the
+        # state and window lookups below are keyed by different spellings.
+        pr_id, display_id = _resolve_spinner_ids(data, pr_id)
     except Exception:
         display_id = None
     pattern = _ACTION_WINDOW_PATTERNS.get(action)

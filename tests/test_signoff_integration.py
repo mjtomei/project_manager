@@ -870,6 +870,9 @@ def test_merge_refuses_clearly_without_workdir(w):
     assert r.exit_code == 1
     assert "workdir not found" in r.output
     assert "stale" not in r.output
+    # The remedy names the command that re-binds the approval, not just
+    # "re-run sign-off".
+    assert f"pm pr signoff {PR}" in r.output
 
 
 def test_head_equal_to_base_is_in_base_not_mergeable(w):

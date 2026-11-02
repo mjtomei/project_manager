@@ -636,8 +636,12 @@ def _resolve_command_bar_pr(app, identifier: str) -> dict | None:
     from pm_core.cli.helpers import _resolve_pr_id
     pr = _resolve_pr_id(data, identifier)
     if pr is None:
-        app.log_message(f"PR not found: {identifier} — see `pr list` "
-                        f"(TUI: r to refresh)")
+        # The identifier is user-typed; escape it or a bracketed typo
+        # (`pr qa [x]`) is swallowed as markup and the id vanishes from the
+        # remedy that is supposed to name it.
+        app.log_message(
+            f"PR not found: {command_surface.escape_markup(identifier)} — "
+            f"see `pr list` (TUI: r to refresh)")
     return pr
 
 

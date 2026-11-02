@@ -1366,7 +1366,7 @@ class ProjectManagerApp(App):
 
         session = self._session_name
         if not session:
-            self.log_message("No tmux session found")
+            self.log_message("No tmux session found — start one with: pm session")
             return
 
         # Try to find and focus any running watcher's window

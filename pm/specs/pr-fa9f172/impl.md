@@ -592,3 +592,30 @@ the routed form and `--fresh` so help is complete.
   it (adding a timer, or clearing `z` on unrelated keys) is a UX decision
   with its own QA — worth a separate bug PR rather than a drive-by change
   in a docs-focused review.
+
+- Review-loop i18: the popup spinner, the last two-token spelling, and the
+  stop remedy for watcher types `ws` cannot toggle. (a) The picker's
+  spinner (`pm _popup-cmd` → `_wait_for_tui_command`) parses the queued
+  `tui:` command to decide which window to follow, but its state/window
+  lookups are keyed by the internal id while the window name uses the
+  display id (`qa-#42`). i4/i6 taught the command bar to accept `pr-001`,
+  `42` and `#42`, so `pr qa #42 --fresh` started QA for the right PR while
+  the spinner polled state for `#42` and matched no window — it sat until
+  dismissed instead of following the rebuilt window. New
+  `_resolve_spinner_ids()` maps the parsed id to `(internal id, display
+  id)` before the lookups; same fix covers `review-loop #42`. (b)
+  `_QaCommand` tolerated the two-token form only when the mode came first,
+  so `pm pr qa pr-001 fresh` (the other command-bar spelling) still died on
+  Click's `Got unexpected extra argument (fresh)` (exit 2). It now scans
+  the argument list for the mode in either order and keeps the mode token
+  so `pr_qa` prints its hint. (c) `pm watcher stop <type>` printed "press
+  'ws'" for every type, but `ws` toggles only the auto-start watcher; it
+  now names the requested type and says there is no TUI key for it. (d) The
+  merge workdir refusal names `pm pr signoff <id>` (TUI: i) rather than
+  only "re-run sign-off", and the `wf` chord's "No tmux session found"
+  names `pm session`, matching the adjacent remedies. (e) The command
+  bar's not-found remedy escapes the user-typed id, so a bracketed typo
+  (`pr qa [x]`) no longer disappears from the message that names it.
+  Tests added: spinner id resolution, the reversed two-token CLI form, the
+  type-aware watcher-stop message, the merge workdir remedy, and the
+  bracketed-id remedy.

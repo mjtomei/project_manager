@@ -291,13 +291,23 @@ def watcher_stop(watcher_type: str):
     # CLI-started watcher with Ctrl+C in its terminal.
     """Explain how to stop a running watcher.
 
-    It cannot stop one itself: a TUI-managed watcher is stopped from the
-    TUI (`w` then `s`), and a CLI-started watcher with Ctrl+C in its
+    It cannot stop one itself: the TUI's `ws` chord toggles only the
+    auto-start watcher, and a CLI-started watcher stops with Ctrl+C in its
     terminal.
     """
+    if watcher_type == "auto-start":
+        click.echo(
+            "To stop the auto-start watcher running in the TUI, press 'ws'.\n"
+            "For a watcher started from the CLI, use Ctrl+C in its terminal."
+        )
+        return
+    # `ws` toggles only auto-start, so naming it for any other type would
+    # send the operator to a chord that does nothing to this watcher.
     click.echo(
-        f"To stop the auto-start watcher running in the TUI, press 'ws'.\n"
-        f"For a watcher started from the CLI, use Ctrl+C in its terminal."
+        f"Only the auto-start watcher is toggled from the TUI ('ws'); there "
+        f"is no key for '{watcher_type}'.\n"
+        f"For a '{watcher_type}' watcher started from the CLI, use Ctrl+C in "
+        f"its terminal."
     )
 
 

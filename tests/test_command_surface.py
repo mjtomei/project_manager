@@ -609,6 +609,26 @@ def test_popup_spinner_parses_both_qa_spellings(cmd, expected):
     assert _parse_tui_action(cmd) == expected
 
 
+def test_popup_spinner_resolves_display_ids():
+    """The spinner's state/window lookups need the internal id.
+
+    The command bar accepts ``pr-001``, ``42`` and ``#42`` (the ids the CLI
+    prints), and the picker routes the typed command through the TUI.  The
+    runtime-state key and the ``qa-<display>`` window name use different
+    spellings, so the parsed id must be resolved before the spinner polls
+    — otherwise ``pr qa #42 --fresh`` starts QA for the right PR while the
+    spinner watches a window that can never appear.
+    """
+    from pm_core.cli.session import _resolve_spinner_ids
+
+    data = {"prs": [{"id": "pr-001", "gh_pr_number": 42}]}
+    assert _resolve_spinner_ids(data, "pr-001") == ("pr-001", "#42")
+    assert _resolve_spinner_ids(data, "#42") == ("pr-001", "#42")
+    assert _resolve_spinner_ids(data, "42") == ("pr-001", "#42")
+    # Unknown ids keep the typed spelling and match no window, as before.
+    assert _resolve_spinner_ids(data, "nope") == ("nope", None)
+
+
 def test_parser_accepts_every_documented_qa_mode():
     """The documented modes and the parser cannot drift apart.
 
@@ -725,6 +745,10 @@ def test_command_bar_qa_unknown_id_names_the_listing_command(tmp_path):
 
     assert "PR not found: pr-999" in logs[-1]
     assert "pr list" in logs[-1]
+
+    # A bracketed typo must survive Textual markup: the remedy names the id.
+    pr_view.handle_command_submitted(app, "pr qa [x]")
+    assert "[x]" in logs[-1]
 
 
 def test_command_bar_qa_no_selection_names_the_requested_mode():
@@ -855,6 +879,24 @@ def test_review_loop_stop_remedy_names_the_loop_command():
     assert "review-loop pr-001" in logs[-1]
     assert "zz d" in logs[-1]
     assert "one-shot" in logs[-1]
+
+
+def test_watcher_stop_names_the_requested_type():
+    """`ws` toggles only auto-start, so it is not the answer for other types.
+
+    `pm watcher stop <type>` cannot stop anything (it prints guidance), but
+    it must answer for the type it was asked about: naming `ws`
+    unconditionally sent an operator with a `bug-fix-impl` watcher to a
+    chord that does nothing to it.
+    """
+    runner = CliRunner()
+    auto = runner.invoke(cli, ["watcher", "stop"]).output
+    assert "press 'ws'" in auto
+
+    other = runner.invoke(cli, ["watcher", "stop", "bug-fix-impl"]).output
+    assert "bug-fix-impl" in other
+    assert "press 'ws'" not in other
+    assert "Ctrl+C" in other
 
 
 def test_watcher_already_running_does_not_promise_watcher_stop():
@@ -1182,6 +1224,30 @@ def test_signoff_refusal_expected_states_follow_skip_qa(tmp_path):
                                 status="in_progress")
     assert result.exit_code == 1, result.output
     assert "sign-off runs after QA" in result.output
+
+
+@pytest.mark.parametrize("mode", command_surface.QA_MODIFIER_MODES)
+def test_pr_qa_cli_rejects_the_reversed_two_token_form(tmp_path, mode):
+    """`pm pr qa pr-001 fresh` is a command-bar spelling too.
+
+    The mode may follow the id (`pr qa <id> fresh`), which the command bar
+    accepts.  Only the mode-first order was tolerated, so this one still
+    died on Click's ``Got unexpected extra argument (fresh)`` (exit 2)
+    instead of naming the command-bar route.
+    """
+    from unittest import mock
+
+    from pm_core.cli import pr as pr_mod
+
+    (tmp_path / "project.yaml").write_text(
+        "project:\n  backend: vanilla\n  base_branch: master\nprs: []\n")
+    with mock.patch.object(pr_mod, "state_root", return_value=tmp_path):
+        result = CliRunner().invoke(pr_mod.pr, ["qa", "pr-001", mode])
+
+    assert result.exit_code == 1, result.output
+    assert "Got unexpected extra argument" not in result.output
+    assert "command bar" in result.output
+    assert f"pr qa {mode} <id>" in result.output
 
 
 @pytest.mark.parametrize("mode", command_surface.QA_MODIFIER_MODES)

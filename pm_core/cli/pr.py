@@ -2885,13 +2885,18 @@ class _QaCommand(click.Command):
     this PR fixes, one surface over.  Keep only the mode token so
     ``pr_qa`` prints its corrective hint; anything with an option (notably
     ``--help``) is left to Click.
+
+    The mode may be on either side of the id (``pr qa fresh pr-001`` and
+    ``pr qa pr-001 fresh`` are both command-bar spellings), so scan the
+    whole argument list rather than only ``args[0]``.
     """
 
     def parse_args(self, ctx, args):
-        if (args and args[0] in command_surface.QA_MODIFIER_MODES
-                and len(args) > 1
-                and not any(arg.startswith("-") for arg in args[1:])):
-            args = args[:1]
+        if len(args) > 1 and not any(arg.startswith("-") for arg in args):
+            modes = [arg for arg in args
+                     if arg in command_surface.QA_MODIFIER_MODES]
+            if modes:
+                args = [modes[0]]
         return super().parse_args(ctx, args)
 
 
@@ -3133,7 +3138,8 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
             base_branch) is None:
         refusal = (f"PR {pr_id} workdir not found; the approved HEAD and "
                    f"candidate live there, so nothing can be published. "
-                   f"Restore the workdir, then re-run sign-off.")
+                   f"Restore the workdir, then re-run sign-off with "
+                   f"'pm pr signoff {pr_id}' (TUI: i).")
     if refusal:
         click.echo(refusal, err=True)
         raise SystemExit(1)
