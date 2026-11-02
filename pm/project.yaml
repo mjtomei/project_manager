@@ -51457,7 +51457,7 @@ prs:
   title: 'Hardening after #249: providers.yaml lock timeout + set-default re-check
     under lock; model popup textual>=2 pin'
   branch: pm/pr-5f30bdf-hardening-after-249-providers-yaml-lock-timeout-se
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Found at sign-off of #249 (pr-592e4bd), HEAD 49bbc7e4; non-blocking.
     (1) pm provider default X racing pm provider remove X: cli/provider.py ~417 validates
@@ -51469,12 +51469,12 @@ prs:
     exists only in textual 2.x+, while pyproject.toml declares textual>=0.40 — on
     an older install opening the TUI o popup raises ImportError; pin textual>=2 or
     guard the import.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/296
+  gh_pr_number: 296
   created_at: '2026-10-28T02:46:55.100157+00:00'
-  updated_at: '2026-11-02T06:03:00.036805+00:00'
-  started_at: null
+  updated_at: '2026-11-02T06:26:43.544393+00:00'
+  started_at: '2026-11-02T02:27:56.323149+00:00'
   reviewed_at: null
   merged_at: null
   notes:
@@ -51503,6 +51503,37 @@ prs:
       wait-for-merge remains required.'
     created_at: '2026-11-02T02:24:48Z'
     last_edited: '2026-11-02T02:24:48Z'
+  - id: note-937a08c
+    text: 'Incidental fix (review-loop 7e77 i2): the Dockerfile pre-install list (whose
+      comment says keep it in sync with pyproject [project.dependencies]) was missing
+      markdown>=3.5, added by fb988d1f; added it so containers can run `pm md-render`
+      (sign-off report embedding) without an ImportError. Also added a positive test
+      that set_default_provider accepts a configured provider and writes default:
+      <name>.'
+    created_at: '2026-11-02T03:13:48Z'
+    last_edited: '2026-11-02T03:13:48Z'
+  - id: note-59efdd1
+    text: 'Review-loop 7e77 i2 scope note for QA/sign-off: the providers.yaml write
+      paths now report an unwritable lock/temp/target as one Error: line. But a wholly
+      unwritable ~/.pm (e.g. chmod 500 ~/.pm) still tracebacks at import, in pm_core/paths.py
+      configure_logger -> debug_dir mkdir, before any provider code runs. That is
+      a pre-existing, command-wide defect outside this PR, filed as pr-78e8ebe and
+      noted in the spec edge cases; do not fail this PR for that scenario. A read-only
+      ~/.pm/providers.yaml.lock is the reachable providers-specific case and does
+      produce one Error: line.'
+    created_at: '2026-11-02T03:16:08Z'
+    last_edited: '2026-11-02T03:16:08Z'
+  - id: note-f9b8d33
+    text: 'Review-loop 7e77 i3: the textual floor is now >=2.0.1, not >=2.0. 2.0.0
+      ships textual.markup.to_content but mis-parses an escaped \[...]: to_content("a
+      \[OK]").plain == "a [OK", so the model popup measures an [OK] route status two
+      cells short, sizes the box too narrow and clips the column (tests/test_model_settings.py::test_tui_project_view_shows_ok_route_status
+      fails at 2.0.0, passes at 2.0.1). Full suite verified green at 2.0.1 (5445 passed,
+      1 skipped, with markdown installed; the 12 test_markdown_render failures seen
+      without it are the missing dep, not textual). Also added tests for the save_providers
+      mkstemp-failure branch and the `pm provider default` CLI success path. (2026-11-02T03:30:00Z)'
+    created_at: '2026-11-02T03:33:49Z'
+    last_edited: '2026-11-02T03:33:49Z'
   - id: note-72f0a2b
     text: 'QA S4 (write-failure/credential-protection scenario) PASS, no code change.
       Spec note for future runs: part 5''s hand-written providers.yaml block lost
@@ -51527,9 +51558,50 @@ prs:
       captures: /pm-captures/scenarios/5/{pre-fix,post-fix}/.'
     created_at: '2026-11-02T06:02:59Z'
     last_edited: '2026-11-02T06:02:59Z'
+  - id: note-f75f0dd
+    text: 'Review-loop a9aa i1: spec synced with QA s5 — impl R4 now documents the
+      _command_bar() None-safe fix (ff85d13a) and qa R13 requires Esc to close the
+      popup; the regression test also calls App.on_key directly with a z event under
+      a modal (raises NoMatches pre-fix at textual 2.0.1, passes at 2.0.1 and 8.2.7).
+      Merge preview against current master (5b352d16, which merged #283 and pr-3d3b3ce):
+      code files auto-merge clean; only the usual pm/project.yaml registry conflict.
+      The merged tree passes tests/test_providers.py tests/test_router_route.py tests/test_model_settings.py
+      tests/test_view_focus_command_bar.py (437 passed). Full suite on the branch:
+      5461 passed, 1 skipped. For QA/sign-off: the QA verdict note at 06:08:16 still
+      lists scenario 5 (TUI model popup at the textual floor) as NEEDS_WORK although
+      the fix note at 06:02:59 reports it fixed and verified — re-run scenario 5 (or
+      refresh that verdict) before sign-off.'
+    created_at: '2026-11-02T06:26:43Z'
+    last_edited: '2026-11-02T06:26:43Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
     signoff: provider:claude-main-xhigh-pm
   session_effort:
     signoff: high
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-5f30bdf-hardening-after-249-providers-yaml-l-0c82d63b
+- id: pr-78e8ebe
+  plan: bugs
+  title: 'Bug: every pm command tracebacks at import when ~/.pm is unwritable (configure_logger
+    creates ~/.pm/debug)'
+  branch: pm/pr-78e8ebe-bug-every-pm-command-tracebacks-at-import-when-pm-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/paths.py debug_dir() (~line 59) called from configure_logger()
+    (~line 555), which pm_core/claude_launcher.py runs at import time. Repro: H=$(mktemp
+    -d); mkdir -p $H/.pm; chmod 500 $H/.pm; HOME=$H pm provider default claude ->
+    PermissionError traceback from Path.mkdir creating ~/.pm/debug, before the command
+    runs (exit 1, no Error: line). Any pm command hits this, so "unwritable ~/.pm
+    -> one Error: line" (pr-5f30bdf goal 2) is only reachable when the CLI can import,
+    e.g. a read-only providers.yaml.lock. Suggested: make configure_logger/debug_dir
+    degrade (stderr warning + NullHandler, or lazy log-file creation) when the log
+    dir cannot be created. Found during review-loop 7e77 i2 of pr-5f30bdf.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T03:15:39.614318+00:00'
+  updated_at: '2026-11-02T03:15:39.614318+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
