@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T12:10:51.838563+00:00'
+  updated_at: '2026-11-02T12:49:11.224234+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -26153,6 +26153,23 @@ prs:
       suite 5594 passed/1 skipped.'
     created_at: '2026-11-02T12:10:51Z'
     last_edited: '2026-11-02T12:10:51Z'
+  - id: note-920d3d6
+    text: 'QA S30 refiner (2026-11-02, live at 7b66d161 = pm_core bc940b76): all 5
+      stories held with no fix (retired corpus + empty-library refusals with a router
+      default; no-model/no-host router refusals on CLI, pm qa launch, TUI Enter and
+      host mode; bridge-dir leftover file/symlink refusals + recovery; qa_regression
+      fake gets no route mount; E26-E29). Draft fixes: a missing image logs no podman
+      create/run, only inspect/rm -f/inspect of the one name, image inspect, then
+      rm -f/inspect again (pm pre-create cleanup + release); every container-mode
+      run logs a podman info (runtime preflight); the regression container is made
+      with run -d; pm provider test <route> --container on a bridge-dir leftover says
+      "cannot start the host route bridge: ... Remedy: check permissions on <dir>";
+      a type: bogus message has no Remedy: but "(fix it there, or replace it with
+      pm provider add ...)". Stop a bridge by removing its router.sock. Do your own
+      podman checks with /usr/bin/podman so the wrapper log holds only pm calls. Helpers
+      + rehearsal: /pm-captures/scenarios/30/refiner-helpers.'
+    created_at: '2026-11-02T12:49:11Z'
+    last_edited: '2026-11-02T12:49:11Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
