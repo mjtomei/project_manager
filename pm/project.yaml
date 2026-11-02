@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T11:44:59.905863+00:00'
+  updated_at: '2026-11-02T11:58:32.316004+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -26127,6 +26127,20 @@ prs:
       (markdown dep from pip --target).'
     created_at: '2026-11-02T11:44:59Z'
     last_edited: '2026-11-02T11:44:59Z'
+  - id: note-2a2f5e6
+    text: 'Review f51f i2 (2026-11-02, 2d1d19fd): NEEDS_WORK, one small fix. The route-mount
+      code (ef4f5c19) and the i1 provider-error message (c5a5dd14) are sound: _regression_route_mounts
+      resolves the provider exactly as build_claude_shell_cmd does (get_provider()
+      with no name). Fix: the container name was set before _regression_route_mounts,
+      so a provider refusal still ran remove_container (rm -f + inspect) on a container
+      that never existed. Now cname is assigned right before create_qa_container and
+      the provider branch keys on use_containers; the router-cannot-launch test asserts
+      remove_container is not called (fails on c5a5dd14). Incidental, filed as pr-a016b21
+      (pre-existing on master): pm qa debug in container mode passes no route_mounts
+      and builds its command without container=True, so a router provider gets a host-style
+      launch inside the container. Full suite 5593 passed/1 skipped.'
+    created_at: '2026-11-02T11:58:32Z'
+    last_edited: '2026-11-02T11:58:32Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
@@ -53468,6 +53482,39 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T10:59:16.128416+00:00'
   updated_at: '2026-11-02T10:59:16.128416+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a016b21
+  plan: bugs
+  title: 'Bug: pm qa debug in container mode gets no route bridge for a router provider
+    (no route_mounts, command built for the host)'
+  branch: pm/pr-a016b21-bug-pm-qa-debug-in-container-mode-gets-no-route-br
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/qa.py qa_debug, container branch (unchanged from master):
+    create_qa_container() is called without route_mounts, and build_claude_shell_cmd()
+    without container=True. With a router default provider (pm provider default <router>,
+    or PM_PROVIDER), the session command is built as a host launch: router_route.launch_parts(container=False)
+    gives no in-container bridge step, ANTHROPIC_BASE_URL = the router''s host api_base
+    (e.g. http://127.0.0.1:<port>, the container''s own loopback inside the container),
+    and a configured host ''launcher'' path replaces claude even though it does not
+    exist in the container. The container also gets no ~/.pm/route-bridge/<route>
+    mount at /run/pm-route. Expected: the same handling pm qa regression got in ef4f5c19
+    (pr-7d5d036, QA S28 R41) and QA scenario containers get (qa_loop._route_mounts):
+    resolve the provider, router_route.require_setup(container=True), container_mounts(strict=True)
+    as route_mounts for a non-faked session, and build_claude_shell_cmd(container=True);
+    a provider refusal should give the provider''s error + remedy, not the container
+    retry advice. Repro: container mode on, router default r-ctr with api_base http://127.0.0.1:<port>
+    and a request-log HTTP server; pm qa debug --foreground <instruction>; the session
+    never reaches the server (or the launcher is missing in the container). Found
+    by code reading in review f51f i2 of pr-7d5d036 (QA S28 flagged it as unconfirmed).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T11:51:09.215239+00:00'
+  updated_at: '2026-11-02T11:51:09.215239+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
