@@ -7318,6 +7318,219 @@ prs:
       (all go through tmux_mod), so nothing it adds bypasses the per-session socket.'
     created_at: '2026-11-02T06:18:08Z'
     last_edited: '2026-11-02T06:18:08Z'
+  - id: note-dbf5634
+    text: 'QA S27 refiner (2026-11-02, head a7169e96): all 7 stories smoke-run live,
+      refined not rejected. Draft corrections: (1) Ctrl+R re-execs the TUI in place,
+      so pidfile keeps the same pid AND starttime, only started_at changes (not a
+      new process); (2) Ctrl-Q with no alpha client shows NO on-screen message; the
+      only signal is the debug-log line "quit_app: no attached client to detach" (impl.md:
+      the TUI logs and continues); (3) a private session keeps tmux window-size latest,
+      so the window follows the last-attached client (A2 at 120x40 made @0 120x39),
+      not "smallest"; (4) pm session terminals never show tmux [detached]/[exited]
+      lines (pm captures attach output), they just return to the prompt rc 0; (5)
+      the container has no vi, so set EDITOR=true before the first pm session or the
+      notes pane closes with an editor error; (6) pm session home switches the first
+      attached ~N client (A1) to pm-home, so press C-b 0 before the Ctrl-Q story;
+      (7) killed tmux servers stay as <defunct> zombies (PID 1 is sleep infinity),
+      so stray-server checks must ignore Z state.'
+    created_at: '2026-11-02T06:38:51Z'
+    last_edited: '2026-11-02T06:38:51Z'
+  - id: note-9a7aab4
+    text: 'QA S27 (first pm sessions on a clean machine, core journey) PASS 7/7 on
+      670d2c3d (code = a7169e96), no source changes. Real HOME, tmux 3.2a, two projects
+      qa27-alpha/qa27-beta driven from harness terminals (tmux -L q27h, status off,
+      window-size manual), starting with no /tmp/pm-sessions. (1) Two starts 4 s apart:
+      Creating lines, /tmp/pm-sessions drwxrwxrwt 1777 pm with exactly two srwx------
+      sockets, each server only base(0)+~1(1) in one group, sh windows print own socket
+      twice + /workspace, pm session list 2 rows CLIENTS 1, default server work byte-identical.
+      (2) A2 120x40 -> Attaching ~2, in-pane script attach -> ~3, no Creating, %0
+      pid + pidfile identical, @0 120x39 + rebalance line, clients ~1 200x50/~2 120x40/~3
+      200x49, CLIENTS 3 then 2 after C-b d (COMMAND_EXIT_CODE=0). (3) --print-connect
+      from plain shell and sh window = tmux -S <SA> attach; C popup Connect Command
+      + hint, Esc then l works; pasted into P1 joins ~3, beta/default untouched, C-b
+      d prints [detached (from session ...~3)]. (4) view/send/frames resolve the cwd
+      session, -s pm-<B> from inside alpha moves only beta, typo -s gives No TUI pane
+      found rc1 with no frames, notes n/C-b Left/n/keypress logs Launched/already
+      exists focusing/handle_pane_exited/unregister/rebalance 200x49; beta windows/panes/registry
+      identical. (5) Ctrl+R keeps pid+starttime (new started_at), mobile --force/home
+      from sh window, A1 moves to pm-home, beta loop ok=100 fail=0. (6) Ctrl-Q from
+      A2 detaches only /dev/pts/<A2>; no-client pm tui send C-q changes no client
+      list anywhere and only logs no attached client lines; TUI answers h. (7) kill
+      alpha only (rc0, A1 rc0, SA and .mobile gone, beta identical, loop ok=60 fail=0),
+      re-create gives new socket/pid/starttime, teardown leaves /tmp/pm-sessions empty.
+      Fixture notes for the next run: script(1) writes its own "Script started" header
+      before the Attaching line in inpane.log; story 3 l leaves alpha on card 2, so
+      press h before story 4; press l after C-b 0 in story 6 so both later h presses
+      select a new card; read-only harness recorders (tmux -L q27rec ... attach -r
+      -t =v-<term>) give per-terminal casts without adding pm clients. Captures: /pm-captures/scenarios/27/
+      (README.md, 22 casts+mp4, screens/, sh-windows/, scripts/).'
+    created_at: '2026-11-02T06:55:11Z'
+    last_edited: '2026-11-02T06:55:11Z'
+  - id: note-ff7fe2a
+    text: 'QA S28 refiner (2026-11-02, head a7169e96). I ran a live smoke in a disposable
+      HOME on stock tmux 3.2a, with a stand-in claude first on PATH. It found two
+      pre-existing defects that block the drafted steps; both also reproduce on master
+      (/opt/pm-src).
+
+      (1) A repo dir containing $HOME cannot get a pm session. tmux rewrites a $ followed
+      by a letter, _ or { to \$ in session names (new-session -s ''a$HOME'' gives
+      a\$HOME; $$, $( and ''$ '' are kept). So pm session prints ''Failed to detect
+      TUI pane after session creation.'' (rc 1). It leaves a server running whose
+      session and registry file carry the \$ name, and a second pm session dies with
+      a TmuxCommandError ''duplicate session'' traceback.
+
+      (2) TUI s and d crash for a repo path containing a single quote. pm_core/tui/pr_view.py
+      start_pr/review_pr append an unquoted ''--transcript <root>/transcripts/manual-<hex>/...''
+      to a string that run_command shlex.splits, which raises ValueError: No closing
+      quotation. When the TUI is the window''s only pane, the session and its server
+      die. A space alone would split the path into extra args.
+
+      Surface map: only s, d, CLI pm pr start and pm meta use the claude "$(cat <cwd>/pm/prompts/pm_prompt_<id>.txt)"
+      form (cwd = PR workdir or meta workdir). c, H and pm qa launch pass the prompt
+      inline, single-quoted. pm qa regression and pm plan add run claude in the foreground
+      with the prompt as an argv entry, so no prompt file and no new window.
+
+      With the fallback name it''s my `touch PWNED` $$ repo, every other check passed:
+      c, H, pm pr start, qa launch, qa regression, plan add and meta (whole prompt
+      in one argument, literal cwd, own PM_TMUX_SOCKET, prompt file removed, override
+      cleared), concurrent TUI s plus CLI starts in two sessions, and prefix+o/arrows
+      on 3.2a (zoom kept 56/56).
+
+      Traps: on 3.2a, show-messages is newest first and logs each key twice (the if-shell
+      binding, then run-shell pm _pane-switch); pm''s own client-NNNN select-pane
+      lines are not the fallback. pm pr start impl windows are never pane-registry
+      entries. An arrow with no neighbour that way does not move. pm qa add-* runs
+      $EDITOR as argv[0] only, so use a script. Identical PR titles give identical
+      PR ids in both projects, so use distinct titles.'
+    created_at: '2026-11-02T06:46:53Z'
+    last_edited: '2026-11-02T06:46:53Z'
+  - id: note-86719bd
+    text: 'QA S28 (every Claude launch surface, plain + awkward project, tmux 3.2a)
+      NEEDS_WORK: four defects found, fixed in this run, and re-driven live; all five
+      stories pass on the fix. (1) Pre-existing, also on master: a repo dir with $HOME
+      (or ., :, \, control chars, #) in its name could not get a pm session. tmux
+      rewrites session names ($HOME -> \$HOME, . and : -> _, # expanded as a format),
+      so pm printed ''Failed to detect TUI pane after session creation.'' and a second
+      pm session died with a ''duplicate session'' traceback. Fix: paths.tmux_safe_name
+      is applied to the session tag at its source, with an inline mirror in wrapper.py
+      for the meta override lookup. The S28 session is now pm-it''s my `touch PWNED`
+      _HOME repo-<hash>; paths and cwd keep the literal $HOME. (2) Found while mapping
+      (1): tmux format-expands new-session -s, every -c <cwd> and display-popup -d,
+      so a repo path containing #(cmd) RAN cmd on each session and window start, and
+      the pane opened in the wrong dir. Fix: tmux.format_literal (# -> ##) on those
+      arguments. (3) Pre-existing: TUI s/d crashed the TUI, and with it the session''s
+      server, for a repo path containing a single quote: the unquoted --transcript
+      hit shlex.split (ValueError: No closing quotation). Fix: shlex.quote the transcript
+      path in start_pr, review_pr and auto-merge; run_command now logs an unparsable
+      line instead of raising. (4) Pre-existing: a window killed outside pm (kill-window,
+      C-b &) stayed in the pane registry until a TUI restart. Fix: _schedule_rebalance
+      also visits registry windows tmux no longer has, so the attach reconciles them
+      away. Re-checked live with a re-attach. Results on the fix: s, d, c and H in
+      both projects, and CLI pr start, qa launch, qa regression, plan add and meta
+      in both, each pass the whole prompt as the last argument. s, d, pr start and
+      meta prompt files were cmp-identical to the argument and removed afterwards.
+      Every sock was the launching session''s own socket. Awkward prompts quote the
+      session name as one shell word; after normalising names, paths and ids they
+      equal the plain prompts. No PWNED anywhere and no default server. A concurrent
+      burst of 4 launches across 2 sessions landed each launch in its own session.
+      28/28 prefix+o/arrow presses on 3.2a stayed zoomed with the run-shell gate branch
+      and no fallback. Filed pr-da4ac96 (pre-existing: the H assist prompt names the
+      guide pane as the TUI pane ID). New tests: tests/test_awkward_repo_paths.py
+      (34; the transcript/registry tests fail on a fix-1-only tree, the -c test fails
+      with format_literal as identity). Captures: /pm-captures/scenarios/28 (README.md;
+      pre-fix/ and post-fix/s1..s5).'
+    created_at: '2026-11-02T07:22:28Z'
+    last_edited: '2026-11-02T07:22:28Z'
+  - id: note-56d6ffd
+    text: 'QA S29 refiner (2026-11-02, a7169e96): all 5 stories smoke-run live on
+      stock tmux 3.2a, two private sessions x two terminals on a `tmux -L` harness.
+      Draft corrections: fzf absent -> numbered picker fallback; picker only lists
+      PRs with an open window (no "start a PR with no window"); start/review are direct
+      popup commands, only t/qa, zz-chords and prefix+M `pr qa`/`review loop` go through
+      the TUI queue (debug log `queue dispatch: cmd=...`); a successful prefix+M command
+      closes its popup at once, so read its output from a pipe-pane/cast transcript;
+      a failing command shows `Press q/Esc/Enter to close...`, and `pm popup failed
+      (exit N)` appears only when _popup-cmd itself fails (e.g. unbalanced quote);
+      `session name` prints the cwd-computed name (from a PR/review window: the workdir
+      clone name); popup width follows the window, i.e. the latest client (window-size
+      latest); `_all: {}` is not verdict-less (review PASSes iteration 1); 3.2a has
+      no window-resized hook, so use prefix+R; a user split sets user_modified until
+      prefix+R; `pm tui view` inside a plain `work` session scans and shows the first
+      pm TUI (A); default-server prefix+M is tmux select-pane -M, P unbound.'
+    created_at: '2026-11-02T07:12:36Z'
+    last_edited: '2026-11-02T07:12:36Z'
+  - id: note-b75c553
+    text: 'QA S29 (popups, queued TUI commands and pane hooks fired concurrently in
+      two private sessions, plus a plain default-server session) PASS 5/5 at a333789e2
+      (code unchanged since 87b2d1d16), no source changes, stock tmux 3.2a, no fzf.
+      (1) prefix+M from Aw (A~1, 200 wide) and Bn (B~2, 70 wide) at the same moment,
+      4 rounds: popups only on the pressers, 80 cols vs 66 (95%), _popup-show window_width=200
+      -> width=80 / window_width=70 -> width=95% with each client tty, one popup-cmd
+      invoked per popup; session name drew each own base name; tui send n opened a
+      notes pane only in its own session (Sent keys n to TUI pane %0 (session: own));
+      session list = the two private rows, no (default server) row; pr show pr-nope
+      listed only A PRs; pr show "x -> No closing quotation, then pm popup failed
+      (exit 1) after the first q. (2) prefix+P from Aw (main) and Bw (PR window) at
+      once: numbered fallback pickers each showing only their own PR (Bw with ●);
+      t -> one queue dispatch pr qa <own id> result=ok per <tag>.log, qa-<id>/-s0
+      windows only on the own server, spinner exit window_open, QA INPUT_REQUIRED
+      in each tui view. (3) review loop from An and Bn at once: review-<own id> only
+      in own server and registry, one queue dispatch each, ~2 clients switched, both
+      PASS iteration 1; two A clients popups at once both 95%. (4) 2 min of concurrent
+      n/x, c/C-d, C-b %/exit cycles with 150<->200 resizes: A 39 cycles = 117 opened/78
+      exited, B 40 = 120/80, 0 lines naming the other session, 156/160 rebalances
+      all matching the own terminal width at that second; extra check with Aw 150
+      and Bw 200 gave A 150x49 and B 200x49; bare resizes add no rebalance on 3.2a;
+      registries settle on (%0, tui), user_modified true until prefix+R (Layout rebalanced.
+      view mode). (5) inside a plain work session: session list has only the two pm
+      rows, tui view scans to A, session name pm-plain-00000000, prefix+P nothing,
+      prefix+M = key M: select-pane -M, default server hooks/keys byte-identical (pm
+      only ran read-only list-sessions/display-message/has-session there). Harness
+      tips: tui send n FOCUSES the new notes pane, so the cleanup is just x (C-b o
+      first moves back to the TUI and x then toggles the TUI hide-all filter); drivers
+      must wait for the notes splash text before x, else x is echoed into the pane
+      before the splash reads keys; "unknown pane ... setting user_modified" is logged
+      for every pm-launched pane too (documented hook-before-register race, reset
+      by register_and_rebalance). Captures: /pm-captures/scenarios/29/ (README.md,
+      0-setup..6-teardown, 24 casts+mp4, scripts/).'
+    created_at: '2026-11-02T07:30:31Z'
+    last_edited: '2026-11-02T07:30:31Z'
+  - id: note-144c894
+    text: 'QA S29 recheck on head 848bd8089 (code 78b7b2fa5, QA S28 fix landed mid-run;
+      it changes popup -d cwd, new-session/new-window format escaping and _schedule_rebalance):
+      stories 1, 2 and 4 re-driven on a fresh fixture, all PASS. 6 concurrent prefix+M
+      popups only on the pressers with width=80 / 95%, own names, own Sent keys n;
+      prefix+P pickers show only their own PR (B popup cwd in the PR workdir), one
+      queue dispatch pr qa <own id> per <tag>.log, qa windows only on their own server;
+      40 s concurrent hook cycle 13/13 cycles, 39 opened / 26 exited per session,
+      0 cross-session lines, rebalance widths all match, prefix+R resets user_modified.
+      Filed pr-90591e9 (pre-existing, single-session): a pane that exits within ~100
+      ms of launch makes launch_pane select-pane fail with a spurious Error ... cannot
+      find pane (1 of 13 cycles when x hit the notes splash immediately). Captures:
+      /pm-captures/scenarios/29/recheck-78b7b2fa5/.'
+    created_at: '2026-11-02T07:35:22Z'
+    last_edited: '2026-11-02T07:35:22Z'
+  - id: note-7df0251
+    text: 'QA S30 refiner (2026-11-02, a7169e96): all 3 draft stories smoke-run live
+      with nested podman 3.4.4 in the QA container (pm-dev built by `pm container
+      build-base` in ~3.5 min; run it from a project with nested_podman: true or the
+      RUN steps die on sethostname). Draft corrections: (1) a fake-claude config makes
+      build_claude_shell_cmd return before any prompt file or $(cat ...) exists, so
+      the prompt-path checks use a stand-in `claude` first on PATH (pm mounts shutil.which(claude)
+      at /usr/local/bin/claude) and NO fake-claude config; (2) TUI `s` refuses "PR
+      ... is not committed on master yet" until `pm push` + `git merge pm/sync-...`;
+      (3) the launch already embeds "$(cat /workspace/pm/prompts/pm_prompt_<sid>.txt)"
+      (no host-path rewrite, the DEBUG "rewrote" line never appears); (4) /run/.containerenv
+      is empty in pm containers. Disposable HOME plus XDG_DATA_HOME=/home/pm/.local/share
+      XDG_CONFIG_HOME=/home/pm/.config keeps the image store. Finding (added as story
+      4): `pm session kill` typed in a shell window inside the session it kills dies
+      on SIGHUP when the server exits. No "Killed session" line, no container/proxy
+      cleanup (the proxy daemon, its dir and .lock leak, and the container goes only
+      via the pane EXIT trap), and the /tmp/pm-sessions socket file is left behind.
+      The socket leak is this PR''s; master has the same kill-then-cleanup order for
+      containers/proxies.'
+    created_at: '2026-11-02T07:36:41Z'
+    last_edited: '2026-11-02T07:36:41Z'
   - id: note-0d22262
     text: 'QA S31 refiner (busy machine, 2026-11-02 at a7169e96): all 5 stories smoke-run
       live, every corrected Then held. Draft corrections: (1) paired P3 starts usually
@@ -51867,6 +52080,63 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T06:11:04.638705+00:00'
   updated_at: '2026-11-02T06:11:04.638705+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-da4ac96
+  plan: bugs
+  title: Assist prompt (H) names the guide pane as the TUI pane ID
+  branch: pm/pr-da4ac96-assist-prompt-h-names-the-guide-pane-as-the-tui-pa
+  status: pending
+  depends_on: []
+  description: 'pm_core/guide.py (assist prompt builder, around line 361) sets ''TUI
+    pane ID: {pane_id}'' from os.environ[''TMUX_PANE'']. The prompt is built by ''pm
+    guide'' running inside the newly split guide pane, so TMUX_PANE is the guide pane
+    itself, not the TUI. Repro (QA S28 on pr-073910f, 2026-11-02, also on master):
+    in a pm session press H in the TUI; the stand-in claude received ''TUI pane ID:
+    %6'' while the TUI was %0 and %6 was the guide pane (registry: tui %0, guide %6).
+    The c prompt (and qa launch/regression) correctly say %0. Fix idea: resolve the
+    TUI pane from the pane registry (role tui) or pass it from the TUI, instead of
+    reading TMUX_PANE.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T07:14:50.211853+00:00'
+  updated_at: '2026-11-02T07:14:50.211853+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-90591e9
+  plan: bugs
+  title: 'Bug: a pane that exits within ~100 ms of launch makes launch_pane report
+    "Error: ... select-pane -t %N ... can''t find pane" (failed to launch <role> pane)'
+  branch: pm/pr-90591e9-bug-a-pane-that-exits-within-100-ms-of-launch-make
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/pane_ops.py launch_pane(): split_pane -> pane_layout.register_and_rebalance
+    -> tmux_mod.select_pane_smart(pane_id). If the new pane exits before select_pane_smart
+    runs (the after-kill-pane/_pane-exited hook already unregistered it), select-pane
+    raises CalledProcessError, the except logs ERROR "failed to launch notes pane"
+    with a traceback, and the TUI log line shows "Error: Command [tmux -S <sock> select-pane
+    -t %28] returned non-zero exit status 1. tmux: can''t find pane: %28". Repro (QA
+    S29 recheck on pr-073910f, tmux 3.2a, EDITOR=true): press n in the TUI and press
+    x the moment the notes splash text appears (scripted: wait for "Press any key
+    to start editing" then send x); 1 of 13 cycles hit it. Debug log order: handle_pane_opened
+    (unknown pane, user_modified) -> register_pane -> handle_pane_exited (user_modified,
+    skipping) -> unregister_pane -> rebalance 1 pane -> ERROR failed to launch notes
+    pane. Registry ends correct ([%0 tui]); only the error message is wrong. A real
+    user hits it when a launched pane command exits immediately (e.g. a failing EDITOR
+    or claude binary). Pre-existing on master (launch_pane unchanged by pr-073910f).
+    Suggested fix: treat a select-pane failure for a pane that no longer exists as
+    "pane exited immediately" (info log, a plain "<role> pane exited" message) instead
+    of an exception.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T07:34:43.481544+00:00'
+  updated_at: '2026-11-02T07:34:43.481544+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

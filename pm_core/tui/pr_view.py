@@ -154,7 +154,12 @@ def start_pr(app, companion: bool = False) -> None:
     except Exception:
         tdir = None
     if tdir:
-        cmd_parts.append(f"--transcript {tdir}/impl-{pr_id}.jsonl")
+        # Quoted: run_command shlex-splits the line, and the transcript
+        # dir sits under the repo path, which may hold a space or a quote
+        # (an unquoted "it's" raised "No closing quotation" and took the
+        # whole TUI down, QA S28).
+        cmd_parts.append(
+            f"--transcript {shlex.quote(f'{tdir}/impl-{pr_id}.jsonl')}")
     cmd_parts.append(pr_id)
     cmd = " ".join(cmd_parts)
     run_command(app, cmd, working_message=action_key, action_key=action_key)
@@ -209,7 +214,9 @@ def review_pr(app, fresh: bool = False) -> None:
         tdir = None
     transcript_arg = ""
     if tdir:
-        transcript_arg = f" --transcript {tdir}/review-{pr_id}.jsonl"
+        # Quoted for run_command's shlex.split (see start_pr).
+        transcript_arg = (" --transcript "
+                          + shlex.quote(f"{tdir}/review-{pr_id}.jsonl"))
     fresh_arg = " --fresh" if fresh else ""
     cmd = f"pr review{fresh_arg}{transcript_arg} {pr_id}"
     run_command(app, cmd, working_message=action_key, action_key=action_key)
@@ -808,7 +815,17 @@ def run_command(app, cmd: str, working_message: str | None = None,
         working_message: Optional message to show while running (enables async mode)
         action_key: Optional key for in-flight tracking (set before calling this)
     """
-    parts = shlex.split(cmd)
+    try:
+        parts = shlex.split(cmd)
+    except ValueError as e:
+        # An unbalanced quote must not escape into Textual: an uncaught
+        # exception here exits the TUI, and when it is the window's only
+        # pane the session and its tmux server go with it.
+        _log.warning("run_command: cannot parse %r: %s", cmd, e)
+        app.log_message(f"Error: cannot parse command: {escape(str(e))}")
+        if action_key:
+            app._inflight_pr_action = None
+        return
     if not parts:
         return
 

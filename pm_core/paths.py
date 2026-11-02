@@ -226,11 +226,52 @@ def sessions_dir() -> Path:
     return d
 
 
+# A ``$`` that tmux escapes when the next character is one of these.
+_TMUX_DOLLAR_ESCAPED_BEFORE = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_{")
+
+
+def tmux_safe_name(name: str) -> str:
+    """Return *name* with every character tmux rewrites in a session name made ``_``.
+
+    tmux does not store a session name as given.  ``new-session -s``
+    expands it as a format (``#S``, ``#{...}``, ``##``; ``#(cmd)`` even
+    runs *cmd*), then ``session_check_name`` turns ``.`` and ``:`` into
+    ``_``, and its vis encoding backslash-escapes ``\\``, ASCII control
+    characters, invalid UTF-8 and a ``$`` followed by an ASCII letter,
+    ``_`` or ``{`` (so ``$HOME`` is stored as ``\\$HOME``; ``$$``, ``$(``
+    and ``$1`` are kept).  A session name pm
+    computed from a repo directory such as ``my $HOME repo`` or ``next.js``
+    then never matched the name tmux reported: ``pm session`` created the
+    server, failed with "Failed to detect TUI pane after session
+    creation." and a second ``pm session`` died with "duplicate session"
+    (QA S28).  Deriving the tag through this function keeps the name pm
+    computes identical to the one tmux stores, everywhere the tag is used.
+
+    Valid non-ASCII text (``日本語``, ``²``) is kept: tmux keeps it.  The
+    ``$`` pass runs right to left, so each ``$`` is judged on its
+    successor's final text: ``$$HOME`` becomes ``__HOME``, not ``$_HOME``
+    (which tmux would escape again).  Rules measured on tmux 3.2a.
+    """
+    chars = [
+        "_" if (c in "#.:\\" or ord(c) < 0x20 or c == "\x7f"
+                or 0xDC80 <= ord(c) <= 0xDCFF)  # surrogateescape'd bytes
+        else c
+        for c in name
+    ]
+    for i in range(len(chars) - 2, -1, -1):
+        if chars[i] == "$" and chars[i + 1] in _TMUX_DOLLAR_ESCAPED_BEFORE:
+            chars[i] = "_"
+    return "".join(chars)
+
+
 def get_session_tag(start_path: Path | None = None, use_github_name: bool = True) -> str | None:
     """Generate session tag from the current git repository.
 
     Format: {repo_name}-{hash} where:
-    - repo_name is GitHub repo name (without org/user) or directory name
+    - repo_name is GitHub repo name (without org/user) or directory name,
+      passed through :func:`tmux_safe_name` so ``pm-{tag}`` is a session
+      name tmux stores unchanged
     - hash is MD5 of the git root path (8 chars)
 
     Works from any subdirectory of the repo.
@@ -267,7 +308,7 @@ def get_session_tag(start_path: Path | None = None, use_github_name: bool = True
         hash_input += "\0" + share_mode
     path_hash = hashlib.md5(hash_input.encode()).hexdigest()[:8]
 
-    tag = f"{repo_name}-{path_hash}"
+    tag = tmux_safe_name(f"{repo_name}-{path_hash}")
     _session_tag_cache[cache_key] = tag
     return tag
 
