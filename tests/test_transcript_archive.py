@@ -135,6 +135,23 @@ def test_archive_transcript_of_frozen_file(env):
     assert not canon.exists()
 
 
+def test_archive_of_a_dangling_outgoing_link(env):
+    """A launch that failed before Claude wrote its native JSONL leaves a
+    dangling link; reusing the path must still archive that attempt (as a
+    dangling link) instead of silently dropping it."""
+    sid = _sid()
+    missing = env.cwd / "missing" / f"{sid}.jsonl"
+    canon = env.run / "impl-pr-abc.jsonl"
+    canon.symlink_to(missing)
+
+    archived = cl.archive_transcript(canon)
+
+    assert archived is not None
+    assert archived.is_symlink() and not archived.exists()
+    assert Path(os.readlink(archived)) == missing
+    assert not canon.is_symlink() and not canon.exists()
+
+
 def test_archive_missing_path_is_noop(env):
     assert cl.archive_transcript(env.run / "nope.jsonl") is None
 
@@ -185,6 +202,29 @@ def test_a_concurrent_archive_is_not_reported_as_a_failure(env, monkeypatch):
     monkeypatch.setattr(cl, "_move_into_archive", _lose_the_race)
 
     assert cl.archive_transcript(canon) == dest
+
+
+def test_launch_proceeds_when_archiving_fails(env, monkeypatch):
+    """R9: a failed archive must never block the launch.
+
+    The archive dir can be unwritable (QA S14).  The canonical is then
+    still replaced with the new session's link — the launch is not
+    stranded — and the outgoing symlink's content stays readable at its
+    native JSONL.
+    """
+    old_sid = _sid()
+    native = _native(env.cwd, old_sid, "PRE-RETURN IMPL")
+    canon = env.run / "impl-pr-abc.jsonl"
+    _link(canon, native)
+
+    monkeypatch.setattr(cl, "archive_transcript", lambda p: None)
+
+    cl.build_claude_shell_cmd(prompt="rework", transcript=str(canon),
+                              cwd=str(env.cwd))
+
+    assert canon.is_symlink()
+    assert cl.session_id_from_transcript(canon) != old_sid
+    assert "PRE-RETURN IMPL" in native.read_text()
 
 
 def test_identical_archive_match_is_scoped_to_the_same_stem(env):
@@ -384,6 +424,20 @@ def test_finalize_with_matching_session_freezes(env):
     archive = cl.transcript_archive_dir(canon) / f"review-pr-abc-i1.{owner}.jsonl"
     assert archive.is_file()
     assert "VERDICT PASS" in archive.read_text()
+
+
+def test_finalize_freezes_a_target_without_a_session_id(env):
+    """A link target that carries no session id cannot be compared with the
+    caller's, so it is frozen as usual (the ownership check only applies
+    when the target names a session; production links always do)."""
+    native = env.cwd / "not-a-session.jsonl"
+    native.write_text(_record("UNIDENTIFIABLE TARGET") + "\n")
+    canon = env.run / "impl-pr-abc.jsonl"
+    _link(canon, native)
+
+    assert cl.finalize_transcript(canon, session_id=_sid()) is True
+    assert not canon.is_symlink()
+    assert "UNIDENTIFIABLE TARGET" in canon.read_text()
 
 
 def test_finalize_leaves_a_redirected_link_live(env, monkeypatch):
@@ -659,6 +713,44 @@ def test_retire_signoff_run_archives_transcript(env, monkeypatch):
     assert signoff.signoff_launched_sha(env.run, "pr-abc") is None
     archive = cl.transcript_archive_dir(canon) / f"signoff-pr-abc.{sid}.jsonl"
     assert "ROUTER SIGNOFF_IMPL" in archive.read_text()
+
+
+def test_retire_signoff_run_drops_a_consumed_link_when_archiving_fails(
+        env, monkeypatch):
+    """A consumed verdict must stay unreplayable even when the archive fails.
+
+    The launch stamp is always removed.  A leftover *symlink* is dropped
+    too (its content lives on in the native JSONL); a *regular file* is the
+    only copy of its content and is never removed — the missing-`.head`
+    guard retires and relaunches it on the next sign-off step.
+    """
+    from pm_core import signoff
+    from pm_core import tmux as tmux_mod
+
+    monkeypatch.setattr(tmux_mod, "find_window_by_name", lambda *a, **k: None)
+    monkeypatch.setattr(cl, "archive_transcript", lambda p: None)
+
+    link_sid = _sid()
+    link_canon = signoff.signoff_transcript(env.run, "pr-link")
+    _link(link_canon, _native(env.cwd, link_sid, "CONSUMED ROUTER"))
+    signoff.stamp_signoff_launch(link_canon, "deadbeef")
+
+    file_canon = signoff.signoff_transcript(env.run, "pr-file")
+    file_canon.write_text(_record("FROZEN ROUTER") + "\n")
+    signoff.stamp_signoff_launch(file_canon, "deadbeef")
+
+    signoff.retire_signoff_run("pm-x", {"id": "pr-link"}, env.run)
+    signoff.retire_signoff_run("pm-x", {"id": "pr-file"}, env.run)
+
+    # The symlink is gone, so its verdict cannot be replayed from the run
+    # dir; its content stays readable at the native JSONL.
+    assert not link_canon.is_symlink() and not link_canon.exists()
+    assert "CONSUMED ROUTER" in (
+        cl.transcript_path_for(str(env.cwd), link_sid)).read_text()
+    # The regular file is the only copy: kept, but its stamp is gone.
+    assert file_canon.is_file()
+    assert signoff.signoff_launched_sha(env.run, "pr-link") is None
+    assert signoff.signoff_launched_sha(env.run, "pr-file") is None
 
 
 # --- bulk finalize on disable --------------------------------------------

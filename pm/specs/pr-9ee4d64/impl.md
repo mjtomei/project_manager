@@ -384,8 +384,8 @@ No **[UNRESOLVED]** ambiguities.
 
 ## Verification
 
-- New unit tests (36, after the e757-i4 rewrite and the e757-i6
-  content-key fixes; 37 before e757 i4) in
+- New unit tests (40, after the e757-i4 rewrite, the e757-i6 content-key
+  fixes and the e757-i11 gap tests; 37 before e757 i4) in
   `tests/test_transcript_archive.py` covering:
   archive-on-replace, ownership-checked finalize, loop-scoped naming,
   retire preserving history, live-appends visibility, restart fallback
@@ -414,7 +414,18 @@ No **[UNRESOLVED]** ambiguities.
   rewritten to the same rule: a live, a gone and a dead pane's canonical
   all stay live, and only the archive entry is frozen.  Losing the
   no-clobber archive create to a concurrent archiver is reported as
-  success (review e757 i2).  One more
+  success (review e757 i2).  Review e757 i11 closes four unit gaps for
+  documented behaviour that only the QA scenarios had exercised: a
+  dangling outgoing link is still archived
+  (`test_archive_of_a_dangling_outgoing_link`), a failed archive never
+  blocks the launch (`test_launch_proceeds_when_archiving_fails`, the R9
+  fallback QA S14 drove by hand), and a `session_id`-checked finalize
+  still freezes a target that names no session
+  (`test_finalize_freezes_a_target_without_a_session_id`), and a retire
+  whose archive fails still makes a consumed verdict unreplayable (drop
+  the leftover symlink, keep a regular file)
+  (`test_retire_signoff_run_drops_a_consumed_link_when_archiving_fails`).
+  One more
   (`test_launches_loop_scoped_transcript_and_records_session`) lives in
   `tests/test_review_loop.py` because it drives `run_review_loop_sync`;
   `tests/test_breadcrumb_review_loop.py` gains an
@@ -1018,3 +1029,43 @@ review-loop / return-handoff / launch-retry / fail-closed / signoff suites;
 still reports all three symptoms fixed.  Full suite re-run after the
 change: **5479 passed / 1 skipped** (7m19s, `markdown` installed —
 5478 + the new regression test).
+
+## Review e757 i11 — unit coverage for four documented fallbacks
+
+No behavioural change: the archive/finalize flow is exactly as e757 i4
+left it.  Four behaviours were documented (design R9, edge cases,
+`finalize_transcript`'s and `retire_signoff_run`'s docstrings) and driven
+by QA scenarios, but had no unit test:
+
+- `test_archive_of_a_dangling_outgoing_link` — a launch that failed
+  before Claude wrote its native JSONL leaves a dangling link; reusing
+  the path still archives that attempt (as a dangling link) instead of
+  dropping it.  Pins the "Dangling outgoing symlink" edge case.
+- `test_launch_proceeds_when_archiving_fails` — `build_claude_shell_cmd`
+  replaces the canonical and links the new session even when
+  `archive_transcript` fails (the R9 "launch is never blocked" fallback
+  QA S14 exercised by making `archive/` unwritable); the outgoing
+  session stays readable at its native JSONL.
+- `test_finalize_freezes_a_target_without_a_session_id` — a
+  `session_id`-checked `finalize_transcript` freezes a link whose target
+  names no session, because the ownership check can only compare two
+  known ids (production links always name a session, so the case is a
+  fixture/defensive path).
+- `test_retire_signoff_run_drops_a_consumed_link_when_archiving_fails` —
+  when `retire_signoff_run` cannot archive, it still removes the launch
+  stamp and drops a leftover symlink (so the consumed verdict cannot be
+  replayed), while a leftover regular file — the only copy of its
+  content — is kept for the missing-`.head` guard to retire and relaunch.
+
+Archive suite 36 -> 40.  No code defect found in this pass: the
+archive-on-replace (no-clobber, content/sid-keyed, never `rename`),
+ownership-checked finalize (readlink at entry, guard after the copy
+before `os.replace`, archive copy written first), loop-scoped iteration
+names with `allow_legacy` only for a resumed in-flight iteration,
+`iteration_sessions` round-tripped through the breadcrumb,
+retire-archives-without-deleting, and the e757-i4 rule that bulk sweeps
+never freeze a canonical are consistent across every caller.
+
+Verified: `tests/test_transcript_archive.py` 40 passed; the post-fix
+repro (`/pm-captures/impl/post-fix/transcript-archive/repro.py --expect
+fixed`) still reports all three symptoms fixed.
