@@ -58540,8 +58540,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-11-02T20:52:55.428913+00:00'
-  updated_at: '2026-11-02T20:52:55.428913+00:00'
+  updated_at: '2026-11-02T23:07:22.739332+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-74bc8b3
+    text: 'From pr-8020495 review c75e (2026-11-02): pr-8020495 adds cli.helpers._running_project_session
+      (QA S77/E18: outside tmux, -C/PM_PROJECT of a pm session --global/--group project
+      resolves the session name by its persisted pm_root, asking each share-mode session
+      on its own socket, paths.shared_socket_path). It overlaps master cli.helpers._project_sessions
+      (same persisted pm_root match, but default/PM_TMUX_SOCKET server only). When
+      fixing _find_tui_pane here, fold both into one lookup that asks the shared sockets
+      and returns the socket with the session name, so _get_pm_session and _find_tui_pane
+      cannot disagree.'
+    created_at: '2026-11-02T23:07:22Z'
+    last_edited: '2026-11-02T23:07:22Z'
