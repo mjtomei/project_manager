@@ -11457,11 +11457,24 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-09T11:42:16.820369+00:00'
-  updated_at: '2026-04-09T11:42:16.820369+00:00'
+  updated_at: '2026-11-02T06:11:33.324032+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-d3c9b21
+    text: 'From pr-6aa74c6 review 0402 i3: once pr-6aa74c6 merges, the TUI /pr select
+      no longer shells out to pm pr select. pm_core/tui/fuzzy_select_cmd.handle_pr_select
+      resolves it in-process: a PR in a collapsed plan group is expanded and selected;
+      an exact id hidden by the status filters logs "<id> <title> is hidden by the
+      current filters (X: merged, f: status filter)" and the cursor stays put; fuzzy
+      matches hidden by filters are only counted ("N hidden by filters"). Left for
+      this PR: name the specific filter that hides the PR (tree_layout.passes_status_filter
+      is the shared predicate to extend with a reason), keyboard navigation, and the
+      CLI pm pr select of a hidden PR while a TUI is running (_follow_active_pr ->
+      select_pr is silent).'
+    created_at: '2026-11-02T06:11:33Z'
+    last_edited: '2026-11-02T06:11:33Z'
 - id: pr-6634fb0
   plan: bugs
   title: Convert all pane registry callers to locked_read_modify_write
