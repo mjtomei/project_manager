@@ -170,6 +170,29 @@ pane unless stated otherwise.
   `pm-x`'s own group: the unrelated session's client is not moved and its
   window size does not constrain the layout (membership is tmux's session
   group, never a name prefix).
+- **GIVEN** that unrelated `pm-x~foo-<hash>` session also has a grouped
+  session of its own (`pm-x~foo-<hash>~1`, created when a second client
+  attached to it), **WHEN** the user runs `pm session` for `pm-x`, kills
+  `pm-x`, presses the quit key in `pm-x`, or `pm-x` sizes its layout,
+  **THEN** that grouped session is not treated as one of `pm-x`'s: the
+  user is never attached to it, it is not killed or detached, and its
+  client's size does not constrain `pm-x`'s window; and once the other
+  project's base is gone, its surviving `~1` does not make discovery
+  adopt the default server for `pm-x`.  Only a remainder that is *all*
+  ASCII digits after `<base>~` is a grouped suffix (review-loop b48f
+  i19).
+- **GIVEN** the TUI is being viewed through a user's own view of the
+  session (any name, e.g. `myview`), **WHEN** the user opens a TUI pane
+  from it (e.g. the notes pane) and then asks for the same pane again,
+  **THEN** the pane is registered in the *base* session's registry (no
+  registry file named after the view appears), the second request
+  focuses the existing pane instead of opening a duplicate, and the
+  layout rebalances for the base (review-loop b48f i1).
+- **GIVEN** a session with clients on `base~N` and on a user's own view,
+  **WHEN** the user runs `pm session --disconnect-others` (`-d`) to take
+  the session over, **THEN** every other client — including the view's —
+  is detached, so none of them keeps constraining the shared window size
+  (review-loop b48f i4).
 
 ### R6 — Quitting a TUI never detaches anyone else
 
@@ -266,7 +289,20 @@ pane unless stated otherwise.
   session — it does not resume the run in its own session (which would
   poll windows that are not there and end the other run with a bogus
   result) — and a run whose session is gone is still resumed here
-  (review-loop b48f i15).
+  (review-loop b48f i15).  A server *another user* planted at that
+  session's deterministic socket name does not count as the run's
+  session: the run is resumed here (review-loop b48f i20).
+- **GIVEN** a pm session whose name contains a space, **WHEN** pm starts
+  an agent whose prompt tells it how to drive the TUI — a QA run
+  (`pm qa launch`, CLI or TUI), `pm qa regression`, `pm meta`, or any
+  prompt carrying the TUI section — **THEN** every copyable command in
+  that prompt (`pm tui view -s …`, `pm tui send … -s …`, the
+  `~/.pm/pane-registry/<session>.json` path, the discovery watcher's
+  `tmux list-panes -t <session>:discovery`) quotes the name as one shell
+  word, so pasting it runs against the right session; ordinary names stay
+  unquoted (review-loop b48f i18/i19).  When the QA run is launched from
+  a user's own view or a `~N` grouped session, the prompt names the base
+  pm session, not the view (review-loop b48f i4).
 
 ### R8 — Killing a session tears down only that session
 
@@ -295,6 +331,11 @@ pane unless stated otherwise.
   `pm-x`, **THEN** only `pm-x`'s group (base, `~N`, views) is torn down;
   the other project's session, its panes and its clients are untouched
   (group membership is tmux's session group, never a name prefix).
+- **GIVEN** a directory that is not a git repository (a mistyped
+  `--dir`), **WHEN** the user runs `pm session kill --dir <that dir>` from
+  inside another project, **THEN** it refuses with the same message as
+  `pm session --print-connect --dir` and kills nothing — in particular
+  not the cwd's session (review-loop b48f i1).
 - **GIVEN** a stale socket file left behind by a dead server,
   **WHEN** the user runs `pm session kill`, **THEN** it reports no session
   and removes the stale file; a later `pm session` starts a fresh server
@@ -497,7 +538,8 @@ pane unless stated otherwise.
   `pm tui view` / `pm tui send` with no `--session` from a plain shell in
   the project, `pm pr start`, `pm meta`, `pm container build`,
   `pm session home`, `pm session kill`, `pm session mobile`,
-  `pm session --print-connect`, or the TUI connect screen — **THEN** the
+  `pm session --print-connect`, the TUI connect screen, or the TUI's
+  QA-resume scan on restart — **THEN** the
   planted server is not adopted or advertised: the lookup falls through
   to the default server (or reports no session, or refuses to print a
   command naming the entry), and the planted server, its session and its
@@ -507,9 +549,14 @@ pane unless stated otherwise.
 - **GIVEN** a repository whose tag would make the socket path exceed the
   Unix socket limit, **WHEN** the user starts a session, **THEN** a
   deterministic hashed socket name is used and list/kill still work.
+  The limit is measured in *bytes*: a repo directory name of roughly 27
+  or more multi-byte characters (e.g. Japanese) is under 100 characters
+  but over the limit, and must also get the hashed name rather than fail
+  with tmux's "File name too long"; a short non-ASCII name keeps its
+  readable socket name (review-loop b48f i21).
 - **GIVEN** tmux is not installed (or not executable) on `PATH`,
   **WHEN** the user runs `pm session list`, `pm session kill`,
-  `pm tui view`, or the TUI's quit key is pressed in an environment with
+  `pm session mobile`, `pm tui view`, or the TUI's quit key is pressed in an environment with
   `$TMUX` set but no tmux binary,
   **THEN** the command reports a clear message and does not traceback.
 
@@ -560,8 +607,15 @@ them.
 - A `pm session list` running while sessions are being created and killed.
 - A `pm session kill` running while a client is attached to that session
   and while another session is being driven.
-- Very long repo name (hashed socket), and a directory that is not a git
-  repository.
+- Very long repo name (hashed socket), a repo name of multi-byte
+  characters that is short in characters but long in bytes, and a
+  directory that is not a git repository (including a mistyped
+  `kill --dir`).
+- Repo directory names containing `~`, a space, a backtick or a quote —
+  each reaches tmux targets, hooks, key bindings, EXIT traps and agent
+  prompts as data, never as a group suffix or shell syntax.
+- Two unrelated legacy sessions on the default server where one's name
+  starts with the other's name plus `~` (including that one's own `~1`).
 - tmux missing from `PATH` while `$TMUX` is set.
 - `pm session` run inside another pm session for a different project.
 - `pm session --global` / `kill --global` run inside a private session.
