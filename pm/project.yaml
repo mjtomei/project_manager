@@ -39226,7 +39226,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-11-02T02:39:00.279222+00:00'
+  updated_at: '2026-11-02T02:52:53.437329+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40207,6 +40207,22 @@ prs:
       stale WCH after watcher stop is pre-existing (pr-edc256b; cross-note added).'
     created_at: '2026-11-02T02:39:00Z'
     last_edited: '2026-11-02T02:39:00Z'
+  - id: note-14775b8
+    text: 'QA S20 captures follow-up (2026-11-02): re-ran all three stories from fresh
+      fixtures with BOTH assigned recipes; each story now has tui/ (TUI cast+mp4+transcript)
+      and cli/ (the pm session drive window ran under asciinema; every pm command
+      and run-dir/log inspection typed live at the moment its Then applies). Results
+      unchanged: story1 49/49, story2 14/14, story3 15/15. Story 1 detail: one out-of-band
+      check ("right after recipe A: still a link, 4 lines") first recorded FAIL only
+      because it ran 0.7 s after the append, when the hook-driven follow-up had already
+      frozen L2; the same check typed in the recorded shell right after the append
+      shows test -L=yes lines=4 (annotated in evidence/then-checks.txt). The stop/disable
+      order within the one second varies between runs (v1 disable first, v2 KILLED
+      first); each archive entry was finalized exactly once either way. The first
+      runs are kept as storyN/previous-run-tui-only/. Supersedes note-9af6236 only
+      as to captures; the verdict stands.'
+    created_at: '2026-11-02T02:52:53Z'
+    last_edited: '2026-11-02T02:52:53Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
