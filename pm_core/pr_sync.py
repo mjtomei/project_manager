@@ -12,10 +12,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from pm_core import store, git_ops, graph
+from pm_core import store, git_ops, graph, gh_ops, merge_integrity
 from pm_core.backend import get_backend
-from pm_core.cli.helpers import _record_status_timestamp
+from pm_core.cli.helpers import _record_status_timestamp, _resolve_repo_dir
 from pm_core.paths import configure_logger
+from pm_core.pr_utils import TERMINAL_PR_STATES, usable_prs
 
 _log = configure_logger("pm.pr_sync")
 
@@ -45,6 +46,7 @@ class SyncResult:
         error: Optional[str] = None,
         skipped_reason: Optional[str] = None,
         status_updates: Optional[dict[str, str]] = None,
+        merge_integrity: Optional[dict[str, "merge_integrity.MergeVerification"]] = None,
     ):
         self.synced = synced
         self.updated_count = updated_count
@@ -54,6 +56,12 @@ class SyncResult:
         self.error = error
         self.skipped_reason = skipped_reason
         self.status_updates = status_updates or {}
+        # Per-PR verification of a sync-detected merge against the bound
+        # SIGNOFF_MERGE (pr-2e06289).  A definite mismatch carries
+        # ``problem``; an unverifiable merge carries ``error``.  Callers that
+        # save apply problems on the PR; callers that don't (the TUI worker
+        # thread) return them for the main thread to apply under its lock.
+        self.merge_integrity = merge_integrity or {}
 
     @property
     def was_skipped(self) -> bool:
@@ -141,6 +149,26 @@ def find_workdir(data: dict) -> Optional[str]:
     return None
 
 
+def _verify_detected_merge(root: Path, data: dict, pr_entry: dict,
+                           workdir: str, base_branch: str):
+    """Verify a sync-detected merge against the PR's bound SIGNOFF_MERGE.
+
+    Returns a :class:`merge_integrity.MergeVerification`, or None when the PR
+    holds no bound approval (nothing to compare against).  The check itself
+    never raises (:func:`merge_integrity.verify_detected_merge`); this wrapper
+    only records the outcome in the log.
+    """
+    result = merge_integrity.verify_detected_merge(
+        root, data, pr_entry, workdir, base_branch)
+    if result is not None and result.problem:
+        _log.warning("Merge integrity for %s: %s",
+                     pr_entry.get("id"), result.problem)
+    elif result is not None and result.error:
+        _log.warning("Could not verify GitHub's merge of %s: %s",
+                     pr_entry.get("id"), result.error)
+    return result
+
+
 def sync_prs(
     root: Path,
     data: Optional[dict] = None,
@@ -178,19 +206,20 @@ def sync_prs(
             error="No workdirs found. Run 'pm pr start' on a PR first."
         )
 
-    prs = data.get("prs") or []
+    prs = usable_prs(data.get("prs"))
     base_branch = data.get("project", {}).get("base_branch", "master")
     backend_name = data.get("project", {}).get("backend", "vanilla")
     backend = get_backend(data)
 
     updated = 0
     merged_prs = []
+    integrity_by_pr: dict[str, merge_integrity.MergeVerification] = {}
 
     # Only the github backend can reliably auto-detect merges (via API).
     # Local/vanilla backends rely on `pm pr merge` for explicit tracking.
     if backend_name == "github":
         for pr_entry in prs:
-            if pr_entry.get("status") not in ("in_review", "in_progress", "qa"):
+            if pr_entry.get("status") not in ("in_review", "in_progress", "qa", "sign_off"):
                 continue
 
             branch = pr_entry.get("branch", "")
@@ -208,6 +237,13 @@ def sync_prs(
                     merged_prs.append(pr_entry["id"])
                     updated += 1
                     _log.info("PR %s detected as merged", pr_entry["id"])
+                    # A merge pm did not publish is verified against the
+                    # signed-off candidate before the status is finalized
+                    # (pr-2e06289).
+                    verified = _verify_detected_merge(
+                        root, data, pr_entry, str(check_dir), base_branch)
+                    if verified is not None and not verified.ok:
+                        integrity_by_pr[pr_entry["id"]] = verified
             except Exception as e:
                 _log.warning("Error checking merge status for %s: %s", pr_entry["id"], e)
 
@@ -219,10 +255,12 @@ def sync_prs(
         merged_set = set(merged_prs)
 
         def apply(fresh_data):
-            for pr in fresh_data.get("prs") or []:
+            for pr in usable_prs(fresh_data.get("prs")):
                 if pr["id"] in merged_set:
                     pr["status"] = "merged"
                     _record_status_timestamp(pr, "merged")
+                    merge_integrity.apply_to_pr(
+                        pr, integrity_by_pr.get(pr["id"]))
             set_last_sync_timestamp(fresh_data, datetime.now(timezone.utc))
 
         store.locked_update(root, apply)
@@ -235,6 +273,7 @@ def sync_prs(
         updated_count=updated,
         merged_prs=merged_prs,
         ready_prs=ready,
+        merge_integrity=integrity_by_pr,
     )
 
 
@@ -273,6 +312,10 @@ def sync_from_github(
     - OPEN + draft → in_progress
     - OPEN + ready → in_review
 
+    Terminal local records win over a non-terminal GitHub state: a PR that
+    is locally ``merged`` or ``closed`` is never moved back to an active
+    status (a merge discovered on GitHub still finalizes as ``merged``).
+
     Only works with the GitHub backend and PRs that have gh_pr_number set.
 
     Args:
@@ -283,8 +326,7 @@ def sync_from_github(
     Returns:
         SyncResult with sync outcome details
     """
-    import subprocess
-    import json
+    import subprocess  # for subprocess.TimeoutExpired in the except clause
 
     if data is None:
         data = store.load(root)
@@ -296,11 +338,13 @@ def sync_from_github(
             error="GitHub sync only works with the GitHub backend"
         )
 
-    prs = data.get("prs") or []
+    prs = usable_prs(data.get("prs"))
+    base_branch = data.get("project", {}).get("base_branch", "master")
     updated = 0
     merged_prs = []
     closed_prs = []
     status_updates: dict[str, str] = {}
+    integrity_by_pr: dict[str, merge_integrity.MergeVerification] = {}
 
     for pr_entry in prs:
         gh_pr_number = pr_entry.get("gh_pr_number")
@@ -311,15 +355,11 @@ def sync_from_github(
         old_status = pr_entry.get("status", "pending")
 
         try:
-            result = subprocess.run(
-                ["gh", "pr", "view", str(gh_pr_number), "--json", "state,isDraft,mergedAt"],
-                capture_output=True, text=True, timeout=30
-            )
-            if result.returncode != 0:
+            info = gh_ops.get_pr_state(gh_pr_number)
+            if info is None:
                 _log.warning("Could not fetch GitHub PR #%s for %s", gh_pr_number, pr_id)
                 continue
 
-            info = json.loads(result.stdout)
             gh_state = info.get("state")
             is_draft = info.get("isDraft", False)
             merged_at = info.get("mergedAt")
@@ -328,10 +368,20 @@ def sync_from_github(
             if gh_state == "MERGED" or merged_at:
                 new_status = "merged"
             elif gh_state == "CLOSED":
+                if old_status == "merged":
+                    # A local merge record is terminal: GitHub closing the PR
+                    # does not undo a merge whose evidence lives in the
+                    # registry (nor re-block the dependents it satisfied).
+                    continue
                 new_status = "closed"
             elif gh_state == "OPEN":
-                # Preserve "qa" status — it's a local refinement of in_review
-                if old_status == "qa":
+                # Preserve "qa"/"sign_off" — local refinements of in_review —
+                # and the terminal records.  "closed": `pm pr close` is
+                # non-destructive, so a PR closed with --keep-github (or whose
+                # `gh pr close` failed) is still closed locally.  "merged": the
+                # merge landed outside GitHub, and rewriting it would erase the
+                # merge evidence and re-block its dependents.
+                if old_status in ("qa", "sign_off", *TERMINAL_PR_STATES):
                     continue
                 new_status = "in_progress" if is_draft else "in_review"
             else:
@@ -346,6 +396,18 @@ def sync_from_github(
                 _log.info("PR %s: %s → %s (from GitHub)", pr_id, old_status, new_status)
                 if new_status == "merged":
                     merged_prs.append(pr_id)
+                    # Verify what GitHub published against the bound
+                    # SIGNOFF_MERGE (pr-2e06289) — the same check
+                    # `pm pr merge` runs, applied to a discovered merge.
+                    wd = pr_entry.get("workdir")
+                    check_dir = (wd if (wd and Path(wd).exists())
+                                 else find_workdir(data))
+                    if not check_dir:
+                        check_dir = str(_resolve_repo_dir(root, data))
+                    verified = _verify_detected_merge(
+                        root, data, pr_entry, str(check_dir), base_branch)
+                    if verified is not None and not verified.ok:
+                        integrity_by_pr[pr_id] = verified
                 elif new_status == "closed":
                     closed_prs.append(pr_id)
 
@@ -356,11 +418,27 @@ def sync_from_github(
 
     if save_state and updated:
         def apply(fresh_data):
-            for pr in fresh_data.get("prs") or []:
+            for pr in usable_prs(fresh_data.get("prs")):
                 new_status = status_updates.get(pr["id"])
-                if new_status and pr.get("status") != new_status:
+                if not new_status:
+                    continue
+                if pr.get("status") in TERMINAL_PR_STATES \
+                        and new_status != "merged":
+                    # A concurrent status write won the race with this sync:
+                    # the status_updates were computed from the pre-lock
+                    # snapshot, and a merged/closed record is terminal
+                    # (pr-62ad13d).  A merge discovered on GitHub still
+                    # finalizes normally.
+                    continue
+                if pr.get("status") != new_status:
                     pr["status"] = new_status
                     _record_status_timestamp(pr, new_status)
+                if new_status == "merged":
+                    # Applied even when another writer already set the status:
+                    # the verification is evidence about this merge, not a
+                    # side effect of the transition (pr-2e06289).
+                    merge_integrity.apply_to_pr(
+                        pr, integrity_by_pr.get(pr["id"]))
             set_last_sync_timestamp(fresh_data, datetime.now(timezone.utc))
 
         store.locked_update(root, apply)
@@ -375,4 +453,5 @@ def sync_from_github(
         merged_prs=merged_prs,
         closed_prs=closed_prs,
         status_updates=status_updates,
+        merge_integrity=integrity_by_pr,
     )

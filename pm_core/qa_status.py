@@ -23,6 +23,7 @@ import re
 import select
 import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
 
@@ -47,12 +48,22 @@ _HIDE_CURSOR = "\033[?25l"
 _SHOW_CURSOR = "\033[?25h"
 _CLEAR_SCREEN = "\033[H\033[2J"
 
+# Appended to a scenario's verdict while its worker waits for input.
+_WAITING_SUFFIX = " (waiting)"
+_WAITING_SUFFIX_WIDTH = len(_WAITING_SUFFIX)
+
 _VERDICT_COLORS = {
     "PASS": _GREEN,
     "NEEDS_WORK": _YELLOW,
     "INPUT_REQUIRED": _RED,
     "interactive": _DIM,
     "queued": _DIM,
+    # Sign-off router verdicts (shown when a sign-off verdict surfaces here).
+    "SIGNOFF_MERGE": _GREEN,
+    "SIGNOFF_REQA": _YELLOW,
+    "SIGNOFF_REVIEW": _YELLOW,
+    "SIGNOFF_IMPL": _YELLOW,
+    "SIGNOFF_BLOCKED": _RED,
 }
 
 _REFRESH_INTERVAL = 1.0  # seconds
@@ -62,9 +73,16 @@ _SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"
 def _load_status(path: Path) -> dict | None:
     """Load qa_status.json, returning None if missing or invalid."""
     try:
-        return json.loads(path.read_text())
+        data = json.loads(path.read_text())
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return None
+    # ``qa_loop._write_status_file`` always writes an object, but a
+    # hand-edited or corrupt file can hold any valid JSON.  A non-dict would
+    # raise AttributeError on ``.get()`` in _render and kill the status pane
+    # (it would stop refreshing, leaving a frozen or one-pane window).
+    # Treat it exactly like an unreadable file: show "Waiting for
+    # qa_status.json..." and keep refreshing.
+    return data if isinstance(data, dict) else None
 
 
 def _truncate(text: str, width: int) -> str:
@@ -110,8 +128,26 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
     if error:
         lines.append(f"  {_RED}{_BOLD}ERROR{_RESET}")
         lines.append("")
+        # Wrap to the pane width: an error line longer than the terminal
+        # (a fail-closed container cause + remedy is ~190 columns) wraps
+        # on its own, adding a row per overflow and scrolling the header
+        # — the pane's own "QA Status:" line — off the top of the screen.
+        # Same rule as the table branch below, which reserves width for
+        # the "(waiting)" suffix instead of letting a row wrap.
+        avail = max(cols - 2, 10)
         for err_line in error.split("\n"):
-            lines.append(f"  {_RED}{err_line}{_RESET}")
+            if not err_line.strip():
+                lines.append("")
+                continue
+            # Keep any leading indent (the remedy list's "  - " bullets)
+            # and re-apply it to wrapped continuations.
+            indent = err_line[:len(err_line) - len(err_line.lstrip())]
+            for chunk in textwrap.wrap(err_line.strip(), avail,
+                                       initial_indent=indent,
+                                       subsequent_indent=indent,
+                                       break_long_words=True,
+                                       break_on_hyphens=False):
+                lines.append(f"  {_RED}{chunk}{_RESET}")
         lines.append("")
         lines.append(f"{_DIM}  q: quit{_RESET}")
         padded = [_pad_line(l, cols) for l in lines]
@@ -119,8 +155,13 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
             padded.append(" " * cols)
         return _CLEAR_SCREEN + "\n".join(padded)
 
-    # Fixed columns: prefix(2) + idx(3) + gap(2) + gap(2) + verdict(14) = 23
-    title_width = max(cols - 28, 10)
+    # Fixed columns: prefix(2) + idx(3) + gap(2) + gap(2) + verdict(14) = 23.
+    # A scenario waiting for input appends " (waiting)" to its verdict, so
+    # reserve that width when any row uses it — otherwise the line exceeds
+    # the terminal width and wraps, pushing the footer off screen.
+    waiting_any = any(sc.get("waiting_for_input") for sc in scenarios)
+    reserve = _WAITING_SUFFIX_WIDTH if waiting_any else 0
+    title_width = max(cols - 28 - reserve, 10)
     lines.append(f"  {'#':>3}  {'Scenario':<{title_width}}  {'Verdict'}")
     lines.append(f"  {'---':>3}  {'-' * title_width}  {'-' * 14}")
 
@@ -130,6 +171,7 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
         idx = sc.get("index", "?")
         title = _truncate(sc.get("title", ""), title_width)
         verdict = sc.get("verdict", "")
+        verdict_reason = sc.get("verdict_reason", "")
 
         if "(verifying" in verdict:
             # Animated spinner for verdicts being verified
@@ -151,6 +193,10 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
         elif verdict:
             color = _VERDICT_COLORS.get(verdict, _DIM)
             verdict_display = f"{color}{verdict}{_RESET}"
+            if sc.get("waiting_for_input"):
+                # The worker asked for input; the loop is still watching its
+                # pane for a follow-up verdict after the user answers.
+                verdict_display += f"{_DIM}{_WAITING_SUFFIX}{_RESET}"
         else:
             verdict_display = f"{_DIM}pending{_RESET}"
 
@@ -161,6 +207,14 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
             suffix = _RESET
 
         lines.append(f"{prefix}{idx:>3}  {title:<{title_width}}  {verdict_display}{suffix}")
+        if verdict_reason:
+            # Render the reason on a continuation line, indented to align
+            # under the title column and dimmed so it doesn't compete with
+            # the verdict colour above.
+            reason_indent = " " * (2 + 3 + 2)  # prefix + idx col + gap
+            reason_text = _truncate(verdict_reason,
+                                    max(cols - len(reason_indent) - 4, 10))
+            lines.append(f"{reason_indent}{_DIM}↳ {reason_text}{_RESET}")
 
     lines.append("")
 

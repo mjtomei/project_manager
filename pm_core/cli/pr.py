@@ -3,19 +3,24 @@
 Registers the ``pr`` group and all subcommands on the top-level ``cli`` group.
 """
 
+import contextlib
 import os
 import platform
 import re
+import secrets
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import click
 import yaml
 
-from pm_core import store, graph, git_ops, prompt_gen
+from pm_core import store, graph, git_ops, prompt_gen, merge_integrity
+from pm_core.pr_utils import TERMINAL_PR_STATES, VALID_PR_STATES, usable_prs
+from pm_core.model_config import EFFORT_LEVELS, PR_SESSION_TYPES
 from pm_core.shell import shell_quote
 from pm_core import pr_sync as pr_sync_mod
 from pm_core import tmux as tmux_mod
@@ -27,15 +32,19 @@ from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_s
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
+    _closed_reopen_hint,
     _ensure_workdir,
     _get_pm_session,
     _gh_state_to_status,
     _infer_pr_id,
+    _launch_blocked_at_lock,
     _log,
     _make_pr_entry,
     _pr_display_id,
+    format_pr_line,
     _pr_id_sort_key,
     _record_status_timestamp,
+    _report_launch_blocked,
     _require_pr,
     _resolve_pr_id,
     _resolve_repo_dir,
@@ -165,13 +174,16 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
             changes.append("description updated")
 
         # Status (skip invalid values silently)
-        valid_statuses = {"pending", "in_progress", "in_review", "qa", "merged", "closed"}
+        valid_statuses = VALID_PR_STATES
         if parsed["status"] is not None:
             current_status = pr_entry.get("status", "pending")
             if parsed["status"] != current_status and parsed["status"] in valid_statuses:
                 pr_entry["status"] = parsed["status"]
                 changes.append(f"status: {current_status} → {parsed['status']}")
-                _record_status_timestamp(pr_entry, parsed["status"])
+                # The editor is the other `pm pr edit` path: reopening here
+                # drops the closure time too (pr-62ad13d).
+                _record_status_timestamp(pr_entry, parsed["status"],
+                                         previous_status=current_status)
 
         # Dependencies (skip unknown IDs silently)
         if parsed["depends_on_str"] is not None:
@@ -295,6 +307,13 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
     branch = entry["branch"]
     if result.get("duplicate"):
         click.echo(f"PR already exists: {_pr_display_id(entry)}: {title}")
+        if entry.get("status") == "closed":
+            # `pm pr close` retains the entry (pr-62ad13d), so a closed
+            # record now matches this duplicate check.  Say how to reuse it
+            # rather than leaving the add silently unfulfilled.
+            click.echo(f"  It is closed; reopen it with "
+                       f"'pm pr edit {entry['id']} --status pending' to reuse "
+                       f"it, or use a different title.")
     else:
         click.echo(f"Created {_pr_display_id(entry)}: {title} (now active)")
         click.echo(f"  branch: {branch}")
@@ -310,8 +329,8 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
 @click.option("--title", default=None, help="New title")
 @click.option("--depends-on", "depends_on", default=None, help="Comma-separated PR IDs (replaces existing)")
 @click.option("--description", "desc", default=None, help="New description")
-@click.option("--status", default=None, type=click.Choice(["pending", "in_progress", "in_review", "qa", "merged", "closed"]),
-              help="New status (pending, in_progress, in_review, qa, merged, closed)")
+@click.option("--status", default=None, type=click.Choice(["pending", "in_progress", "in_review", "qa", "sign_off", "merged", "closed"]),
+              help="New status (pending, in_progress, in_review, qa, sign_off, merged, closed)")
 @click.option("--plan", default=None, help="Associated plan ID")
 def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | None, status: str | None, plan: str | None):
     """Edit an existing PR's title, description, dependencies, or status."""
@@ -334,7 +353,9 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
         old_status = pr_entry.get("status", "pending")
         pr_entry["status"] = status
         changes.append(f"status: {old_status} → {status}")
-        _record_status_timestamp(pr_entry, status)
+        # ``closed_at`` describes a closure (pr-62ad13d): the helper drops it
+        # on a reopen and keeps it when the status merely restates `closed`.
+        _record_status_timestamp(pr_entry, status, previous_status=old_status)
     if depends_on is not None:
         if depends_on == "":
             pr_entry["depends_on"] = []
@@ -435,8 +456,11 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
         if desc is not None:
             pr["description"] = desc
         if status is not None:
+            # Mirrors the pre-lock preview above: reopening drops the closure
+            # time, restating `closed` keeps it (pr-62ad13d).
+            prior_status = pr.get("status") or "pending"
             pr["status"] = status
-            _record_status_timestamp(pr, status)
+            _record_status_timestamp(pr, status, previous_status=prior_status)
         if depends_on is not None:
             if depends_on == "":
                 pr["depends_on"] = []
@@ -510,7 +534,7 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
         return
 
     if open_only:
-        prs = [p for p in prs if p.get("status") not in ("closed", "merged")]
+        prs = [p for p in prs if p.get("status") not in TERMINAL_PR_STATES]
     if filter_status:
         prs = [p for p in prs if p.get("status") == filter_status]
     if filter_plan:
@@ -523,33 +547,9 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
         prs = sorted(prs, key=lambda p: (p.get("gh_pr_number") or _pr_id_sort_key(p["id"])[0], _pr_id_sort_key(p["id"])[1]), reverse=True)
 
     active_pr = data.get("project", {}).get("active_pr")
-    status_icons = {
-        "pending": "⏳",
-        "in_progress": "🔨",
-        "in_review": "👀",
-        "qa": "🧪",
-        "merged": "✅",
-        "closed": "🚫",
-        "blocked": "🚫",
-    }
     out: list[str] = []
     for p in prs:
-        icon = status_icons.get(p.get("status", "pending"), "?")
-        deps = p.get("depends_on") or []
-        dep_str = f" <- [{', '.join(deps)}]" if deps else ""
-        machine = p.get("agent_machine")
-        machine_str = f" ({machine})" if machine else ""
-        active_str = " *" if p["id"] == active_pr else ""
-        ts_str = ""
-        if timestamps:
-            ts = p.get("updated_at") or p.get("created_at") or ""
-            if ts:
-                try:
-                    dt = datetime.fromisoformat(ts).astimezone()
-                    ts_str = f" [{dt.strftime('%Y-%m-%d %H:%M')}]"
-                except ValueError:
-                    ts_str = f" [{ts}]"
-        out.append(f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{machine_str}{active_str}{ts_str}")
+        out.append(format_pr_line(p, active_pr=active_pr, with_timestamp=timestamps))
         if workdirs:
             wd = p.get("workdir")
             if wd and Path(wd).exists():
@@ -561,6 +561,152 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
             else:
                 out.append(f"      workdir: none")
     emit_paged(out)
+
+
+def _note_line(n: dict) -> str:
+    """One note, as ``pm pr note list`` and ``pm pr show`` print it.
+
+    Both commands are on-demand readers for the PR-notes block prompt
+    builders abbreviate, so they must render a note identically — and they
+    must not crash on a shape the prompt builder accepts: ``_format_pr_notes``
+    deliberately tolerates notes without an ``id`` (hand-edited or legacy
+    ``project.yaml``), so the reader falls back to a placeholder rather than
+    raising ``KeyError`` and hiding every note behind a traceback.
+    """
+    ts = n.get("created_at", "")
+    ts_str = f" ({ts})" if ts else ""
+    # Tolerate a note with no ``text`` as well as no ``id`` (hand-edited or
+    # legacy project.yaml): both readers are the on-demand fallback for an
+    # abbreviated PR-notes block, so one malformed note must not raise and hide
+    # every note.  A present-but-null ``id:``/``text:`` is the same shape, so
+    # use ``or`` — a plain default would render the literal ``None``.
+    return f"  {n.get('id') or '?'}{ts_str}: {n.get('text') or ''}"
+
+
+@pr.command("show")
+@click.argument("pr_id")
+def pr_show(pr_id: str):
+    """Show a PR's full detail: description, tests, files, deps, notes,
+    sign-off return, and integration.
+
+    The on-demand companion to the abbreviated listings prompt builders
+    emit when a collection is too large to inline: sessions told to "run
+    `pm pr show <id>`" read the full record here.
+    """
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+
+    click.echo(format_pr_line(pr_entry))
+    for label, key in (
+        ("Title", "title"),
+        ("Status", "status"),
+        ("Plan", "plan"),
+        ("Branch", "branch"),
+        ("Workdir", "workdir"),
+        ("GitHub", "gh_pr"),
+    ):
+        val = pr_entry.get(key)
+        if val:
+            click.echo(f"{label}: {val}")
+    deps = pr_entry.get("depends_on") or []
+    if deps:
+        click.echo(f"Depends on: {', '.join(deps)}")
+    for label, key in (
+        ("Description", "description"),
+        ("Tests", "tests"),
+        ("Files", "files"),
+    ):
+        val = (pr_entry.get(key) or "").strip()
+        if val:
+            click.echo(f"\n## {label}\n{val}")
+    notes = pr_entry.get("notes") or []
+    if notes:
+        click.echo("\n## Notes")
+        for n in notes:
+            click.echo(_note_line(n))
+    # Prompt builders abbreviate the integration overlap/conflict path lists
+    # and point sessions here for the rest, so print the record (and where its
+    # full form lives) rather than making that pointer a dead end.
+    def _path_list_lines(record: dict) -> None:
+        """Print overlap/conflict paths, naming the record's real total.
+
+        project.yaml keeps at most _YAML_LIST_LIMIT paths per list and records
+        the real total separately.  Report that total (and how many paths are
+        not shown) so the session reading this fallback does not mistake the
+        yaml copy for the whole record — the same rule for the top-level
+        integration record and the sign-off return's copy of it.
+        """
+        for label, key in (("Overlap", "overlap"), ("Conflicts", "conflicts")):
+            vals = record.get(key) or []
+            total = record.get(f"{key}_total")
+            if (not isinstance(total, int) or isinstance(total, bool)
+                    or total < len(vals)):
+                # Missing or malformed (hand-edited yaml) -> the yaml copy is
+                # all this reader can vouch for.
+                total = len(vals)
+            if vals or total:
+                more = (f" (+{total - len(vals)} more)"
+                        if total > len(vals) else "")
+                click.echo(f"{label} ({total}): {', '.join(vals)}{more}")
+
+    # The sign-off return is a separate prompt block from the notes (it is a
+    # different document), so its omission marker points here rather than at
+    # `pm pr note list`, which does not contain it.  Print the whole record.
+    ret = pr_entry.get("signoff_return") or {}
+    if ret:
+        click.echo("\n## Sign-off return")
+        for label, key in (
+            ("Verdict", "verdict"),
+            ("Hop", "hop"),
+            ("Reviewed head", "reviewed_head"),
+            ("Reason", "reason"),
+            ("Original verdict", "original_verdict"),
+            ("Coerced reason", "coerced_reason"),
+        ):
+            val = ret.get(key)
+            if val:
+                click.echo(f"{label}: {val}")
+        applied = ret.get("applied") or {}
+        if applied.get("merge_sha"):
+            click.echo(f"Applied merge: {applied['merge_sha']}")
+        if ret.get("apply_error"):
+            click.echo(f"Apply error: {ret['apply_error']}")
+        ret_integ = ret.get("integration") or {}
+        if ret_integ:
+            # A return integration can legitimately lack a field: an ERROR
+            # record (e.g. the base fetch failed) carries ``base_sha: null``.
+            # Render the placeholder rather than the literal ``None`` — the
+            # same rule the notes readers follow (a reader must not print a
+            # value the record does not hold).
+            base = (f"`{ret_integ.get('base_branch') or '?'}` @ "
+                    f"`{ret_integ.get('base_sha') or '?'}` from "
+                    f"`{ret_integ.get('target_repo') or '?'}`")
+            click.echo(f"Integration: {ret_integ.get('status') or '?'} "
+                       f"with {base}")
+            _path_list_lines(ret_integ)
+    integ = pr_entry.get("integration") or {}
+    if integ:
+        click.echo("\n## Integration")
+        for label, key in (
+            ("Target", "target_repo"),
+            ("Base branch", "base_branch"),
+            ("Base sha", "base_sha"),
+            ("Status", "status"),
+        ):
+            val = integ.get(key)
+            if val:
+                click.echo(f"{label}: {val}")
+        _path_list_lines(integ)
+        # A runtime-resolved reference, not a host path: sessions following the
+        # integration omission marker run inside a container, where the host
+        # ~/.pm/sessions/<tag>/captures/ path does not exist (the same
+        # host-vs-container split integration_pointer handles).  Resolving it
+        # here would also create that directory as a side effect.
+        click.echo(
+            "Full record: "
+            f"`$(pm qa captures-path {pr_entry.get('id', pr_id)})"
+            "/integration.json`")
 
 
 @pr.command("graph")
@@ -812,6 +958,13 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         click.echo(f"PR {pr_id} is already merged.", err=True)
         raise SystemExit(1)
 
+    if pr_entry.get("status") == "closed":
+        # Closed is a terminal lifecycle record (`pm pr close` keeps it), so a
+        # start would silently resurrect a PR the user retired.  Reopening is
+        # an explicit status edit.
+        click.echo(_closed_reopen_hint(pr_id), err=True)
+        raise SystemExit(1)
+
     # Determine tmux session name (used for fast-path check and later launch)
     pm_session = _get_pm_session()
 
@@ -826,6 +979,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             existing = tmux_mod.find_window_by_name(pm_session, window_name)
             if existing:
                 if fresh:
+                    from pm_core import home_window
+                    home_window.park_if_on(pm_session, existing["id"])
                     tmux_mod.kill_window(pm_session, existing["id"])
                     click.echo(f"Killed existing window '{window_name}'")
                 elif use_companion and not background:
@@ -834,7 +989,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                     if impl_workdir:
                         _add_companion_pane(pm_session, existing, impl_workdir, "impl")
                     tmux_mod.select_window(pm_session, existing["id"])
-                    click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
+                    click.echo(f"Switched to existing window '{window_name}' "
+                               f"(session: {tmux_mod.current_or_base_session(pm_session)})")
                     return
                 elif background:
                     # Window already exists, nothing to do in background mode
@@ -842,7 +998,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                     return
                 else:
                     tmux_mod.select_window(pm_session, existing["id"])
-                    click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
+                    click.echo(f"Switched to existing window '{window_name}' "
+                               f"(session: {tmux_mod.current_or_base_session(pm_session)})")
                     return
 
     repo_url = data["project"]["repo"]
@@ -905,15 +1062,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             local_source = str(root.parent) if store.is_internal_pm_dir(root) else str(root)
             click.echo(f"Cloning locally from {local_source}...")
             git_ops.clone(local_source, tmp_path, branch=base_branch)
-            # Configure push URLs: push to both the local repo (keeps
-            # it up to date, like the container push proxy does) and
-            # the remote (GitHub).  Fetch stays local for speed.
-            # PR branches aren't checked out in the main repo, so
-            # pushing to the local path succeeds without issues.
-            git_ops.run_git("remote", "set-url", "--push",
-                            "origin", local_source, cwd=tmp_path)
-            git_ops.run_git("remote", "set-url", "--add", "--push",
-                            "origin", repo_url, cwd=tmp_path)
+            # fetch from upstream, push to both local + upstream.  Critically
+            # the fetch URL must be upstream, not the local clone source, or
+            # the container push proxy rejects pushes from inside the session.
+            git_ops.configure_dual_remote(tmp_path, local_source, repo_url)
 
             # Cache repo_id now that we have a clone
             _resolve_repo_id(data, tmp_path, root)
@@ -975,10 +1127,19 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     # Update state under lock — only advance from pending; don't regress in_review/merged
     machine = platform.node()
     work_path_str = str(work_path)
+    blocked_at_lock: str | None = None
 
     def apply(data):
+        nonlocal blocked_at_lock
         pr = store.get_pr(data, pr_id)
-        if not pr:
+        # A `pm pr close`/merge that landed while this start was cloning and
+        # pushing wins: attaching a workdir, the active pointer and an
+        # `in_progress` timestamp to a terminal record would erase its
+        # closed_at and re-activate a retired PR.  A `--remove` that deleted
+        # the record is reported the same way, not as "nothing to update"
+        # (pr-62ad13d).
+        blocked_at_lock = _launch_blocked_at_lock(pr)
+        if blocked_at_lock:
             return
         if pr.get("status") == "pending":
             pr["status"] = "in_progress"
@@ -991,6 +1152,11 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         data["project"]["active_pr"] = pr_id
 
     data = store.locked_update(root, apply)
+    if blocked_at_lock:
+        _report_launch_blocked(
+            pr_id, blocked_at_lock, doing="starting",
+            consequence="not recording the start. Any prepared workdir is "
+                        "left in place.")
     # Reload pr_entry from updated data (now contains gh_pr_number)
     pr_entry = store.get_pr(data, pr_id) or pr_entry
     trigger_tui_refresh()
@@ -1001,10 +1167,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     prompt = prompt_gen.generate_prompt(data, pr_id, session_name=pm_session)
 
     # Resolve model/provider for this implementation session
-    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
+    from pm_core.model_config import resolve_model_and_provider
     _resolution = resolve_model_and_provider(
         "impl",
-        pr_model=get_pr_model_override(pr_entry),
+        pr_entry=pr_entry,
         project_data=data,
     )
     resolved_model = _resolution.model
@@ -1035,20 +1201,30 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             else:
                 _claude_cwd = str(work_path)
                 _claude_write_dir = None
+            # Session-scoped launch config (fake-claude, skip-permissions)
+            # follows the tmux session, not the cwd — run from a PR workdir
+            # (picker / prefix+M popup) the cwd tag names no session.
+            _stag = pm_session.removeprefix("pm-") if pm_session else None
+            env: dict[str, str] = {}
             cmd = build_claude_shell_cmd(prompt=prompt,
                                          transcript=transcript,
                                          cwd=_claude_cwd,
                                          write_dir=_claude_write_dir,
                                          model=resolved_model,
                                          provider=resolved_provider,
-                                         effort=_resolution.effort)
+                                         effort=_resolution.effort,
+                                         session_tag=_stag,
+                                         session_type="impl",
+                                         container=_is_container_enabled(),
+                                         env_out=env)
             # Optionally wrap in a container for isolation
             from pm_core.container import wrap_claude_cmd, ContainerError
-            _stag = pm_session.removeprefix("pm-") if pm_session else None
             try:
                 cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
                                               allowed_push_branch=branch,
-                                              session_tag=_stag, pr_id=pr_id)
+                                              session_tag=_stag, pr_id=pr_id,
+                                              provider=resolved_provider,
+                                              env=env)
             except ContainerError as e:
                 click.echo(str(e), err=True)
                 raise SystemExit(1)
@@ -1056,7 +1232,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 if use_companion:
                     claude_pane = tmux_mod.new_window_get_pane(
                         pm_session, window_name, cmd, str(work_path),
-                        switch=not background,
+                        switch=not background, env=env,
                     )
                     if claude_pane:
                         win = tmux_mod.find_window_by_name(pm_session, window_name)
@@ -1064,10 +1240,15 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                             _add_companion_pane(pm_session, win, str(work_path), "impl")
                 else:
                     tmux_mod.new_window(pm_session, window_name, cmd, str(work_path),
-                                        switch=not background)
+                                        switch=not background, env=env)
                     win = tmux_mod.find_window_by_name(pm_session, window_name)
                     if win:
                         tmux_mod.set_shared_window_size(pm_session, win["id"])
+                # A sign-off IMPL return is now being worked on.  Cleared
+                # before the echo, which fails (EPIPE) when the TUI that
+                # launched this restarted meanwhile (see _launch_review_window).
+                from pm_core.signoff import clear_return_awaiting
+                clear_return_awaiting(root, pr_id, "impl", session_opened=True)
                 click.echo(f"Launched Claude in tmux window '{window_name}' (session: {pm_session})")
                 return
             except Exception as e:
@@ -1079,8 +1260,11 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     if fresh:
         clear_session(root, session_key)
     click.echo("Launching Claude...")
+    from pm_core.signoff import clear_return_awaiting
+    clear_return_awaiting(root, pr_id, "impl", session_opened=True)
     launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh,
-                  provider=resolved_provider, model=resolved_model, effort=_resolution.effort)
+                  provider=resolved_provider, model=resolved_model, effort=_resolution.effort,
+                  session_type="impl")
 
 
 def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
@@ -1123,13 +1307,59 @@ def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
     click.echo("Added companion pane.")
 
 
+# Phases past the review step where ``pm pr review`` is an *inspection* of
+# the earlier review, not a new review: it must never move the PR backwards
+# (QA/sign-off own the branch and may be mid-flight).  ``merged``/``closed``
+# are past the review step too, but they are refused outright instead.
+_REVIEW_INSPECTION_PHASES = {
+    "qa": "QA",
+    "sign_off": "sign-off",
+}
+
+
+def _focus_review_window(pr_entry: dict) -> str | None:
+    """Focus the PR's existing review window; never start a new session.
+
+    Used when the PR is past the review step (``qa`` / ``sign_off``) and the
+    user asks to read the earlier review.  Returns the focused window name, or
+    ``None`` when there is nothing to focus.
+
+    Deliberately does **not** create a window, remove/launch a container,
+    generate a prompt, touch project state or clear a sign-off return: merely
+    viewing an old review while QA/sign-off runs must not start a second agent
+    or disturb the running phase.  (``_launch_review_window`` is the opposite:
+    it creates a fresh review session and clears a REVIEW return.)
+    """
+    if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
+        _log.info("focus review window: not in tmux")
+        return None
+    pm_session = _get_pm_session()
+    if not pm_session or not tmux_mod.session_exists(pm_session):
+        _log.info("focus review window: session %r not found", pm_session)
+        return None
+    window_name = f"review-{_pr_display_id(pr_entry)}"
+    existing = tmux_mod.find_window_by_name(pm_session, window_name)
+    if not existing:
+        _log.info("focus review window: no window %r", window_name)
+        return None
+    # select_window targets the caller's grouped/popup session, so the
+    # window switches in the client that asked for it (picker popup too).
+    if not tmux_mod.select_window(pm_session, existing["id"]):
+        _log.info("focus review window: select failed for %r", window_name)
+        return None
+    return window_name
+
+
 def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                           background: bool = False,
                           review_loop: bool = False, review_iteration: int = 0,
                           review_loop_id: str = "",
                           transcript: str | None = None) -> None:
     """Launch a tmux review window with Claude review + git diff shell."""
-    if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
+    # A background launch (``pm pr auto-sequence``) switches no client, so
+    # it may come from a shell outside tmux: the window opens in the pm
+    # session of the project.
+    if not tmux_mod.has_tmux() or not (background or tmux_mod.in_tmux()):
         click.echo("Review window requires tmux.")
         return
 
@@ -1167,21 +1397,29 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                 sessions_on_review = tmux_mod.sessions_on_window(
                     pm_session, existing["id"],
                 )
+            from pm_core import home_window
+            home_window.park_if_on(pm_session, existing["id"])
             tmux_mod.kill_window(pm_session, existing["id"])
             click.echo(f"Killed existing review window '{window_name}'")
+            # The review loop launches this command as a child and discards
+            # its stdout on success, so mirror the user-facing notice into the
+            # log — otherwise a loop-driven launch silently replaces a held or
+            # historical window with no visible trace.
+            _log.info("Killed existing review window '%s'", window_name)
         else:
             tmux_mod.select_window(pm_session, existing["id"])
             click.echo(f"Switched to existing review window '{window_name}'")
+            _log.info("Switched to existing review window '%s'", window_name)
             return
 
     title = pr_entry.get("title", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
 
     # Resolve model/provider for review session
-    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
+    from pm_core.model_config import resolve_model_and_provider
     _resolution = resolve_model_and_provider(
         "review",
-        pr_model=get_pr_model_override(pr_entry),
+        pr_entry=pr_entry,
         project_data=data,
     )
 
@@ -1202,13 +1440,21 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     else:
         _claude_cwd = workdir
         _claude_write_dir = None
+    # Session-scoped config (fake-claude, skip-permissions, the captures
+    # bind-mount below) follows the tmux session, not the cwd.
+    _review_stag = pm_session.removeprefix("pm-")
+    env: dict[str, str] = {}
     claude_cmd = build_claude_shell_cmd(prompt=review_prompt,
                                          transcript=transcript,
                                          cwd=_claude_cwd,
                                          write_dir=_claude_write_dir,
                                          model=_resolution.model,
                                          provider=_resolution.provider,
-                                         effort=_resolution.effort)
+                                         effort=_resolution.effort,
+                                         session_tag=_review_stag,
+                                         session_type="review",
+                                         container=_is_container_enabled(),
+                                         env_out=env)
     # Optionally wrap in a container for isolation.
     # Always remove any existing container for this review before creating a
     # new one.  The previous session's bash EXIT trap runs "docker rm -f"
@@ -1220,10 +1466,19 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     branch = pr_entry.get("branch", "")
     from pm_core.container import wrap_claude_cmd, ContainerError, remove_container, is_container_mode_enabled, _make_container_name
     if is_container_mode_enabled():
-        remove_container(_make_container_name(f"review-{pr_id}"))
+        remove_container(_make_container_name(f"review-{pr_id}",
+                                              session_tag=_review_stag))
+    # session_tag drives the captures bind-mount so the review
+    # container's /pm-captures points at the same per-PR captures dir
+    # the impl and QA containers use (lets a reviewer read pre/post-fix
+    # captures and scenario captures from inside their pane).
     try:
         claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
-                                              allowed_push_branch=branch)
+                                              allowed_push_branch=branch,
+                                              session_tag=_review_stag,
+                                              pr_id=pr_id,
+                                              provider=_resolution.provider,
+                                              env=env)
     except ContainerError as e:
         click.echo(str(e), err=True)
         raise SystemExit(1)
@@ -1238,7 +1493,16 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         # Build the diff pane command first.  We use git --no-pager
         # and pipe through less ourselves so that quitting the pager
         # doesn't kill the pane (git's built-in pager can cause SIGPIPE
-        # exit codes that break && chains).
+        # exit codes that break && chains).  Fall back to cat when less
+        # isn't on PATH (minimal hosts/containers) — a bare `| less -R`
+        # swallows all the output and leaves a blank pane.  The check runs
+        # in the pane's shell, not here, so it tests where the pane runs.
+        # The cat branch leaves the diff on the primary screen directly
+        # above the shell prompt.  A long prompt wraps in the half-width
+        # pane; when the pane later widens (Claude pane exits, wider
+        # client attaches) tmux reflows it to fewer rows but readline's
+        # SIGWINCH redraw still moves up by the old row count, overwriting
+        # the last diff line.  Two blank rows after the diff absorb that.
         shell = os.environ.get("SHELL", "/bin/bash")
         header = f"=== Review: {display_id} — {title} ==="
         # Use backend-appropriate diff base:
@@ -1265,7 +1529,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             f" && echo ''"
             f" && echo '--- Full diff ---'"
             f" && git --no-pager diff {diff_ref}...HEAD"
-            f"; }} | less -R"
+            f"; }} | if command -v less >/dev/null 2>&1;"
+            f" then less -R; else cat; echo; echo; fi"
             f"; exec {shell}"
         )
 
@@ -1290,7 +1555,11 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             click.echo(f"Review window: failed to create tmux window '{window_name}'.")
             return
 
-        claude_pane = tmux_mod.split_pane_at(diff_pane, "h", claude_cmd, background=True)
+        # Explicit cwd: without -c tmux starts the split in the calling
+        # process's cwd (the TUI's pm dir), not the PR workdir.
+        claude_pane = tmux_mod.split_pane_at(diff_pane, "h", claude_cmd,
+                                             background=True, cwd=workdir,
+                                             env=env)
 
         # Register review panes under the review window (multi-window safe).
         # Derive window ID from the pane we just created rather than
@@ -1332,6 +1601,14 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         if review_win_id:
             pane_layout.rebalance(pm_session, review_win_id)
 
+        # A sign-off REVIEW return is now being reviewed.  Cleared before
+        # the echo: a TUI that launched this and restarted meanwhile left
+        # stdout a broken pipe, and the echo's EPIPE would skip the clear
+        # while the window runs (S75), so a tick after the claim expired
+        # would launch a second --fresh review over it.
+        from pm_core.signoff import clear_return_awaiting
+        clear_return_awaiting(state_root(), pr_entry["id"], "review",
+                              session_opened=True)
         click.echo(f"Opened review window '{window_name}'")
     except Exception as e:
         _log.warning("Failed to launch review window: %s", e)
@@ -1348,8 +1625,17 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
 @click.option("--review-loop-id", default="", help="Unique review loop identifier (for commit messages)")
 @click.option("--transcript", default=None, hidden=True,
               help="Path to save Claude transcript symlink (used by auto-start)")
-def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: bool, review_iteration: int, review_loop_id: str, transcript: str | None):
+@click.option("--no-window", is_flag=True, default=False, hidden=True,
+              help="Only transition to in_review; the caller's review loop "
+                   "launches the window itself (used by auto-start)")
+def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: bool, review_iteration: int, review_loop_id: str, transcript: str | None, no_window: bool):
     """Mark a PR as in_review and launch a review window.
+
+    On a PR that is already past the review step (``qa`` / ``sign_off``) this
+    is an *inspection*: it focuses the existing review window and never
+    changes the phase, so a running QA loop / sign-off router is not
+    disturbed.  ``--fresh`` / ``--review-loop`` are refused there because they
+    would start a second agent against the in-flight phase.
 
     If PR_ID is omitted, infers from cwd (if inside a workdir) or
     auto-selects when there's exactly one in_progress PR.
@@ -1373,21 +1659,59 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
 
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
+    status = pr_entry.get("status")
+    display_id = _pr_display_id(pr_entry)
 
-    if pr_entry.get("status") == "merged":
-        click.echo(f"PR {pr_id} is already merged.", err=True)
+    if status in TERMINAL_PR_STATES:
+        if status == "closed":
+            # A closed record is retained, so name the way out here too
+            # (start/signoff/merge/qa do): reopening is the only route back
+            # into the lifecycle.
+            click.echo(_closed_reopen_hint(pr_id), err=True)
+        else:
+            click.echo(f"PR {pr_id} is already {status}.", err=True)
         raise SystemExit(1)
-    if pr_entry.get("status") == "in_review":
+    if status == "in_review":
         click.echo(f"PR {pr_id} is already in_review.")
+        if no_window:
+            return
         _launch_review_window(data, pr_entry, fresh=fresh, background=background,
                               review_loop=review_loop,
                               review_iteration=review_iteration,
                               review_loop_id=review_loop_id,
                               transcript=transcript)
         return
-    if pr_entry.get("status") == "pending":
+    if status == "pending":
         click.echo(f"PR {pr_id} is pending — start it first with: pm pr start {pr_id}", err=True)
         raise SystemExit(1)
+    if status in _REVIEW_INSPECTION_PHASES:
+        # The review step has already happened (or the PR is past it).  A
+        # plain `pm pr review` opens the earlier review for reading and must
+        # NOT write status/timestamps or start a second agent — the running
+        # QA loop / sign-off router owns the PR, and demoting it to
+        # in_review strands that phase (sign-off refuses to collect a
+        # verdict unless the PR is still sign_off).
+        phase = _REVIEW_INSPECTION_PHASES[status]
+        if fresh or review_loop:
+            click.echo(
+                f"PR {display_id} is in {phase} — a fresh review is refused "
+                f"while the PR is in this phase (it would start a second "
+                f"agent). Open the existing review window for inspection "
+                f"with: pm pr review {pr_id}", err=True)
+            raise SystemExit(1)
+        if no_window:
+            click.echo(f"PR {display_id} is in {phase} — status unchanged.")
+            return
+        focused = _focus_review_window(pr_entry)
+        if focused:
+            click.echo(
+                f"PR {display_id} is in {phase} — opened review window "
+                f"'{focused}' without changing status.")
+        else:
+            click.echo(
+                f"PR {display_id} is in {phase} — no review window to open; "
+                f"status unchanged (no new review started).")
+        return
 
     # For GitHub backend: upgrade draft PR to ready for review (before lock)
     backend_name = data["project"].get("backend", "vanilla")
@@ -1404,21 +1728,301 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         else:
             click.echo("Warning: Failed to upgrade draft PR. It may already be ready or was closed.", err=True)
 
+    blocked_at_lock: str | None = None
+
     def apply(data):
+        nonlocal blocked_at_lock
         pr = store.get_pr(data, pr_id)
-        if not pr:
+        # Upgrading the draft PR and resolving the workdir happen outside the
+        # lock; a `pm pr close`/merge landing meanwhile must win — moving a
+        # terminal record back to `in_review` would resurrect it and erase
+        # its closed_at (pr-62ad13d).  A `--remove` that deleted the record
+        # must not leave the review window opening against it either.
+        blocked_at_lock = _launch_blocked_at_lock(pr)
+        if blocked_at_lock:
             return
         pr["status"] = "in_review"
         _record_status_timestamp(pr, "in_review")
 
     store.locked_update(root, apply)
+    if blocked_at_lock:
+        _report_launch_blocked(
+            pr_id, blocked_at_lock, doing="opening the review",
+            consequence="not marked in_review and no review window was "
+                        "opened.")
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
+    if no_window:
+        return
     _launch_review_window(data, pr_entry, fresh=fresh, background=background,
                           review_loop=review_loop,
                           review_iteration=review_iteration,
                           review_loop_id=review_loop_id,
                           transcript=transcript)
+
+
+class _SignoffGroup(click.Group):
+    """Group whose unrecognized first token routes to the ``run`` subcommand.
+
+    Keeps the pre-existing surface (``pm pr signoff <pr_id> [--fresh]``)
+    working verbatim while explicit subcommands (``record``) stay reachable.
+    """
+
+    def parse_args(self, ctx, args):
+        if args and args[0] not in self.commands \
+                and args[0] not in ctx.help_option_names:
+            args = ["run", *args]
+        return super().parse_args(ctx, args)
+
+
+@pr.group("signoff", cls=_SignoffGroup, invoke_without_command=True)
+@click.pass_context
+def pr_signoff_group(ctx):
+    """Sign-off: PR-level review + verdict router; `record` approves a report."""
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(pr_signoff)
+
+
+@pr_signoff_group.command("run", hidden=True)
+@click.argument("pr_id", default=None, required=False)
+@click.option("--fresh", is_flag=True, default=False,
+              help="Kill existing sign-off window and create a new one")
+@click.option("--background", is_flag=True, default=False, hidden=True,
+              help="Create sign-off window without switching focus (auto-sequence)")
+@click.option("--transcript", default=None, hidden=True,
+              help="Path to save Claude transcript symlink (used by auto-sequence)")
+def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
+               transcript: str | None):
+    """Move a PR into sign_off and launch its sign-off window.
+
+    Sign-off is the comprehensive PR-level review + verdict router that runs
+    between QA and merge.  If PR_ID is omitted, infers from cwd or auto-selects
+    a single ``qa``/``sign_off`` PR.  A PR currently in ``qa`` (or
+    ``in_review`` when the project sets ``skip_qa``) is transitioned to
+    ``sign_off``.
+    """
+    from pm_core import signoff as signoff_mod
+
+    root = state_root()
+    data = store.load(root)
+
+    if pr_id is None:
+        pr_id = _infer_pr_id(data, status_filter=("sign_off", "qa"))
+        if pr_id is None:
+            click.echo("No qa/sign_off PR to sign off. Specify one.", err=True)
+            raise SystemExit(1)
+        click.echo(f"Auto-selected {pr_id}")
+
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+    status = pr_entry.get("status")
+
+    if status == "merged":
+        click.echo(f"PR {pr_id} is already merged.", err=True)
+        raise SystemExit(1)
+    if status == "closed":
+        # A retained closed record (pr-62ad13d) is terminal: name the way out
+        # instead of the generic "sign-off runs after QA" status complaint.
+        click.echo(_closed_reopen_hint(pr_id), err=True)
+        raise SystemExit(1)
+    # With project.skip_qa there is no QA stage: sign-off follows review.
+    entry_statuses = ("qa",)
+    if (data.get("project") or {}).get("skip_qa"):
+        entry_statuses = ("qa", "in_review")
+    if status not in entry_statuses + ("sign_off",):
+        click.echo(
+            f"PR {pr_id} is {status} — sign-off runs after QA "
+            f"(expected qa or sign_off).", err=True)
+        raise SystemExit(1)
+
+    # The transition and the launch are separated by the store lock: a
+    # `pm pr close`/merge that lands between this command's pre-lock snapshot
+    # and its apply must win.  Claiming "marked as sign_off" and opening a
+    # sign-off window against a record that has become terminal would
+    # resurrect a retired PR's phase and contradict the record
+    # (pr-62ad13d), exactly like the start/review at-lock guards.
+    blocked_at_lock: str | None = None
+    transitioned = False
+
+    def apply(d):
+        nonlocal blocked_at_lock, transitioned
+        pr = store.get_pr(d, pr_id)
+        blocked_at_lock = _launch_blocked_at_lock(pr)
+        if blocked_at_lock:
+            return
+        # Decide from the freshly loaded status, not the pre-lock snapshot:
+        # a concurrent edit may already have moved the PR to sign_off.
+        if pr.get("status") in entry_statuses:
+            pr["status"] = "sign_off"
+            _record_status_timestamp(pr, "sign_off")
+            transitioned = True
+
+    store.locked_update(root, apply)
+    if blocked_at_lock:
+        _report_launch_blocked(
+            pr_id, blocked_at_lock, doing="opening the sign-off",
+            consequence="not marked sign_off and no sign-off window was "
+                        "opened.")
+    if transitioned:
+        click.echo(f"PR {_pr_display_id(pr_entry)} marked as sign_off.")
+        trigger_tui_refresh()
+
+    from pm_core.container import ContainerError
+    try:
+        signoff_mod.launch_signoff_window(
+            data, pr_entry, fresh=fresh, background=background,
+            transcript=transcript)
+    except ContainerError as e:
+        # Like impl/review: the TUI's sign-off driver discards stdout and
+        # shows a failed launch's last stderr line, so a setup remedy
+        # printed to stdout with rc 0 was never seen (it logged "launched").
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
+
+
+@pr_signoff_group.command("record")
+@click.argument("pr_id")
+def pr_signoff_record(pr_id: str):
+    """Record reviewer approval of a PR's sign-off report.
+
+    The explicit act after reading ``report.html``: reads the verdict from
+    the report's ``pm-signoff-verdict`` meta tag and records it on
+    ``pr['signoff']`` (origin=manual) together with the report's content
+    hash and the integration check it assessed, so the merge gate passes —
+    and re-blocks if the report, HEAD or base changes afterwards. Recording
+    never changes PR status.
+    """
+    import hashlib
+
+    from pm_core import signoff as signoff_mod
+    from pm_core.behavior_report import _extract_verdict
+    from pm_core.paths import captures_root
+
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+
+    croot = captures_root()
+    report = croot / pr_id / "report.html" if croot else None
+    if report is None or not report.is_file():
+        click.echo(
+            f"PR {pr_id}: no report.html to approve — run "
+            f"`pm pr signoff {pr_id}` to generate one.", err=True)
+        raise SystemExit(1)
+    verdict = _extract_verdict(report)
+    if verdict not in signoff_mod.SIGNOFF_VERDICTS:
+        click.echo(
+            f"PR {pr_id}: report.html carries no valid pm-signoff-verdict "
+            f"meta tag — regenerate with `pm pr signoff {pr_id}`.", err=True)
+        raise SystemExit(1)
+    sha = signoff_mod.head_sha(pr_entry.get("workdir"))
+    if not sha:
+        click.echo(
+            f"PR {pr_id}: no workdir/HEAD to record the verdict against.",
+            err=True)
+        raise SystemExit(1)
+
+    # Bind the approval to the integration check the report assessed: the
+    # report names the HEAD and base it reviewed, and they must match the
+    # current HEAD and the recorded check of it.  A report without them is
+    # a legacy (HEAD-only) report.
+    from pm_core import integration
+    meta = signoff_mod.report_meta(pr_id)
+    irec = pr_entry.get("integration") or {}
+    bound = integration.binding(irec) if irec.get("head") == sha else None
+    if verdict == signoff_mod.SIGNOFF_MERGE:
+        problem = None
+        if not meta.get("head") or not meta.get("base"):
+            problem = ("report.html has no pm-signoff-head / pm-signoff-base "
+                       "meta tags (a legacy HEAD-only report)")
+        elif len(meta["head"]) < 7 or not sha.startswith(meta["head"]):
+            problem = (f"report.html reviewed HEAD {meta['head'][:12]}, but "
+                       f"HEAD is now {sha[:12]}")
+        elif not integration.valid_for(irec, sha):
+            problem = ("there is no conflict-free integration check of the "
+                       f"current HEAD ({integration.summary(irec) if irec else 'none'})")
+        elif len(meta["base"]) < 7 \
+                or not (irec.get("base_sha") or "").startswith(meta["base"]):
+            problem = (f"report.html assessed base {meta['base'][:12]}, but "
+                       f"the latest integration check is against "
+                       f"{(irec.get('base_sha') or '?')[:12]}")
+        if problem:
+            click.echo(f"PR {pr_id}: cannot record {verdict}: {problem}. "
+                       f"Regenerate with `pm pr signoff --fresh {pr_id}`.",
+                       err=True)
+            raise SystemExit(1)
+
+    # Same earliest-step routing as the driver: a conflicted integration
+    # can only go back to implementation.
+    recorded, coerced = signoff_mod.effective_verdict(verdict, irec, sha)
+    report_hash = hashlib.sha256(report.read_bytes()).hexdigest()
+    signoff_mod.record_signoff_verdict(
+        root, pr_id, recorded, sha, "manual", report_hash=report_hash,
+        integration=bound,
+        extra={"original_verdict": verdict if coerced else None,
+               "coerced_reason": coerced})
+    if coerced:
+        click.echo(f"Note: {coerced}.")
+    verdict = recorded
+    base_note = ""
+    if bound:
+        base_note = (f", base {bound.get('base_branch')}@"
+                     f"{(bound.get('base_sha') or '?')[:12]}")
+    click.echo(
+        f"Recorded sign-off verdict {verdict} for {pr_id} "
+        f"(origin=manual, report approved at sha {sha[:12]}{base_note}).")
+    trigger_tui_refresh()
+
+
+@pr_signoff_group.command("integrate")
+@click.argument("pr_id")
+@click.option("--record", is_flag=True, default=False,
+              help="Record the result on the PR (what a sign-off verdict "
+                   "binds to). Run from the base pm directory.")
+@click.option("--apply", "apply_", is_flag=True, default=False,
+              help="Merge a clean base into the PR branch (never the base).")
+def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool):
+    """Check integration with the latest base (isolated candidate).
+
+    Fetches the configured base branch from the target repository and
+    merges the PR HEAD with it in an isolated candidate — the PR worktree
+    and the base branch are untouched — and prints the result.  Read-only
+    by default (the sign-off launch records the check its verdict binds
+    to); ``--record`` stores it on the PR and in ``$CAP/integration.json``.
+    ``--apply`` then merges a *clean* result into the PR branch.  Exits 1
+    when the integration conflicts or the check fails.
+    """
+    from pm_core import integration
+
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+    if record or apply_:
+        rec = integration.check_integration(root, pr_id, data=data)
+    else:
+        rec = integration.run_check(data, pr_entry, root)
+    click.echo(f"PR {pr_id}: {integration.summary(rec)}")
+    click.echo(f"  target: {rec.get('base_branch')} of {rec.get('target_repo')}")
+    click.echo(f"  head:   {rec.get('head')}")
+    click.echo(f"  base:   {rec.get('base_sha')}")
+    if rec.get("candidate_tree"):
+        click.echo(f"  candidate tree: {rec['candidate_tree']}")
+    for label, key in (("conflicts", "conflicts"), ("changed on both sides", "overlap")):
+        if rec.get(key):
+            click.echo(f"  {label}: {', '.join(rec[key])}")
+    if apply_ and rec.get("status") == integration.CLEAN:
+        merged, err = integration.apply_integration(root, pr_id, rec)
+        if err:
+            click.echo(f"Not applied: {err}", err=True)
+            raise SystemExit(1)
+        click.echo(f"Merged {rec.get('base_branch')}@{rec['base_sha'][:12]} "
+                   f"into the PR branch as {merged[:12]}.")
+    if record or apply_:
+        trigger_tui_refresh()
+    if rec.get("status") not in integration.MERGEABLE:
+        raise SystemExit(1)
 
 
 def _finalize_merge(root, pr_entry: dict, pr_id: str,
@@ -1432,7 +2036,6 @@ def _finalize_merge(root, pr_entry: dict, pr_id: str,
         _record_status_timestamp(pr, "merged")
 
     data = store.locked_update(root, apply)
-    click.echo(f"PR {_pr_display_id(pr_entry)} marked as merged.")
     trigger_tui_refresh()
 
     # Kill tmux windows for the merged PR (they're inaccessible from the TUI)
@@ -1448,35 +2051,41 @@ def _finalize_merge(root, pr_entry: dict, pr_id: str,
     if transcript:
         finalize_transcript(Path(transcript))
 
-    # Show newly unblocked PRs
+    # Show newly unblocked PRs.  The merged line goes last: the TUI's ``g``
+    # log line shows only the final stdout line, so it names just the PRs
+    # this merge unblocked (``ready`` also holds every dependency-free
+    # pending PR).
     prs = data.get("prs") or []
     ready = graph.ready_prs(prs)
+    unblocked = [p for p in ready if pr_id in (p.get("depends_on") or [])]
+    merged = f"PR {_pr_display_id(pr_entry)} marked as merged"
     if ready:
-        click.echo("\nNewly ready PRs:")
+        click.echo("Newly ready PRs:")
         for p in ready:
             click.echo(f"  ⏳ {_pr_display_id(p)}: {p.get('title', '???')}")
+    if unblocked:
+        click.echo(f"{merged} (newly ready: "
+                   f"{', '.join(_pr_display_id(p) for p in unblocked)}).")
+    else:
+        click.echo(f"{merged}.")
 
 
 def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
                          background: bool = False,
                          transcript: str | None = None,
                          cwd: str | None = None,
-                         companion: bool = False,
-                         pull_from_workdir: str | None = None,
-                         pull_from_origin: bool = False) -> None:
-    """Launch a tmux window with Claude to resolve a merge conflict.
+                         companion: bool = False) -> None:
+    """Launch a tmux window with Claude to update the main repo after a merge.
+
+    Post-merge recovery only (the merge was already published): the merge
+    step never launches a conflict-resolution session (pr-ac10f03).
 
     Args:
-        cwd: Directory to run the merge resolution in.  Defaults to the
-             PR's workdir when *None*.
+        cwd: Directory to run the recovery in (the main repo).  Defaults to
+             the PR's workdir when *None*.
         companion: If True (or the ``companion-pane`` global setting is
                    enabled), a companion shell pane is opened alongside
                    the Claude pane.
-        pull_from_workdir: When set, this is a pull-from-workdir failure
-             (local backend).  The value is the workdir path containing
-             the merged branch.
-        pull_from_origin: When True, this is a pull-from-origin failure
-             (vanilla/github backend).
     """
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
         click.echo("Merge window requires tmux.")
@@ -1505,25 +2114,26 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     display_id = _pr_display_id(pr_entry)
 
     # Resolve model/provider for merge session
-    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
+    from pm_core.model_config import resolve_model_and_provider
     _resolution = resolve_model_and_provider(
         "merge",
-        pr_model=get_pr_model_override(pr_entry),
+        pr_entry=pr_entry,
         project_data=data,
     )
 
     merge_prompt = prompt_gen.generate_merge_prompt(
-        data, pr_id, error_output, session_name=pm_session,
-        pull_from_workdir=pull_from_workdir,
-        pull_from_origin=pull_from_origin,
-    )
+        data, pr_id, error_output, session_name=pm_session)
+    env: dict[str, str] = {}
     claude_cmd = build_claude_shell_cmd(prompt=merge_prompt,
                                          transcript=transcript, cwd=workdir,
                                          model=_resolution.model,
                                          provider=_resolution.provider,
-                                         effort=_resolution.effort)
-    # Merge runs on the host — it needs to push to master and modify the
-    # main repo, which the branch-scoped push proxy would block.
+                                         effort=_resolution.effort,
+                                         session_tag=pm_session.removeprefix("pm-"),
+                                         session_type="merge",
+                                         env_out=env)
+    # Runs on the host — it updates the main repo checkout, which the
+    # branch-scoped container push proxy is not set up for.
     window_name = f"merge-{display_id}"
 
     # No-op if a merge window is already running for this PR
@@ -1540,7 +2150,7 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         if use_companion:
             claude_pane = tmux_mod.new_window_get_pane(
                 pm_session, window_name, claude_cmd, workdir,
-                switch=not background,
+                switch=not background, env=env,
             )
             if claude_pane:
                 win = tmux_mod.find_window_by_name(pm_session, window_name)
@@ -1549,9 +2159,17 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         else:
             tmux_mod.new_window(
                 pm_session, window_name, claude_cmd, workdir,
-                switch=not background,
+                switch=not background, env=env,
             )
-        click.echo(f"Opened merge resolution window '{window_name}'")
+        click.echo(f"Opened repo-update window '{window_name}'")
+        # The vanilla/GitHub pull-from-origin window resolves in the project
+        # root, which pm does not auto-trust (pr-19990de): say why the
+        # window is waiting.
+        from pm_core.workspace_trust import approved_path
+        if not approved_path(workdir):
+            click.echo(f"  {workdir} is not an approved workspace: answer "
+                       f"Claude's trust prompt in '{window_name}' (or run "
+                       f"`pm trust add {workdir}` before merging).")
     except Exception as e:
         _log.warning("Failed to launch merge window: %s", e)
         click.echo(f"Merge window error: {e}")
@@ -1614,10 +2232,10 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
         if resolve_window:
             _launch_merge_window(data, pr_entry, error_msg,
                                  background=background, transcript=transcript,
-                                 cwd=repo_dir, companion=companion,
-                                 pull_from_origin=True)
+                                 cwd=repo_dir, companion=companion)
             return False
-        click.echo("Resolve conflicts manually, then re-run 'pm pr merge' to finalize.", err=True)
+        click.echo("Resolve this manually, then run 'pm pr merge "
+                   f"--propagation-only {pr_entry['id']}' to finalize.", err=True)
         return False
 
     if stash_info:
@@ -1626,100 +2244,490 @@ def _pull_after_merge(data: dict, pr_entry: dict, repo_dir: str,
     return True
 
 
-def _pull_from_workdir(data: dict, pr_entry: dict, repo_dir: str,
-                       workdir: str, base_branch: str,
-                       resolve_window: bool, background: bool,
-                       transcript: str | None,
-                       companion: bool = False) -> bool:
-    """Pull merged base branch from a workdir into the main repo.
+# --- Publishing an approved merge (pr-ac10f03) -----------------------------
+# ``pm pr merge`` only publishes the exact candidate sign-off approved: the
+# merge of the approved PR HEAD with the approved base revision, whose tree
+# the integration check computed.  It re-fetches the base and recomputes the
+# candidate first, builds the merge commit from the approved tree (no
+# worktree merge, so no conflict can arise and none is ever resolved here),
+# and publishes with a compare-and-swap on the base revision.  Anything that
+# no longer matches invalidates the approval and returns the PR to sign-off.
 
-    For local backend where origin is a non-bare repo with the base branch
-    checked out, ``git push`` fails.  Instead we fetch from the workdir and
-    fast-forward the base branch in the main repo.
 
-    Returns True if successful (caller should finalize), False if a merge
-    window was launched or the update failed.
+@contextlib.contextmanager
+def _publish_lock(data: dict):
+    """Serialize pm publications into one repository (across PRs)."""
+    import fcntl
+    from pm_core.paths import workdirs_base
+    repo_id = data["project"].get("repo_id", "")
+    path = workdirs_base() / f".publish-{repo_id}.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        try:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            # Say why the command is silent (another PR's publish can take
+            # a while: fetches, gh merge retries).
+            click.echo("Waiting for another merge into this repository "
+                       "to finish...")
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        yield
+
+
+def _return_to_signoff(root: Path, pr_entry: dict, reason: str):
+    """Refuse a stale merge: invalidate the approval, exit non-zero.
+
+    The sign-off driver (TUI auto-start / ``pm pr auto-sequence``) sees the
+    invalidated record and re-runs sign-off against the current base; a
+    manual flow re-runs ``pm pr signoff``.
     """
-    repo_path = Path(repo_dir)
+    from pm_core import signoff as signoff_mod
+    pr_id = pr_entry["id"]
+    signoff_mod.invalidate_signoff(root, pr_id, reason)
+    trigger_tui_refresh()
+    click.echo(f"PR {pr_id}: merge refused — {reason}. The sign-off "
+               f"approval no longer matches; returned to sign-off "
+               f"(`pm pr signoff --fresh {pr_id}` if no driver re-runs it).",
+               err=True)
+    raise SystemExit(1)
 
-    # Check what branch is checked out in the repo
-    head_result = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD",
-                                  cwd=repo_dir, check=False)
-    current = head_result.stdout.strip() if head_result.returncode == 0 else ""
 
+def _ref(cwd, ref: str) -> str | None:
+    r = git_ops.run_git("rev-parse", "-q", "--verify", ref, cwd=cwd, check=False)
+    return (r.stdout.strip() or None) if r.returncode == 0 else None
+
+
+def _after_publish(root: Path, data: dict, pr_entry: dict, transcript) -> None:
+    _finalize_merge(root, pr_entry, pr_entry["id"], transcript=transcript)
+    # Restart TUI when managing the project_manager repo itself, so it
+    # picks up the latest pm code.
+    repo = data.get("project", {}).get("repo", "")
+    if "project_manager" in repo or "project-manager" in repo:
+        trigger_tui_restart()
+
+
+def _publish_approved(data: dict, root: Path, pr_entry: dict,
+                      backend_name: str, base_branch: str,
+                      workdir: str, *, resolve_window: bool,
+                      background: bool, transcript: str | None,
+                      companion: bool) -> None:
+    """Re-validate the approved candidate and publish it (see above)."""
+    from pm_core import integration
+
+    pr_id = pr_entry["id"]
+    approved = pr_entry["signoff"]
+    bound = approved["integration"]
+    head = approved["sha"]
+    target_repo, _ = integration.target_for(data, pr_entry, root)
+    if bound.get("target_repo") and not integration.same_target(
+            target_repo, bound["target_repo"]):
+        _return_to_signoff(
+            root, pr_entry, f"target repository changed "
+            f"({bound['target_repo']} -> {target_repo})")
+
+    published = False
+    with _publish_lock(data):
+        click.echo(f"Checking {base_branch} of {target_repo}...")
+        base_sha, err = integration.fetch_base(workdir, target_repo, base_branch)
+        if err:
+            click.echo(f"PR {pr_id}: cannot verify the base: {err}", err=True)
+            raise SystemExit(1)
+        if base_sha != bound["base_sha"] \
+                and integration.is_ancestor(workdir, head, base_sha):
+            # The approved head is already in the base: an earlier run
+            # published it but did not finish (main-repo update failed, or
+            # it was interrupted).  Finalize it below; refusing would send a
+            # merged PR back to sign-off, whose check can only BLOCK it.
+            published = True
+        elif base_sha != bound["base_sha"]:
+            _return_to_signoff(
+                root, pr_entry, f"{base_branch} moved since sign-off "
+                f"({bound['base_sha'][:12]} -> {base_sha[:12]})")
+        else:
+            _publish_candidate(data, root, pr_entry, backend_name, workdir,
+                               target_repo, base_branch, base_sha, head,
+                               bound)
+
+    if published:
+        _recover_completed_merge(
+            data, root, pr_entry, backend_name, base_branch,
+            resolve_window=resolve_window, background=background,
+            transcript=transcript, companion=companion)
+    elif backend_name == "local":
+        _after_publish(root, data, pr_entry, transcript)
+    else:
+        _sync_main_repo_and_finalize(data, root, pr_entry, base_branch,
+                                     resolve_window=resolve_window,
+                                     background=background,
+                                     transcript=transcript,
+                                     companion=companion)
+
+
+def _publish_candidate(data: dict, root: Path, pr_entry: dict,
+                       backend_name: str, workdir: str, target_repo: str,
+                       base_branch: str, base_sha: str, head: str,
+                       bound: dict) -> None:
+    """Recompute the candidate against the (unchanged) base and publish it.
+
+    Called under the publish lock.  Refuses (back to sign-off) when the
+    candidate no longer matches the approved tree.
+    """
+    from pm_core import integration
+    pr_id = pr_entry["id"]
+    branch = pr_entry.get("branch", "")
+    cand = integration.compute_candidate(workdir, head, base_sha)
+    if cand.get("status") not in integration.MERGEABLE \
+            or cand.get("candidate_tree") != bound["candidate_tree"]:
+        _return_to_signoff(
+            root, pr_entry, "the integration candidate no longer matches "
+            f"the approved one ({integration.summary(dict(cand, base_branch=base_branch, base_sha=base_sha))})")
+
+    if backend_name == "github":
+        _publish_github(root, pr_entry, workdir, target_repo, base_branch,
+                        base_sha, head, bound)
+        return
+    msg = f"Merge {branch}: {pr_entry.get('title', pr_id)}"
+    merge_sha, err = integration.build_merge_commit(
+        workdir, bound["candidate_tree"], base_sha, head, msg)
+    if err:
+        click.echo(f"PR {pr_id}: {err}", err=True)
+        raise SystemExit(1)
+    click.echo(f"Merging {branch} into {base_branch} "
+               f"({head[:12]} + {base_sha[:12]} -> {merge_sha[:12]})...")
+    if backend_name == "local":
+        _publish_local(data, root, pr_entry, workdir, base_branch,
+                       base_sha, merge_sha)
+    else:
+        _publish_vanilla(root, pr_entry, workdir, target_repo,
+                         base_branch, base_sha, merge_sha)
+
+
+def _sync_main_repo_and_finalize(data: dict, root: Path, pr_entry: dict,
+                                 base_branch: str, *, resolve_window: bool,
+                                 background: bool, transcript: str | None,
+                                 companion: bool) -> None:
+    """Remote backends, after publication: update the main repo checkout
+    from origin, then mark the PR merged.
+
+    Post-merge recovery only — a failed update opens the pull window (which
+    never publishes code) or, without one, exits 1; ``pm pr merge
+    --propagation-only`` finalizes once the checkout is fixed.
+    """
+    repo_dir = str(_resolve_repo_dir(root, data))
+    if _pull_after_merge(data, pr_entry, repo_dir, base_branch,
+                         resolve_window=resolve_window, background=background,
+                         transcript=transcript, companion=companion):
+        _after_publish(root, data, pr_entry, transcript)
+    elif not resolve_window:
+        raise SystemExit(1)
+
+
+def _publish_local(data: dict, root: Path, pr_entry: dict, workdir: str,
+                   base_branch: str, base_sha: str, merge_sha: str) -> None:
+    """Fast-forward the main repo's base from *base_sha* to *merge_sha*.
+
+    Compare-and-swap: refused (back to sign-off) unless the base is still
+    *base_sha*.  Uncommitted work in the main repo is tolerated (stashed
+    around an overlapping fast-forward and restored); it is never reset.
+    """
+    from pm_core import integration
+    pr_id = pr_entry["id"]
+    repo_dir = str(_resolve_repo_dir(root, data))
+    ref = f"refs/pm/merge/{pr_id}"
+    git_ops.run_git("update-ref", ref, merge_sha, cwd=workdir, check=False)
+    # Into the same private ref on the main repo side, not FETCH_HEAD: a
+    # concurrent fetch there (a user, an agent) would overwrite FETCH_HEAD.
+    fetch = git_ops.run_git("fetch", "--no-tags", workdir, f"+{ref}:{ref}",
+                            cwd=repo_dir, check=False)
+    git_ops.run_git("update-ref", "-d", ref, cwd=workdir, check=False)
+    fetched = _ref(repo_dir, ref)
+    # The merge commit stays reachable from the base once published; the
+    # private ref is not needed after this check.
+    git_ops.run_git("update-ref", "-d", ref, cwd=repo_dir, check=False)
+    if fetch.returncode != 0 or fetched != merge_sha:
+        click.echo(f"PR {pr_id}: could not fetch the merge commit into "
+                   f"{repo_dir}: {git_ops.git_detail(fetch)}", err=True)
+        raise SystemExit(1)
+    current = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD",
+                              cwd=repo_dir, check=False).stdout.strip()
+    if _ref(repo_dir, f"refs/heads/{base_branch}") != base_sha:
+        _return_to_signoff(root, pr_entry,
+                           f"{base_branch} in {repo_dir} moved during the merge")
     if current != base_branch:
-        # Not on base branch — update just the ref (no working-tree changes)
-        click.echo(f"Repo is on '{current}', updating {base_branch} ref...")
-        fetch_r = git_ops.run_git(
-            "fetch", workdir, f"{base_branch}:{base_branch}",
-            cwd=repo_dir, check=False,
-        )
-        if fetch_r.returncode == 0:
-            click.echo(f"Updated {base_branch} in repo.")
-            return True
-        error_msg = (f"Could not update {base_branch} ref: "
-                     f"{fetch_r.stderr.strip()}")
-        click.echo(error_msg, err=True)
-        if resolve_window:
-            _launch_merge_window(data, pr_entry, error_msg,
-                                 background=background, transcript=transcript,
-                                 cwd=repo_dir, companion=companion,
-                                 pull_from_workdir=workdir)
-            return False
-        click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
-        return False
-
-    # On base branch — need to update the working tree too.
-    # Dirty files are tolerated; git merge --ff-only succeeds when they
-    # don't overlap with the incoming changes.
-    pr_display = _pr_display_id(pr_entry)
-
-    fetch_r = git_ops.run_git("fetch", workdir, base_branch,
-                              cwd=repo_dir, check=False)
-    if fetch_r.returncode != 0:
-        error_msg = f"Fetch from workdir failed: {fetch_r.stderr.strip()}"
-        click.echo(error_msg, err=True)
-        if resolve_window:
-            _launch_merge_window(data, pr_entry, error_msg,
-                                 background=background, transcript=transcript,
-                                 cwd=repo_dir, companion=companion,
-                                 pull_from_workdir=workdir)
-            return False
-        click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
-        return False
-
-    merge_r = git_ops.run_git("merge", "--ff-only", "FETCH_HEAD",
-                              cwd=repo_dir, check=False)
-
-    # If merge failed due to dirty-file overlap, stash and retry
-    stash_info = None
-    if merge_r.returncode != 0 and _is_dirty_overlap_error(merge_r):
-        stash_info = _stash_for_merge(repo_path, pr_display)
-        if stash_info:
-            merge_r = git_ops.run_git("merge", "--ff-only", "FETCH_HEAD",
-                                      cwd=repo_dir, check=False)
-
-    if merge_r.returncode != 0:
+        upd = git_ops.run_git("update-ref", f"refs/heads/{base_branch}",
+                              merge_sha, base_sha, cwd=repo_dir, check=False)
+        if upd.returncode != 0:
+            _return_to_signoff(root, pr_entry,
+                               f"{base_branch} in {repo_dir} moved during "
+                               f"the merge ({git_ops.git_detail(upd)})")
+    else:
+        repo_path = Path(repo_dir)
+        merge_r = git_ops.run_git("merge", "--ff-only", merge_sha,
+                                  cwd=repo_dir, check=False)
+        stash_info = None
+        if merge_r.returncode != 0 and _is_dirty_overlap_error(merge_r):
+            stash_info = _stash_for_merge(repo_path, _pr_display_id(pr_entry))
+            if stash_info:
+                merge_r = git_ops.run_git("merge", "--ff-only", merge_sha,
+                                          cwd=repo_dir, check=False)
         if stash_info:
             _unstash_after_merge(repo_path, stash_info)
-        error_detail = (merge_r.stdout.strip() + "\n"
-                        + merge_r.stderr.strip()).strip()
-        error_msg = f"Fast-forward of {base_branch} failed:\n{error_detail}"
-        click.echo(error_msg, err=True)
-        if resolve_window:
-            _launch_merge_window(data, pr_entry, error_msg,
-                                 background=background, transcript=transcript,
-                                 cwd=repo_dir, companion=companion,
-                                 pull_from_workdir=workdir)
-            return False
-        click.echo("Pull manually when ready, then re-run 'pm pr merge'.", err=True)
-        return False
-
-    if stash_info:
-        _unstash_after_merge(repo_path, stash_info)
+        if merge_r.returncode != 0 and _ref(
+                repo_dir, f"refs/heads/{base_branch}") != base_sha:
+            # A commit landed on the checked-out base after the CAS check.
+            _return_to_signoff(root, pr_entry,
+                               f"{base_branch} in {repo_dir} moved during "
+                               f"the merge")
+        if merge_r.returncode != 0:
+            click.echo(f"Fast-forward of {base_branch} in {repo_dir} failed:\n"
+                       f"{git_ops.git_detail(merge_r)}\n"
+                       f"Nothing in {repo_dir} was "
+                       f"reset or discarded. Fix this there, then re-run "
+                       f"'pm pr merge {pr_id}'.", err=True)
+            raise SystemExit(1)
     click.echo(f"Updated {base_branch} in repo.")
+    # Keep the workdir's own base ref current when that is a fast-forward.
+    old = _ref(workdir, f"refs/heads/{base_branch}")
+    wd_head = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD",
+                              cwd=workdir, check=False).stdout.strip()
+    if wd_head != base_branch and (
+            old is None or integration.is_ancestor(workdir, old, merge_sha)):
+        git_ops.run_git("update-ref", f"refs/heads/{base_branch}", merge_sha,
+                        cwd=workdir, check=False)
 
-    return True
+
+def _publish_vanilla(root: Path, pr_entry: dict, workdir: str,
+                     target_repo: str, base_branch: str, base_sha: str,
+                     merge_sha: str) -> None:
+    """Push *merge_sha* to the target's base with a lease on *base_sha*.
+
+    ``--force-with-lease`` with an explicit expected value is an atomic
+    compare-and-swap on the remote ref: a base update racing with this push
+    rejects it, and the PR returns to sign-off.  Pushes to the fetch URL
+    only (origin's push URLs may fan out to the local source checkout).
+    """
+    from pm_core import integration
+    pr_id = pr_entry["id"]
+    push = git_ops.run_git(
+        "push", "--porcelain", target_repo,
+        f"{merge_sha}:refs/heads/{base_branch}",
+        f"--force-with-lease=refs/heads/{base_branch}:{base_sha}",
+        cwd=workdir, check=False)
+    if push.returncode != 0:
+        now = integration.remote_ref(workdir, target_repo,
+                                     f"refs/heads/{base_branch}")
+        if now is not None and now != base_sha:
+            _return_to_signoff(root, pr_entry,
+                               f"{base_branch} moved during the merge "
+                               f"({base_sha[:12]} -> {now[:12]})")
+        click.echo(f"Push to {target_repo} failed: "
+                   f"{git_ops.git_detail(push)}\n"
+                   f"Nothing was published; re-run 'pm pr merge {pr_id}'.",
+                   err=True)
+        raise SystemExit(1)
+    click.echo(f"Pushed merged {base_branch} to origin.")
+
+
+# Waits between ``gh pr merge`` retries after pushing the approved head.
+_GH_HEAD_SYNC_RETRY_DELAYS = (1.0, 2.0, 3.0)
+
+
+def _publish_github(root: Path, pr_entry: dict, workdir: str,
+                    target_repo: str, base_branch: str, base_sha: str,
+                    head: str, bound: dict) -> None:
+    """Merge on GitHub (GitHub stays the merger), pinned to the approved head.
+
+    The remote PR branch is fast-forwarded to the approved HEAD when behind,
+    the base is re-checked right before ``gh pr merge --match-head-commit``
+    (GitHub refuses if the PR head moved).  GitHub offers no base-revision
+    precondition, so a base update landing between that check and GitHub's
+    merge is detected afterwards (first parent / tree of the merge commit)
+    and recorded on ``pr["merge_integrity"]``.
+    """
+    from pm_core import gh_ops, integration
+    from pm_core.paths import fake_github_active
+    pr_id = pr_entry["id"]
+    branch = pr_entry.get("branch", "")
+    gh_pr_number = pr_entry.get("gh_pr_number")
+    gh_usable = bool(shutil.which("gh")) or fake_github_active()
+    if not (gh_pr_number and gh_usable):
+        gh_pr = pr_entry.get("gh_pr")
+        if gh_pr:
+            click.echo(f"GitHub PR: {gh_pr}")
+            click.echo("Merge via GitHub, then run 'pm pr sync' to detect it.",
+                       err=True)
+        else:
+            click.echo("No GitHub PR URL found. Merge manually on GitHub, "
+                       "then run 'pm pr sync'.", err=True)
+        raise SystemExit(1)
+
+    remote_head = integration.remote_ref(workdir, target_repo,
+                                         f"refs/heads/{branch}")
+    pushed = False
+    if remote_head != head:
+        if remote_head and not integration.is_ancestor(
+                workdir, remote_head, head):
+            # Not an invalidation: re-signing the workdir HEAD cannot cover
+            # commits it lacks, so the driver would re-run sign-off and hit
+            # this refusal forever.  Once they are pulled into the workdir,
+            # the moved HEAD makes the approval stale on its own.
+            click.echo(
+                f"PR {pr_id}: merge refused — the remote PR branch has "
+                f"commits that were not signed off ({remote_head[:12]}). "
+                f"Bring them into the PR workdir (or remove them from "
+                f"{branch}); the changed HEAD then gets a fresh sign-off.",
+                err=True)
+            raise SystemExit(1)
+        lease = f"--force-with-lease=refs/heads/{branch}:{remote_head or ''}"
+        push = git_ops.run_git("push", target_repo,
+                               f"{head}:refs/heads/{branch}", lease,
+                               cwd=workdir, check=False)
+        if push.returncode != 0:
+            click.echo(f"Could not push the approved head to {branch}: "
+                       f"{git_ops.git_detail(push)}", err=True)
+            raise SystemExit(1)
+        click.echo(f"Pushed approved head {head[:12]} to {branch}.")
+        pushed = True
+    now = integration.remote_ref(workdir, target_repo, f"refs/heads/{base_branch}")
+    if now is None:
+        # Unknown is not "moved": keep the approval, publish nothing.
+        click.echo(f"PR {pr_id}: cannot read {base_branch} of {target_repo}; "
+                   f"nothing was merged. Re-run 'pm pr merge {pr_id}'.",
+                   err=True)
+        raise SystemExit(1)
+    if now != base_sha:
+        _return_to_signoff(root, pr_entry, f"{base_branch} moved during the "
+                           f"merge ({base_sha[:12]} -> {now[:12]})")
+
+    click.echo(f"Merging GitHub PR #{gh_pr_number} via gh CLI...")
+    merge_result = gh_ops.merge_pr(workdir, gh_pr_number, match_head_commit=head)
+    # GitHub updates a PR's head asynchronously after a push, so right after
+    # pushing the approved head --match-head-commit can still see the old
+    # one ("Head branch was modified").  Retry briefly — bounded, as the TUI
+    # runs this synchronously — while the PR is unmerged and the base holds.
+    for delay in (_GH_HEAD_SYNC_RETRY_DELAYS if pushed else ()):
+        if merge_result.returncode == 0 \
+                or gh_ops.is_pr_merged(workdir, branch) \
+                or integration.remote_ref(
+                    workdir, target_repo,
+                    f"refs/heads/{base_branch}") != base_sha:
+            break
+        time.sleep(delay)
+        merge_result = gh_ops.merge_pr(workdir, gh_pr_number,
+                                       match_head_commit=head)
+    if merge_result.returncode != 0:
+        if gh_ops.is_pr_merged(workdir, branch):
+            # Merged by someone else (or a retried call): still check that
+            # what landed is the approved candidate.
+            click.echo(f"GitHub PR #{gh_pr_number} is already merged.")
+            _verify_github_merge(root, pr_entry, workdir, target_repo,
+                                 base_branch, base_sha, head, bound)
+        else:
+            stderr = (merge_result.stderr or "").strip()
+            now = integration.remote_ref(workdir, target_repo,
+                                         f"refs/heads/{base_branch}")
+            if now is not None and now != base_sha:
+                _return_to_signoff(root, pr_entry,
+                                   f"{base_branch} moved during the merge")
+            click.echo(f"gh pr merge failed: {stderr}\nNothing was merged; "
+                       f"the merge step never resolves conflicts. Re-run "
+                       f"`pm pr signoff --fresh {pr_id}` if the PR changed.",
+                       err=True)
+            raise SystemExit(1)
+    else:
+        click.echo(f"GitHub PR #{gh_pr_number} merged.")
+        _verify_github_merge(root, pr_entry, workdir, target_repo,
+                             base_branch, base_sha, head, bound)
+
+
+def _verify_github_merge(root: Path, pr_entry: dict, workdir: str,
+                         target_repo: str, base_branch: str, base_sha: str,
+                         head: str, bound: dict) -> None:
+    """Check GitHub's merge commit is the approved candidate; record if not.
+
+    The check itself lives in :mod:`pm_core.merge_integrity` so the sync paths
+    (TUI background/startup, ``pm pr sync``) verify discovered merges exactly
+    as the publisher does.  Recording happens here, under the store lock.
+    """
+    pr_id = pr_entry["id"]
+    result = merge_integrity.verify_github_merge(
+        pr_id, workdir, target_repo, base_branch, base_sha, head, bound)
+    if result.error:
+        click.echo(f"WARNING: could not verify GitHub's merge of {pr_id}: "
+                   f"{result.error}.", err=True)
+        return
+    if result.problem is None:
+        return
+
+    # Recorded and noted on the PR (notes reach every later session and
+    # `pm pr note list`), not only printed.  Verification re-runs on every
+    # recovery (--propagation-only after a repo-update window, a repeated
+    # --no-signoff-check): note a given problem once.
+    def _apply(d):
+        p = store.get_pr(d, pr_id)
+        if p is not None:
+            merge_integrity.apply_to_pr(p, result)
+
+    store.locked_update(root, _apply)
+    click.echo(f"WARNING: {result.problem}.", err=True)
+
+
+def _recover_completed_merge(data: dict, root: Path, pr_entry: dict,
+                             backend_name: str, base_branch: str, *,
+                             resolve_window: bool, background: bool,
+                             transcript: str | None, companion: bool) -> None:
+    """``--no-signoff-check`` / ``--propagation-only``: finalize a merge that
+    is already published; refuse to publish anything new."""
+    from pm_core import gh_ops, integration
+    pr_id = pr_entry["id"]
+    branch = pr_entry.get("branch", "")
+    repo_dir = str(_resolve_repo_dir(root, data))
+    workdir = pr_entry.get("workdir")
+    if not workdir or not Path(workdir).exists():
+        workdir = None
+    # The PR's revision: the workdir HEAD, else the branch in the main repo.
+    head = _ref(workdir, "HEAD") if workdir else (
+        _ref(repo_dir, f"refs/heads/{branch}") if branch else None)
+    cwd = workdir or repo_dir
+
+    merged = False
+    if backend_name == "local":
+        merged = bool(head) and integration.is_ancestor(
+            repo_dir, head, f"refs/heads/{base_branch}")
+    else:
+        if head:
+            # From the main repo when the workdir is gone (the target then
+            # falls back to the project's repo URL).
+            target_repo, _ = integration.target_for(data, pr_entry, root)
+            tip, _err = integration.fetch_base(cwd, target_repo, base_branch)
+            merged = bool(tip) and integration.is_ancestor(cwd, head, tip)
+        if not merged and backend_name == "github" and branch:
+            merged = gh_ops.is_pr_merged(cwd, branch)
+    if not merged:
+        click.echo(
+            f"PR {pr_id}: --no-signoff-check / --propagation-only only "
+            f"recover an already-completed merge, and {pr_id}'s HEAD is not "
+            f"in {base_branch} yet. Merge it through sign-off: `pm pr "
+            f"signoff {pr_id}`, then `pm pr merge {pr_id}`.", err=True)
+        raise SystemExit(1)
+    click.echo(f"PR {pr_id} is already in {base_branch}; recovering.")
+    if backend_name == "local":
+        _after_publish(root, data, pr_entry, transcript)
+        return
+    if backend_name == "github":
+        # A merge done on GitHub (by someone else) is checked against the
+        # signed-off candidate like one pm made: a different head or base is
+        # recorded on merge_integrity, not accepted silently.
+        candidate = merge_integrity.approved_candidate(pr_entry)
+        if candidate:
+            head, bound = candidate
+            target_repo, _ = integration.target_for(data, pr_entry, root)
+            _verify_github_merge(root, pr_entry, cwd, target_repo,
+                                 base_branch, bound["base_sha"], head, bound)
+    _sync_main_repo_and_finalize(data, root, pr_entry, base_branch,
+                                 resolve_window=resolve_window,
+                                 background=background,
+                                 transcript=transcript, companion=companion)
 
 
 @pr.command("qa")
@@ -1754,6 +2762,12 @@ def pr_qa(pr_id: str | None):
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
+    if pr_entry.get("status") == "closed":
+        # A retained closed record (pr-62ad13d) is terminal for QA as well, so
+        # name the way out like start/review/signoff/merge do rather than
+        # answering with the generic "QA requires ..." status complaint.
+        click.echo(_closed_reopen_hint(pr_id), err=True)
+        raise SystemExit(1)
     if pr_entry.get("status") not in ("in_progress", "in_review", "qa"):
         click.echo(f"PR {pr_id} has status '{pr_entry.get('status')}' — QA requires in_progress, in_review, or qa.", err=True)
         raise SystemExit(1)
@@ -1788,22 +2802,33 @@ def _resolve_window_default() -> bool:
 @click.argument("pr_id", default=None, required=False)
 @click.option("--resolve-window/--no-resolve-window", "resolve_window",
               default=None, hidden=True,
-              help="On merge conflict, launch a Claude resolution window instead of exiting")
+              help="If updating the main repo after the merge fails, launch a "
+                   "Claude recovery window instead of exiting")
 @click.option("--background", is_flag=True, default=False, hidden=True,
               help="Create merge window without switching focus (used by auto-start)")
 @click.option("--transcript", default=None, hidden=True,
               help="Path to save Claude transcript symlink (used by auto-start)")
 @click.option("--companion", is_flag=True, default=False,
-              help="Open a companion shell pane alongside the merge resolution window")
+              help="Open a companion shell pane alongside the post-merge repo-update window")
 @click.option("--propagation-only", is_flag=True, default=False, hidden=True,
-              help="Skip workdir merge, go straight to pull into repo dir (step 2)")
+              help="Recovery: finalize an already-published merge (update "
+                   "the main repo, mark merged)")
+@click.option("--no-signoff-check", is_flag=True, default=False,
+              help="Recovery only: finalize a merge that is already in the "
+                   "base branch. Never publishes unapproved code.")
 def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
-             transcript: str | None, companion: bool, propagation_only: bool):
-    """Merge a PR's branch into the base branch.
+             transcript: str | None, companion: bool, propagation_only: bool,
+             no_signoff_check: bool):
+    """Publish a signed-off PR into the base branch.
 
-    For local/vanilla backends, performs a local git merge.
-    For GitHub backend, merges via gh CLI if available, otherwise
-    directs the user to merge on GitHub manually.
+    Requires a fresh SIGNOFF_MERGE bound to the current PR HEAD and to a
+    conflict-free integration with the configured base.  Re-fetches the base
+    and recomputes the candidate; if the PR or base moved (including during
+    publication) the merge is refused and the PR returns to sign-off.  The
+    merge never resolves conflicts.  Local backend: fast-forwards the main
+    repo's base to the approved merge commit; vanilla: pushes it with a
+    lease on the approved base revision; GitHub: ``gh pr merge
+    --match-head-commit`` (or directs the user to merge on GitHub).
     If PR_ID is omitted, infers from cwd or auto-selects.
     """
     if resolve_window is None:
@@ -1812,9 +2837,9 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     data = store.load(root)
 
     if pr_id is None:
-        pr_id = _infer_pr_id(data, status_filter=("in_review",))
+        pr_id = _infer_pr_id(data, status_filter=("sign_off", "in_review"))
         if pr_id is None:
-            click.echo("No in_review PR to merge.", err=True)
+            click.echo("No sign_off/in_review PR to merge.", err=True)
             raise SystemExit(1)
         click.echo(f"Auto-selected {pr_id}")
 
@@ -1828,220 +2853,86 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
         click.echo(f"PR {pr_id} is pending — start and review it first.", err=True)
         raise SystemExit(1)
 
-    backend_name = data["project"].get("backend", "vanilla")
-    base_branch = data["project"].get("base_branch", "master")
-    branch = pr_entry.get("branch", "")
-
-    if backend_name == "github":
-        gh_pr_number = pr_entry.get("gh_pr_number")
-        workdir = pr_entry.get("workdir")
-        if workdir and not Path(workdir).exists():
-            workdir = _ensure_workdir(data, pr_entry, root)
-        if gh_pr_number and workdir and Path(workdir).exists() and shutil.which("gh"):
-            gh_merged = False
-
-            if propagation_only:
-                # Step 2: skip gh pr merge, go straight to pull into repo dir
-                click.echo(f"Propagation only: skipping gh pr merge for #{gh_pr_number}")
-                gh_merged = True
-            else:
-                click.echo(f"Merging GitHub PR #{gh_pr_number} via gh CLI...")
-                merge_result = subprocess.run(
-                    ["gh", "pr", "merge", str(gh_pr_number), "--merge"],
-                    cwd=workdir, capture_output=True, text=True,
-                )
-                gh_merged = merge_result.returncode == 0
-                if gh_merged:
-                    click.echo(f"GitHub PR #{gh_pr_number} merged.")
-                else:
-                    # Check if PR was already merged (e.g. re-attempt after conflict resolution)
-                    from pm_core import gh_ops
-                    if gh_ops.is_pr_merged(workdir, branch):
-                        click.echo(f"GitHub PR #{gh_pr_number} is already merged.")
-                        gh_merged = True
-                    else:
-                        stderr = merge_result.stderr.strip()
-                        click.echo(f"gh pr merge failed: {stderr}", err=True)
-                        if resolve_window:
-                            _launch_merge_window(
-                                data, pr_entry, stderr,
-                                background=background,
-                                transcript=transcript,
-                                companion=companion,
-                            )
-                            return
-                        click.echo("Falling back to manual instructions.", err=True)
-
-            if gh_merged:
-                repo_dir = str(_resolve_repo_dir(root, data))
-                pull_ok = _pull_after_merge(
-                    data, pr_entry, repo_dir, base_branch,
-                    resolve_window=resolve_window,
-                    background=background,
-                    transcript=transcript,
-                    companion=companion,
-                )
-                if pull_ok:
-                    _finalize_merge(root, pr_entry, pr_id, transcript=transcript)
-                    # Restart TUI when managing the project_manager repo itself,
-                    # so it picks up the latest pm code from the pull.
-                    repo = data.get("project", {}).get("repo", "")
-                    if "project_manager" in repo or "project-manager" in repo:
-                        trigger_tui_restart()
-                # If not pull_ok and resolve_window, a merge window was launched.
-                # The idle tracker will re-attempt and finalize after resolution.
-                return
-
-        # Fallback: direct user to merge manually. Exits non-zero so the
-        # popup picker / TUI surfaces the message instead of closing
-        # silently — the user must take a manual action to proceed.
-        gh_pr = pr_entry.get("gh_pr")
-        if gh_pr:
-            click.echo(f"GitHub PR: {gh_pr}")
-            click.echo("Merge via GitHub, then run 'pm pr sync' to detect it.", err=True)
-        else:
-            click.echo("No GitHub PR URL found. Merge manually on GitHub, then run 'pm pr sync'.", err=True)
+    # Serialize concurrent `pm pr merge` of the SAME PR (the cross-PR
+    # publish lock is taken later, in _publish_approved: lock order PR ->
+    # repo). Two invocations racing would both publish, finalize and pull
+    # the main repo for one approval. An exclusive per-PR
+    # lock makes the loser wait; once the winner finishes (status persisted
+    # by _finalize_merge before the lock releases) the loser re-loads state
+    # and exits cleanly with "already merged" — before the sign-off gate, so
+    # it never trips on the now-advanced HEAD. The lock is held for the whole
+    # command and released deterministically when the click context tears down
+    # (fires on every exit path — return, SystemExit, exception). Relying on fd
+    # GC instead would deadlock a second in-process merge of the same PR: an
+    # exception traceback keeps the fd alive, and a same-process second flock
+    # on the same file blocks.
+    import fcntl as _fcntl
+    from pm_core.paths import workdirs_base as _workdirs_base
+    _repo_id = data["project"].get("repo_id", "")
+    _merge_lock_path = _workdirs_base() / f".merge-{_repo_id}-{pr_id}.lock"
+    _merge_lock_f = open(_merge_lock_path, "w")
+    _fcntl.flock(_merge_lock_f.fileno(), _fcntl.LOCK_EX)
+    try:
+        click.get_current_context().call_on_close(_merge_lock_f.close)
+    except RuntimeError:
+        # No active click context (e.g. direct call) — fall back to GC release.
+        pass
+    # Re-load under the lock: a concurrent invocation may have just merged.
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    pr_id = pr_entry["id"]
+    if pr_entry.get("status") == "merged":
+        click.echo(f"PR {pr_id} is already merged.", err=True)
         raise SystemExit(1)
 
-    # For local/vanilla: merge in the PR's workdir (branch always exists there)
-    workdir = pr_entry.get("workdir")
-    if not workdir or not Path(workdir).exists():
-        workdir = _ensure_workdir(data, pr_entry, root)
-        if not workdir:
-            click.echo(f"PR {pr_id} workdir not found. Cannot merge without the branch.", err=True)
-            raise SystemExit(1)
+    backend_name = data["project"].get("backend", "vanilla")
+    base_branch = data["project"].get("base_branch", "master")
 
-    work_path = Path(workdir)
-
-    if propagation_only:
-        # Step 2: skip workdir merge, go straight to propagation
-        click.echo("Propagation only: skipping workdir merge.")
-    else:
-        # Fetch latest from origin (important for vanilla backend where others may push)
-        if backend_name == "vanilla":
-            click.echo("Fetching latest from origin...")
-            git_ops.run_git("fetch", "origin", cwd=workdir, check=False)
-
-        # Capture the branch tip before merge for post-merge verification
-        tip_result = git_ops.run_git("rev-parse", branch, cwd=workdir, check=False)
-        branch_tip = tip_result.stdout.strip() if tip_result.returncode == 0 else None
-
-        click.echo(f"Merging {branch} into {base_branch}...")
-
-        # Checkout base branch — stash dirty files if they overlap
-        stash_info = None
-        result = git_ops.run_git("checkout", base_branch, cwd=workdir, check=False)
-        if result.returncode != 0 and _is_dirty_overlap_error(result):
-            # Workdir is a pm-managed clone, no TUI overlay needed
-            stash_info = _stash_for_merge(work_path, lock_tui=False)
-            if stash_info:
-                result = git_ops.run_git("checkout", base_branch, cwd=workdir, check=False)
-        if result.returncode != 0:
-            if stash_info:
-                _unstash_after_merge(work_path, stash_info)
-            error_msg = f"Failed to checkout {base_branch}: {result.stderr.strip()}"
-            click.echo(error_msg, err=True)
-            if resolve_window:
-                _launch_merge_window(data, pr_entry, error_msg, background=background,
-                                     transcript=transcript, companion=companion)
-                return
-            raise SystemExit(1)
-
-        result = git_ops.run_git("merge", "--no-ff", branch, "-m",
-                                 f"Merge {branch}: {pr_entry.get('title', pr_id)}",
-                                 cwd=workdir, check=False)
-        if result.returncode != 0:
-            # Abort the failed merge before unstashing
-            git_ops.run_git("merge", "--abort", cwd=workdir, check=False)
-            if stash_info:
-                _unstash_after_merge(work_path, stash_info)
-            # Git sends conflict details to stdout, other errors to stderr
-            error_detail = (result.stdout.strip() + "\n" + result.stderr.strip()).strip()
-            error_msg = f"Merge failed:\n{error_detail}" if error_detail else "Merge failed"
-            click.echo(error_msg, err=True)
-            click.echo("Resolve conflicts manually, then run 'pm pr merge' again.", err=True)
-            if resolve_window:
-                _launch_merge_window(data, pr_entry, error_msg, background=background,
-                                     transcript=transcript, companion=companion)
-                return
-            raise SystemExit(1)
-
-        # Post-merge verification: confirm the branch tip is now an ancestor of HEAD
-        if branch_tip:
-            verify = git_ops.run_git(
-                "merge-base", "--is-ancestor", branch_tip, "HEAD",
-                cwd=workdir, check=False,
-            )
-            if verify.returncode != 0:
-                click.echo(f"Warning: Post-merge verification failed — branch tip {branch_tip[:8]} "
-                            f"is not an ancestor of {base_branch} HEAD.", err=True)
-                click.echo("The merge commit exists but may not include all branch commits.", err=True)
-
-        if stash_info:
-            _unstash_after_merge(work_path, stash_info)
-
-    # --- Propagate merged base_branch to the main repo / origin ---
-    if backend_name == "local":
-        # Local backend: pull from workdir into the main repo dir
-        repo_dir = str(_resolve_repo_dir(root, data))
-        pull_ok = _pull_from_workdir(
-            data, pr_entry, repo_dir, str(work_path), base_branch,
+    # --no-signoff-check / --propagation-only only RECOVER a merge that is
+    # already published (finalize state, update the main repo checkout);
+    # they never publish code themselves.
+    if no_signoff_check or propagation_only:
+        _recover_completed_merge(
+            data, root, pr_entry, backend_name, base_branch,
             resolve_window=resolve_window, background=background,
-            transcript=transcript, companion=companion,
-        )
-        if not pull_ok:
-            # When resolve_window=True, a window was launched — exit 0
-            # so callers (idle tracker, review loop) don't treat it as
-            # failure. When resolve_window=False, the helper printed
-            # "Pull manually..." — exit non-zero so the popup / TUI
-            # surfaces it.
-            if not resolve_window:
-                raise SystemExit(1)
-            return
-        _finalize_merge(root, pr_entry, pr_id, transcript=transcript)
-        repo = data.get("project", {}).get("repo", "")
-        if "project_manager" in repo or "project-manager" in repo:
-            trigger_tui_restart()
-    else:
-        if not propagation_only:
-            # Vanilla backend: push to remote origin (already done in step 1 or by Claude)
-            push_result = git_ops.run_git("push", "origin", base_branch,
-                                          cwd=workdir, check=False)
-            if push_result.returncode != 0:
-                error_msg = f"Push to origin failed: {push_result.stderr.strip()}"
-                click.echo(error_msg, err=True)
-                if resolve_window:
-                    _launch_merge_window(data, pr_entry, error_msg,
-                                         background=background, transcript=transcript,
-                                         companion=companion)
-                    return
-                click.echo("Push manually when ready, then re-run 'pm pr merge'.", err=True)
-                raise SystemExit(1)
-            click.echo(f"Pushed merged {base_branch} to origin.")
-        else:
-            click.echo("Propagation only: skipping push to origin.")
-        # Pull into the main repo dir so it stays up to date
-        repo_dir = str(_resolve_repo_dir(root, data))
-        pull_ok = _pull_after_merge(
-            data, pr_entry, repo_dir, base_branch,
-            resolve_window=resolve_window,
-            background=background,
-            transcript=transcript,
-            companion=companion,
-        )
-        if not pull_ok:
-            # resolve_window=True: window launched — caller will retry
-            # via idle tracker; exit 0 so they don't treat the handoff
-            # as failure. resolve_window=False: helper printed "Resolve
-            # conflicts manually..." — exit non-zero so the popup / TUI
-            # actually surfaces it instead of closing silently.
-            if not resolve_window:
-                raise SystemExit(1)
-            return
-        _finalize_merge(root, pr_entry, pr_id, transcript=transcript)
-        repo = data.get("project", {}).get("repo", "")
-        if "project_manager" in repo or "project-manager" in repo:
-            trigger_tui_restart()
+            transcript=transcript, companion=companion)
+        return
+
+    # `closed` is a terminal lifecycle record (`pm pr close` keeps it, and the
+    # retained workdir means `_infer_pr_id` can still resolve a closed PR from
+    # its cwd).  Publishing it would rewrite the closure into `merged` and
+    # erase the reason it was retired; reopening is an explicit status edit.
+    # Checked *after* the recovery branch: recovering a merge that is already
+    # published must still work even if the record was closed meanwhile.
+    if pr_entry.get("status") == "closed":
+        click.echo(_closed_reopen_hint(pr_id, "to merge it"), err=True)
+        raise SystemExit(1)
+
+    # Sign-off gate (record-only): a fresh SIGNOFF_MERGE for the current HEAD
+    # bound to a conflict-free integration with the configured base.  A code
+    # change after sign-off, a legacy HEAD-only approval or an approval the
+    # gate already invalidated all refuse.
+    from pm_core.signoff import head_sha, merge_gate_refusal
+    workdir = pr_entry.get("workdir")
+    # No workdir -> no HEAD -> the gate refuses (an approval names a HEAD
+    # that only exists there); never clone just to look.  When the approval
+    # is otherwise valid, say the workdir is missing rather than "stale".
+    current_sha = head_sha(workdir) if workdir else None
+    refusal = merge_gate_refusal(pr_entry, current_sha, base_branch)
+    if current_sha is None and refusal and merge_gate_refusal(
+            pr_entry, (pr_entry.get("signoff") or {}).get("sha"),
+            base_branch) is None:
+        refusal = (f"PR {pr_id} workdir not found; the approved HEAD and "
+                   f"candidate live there, so nothing can be published. "
+                   f"Restore the workdir, then re-run sign-off.")
+    if refusal:
+        click.echo(refusal, err=True)
+        raise SystemExit(1)
+
+    _publish_approved(data, root, pr_entry, backend_name, base_branch,
+                      workdir, resolve_window=resolve_window,
+                      background=background, transcript=transcript,
+                      companion=companion)
 
 
 @pr.command("sync")
@@ -2088,8 +2979,9 @@ def pr_sync():
 
     # Check merge status outside the lock (network/git calls)
     merged_ids = set()
+    integrity_by_pr: dict[str, merge_integrity.MergeVerification] = {}
     for pr_entry in prs:
-        if pr_entry.get("status") not in ("in_review", "in_progress", "qa"):
+        if pr_entry.get("status") not in ("in_review", "in_progress", "qa", "sign_off"):
             continue
         branch = pr_entry.get("branch", "")
         # Prefer PR's own workdir if it exists
@@ -2100,6 +2992,20 @@ def pr_sync():
             merged_ids.add(pr_entry["id"])
             click.echo(f"  ✅ {_pr_display_id(pr_entry)}: merged")
             updated += 1
+            # A merge pm did not publish is verified against the signed-off
+            # candidate before it is finalized (pr-2e06289).  The TUI sync
+            # and `pm pr sync-github` do the same in pm_core.pr_sync; the
+            # check never raises (a failure is an "unknown", not a mismatch).
+            verified = merge_integrity.verify_detected_merge(
+                root, data, pr_entry, str(check_dir), base_branch)
+            if verified is not None and verified.problem:
+                # Only a mismatch is recorded below; a could-not-verify is
+                # reported here and nothing is written.
+                integrity_by_pr[pr_entry["id"]] = verified
+                click.echo(f"WARNING: {verified.problem}.", err=True)
+            elif verified is not None and verified.error:
+                click.echo(f"WARNING: could not verify GitHub's merge of "
+                           f"{pr_entry['id']}: {verified.error}.", err=True)
 
     if updated:
         def apply(data):
@@ -2107,6 +3013,8 @@ def pr_sync():
                 if pr["id"] in merged_ids:
                     pr["status"] = "merged"
                     _record_status_timestamp(pr, "merged")
+                    merge_integrity.apply_to_pr(
+                        pr, integrity_by_pr.get(pr["id"]))
 
         data = store.locked_update(root, apply)
         trigger_tui_refresh()
@@ -2131,6 +3039,10 @@ def pr_sync_github():
     - CLOSED → closed
     - OPEN + draft → in_progress
     - OPEN + ready → in_review
+
+    A PR that is already merged or closed locally keeps that status (a
+    merge discovered on GitHub still finalizes): the local record is
+    history, not a cache of the GitHub state.
     """
     root = state_root()
     data = store.load(root)
@@ -2146,6 +3058,16 @@ def pr_sync_github():
     if result.error:
         click.echo(f"Error: {result.error}", err=True)
         raise SystemExit(1)
+
+    # A discovered merge that published something other than the signed-off
+    # candidate is recorded on the PR (merge_integrity + note); say so here
+    # too, like `pm pr sync` does, rather than only in the log file.
+    for pr_id, verified in result.merge_integrity.items():
+        if verified.problem:
+            click.echo(f"WARNING: {verified.problem}.", err=True)
+        elif verified.error:
+            click.echo(f"WARNING: could not verify GitHub's merge of "
+                       f"{pr_id}: {verified.error}.", err=True)
 
     if result.updated_count > 0:
         click.echo(f"Updated {result.updated_count} PR(s).")
@@ -2303,13 +3225,53 @@ def _stash_for_merge(cwd: Path, pr_display_id: str = "",
     return {"has_pm": has_pm, "count": len(dirty), "lock_tui": lock_tui}
 
 
+def _resolve_project_yaml_pop(cwd: Path) -> bool:
+    """Resolve a ``project.yaml`` conflict left by a failed ``stash pop``.
+
+    pm keeps its live state uncommitted in the main repo, so a merge that
+    brings committed ``project.yaml`` changes (an agent's cross-PR note on
+    its branch) makes the restoring pop conflict and leaves markers that
+    break every pm command.  Merges the file structurally instead; drops the
+    stash when nothing else conflicted.  Returns True when the pop is fully
+    resolved.
+    """
+    unmerged = git_ops.run_git("diff", "--name-only", "--diff-filter=U",
+                               cwd=cwd, check=False).stdout.split()
+    yaml_paths = [p for p in unmerged if Path(p).name == "project.yaml"]
+    if not yaml_paths:
+        return False
+    loader = store._yaml_loader()
+    for rel in yaml_paths:
+        texts = []
+        for rev in ("stash@{0}^1", "HEAD", "stash@{0}"):
+            r = git_ops.run_git("show", f"{rev}:{rel}", cwd=cwd, check=False)
+            if r.returncode != 0:
+                return False
+            texts.append(r.stdout)
+        try:
+            base, ours, theirs = (yaml.load(t, Loader=loader) or {}
+                                  for t in texts)
+        except yaml.YAMLError:
+            return False
+        root = (cwd / rel).parent
+        with store._lock(root):
+            store.save(store.merge_3way(base, ours, theirs), root)
+        git_ops.run_git("reset", "-q", "--", rel, cwd=cwd, check=False)
+        click.echo(f"Merged {rel} (local pm state + merged changes).")
+    if len(yaml_paths) < len(unmerged):
+        return False
+    git_ops.run_git("reset", "-q", cwd=cwd, check=False)
+    git_ops.run_git("stash", "drop", "-q", cwd=cwd, check=False)
+    return True
+
+
 def _unstash_after_merge(cwd: Path, info: dict) -> bool:
     """Pop the stash and remove the TUI merge-lock if one was set.
 
     Returns True if the stash popped cleanly.
     """
     pop_r = git_ops.run_git("stash", "pop", cwd=cwd, check=False)
-    clean = pop_r.returncode == 0
+    clean = pop_r.returncode == 0 or _resolve_project_yaml_pop(cwd)
 
     if info.get("has_pm") and info.get("lock_tui"):
         trigger_tui_merge_unlock()
@@ -2353,6 +3315,8 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
     """Remove work directory for a PR.
 
     Refuses to delete workdirs with uncommitted changes unless --force is given.
+    Without a PR id, auto-selects the sole terminal (merged or closed) PR that
+    still has a workdir — the explicit step `pm pr close` points at.
     Use --all to clean up all PR workdirs at once.
     Use --prune to clear stale workdir references from project.yaml.
     Use --resources to kill live tmux/docker/registry resources for a PR.
@@ -2387,7 +3351,9 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
 
         def apply_prune(data):
             nonlocal pruned
-            for p in data.get("prs") or []:
+            # usable_prs: a hand-edited entry without an ``id`` must not turn
+            # `--prune` into a KeyError (same class as the dependents scan).
+            for p in usable_prs(data.get("prs")):
                 wd = p.get("workdir")
                 if wd and not Path(wd).exists():
                     click.echo(f"  {p['id']}: cleared missing workdir {wd}")
@@ -2404,7 +3370,7 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
             return
 
     if cleanup_all:
-        prs = data.get("prs") or []
+        prs = usable_prs(data.get("prs"))
         with_workdir = [p for p in prs if p.get("workdir") and Path(p["workdir"]).exists()]
         if not with_workdir:
             click.echo("No PR workdirs to clean up.")
@@ -2417,7 +3383,9 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
                 cleaned_ids.add(pr_entry["id"])
         if cleaned_ids:
             def apply_cleanup_all(data):
-                for pr in data.get("prs") or []:
+                # usable_prs: an entry without an ``id`` must not raise here
+                # (inside the store lock) on a hand-edited project.yaml.
+                for pr in usable_prs(data.get("prs")):
                     if pr["id"] in cleaned_ids:
                         pr["workdir"] = None
 
@@ -2427,17 +3395,24 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
         return
 
     if pr_id is None:
-        prs = data.get("prs") or []
-        with_workdir = [p for p in prs if p.get("status") == "merged" and p.get("workdir")
+        # `closed` is a normal terminal state since `pm pr close` retains the
+        # entry and its workdir (pr-62ad13d), so it is offered here alongside
+        # `merged` — close's help points at this explicit step.
+        prs = usable_prs(data.get("prs"))
+        with_workdir = [p for p in prs
+                        if (p.get("status") or "pending") in TERMINAL_PR_STATES
+                        and p.get("workdir")
                         and Path(p["workdir"]).exists()]
         if len(with_workdir) == 1:
             pr_id = with_workdir[0]["id"]
             click.echo(f"Auto-selected {pr_id}")
         elif len(with_workdir) == 0:
-            click.echo("No merged PRs with workdirs to clean up.", err=True)
+            click.echo("No merged or closed PRs with workdirs to clean up.",
+                       err=True)
             raise SystemExit(1)
         else:
-            click.echo("Multiple merged PRs have workdirs. Specify one:", err=True)
+            click.echo("Multiple merged or closed PRs have workdirs. "
+                       "Specify one:", err=True)
             for p in with_workdir:
                 click.echo(f"  {_pr_display_id(p)}: {p.get('title', '???')}", err=True)
             raise SystemExit(1)
@@ -2447,7 +3422,12 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
         click.echo(f"PR '{pr_id}' not found.", err=True)
         raise SystemExit(1)
 
-    if pr_entry.get("status") not in ("merged", "in_review"):
+    # `closed` is a normal terminal state (pr-62ad13d retains those records and
+    # `pm pr close` points here for the explicit cleanup), so it is not worth a
+    # "not merged" warning; anything else still is.  `in_review` is cleanable
+    # too, so it is named alongside the terminal set rather than by duplicating
+    # its members.
+    if pr_entry.get("status") not in ("in_review", *TERMINAL_PR_STATES):
         click.echo(f"Warning: {pr_id} status is '{pr_entry.get('status')}' (not merged).", err=True)
         click.echo("Cleaning up anyway.", err=True)
 
@@ -2462,6 +3442,134 @@ def _clear_workdir(data: dict, pr_id: str) -> None:
     pr = store.get_pr(data, pr_id)
     if pr:
         pr["workdir"] = None
+
+
+@pr.group("model")
+def pr_model():
+    """View and set which model, provider and effort a PR's sessions use.
+
+    A PR's settings win over the project's and global ones (only PM_MODEL /
+    PM_EFFORT beat them).  Without --role a setting applies to every role of
+    the PR; with --role it applies to that role (and the roles that fall
+    back to it, e.g. qa -> qa_scenario).  Providers are configured with
+    'pm provider'.
+    """
+    pass
+
+
+_PR_ROLE_CHOICE = click.Choice(list(PR_SESSION_TYPES))
+
+
+@pr_model.command("show")
+@click.argument("pr_id")
+def pr_model_show(pr_id: str):
+    """Show the effective model, effort and command of each role of a PR."""
+    from pm_core import model_settings
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    click.echo(f"{_pr_display_id(pr_entry)} model settings "
+               f"(model: {pr_entry.get('model') or '-'}, "
+               f"effort: {pr_entry.get('effort') or '-'}):")
+    for key in ("session_models", "session_effort"):
+        entries = pr_entry.get(key)
+        if isinstance(entries, dict) and entries:
+            click.echo(f"  {key}: " + ", ".join(
+                f"{k}={v}" for k, v in entries.items()))
+    click.echo()
+    for line in model_settings.format_rows(
+            model_settings.role_rows(data, pr_entry)):
+        click.echo(f"  {line}")
+
+
+@pr_model.command("set")
+@click.argument("pr_id")
+@click.argument("value", required=False)
+@click.option("--effort", type=click.Choice(list(EFFORT_LEVELS)),
+              default=None, help="Also set the effort")
+@click.option("--role", "roles", multiple=True, type=_PR_ROLE_CHOICE,
+              help="Only this role (repeatable); default: every role")
+def pr_model_set(pr_id: str, value: str | None, effort: str | None,
+                 roles: tuple):
+    """Set a PR's model (VALUE) and/or effort.
+
+    VALUE is a model name (opus, claude-opus-5-5, ...) or provider:NAME
+    for a provider configured with 'pm provider'.
+
+    \b
+    Examples:
+      pm pr model set pr-001 provider:my-router --effort high
+      pm pr model set pr-001 provider:other --role signoff
+      pm pr model set pr-001 --effort medium --role qa_scenario
+    """
+    from pm_core import model_settings
+    if value is None and effort is None:
+        click.echo("Error: give a VALUE and/or --effort.", err=True)
+        raise SystemExit(1)
+    if value is not None:
+        problem = model_settings.check_model_value(value)
+        if problem:
+            click.echo(f"Error: {problem}", err=True)
+            raise SystemExit(1)
+    root = state_root()
+    pr_id = _require_pr(store.load(root), pr_id)["id"]
+
+    def apply(data):
+        pr_entry = store.get_pr(data, pr_id)
+        if pr_entry is None:
+            raise click.ClickException(f"PR {pr_id} disappeared")
+        if value is not None:
+            model_settings.set_pr_value(pr_entry, "model", value, list(roles))
+        if effort is not None:
+            model_settings.set_pr_value(pr_entry, "effort", effort,
+                                        list(roles))
+
+    store.locked_update(root, apply)
+    scope = ", ".join(roles) if roles else "every role"
+    what = " and ".join(x for x in (value and f"model {value}",
+                                    effort and f"effort {effort}") if x)
+    click.echo(f"{pr_id}: set {what} for {scope}")
+    click.echo("Running sessions keep their settings; new launches use "
+               "these.")
+
+
+@pr_model.command("unset")
+@click.argument("pr_id")
+@click.option("--role", "roles", multiple=True, type=_PR_ROLE_CHOICE,
+              help="Only this role's entry (repeatable)")
+@click.option("--model", "only_model", is_flag=True,
+              help="Only the model setting")
+@click.option("--effort", "only_effort", is_flag=True,
+              help="Only the effort setting")
+@click.option("--all", "everything", is_flag=True,
+              help="Every PR-wide and per-role setting")
+def pr_model_unset(pr_id: str, roles: tuple, only_model: bool,
+                   only_effort: bool, everything: bool):
+    """Remove a PR's model and/or effort setting.
+
+    Without --role removes the PR-wide setting (role entries stay); with
+    --role those roles' entries; with --all everything.
+    """
+    from pm_core import model_settings
+    kinds = [k for k, on in (("model", only_model), ("effort", only_effort))
+             if on] or ["model", "effort"]
+    root = state_root()
+    pr_id = _require_pr(store.load(root), pr_id)["id"]
+
+    def apply(data):
+        pr_entry = store.get_pr(data, pr_id)
+        if pr_entry is None:
+            raise click.ClickException(f"PR {pr_id} disappeared")
+        for kind in kinds:
+            if everything:
+                model_settings.clear_pr(pr_entry, kind)
+            else:
+                model_settings.set_pr_value(pr_entry, kind, None, list(roles))
+
+    store.locked_update(root, apply)
+    scope = ("all settings" if everything else
+             ", ".join(roles) if roles else "PR-wide setting")
+    click.echo(f"{pr_id}: removed {' and '.join(kinds)} ({scope})")
 
 
 @pr.group("note")
@@ -2563,9 +3671,7 @@ def pr_note_list(pr_id: str):
         click.echo(f"No notes on {_pr_display_id(pr_entry)}.")
         return
     for n in notes:
-        ts = n.get("created_at", "")
-        ts_str = f" ({ts})" if ts else ""
-        click.echo(f"  {n['id']}{ts_str}: {n['text']}")
+        click.echo(_note_line(n))
 
 
 @pr_note.command("delete")
@@ -2600,15 +3706,43 @@ def pr_note_delete(pr_id: str, note_id: str):
     trigger_tui_refresh()
 
 
+def _retained_resources(pr_entry: dict) -> list[str]:
+    """The branch/workdir references `pm pr close` keeps verbatim.
+
+    Shared by the close and `--remove` messages so neither claims to have kept
+    something the entry never had.
+    """
+    kept = []
+    if pr_entry.get("branch"):
+        kept.append(f"branch '{pr_entry['branch']}'")
+    if pr_entry.get("workdir"):
+        kept.append(f"workdir '{pr_entry['workdir']}'")
+    return kept
+
+
 @pr.command("close")
 @click.argument("pr_id", default=None, required=False)
 @click.option("--keep-github", is_flag=True, help="Don't close the GitHub PR")
-@click.option("--keep-branch", is_flag=True, help="Don't delete the remote branch")
-def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
-    """Close and remove a PR from the project.
+@click.option("--keep-branch", is_flag=True,
+              help="Deprecated no-op: close never deletes branches")
+@click.option("--remove", is_flag=True, default=False,
+              help="Delete the registry entry instead of recording the "
+                   "closure. Registry-only: the branch and workdir are kept, "
+                   "and the GitHub PR is still closed unless --keep-github "
+                   "(a PR recorded as merged is never touched on GitHub)")
+def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
+             remove: bool):
+    """Close a PR without destroying its history.
 
-    Removes the PR entry from project.yaml. By default also closes the
-    GitHub PR and deletes the remote branch if they exist.
+    Sets the PR's status to "closed" and keeps its registry entry — title,
+    description, notes, dependencies, branch, and workdir reference.  The
+    GitHub PR is closed when one exists (unless --keep-github); no branch,
+    workdir, file, or capture is ever deleted by this command.
+
+    Cleanup stays separate: "pm pr cleanup" removes a workdir, and --remove
+    deletes a mistaken registry entry (local branch and workdir are kept; the
+    GitHub PR is still closed unless --keep-github).  A merged PR cannot be
+    closed without --remove, so merge history is never rewritten.
 
     If PR_ID is omitted, uses the active PR.
     """
@@ -2624,46 +3758,198 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
 
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
+    display_id = _pr_display_id(pr_entry)
+    old_status = pr_entry.get("status") or "pending"
 
-    # Close GitHub PR if exists
+    merged_refusal = (
+        f"PR {display_id} is already merged — closing it would erase the "
+        f"merge record. Use 'pm pr close {pr_id} --remove' to delete the "
+        f"registry entry (branch and workdir are kept).")
+
+    if old_status == "merged" and not remove:
+        click.echo(merged_refusal, err=True)
+        raise SystemExit(1)
+
+    # Close the GitHub PR when there is one.  Never delete the branch:
+    # close is non-destructive by contract, so `--delete-branch` is not
+    # passed (the `--keep-branch` flag is a compatibility no-op).  A merged
+    # GitHub PR cannot be closed, so the --remove path skips the call.
     gh_pr_number = pr_entry.get("gh_pr_number")
-    if gh_pr_number and not keep_github:
+    if gh_pr_number and keep_github:
+        # Its GitHub state is not necessarily OPEN (the PR may have been
+        # closed or merged on GitHub), so promise "unchanged", not "open".
+        click.echo(f"Leaving GitHub PR #{gh_pr_number} unchanged "
+                   f"(--keep-github).")
+    elif gh_pr_number and old_status != "merged":
         click.echo(f"Closing GitHub PR #{gh_pr_number}...")
         try:
-            delete_flag = [] if keep_branch else ["--delete-branch"]
-            result = subprocess.run(
-                ["gh", "pr", "close", str(gh_pr_number), *delete_flag],
-                capture_output=True, text=True
-            )
+            from pm_core import gh_ops
+            result = gh_ops.close_pr(gh_pr_number)
             if result.returncode == 0:
                 click.echo(f"GitHub PR #{gh_pr_number} closed.")
             else:
                 click.echo(f"Warning: Could not close GitHub PR: {result.stderr.strip()}", err=True)
+        except SystemExit:
+            # gh_ops.run_gh -> _check_gh() raises SystemExit when gh is missing
+            # or unauthenticated.  The local lifecycle record is still written
+            # below: a GitHub failure never triggers destructive fallback.
+            click.echo("Warning: Could not close GitHub PR: gh CLI unavailable or unauthenticated.", err=True)
         except Exception as e:
             click.echo(f"Warning: Could not close GitHub PR: {e}", err=True)
+    elif gh_pr_number:
+        # Reached only by `--remove` of a PR recorded as merged (a plain close
+        # of one is refused above): a merged GitHub PR cannot be closed, so no
+        # gh call is made.  Only the LOCAL record is known to be merged — a
+        # hand-set status, or a local-backend merge, can leave the GitHub PR
+        # open — so report the local fact and never call the PR "open".
+        click.echo(f"GitHub PR #{gh_pr_number} left unchanged (the PR is "
+                   f"recorded as merged).")
 
-    # Remove workdir if exists (filesystem op, safe outside lock)
-    workdir = pr_entry.get("workdir")
-    if workdir and Path(workdir).exists():
-        shutil.rmtree(workdir)
-        click.echo(f"Removed workdir: {workdir}")
-
-    # Remove PR from list and update active_pr under lock
-    target_id = pr_id
+    # Record the closure (or drop the entry with --remove) under the lock.
+    # Workdir, branch and every file in the workdir stay untouched — cleanup
+    # is a separate, explicit operation (`pm pr cleanup`, `--resources`).
+    merged_concurrently = False
+    missing_at_lock = False
 
     def apply(data):
-        data["prs"] = [p for p in (data.get("prs") or []) if p["id"] != target_id]
-        if data.get("project", {}).get("active_pr") == target_id:
-            remaining = data.get("prs") or []
-            data["project"]["active_pr"] = remaining[0]["id"] if remaining else None
+        nonlocal merged_concurrently, missing_at_lock
+        pr = store.get_pr(data, pr_id)
+        if not pr:
+            # Removed concurrently — nothing left to close or remove.
+            missing_at_lock = True
+            return
+        prior_status = pr.get("status") or "pending"
+        if prior_status == "merged" and old_status != "merged":
+            # A merge landed between our load and the lock.  Rewriting it into
+            # `closed` would erase merge history, and `--remove` would delete
+            # that history outright — neither is what the user saw when they
+            # ran the command, so refuse once and let a re-run act on the
+            # now-known merged record (a plain close still refuses; --remove
+            # deletes it, A5).
+            merged_concurrently = True
+            return
+        if remove:
+            data["prs"] = [p for p in (data.get("prs") or [])
+                           if p.get("id") != pr_id]
+        else:
+            # Repeat close is idempotent: updated_at still moves, but the
+            # original closure time is history and is not rewritten.  An entry
+            # closed before closed_at existed keeps none — stamping "now"
+            # would invent a closure time that never happened.  The helper
+            # owns that rule (it sees the previous status).
+            pr["status"] = "closed"
+            _record_status_timestamp(pr, "closed", previous_status=prior_status)
+        if data.get("project", {}).get("active_pr") == pr_id:
+            remaining = [
+                p for p in usable_prs(data.get("prs"))
+                if (p.get("status") or "pending") not in TERMINAL_PR_STATES
+            ]
+            data["project"]["active_pr"] = (
+                remaining[0]["id"] if remaining else None)
 
-    store.locked_update(root, apply)
-    click.echo(f"Removed {pr_id}: {pr_entry.get('title', '???')}")
+    updated = store.locked_update(root, apply)
+
+    if merged_concurrently:
+        if remove:
+            # The user asked to drop a record they believed was not merged;
+            # the merge is newer than their request, so nothing was deleted.
+            click.echo(
+                f"PR {display_id} became merged while removing — the registry "
+                f"entry was NOT removed. Re-run 'pm pr close {pr_id} "
+                f"--remove' to delete the merged record (branch and workdir "
+                f"are kept).", err=True)
+        else:
+            click.echo(merged_refusal, err=True)
+        raise SystemExit(1)
+
+    if missing_at_lock:
+        # Another process removed the entry between our load and the lock.
+        click.echo(
+            f"PR {pr_id} was removed concurrently; nothing to "
+            f"{'remove' if remove else 'close'}.", err=True)
+        trigger_tui_refresh()
+        return
+
+    if remove:
+        click.echo(f"Removed registry entry {pr_id}: "
+                   f"{pr_entry.get('title', '???')}")
+        kept = _retained_resources(pr_entry)
+        if kept:
+            click.echo(f"  Kept: {', '.join(kept)}")
+        # Everything the entry owned is now unreachable through pm: `pm pr
+        # cleanup` resolves the registry entry, and its --resources mode does
+        # the same, so the retained workdir *and* any live tmux windows /
+        # containers become orphans with no pointer.  Say so instead of
+        # leaving the user to discover it — naming only what the entry had.
+        orphaned = ("that workdir and any tmux windows/containers"
+                    if pr_entry.get("workdir")
+                    else "any tmux windows/containers")
+        click.echo(f"  Note: {orphaned} for this PR are no longer tracked by "
+                   f"pm (the registry entry is gone) — clean them up by hand "
+                   f"when you are done with them.")
+    else:
+        click.echo(f"Closed {display_id}: {pr_entry.get('title', '???')} "
+                   f"(status: closed)")
+        kept = ["registry entry", *_retained_resources(pr_entry)]
+        click.echo(f"  Kept: {', '.join(kept)}")
+        # The status is terminal, so say how to get back and how to do the
+        # (separate, explicit) workdir cleanup this command deliberately
+        # leaves behind.
+        click.echo(f"  Reopen: pm pr edit {pr_id} --status pending")
+        if pr_entry.get("workdir"):
+            click.echo(f"  Cleanup: pm pr cleanup {pr_id} "
+                       f"(--force discards uncommitted changes)")
+
+    # A closed PR blocks its dependents forever (only `merged` satisfies a
+    # dependency): name them so the block is visible, but never rewrite them.
+    # With --remove the dependency reference now names a record that no longer
+    # exists — say so, rather than implying a `closed` status is the blocker.
+    # Iterate usable entries only: this runs *after* the status write, so a
+    # hand-edited `project.yaml` entry without an ``id`` (which the rest of the
+    # codebase skips via ``usable_prs``) must not turn a successful close into
+    # a traceback.
+    dependents = [
+        p for p in usable_prs(updated.get("prs"))
+        if pr_id in (p.get("depends_on") or [])
+        and (p.get("status") or "pending") not in TERMINAL_PR_STATES
+    ]
+    if dependents:
+        names = ", ".join(
+            f"{_pr_display_id(p)} ({p.get('title', '???')})"
+            for p in dependents)
+        if remove:
+            # "are blocked without it", not "stay blocked": removing a
+            # *merged* record (the other --remove input) takes away the
+            # dependency that had satisfied them, so they were ready a moment
+            # ago and are blocked only now.  Only `merged` satisfies a
+            # dependency, so a removed record never satisfies one.
+            click.echo(
+                f"Warning: {len(dependents)} dependent PR(s) depend on the "
+                f"removed {display_id} and are blocked without it: {names}",
+                err=True)
+            # The record is gone, so re-adding would mint a new id and leave
+            # the reference dangling: dropping the dependency is the way out.
+            click.echo(
+                f"  Hint: drop it from the dependents' depends_on "
+                f"('pm pr edit <id> --depends-on \"\"') to unblock them.",
+                err=True)
+        else:
+            click.echo(
+                f"Warning: {len(dependents)} dependent PR(s) remain blocked "
+                f"by {display_id}: {names}", err=True)
+            # Only `merged` satisfies a dependency, so the block is permanent
+            # until the user acts — say which way out exists.
+            click.echo(
+                f"  Hint: reopen the closed PR, or drop it from the "
+                f"dependents' depends_on ('pm pr edit <id> --depends-on "
+                f"\"\"'), to unblock them.", err=True)
+
     trigger_tui_refresh()
 
 
 # ---------------------------------------------------------------------------
-# Auto-sequence: chain start → review → QA on a single PR (stops before merge)
+# Auto-sequence: chain start → review → QA on a single PR (reports
+# ready_to_merge; the merge itself stays with the caller)
 # ---------------------------------------------------------------------------
 
 def _auto_seq_transcript_dir(root: Path, pr_id: str) -> Path:
@@ -2719,6 +4005,25 @@ def _check_review_verdict(tdir: Path, pr_id: str) -> tuple[str | None, int]:
     return verdict, latest_iter
 
 
+def _signoff_window_pane(session: str, pr_entry: dict) -> str | None:
+    """Return the first pane id of the sign-off tmux window, or None."""
+    from pm_core import signoff as signoff_mod
+    return signoff_mod.signoff_window_pane(session, pr_entry)
+
+
+def _check_signoff_verdict(tdir: Path, pr_id: str) -> str | None:
+    """Return the sign-off routing verdict, or None if none emitted yet."""
+    from pm_core import signoff as signoff_mod
+    return signoff_mod.signoff_transcript_verdict(tdir, pr_id)
+
+
+def _retire_signoff_window(session: str, pr_entry: dict, tdir: Path) -> None:
+    """Tear down a PR's sign-off window + transcript when bouncing out of
+    sign_off (see :func:`pm_core.signoff.retire_signoff_run`)."""
+    from pm_core import signoff as signoff_mod
+    signoff_mod.retire_signoff_run(session, pr_entry, tdir)
+
+
 def _check_impl_idle(session: str, pr_entry: dict, tdir: Path) -> tuple[bool, bool]:
     """Return (idle, gone): polls the impl pane via PaneIdleTracker.
 
@@ -2734,6 +4039,11 @@ def _check_impl_idle(session: str, pr_entry: dict, tdir: Path) -> tuple[bool, bo
     transcript = tdir / f"impl-{pr_id}.jsonl"
     if not transcript.exists():
         return False, False
+    from pm_core.claude_launcher import pane_runs_transcript
+    if not pane_runs_transcript(pane_id, pr_entry.get("workdir"), transcript):
+        # Another driver (the TUI) launched this pane; the symlink is an
+        # earlier session's, whose idle event says nothing about it (S79).
+        return False, False
     tracker = PaneIdleTracker()
     try:
         tracker.register(pr_id, pane_id, str(transcript))
@@ -2743,37 +4053,151 @@ def _check_impl_idle(session: str, pr_entry: dict, tdir: Path) -> tuple[bool, bo
     return tracker.is_idle(pr_id), tracker.is_gone(pr_id)
 
 
+def _older_than(path: Path | None, iso_ts: str | None) -> bool:
+    """Whether *path* was last written before the ISO timestamp *iso_ts*."""
+    from pm_core.signoff import parse_ts
+    if path is None or not iso_ts:
+        return False
+    try:
+        return path.stat().st_mtime < parse_ts(iso_ts).timestamp()
+    except (OSError, ValueError):
+        return False
+
+
+def _qa_run_started_since(pr_id: str, iso_ts: str | None) -> bool:
+    """Whether this pm session started a QA run of *pr_id* at or after the
+    ISO timestamp *iso_ts*, by the start record each run writes in its QA
+    workdir."""
+    from pm_core.qa_loop import own_run_started_since
+    from pm_core.signoff import parse_ts
+    try:
+        since = parse_ts(iso_ts).timestamp()
+    except (TypeError, ValueError):
+        return False
+    return own_run_started_since(pr_id, since)
+
+
+def _qa_run_starting(pr_id: str, iso_ts: str | None) -> bool:
+    """Whether this pm session started a QA run of *pr_id* less than a
+    launch claim's expiry ago (and at or after the ISO timestamp *iso_ts*
+    when given): a driver still killing the judged run's windows and
+    planning, before its own qa window and status exist.  The TUI's REQA
+    hop holds no launch claim, so its start record is the only sign of it
+    (S91).  A run that died before opening a window stops counting once
+    that expiry passes, like a claim whose launcher died."""
+    import time
+    from pm_core.qa_loop import own_run_started_since
+    from pm_core.signoff import RETURN_LAUNCH_CLAIM_SECONDS, parse_ts
+    since = time.time() - RETURN_LAUNCH_CLAIM_SECONDS
+    if iso_ts:
+        try:
+            since = max(since, parse_ts(iso_ts).timestamp())
+        except (TypeError, ValueError):
+            pass
+    return own_run_started_since(pr_id, since)
+
+
+def _qa_run_driven(pr_id: str) -> bool:
+    """Whether a QA run of *pr_id* this pm session started is still driven
+    by a live process, with or without its qa window.  It need not be the
+    re-run: a run from before a sign-off return still holds the PR until it
+    ends (S120)."""
+    from pm_core.qa_loop import own_run_driven
+    return own_run_driven(pr_id)
+
+
+def _qa_run_stopped(pr_id: str, status_path: Path | None) -> bool:
+    """Whether the latest QA run of *pr_id* (*status_path* is its status
+    file) ended on a provider setup error and nothing drives or replaced
+    it: no run of it this pm session started after that stop, and no live
+    driver of one (see :func:`pm_core.qa_loop.record_setup_stop`)."""
+    import json
+    from pm_core.qa_loop import own_run_started_since
+    if status_path is None:
+        return False
+    try:
+        data = json.loads(status_path.read_text())
+        stopped_at = status_path.stat().st_mtime
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict) or not data.get("stopped"):
+        return False
+    return (not own_run_started_since(pr_id, stopped_at)
+            and not _qa_run_driven(pr_id))
+
+
 def _qa_status_for(pr_id: str) -> tuple[str | None, Path | None]:
     """Find the latest QA status.json for *pr_id*; return (overall, path)."""
     import json
-    qa_dirs = Path.home() / ".pm" / "workdirs" / "qa"
-    if not qa_dirs.is_dir():
+    from pm_core.paths import latest_qa_status_path
+    latest = latest_qa_status_path(pr_id)
+    if latest is None:
         return None, None
-    candidates = sorted(qa_dirs.glob(f"{pr_id}-*/qa_status.json"),
-                        key=lambda p: p.stat().st_mtime if p.exists() else 0)
-    if not candidates:
-        return None, None
-    latest = candidates[-1]
     try:
         data = json.loads(latest.read_text())
     except (OSError, ValueError):
         return None, latest
+    # A hand-edited/corrupt file can hold any valid JSON; a non-object would
+    # raise AttributeError on ``.get()`` and crash the auto-sequence tick.
+    # Treat it like an unreadable file (no overall), as the other readers do.
+    if not isinstance(data, dict):
+        return None, latest
     return data.get("overall") or None, latest
+
+
+def _qa_run_owned_elsewhere(status_path: Path | None) -> bool:
+    """True when another live process still drives the run behind *status_path*.
+
+    The status file carries an empty ``overall`` for the whole duration of a
+    run, so a missing qa window does not prove the run is dead.  The resume
+    snapshot next to it records the driver (owner pid + start time); the same
+    check a restarting TUI uses decides whether the run is orphaned.
+    """
+    if status_path is None:
+        return False
+    import json
+    from pm_core import qa_loop
+    try:
+        data = json.loads(
+            (status_path.parent / "qa_resume.json").read_text())
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    return qa_loop.resume_owned_elsewhere(data)
+
+
+def _launch_review_iteration(pr_id: str, tdir: Path, iteration: int, *,
+                             fresh: bool, review_loop: bool = True) -> None:
+    """Launch review *iteration* in the background for auto-sequence.
+
+    Its transcript lives under *tdir* with review-loop iteration naming so
+    a later tick finds the verdict (:func:`_check_review_verdict`).
+    """
+    transcript = tdir / f"review-{pr_id}-i{iteration}.jsonl"
+    click.get_current_context().invoke(
+        pr_review, pr_id=pr_id, fresh=fresh, background=True,
+        review_loop=review_loop, review_iteration=iteration,
+        review_loop_id="", transcript=str(transcript))
 
 
 @pr.command("auto-sequence")
 @click.argument("pr_id")
 def pr_auto_sequence(pr_id: str):
-    """Advance a PR through start → review → QA, stopping before merge.
+    """Advance a PR through start → review → QA → sign-off, reporting ready_to_merge.
 
     Idempotent and non-blocking: each invocation examines the PR's current
     state and advances it by at most one phase.  Designed to be called
     repeatedly (e.g. by an implementation watcher) until the PR reports
-    ``ready_to_merge`` or ``paused: ...``.
+    ``ready_to_merge`` or ``paused: ...``.  On a QA PASS the PR enters the
+    ``sign_off`` step (comprehensive review + verdict router); a verified
+    sign-off reports ``ready_to_merge`` (sign-off never merges itself).
 
-    Output is a single status line on stdout.  Exit codes:
-      0 — advanced or status reported normally
-      2 — PR not found / unknown state
+    Output is a single status line on stdout.  A terminal PR (merged or
+    closed) reports its status and is not advanced.
+
+    Exit codes: 0 — advanced or status reported normally; 2 — PR not found or
+    an unknown state.
     """
     root = state_root()
     data = store.load(root)
@@ -2784,8 +4208,13 @@ def pr_auto_sequence(pr_id: str):
     tdir = _auto_seq_transcript_dir(root, pr_id)
     tdir.mkdir(parents=True, exist_ok=True)
 
-    if status == "merged":
-        click.echo("merged")
+    if status in TERMINAL_PR_STATES:
+        # `closed` is terminal exactly like `merged` (pr-62ad13d retains the
+        # record): report the status and stop.  Falling through would answer
+        # "unknown status: closed" (exit 2), which a driving session reads as
+        # a broken PR, and driving another phase would resurrect a PR the
+        # user retired.
+        click.echo(status)
         return
 
     if status == "pending":
@@ -2797,12 +4226,31 @@ def pr_auto_sequence(pr_id: str):
         click.echo("started")
         return
 
+    from pm_core.signoff import open_return, return_awaiting
+    awaiting = return_awaiting(pr_entry)
+
     if status == "in_progress":
         if spec_gen.has_pending_spec(pr_entry):
             click.echo("paused: spec_pending")
             return
         if not pm_session:
             click.echo("paused: no pm tmux session")
+            return
+        if awaiting == "impl":
+            # Sign-off routed this back but the rework session never
+            # launched (interrupted right after the hop): an idle old
+            # session is not finished work.  Unless another driver is
+            # already relaunching it (a second --fresh would kill it).
+            from pm_core.signoff import claim_return_launch
+            if not claim_return_launch(root, pr_id, "impl"):
+                click.echo("running: impl")
+                return
+            impl_transcript = tdir / f"impl-{pr_id}.jsonl"
+            ctx = click.get_current_context()
+            ctx.invoke(pr_start, pr_id=pr_id, workdir=None, fresh=True,
+                       background=True, transcript=str(impl_transcript),
+                       companion=False)
+            click.echo("sign_off: returning to impl (relaunched)")
             return
         idle, gone = _check_impl_idle(pm_session, pr_entry, tdir)
         if gone:
@@ -2819,13 +4267,20 @@ def pr_auto_sequence(pr_id: str):
             return
         # Idle and no spec_pending → advance to review.  Persist the
         # transcript symlink under the auto-sequence dir so the next tick
-        # can locate the verdict.  Use review-loop iteration 1 naming so
-        # NEEDS_WORK retries (iteration 2+) follow the same scheme.
-        iter_transcript = tdir / f"review-{pr_id}-i1.jsonl"
-        ctx = click.get_current_context()
-        ctx.invoke(pr_review, pr_id=pr_id, fresh=False, background=True,
-                   review_loop=False, review_iteration=1,
-                   review_loop_id="", transcript=str(iter_transcript))
+        # can locate the verdict.  Use review-loop iteration naming so
+        # NEEDS_WORK retries follow the same scheme; after a sign-off
+        # return the earlier iterations exist, and the next tick reads
+        # the highest one — so continue numbering after them.  An open
+        # review window then reviewed the older code: replace it (fresh)
+        # rather than switching to it, or no rework review ever runs and
+        # the in_review tick waits on that window forever.  That holds for
+        # any rework of a sign-off return, also when this dir has no
+        # iteration because the TUI ran the earlier reviews (S77).
+        _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
+        next_iter = latest_iter + 1
+        _launch_review_iteration(
+            pr_id, tdir, next_iter, review_loop=False,
+            fresh=latest_iter > 0 or open_return(pr_entry) is not None)
         click.echo("advanced: in_review")
         return
 
@@ -2833,21 +4288,64 @@ def pr_auto_sequence(pr_id: str):
         if not pm_session:
             click.echo("paused: no pm tmux session")
             return
+        # A native review loop (including its bounded failed-launch retries)
+        # owns this PR's review launch; a second --fresh launch here would
+        # kill its window and duplicate the work.  Wait for the loop.
+        from pm_core.review_loop import review_loop_owns_launch
+        _loop_owner = review_loop_owns_launch(pr_id)
+        if _loop_owner:
+            click.echo(f"running: review (owned by {_loop_owner})")
+            return
         verdict, latest_iter = _check_review_verdict(tdir, pr_id)
+        if verdict and _older_than(
+                tdir / f"review-{pr_id}-i{latest_iter}.jsonl",
+                (open_return(pr_entry) or {}).get("ts")):
+            # Reviewed the code sign-off sent back, not the rework.
+            verdict = None
+        if awaiting == "review":
+            # A sign-off REVIEW return: an earlier iteration's verdict
+            # reviewed older code — launch a fresh iteration, unless another
+            # driver (the TUI that routed it, a concurrent tick) is already
+            # launching it: a second --fresh launch would kill that one.
+            from pm_core.signoff import claim_return_launch
+            if not claim_return_launch(root, pr_id, "review"):
+                click.echo("running: review")
+                return
+            next_iter = latest_iter + 1
+            _launch_review_iteration(pr_id, tdir, next_iter, fresh=True)
+            click.echo(
+                f"sign_off: returning to review (iteration {next_iter})")
+            return
 
         if verdict == "PASS":
             project = data.get("project") or {}
             if project.get("skip_qa"):
                 click.echo("ready_to_merge (skip_qa)")
                 return
-            # Transition to qa and launch QA in a detached subprocess.
+            # Transition to qa and launch QA in a detached subprocess.  A
+            # provider setup error is reported before the move: a PR left in
+            # qa with no run would have its next tick act on an earlier
+            # run's qa_status.json (a stale NEEDS_WORK bounces it back to
+            # review) or qa window ("running: qa", the launch never retried).
+            _check_qa_launch(root, pr_id)
             def _to_qa(d):
                 p = store.get_pr(d, pr_id)
                 if p and p.get("status") == "in_review":
                     p["status"] = "qa"
                     _record_status_timestamp(p, "qa")
-            store.locked_update(root, _to_qa)
-            _launch_qa_detached(root, pr_id)
+            # A run record names this tick (then the driver) before the PR
+            # shows qa: a TUI auto-start pass in between saw no driver and
+            # started a second loop (S111).
+            from pm_core.qa_loop import drop_launch_record, write_launch_record
+            loop_id = secrets.token_hex(8)
+            write_launch_record(pr_id, loop_id, os.getpid())
+            try:
+                store.locked_update(root, _to_qa)
+            except BaseException:
+                drop_launch_record(pr_id, loop_id)
+                raise
+            trigger_tui_refresh()
+            _launch_qa_detached(root, pr_id, loop_id=loop_id)
             click.echo("advanced: qa")
             return
 
@@ -2861,11 +4359,7 @@ def pr_auto_sequence(pr_id: str):
             # machinery in the launched window writes to the next
             # iteration transcript.
             next_iter = latest_iter + 1
-            iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
-            ctx = click.get_current_context()
-            ctx.invoke(pr_review, pr_id=pr_id, fresh=True, background=True,
-                       review_loop=True, review_iteration=next_iter,
-                       review_loop_id="", transcript=str(iter_transcript))
+            _launch_review_iteration(pr_id, tdir, next_iter, fresh=True)
             click.echo(f"review: needs_work, retrying iteration {next_iter}")
             return
 
@@ -2873,11 +4367,7 @@ def pr_auto_sequence(pr_id: str):
         if _review_window_pane(pm_session, pr_entry) is None:
             # Review window absent — launch a review-loop iteration.
             next_iter = max(latest_iter, 0) + 1
-            iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
-            ctx = click.get_current_context()
-            ctx.invoke(pr_review, pr_id=pr_id, fresh=False, background=True,
-                       review_loop=True, review_iteration=next_iter,
-                       review_loop_id="", transcript=str(iter_transcript))
+            _launch_review_iteration(pr_id, tdir, next_iter, fresh=False)
             click.echo("advanced: review_relaunched")
             return
         click.echo("running: review")
@@ -2885,8 +4375,49 @@ def pr_auto_sequence(pr_id: str):
 
     if status == "qa":
         overall, _path = _qa_status_for(pr_id)
+        # The status predates sign-off's return (REQA, or rework that must be
+        # re-verified): it is the run sign-off already judged, not the re-run.
+        stale_status = bool(overall) and _older_than(
+            _path, (open_return(pr_entry) or {}).get("ts"))
+        # A PASS seen while the REQA obligation is still unclaimed is not the
+        # owed re-run's either: every full-run starter clears ``awaiting`` as
+        # it starts (``start_qa``, ``qa-run-bg``, ``zz t``), so it came from a
+        # run that was already in flight when sign-off bounced the PR.  That
+        # run verified the code sign-off judged, so advancing would silently
+        # drop the owed re-run — leave the PR at ``qa`` and start it via the
+        # catch-up below (mirrors ``qa_loop_ui._on_qa_complete``'s guard).
+        owed_reqa = awaiting == "qa"
+        pre_return_pass = overall == "PASS" and owed_reqa
+        if stale_status or pre_return_pass:
+            overall = None
+        # The REQA episode is still open and a QA run of this PR is in
+        # flight: whatever ``qa_status.json`` says now was written by a run
+        # that started before it (the owed re-run clears ``awaiting`` as it
+        # starts but only writes its own status once planning ends — minutes
+        # later — so the previous run's PASS/NEEDS_WORK stays newest).  Acting
+        # on it would advance or bounce the PR out from under the run that
+        # owns it and drop the owed re-run; wait for that run to end.
+        from pm_core.qa_loop import run_driven_elsewhere
+        if overall is not None and open_return(pr_entry) is not None \
+                and run_driven_elsewhere(pr_id):
+            click.echo("running: qa (driven elsewhere)")
+            return
         if overall == "PASS":
-            click.echo("ready_to_merge")
+            # QA passed and finalized -> advance to the sign_off step, which
+            # runs the comprehensive PR-level review + verdict router.  The
+            # sign_off branch below polls the router's verdict and routes on.
+            def _to_signoff(d):
+                p = store.get_pr(d, pr_id)
+                if p and p.get("status") == "qa":
+                    p["status"] = "sign_off"
+                    _record_status_timestamp(p, "sign_off")
+            store.locked_update(root, _to_signoff)
+            trigger_tui_refresh()
+            signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
+            ctx = click.get_current_context()
+            ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False, background=True,
+                       transcript=str(signoff_transcript))
+            click.echo("advanced: sign_off")
             return
         if overall == "INPUT_REQUIRED":
             click.echo("paused: input_required (qa)")
@@ -2903,86 +4434,380 @@ def pr_auto_sequence(pr_id: str):
                     p["status"] = "in_review"
                     _record_status_timestamp(p, "in_review")
             store.locked_update(root, _to_review)
+            trigger_tui_refresh()
             _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
             next_iter = latest_iter + 1
-            iter_transcript = tdir / f"review-{pr_id}-i{next_iter}.jsonl"
-            ctx = click.get_current_context()
-            ctx.invoke(pr_review, pr_id=pr_id, fresh=True, background=True,
-                       review_loop=True, review_iteration=next_iter,
-                       review_loop_id="", transcript=str(iter_transcript))
+            _launch_review_iteration(pr_id, tdir, next_iter, fresh=True)
             click.echo(
                 f"qa: needs_work, returning to review (iteration {next_iter})"
             )
             return
         if overall is None:
-            # No qa_status.json yet.  Could be a never-started run *or*
-            # a freshly-launched run whose first status write hasn't
-            # landed yet.  Check for the qa tmux window before
+            # No finalized result yet: a never-started run, a freshly
+            # launched run, or a held run reopening after INPUT_REQUIRED.
+            # Check for the qa tmux window before
             # re-launching to avoid stacking duplicate QA subprocesses
             # during the launch→first-write race window.
             display_id = _pr_display_id(pr_entry)
             qa_win = tmux_mod.find_window_by_name(
                 pm_session, f"qa-{display_id}",
             ) if pm_session else None
-            if qa_win:
+            return_ts = (open_return(pr_entry) or {}).get("ts")
+            if owed_reqa:
+                if (qa_win and _qa_run_started_since(pr_id, return_ts)) \
+                        or _qa_run_starting(pr_id, return_ts) \
+                        or _qa_run_driven(pr_id):
+                    # The TUI started the re-run while project.yaml was
+                    # busy: its clear of ``awaiting`` is still pending (the
+                    # poll tick retries it), and a tick queued on the lock
+                    # got it first at the release (S87).  That run's window
+                    # is the re-run's, not the judged run's (or it has
+                    # none yet: it is still replacing the judged run's).  A
+                    # live driver of that run counts even after the user
+                    # closed its qa window (S89).  So does a run another
+                    # process still drives from before the return (the
+                    # user's ``pm qa run``): a launch now retires its
+                    # windows as stale and runs a second loop beside it;
+                    # the re-run starts once it ends (S117, S120).
+                    click.echo("running: qa")
+                    return
+                if run_driven_elsewhere(pr_id):
+                    click.echo("running: qa (driven elsewhere)")
+                    return
+                # Sign-off sent this back to QA and no driver has started
+                # the re-run yet (each clears ``awaiting`` as it starts), so
+                # a qa window is the judged run's (QA windows are kept for
+                # inspection): launch — unless another driver already is,
+                # the claim being the one-owner gate.  The hop tick refuses
+                # a provider setup error after the hop, so check before
+                # claiming: a claim held through the fix would hide the
+                # launch for minutes.
+                from pm_core.signoff import claim_return_launch
+                _check_qa_launch(root, pr_id)
+                if not claim_return_launch(root, pr_id, "qa",
+                                           require_status="qa"):
+                    click.echo("running: qa (launch claimed)")
+                    return
+            elif _qa_run_stopped(pr_id, _path):
+                # The run ended on a provider setup error and nothing will
+                # finish it (its window stays open): relaunch.  While the
+                # setting is still broken the launch check prints the one
+                # Error: line and spawns nothing.
+                _launch_qa_detached(root, pr_id)
+                click.echo("running: qa (relaunched)")
+                return
+            elif qa_win:
                 click.echo("running: qa")
                 return
+            else:
+                # The re-run's driver cleared ``awaiting`` and is replacing
+                # the judged run's window: its claim still stands.
+                # A TUI driver holds no claim: its start record stands in
+                # until its window exists (S91: two ticks 2 s apart each
+                # launched qa-run-bg over a TUI REQA re-run in that gap).
+                # A run whose qa window the user closed is still driven
+                # while its driver lives (S89), and a run another live
+                # process drives is not ours to duplicate (S117).
+                from pm_core.signoff import return_launch_claimed
+                if return_launch_claimed(pr_entry, "qa") \
+                        or _qa_run_starting(pr_id, return_ts) \
+                        or _qa_run_driven(pr_id):
+                    click.echo("running: qa")
+                    return
+                if run_driven_elsewhere(pr_id):
+                    click.echo("running: qa (driven elsewhere)")
+                    return
+                if _qa_run_owned_elsewhere(_path):
+                    # A reopened held run can still have an owner even
+                    # without its window. Keep that driver's workers and
+                    # evidence intact.
+                    click.echo("running: qa")
+                    return
             _launch_qa_detached(root, pr_id)
             click.echo("running: qa (launched)")
             return
         click.echo("running: qa")
         return
 
+    if status == "sign_off":
+        if not pm_session:
+            click.echo("paused: no pm tmux session")
+            return
+        from pm_core import signoff as signoff_mod
+
+        # Shared state machine (also driven by the TUI scheduler): adopt a
+        # fresh record, retire+relaunch a stale run, record the transcript
+        # verdict, then decide + apply the hop.  Launching is ours.
+        step = signoff_mod.step_signoff(
+            root, pr_entry, session=pm_session, tdir=tdir,
+            read_verdict=_check_signoff_verdict,
+            window_pane=_signoff_window_pane,
+            retire=_retire_signoff_window)
+        if step.stale:
+            trigger_tui_refresh()
+        if step.action == "launch":
+            signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
+            ctx = click.get_current_context()
+            ctx.invoke(pr_signoff, pr_id=pr_id, fresh=False, background=True,
+                       transcript=str(signoff_transcript))
+            click.echo("advanced: sign_off_relaunched")
+            return
+        if step.action == "running":
+            click.echo("running: sign_off")
+            return
+
+        hop = step.hop
+        # The verdict record / hop status was written behind the TUI's back;
+        # without a reload its rows keep saying "awaiting sign-off".
+        trigger_tui_refresh()
+        if step.coerced and hop != "unknown":
+            click.echo(f"note: {step.coerced}", err=True)
+        if hop == "ready_to_merge":
+            # Sign-off always gates at merge: this is a recommendation only.
+            # The PR stays in sign_off; the merge decision is made elsewhere
+            # (the plan auto-start watcher, pr-ff9b728).
+            click.echo("ready_to_merge")
+            return
+        if hop == "blocked":
+            click.echo("paused: sign_off_blocked")
+            return
+        if hop == "qa":
+            # A QA run another process still drives (the user's ``pm qa
+            # run``) is left to finish: a detached run now would retire its
+            # windows as stale and run QA twice (S117).  The return record
+            # keeps ``awaiting: qa``, so the next tick — or the TUI's
+            # reconciler — starts the owed run once that one ends (S120).
+            from pm_core.qa_loop import run_driven_elsewhere
+            if run_driven_elsewhere(pr_id) or _qa_run_driven(pr_id):
+                click.echo("sign_off: re-qa deferred: a QA run is in flight")
+                return
+            # One owner across ticks and TUIs: claimed (after the provider
+            # check: a claim held through the fix would hide the launch for
+            # minutes) before the spawn, so a concurrent qa tick leaves this
+            # driver alone until it starts; one that claimed first launches
+            # instead.
+            from pm_core.signoff import claim_return_launch
+            _check_qa_launch(root, pr_id)
+            if not claim_return_launch(root, pr_id, "qa", require_status="qa"):
+                click.echo("running: qa (launch claimed)")
+                return
+            _launch_qa_detached(root, pr_id)
+            click.echo("sign_off: re-qa")
+            return
+        # A review/impl hop's return record already holds the launch claim
+        # for this driver (signoff.build_return_record).
+        if hop == "review":
+            _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
+            next_iter = latest_iter + 1
+            _launch_review_iteration(pr_id, tdir, next_iter, fresh=True)
+            click.echo(
+                f"sign_off: returning to review (iteration {next_iter})")
+            return
+        if hop == "impl":
+            impl_transcript = tdir / f"impl-{pr_id}.jsonl"
+            ctx = click.get_current_context()
+            # fresh=True: a bounce must RELAUNCH the impl agent so it actually
+            # reworks against the sign-off feedback.  With fresh=False the
+            # pre-existing (idle) impl window short-circuits pr_start's
+            # background fast path ("already exists, no focus change") and no
+            # new agent ever runs — the next tick would just re-advance to
+            # in_review with zero rework.  fresh=True reuses the existing
+            # workdir (status is in_progress) but kills the stale window and
+            # starts a fresh session, mirroring the sign_off->review hop.
+            ctx.invoke(pr_start, pr_id=pr_id, workdir=None, fresh=True,
+                       background=True, transcript=str(impl_transcript),
+                       companion=False)
+            click.echo("sign_off: returning to impl")
+            return
+        # hop == "unknown": verdict not actionable or PR moved concurrently.
+        click.echo("running: sign_off")
+        return
+
     click.echo(f"unknown status: {status}", err=True)
     raise SystemExit(2)
 
 
-def _launch_qa_detached(root: Path, pr_id: str) -> None:
+def _check_qa_launch(root: Path, pr_id: str) -> None:
+    """Raise the provider setup error a detached QA driver would die on."""
+    from pm_core.qa_loop import check_qa_providers
+    data = store.load(root)
+    check_qa_providers(store.get_pr(data, pr_id) or {}, data)
+
+
+def _launch_qa_detached(root: Path, pr_id: str,
+                        loop_id: str | None = None) -> None:
     """Spawn a detached subprocess to drive the QA loop for *pr_id*.
 
     Uses the hidden ``pm pr qa-run-bg`` subcommand so the QA scenarios
     run in tmux windows under their own long-lived process.  Subsequent
     auto-sequence ticks read the resulting ``qa_status.json``.
+
+    The driver's output goes nowhere, so a provider setup error of a QA
+    session is raised here (one ``Error:`` line from
+    this tick, no driver spawned) instead of ending the driver unseen and
+    being relaunched on every tick.
+
+    The run's start record names this process and then the driver from
+    before the spawn (qa_loop.write_launch_record): the driver writes its
+    own only after setting up, and a TUI auto-start pass in that gap would
+    start a second loop.
     """
+    from pm_core.qa_loop import drop_launch_record, write_launch_record
+    loop_id = loop_id or secrets.token_hex(8)
     cmd = [sys.executable, "-m", "pm_core.wrapper",
-           "pr", "qa-run-bg", pr_id]
-    # start_new_session detaches from the parent process group so the
-    # caller can exit while QA continues.
-    subprocess.Popen(
-        cmd, cwd=str(root), start_new_session=True,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        stdin=subprocess.DEVNULL,
-    )
+           "pr", "qa-run-bg", pr_id, "--loop-id", loop_id]
+    try:
+        _check_qa_launch(root, pr_id)
+        write_launch_record(pr_id, loop_id, os.getpid())
+        # start_new_session detaches from the parent process group so the
+        # caller can exit while QA continues.
+        proc = subprocess.Popen(
+            cmd, cwd=str(root), start_new_session=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+        )
+    except BaseException:
+        # No driver: a record naming this exiting tick would read as a
+        # run starting (_qa_run_starting) until the claim expiry.
+        drop_launch_record(pr_id, loop_id)
+        raise
+    write_launch_record(pr_id, loop_id, proc.pid)
 
 
 @pr.command("qa-run-bg", hidden=True)
 @click.argument("pr_id")
-def pr_qa_run_bg(pr_id: str):
+@click.option("--loop-id", default=None, hidden=True,
+              help="Run id whose start record the launcher wrote.")
+def pr_qa_run_bg(pr_id: str, loop_id: str | None):
     """Hidden: run the QA loop synchronously to completion.
 
     Used by ``pm pr auto-sequence`` to spawn a detached QA driver.  Not
     intended for direct human use — prefer the TUI ``t`` key.
     """
-    from pm_core.qa_loop import QALoopState, run_qa_sync
+    from pm_core.qa_loop import (QALoopState, _is_setup_error,
+                                 _log_thread_end, clear_resume_file,
+                                 record_setup_stop, run_qa_sync)
 
     root = state_root()
     data = store.load(root)
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
-    # Transition to qa if necessary
+    # Transition to qa if necessary.  The launching tick has normally done
+    # it already; only lock when there is something to write, and wait out
+    # a busy project.yaml (another pm command) rather than die before the
+    # run starts: nothing would report it (output goes nowhere) (S111).
     def _to_qa(d):
         p = store.get_pr(d, pr_id)
         if p and p.get("status") == "in_review":
             p["status"] = "qa"
             _record_status_timestamp(p, "qa")
-    store.locked_update(root, _to_qa)
-    data = store.load(root)
-    pr_entry = store.get_pr(data, pr_id) or pr_entry
+    if pr_entry.get("status") == "in_review":
+        try:
+            store.locked_update(root, _to_qa)
+        except store.StoreLockTimeout as e:
+            from pm_core.signoff import RETURN_CLEAR_WAIT_SECONDS
+            _log.warning("pr_qa_run_bg: %s; waiting up to %ss more", e,
+                         RETURN_CLEAR_WAIT_SECONDS)
+            store.locked_update(root, _to_qa,
+                                timeout=RETURN_CLEAR_WAIT_SECONDS)
+        data = store.load(root)
+        pr_entry = store.get_pr(data, pr_id) or pr_entry
 
-    state = QALoopState(pr_id=pr_id)
+    # Guard against an out-of-band status change that landed between the
+    # auto-sequence sign_off->qa bounce (apply_signoff_hop) that spawned this
+    # detached driver and this process actually starting: a concurrent merge
+    # (e.g. a GitHub sync marking the PR merged) can move the PR to
+    # merged/closed.  apply_signoff_hop's lock only guards the *status*
+    # transition, not this subprocess; without this check we'd open a qa-<id>
+    # window and run a full QA loop against an already-merged PR.  Bail BEFORE
+    # run_qa_sync (which creates the window) so no QA window/subprocess is left
+    # running against the merged PR.
+    if (pr_entry.get("status") or "") in TERMINAL_PR_STATES:
+        _log.info("pr_qa_run_bg: %s is %s; skipping QA (no longer qa-eligible)",
+                  pr_id, pr_entry.get("status"))
+        return
+
+    from pm_core.signoff import clear_return_awaiting
+    clear_return_awaiting(root, pr_id, "qa", session_opened=True)
+    # Mirror this CLI-driven run into the shared per-PR runtime state.  Only
+    # TUI-owned loops mirror themselves, so without this a run launched by
+    # auto-sequence has no ~/.pm/runtime/<id>.json at all: the popup picker
+    # cannot show its progress and auto-start's recorded_qa_verdict cannot
+    # see its verdict (it would relaunch QA for a PR this driver already
+    # took to PASS).  Keep any pending suppress_switch: it belongs to a user
+    # start for this PR, not to this driver's own launch.
+    from pm_core import runtime_state as _rs
+    _suppress = (_rs.get_action_state(pr_id, "qa") or {}).get("suppress_switch")
+    _rs.set_action_state(pr_id, "qa", "running", suppress_switch=_suppress)
+    state = (QALoopState(pr_id=pr_id, loop_id=loop_id) if loop_id
+             else QALoopState(pr_id=pr_id))
     try:
         run_qa_sync(state, root, pr_entry, on_update=None, max_scenarios=None)
     except Exception as e:
-        _log.exception("pr_qa_run_bg: QA crashed for %s: %s", pr_id, e)
+        _rs.set_action_state(pr_id, "qa", "failed")
+        _log_thread_end(e, "pr_qa_run_bg: QA", pr_id)
+        if _is_setup_error(e):
+            record_setup_stop(state, e)
         raise SystemExit(1)
+    if state.latest_verdict:
+        _rs.set_action_state(pr_id, "qa", "done", verdict=state.latest_verdict)
+    else:
+        # The run ended without a verdict — the PR merged/closed while it
+        # ran, so run_qa_sync returned early.  Drop the [working] entry
+        # rather than leaving a QA run the picker and home window show as
+        # still live; keep a suppress flag that is *still* pending (a
+        # concurrent user start may have consumed it during the run), since
+        # it belongs to that start rather than this driver's launch.
+        still_pending = (_rs.get_action_state(pr_id, "qa")
+                         or {}).get("suppress_switch")
+        _rs.clear_action(pr_id, "qa")
+        if still_pending:
+            _rs.request_suppress_switch(pr_id, "qa")
+
+    # This process finished the run and auto-sequence reads qa_status.json
+    # itself, so drop the resume snapshot before exiting.  It exists only so
+    # a TUI can pick up a run whose driver *died*; left behind, the TUI's
+    # resume scan would "recover" this completed run once our pid is gone —
+    # e.g. a run retired by a sign-off re-qa bounce finishes late and logs a
+    # stale "QA PASS — press i" against the PR's new QA run.
+    if state.latest_verdict and state.qa_workdir:
+        clear_resume_file(state.qa_workdir)
+
+
+@pr.command("dashboard")
+@click.option("--port", default=None, type=int,
+              help="TCP port (default 8765; 0 picks a free port).")
+@click.option("--bind", default=None,
+              help="Bind address (default 127.0.0.1). Use with care — "
+                   "the server has no auth.")
+@click.option("--open", "do_open", is_flag=True,
+              help="Open the dashboard in a browser once the server is up.")
+def pr_dashboard(port: int | None, bind: str | None, do_open: bool):
+    """Serve the all-PR behavior dashboard at ``http://localhost:<port>/``.
+
+    Starts a localhost HTTP server that rebuilds the index from
+    ``project.yaml`` + the captures dir on every ``/`` request, so a new
+    sign-off report shows up on the next page load with no regeneration
+    step. Per-PR ``report.html`` and its evidence siblings are served
+    straight from ``~/.pm/sessions/<tag>/captures/<pr_id>/``.
+
+    Foreground / blocking. Ctrl-C shuts the server down.
+    """
+    from pm_core import dashboard_server
+    from pm_core.paths import captures_root
+
+    root = state_root()
+    # captures_root() creates the dir when a tag resolves, so croot exists
+    # by the time we get a non-None path back.
+    croot = captures_root()
+    if croot is None:
+        click.echo(
+            "Could not resolve the captures root (not inside a git repo / no "
+            "session tag?).", err=True)
+        raise SystemExit(1)
+    dashboard_server.serve(
+        pm_root=root, captures_root_dir=croot,
+        host=bind or dashboard_server.DEFAULT_BIND,
+        port=port if port is not None else dashboard_server.DEFAULT_PORT,
+        open_browser=do_open)

@@ -91,7 +91,7 @@ def load_watcher_plan_prs(app) -> int:
 
     Returns the number of PRs created.
     """
-    from pm_core.plan_parser import parse_plan_prs
+    from pm_core.plans.parser import parse_plan_prs
     from pm_core.cli.helpers import _make_pr_entry
     from pm_core.cli.plan import _build_pr_description
     from pm_core.cli.meta import ensure_meta_workdir
@@ -208,7 +208,8 @@ def start_watcher(app, transcript_dir: str | None = None,
     pm_root = str(store.find_project_root())
     kwargs = {}
     if watcher_type == "auto-start":
-        kwargs["auto_start_target"] = getattr(app, '_auto_start_target', None)
+        from pm_core.tui import auto_start as _auto_start
+        kwargs["auto_start_targets"] = _auto_start.get_targets(app)
         kwargs["meta_pm_root"] = meta_pm_root
     watcher = cls(pm_root=pm_root, **kwargs)
     manager.register(watcher)

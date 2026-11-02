@@ -1,0 +1,103 @@
+# Recursive pm Tournament Across Targets
+
+Run a population of pm variants in parallel, score them by an external fitness metric, and let winners graduate to higher-stakes work. Targets are pluggable — pm itself, the plan-002 benchmark set, OSS repos with QA harnesses. The tournament is itself a pm prompt and evolves through the same loop as anything else; safety comes from external evaluation rather than code-level carve-outs.
+
+This plan is intentionally underspecified. Many design choices should draw on prior work in evolutionary algorithms (selection pressure, population diversity, anchor strategies, novelty search, multi-objective fitness) and will be worked out collaboratively before phase breakdown.
+
+> **First experiment (2026-10-19):** [Document evaluation](plan-doc-eval.md) builds and runs a document-only prompt-improvement loop using the known-good corpus, then adopts measured improvements in existing PM planning prompts. [Execution evaluation](../docs/planning-evaluation.md) follows on existing benchmark tasks, comparing direct execution without a separate plan against current and improved planning under matched total budgets. Full PM orchestration comes afterward. Open/local backends are supported, and the full tournament prerequisites below do not block the document-only bootstrap.
+
+> **Cross-plan note (2026-08-31):** [[plan-jurisdiction]] Set B builds the seeded-bad-change **exam harness** as standing infrastructure — extending this plan's `signoff` two-evaluation-router A/B into the certification instrument for process grants; the appendix's A/B candidates get their measurement substrate from it plus #160's fixtures. The riscv-pareto campaign (`../riscv-pareto/pm/plans/plan-campaign.md`) is a natural future **target**: an external project exposing a numeric fitness with held-out structure (Pareto-front movement under a pinned eval pipeline).
+
+## Coverage beyond the document bootstrap
+
+The automatic improvement flow should cover all PM use cases, including importing a project from existing material with little human setup. Extend from document quality to discovery of plans/artifacts, generation and execution of recipes, task handoffs and recovery, software and research outcomes, living-document coherence, and Radar. Evaluate whether generated plans/recipes actually help work advance. Project-import cases begin with repositories and goals rather than curated manifests; measure useful first work, discovery omissions, incorrect relationships, repeat-import stability, and user setup/coordination effort. Preserve held-out evaluation and independent evidence; document scores alone do not establish these outcomes.
+
+Use the same agent-controlled, hook-free launch/tmux boundary as [plan-delivery](plan-delivery.md). The document-only experiment remains the first step and does not wait for this wider coverage.
+
+## Goals
+
+- Use pm to improve any project with an appropriate independently evaluated outcome, including pm itself.
+- Make the tournament generic across targets — adding a new target is configuration, not new infrastructure.
+- Avoid self-confirmation collapse: a variant never grades itself; anchor variants and held-out corpora bound the loop.
+- Route compute toward variants likely to do good work on stakes-bearing targets.
+
+## Prerequisites
+
+- Bug-fix loop demonstrably unsupervised — regression-loop Phase 7 evidence and coverage gates landed.
+- Benchmark loaders from plan-002 — held-out slices for variant evaluation come from here.
+- Per-plan gated-merge config on the plan auto-start watcher (`pr-ff9b728`, plan-regression Phase 11 — supersedes `pr-b77702b`'s auto_merge flag, which was rescoped) so variant branches stage as candidates.
+- Container isolation for variants (already in plan-qa).
+
+## Core concepts
+
+### Target
+
+A project the tournament operates against. Provides: a checkout, a Claude-based test harness that emits a numeric metric, and a held-out evaluation corpus the loop is not allowed to peek at. pm itself, benchmark sets, and OSS repos are all targets; the infrastructure does not know which is which.
+
+### Variant
+
+A pm checkout at a specific commit, possibly with prompt or model overrides. Variants are produced by the existing bug-fix and improvement-fix watchers operating on a target's self-modification plan. The same variant can compete on multiple targets — overfitting one target shows up as poor cross-target performance.
+
+### External fitness
+
+A variant is never graded by itself. Sources include the target's own metric, cross-variant review (sibling variants score each other), and agreement with anchor variants on cases where ground truth is settled. Cost is a tiebreaker. Specific weighting and combination is a design choice we should work through with the evolutionary-algorithms framing, not pin down here.
+
+### Anchor
+
+At least one variant per target is pinned to a known-good ancestor and never retires. Anchors are the safety boundary: they periodically re-run the tournament as a sanity check, they sit in the population as a fitness reference, and they catch population-wide drift that cross-variant agreement alone would miss.
+
+### Recursive tournament
+
+The tournament is a pm prompt. Variants can propose changes to it. The variant evaluating a tournament tick is never the variant being scored. A meta-tournament selecting tournament-runners is possible at the next level up; the recursion bottoms out at a human-pinned anchor.
+
+### Champion and promotion
+
+Each target has a champion — the variant currently used for production work against it. Promotion is gated: a challenger must beat the champion by some margin for some duration before replacing it, with a human confirm step. The exact gate parameters are a design choice for later.
+
+## Prior art: open-ended search and the controlled-aberration mechanism
+
+The tournament is a search over intelligences; its hardest open question (novelty vs. fitness, diversity preservation) is the **open-endedness** problem, which has direct prior art to draw on (all `unverified` until audited):
+
+- **Open-endedness / objective deception** — Stanley & Lehman, *Why Greatness Cannot Be Planned*: objective-directed search cannot reach what isn't on the gradient toward the stated objective; reaching the genuinely new *requires* non-goal-directed exploration. The load-bearing reason the tournament needs more than fitness-maximization.
+- **Quality-diversity / novelty search** — Lehman & Stanley (novelty search); MAP-Elites (Mouret & Clune); POET (Wang et al.). Illuminate the *space* of variants by behavioral niche rather than collapsing to one scalar optimum — the concrete algorithms for "diversity preservation."
+- **Cultural evolution** — Henrich, *The Secret of Our Success* (adaptive practices no individual understands; the Naskapi divination example *randomizes* hunting to avoid over-exploitation — variation → capability beyond individual comprehension); Boyd & Richerson (transmission biases); Tomasello's **cultural ratchet** (retain + propagate winners so capability compounds — the third piece beyond variation + selection).
+- **Schizotypy ↔ creativity / bet-hedging** — populations apparently tolerate a *rate* of aberrant cognition because the rare innovation payoff justifies the common cost; the biological analogue of a controlled mutation/aberration rate.
+
+**The high-level mechanism (a candidate for the novelty axis).** To reach methods you can't conceive, allow individuals to operate **without justification at a controlled rate** — non-goal-directed variation. Most aberrations are useless and selected out; the rare useful ones are kept by the **external fitness itself** — no special "is-this-better" judge is required (the task fitness *is* the selection; a self-recognition judge is only a *large accelerant*, verify ≫ generate). The one hard requirement is that the fitness be **grounded and long-horizon** — a myopic fitness kills slow-burn innovations that look worse at first. A safe, focused form applies the aberration only to an **"aspirational simulation" line of thinking** (periodically simulate a higher intelligence; vary only there), gated by fitness before it acts.
+
+**Relation to the far-term framing.** This is the near-term, single-target version of the *search over minds / stream-compositions* sketched as the parked `mind-search` capstone. The aberration mechanism and these references apply to both; the in-reasoning version is the "aspirational simulation" branch-type in `literature-review-user-model-extension.md` §4.1 / [[plan-consult]].
+
+## Open questions to work through before phase breakdown
+
+- Selection and population dynamics: tournament size, replacement strategy, diversity preservation, novelty vs. fitness tradeoff. The previous evolutionary-algorithms work should inform this directly.
+- Held-out corpus hygiene: rotation strategy, meta-held-out reserved for sanity checks, detection of leakage.
+- Anchor advancement: anchors can't stay frozen forever or all variants legitimately diverge. Rolling anchor under human approval, or anchor lineage that advances when consensus among non-anchor winners is strong.
+- Cross-variant collusion: if all non-anchor variants drift together, sibling agreement stops being a signal. The anchor's weight in composite fitness has to be meaningful.
+- Tournament-prompt sabotage: a variant could propose a tournament change that subtly favors itself. Anchor-run tournaments on identical populations should produce close-to-identical rankings; large divergence triggers rollback.
+- Cost ceiling and budget allocation across targets and population size.
+- Champion rollback: if a graduated champion is later found regressed, rollback is a normal pm revert PR — but the fitness signal that missed the regression also needs review.
+
+## Success criteria
+
+- A continuous variant population competes on multiple targets simultaneously, with per-target champions determined by the tournament rather than manual selection.
+- Adding a new target is a configuration change plus a harness wrapper.
+- The tournament prompt is evolvable through the loop, bounded by anchors and held-out corpora.
+- The operator can ask "for target T, which variant is the current champion, why, and what is it working on" and get a coherent answer.
+
+## Appendix: Workflow A/B candidates (deferred)
+
+Multi-agent orchestration (Claude Code's Workflow tool, or an equivalent built in pm Python) is a candidate axis for variants once the tournament substrate exists. We are not adopting it now because we cannot yet measure whether it meaningfully improves output quality vs. the current single-prompt approach, and adopting it has real costs: reduced portability to non-Claude-Code backends (including local LLMs behind Claude) and reduced visibility (you cannot attach to a workflow mid-run the way you can attach to a tmux pane in the QA flow).
+
+Once regression-test infrastructure (plan-regression Phase 7 + plan-002 benchmarks) gives us a stable quantitative metric, the following sites are worth running as A/B variants — single-prompt champion vs. multi-agent challenger — and promoting only if the challenger wins by margin:
+
+- **`adversarial_review`** — current single-prompt review vs. parallel skeptic finders + independent voter quorum. Quality hypothesis: independent skeptics catch false positives a single review prompt rationalizes past. Measure: review precision/recall against curated bug fixtures.
+- **`review_qa_benchmark` harness** — sequential per-case scoring vs. fan-out per case with deterministic aggregation. Hypothesis: pure throughput win, not quality; promote only if dev-time to build the harness in pm Python is meaningfully higher than wiring it through Workflow.
+- **`adversary-runner` / `plan-gen-integration` / `spec-gen-integration`** — single plan/spec gen prompt vs. three-lens fan-out (internal-consistency / external-skeptic / cross-reference) with loop-until-quiescence. Hypothesis: lens diversity catches gaps a single prompt misses. Measure: held-out execution success, rework and total cost against direct execution and current planning. Human readability and reference-plan comparisons remain optional diagnostics; see [planning evaluation](../docs/planning-evaluation.md).
+- **`external-fitness` + `anchor-variants`** — this tournament's own scheduler. Whether the variant grid runs as Workflow vs. pm-Python orchestration is itself an A/B once the metric exists. Hypothesis: Workflow's built-in journaling/resume/concurrency-cap is a dev-time win; quality should be identical.
+- **`prior-work-survey` (plan-living-artifacts)** — single deep-research prompt (or the existing `deep-research` skill) vs. fan-out per-area + adversarial citation verifier. Hypothesis: citation hallucination rate drops with an independent verifier pass. Measure: cite-check precision against the produced bibliography.
+- **Citation audit loop (plan-litreview augmented cycle).** Per-citation fan-out vs. the current single sequential session walking the citation list. The audit already writes one entry per citation to disk as it runs, so visibility cost is low. Hypothesis: independent per-citation judgment is better calibrated than a single pass, especially for `over-characterizes` / `under-characterizes` verdicts. Measure: agreement with held-out human-graded verdicts on a fixture artifact; false-faithful rate on seeded mischaracterizations. See [[plan-quality#appendix-same-question-across-many-pieces-of-text]] for the per-citation framing.
+- **`signoff` two-evaluation router** — current single sign-off prompt vs. parallel (evidence-supports-diff) + (anti-shortcut/meta-QA) subagents gated by a deterministic Python router. Hypothesis: independent evaluations catch shortcuts the merged prompt rationalizes. Measure: false-PASS rate on injected shortcut fixtures.
+
+For each candidate, the A/B must control for token spend — a workflow that wins only because it spent 5× the tokens isn't a real win unless the cost ceiling explicitly allows it. The tournament's existing per-target cost ceiling is the right place to enforce this.
+
+Visibility cost is part of the cost side of the ledger: workflows that hide debuggable session state should clear a higher quality bar than ones (like batch eval harnesses) that nobody attaches to mid-run anyway.
