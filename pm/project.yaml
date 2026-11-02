@@ -5173,7 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-11-02T05:49:53.396850+00:00'
+  updated_at: '2026-11-02T07:05:21.826723+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5234,6 +5234,19 @@ prs:
       from the real fix (move the extra clone).'
     created_at: '2026-11-02T05:49:53Z'
     last_edited: '2026-11-02T05:49:53Z'
+  - id: note-d152fcb
+    text: 'QA S9 story 2 finding at 0d42e087 (outside the re-link fix, d256 i1 covered
+      only the single-clone path): `pm pr signoff integrate <pr> --record` with a
+      stale record and 2 verified clones on the PR branch prints the ambiguity listing
+      on stderr, then "integration check failed: no PR workdir" (head/base None) rc
+      1, and OVERWRITES the valid up_to_date integration record: `pm pr show` drops
+      Base sha and shows Status: error; integration.json becomes {status: error, error:
+      "no PR workdir"} (head, base_sha, candidate_tree gone). Both clones and the
+      workdir record are untouched. Expected: with an ambiguity (no workdir resolved),
+      --record should leave the existing integration record alone, as the read-only
+      default does. Captures /pm-captures/scenarios/9/story2.'
+    created_at: '2026-11-02T07:05:21Z'
+    last_edited: '2026-11-02T07:05:21Z'
 - id: pr-0778fbe
   plan: plan-003
   title: Add PR ownership tracking with workdir history
