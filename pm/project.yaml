@@ -51473,7 +51473,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/296
   gh_pr_number: 296
   created_at: '2026-10-28T02:46:55.100157+00:00'
-  updated_at: '2026-11-02T08:57:49.353486+00:00'
+  updated_at: '2026-11-02T10:01:30.464195+00:00'
   started_at: '2026-11-02T02:27:56.323149+00:00'
   reviewed_at: null
   merged_at: null
@@ -51632,6 +51632,22 @@ prs:
       pending). Branch ready for a fresh sign-off.'
     created_at: '2026-11-02T08:57:49Z'
     last_edited: '2026-11-02T08:57:49Z'
+  - id: note-7b333a9
+    text: 'QA scenario 12 (unreadable/malformed providers.yaml) PASS: all 7 stories
+      matched their THENs exactly — add refusals are one Error: line (exit 1, empty
+      stdout, file byte-identical and 0600/000/dir intact), list exits 0 with a single
+      NOT READ line, and the 200x55 project popup renders the full NOT READ / INVALID
+      ENTRY lines unclipped with Esc + r still working. Captures: /pm-captures/scenarios/12/
+      (cli-invalid-yaml, cli-shape-list, cli-unreadable, cli-partly-invalid, tui-invalid-yaml,
+      tui-unreadable, tui-partly-invalid; each with cast+mp4+manifest). Prompt caveat:
+      the story-7 YAML block again lost its indentation in prompt.md (literal column-0
+      providers:/alpha: is a null block, same as the S4 note); the capture uses the
+      correctly indented form the THEN requires. No code change. Minor observation:
+      the TUI debug log emits one WARNING [providers] Failed to read line per role
+      resolution while the popup is open (17x for a directory), no traceback and no
+      user-visible effect.'
+    created_at: '2026-11-02T10:01:30Z'
+    last_edited: '2026-11-02T10:01:30Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
