@@ -4,11 +4,14 @@ Registers the ``session`` group and all subcommands, plus internal
 pane/window management commands and session registry commands.
 """
 
+import contextlib
 import functools
 import os
 import shlex
+import signal
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import click
@@ -1152,56 +1155,106 @@ def session_kill(start_dir):
                 pass
         raise SystemExit(1)
 
-    # Kill every session in the group — the `~N` grouped sessions and a
-    # user's own view however it is named — then the base, on the hosting
-    # server.  A view (``tmux new-session -t base -s myview``,
-    # S118/S121/S124) is not a session of its own: it shares the windows,
-    # so leaving it behind would keep the old TUI pane and the server
-    # alive, the socket could not be unlinked, and a later `pm session`
-    # would start a second base with the same name on the same server.
-    # Enumerate through tmux's session *group*, not the ``base~N`` name
-    # prefix, which cannot see a view (R8: nothing of the session is left
-    # behind).  Every kill uses an exact target: the lookup above is exact,
-    # and a bare ``-t`` would prefix-match a *different* session if the base
-    # (or a member) disappeared between the lookup and here (verified on
-    # tmux 3.2a) — on the legacy default server that is another pm
-    # session's TUI.
-    for member in tmux_mod.sessions_in_group(session_name,
-                                             socket_path=hosting_socket):
-        if member != session_name:
-            tmux_mod.kill_session(member, socket_path=hosting_socket,
-                                  exact=True)
-    tmux_mod.kill_session(session_name, socket_path=hosting_socket,
-                          exact=True)
+    # From here on the command must run to the end even if its terminal
+    # goes away (see ``_hangup_ignored``).
+    with _hangup_ignored():
+        # Kill every session in the group — the `~N` grouped sessions and a
+        # user's own view however it is named — then the base, on the hosting
+        # server.  A view (``tmux new-session -t base -s myview``,
+        # S118/S121/S124) is not a session of its own: it shares the windows,
+        # so leaving it behind would keep the old TUI pane and the server
+        # alive, the socket could not be unlinked, and a later `pm session`
+        # would start a second base with the same name on the same server.
+        # Enumerate through tmux's session *group*, not the ``base~N`` name
+        # prefix, which cannot see a view (R8: nothing of the session is left
+        # behind).  Every kill uses an exact target: the lookup above is exact,
+        # and a bare ``-t`` would prefix-match a *different* session if the base
+        # (or a member) disappeared between the lookup and here (verified on
+        # tmux 3.2a) — on the legacy default server that is another pm
+        # session's TUI.
+        for member in tmux_mod.sessions_in_group(session_name,
+                                                 socket_path=hosting_socket):
+            if member != session_name:
+                tmux_mod.kill_session(member, socket_path=hosting_socket,
+                                      exact=True)
+        tmux_mod.kill_session(session_name, socket_path=hosting_socket,
+                              exact=True)
 
-    pane_layout.set_force_mobile(session_name, False)
+        pane_layout.set_force_mobile(session_name, False)
 
-    # Clean up containers and push proxies belonging to this session
-    if session_tag:
-        from pm_core.container import cleanup_session_containers
-        from pm_core.push_proxy import stop_session_proxies
-        n_containers = cleanup_session_containers(session_tag)
-        n_proxies = stop_session_proxies(session_tag)
-        if n_containers or n_proxies:
-            _log.info("Session kill cleanup: %d container(s), %d proxy(ies)",
-                      n_containers, n_proxies)
+        # Clean up containers and push proxies belonging to this session
+        if session_tag:
+            from pm_core.container import cleanup_session_containers
+            from pm_core.push_proxy import stop_session_proxies
+            n_containers = cleanup_session_containers(session_tag)
+            n_proxies = stop_session_proxies(session_tag)
+            if n_containers or n_proxies:
+                _log.info(
+                    "Session kill cleanup: %d container(s), %d proxy(ies)",
+                    n_containers, n_proxies)
 
-    # tmux leaves the socket file behind after the server exits; remove it
-    # so `pm session list` does not keep reporting a dead server.  Only
-    # remove it when no server answers on it: the kill may have left the
-    # server alive (a session that is not part of this group — a stray or
-    # hand-made one — or a kill-session that failed), and unlinking a live
-    # server's socket strands every client attached to it.  This is the
-    # same rule the not-found branch above follows, including the refusal
-    # to probe or delete through a planted directory link or symlink.
-    if (_removable_private_socket(socket_path)
-            and not tmux_mod.server_alive(socket_path)):
+        # tmux leaves the socket file behind after the server exits; remove it
+        # so `pm session list` does not keep reporting a dead server.  Only
+        # remove it when no server answers on it: the kill may have left the
+        # server alive (a session that is not part of this group — a stray or
+        # hand-made one — or a kill-session that failed), and unlinking a live
+        # server's socket strands every client attached to it.  This is the
+        # same rule the not-found branch above follows, including the refusal
+        # to probe or delete through a planted directory link or symlink.
+        if (_removable_private_socket(socket_path)
+                and not tmux_mod.server_alive(socket_path)):
+            try:
+                Path(socket_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+        _echo_surviving_hangup(f"Killed session '{session_name}'.")
+
+
+@contextlib.contextmanager
+def _hangup_ignored():
+    """Ignore SIGHUP for the duration of a session teardown.
+
+    ``pm session kill`` typed in a shell window *inside* the session it
+    kills always loses its terminal: when the server exits it hangs up
+    every pane, and the default SIGHUP action ended the command before the
+    container/proxy cleanup and the socket unlink ran (QA S30: the
+    push-proxy daemon, its directory and ``.lock``, and the
+    ``/tmp/pm-sessions`` socket file were left behind; the container went
+    only through the agent pane's own EXIT trap).  The remaining work is
+    short and bounded, so the hangup is ignored until it is done; the same
+    keeps a kill whole when the user's own terminal closes mid-command.
+    The previous handler is restored afterwards (a hangup that arrived
+    meanwhile was discarded, not left pending).
+    """
+    try:
+        previous = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    except ValueError:  # not the main thread: leave signals alone
+        previous = None
+    try:
+        yield
+    finally:
+        if previous is not None:
+            signal.signal(signal.SIGHUP, previous)
+
+
+def _echo_surviving_hangup(message: str) -> None:
+    """Print *message*, tolerating a terminal that no longer exists.
+
+    A kill typed in a pane of the session it kills has lost that pane's
+    terminal by the time it reports, so the write fails (EIO).  The work
+    is done and nobody can read the line: drop it, and point stdout at
+    /dev/null so interpreter shutdown does not fail flushing it again.
+    """
+    try:
+        click.echo(message)
+    except OSError:
         try:
-            Path(socket_path).unlink(missing_ok=True)
-        except OSError:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+            os.close(devnull)
+        except (OSError, ValueError, AttributeError):
             pass
-
-    click.echo(f"Killed session '{session_name}'.")
 
 
 @session.command("mobile")

@@ -17,6 +17,7 @@ import shlex
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -5736,3 +5737,116 @@ class TestAnotherProjectsGroupedSessionIsNotOurs:
         finally:
             _tmux(sock, "kill-server")
             Path(sock).unlink(missing_ok=True)
+
+
+@pytest.mark.skipif(not tmux.has_tmux(), reason="tmux not installed")
+class TestSessionKillFromInsideItsOwnSession:
+    """``pm session kill`` typed in a pane of the session it kills (QA S30).
+
+    The server exits under the command and hangs up the pane it runs in.
+    The default SIGHUP action ended the command right there: no container
+    or push-proxy cleanup, the socket file left in the socket directory, no
+    result line.  Driven on a real tmux server: a pane of the disposable
+    session runs ``pm session kill`` in-process, with the podman and
+    push-proxy cleanups stubbed to record that they ran.
+    """
+
+    NAME = "pm-hupkill-abc"
+
+    DRIVER = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from pm_core import paths, container, push_proxy\n"
+        "from pm_core.cli import session as session_mod\n"
+        "marks, sock_dir = Path(sys.argv[1]), Path(sys.argv[2])\n"
+        "name = sys.argv[3]\n"
+        "paths.SHARED_SOCKET_DIR = sock_dir\n"
+        "session_mod._resolve_target_session = lambda: name\n"
+        "def _containers(tag):\n"
+        "    (marks / 'containers').write_text(tag)\n"
+        "    return 1\n"
+        "def _proxies(tag):\n"
+        "    (marks / 'proxies').write_text(tag)\n"
+        "    return 1\n"
+        "container.cleanup_session_containers = _containers\n"
+        "push_proxy.stop_session_proxies = _proxies\n"
+        "(marks / 'started').write_text('')\n"
+        "try:\n"
+        "    session_mod.session.main(['kill'], prog_name='pm session')\n"
+        "except SystemExit as e:\n"
+        "    (marks / 'exit').write_text(str(e.code))\n"
+        "except BaseException as e:\n"
+        "    (marks / 'exit').write_text(repr(e))\n"
+    )
+
+    def _kill_from_inside(self, short_sock_dir, tmp_path, redirect):
+        sock = short_sock_dir / self.NAME
+        marks = tmp_path / "marks"
+        marks.mkdir()
+        home = tmp_path / "home"
+        home.mkdir()
+        driver = tmp_path / "driver.py"
+        driver.write_text(self.DRIVER)
+        out = tmp_path / "kill.out"
+        repo = Path(__file__).resolve().parents[1]
+        cmd = " ".join(shlex.quote(str(a)) for a in (
+            "env", f"HOME={home}", f"PYTHONPATH={repo}",
+            sys.executable, driver, marks, short_sock_dir, self.NAME))
+        if redirect:
+            cmd += f" > {shlex.quote(str(out))} 2>&1"
+        r = _tmux(sock, "new-session", "-d", "-s", self.NAME, "-n", "main",
+                  "sleep 300")
+        assert r.returncode == 0, r.stderr
+        try:
+            # The agent-like window the kill runs in, as `C-b c` would open.
+            _tmux_out(sock, "new-window", "-d", "-t", f"={self.NAME}:",
+                      "-n", "kin", cmd)
+            deadline = time.monotonic() + 20
+            while (time.monotonic() < deadline
+                   and not (marks / "exit").exists()):
+                time.sleep(0.05)
+            assert (marks / "started").exists(), "the driver never ran"
+            return sock, marks, out
+        finally:
+            _tmux(sock, "kill-server")
+
+    def test_teardown_finishes_after_the_server_hangs_up_the_pane(
+            self, short_sock_dir, tmp_path):
+        sock, marks, out = self._kill_from_inside(
+            short_sock_dir, tmp_path, redirect=True)
+
+        # The command outlived the hangup: it exited normally ...
+        assert (marks / "exit").exists(), (
+            "pm session kill died with its pane (SIGHUP) before finishing")
+        assert (marks / "exit").read_text() == "0"
+        # ... after running the session's container and proxy cleanup ...
+        tag = self.NAME.removeprefix("pm-")
+        assert (marks / "containers").read_text() == tag
+        assert (marks / "proxies").read_text() == tag
+        # ... removing the dead server's socket file (R8) ...
+        assert not sock.exists()
+        # ... and reporting the kill.
+        assert f"Killed session '{self.NAME}'." in out.read_text()
+
+    def test_a_vanished_terminal_does_not_fail_the_kill(
+            self, short_sock_dir, tmp_path):
+        """With no redirect the result line goes to the dead pane."""
+        sock, marks, _ = self._kill_from_inside(
+            short_sock_dir, tmp_path, redirect=False)
+
+        assert (marks / "exit").exists(), (
+            "pm session kill died with its pane (SIGHUP) before finishing")
+        assert (marks / "exit").read_text() == "0"
+        assert (marks / "containers").exists()
+        assert (marks / "proxies").exists()
+        assert not sock.exists()
+
+    def test_the_hangup_handler_is_restored_after_the_kill(self):
+        """The ignore is scoped to the teardown, not left on the caller."""
+        import signal
+        from pm_core.cli import session as session_mod
+
+        before = signal.getsignal(signal.SIGHUP)
+        with session_mod._hangup_ignored():
+            assert signal.getsignal(signal.SIGHUP) is signal.SIG_IGN
+        assert signal.getsignal(signal.SIGHUP) == before
