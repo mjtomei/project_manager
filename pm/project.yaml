@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-02T03:52:43.480490+00:00'
+  updated_at: '2026-11-02T04:15:10.382956+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48335,6 +48335,23 @@ prs:
       in pm/project.yaml, the qa.md edits, verify-s51-followup.md.'
     created_at: '2026-11-02T03:52:43Z'
     last_edited: '2026-11-02T03:52:43Z'
+  - id: note-0077d80
+    text: 'review-loop 48dd i8 (2388fd0a): no bug found; one consolidation. `pm pr
+      show`, `pm pr signoff integrate` and the sign-off launch each kept their own
+      copy of the attempted / resolved-earlier / resolved per-path rule and of the
+      id-list listing (the prompt had a fourth copy), and they had drifted: integrate
+      labelled merged_fields (record ids) "merged fields" while show/prompt said "merged
+      records". Now integration.resolution_path_states + resolution_id_listing decide
+      it once; each surface only words the result (output unchanged apart from that
+      label). Also removed four lazy-import wrappers in signoff.py (_resolution_of/_resolution_entries/_carried_applied_resolution/_contained_base)
+      — signoff already imports integration at module scope. Full suite 5766 passed,
+      1 skipped; the branch merged with master@b8576981 (#282 + #283, effort routing)
+      merges with no conflicts and passes too (5857 passed, 1 skipped) — /pm-captures/review-48dd-i8/.
+      #283 adds no new PR/project behaviour fields beyond effort/session_effort/model_config,
+      which R3 already covers. Left uncommitted: the user model switch in pm/project.yaml,
+      the qa.md edits, verify-s51-followup.md.'
+    created_at: '2026-11-02T04:15:10Z'
+    last_edited: '2026-11-02T04:15:10Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
