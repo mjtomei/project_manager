@@ -39226,7 +39226,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-11-02T03:32:49.010014+00:00'
+  updated_at: '2026-11-02T04:06:17.629986+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40283,6 +40283,31 @@ prs:
       w1 exit and 2 for B at w2 exit. 28/28 checks. No product change.'
     created_at: '2026-11-02T03:32:48Z'
     last_edited: '2026-11-02T03:32:48Z'
+  - id: note-b6d7ad5
+    text: 'QA S23 (2026-11-02, 303eb2bda) PASS 4/4. The four TUI auto-start fixtures
+      ran in parallel (own HOME/TMUX_TMPDIR each). Every GIVEN was applied inside
+      router #1''s 45 s delay. (1) Read-only archive/ (0555): the impl relaunch logged
+      "archiving …/impl-<pr>.jsonl -> …/archive/impl-<pr>.<OLD>.jsonl failed: [Errno
+      13]", then exactly one "could not archive … before reuse; replacing it", then
+      "symlink … -> <new-sid>" (consecutive lines). The retire logged only its [Errno
+      13] WARNING and still dropped the canonical and .head. archive/ was untouched
+      (same entry, same dir mtime). The native impl and router #1 sessions stayed
+      readable. Loop 2 logged "archive copy … failed" and then "finalized". Router
+      #2 got a fresh sid and .head, then merged; 1 IMPL / 1 MERGE. (2) Dangling impl
+      link: "transcript: archived" to a dangling archive/impl-<pr>.<OLD>.jsonl (readlink
+      = native path), logged before the new symlink; no errors; still dangling after
+      OFF. (3) Frozen regular-file canonical: archived as impl-<pr>.<sha12>.jsonl,
+      a regular file with the same sha256 and the OLD sessionId, and the only impl
+      entry; unchanged at the end. (4) Frozen canonical + identical sid-keyed copy:
+      "already archived at …<OLD>.jsonl", no second copy. Every story reached merge
+      + auto-start OFF with 1 routed SIGNOFF_IMPL and 1 SIGNOFF_MERGE, no Traceback/FileExistsError,
+      and no pr-9966785 stall. Captures: /pm-captures/scenarios/23/story{1..4}/{tui,cli}/
+      (+ cli-followup/ for 1-2: a correctly quoted grep re-run on the live fixture).
+      Story 1''s first listing check was over-strict: it compared the "." mode bits
+      that the scenario''s own chmod changes. Corrected in story1/evidence/then-checks.txt;
+      not a product issue. No code change.'
+    created_at: '2026-11-02T04:06:17Z'
+    last_edited: '2026-11-02T04:06:17Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
