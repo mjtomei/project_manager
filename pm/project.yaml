@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T13:49:22.597885+00:00'
+  updated_at: '2026-11-02T14:01:37.242465+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -26288,6 +26288,31 @@ prs:
       S32.'
     created_at: '2026-11-02T13:49:22Z'
     last_edited: '2026-11-02T13:49:22Z'
+  - id: note-563ed65
+    text: 'QA S32 (2026-11-02): PASS at 9f4953cc (pm_core unchanged since 2d1d19fd),
+      no fix. R47 held live with real Claude 2.1.316 in a nested podman QA container,
+      from TUI Enter on `smoke` in a fresh /scratch/s32 fixture (private socket, pm
+      session pm-proj-6fb71706). The run pane opened 0.2 s after Enter. Its header
+      showed the clone, "Runs in:  container pm-proj-6fb71706-qa-regression-smoke-20261102T135436Z-c886-s0"
+      and the captures dir. The debug log has "workspace trust: seeded /workspace
+      trust". There was no trust prompt, no blocked-hook entry, and the first Bash
+      call came 3 s after the prompt. The session reached PASS 63 s after Enter. It
+      made 10 Bash calls: /scratch/aaa-smoke with git init, pm init and pm pr add
+      "test seed"; a plain pm session; plain `tmux ls` (never -S/-L); `pm tui view
+      -s pm-aaa-smoke-29f31c6a`; tui.txt + manifest.md beside prompt.md; and `pm -C
+      /pm-project pr add` -> "Created pr-0538cde: S32 smoke finding (now active)".
+      prompt.md had the container wording (/workspace, /scratch, /pm-captures, -C
+      /pm-project) and no socket note. The registry diff was the new PR plus active_pr
+      (pr-a571291). The TUI showed 1 PR until r (A14, pr-7ebc650), then 2 PRs. In
+      156 polls, the user socket listed only the two pm-proj sessions and the default
+      server never existed. After /exit, the container was gone in 10.6 s and the
+      pane in 10.9 s. podman ps -a was empty, windows/panes matched the baseline,
+      the clone git status was clean, the settings.json sha was unchanged, and the
+      shared auto-memory was unchanged this time. Filed the nested hook gap (stock
+      image blocks every prompt; note-11756c0) as pr-05283a9. Captures: /pm-captures/scenarios/32/
+      (tui/, cli/, evidence/).'
+    created_at: '2026-11-02T14:01:37Z'
+    last_edited: '2026-11-02T14:01:37Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
@@ -53662,6 +53687,39 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T11:51:09.215239+00:00'
   updated_at: '2026-11-02T11:51:09.215239+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-05283a9
+  plan: bugs
+  title: 'Bug: a pm-created container nested inside a pm container gets PM_HOST_HOME=$HOME
+    and no hook receiver, so every Claude prompt is blocked by the shared hooks'
+  branch: pm/pr-05283a9-bug-a-pm-created-container-nested-inside-a-pm-cont
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/container.py create_container (receiver mount from
+    Path.home()/.pm/hook_receiver.py, and -e PM_HOST_HOME={Path.home()}); pre-existing
+    master code. Repro (pr-7d5d036 QA S32 refiner, 2026-11-02): inside a pm QA container
+    (HOME=/home/pm, PM_HOST_HOME=/home/matt, the receiver mounted only at /home/matt/.pm/hook_receiver.py),
+    run a container-mode regression (pm qa regression / TUI Enter) with a stock image
+    (python:3.12-slim + git tmux, pm shim without PM_HOST_HOME). The shared ~/.claude/settings.json
+    hooks run python3 /home/matt/.pm/hook_receiver.py, but the nested container gets
+    PM_HOST_HOME=/home/pm and no file at /home/matt/.pm. Actual: the first prompt
+    is refused with "UserPromptSubmit operation blocked by hook: [python3 /home/matt/.pm/hook_receiver.py
+    user_prompt]: python3: cannot open file /home/matt/.pm/hook_receiver.py: [Errno
+    2] No such file or directory", and an in-container pm session exits 1 with "Refusing
+    to install pm Claude Code hooks". Expected: when PM_HOST_HOME is already set (pm-in-pm),
+    create_container passes it through unchanged and mounts $PM_HOST_HOME/.pm/hook_receiver.py
+    at that same path, so nested sessions work without a custom image. Workaround
+    used in QA: bake the receiver at /home/matt/.pm/hook_receiver.py into the image
+    and have its pm shim export PM_HOST_HOME=/home/matt. Evidence: /pm-captures/scenarios/32/refiner-helpers/README.md
+    and rehearsal/run1-blocked-hook.jsonl.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T13:58:00.818355+00:00'
+  updated_at: '2026-11-02T13:58:00.818355+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
