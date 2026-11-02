@@ -1005,6 +1005,35 @@ class TestReviewLoopHistory:
         assert (ev["attempt"], ev["phase"], ev["session_id"]) == (
             "a2", "agent", "sess-a")
 
+    def test_unexpected_exception_ends_the_open_iteration(self, clock):
+        """An exception no handler catches (here from the INPUT_REQUIRED
+        follow-up wait) must not leave the iteration reading "running"
+        while the TUI lives on."""
+        from pm_core import review_loop as rl
+        state = rl.ReviewLoopState(pr_id=PR)
+        rs.set_action_state(PR, "review-loop", "running",
+                            loop_id=state.loop_id)
+        with _review_launch_fakes(clock), \
+                patch.object(rl, "_launch_review_window"), \
+                patch.object(rl, "_poll_for_verdict",
+                             return_value="q\nINPUT_REQUIRED"), \
+                patch.object(rl, "_wait_for_follow_up_verdict",
+                             side_effect=RuntimeError("boom")):
+            with pytest.raises(RuntimeError):
+                rl.run_review_loop_sync(state, "/tmp", _PR_DATA,
+                                        transcript_dir="/tmp")
+        (it,) = [a for a in _attempts().values() if a.get("iteration") == 1]
+        end = _ends()[it["attempt"]]
+        assert (end["outcome"], end["verdict"]) == ("failed", "ERROR")
+        assert state._history_attempt == ""
+        assert not ah.is_open(it["attempt"])
+
+    def test_handled_ends_are_not_journaled_twice(self, clock):
+        from pm_core import review_loop as rl
+        _drive_review_loop(clock, [rl.PaneKilledError("gone")])
+        ends = [e for e in ah.read_events(PR) if e["kind"] == "attempt_end"]
+        assert len(ends) == 1 and ends[0]["outcome"] == "vanished"
+
     def test_stop_requested_marks_loop_cancelled(self, clock):
         state = _drive_review_loop(clock, ["x\nNEEDS_WORK", "y\nNEEDS_WORK"],
                                    stop_after=1)

@@ -607,6 +607,14 @@ def end_attempt(pr_id: str, attempt: str | None, outcome: str, *,
         _open_attempts.pop(attempt, None)
 
 
+def is_open(attempt: str | None) -> bool:
+    """Whether this process started *attempt* and has not ended it."""
+    if not attempt:
+        return False
+    with _open_lock:
+        return attempt in _open_attempts
+
+
 def mark_owner_exit(reason: str = "restart") -> None:
     """Journal that this process stops now, in every PR it has open attempts.
 

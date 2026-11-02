@@ -1752,6 +1752,15 @@ def run_review_loop_sync(
 
     finally:
         state.running = False
+        # An exception none of the handlers above caught escapes the loop
+        # with its iteration still open, which would read "running" for as
+        # long as this process lives.
+        if _ah.is_open(state._history_attempt):
+            _ah.end_attempt(state.pr_id, state._history_attempt, "failed",
+                            verdict=VERDICT_ERROR,
+                            detail="review loop exited without a verdict "
+                                   "for this iteration")
+        state._history_attempt = ""
         _release_lease(state)
 
     return state

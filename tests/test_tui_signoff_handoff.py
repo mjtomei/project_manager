@@ -1012,6 +1012,24 @@ def test_adopted_verdict_closes_only_newest_open_router_attempt():
     assert (end["attempt"], end["adopted"]) == (new, True)
 
 
+def test_router_attempt_fails_when_transcript_dir_cannot_be_made(tmp_path):
+    """A launch that stops before any worker starts ends its attempt, so
+    history does not show a router run in flight that never launched."""
+    from types import SimpleNamespace
+    from pm_core import action_history
+    from pm_core.tui import signoff_ui
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    app = SimpleNamespace(log_message=lambda *a, **k: None,
+                          run_worker=lambda *a, **k: pytest.fail("launched"))
+    signoff_ui._launch(app, PR, blocker / "tdir")
+    (end,) = [e for e in action_history.read_events(PR)
+              if e["kind"] == "attempt_end"]
+    assert end["outcome"] == "failed"
+    assert "cannot create transcript dir" in end["detail"]
+    assert action_history.newest_open_attempt(PR, "signoff") is None
+
+
 def test_adopted_verdict_leaves_abandoned_run_when_newest_ended():
     """A run abandoned before a relaunch that already delivered its verdict
     must not absorb a re-routed verdict after a later TUI restart."""

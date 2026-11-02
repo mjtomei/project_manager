@@ -227,6 +227,8 @@ def _launch(app, pr_id: str, tdir, force: bool = False) -> None:
         tdir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
         app.log_message(f"[red]Cannot create transcript dir[/] {tdir}: {e}")
+        _end_attempt(app, pr_id, "failed",
+                     detail=f"cannot create transcript dir: {e}"[:300])
         return
     transcript = signoff_mod.signoff_transcript(tdir, pr_id)
     _inflight(app).add(pr_id)

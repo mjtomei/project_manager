@@ -175,7 +175,11 @@ is polled without a grace, so none is armed).  Iteration ends: verdict →
 loop was stopped); `ReviewClosedError` → `cancelled` `CLOSED`;
 `ReviewHoldError` → `failed` `HOLD`; `ReviewLaunchError` → `failed`
 `LAUNCH_FAILED` (`superseded` when another loop owns the launch); other
-exceptions → `failed` `ERROR`.  Adopted in-flight iterations
+exceptions → `failed` `ERROR`; an exception none of those handlers
+catch (e.g. from the INPUT_REQUIRED follow-up wait) ends the iteration
+still open in `run_review_loop_sync`'s `finally` the same way
+(`action_history.is_open`), so it never reads running while the TUI
+lives on.  Adopted in-flight iterations
 (`_adopt_in_flight_review`) start with `adopted=true`.  The loop-level
 attempt comes from R3 (`_start_loop` → running, `_on_complete_from_thread`
 → done/failed, with `history_outcome="cancelled"` when `stop_requested`
@@ -236,7 +240,8 @@ R6. **Sign-off** (`pm_core/tui/signoff_ui.py`): router launch attempt
 (`action="signoff"`) started in `_launch` past the gates, ended when the
 `_launch_quiet` worker finishes (`failed` on error/non-zero, otherwise the
 launch is recorded as a phase `agent` and the attempt ends when `step`
-routes a verdict hop, or `superseded` on a stale relaunch). The relaunch
+routes a verdict hop, or `superseded` on a stale relaunch; `failed`
+when the transcript dir cannot be created, since no worker starts). The relaunch
 throttle is a `gate` timer (60 s) armed at launch, cleared when
 `_launched_at().pop(pr_id)` runs.
 
