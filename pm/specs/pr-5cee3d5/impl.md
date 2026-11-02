@@ -1491,3 +1491,35 @@ which still says "unreadable").
 
 Validation: full suite on the merged tree — 5733 passed, 1 skipped, 0
 failed (with `markdown` installed in the test venv).
+
+## Integration with master: reasoning effort and the live provider probe (pr-5ec411c / pr-3d3b3ce)
+
+A later base (`master@5b352d16`) carries #283 (pr-5ec411c: effective
+Claude/OpenRouter reasoning effort, with `pm_core/worker_route.py` renamed to
+`router_route.py`) and #293 (pr-3d3b3ce: router env values kept out of the
+`pm provider test --live` probe's argv). Sign-off routed `SIGNOFF_IMPL` only
+because the host pm that ran the check predates this PR's resolver: the
+recorded check was a `conflict` in `pm/project.yaml` alone.
+
+- `pm/project.yaml` was reconciled with this PR's own resolver
+  (`integration.resolve_project_yaml` over the merge index stages), which
+  accepted the document as-is: 10 PR records added on the branch, 2 on the
+  base (pr-3d3b3ce, pr-0ebbc91), 594 records and 22 plans, no id lost, no
+  duplicates, the `project` block identical on both sides, and zero lost
+  one-sided changes in the independent preservation walk. The merge commit's
+  tree equals the sign-off candidate tree `10f35bdf`.
+- `pm_core/cli/pr.py` auto-merged: master's only change there is the
+  `pr_model_set` effort warning, away from this PR's code.
+- No code in this branch referenced `worker_route`, so the rename needs no
+  follow-up.
+- New-base interaction (R3): master's effort work reads PR `effort` /
+  `session_effort` (already in this PR's behaviour-change list) and
+  `providers.yaml` (host configuration, not `project.yaml`); it adds no
+  `project.yaml` key the behaviour summary would have to cover.
+
+This PR's own code is unchanged by the merge, so review 48dd i10 and QA
+S65–S70 (both at `62705458`) still describe it; the next sign-off only has to
+bind to the merged head.
+
+Validation: full suite on the merged tree (`f77a9ebc`) — 5871 passed,
+1 skipped, 0 failed (with `markdown` installed in the test venv).
