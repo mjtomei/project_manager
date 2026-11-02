@@ -21,7 +21,8 @@ Event kinds (all carry ``v``, ``ts``, ``t``, ``pr_id``, ``kind``,
   ``session_id``/``transcript``, ``resumed``/``adopted``.
 * ``phase`` — ``attempt``, ``phase`` (see :data:`WAIT_PHASES` /
   :data:`EXEC_PHASES`), ``detail``.
-* ``attempt_end`` — ``attempt``, ``outcome``, ``verdict``, ``detail``.
+* ``attempt_end`` — ``attempt``, ``outcome`` (see :data:`OUTCOMES`),
+  ``verdict``, ``detail``.
 * ``timer_arm`` — ``timer``, ``purpose``, ``owner_action``,
   ``owner_attempt``, ``armed_t``, ``due_t`` (``None`` = indefinite hold),
   ``effect`` (``gate``: nothing happens at the due time, the timer only

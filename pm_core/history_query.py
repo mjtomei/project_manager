@@ -722,7 +722,8 @@ def _current_activity(attempts: dict[str, dict], timer_rows: dict,
         last = a["phases"][-1] if a["phases"] else None
         ph = last["phase"] if last else "start"
         since = last["t"] if last else a["started_t"]
-        row = {"attempt": a["id"], "name": _attempt_name(a),
+        row = {"attempt": a["id"], "action": a.get("action"),
+               "name": _attempt_name(a),
                "phase": ph, "since": _ah.iso(since),
                "for_s": t_now - since, "state": None, "text": ""}
         if ph == "agent" or (ph == "start" and a.get("session_id")):
@@ -872,11 +873,19 @@ _NEEDS_HUMAN_STATES = ("waiting_human", "blocked_on_permission")
 
 
 def _focus_row(current: list[dict]) -> dict | None:
-    """The activity row to headline: one needing a human, else the newest."""
-    for row in current:
+    """The activity row to headline: one needing a human, else the newest.
+
+    Rows of a known action come first.  pm always journals an action, so a
+    start line without one is damage (E3): it still gets its ``?`` row,
+    but with no owner it never ends, and as the newest row it would
+    otherwise headline "Waiting for" and the badge for good, over the
+    attempt PM is really running.
+    """
+    rows = [r for r in current if r.get("action")] or current
+    for row in rows:
         if row["state"] in _NEEDS_HUMAN_STATES:
             return row
-    return current[-1] if current else None
+    return rows[-1] if rows else None
 
 
 def _waiting_for(holds, timer_rows, current, attempts) -> str:

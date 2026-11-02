@@ -193,6 +193,28 @@ class TestJournal:
         assert row["name"] == "?"
         assert hq.render_text(model) and hq.summary_badge(model)
 
+    def test_action_less_row_never_headlines_over_a_real_attempt(self, clock):
+        # The damaged line has no owner, so it never ends; as the newest
+        # open row it once took "Waiting for" and the badge for good
+        # (QA S62: "?: running for Ns" while i2 ran).  It keeps its row.
+        a = ah.start_attempt(PR, "review-loop", iteration=2, loop_id="L1")
+        ah.phase(PR, a, "agent")
+        clock.advance(5)
+        with open(ah.journal_path(PR), "a") as f:
+            f.write('{"kind": "attempt_start", "attempt": "x1", "t": %s}\n'
+                    % clock.t)
+        clock.advance(5)
+        model = hq.build_history(PR, now=clock.t, live=False)
+        assert {r["name"] for r in model["current"]} == {"?",
+                                                         "review-loop i2"}
+        assert model["waiting_for"].startswith("review-loop i2: agent working")
+        assert hq.summary_badge(model) == " [review-loop i2: working]"
+        # Only damage left: it still headlines rather than "nothing".
+        ah.end_attempt(PR, a, "done", verdict="PASS")
+        model = hq.build_history(PR, now=clock.t, live=False)
+        assert model["waiting_for"].startswith("?: ")
+        assert hq.summary_badge(model).startswith(" [?: ")
+
     def test_append_after_truncated_last_line_is_not_lost(self, clock):
         # A crash mid-write leaves a partial line with no trailing newline;
         # the next event must start on its own line, not be glued onto it.

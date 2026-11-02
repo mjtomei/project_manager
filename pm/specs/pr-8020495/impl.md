@@ -334,7 +334,12 @@ The model contains:
     then the newest activity row. The pane badge uses the same
     human-first activity row; its countdown is the row's own `fires`
     timer, or the verdict grace (own or ancestor's `gate`) only once the
-    agent's turn has finished.
+    agent's turn has finished.  Activity rows of a known action are
+    considered first: an action-less start line (damage, E3; pm always
+    journals an action) keeps its `?` row but, having no owner, never
+    ends, and would otherwise headline `Waiting for` and the badge for
+    good over the attempt really running (QA S62 observation).  Each
+    `current` row carries its `action`.
   - `milestones`: project.yaml timestamps (`created_at`, `started_at`,
     `reviewed_at`, `signed_off_at`, `merged_at`) as pre-journal evidence.
   - `missing`: honest notes (no journal file; journal starts after
