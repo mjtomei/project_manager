@@ -5173,7 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-11-02T19:14:50.039654+00:00'
+  updated_at: '2026-11-02T20:12:20.273950+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5502,6 +5502,29 @@ prs:
       in the workdir.'
     created_at: '2026-11-02T19:14:49Z'
     last_edited: '2026-11-02T19:14:49Z'
+  - id: note-f71be6d
+    text: 'QA S23 2026-11-02 at a414867b: PASS 8/8 live (CLI only, no pm session;
+      isolated HOME; captures /pm-captures/scenarios/23/story1-8). (1) Two verified
+      clones of Alpha: cd rc 1 lists both + "Not choosing one...", start refuses with
+      "Not creating another workdir", no record or clone change; after moving one
+      out the next cd re-links the remaining clone (rc 0). (2) Bravo look-alikes (master
+      copy, plain dir, unrelated-repo clone, detached copy) each skipped with a reason,
+      record unchanged; start creates a fresh clone at the full-base-hash name and
+      leaves the four look-alikes byte-identical. (3) Charlie: both workdir names
+      held by plain dirs -> start refuses "workdir names ... are taken by directories
+      that aren''t its clone; move them aside", .tmp-pr-C removed, nothing recorded.
+      (4) Delta: symlink alias -0000000a sorts first but the real -d60f9a82 dir is
+      re-linked, not the alias. (5) Echo: inherited GIT_DIR/GIT_WORK_TREE pointing
+      at an unrelated repo does not fool discovery; plain dir skipped, real clone
+      re-linked once copied in. (6) Foxtrot: 17 same-named plain dirs -> "(more than
+      16; none verified)" listing, no clone, record unchanged. (7) Golf: clones only
+      outside the project workdirs dir -> cd says "Workdir ... does not exist: <recorded
+      path>" (no scan), start creates a fresh clone; outside snapshot identical before/after.
+      (8) Hotel: recorded path restored as a symlink -> fast path, no re-link, record
+      unchanged. Only deviation: git 2.34.1''s "not a git repository" stderr reads
+      "(or any parent up to mount point /)" vs the qa.md text (git wording, not pm).'
+    created_at: '2026-11-02T20:12:20Z'
+    last_edited: '2026-11-02T20:12:20Z'
   model: provider:claude-main-xhigh-pm
   effort: high
 - id: pr-0778fbe
@@ -41064,38 +41087,40 @@ prs:
   notes: []
 - id: pr-9ee4d64
   plan: bugs
-  title: 'Bug: auto-start run transcripts overwrite pre-return impl/sign-off/review transcripts
-    after a sign-off return'
+  title: 'Bug: auto-start run transcripts overwrite pre-return impl/sign-off/review
+    transcripts after a sign-off return'
   branch: pm/pr-9ee4d64-bug-auto-start-run-transcripts-overwrite-pre-retur
   status: closed
   depends_on: []
   description: 'pm/transcripts/<autostart-run>/ keeps one file per (step, pr): impl-<pr>.jsonl,
     signoff-<pr>.jsonl, review-<pr>-i1.jsonl. When sign-off routes a PR back (SIGNOFF_IMPL/REVIEW)
-    within the same auto-start run, the rework impl, the fresh review loop (iteration restarts
-    at 1) and the fresh sign-off write the same paths, so the archived transcript of the router
-    that made the return decision (and the pre-return impl/review) is lost from the run archive
-    (the original ~/.claude/projects JSONL survives). Repro (QA pr-ac10f03 S15, 2026-10-22):
-    two overlapping PRs, B returned SIGNOFF_IMPL at 03:39:55; after B merged, pm/transcripts/autostart-*/signoff-<B>.jsonl
-    and impl-<B>.jsonl hold only the post-return sessions. Suggest suffixing by return round
-    (e.g. signoff-<pr>-r2.jsonl) or by session id.
+    within the same auto-start run, the rework impl, the fresh review loop (iteration
+    restarts at 1) and the fresh sign-off write the same paths, so the archived transcript
+    of the router that made the return decision (and the pre-return impl/review) is
+    lost from the run archive (the original ~/.claude/projects JSONL survives). Repro
+    (QA pr-ac10f03 S15, 2026-10-22): two overlapping PRs, B returned SIGNOFF_IMPL
+    at 03:39:55; after B merged, pm/transcripts/autostart-*/signoff-<B>.jsonl and
+    impl-<B>.jsonl hold only the post-return sessions. Suggest suffixing by return
+    round (e.g. signoff-<pr>-r2.jsonl) or by session id.
 
 
-    2026-10-28 live collector failure: #241 old review completion finalized the shared review-i1
-    transcript path before checking current loop ownership. A newer loop (8101 i1) had reused
-    the path; the obsolete callback froze its live symlink into an early copy, so the collector
-    saw no verdict even though the canonical newer SID finished with its own NEEDS_WORK. Recovery
-    preserved both and restored the exact link before collecting the original reviewer outcome.
-    Evidence: /home/matt/.local/state/pm-pr-shepherd/241-review-8101-i1-transcript-recovery.json
-    and check-20261028T122913Z/241-transcript-link-preservation. #248 S11 also exposed loss
-    of the earlier session_id from overwrite.
+    2026-10-28 live collector failure: #241 old review completion finalized the shared
+    review-i1 transcript path before checking current loop ownership. A newer loop
+    (8101 i1) had reused the path; the obsolete callback froze its live symlink into
+    an early copy, so the collector saw no verdict even though the canonical newer
+    SID finished with its own NEEDS_WORK. Recovery preserved both and restored the
+    exact link before collecting the original reviewer outcome. Evidence: /home/matt/.local/state/pm-pr-shepherd/241-review-8101-i1-transcript-recovery.json
+    and check-20261028T122913Z/241-transcript-link-preservation. #248 S11 also exposed
+    loss of the earlier session_id from overwrite.
 
 
     Extend acceptance to immutable per-attempt/loop/session archives and ownership-checked
-    finalization: superseded callbacks cannot freeze, replace, unlink or redirect a current
-    attempt''s live collector transcript. Keep both complete original sessions across multiple
-    sign-off returns, iteration resets, restart and late completion. Current collectors must
-    see later appended verdicts; never invent a verdict or delete history. User authorized
-    this PR to start2026-10-28 alongside the earlier integration gate.'
+    finalization: superseded callbacks cannot freeze, replace, unlink or redirect
+    a current attempt''s live collector transcript. Keep both complete original sessions
+    across multiple sign-off returns, iteration resets, restart and late completion.
+    Current collectors must see later appended verdicts; never invent a verdict or
+    delete history. User authorized this PR to start2026-10-28 alongside the earlier
+    integration gate.'
   agent_machine: spark-424d
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
@@ -41106,91 +41131,96 @@ prs:
   merged_at: null
   notes:
   - id: note-6f1c638
-    text: 'QA INPUT_REQUIRED: Sign-off IMPL return keeps the pre-return implementation and
-      router transcripts: PASS; Sign-off REVIEW return restarts the review loop without overwriting
-      the earlier loop: PASS; A superseded review loop cannot freeze the current loop''s live
-      transcript: PASS; Turning auto-start off, or a watcher completing, must not freeze a
-      loop that is still writing: PASS; Restarting the TUI mid-run resumes on the same transcripts:
-      PASS; Two PRs and two sign-off returns inside one auto-start run: INPUT_REQUIRED; CLI
-      drivers preserve transcripts too (auto-sequence and CLI watcher): PASS; The bug''s reproduction
-      tests pass on the fix and fail before it: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-9ee4d64-0de466423db9dfc5)'
+    text: 'QA INPUT_REQUIRED: Sign-off IMPL return keeps the pre-return implementation
+      and router transcripts: PASS; Sign-off REVIEW return restarts the review loop
+      without overwriting the earlier loop: PASS; A superseded review loop cannot
+      freeze the current loop''s live transcript: PASS; Turning auto-start off, or
+      a watcher completing, must not freeze a loop that is still writing: PASS; Restarting
+      the TUI mid-run resumes on the same transcripts: PASS; Two PRs and two sign-off
+      returns inside one auto-start run: INPUT_REQUIRED; CLI drivers preserve transcripts
+      too (auto-sequence and CLI watcher): PASS; The bug''s reproduction tests pass
+      on the fix and fail before it: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-9ee4d64-0de466423db9dfc5)'
     created_at: '2026-10-28T20:28:46Z'
     last_edited: '2026-10-28T20:28:46Z'
   - id: note-user-restart-all-20261029
-    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart this
-      PR in implementation and merge latest origin/master INTO this existing PR branch before
-      any new review/QA. User explicitly released old review/QA holds for this restart; preserve
-      all earlier questions, answers, verdicts and evidence and re-evaluate after integration
-      rather than invent answers or waive acceptance. Preserve dirty source, planner/spec
-      edits, local registry/routing, stashes, untracked files and all evidence. The interrupted
-      work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
-      inspect its per-PR backup and original transcripts as needed. Safely reconcile interrupted
-      changes and current master, test, commit and push only this PR branch. Never force-push/reset
-      master or merge the PR into master. Report integrated master SHA and tests; only then
-      hand off to native review/QA. Keep assigned primary/helper model and explicit work Opus5.5/xhigh
-      signoff override. No new dependencies or unrelated work are authorized.
+    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart
+      this PR in implementation and merge latest origin/master INTO this existing
+      PR branch before any new review/QA. User explicitly released old review/QA holds
+      for this restart; preserve all earlier questions, answers, verdicts and evidence
+      and re-evaluate after integration rather than invent answers or waive acceptance.
+      Preserve dirty source, planner/spec edits, local registry/routing, stashes,
+      untracked files and all evidence. The interrupted work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
+      inspect its per-PR backup and original transcripts as needed. Safely reconcile
+      interrupted changes and current master, test, commit and push only this PR branch.
+      Never force-push/reset master or merge the PR into master. Report integrated
+      master SHA and tests; only then hand off to native review/QA. Keep assigned
+      primary/helper model and explicit work Opus5.5/xhigh signoff override. No new
+      dependencies or unrelated work are authorized.
 
       Test isolation is mandatory: #267 S10 refiner killed the REAL pm-project_manager-5b29c418
-      session after mistaking a test PR launch for ownership of that session. S9/S12 inherited
-      ambient tmux context and recreated test TUIs under that real name; S12 changed global
-      tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use an explicit dedicated test
-      tmux socket and isolated state/config, verify fixture ownership; never mutate the user''s
-      real session or shared host configuration as test cleanup. Preserve the failed-run evidence.
-      #278 is the existing per-session tmux-isolation fix. Do not relaunch old QA fixture
-      workers.'
+      session after mistaking a test PR launch for ownership of that session. S9/S12
+      inherited ambient tmux context and recreated test TUIs under that real name;
+      S12 changed global tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use
+      an explicit dedicated test tmux socket and isolated state/config, verify fixture
+      ownership; never mutate the user''s real session or shared host configuration
+      as test cleanup. Preserve the failed-run evidence. #278 is the existing per-session
+      tmux-isolation fix. Do not relaunch old QA fixture workers.'
     created_at: '2026-10-29T01:33:53.678599+00:00'
     last_edited: '2026-10-29T01:33:53.678599+00:00'
   - id: note-5d78b22
-    text: 'QA INPUT_REQUIRED: A sign-off implementation return keeps the pre-return implementation
-      and router transcripts: PASS; Whole-run archive audit across two returns, a restart
-      and the merge step: PASS; Review-loop ownership across a restart, a dead attempt and
-      a second loop: PASS; A pre-upgrade run directory — legacy adoption, frozen legacy files
-      and a live legacy link: PASS; Concurrent sweeps and overlapping writers: PASS; A failed
-      archive, and a pruned native transcript, never block the workflow: PASS; A sign-off
-      QA return archives its router and does not replay its verdict: PASS; CLI drivers keep
-      history too, and do not freeze a TUI loop: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-9ee4d64-b0d9756bebb216d5)'
+    text: 'QA INPUT_REQUIRED: A sign-off implementation return keeps the pre-return
+      implementation and router transcripts: PASS; Whole-run archive audit across
+      two returns, a restart and the merge step: PASS; Review-loop ownership across
+      a restart, a dead attempt and a second loop: PASS; A pre-upgrade run directory
+      — legacy adoption, frozen legacy files and a live legacy link: PASS; Concurrent
+      sweeps and overlapping writers: PASS; A failed archive, and a pruned native
+      transcript, never block the workflow: PASS; A sign-off QA return archives its
+      router and does not replay its verdict: PASS; CLI drivers keep history too,
+      and do not freeze a TUI loop: INPUT_REQUIRED (workdir: /home/matt/.pm/workdirs/qa/pr-9ee4d64-b0d9756bebb216d5)'
     created_at: '2026-10-29T10:23:47Z'
     last_edited: '2026-10-29T10:23:47Z'
   - id: note-61363a5
-    text: 'User-authorized restart from the main PM session on 2026-10-31 after #249 merged
-      as eaf3372e60d1717bd97cc50b5e0b04c6df881fa1. Resume this existing PR in its existing
-      workdir. First integrate current origin/master INTO THIS PR branch, preserving its intended
-      behavior and all earlier review/QA corrections; resolve real code/test conflicts and
-      validate the combined behavior before handing off for a fresh review/QA/sign-off sequence.
-      Do not merge this PR into master or push/reset/delete master or other branches. This
-      is a user-directed implementation return, not a reviewer/sign-off verdict. GitHub reports
-      the PR conflicts with current master; reconcile that before resuming the prior review/QA
-      work. Retain all original source, dirty files, stashes, drafts, fixtures and captures.
-      Existing uncommitted content may have been intentionally excluded; inspect its provenance
-      instead of automatically committing it. Preserve every PR record and unrelated local
-      metadata during project.yaml reconciliation. Do not weaken acceptance criteria, choose
-      unresolved user policy questions or reuse stale PASS results. Historical captures have
-      been copied intact to the main session captures; overwritten filename collisions are
-      backed up in the host migration record. Main session is pm-project_manager-c5a1006b;
-      keep old restored sessions idle. Assigned models and explicit work-Opus sign-off override
-      remain unchanged. Autostart will use wait_for_merge; no PR merge is authorized by this
-      request.'
+    text: 'User-authorized restart from the main PM session on 2026-10-31 after #249
+      merged as eaf3372e60d1717bd97cc50b5e0b04c6df881fa1. Resume this existing PR
+      in its existing workdir. First integrate current origin/master INTO THIS PR
+      branch, preserving its intended behavior and all earlier review/QA corrections;
+      resolve real code/test conflicts and validate the combined behavior before handing
+      off for a fresh review/QA/sign-off sequence. Do not merge this PR into master
+      or push/reset/delete master or other branches. This is a user-directed implementation
+      return, not a reviewer/sign-off verdict. GitHub reports the PR conflicts with
+      current master; reconcile that before resuming the prior review/QA work. Retain
+      all original source, dirty files, stashes, drafts, fixtures and captures. Existing
+      uncommitted content may have been intentionally excluded; inspect its provenance
+      instead of automatically committing it. Preserve every PR record and unrelated
+      local metadata during project.yaml reconciliation. Do not weaken acceptance
+      criteria, choose unresolved user policy questions or reuse stale PASS results.
+      Historical captures have been copied intact to the main session captures; overwritten
+      filename collisions are backed up in the host migration record. Main session
+      is pm-project_manager-c5a1006b; keep old restored sessions idle. Assigned models
+      and explicit work-Opus sign-off override remain unchanged. Autostart will use
+      wait_for_merge; no PR merge is authorized by this request.'
     created_at: '2026-10-31T18:07:25.345765+00:00'
     last_edited: '2026-10-31T18:07:25.345765+00:00'
   - id: note-6a31b67
-    text: 'QA PASS: A sign-off return keeps the pre-return implementation and router transcripts
-      (original bug), and the run ends with live canonicals: PASS; A sign-off REVIEW return
-      starts a separate review loop and adopts an already-open return review window: PASS;
-      Overlapping review loops, a TUI restart and a follow-up verdict never cut the current
-      loop off from its own transcript: PASS; Turning auto-start off and finishing the watcher,
-      even at the same moment, never freezes a canonical transcript: PASS; One run, two PRs,
-      two returns and a restart: whole-run archive audit with concurrent writers: PASS; CLI
-      drivers keep history: auto-sequence returns and watcher runs, including two watchers
-      at once: PASS; Archive failures, pruned or dangling sessions and frozen canonicals never
-      block a return: PASS; Resuming a pre-upgrade run directory and an imperfect breadcrumb:
-      PASS (workdir: /home/matt/.pm/workdirs/qa/pr-9ee4d64-f7bc35893e6a7d19)'
+    text: 'QA PASS: A sign-off return keeps the pre-return implementation and router
+      transcripts (original bug), and the run ends with live canonicals: PASS; A sign-off
+      REVIEW return starts a separate review loop and adopts an already-open return
+      review window: PASS; Overlapping review loops, a TUI restart and a follow-up
+      verdict never cut the current loop off from its own transcript: PASS; Turning
+      auto-start off and finishing the watcher, even at the same moment, never freezes
+      a canonical transcript: PASS; One run, two PRs, two returns and a restart: whole-run
+      archive audit with concurrent writers: PASS; CLI drivers keep history: auto-sequence
+      returns and watcher runs, including two watchers at once: PASS; Archive failures,
+      pruned or dangling sessions and frozen canonicals never block a return: PASS;
+      Resuming a pre-upgrade run directory and an imperfect breadcrumb: PASS (workdir:
+      /home/matt/.pm/workdirs/qa/pr-9ee4d64-f7bc35893e6a7d19)'
     created_at: '2026-11-02T04:32:33Z'
     last_edited: '2026-11-02T04:32:33Z'
   - id: note-0a052ee
     text: 'Closed by explicit user request 2026-11-02, not merged. Superseded by pr-ec5bc84:
-      use harness-native logs directly and remove PM transcript symlink/copy/archive indirection.
-      Native retention is already configured. Keep this branch, workdir, QA evidence and drafts
-      for reference; never restart this closed PR.'
+      use harness-native logs directly and remove PM transcript symlink/copy/archive
+      indirection. Native retention is already configured. Keep this branch, workdir,
+      QA evidence and drafts for reference; never restart this closed PR.'
     created_at: '2026-11-02T05:06:21Z'
     last_edited: '2026-11-02T05:06:21Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
@@ -56072,62 +56102,66 @@ prs:
   branch: pm/pr-ec5bc84-use-native-session-logs-and-remove-pm-transcripts-
   status: pending
   depends_on: []
-  description: 'Replace the PM-owned transcript symlink/copy/archive tree with direct references
-    to harness-native session history. Supersedes closed #275 / pr-9ee4d64 by eliminating
-    the mutable indirection that caused the bug, rather than adding another archive layer.
-    User explicitly approved closing #275 and starting this simpler design on 2026-11-02.
+  description: 'Replace the PM-owned transcript symlink/copy/archive tree with direct
+    references to harness-native session history. Supersedes closed #275 / pr-9ee4d64
+    by eliminating the mutable indirection that caused the bug, rather than adding
+    another archive layer. User explicitly approved closing #275 and starting this
+    simpler design on 2026-11-02.
 
 
     Why: Claude already retains the original JSONL; the current installation has cleanupPeriodDays=365000.
-    PM currently reuses phase/iteration paths and sometimes freezes a live symlink into a
-    copy. A real #241 incident let an obsolete review completion freeze the next loop''s live
-    file and hide its eventual NEEDS_WORK. Earlier sign-off return history was also lost from
-    PM''s run directory even though native sessions survived.
+    PM currently reuses phase/iteration paths and sometimes freezes a live symlink
+    into a copy. A real #241 incident let an obsolete review completion freeze the
+    next loop''s live file and hide its eventual NEEDS_WORK. Earlier sign-off return
+    history was also lost from PM''s run directory even though native sessions survived.
 
 
-    Desired design: keep the smallest durable mapping needed to associate project/PR, phase
-    and exact run/loop/attempt with native session ID and native log location, reusing existing
-    session/runtime metadata. Launches register their own identity; collectors and history
-    readers read that session directly. Do not derive identity from a mutable alias, scan
-    the entire history when a known session ID suffices, or replace this with a new copy/archive
-    service. Use native retention; do not silently change global retention or promise history
-    beyond the configured harness retention. A missing/pruned native log must be reported
-    accurately, never treated as a verdict or another session.
+    Desired design: keep the smallest durable mapping needed to associate project/PR,
+    phase and exact run/loop/attempt with native session ID and native log location,
+    reusing existing session/runtime metadata. Launches register their own identity;
+    collectors and history readers read that session directly. Do not derive identity
+    from a mutable alias, scan the entire history when a known session ID suffices,
+    or replace this with a new copy/archive service. Use native retention; do not
+    silently change global retention or promise history beyond the configured harness
+    retention. A missing/pruned native log must be reported accurately, never treated
+    as a verdict or another session.
 
 
     Retire all new writes and runtime dependence on pm/transcripts, including implementation,
-    reviews, QA roles, sign-off, watchers and CLI flows that use it. Keep genuine execution
-    stdout/stderr, recordings and non-native artifacts in their existing appropriate capture/state
-    locations; do not throw away evidence merely because it is called a transcript. Reuse
-    launch/session plumbing and one small common resolver rather than adding parallel role-specific
-    machinery. Review any proposed compatibility code against the simplification goal.
+    reviews, QA roles, sign-off, watchers and CLI flows that use it. Keep genuine
+    execution stdout/stderr, recordings and non-native artifacts in their existing
+    appropriate capture/state locations; do not throw away evidence merely because
+    it is called a transcript. Reuse launch/session plumbing and one small common
+    resolver rather than adding parallel role-specific machinery. Review any proposed
+    compatibility code against the simplification goal.
 
 
-    Upgrade safely: existing in-flight sessions and saved runtime records must remain identifiable,
-    and earlier evidence/unsent drafts must not be deleted. Preserve legacy copies that are
-    the only remaining evidence. A bounded read-only compatibility/adoption path is acceptable;
-    new runs must not recreate the old tree. Do not delete the live installation''s pm/transcripts
-    or alter the running host during implementation/QA.
+    Upgrade safely: existing in-flight sessions and saved runtime records must remain
+    identifiable, and earlier evidence/unsent drafts must not be deleted. Preserve
+    legacy copies that are the only remaining evidence. A bounded read-only compatibility/adoption
+    path is acceptable; new runs must not recreate the old tree. Do not delete the
+    live installation''s pm/transcripts or alter the running host during implementation/QA.
 
 
-    Acceptance: exact-session verdict collection across sign-off returns, fresh review loops
-    restarting at iteration one, concurrent PRs, late completion from an obsolete loop, TUI
-    restart/adoption and human follow-up in the existing pane. Reproduce #241''s stale-finalizer
-    failure and show it cannot freeze or retarget a newer native log. Verify newly appended
-    outcomes remain readable and prior session identities remain discoverable. Include representative
-    coverage of every affected producer/consumer; use isolated test projects, HOME/PM state
-    and tmux servers inside the configured containers. Preserve manual merge/spec gates and
-    the existing verdict policy. No broad workflow rewrite, new archive retention subsystem
-    or unrelated recipe hardening.
+    Acceptance: exact-session verdict collection across sign-off returns, fresh review
+    loops restarting at iteration one, concurrent PRs, late completion from an obsolete
+    loop, TUI restart/adoption and human follow-up in the existing pane. Reproduce
+    #241''s stale-finalizer failure and show it cannot freeze or retarget a newer
+    native log. Verify newly appended outcomes remain readable and prior session identities
+    remain discoverable. Include representative coverage of every affected producer/consumer;
+    use isolated test projects, HOME/PM state and tmux servers inside the configured
+    containers. Preserve manual merge/spec gates and the existing verdict policy.
+    No broad workflow rewrite, new archive retention subsystem or unrelated recipe
+    hardening.
 
 
-    Coordination: #248 INPUT_REQUIRED adoption, #260 fresh implementation handoff and #274
-    integration-return gate currently depend on #275''s session ownership fixes. The approved
-    scheduling holds now target this replacement for downstream review/QA; their existing
-    implementation/evidence remain preserved. Coordinate with #237 action history without
-    expanding into that feature. Start fresh from current master, not from #275''s unmerged
-    archive implementation; use its incident evidence and focused regression intent where
-    useful.'
+    Coordination: #248 INPUT_REQUIRED adoption, #260 fresh implementation handoff
+    and #274 integration-return gate currently depend on #275''s session ownership
+    fixes. The approved scheduling holds now target this replacement for downstream
+    review/QA; their existing implementation/evidence remain preserved. Coordinate
+    with #237 action history without expanding into that feature. Start fresh from
+    current master, not from #275''s unmerged archive implementation; use its incident
+    evidence and focused regression intent where useful.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
@@ -56138,12 +56172,13 @@ prs:
   merged_at: null
   notes:
   - id: note-dcc1cd1
-    text: 'User authorized this replacement to start immediately. Use main-account Opus 5.5/xhigh
-      for all roles/helpers/sign-off, matching the superseded PR current routing. The provider
-      pins the effective xhigh setting. Keep wait_for_merge. No spec-approval pause requested
-      for this code simplification; do not expand into prompt redesign. No live host PM/tmux/settings
-      mutation in tests. Preserve old #275 source and evidence; it is closed by user choice
-      despite its historical passing sign-off.'
+    text: 'User authorized this replacement to start immediately. Use main-account
+      Opus 5.5/xhigh for all roles/helpers/sign-off, matching the superseded PR current
+      routing. The provider pins the effective xhigh setting. Keep wait_for_merge.
+      No spec-approval pause requested for this code simplification; do not expand
+      into prompt redesign. No live host PM/tmux/settings mutation in tests. Preserve
+      old #275 source and evidence; it is closed by user choice despite its historical
+      passing sign-off.'
     created_at: '2026-11-02T05:06:19Z'
     last_edited: '2026-11-02T05:06:19Z'
   model: provider:claude-main-xhigh-pm
@@ -56512,7 +56547,6 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
-
 - id: pr-ade4427
   plan: bugs
   title: 'Bug: prefix+P / prefix+M popup closes at once when the dispatched pm command
