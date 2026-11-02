@@ -5173,7 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-11-02T04:47:14.417003+00:00'
+  updated_at: '2026-11-02T05:18:45.025224+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5208,6 +5208,13 @@ prs:
       /pm-captures/scenarios/1/{cli/fixture,cli/stories,tui,evidence}.'
     created_at: '2026-11-02T04:47:14Z'
     last_edited: '2026-11-02T04:47:14Z'
+  - id: note-49de3bf
+    text: 'QA S1 2026-11-02: the user ruled story 1 a PASS. The project.yaml mtime
+      moved only because the scenario''s TUI Right/Left browse saves active_pr; the
+      content sha matched and nothing was re-linked. Final verdict PASS 8/8 (follow-up
+      to note-da12d23).'
+    created_at: '2026-11-02T05:18:44Z'
+    last_edited: '2026-11-02T05:18:44Z'
 - id: pr-0778fbe
   plan: plan-003
   title: Add PR ownership tracking with workdir history
