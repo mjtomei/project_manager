@@ -30,6 +30,7 @@ def list_watcher_types() -> list[dict]:
         {
             "type": cls.WATCHER_TYPE,
             "display_name": cls.DISPLAY_NAME,
+            "description": cls.DESCRIPTION,
             "window_name": cls.WINDOW_NAME,
             "default_interval": cls.DEFAULT_INTERVAL,
         }

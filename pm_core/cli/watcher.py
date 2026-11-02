@@ -16,6 +16,7 @@ fixing them.  Targets are owned by the running TUI (``pm autostart add``).
 """
 
 import secrets
+import textwrap
 from datetime import datetime
 
 import click
@@ -324,6 +325,15 @@ def watcher_list():
     click.echo("Registered watcher types:\n")
     for t in types:
         click.echo(f"  {t['type']:<20} {t['display_name']}")
+        # The description names the plan the watcher drives (e.g.
+        # `plan=improvements`), so `pm watcher list` is a live surface for
+        # the plan name, not just the display name.  Wrapped so a long
+        # description does not run off a narrow terminal.
+        if t.get("description"):
+            click.echo(textwrap.fill(t["description"], width=78,
+                                     initial_indent=" " * 23,
+                                     subsequent_indent=" " * 23,
+                                     break_on_hyphens=False))
         click.echo(f"  {'':20} window: {t['window_name']}, "
                    f"interval: {t['default_interval']}s")
         click.echo()

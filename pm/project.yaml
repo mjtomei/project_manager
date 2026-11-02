@@ -33110,6 +33110,20 @@ prs:
       to pm pr note add <existing-id>. Commit f174ca89.'
     created_at: '2026-11-02T21:43:09Z'
     last_edited: '2026-11-02T21:43:09Z'
+  - id: note-f11f9d5
+    text: 'review-loop b8ed i1: the plan-name NEEDS_WORK is addressed at the one live
+      surface that was missing it. `pm watcher list` printed only display name/window/interval,
+      so the improvement-fix watcher never read as driving `plan=improvements` (R22
+      names `pm watcher list` alongside `pm watcher start --help`). `BaseWatcher`
+      now has a DESCRIPTION class attribute, set on all four built-ins; `pm watcher
+      list` prints it (plan=bugs / plan=improvements), with a test asserting both
+      and no `plan=ux`. Verified separately: all 152 leaf-command `--help` outputs,
+      the generated discovery/bug-fix/improvement prompts, and `pm tui keys` contain
+      no `plan=ux`. The only remaining `plan=ux` in a `pm prompt <id>` output is this
+      PR''s own description, notes and impl spec — historical records that spec section
+      D deliberately excludes. Full suite green (5561 passed, 1 skipped).'
+    created_at: '2026-11-02T22:18:03Z'
+    last_edited: '2026-11-02T22:18:03Z'
   model: provider:deepseek-flash
   effort: high
   session_models:

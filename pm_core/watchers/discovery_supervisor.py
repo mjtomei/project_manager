@@ -23,6 +23,8 @@ class DiscoverySupervisorWatcher(BaseWatcher):
 
     WATCHER_TYPE = "discovery"
     DISPLAY_NAME = "Discovery Supervisor"
+    DESCRIPTION = ("Schedule regression tests and reconcile filings into the "
+                   "bugs/improvements plans")
     WINDOW_NAME = "discovery"
     DEFAULT_INTERVAL = 1800  # 30 minutes
     VERDICTS = ("READY", "INPUT_REQUIRED")

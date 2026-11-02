@@ -1448,6 +1448,26 @@ def test_pr_qa_cli_rejects_a_command_bar_mode_with_a_hint(tmp_path, mode):
 # Plan-name reconciliation
 # ---------------------------------------------------------------------------
 
+def test_watcher_list_names_the_plans_the_watchers_drive():
+    """`pm watcher list` is a live plan-name surface, not just a type list.
+
+    R22 names it alongside `pm watcher start --help`: the improvement-fix
+    watcher must read as driving `plan=improvements`.  It used to print only
+    the display name, window and interval, so the plan name — the thing this
+    PR reconciles — never appeared.
+    """
+    out = CliRunner().invoke(cli, ["watcher", "list"]).output
+    assert "plan=improvements" in out
+    assert "plan=bugs" in out
+    assert not re.search(r"\bplan=ux\b", out)
+
+    # Both surfaces R22 names must agree: start --help already said
+    # plan=improvements; the list output now does too.
+    start_help = CliRunner().invoke(cli, ["watcher", "start", "--help"]).output
+    assert "plan=improvements" in start_help
+    assert not re.search(r"\bplan=ux\b", start_help)
+
+
 def test_no_stale_ux_plan_name_in_code():
     root = Path(__file__).resolve().parents[1]
     offenders = []

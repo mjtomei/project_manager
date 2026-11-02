@@ -669,3 +669,19 @@ the routed form and `--fresh` so help is complete.
   cycles the sort field and `f` cycles the status filter. Both messages
   (`No <status> PRs` and `No PRs to show`) now say `f`, and the existing
   widget test asserts the letter.
+
+- Review-loop b8ed i1: the plan-name story's remaining live surface.
+  QA marked "`improvements` is the one plan name across help, prompts, and
+  watcher surfaces" NEEDS_WORK. The help and generated watcher prompts were
+  clean, but `pm watcher list` — named in R22 alongside `pm watcher start
+  --help` — printed only the display name, window and interval, so the
+  improvement-fix watcher never read as driving `plan=improvements`.
+  `BaseWatcher` gains a `DESCRIPTION` class attribute (set on all four
+  built-ins) and `pm watcher list` prints it, naming the plan each watcher
+  drives. A test asserts `plan=improvements` / `plan=bugs` and the absence
+  of `plan=ux` in that output. Verified separately that every `--help`
+  surface (152 leaf commands), the generated discovery / bug-fix /
+  improvement prompts, and `pm tui keys` are free of `plan=ux`; the only
+  remaining occurrences in a `pm prompt <id>` output are this PR's own
+  description, notes and spec, which section D deliberately excludes as
+  historical records.

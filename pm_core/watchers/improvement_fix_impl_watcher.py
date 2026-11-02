@@ -24,6 +24,8 @@ class ImprovementFixImplWatcher(BaseWatcher):
 
     WATCHER_TYPE = "improvement-fix-impl"
     DISPLAY_NAME = "Improvement-Fix Implementation Watcher"
+    DESCRIPTION = ("Drive plan=improvements PRs through auto-sequence "
+                   "(gated at QA PASS)")
     WINDOW_NAME = "improvement-fix-impl"
     DEFAULT_INTERVAL = 1800  # 30 minutes — UX is taste-driven
     VERDICTS = ("READY", "INPUT_REQUIRED")
