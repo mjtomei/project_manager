@@ -40317,7 +40317,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T21:17:18.901511+00:00'
+  updated_at: '2026-11-02T21:30:49.258634+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42286,6 +42286,49 @@ prs:
       line, 0 tracebacks.'
     created_at: '2026-11-02T21:17:18Z'
     last_edited: '2026-11-02T21:17:18Z'
+  - id: note-299e235
+    text: 'S79 refiner (ad033bbb, merged master@c3bac6ce launcher): all 4 stories
+      held live in /scratch/s79 (torn down; drivers + evidence /pm-captures/pr-8020495/s79-refiner,
+      S71 drivers re-pointed, 80x45 client). Draft fixes: backoff timer purpose names
+      the NEXT attempt ("iteration 1, attempt 2/3", then "3/3" on the same review-launch-retry:<iter
+      id>); adding Q as auto-start target >=65 s after its manual LAUNCH_FAILED resumes
+      the SAME loop id at once (new top-level attempt, "i1 (adopted) vanished") before
+      any cooldown; a 60 s re-arm cooldown (due-armed 59.4 s, first read 59s) follows
+      that exhaustion; run `pm autostart clear` while the cooldown-re-armed loop runs
+      or Q keeps re-arming through later stories; unauthorized image = non-retryable
+      LAUNCH_FAILED "Needs attention", not an auth error; closed-P popup badge read
+      [4 runs]. 14 Tracebacks all injected; 0 effort warnings.'
+    created_at: '2026-11-02T21:30:47Z'
+    last_edited: '2026-11-02T21:30:47Z'
+  - id: note-a02eaee
+    text: 'QA S79 (2026-11-02) PASS on 1aab3e8d5 (includes the S77 fix fd5bf53ac),
+      no code edits. I ran the refiner drivers live in a fresh env -i sandbox (/scratch/s79,
+      now torn down; P=pr-e626745, Q=pr-e535ac6, T=pr-e947a0b). Captures, the per-Then
+      README, 777 JSON polls and the analysis are in /pm-captures/scenarios/79. (1)
+      P was repaired in the 5 s backoff: one loop and one i1 id across 111 polls,
+      review-launch-retry due-armed 5.0, remaining 4.69->0.58 strictly falling, the
+      Waiting-for text equal to round() in every read, popup [loop i1] / [review-loop
+      i1: backoff, 4s left], then i1 NEEDS_WORK and i2 PASS. (2) Q backoffs were 2/3
+      (5.0) then 3/3 (10.0) on the same timer id, first read 10s. Q went LAUNCH_FAILED
+      15.55 s after the key with the whole artifact path on its own line, and the
+      artifact file was complete. The popup showed [failed; retryable] / [start: turn
+      done], and the pager matched the CLI once whitespace was removed (less breaks
+      the path). (3) The auto-start add 76.8 s later resumed loop a2ce at once (adopted
+      i1 vanished + fresh i1). Its rearm cooldown had due-armed 59.764 (due = failure
+      + 60.000), 59.36->0.11 strictly falling, no 1m00s; it fired and re-ran the loop.
+      After autostart clear, the loop exhausted to "Run ''review-loop start'' to retry".
+      Ended attempts and recent timers stayed unchanged across polls (stable.py, 0
+      changes). (4) z d gave cancelled KILLED with the timer cancelled 3.25 s before
+      due and no second podman run. pm pr close gave cancelled CLOSED 1.24 s later.
+      The closed popup showed no z line and [4 runs], and z,d opened nothing. unauthorized:latest
+      gave LAUNCH_FAILED in 0.20 s with no timers. (5) The trust stand-in gave HOLD
+      33.4 s after the key with two accepts 15 s apart. The derived hold had no countdown,
+      and the whole HOLD instruction was in all 14 HOLD polls. There were 14 Tracebacks,
+      all injected (13 shim runs + 1 ContainerError), and 0 effort warnings. Observation
+      only: runtime.review-loop.started_at keeps the first loop''s start because runtime_state
+      uses setdefault (master code; no history surface reads it).'
+    created_at: '2026-11-02T21:30:49Z'
+    last_edited: '2026-11-02T21:30:49Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
