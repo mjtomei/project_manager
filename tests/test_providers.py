@@ -275,6 +275,23 @@ class TestProvidersFilePermissions:
         assert self._mode(path) == 0o644
         assert self._temp_files(tmp_path) == []
 
+    def test_failed_temp_creation_names_the_target(self, tmp_path):
+        """A ``mkstemp`` failure is one typed write error, not a raw
+        ``OSError``: the CLI turns it into one ``Error:`` line."""
+        path = tmp_path / "providers.yaml"
+        original = "providers: {}\n"
+        path.write_text(original)
+        with patch("pm_core.providers.pm_home", return_value=tmp_path), \
+                patch("pm_core.providers.tempfile.mkstemp",
+                      side_effect=PermissionError(13, "Permission denied",
+                                                  str(tmp_path))):
+            with pytest.raises(ProvidersWriteError) as excinfo:
+                save_providers({"providers": {}})
+        assert str(path) in str(excinfo.value)
+        assert "Permission denied" in str(excinfo.value)
+        assert path.read_text() == original
+        assert self._temp_files(tmp_path) == []
+
 
 # ---------------------------------------------------------------------------
 # providers_lock / set_default_provider hardening
@@ -400,6 +417,23 @@ class TestSetDefaultProvider:
                 patch.object(providers, "load_providers_for_edit", fake_load):
             with pytest.raises(ProviderNotFoundError):
                 providers.set_default_provider("gone")
+
+    def test_cli_sets_a_configured_provider(self, tmp_path):
+        """The success path still writes and reports the new default, so
+        the error handling around it cannot silently swallow a real set."""
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+
+        path = tmp_path / "providers.yaml"
+        path.write_text("providers:\n"
+                        "  x:\n"
+                        "    type: local\n"
+                        "    api_base: http://localhost:1\n")
+        with patch("pm_core.providers.pm_home", return_value=tmp_path):
+            result = CliRunner().invoke(cli, ["provider", "default", "x"])
+        assert result.exit_code == 0, result.output
+        assert "Default provider set to 'x'" in result.output
+        assert "default: x" in path.read_text()
 
     def test_cli_reports_missing_provider_with_one_error_line(self, tmp_path):
         from click.testing import CliRunner

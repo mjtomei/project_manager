@@ -37,8 +37,10 @@ removes anything it introduces, and it is not integrated (see A5).
   lock acquisition or `save_providers`.
 - `pm_core/tui/model_screen.py:194-196` — `_resize()` lazily imports
   `textual.markup.to_content` to measure markup-free row widths.  Verified
-  present (with `textual.content.Content`) in textual **2.0.0** and in the
-  installed 8.2.7; absent from the declared floor `textual>=0.40`.
+  present (with `textual.content.Content`) in textual **2.0.1** and in the
+  installed 8.2.7; absent from the declared floor `textual>=0.40`.  It is
+  also present in `2.0.0`, but there `to_content` mis-parses an escaped
+  `\[...]`, which breaks the popup's width measurement (see R3).
 - `pyproject.toml:13` declares `textual>=0.40`; `Dockerfile:150` repeats the
   same floor in its pre-installed dependency list.  No other declaration of
   the floor exists (`install.sh` installs the project, so it follows
@@ -96,12 +98,17 @@ In `pm_core/cli/provider.py`:
 - Preserve the current success messages and exit codes.
 
 ### R3 — Declare the Textual floor the code actually needs
-Raise the declared floor from `textual>=0.40` to `textual>=2.0` in
-`pyproject.toml` and in the `Dockerfile`'s pre-install list.  `2.0.0` is
+Raise the declared floor from `textual>=0.40` to `textual>=2.0.1` in
+`pyproject.toml` and in the `Dockerfile`'s pre-install list.  `2.0.1` is
 the minimum verified to provide both `textual.markup.to_content` and
-`textual.content.Content`, which the code and tests use.  Keep the lazy
-import in `model_screen.py` (it is only needed when sizing the popup);
-no compatibility shim is needed once the floor is honest.
+`textual.content.Content`, which the code and tests use, *and* to render
+the popup correctly: `2.0.0` has `to_content` but it drops the closing `]`
+of an escaped `\[...]` (review-loop i3), so a `[OK]` status line measures
+two cells short, the box is sized too narrow and the column is clipped —
+`tests/test_model_settings.py::test_tui_project_view_shows_ok_route_status`
+fails at `2.0.0` and passes at `2.0.1`.  Keep the lazy import in
+`model_screen.py` (it is only needed when sizing the popup); no
+compatibility shim is needed once the floor is honest.
 
 ## Implicit requirements
 
@@ -137,10 +144,11 @@ no compatibility shim is needed once the floor is honest.
   coherent.  The one existing test that asserts `pytest.raises(OSError)`
   for a failed `os.replace` is updated to the new type; it still asserts
   the original file survives and the temp is cleaned.
-- **A3 — pin vs. guard.**  Resolved: pin `textual>=2.0`.  The codebase
-  already imports `textual.content` in tests, and `2.0.0` was verified to
-  contain both APIs.  A guard would only hide a stale environment the
-  project does not support.
+- **A3 — pin vs. guard.**  Resolved: pin `textual>=2.0.1`.  The codebase
+  already imports `textual.content` in tests, and `2.0.1` was verified to
+  contain both APIs and to pass the popup tests; `2.0.0` has both APIs but
+  clips escaped `[OK]` status text (R3).  A guard would only hide a stale
+  environment the project does not support.
 - **A4 — validate entry contents in `set_default_provider`?**  Resolved:
   no.  The stated bug is the existence race; adding validation would change
   behaviour for hand-edited invalid entries and is out of scope.
@@ -177,7 +185,9 @@ No **[UNRESOLVED]** ambiguities.
   instead of hanging forever.
 - A user on textual 1.x who did not reinstall keeps the old behaviour
   (lazy `ImportError` on opening the popup); the declared floor and the
-  Docker image now prevent new installs from landing there.
+  Docker image now prevent new installs from landing there.  A user on
+  textual 2.0.0 gets the popup but with a clipped status column (R3), so
+  the floor names 2.0.1.
 
 ## Tests to add/update
 
