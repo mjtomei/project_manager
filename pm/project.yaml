@@ -52633,3 +52633,31 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-f51600e
+  plan: bugs
+  title: 'Bug: a command-bar line with an unbalanced quote crashes the TUI (unguarded
+    shlex.split in handle_command_submitted)'
+  branch: pm/pr-f51600e-bug-a-command-bar-line-with-an-unbalanced-quote-cr
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/pr_view.py:644, handle_command_submitted runs
+    parts = shlex.split(cmd) with no try/except, before any command dispatch. Repro:
+    in any pm TUI press /, type a line with an unbalanced quote, e.g. qa regression
+    smoke-check --branch "side   or   pr list "x   and press Enter. Actual: shlex
+    raises ValueError: No closing quotation, the Textual app exits, the TUI pane closes
+    and window 0 disappears (traceback in ~/.pm/debug/tui-stderr.log via app.py:1228
+    on_command_submitted -> pr_view.py:644 -> shlex.split). Re-running pm session
+    respawns the TUI, but the grouped <ses>~1 is left on another window, so new TUI
+    panes open there until select-window -t <ses>~1:0. Expected: one TUI log line
+    such as "Command not parsed: No closing quotation" and the TUI keeps running,
+    like the qa regression UsageError path does. Seen in QA S8 of pr-7d5d036 (pre-existing;
+    on master since Feb). Captures: /pm-captures/scenarios/8/story10-unbalanced-quote/.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T02:27:48.995190+00:00'
+  updated_at: '2026-11-02T02:27:48.995190+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
