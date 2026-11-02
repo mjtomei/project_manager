@@ -4228,3 +4228,23 @@ else `main`, else the first window — is now
 (`pm session`'s attach) and `_respawn_unlisted_tui` (the hook), so the
 two cannot start a respawned TUI in different places.  Tests:
 `TestTuiRespawnWindow`.
+
+**Review loop 1237 i2** (no requirement changes) found one gap in
+`paths.tmux_safe_name`: the Unicode line separators `U+0085`, `U+2028`
+and `U+2029`.  tmux stores them in a session name unchanged (verified on
+tmux 3.2a), but pm reads every tmux listing back with
+`str.splitlines()`, which treats them as record boundaries.  A repo
+directory whose name contained one therefore produced a live session that
+`list_pm_sessions()` parsed as two malformed rows: `pm session list`
+showed nothing, and the cross-server TUI scan (`_find_tui_pane`) could not
+find the session (reproduced on a disposable socket: the live session
+listed `[]`).  They are now replaced with `_` like the characters tmux
+itself rewrites — the same "a name must survive the round trip" rule as
+QA S28.  Tests:
+`test_session_tag_with_a_unicode_line_separator_is_one_line` and three new
+cases in `TestTmuxSafeName` (`tests/test_awkward_repo_paths.py`).  Also a
+one-line cleanup: `_ensure_tui_running` finds the registered TUI window
+through `pane_registry._iter_all_panes`, the iterator
+`_respawn_unlisted_tui` already uses.  Residual: a *legacy* session (or a
+user's own view) created before this change with such a character in its
+name still cannot be parsed back; it is not renamed (R6).

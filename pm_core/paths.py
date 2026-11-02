@@ -230,6 +230,15 @@ def sessions_dir() -> Path:
 _TMUX_DOLLAR_ESCAPED_BEFORE = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_{")
 
+# Characters ``str.splitlines()`` treats as a line boundary but that are not
+# ASCII control characters, so the check below would keep them.  tmux keeps
+# them in a session name too, but every tmux listing is read back line by
+# line (``list-sessions``, ``list-panes -a``, …) with ``splitlines``, so a
+# name containing one would be parsed as two records: ``pm session list``
+# dropped a live session, and the group/pane scans mis-parsed their rows.
+# Made ``_`` like the characters tmux itself rewrites.
+_SPLITLINES_SEPARATORS = frozenset("\x85\u2028\u2029")
+
 
 def tmux_safe_name(name: str) -> str:
     """Return *name* with every character tmux rewrites in a session name made ``_``.
@@ -248,6 +257,13 @@ def tmux_safe_name(name: str) -> str:
     (QA S28).  Deriving the tag through this function keeps the name pm
     computes identical to the one tmux stores, everywhere the tag is used.
 
+    The Unicode line separators ``U+0085``, ``U+2028`` and ``U+2029`` are
+    replaced too, although tmux stores them unchanged: pm reads every tmux
+    listing back with ``str.splitlines()``, which treats them as record
+    boundaries, so such a session would vanish from ``pm session list``
+    and from the cross-server TUI scan (the same "a name must survive the
+    round trip" rule; measured on tmux 3.2a and Python 3.10).
+
     Valid non-ASCII text (``日本語``, ``²``) is kept: tmux keeps it.  The
     ``$`` pass runs right to left, so each ``$`` is judged on its
     successor's final text: ``$$HOME`` becomes ``__HOME``, not ``$_HOME``
@@ -255,7 +271,8 @@ def tmux_safe_name(name: str) -> str:
     """
     chars = [
         "_" if (c in "#.:\\" or ord(c) < 0x20 or c == "\x7f"
-                or 0xDC80 <= ord(c) <= 0xDCFF)  # surrogateescape'd bytes
+                or 0xDC80 <= ord(c) <= 0xDCFF  # surrogateescape'd bytes
+                or c in _SPLITLINES_SEPARATORS)
         else c
         for c in name
     ]

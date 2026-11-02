@@ -226,8 +226,8 @@ def _ensure_tui_running(session_name: str) -> str | None:
     # back to ``main``, else the first window (the same rule the
     # after-kill-pane hook applies).
     tui_window = next(
-        (wid for wid, wdata in registry.get("windows", {}).items()
-         if any(p.get("role") == "tui" for p in wdata.get("panes", []))),
+        (wid for wid, pane in pane_registry._iter_all_panes(registry)
+         if pane.get("role") == "tui"),
         None)
     tui_window = pane_layout.tui_respawn_window(session_name, tui_window)
     if not tui_window:

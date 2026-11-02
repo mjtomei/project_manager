@@ -45,6 +45,7 @@ AWKWARD = [
     "a$$HOME", "a$_x", "a${x}", "a$.b", "a$1b", "a$(x)", "a$$ b", "a$",
     "a#(touch PWNED)b", "a#{host}b", "a##b", "a#Sb", "c#",
     "日本語~²", "~tilde", "q'uote", "sp ace", 'dq"x', "%pct",
+    "a\x85b", "a\u2028b", "a\u2029b",
 ]
 
 
@@ -62,8 +63,13 @@ class TestTmuxSafeName:
         ("a$1b", "a$1b"), ("a$(x)", "a$(x)"), ("a$$ b", "a$$ b"),
         ("a$'b", "a$'b"), ("a$-b", "a$-b"), ("a$é", "a$é"),
         ("日本語~²", "日本語~²"), ("q'uote `x` ~y", "q'uote `x` ~y"),
+        # Unicode line separators: tmux keeps them, but every tmux listing
+        # is read back with ``str.splitlines``, which treats them as record
+        # boundaries (a live session vanished from ``pm session list``).
+        ("a\x85b", "a_b"), ("a\u2028b", "a_b"), ("a\u2029b", "a_b"),
     ])
-    def test_rewrites_only_what_tmux_rewrites(self, name, expected):
+    def test_rewrites_what_tmux_or_the_line_parsers_rewrite(self, name,
+                                                           expected):
         assert tmux_safe_name(name) == expected
 
     def test_idempotent(self):
@@ -82,6 +88,25 @@ class TestTmuxSafeName:
             paths._session_tag_cache.clear()
         assert tag.startswith("it's my `touch PWNED` _HOME repo-")
         assert tag == tmux_safe_name(tag)
+
+    @pytest.mark.parametrize("separator", ["\x85", "\u2028", "\u2029"])
+    def test_session_tag_with_a_unicode_line_separator_is_one_line(
+            self, tmp_path, separator):
+        """tmux stores U+0085/U+2028/U+2029, but pm parses every tmux
+        listing with ``str.splitlines``: a tag containing one would be read
+        back as two records, so ``pm session list`` dropped the live
+        session (and the cross-server TUI scan missed it)."""
+        repo = tmp_path / f"a{separator}b"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        paths._session_tag_cache.clear()
+        try:
+            tag = paths.get_session_tag(start_path=repo,
+                                        use_github_name=False)
+        finally:
+            paths._session_tag_cache.clear()
+        assert tag.startswith("a_b-")
+        assert len(("pm-" + tag).splitlines()) == 1
 
     @pytest.mark.parametrize("share_mode", [None, "", "global", "group:devteam"])
     def test_wrapper_tag_equals_paths_tag(self, tmp_path, monkeypatch,
