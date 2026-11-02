@@ -106,7 +106,7 @@ leave-qa timing corrected to the held run's 60 s status check.*
   (`no history`, `N runs`, `hold: …`, `review-loop i2: turn done, 8s left`…);
   when the user selects it (or presses `H`), then the same text as
   `pm pr history` for that PR is shown in a pager inside the popup and `q`
-  dismisses it. The badge follows the same human-first row as
+  dismisses the pager, returning to the (refreshed) popup list. The badge follows the same human-first row as
   `Waiting for:`; its countdown is the row's own `fires` timer, or the
   verdict grace only once the agent's turn has finished — a working review
   iteration reads e.g. `review-loop i1: working` with no "Ns left", and a

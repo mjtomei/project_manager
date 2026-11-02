@@ -1473,8 +1473,8 @@ def _show_view_action(cmd: str, session: str = "") -> None:
     """Render a ``view:<key> <pr_id>`` command inside the popup.
 
     The text is paged with ``less -R`` reading keys from the popup's tty
-    (q closes it); without ``less`` it is printed and the popup waits for
-    a dismiss key.
+    (q closes the pager; the fzf picker then shows its list again); without
+    ``less`` it is printed and the popup waits for a dismiss key.
 
     The PR record comes from the session's project root, like the picker
     rows (``PM_PROJECT``, which the picker exports, else the session's
@@ -2532,6 +2532,21 @@ def popup_picker_cmd(session: str, window_name: str):
                 cmd.extend(["--disabled", "--prompt="])
             return cmd
 
+        def _page_view_then_return(cmd: str | None, label: str) -> bool:
+            """Page a view action (History) inside the popup, then go back
+            to the list instead of closing the popup: ``q`` in the pager
+            dismisses only the pager.  The rows are refreshed on the way
+            back, so the History badge is current.  False for any other
+            command, which dispatches and closes the popup as before."""
+            if not cmd or not cmd.startswith(_VIEW_PREFIX):
+                return False
+            # --no-clear left the picker frame up; wipe it under the pager.
+            sys.stdout.write("\033[H\033[2J")
+            sys.stdout.flush()
+            _run_picker_command(cmd, session)
+            _still_has_action(label)
+            return True
+
         cmd_to_run: str | None = None
         chord_state = "main"  # 'main' | 'z' | 'zz'
         while True:
@@ -2642,6 +2657,9 @@ def popup_picker_cmd(session: str, window_name: str):
                     if not _still_has_action(action_label):
                         continue
                     cmd_to_run = _label_to_cmd.get(action_label)
+                    if _page_view_then_return(cmd_to_run, action_label):
+                        cmd_to_run = None
+                        continue
                     break
                 if selected:
                     selected_cmd = None
@@ -2660,6 +2678,9 @@ def popup_picker_cmd(session: str, window_name: str):
                     if label is None or not _still_has_action(label):
                         continue
                     cmd_to_run = _label_to_cmd[label]
+                    if _page_view_then_return(cmd_to_run, label):
+                        cmd_to_run = None
+                        continue
                     break
                 # No actionable input — bail.
                 break

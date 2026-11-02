@@ -660,7 +660,9 @@ class _FakeFzf:
     """Scripted stand-in for the picker's fzf subprocess.
 
     Each entry in ``script`` is ``(returncode, stdout)`` for one fzf
-    launch; every launch's argv and stdin are recorded.
+    launch, or a callable taking this fake and returning that pair (to
+    select a row from the launch's own input); every launch's argv and
+    stdin are recorded.
     """
 
     def __init__(self, script, on_launch=None):
@@ -676,7 +678,8 @@ class _FakeFzf:
                 fake.calls.append({"cmd": cmd, "input": input})
                 if fake.on_launch:
                     fake.on_launch(len(fake.calls))
-                rc, out = fake.script.pop(0)
+                entry = fake.script.pop(0)
+                rc, out = entry(fake) if callable(entry) else entry
                 self.returncode = rc
                 return out, ""
         return _Proc()
@@ -844,8 +847,32 @@ class TestPopupPickerNoActions:
     def test_merged_pr_history_runs_the_view(self, tmp_path, monkeypatch):
         fzf, run_cmd = _run_picker(
             tmp_path, monkeypatch, [self.PRS[0]], ["#238"], "#238",
-            [(0, "H\n")])
+            [(0, "H\n"), (130, "")])
         run_cmd.assert_called_once_with("view:history pr-m", "pm-x")
+        # q in the pager returns to the (view-only) list; q/Esc there quits.
+        assert len(fzf.calls) == 2
+        assert "history" in fzf.calls[1]["input"]
+
+    def test_history_view_returns_to_the_list(self, tmp_path, monkeypatch):
+        """QA S56: H, and Enter on the history row, page History inside the
+        popup; q in the pager goes back to the action list (refreshed)
+        instead of closing the popup.  A session action still dispatches
+        and closes the popup."""
+        def enter_history_row(fake):
+            row = next(line for line in fake.calls[-1]["input"].split("\n")
+                       if "history" in line)
+            return 0, f"\n{row}\n"
+
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, self.PRS[1:2], ["#240"], "#240",
+            [(0, "H\n"), enter_history_row, (0, "s\n")])
+        assert [c.args for c in run_cmd.call_args_list] == [
+            ("view:history pr-r", "pm-x"), ("view:history pr-r", "pm-x"),
+            ("pr start pr-r", "pm-x")]
+        assert len(fzf.calls) == 3
+        for call in fzf.calls:
+            assert _header(call).startswith("PR Actions — #240")
+            assert "history" in call["input"]
 
     def test_local_id_window_resolves_to_display_id(self, tmp_path, monkeypatch):
         """Window named pr-r (before #240 existed) resolves to #240's actions."""
