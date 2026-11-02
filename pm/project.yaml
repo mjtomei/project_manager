@@ -6859,6 +6859,20 @@ prs:
       test_keys_held_behind_empty_enter_are_replayed. Captures /pm-captures/scenarios/7/{pre-fix,post-fix}.'
     created_at: '2026-11-02T05:11:10Z'
     last_edited: '2026-11-02T05:11:10Z'
+  - id: note-33583b0
+    text: 'QA S10 refiner 2026-11-02 at 5dcf90dc (8 stories live, 4 plans + Standalone,
+      200x110). (1) Pre-existing, also on master with exact-id /pr select: when a
+      command-bar command hands focus back to the tree (_focus_current_view -> tree.focus(),
+      Textual default scroll_visible), the tree can scroll to its top and leave the
+      cursor box off-screen below the fold. Seen at 200x50 on master (re-select of
+      the PR under the cursor, Escape in the bar, 60f857a -> e9b0e10) and on this
+      branch in the same cases; the next ]/[ scrolls it back. Not filed as a bug PR
+      yet. Size scenario windows so the whole tree fits. (2) Identical consecutive
+      log messages are deduplicated on screen, in L and in frames.json, so ] then
+      [ with no list shows a single "No match results" line; put a /pr select usage
+      error between them as a discriminator.'
+    created_at: '2026-11-02T07:04:58Z'
+    last_edited: '2026-11-02T07:04:58Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-6aa74c6-fuzzy-select-for-pr-and-plan-command-ab512a43
 - id: pr-98bf8df
   plan: plan-qa
