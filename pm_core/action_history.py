@@ -863,7 +863,17 @@ class ScenarioObserver:
         With *keep_waiting* a scenario waiting for input stays open: the run
         is about to hold on it.  At the end of the run such a scenario ends
         with its INPUT_REQUIRED verdict (or ``cancelled`` on a stop).
+        Never raises, like the other observer entry points: the poll loop
+        calls it unguarded as it returns.
         """
+        try:
+            self._finish(stopped=stopped, keep_waiting=keep_waiting,
+                         verdicts=verdicts)
+        except Exception:
+            _log.debug("ScenarioObserver.finish failed", exc_info=True)
+
+    def _finish(self, *, stopped: bool, keep_waiting: bool,
+                verdicts: dict | None) -> None:
         for idx, cur in list(self._open.items()):
             waiting = cur["status"] == "waiting"
             if waiting and keep_waiting and not stopped:

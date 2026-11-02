@@ -81,6 +81,27 @@ class TestJournal:
         assert rows["review"]["context"] == {"window": "review-#7"}
         assert "context" not in rows["merge"]
 
+    def test_journals_are_per_pm_session(self, clock, monkeypatch):
+        # Two clones of one project share ~/.pm and PR ids; each pm
+        # session's journal is its own, like the runtime mirror (S93).
+        # Owner locks stay shared: liveness is per process.
+        base = ah.history_dir()
+        monkeypatch.setattr(ah, "_scope", lambda: "pm-a")
+        a = ah.start_attempt(PR, "review")
+        assert ah.journal_path(PR) == base / "pm-a" / f"{PR}.jsonl"
+        monkeypatch.setattr(ah, "_scope", lambda: "pm-b")
+        assert not ah.has_journal(PR)
+        assert ah.read_events(PR) == []
+        b = ah.start_attempt(PR, "merge")
+        assert list(_attempts()) == [b]
+        monkeypatch.setattr(ah, "_scope", lambda: "pm-a")
+        assert list(_attempts()) == [a]
+        monkeypatch.setattr(ah, "_scope", lambda: None)
+        assert not ah.has_journal(PR)  # session-less layout: history/<pr>
+        assert ah.journal_path(PR) == base / f"{PR}.jsonl"
+        assert not (base / "pm-a" / "owners").exists()
+        assert ah._owners_dir() == base / "owners"
+
     def test_garbage_lines_are_skipped(self, clock):
         ah.start_attempt(PR, "review")
         with open(ah.journal_path(PR), "a") as f:
@@ -875,6 +896,40 @@ class TestReviewLoopHistory:
         assert t["expected"] == "relaunch the review window"
         assert "review launch retry backoff" in seen["m"]["waiting_for"]
 
+    def test_rearm_cooldown_is_a_fires_timer(self, clock):
+        # An auto-start target whose launch retries were exhausted gets one
+        # TUI pass after the cooldown: journaled as a countdown the TUI
+        # acts on, cleared "fired" when that pass runs.
+        from unittest.mock import MagicMock
+        from pm_core import review_loop as rl
+        from pm_core.tui import review_loop_ui
+        app = MagicMock()
+        app._review_retry_timer = None
+        fired = []
+        app.set_timer.side_effect = lambda delay, cb: fired.append(cb) or "t"
+        state = rl.ReviewLoopState(pr_id=PR,
+                                   retry_ready_at=time.time() + 60)
+        with patch.object(review_loop_ui, "_retry_rearm_applies",
+                          return_value=True):
+            review_loop_ui._schedule_retry_rearm(app, state)
+            # One timer per TUI: a second schedule journals nothing.
+            review_loop_ui._schedule_retry_rearm(app, state)
+        clock.advance(10)
+        m = hq.build_history(PR, now=clock.t, live=False)
+        (t,) = m["timers"]["active"]
+        assert t["timer"] == f"review-launch-rearm:{PR}"
+        assert t["purpose"] == "review launch re-arm cooldown (auto-start)"
+        assert t["effect"] == "fires" and 45 < t["remaining_s"] <= 50
+        assert m["waiting_for"].startswith(
+            "review launch re-arm cooldown (auto-start)")
+        (cb,) = fired
+        with patch("pm_core.tui.auto_start.check_and_start"):
+            cb()
+        m = hq.build_history(PR, now=clock.t, live=False)
+        assert m["timers"]["active"] == []
+        (row,) = m["timers"]["recent"]
+        assert row["resolution"] == "fired"
+
     @pytest.mark.parametrize("exc,outcome,verdict", [
         ("closed", "cancelled", "CLOSED"),
         ("hold", "failed", "HOLD"),
@@ -1094,6 +1149,22 @@ class TestScenarioObserver:
         clock.advance(10)
         ah.end_attempt(PR, run, "done", verdict="NEEDS_WORK")
         return run
+
+    def test_observer_entry_points_never_raise(self, clock):
+        # The poll loop calls the observer unguarded (finish as it
+        # returns): a journaling bug must not end the QA run.
+        obs = ah.ScenarioObserver(PR, None, "L1")
+        obs.observe([_sc(1)], pending={1}, verifying=set(), queued=set(),
+                    verdicts={})
+        with patch.object(ah, "end_attempt", side_effect=RuntimeError("x")), \
+                patch.object(ah, "phase", side_effect=RuntimeError("x")):
+            obs.observe([_sc(1)], pending=set(), verifying=set(),
+                        queued=set(), verdicts={1: "PASS"})
+            obs.launching(_sc(1))
+            obs.relaunching(_sc(1), 1, 5)
+            obs.relaunched(_sc(1), True)
+            obs.finish(stopped=False)
+            obs.finish(stopped=True)
 
     def test_overlapping_scenarios_not_summed(self, clock):
         self._run(clock)

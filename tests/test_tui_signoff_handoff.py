@@ -964,6 +964,46 @@ def test_signoff_history_attempts_throttle_and_merge_hold(world_factory):
                    for r in m["timers"]["recent"])
 
 
+@pytest.mark.parametrize("drop", ["remove", "clear"])
+def test_auto_start_dropping_wait_target_releases_journaled_hold(
+        world_factory, drop):
+    """Removing the wait-for-merge target that held the PR (or turning
+    auto-start off) ends its manual-merge hold in history too, instead of
+    the hold reading active for as long as the TUI lives."""
+    from unittest.mock import MagicMock
+    from pm_core import action_history, history_query
+    with action_history.use_clock(lambda: 1_800_000_000.0):
+        app, w = world_factory(wait=True, targets=(PR, "pr-out"))
+        app._update_display = lambda: None
+        app._watcher_manager = MagicMock()
+        _qa_pass(app)
+        w.emit("SIGNOFF_MERGE")
+        _poll(app)
+        m = history_query.build_history(PR, pr=app.pr(), live=False)
+        (hold,) = m["holds"]
+        assert hold["timer"] == f"merge-hold:{PR}"
+
+        if drop == "remove":
+            res = auto_start.remove_targets(app, [PR])
+            assert res["ok"] and auto_start.is_enabled(app)  # pr-out stays
+        else:
+            auto_start.clear_targets(app)
+            assert not auto_start.is_enabled(app)
+        m = history_query.build_history(PR, pr=app.pr(), live=False)
+        assert m["holds"] == []
+        (row,) = [r for r in m["timers"]["recent"]
+                  if r["timer"] == f"merge-hold:{PR}"]
+        assert row["resolution"] == "released"
+        # Released once (the router launch's "superseded" clear came before
+        # the hold was armed), however many paths saw the hold go.
+        evs = [e for e in action_history.read_events(PR)
+               if e.get("timer") == f"merge-hold:{PR}"]
+        assert [e.get("reason") or e["kind"] for e in evs] == [
+            "superseded", "timer_arm", "released"]
+        # The other PR never had a hold: it gets no journal events.
+        assert not action_history.has_journal("pr-out")
+
+
 def test_terminal_signoff_hop_does_not_reread_journal_each_poll(
         world_factory):
     """ready_to_merge repeats on every 5 s poll; journaling the routed

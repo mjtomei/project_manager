@@ -5597,12 +5597,8 @@ def _journal_qa_run(state: QALoopState, *, resumed: bool):
         # crash) end with the run.
         observer = state._history_observer
         if observer is not None:
-            try:
-                observer.finish(stopped=stopped,
-                                verdicts=dict(state.scenario_verdicts))
-            except Exception:
-                _log.debug("history: ending scenario attempts failed",
-                           exc_info=True)
+            observer.finish(stopped=stopped,
+                            verdicts=dict(state.scenario_verdicts))
 
     try:
         yield

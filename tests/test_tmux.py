@@ -707,6 +707,12 @@ class TestProviderEnvTransport:
     client's, and silently drops it for new-window/split-window.
     """
 
+    @pytest.fixture(autouse=True)
+    def _private_home(self, tmp_path, monkeypatch):
+        # tmux is mocked, so no pane ever sources (and removes) the env
+        # file: keep the canary files out of the real ~/.pm/run.
+        monkeypatch.setenv("HOME", str(tmp_path))
+
     @patch("pm_core.tmux.subprocess.run")
     def test_split_pane_sources_env_file(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="%5\n")
