@@ -5173,7 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-11-02T10:08:07.368610+00:00'
+  updated_at: '2026-11-02T17:51:56.500551+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5432,6 +5432,24 @@ prs:
       No production code changed since dcb8c0d2; master is still 6728fc22.'
     created_at: '2026-11-02T17:17:45Z'
     last_edited: '2026-11-02T17:17:45Z'
+  - id: note-78721a0
+    text: 'QA S18 run 2026-11-02 at d911598b: PASS 5/5 live (isolated HOME, private
+      pm session + TUI, fake-claude; captures /pm-captures/scenarios/18/{fixture,story1-5}).
+      (1) pm pr cd 136 / "#136" (gh_pr_number) re-linked A from an /home/olduser record,
+      one-line yaml diff, A dirty state (index sha/mtime, staged, stash, untracked,
+      evidence) identical; TUI card "#136" after r. (2) from C clone: no -C = "using
+      ... (not recorded: ... tracked in the clone <C>)", -C <M>/pm re-links then fast
+      path, PM_PROJECT=<C>/pm from main = not recorded; C yaml/porcelain unchanged.
+      (3) pm -C <M>/pm pr review from a non-pm session on the pm server: E re-linked,
+      review window in the pm session (panes in E clone), work client untouched; D
+      with 2 clones: listing (stderr) twice + "Review window: no workdir ... not choosing
+      one", rc 0, no window/dir. (4) E18 reproduced: id-less pm pr review in F stale
+      clone auto-selected active B (filed pr-8d624c5); after pm pr cd F it auto-selects
+      F. (5) 4-shell go-file race (-C main, cwd A/B/C/M): exactly 1 re-link line per
+      PR (G, H), 4x integrate up to date head = G clone HEAD, 4 notes, no lock error,
+      all clone yamls unchanged.'
+    created_at: '2026-11-02T17:51:56Z'
+    last_edited: '2026-11-02T17:51:56Z'
   model: provider:claude-main-xhigh-pm
   effort: high
 - id: pr-0778fbe
@@ -56164,6 +56182,37 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T13:58:00.818355+00:00'
   updated_at: '2026-11-02T13:58:00.818355+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8d624c5
+  plan: bugs
+  title: 'Bug: id-less pm pr review/signoff/cd from a PR clone whose workdir record
+    is stale acts on the active PR instead of the clone''s PR'
+  branch: pm/pr-8d624c5-bug-id-less-pm-pr-review-signoff-cd-from-a-pr-clon
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/helpers.py _infer_pr_id (used by id-less pm
+    pr review/signoff/qa/cd etc.). It matches the cwd only against recorded pr["workdir"]
+    paths (string prefix), then falls back to project.active_pr. When the user is
+    inside a PR clone whose record is stale (clone renamed/moved, record from another
+    machine), inference misses the clone and silently acts on whatever PR is active.
+    Repro (QA S18 story 4, pr-4258a32 at d911598b, local backend, private pm session
+    + fake-claude): start PRs B and F; mv F clone to <WD>/pm-pr-<F>-...-0f0f0f0f;
+    `pm pr select <B>`; in a tmux shell in the F clone with PM_PROJECT=<main>/pm run
+    `pm pr review` -> "Auto-selected <B>", "PR <B> marked as in_review.", "Opened
+    review window review-<B>" (panes in B clone). After `pm pr cd <F>` re-links F,
+    the same id-less command auto-selects F. Expected: when cwd is inside a git clone
+    whose checked-out branch is a PR branch (or the workdirs dir of this project),
+    infer that PR (verify via the same read-only identity checks pm_core/workdirs.py
+    uses, optionally re-link), or at least refuse/ask instead of acting on a different
+    PR. Captures: /pm-captures/scenarios/18/story4.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T17:51:35.706301+00:00'
+  updated_at: '2026-11-02T17:51:35.706301+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
