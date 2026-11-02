@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T08:33:01.483430+00:00'
+  updated_at: '2026-11-02T08:39:32.345349+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25890,6 +25890,25 @@ prs:
       /pm-captures/scenarios/23/refiner-helpers.'
     created_at: '2026-11-02T08:33:01Z'
     last_edited: '2026-11-02T08:33:01Z'
+  - id: note-1dfd729
+    text: 'QA S24 (2026-11-02): PASS at ec6facc1, no fix. Live from /scratch/s24 with
+      pm session --global (pm-proj-6d768c04) and real Claude 2.1.316. TUI q, j, Enter
+      opened the run pane in 0.12 s, and Claude reached PASS at an idle prompt in
+      44 s. Both tmux calls were tmux -S <shared sock>, both pm tui view calls used
+      -s pm-aaa-smoke-20126cbe, and the default server never existed (124/124 polls
+      absent). The test session pm-aaa-smoke-20126cbe(+~1) on the shared server had
+      a single plain pm _tui pane and no guide. The user log shows nothing between
+      the run pane launch and its exit. The filing (pr-c8098ec, only in proj) reloaded
+      the user TUI at 08:34:06, the same second, with no r. The test TUI (aaa-smoke-<share
+      hash>.log, pr-50e1e3f) logged no reload action. /exit closed the pane in 0.44
+      s. The registry sha is identical, and windows/panes are unchanged apart from
+      the aaa-smoke sessions. Cited, not filed: pr-e6d0439 (clone override under repo-<share
+      tag>), pr-5a1f570 (no-TTY attach traceback), pr-a571291 (active_pr moved). Rig
+      trap: grep -c reload on a TUI log also counts the startup line "Installed SIGUSR1
+      reload ... handlers", so grep for "action: reload". Captures: /pm-captures/scenarios/24/
+      (tui/, cli/, evidence/).'
+    created_at: '2026-11-02T08:39:32Z'
+    last_edited: '2026-11-02T08:39:32Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
