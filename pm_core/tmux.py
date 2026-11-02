@@ -1723,8 +1723,9 @@ def list_pm_sessions(*, extra_sockets: Iterable[str | Path] = (),
 
     *extra_sockets* are socket paths inside the socket directory that are
     probed even when the scan does not report them — a caller that knows
-    a session's deterministic socket (``pm session list`` passes the cwd
-    project's) can still list it when the directory cannot be enumerated.
+    a session's socket without enumerating the directory (``pm session
+    list`` passes the cwd project's deterministic one and the one the
+    command runs in) can still list it when the directory cannot be read.
     When the directory exists but cannot be read (EACCES on a root-owned
     ``1733`` directory, which ``pm session`` accepts), the error is
     appended to *read_errors* so the caller can say so instead of
@@ -1852,9 +1853,10 @@ def list_pm_sessions(*, extra_sockets: Iterable[str | Path] = (),
                 read_errors.append(exc)
             sockets = []
         # Sockets the caller can name without enumerating the directory
-        # (the cwd project's deterministic socket) stay reachable when it
-        # cannot be read.  Only entries of the socket directory itself are
-        # taken, and each goes through the same lstat check as the scan.
+        # (the cwd project's deterministic socket, the session the command
+        # runs in) stay reachable when it cannot be read.  Only entries of
+        # the socket directory itself are taken, and each goes through the
+        # same lstat check as the scan.
         for extra in extra_sockets:
             extra = Path(extra)
             if extra.parent == SHARED_SOCKET_DIR and extra not in sockets:
