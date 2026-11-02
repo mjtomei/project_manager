@@ -51480,7 +51480,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/293
   gh_pr_number: 293
   created_at: '2026-10-29T14:01:10.973333+00:00'
-  updated_at: '2026-11-02T02:21:30.335559+00:00'
+  updated_at: '2026-11-02T03:34:44.184884+00:00'
   started_at: '2026-11-02T01:59:27.402561+00:00'
   reviewed_at: null
   merged_at: null
@@ -51534,6 +51534,20 @@ prs:
       247 passed. Ready for PM to advance to review/QA.'
     created_at: '2026-11-02T02:21:30Z'
     last_edited: '2026-11-02T02:21:30Z'
+  - id: note-5f3f571
+    text: 'QA S5 refiner (live at 21bc398d): routed impl pane from TUI `s` held every
+      Then. Recipe: private PM_TMUX_SOCKET, PYTHONPATH=/workspace, a `claude` stand-in
+      first on PATH (pm pr start needs one on PATH or it only prints the prompt; with
+      a router launcher it is never run), TEST_DIR needs a commit before `s`. Pane
+      start cmd = `cd <workdir> && sh -c ''set -a; . ~/.pm/run/env-XXXX.sh; set +a;
+      rm -f …; env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_AUTO_MODE_MODEL
+      <launcher> --model … --effort medium --session-id …''`; ~/.pm/run empty after
+      launch. Probe and pane records agree on all 12 route vars + header hash; pane
+      alone adds --effort (A5). Pass the canary to an observer via a file, not argv
+      (its own argv otherwise holds it); never kill by a pattern your tool shell argv
+      contains.'
+    created_at: '2026-11-02T03:34:44Z'
+    last_edited: '2026-11-02T03:34:44Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3d3b3ce-bug-pm-provider-test-live-inlines-a--0eb88069
   model: provider:claude-main-xhigh-pm
   effort: high
