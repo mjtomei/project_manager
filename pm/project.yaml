@@ -6873,6 +6873,21 @@ prs:
       error between them as a discriminator.'
     created_at: '2026-11-02T07:04:58Z'
     last_edited: '2026-11-02T07:04:58Z'
+  - id: note-08f2635
+    text: 'QA S15 refiner (2026-11-02, code 5dcf90dc), pre-existing, not filed: a
+      queued SIGUSR2 command (pm autostart status/list in a loop) that is drained
+      after a command-bar command is handled but before its deferred tree focus runs
+      still sees the bar focused (_drain_command_queue typing=_command_bar_in_use())
+      and calls CommandBar.focus(), so focus ends on the bar. Live, sync `pr note
+      add` with no key after it: 10/20 here, 13/20 on origin/master 5b352d16. `/pr
+      select q` Enter `]`: 2/20 (] lost, or ] typed into the refocused bar). Debug-log
+      signature: `log: Selected: ...` immediately followed by `queue dispatch: cmd=autostart
+      ...`. The select text was never garbled (the key hold works). Separately, one
+      send-keys burst of `/plan select watch` Enter garbles (pan seect watc], pr-edit
+      pane launched) with or without a first command: pr-6412997 (tree eats h/j/k/l/Enter
+      while / is pending).'
+    created_at: '2026-11-02T08:38:30Z'
+    last_edited: '2026-11-02T08:38:30Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-6aa74c6-fuzzy-select-for-pr-and-plan-command-ab512a43
 - id: pr-98bf8df
   plan: plan-qa
