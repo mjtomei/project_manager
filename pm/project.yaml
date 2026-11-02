@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T11:16:21.728793+00:00'
+  updated_at: '2026-11-02T11:36:18.634720+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7870,6 +7870,22 @@ prs:
       servers, so list-clients Thens stay exact. Captures: /pm-captures/scenarios/36/.'
     created_at: '2026-11-02T11:16:21Z'
     last_edited: '2026-11-02T11:16:21Z'
+  - id: note-5150f15
+    text: 'Review e661 i1 (2026-11-02, 34d2bc5b): NEEDS_WORK, cleanup + robustness
+      only, on top of the S34 (list on an unreadable /tmp/pm-sessions) and S35 (_adopt_running_tui)
+      fixes, both verified sound: the scan is the only socket-dir enumeration and
+      pm session list probes the same path pm session binds; the adopt reads only
+      the selected server (PM_TMUX_SOCKET), so pane ids cannot cross servers. (1)
+      pane_registry.register_tui_pane is the single "record pane as window TUI unless
+      listed" step; heal_registry and _adopt_running_tui had identical inline copies.
+      (2) The adopt registry write is best-effort: a held lock (5 s TimeoutError)
+      or unwritable registry used to raise out of pm session before attach, where
+      pre-S35 the guarded _respawn_tui path degraded; the running TUI registers itself
+      once mounted. (3) Added a private-server real-tmux adopt test (S35 path; the
+      existing ones ran only on the legacy default server), plus unit tests; a mutation
+      check showed each change is caught. Full suite 5579 passed / 1 skipped (/pm-captures/review-e661-i1/full-suite.log).'
+    created_at: '2026-11-02T11:36:18Z'
+    last_edited: '2026-11-02T11:36:18Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
