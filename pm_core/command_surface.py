@@ -64,7 +64,7 @@ COMMAND_BAR_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
      "g / G", "publish a signed-off PR"),
     ("pr signoff [--fresh] [PR_ID]",
      "pm pr signoff [--fresh] [PR_ID]",
-     "i", "sign-off router"),
+     "i", "sign-off router (fresh restart: CLI/command bar only)"),
     ("review-loop [PR_ID]",
      "pm pr review --review-loop [PR_ID] (one iteration)",
      "zz d", "review loop (TUI-driven)"),

@@ -700,6 +700,11 @@ def handle_command_submitted(app, cmd: str) -> None:
     # i.e. no help at all).  The screen now carries the command-bar forms.
     if (cmd.lower() in ("help", "?", "commands", "command bar", "command-bar")
             or cmd.lower().startswith("help ")):
+        # Hand focus back to the active view before the modal opens, as every
+        # other command-bar path does.  The bar keeps focus across a screen
+        # push/pop, so without this the next keystroke after closing help is
+        # typed into the command bar instead of moving the tree.
+        app.action_unfocus_command()
         app.action_show_help()
         return
 

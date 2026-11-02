@@ -418,3 +418,22 @@ the routed form and `--fresh` so help is complete.
   help on `start`/`review`/`signoff` now opens with "Fresh restart:", the
   wording `command_surface` and the docstring tables already use (C3). A
   test asserts the positional-mode hint for both modes.
+
+- Review-loop i10: three accuracy gaps that survived i1–i9.
+  (a) `pm pr merge --help` said "Re-run `pm pr merge` to retry", which
+  contradicts the sentence before it: a refusal calls
+  `_return_to_signoff`, invalidating the approval, so re-running merge
+  alone refuses again. The help now names the real path — fresh sign-off
+  (`pm pr signoff --fresh <id>`, TUI `i`) then merge, with
+  `--no-signoff-check` only to finalize an already-published merge. A test
+  pins both halves.
+  (b) `pm tui keys` still said `Enter Select/expand PR`; `TechTree` posts
+  `PRSelected` then calls `action_edit_plan`, and the `?` screen already
+  says "e / Enter Edit selected PR". It now reads "Edit selected PR (plans
+  view: view plan file)", so the two surfaces agree. Test added.
+  (c) The command-bar `help` branch pushed the HelpScreen without handing
+  focus back to the active view. A bar keeps focus across a screen
+  push/pop, so after closing help the next keystroke was typed into the
+  command bar, unlike `?` and every other command-bar path. It now calls
+  `app.action_unfocus_command()` first (which also handles the plans and QA
+  views). Test added.

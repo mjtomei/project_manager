@@ -25438,11 +25438,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-08T20:50:25.310435+00:00'
-  updated_at: '2026-05-08T20:50:25.310435+00:00'
+  updated_at: '2026-11-02T08:19:13.573516+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-9861b8a
+    text: 'pr-fa9f172 (improvements) already rewrote the live plan=ux references as
+      part of its sweep: pm_core/prompt_gen.py, pm_core/cli/watcher.py, pm_core/watchers/discovery_supervisor.py,
+      pm_core/watchers/improvement_fix_impl_watcher.py, pm/plans/plan-regression.md
+      and pm/docs/literature-review.md now say plan=improvements, and tests/test_command_surface.py::test_no_stale_ux_plan_name_in_code
+      guards it. Check whether anything remains (e.g. other prompt sites, project.yaml
+      plan descriptions) before redoing this work; historical pm/specs/** and pm/docs/adversarial-review/**
+      are deliberately untouched.'
+    created_at: '2026-11-02T08:19:13Z'
+    last_edited: '2026-11-02T08:19:13Z'
 - id: pr-be00809
   plan: bugs
   title: 'Bug: QA result PR notes render empty scenario summary even when scenarios

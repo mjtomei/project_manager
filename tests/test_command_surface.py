@@ -85,10 +85,26 @@ def test_pr_merge_help_names_tui_keys_and_no_fresh():
     assert "pm pr merge [--companion] [PR_ID]" in out
 
 
+def test_pr_merge_help_names_the_real_retry_path():
+    """A refusal invalidates the approval; re-running merge alone cannot work.
+
+    The help used to say "Re-run `pm pr merge` to retry", which contradicts
+    the sentence before it ("returning the PR to sign-off"): after a refusal
+    the gate has no valid approval, so the next step is a fresh sign-off.
+    """
+    out = " ".join(_help("pr", "merge").split())
+    assert "pm pr signoff --fresh <id>" in out
+    assert "Re-run `pm pr merge` to retry" not in out
+
+
 def test_pr_signoff_help_names_routed_form_and_record():
     out = _help("pr", "signoff")
     assert "--fresh" in out
     assert "record" in out and "integrate" in out
+    # `i` is the router (focus-or-open); there is no z-modifier for a fresh
+    # sign-off, so the help must not imply the TUI can do one.
+    assert "no TUI key" in out
+    assert "fresh restart is CLI/command-bar only" in " ".join(out.split())
 
 
 def test_cli_merge_and_qa_deliberately_reject_fresh():
@@ -318,6 +334,18 @@ def test_tui_keys_documents_prefix_keys_as_prefixes():
     assert "ys start" in out and "yd review" in out and "yt QA" in out
 
 
+def test_tui_keys_documents_enter_as_edit():
+    """Enter opens the edit screen, as the `?` screen says.
+
+    Selection is the cursor; the old "Select/expand PR" line described a
+    behaviour that does not exist (``TechTree`` posts PRSelected then calls
+    ``action_edit_plan``), so the two help surfaces disagreed.
+    """
+    out = CliRunner().invoke(cli, ["tui", "keys"]).output
+    assert re.search(r"^\s*Enter\s{2,}Edit selected PR", out, re.M)
+    assert "Select/expand" not in out
+
+
 @pytest.mark.parametrize("cmd", ["help", "?", "commands", "command bar",
                                  "command-bar", "help pr"])
 def test_command_bar_help_opens_the_help_screen(cmd):
@@ -332,9 +360,31 @@ def test_command_bar_help_opens_the_help_screen(cmd):
 
     shown = []
     app = SimpleNamespace(action_show_help=lambda: shown.append(True),
+                          action_unfocus_command=lambda: None,
                           log_message=lambda *a, **k: None)
     pr_view.handle_command_submitted(app, cmd)
     assert shown == [True]
+
+
+def test_command_bar_help_returns_focus_to_the_view():
+    """The bar keeps focus across a screen push/pop.
+
+    Every other command-bar path hands focus back to the tree / plans pane;
+    the help branch must too, or the next keystroke after closing help is
+    typed into the command bar instead of moving the tree (`?` leaves the
+    tree focused, so the two routes disagreed).
+    """
+    from types import SimpleNamespace
+
+    from pm_core.tui import pr_view
+
+    calls = []
+    app = SimpleNamespace(
+        action_unfocus_command=lambda: calls.append("unfocus"),
+        action_show_help=lambda: calls.append("help"),
+        log_message=lambda *a, **k: None)
+    pr_view.handle_command_submitted(app, "help")
+    assert calls == ["unfocus", "help"]
 
 
 def test_non_github_backend_remedies_name_a_working_command(tmp_path,

@@ -1826,10 +1826,11 @@ def pr_signoff_group(ctx):
       pm pr signoff [--fresh] [PR_ID]   run the router (the hidden `run` form)
       pm pr signoff record PR_ID        record approval of report.html
       pm pr signoff integrate PR_ID     check integration with the latest base
-      command bar: pr signoff [--fresh] [PR_ID]     = TUI i
+      command bar: pr signoff [--fresh] [PR_ID]     = TUI i (router)
 
     `--fresh` is a fresh restart: it kills an existing sign-off window and
-    opens a new one.
+    opens a new one.  There is no TUI key for it — `i` focuses or opens the
+    router — so a fresh restart is CLI/command-bar only.
     """
     if ctx.invoked_subcommand is None:
         ctx.invoke(pr_signoff)
@@ -2971,9 +2972,11 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
       TUI          g      merge
                    G      merge with a companion shell pane
 
-    There is no --fresh option: each run re-evaluates the sign-off gate
-    against the current PR HEAD and either merges or is refused (returning
-    the PR to sign-off). Re-run `pm pr merge` to retry.
+    There is no --fresh option: there is no session to restart, so each run
+    re-evaluates the sign-off gate against the current PR HEAD.  A refusal
+    invalidates the approval and returns the PR to sign-off — re-run sign-off
+    (`pm pr signoff --fresh <id>`, TUI: i), then merge again.  If the merge is
+    already in the base, `--no-signoff-check` finalizes it.
     """
     if resolve_window is None:
         resolve_window = _resolve_window_default()

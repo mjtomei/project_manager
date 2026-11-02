@@ -271,7 +271,7 @@ Navigation:
   Up/Down, j/k     Navigate PR list
   Left/Right, h/l  Navigate tree columns
   J/K              Jump to next/prev plan
-  Enter            Select/expand PR
+  Enter            Edit selected PR (plans view: view plan file)
   x                Hide/show plan group
   X                Toggle merged PRs
   f                Cycle status filter
