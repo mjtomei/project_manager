@@ -6838,6 +6838,16 @@ prs:
       exact ID: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-6aa74c6-32ce8ddb3cb52310)'
     created_at: '2026-03-14T22:07:31Z'
     last_edited: '2026-03-14T22:07:31Z'
+  - id: note-17868d2
+    text: 'QA S4 refiner (2026-11-02): pre-existing race, not caused by ]/[: the 5-min
+      TUI background sync (sync.background_sync, first tick = TUI start + 300 s) re-reads
+      project.yaml without flushing the 1.5 s active_pr write queue, then _follow_active_pr
+      snaps the cursor back to the previous PR while disk keeps the new one. Reproduced
+      live with a plain Down arrow 0.7 s before a tick. If a cursor jumps back with
+      no keypress at start+300k s, re-run that step and file the race separately;
+      do not fail this PR on it.'
+    created_at: '2026-11-02T03:44:58Z'
+    last_edited: '2026-11-02T03:44:58Z'
   - id: note-0d772aa
     text: 'QA S7 incidental fix d6b2c29e (pre-existing command-bar race, not fuzzy-select
       logic): under a reload stream (outside pm pr edit loop) a key typed right after
