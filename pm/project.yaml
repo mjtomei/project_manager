@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T15:05:22.570175+00:00'
+  updated_at: '2026-11-02T15:18:23.905956+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40247,6 +40247,19 @@ prs:
       s of loop end (R2/R3 caught it).'
     created_at: '2026-11-02T15:05:22Z'
     last_edited: '2026-11-02T15:05:22Z'
+  - id: note-1cb59a7
+    text: 'QA S68 refiner (2026-11-02, dcfcae77f): stories 1-3 and 5 held live. Story
+      1: a `pm pr close --remove`d PR keeps its history (no status/title/milestones;
+      start turns untracked at the next tick). Story 3: 13 damage lines at 1 s spacing
+      fit inside i2; at 1.5 s the fragment can land after the last pm write. The `?`
+      row headlines only after the loop ends. Hook story: config must add "impl":
+      {"idle_once_after": 1}, or the impl fake rewrites the hook file every 2 s. `1e20`
+      is TUI-safe. A string timestamp and `[1, 2, 3]` crash the TUI at the next impl-idle
+      tick (master pane_idle.py:167, filed pr-28b84d4); history stays rc 0 and honest.
+      A respawned TUI does not re-track old impl panes, so use a fresh PR per crash
+      form. Evidence: /pm-captures/pr-8020495/s68-refiner.'
+    created_at: '2026-11-02T15:18:23Z'
+    last_edited: '2026-11-02T15:18:23Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
@@ -53288,6 +53301,40 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T08:59:11.163808+00:00'
   updated_at: '2026-11-02T08:59:11.163808+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-28b84d4
+  plan: bugs
+  title: 'Bug: a damaged hook event file crashes the TUI (pane_idle.poll on a non-dict
+    event or non-numeric timestamp)'
+  branch: pm/pr-28b84d4-bug-a-damaged-hook-event-file-crashes-the-tui-pane
+  status: pending
+  depends_on: []
+  description: 'pm_core/pane_idle.py PaneIdleTracker.poll does `event = hook_events.read_event(session_id)`
+    and then `float(event.get("timestamp") or 0)`. read_event returns whatever json.loads
+    gives, so a hook file ~/.pm/hooks/<session-id>.json that holds valid JSON of the
+    wrong shape raises inside the TUI tick: `[1, 2, 3]` → AttributeError (list has
+    no .get), `{"event_type": "idle_prompt", "timestamp": "abc"}` → ValueError. _poll_loop_state
+    logs "_poll_loop_state raised …" with the Traceback and re-raises, Textual exits,
+    the TUI window closes, and every pane the TUI was tracking reads interrupted (owner
+    exited) until `pm session` respawns it; the respawned TUI does not re-track existing
+    impl panes. Repro: TUI `s` on a PR, wait for the start to be tracked, write `[1,
+    2, 3]` to its hook file, and within 5 s (the next impl-idle tick) window 0 is
+    gone. `"timestamp": 1e20` does not crash the tracker, but it stores last_hook_ts=1e20,
+    so later real events are ignored. Same unguarded reads: runtime_state._hook_state_for
+    (ev.get on a list; derive_action_status raises, so the popup start badge goes
+    blank and pm pr history drops its whole runtime line), qa_loop.py around 4972
+    and router_route.py around 584. Fix: treat a non-dict event, or one whose timestamp
+    is not a number in range, as no event, as history_query._hook_event_for already
+    does (action_history.is_valid_time). Same code on master 5b352d16. Seen in pr-8020495
+    QA S68 refiner (2026-11-02, /pm-captures/pr-8020495/s68-refiner/storyH).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T15:14:18.975751+00:00'
+  updated_at: '2026-11-02T15:14:18.975751+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
