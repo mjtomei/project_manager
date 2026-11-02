@@ -109,6 +109,30 @@ def _component_sort_key(
     )
 
 
+def passes_status_filter(
+    pr: dict,
+    *,
+    status_filter: str | None = None,
+    hide_merged: bool = False,
+    hide_closed: bool = True,
+) -> bool:
+    """True if *pr* survives the tree's status filters.
+
+    The single predicate behind :func:`compute_tree_layout`'s status
+    filtering, shared with callers (e.g. fuzzy select) that need to know
+    whether a PR can be shown without laying out the whole tree.  Plan
+    collapsing is separate: a PR in a hidden plan group still passes.
+    """
+    status = pr.get("status")
+    if status_filter:
+        return status == status_filter
+    if hide_merged and status == "merged":
+        return False
+    if hide_closed and status == "closed":
+        return False
+    return True
+
+
 def compute_tree_layout(
     all_prs: list[dict],
     *,
@@ -164,13 +188,9 @@ def compute_tree_layout(
             return layout
 
     # Filter by status
-    if status_filter:
-        prs = [p for p in prs if p.get("status") == status_filter]
-    else:
-        if hide_merged:
-            prs = [p for p in prs if p.get("status") != "merged"]
-        if hide_closed:
-            prs = [p for p in prs if p.get("status") != "closed"]
+    prs = [p for p in prs if passes_status_filter(
+        p, status_filter=status_filter,
+        hide_merged=hide_merged, hide_closed=hide_closed)]
 
     if not prs:
         return layout

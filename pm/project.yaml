@@ -6869,7 +6869,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/136
   gh_pr_number: 136
   created_at: '2026-03-09T16:23:27.180369+00:00'
-  updated_at: '2026-03-23T13:16:45.851043+00:00'
+  updated_at: '2026-11-02T09:56:30.097861+00:00'
   started_at: '2026-03-10T15:18:02.866746+00:00'
   reviewed_at: '2026-03-11T00:23:28.233394+00:00'
   merged_at: null
@@ -6888,6 +6888,106 @@ prs:
       exact ID: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-6aa74c6-32ce8ddb3cb52310)'
     created_at: '2026-03-14T22:07:31Z'
     last_edited: '2026-03-14T22:07:31Z'
+  - id: note-17868d2
+    text: 'QA S4 refiner (2026-11-02): pre-existing race, not caused by ]/[: the 5-min
+      TUI background sync (sync.background_sync, first tick = TUI start + 300 s) re-reads
+      project.yaml without flushing the 1.5 s active_pr write queue, then _follow_active_pr
+      snaps the cursor back to the previous PR while disk keeps the new one. Reproduced
+      live with a plain Down arrow 0.7 s before a tick. If a cursor jumps back with
+      no keypress at start+300k s, re-run that step and file the race separately;
+      do not fail this PR on it.'
+    created_at: '2026-11-02T03:44:58Z'
+    last_edited: '2026-11-02T03:44:58Z'
+  - id: note-0d772aa
+    text: 'QA S7 incidental fix d6b2c29e (pre-existing command-bar race, not fuzzy-select
+      logic): under a reload stream (outside pm pr edit loop) a key typed right after
+      a command-bar Enter could land inside the submitted command (/pr select spec
+      Enter ] -> "pr select spec]", No PR matches, fuzzy list cleared; 2 of 5 live).
+      ProjectManagerApp.on_event now holds terminal keys behind a command-bar Enter
+      and replays them in order after CommandSubmitted is handled (3 s fallback);
+      CommandBar posts CommandSubmitted for empty commands too. Tests: test_key_after_command_bar_enter_waits_for_the_command,
+      test_keys_held_behind_empty_enter_are_replayed. Captures /pm-captures/scenarios/7/{pre-fix,post-fix}.'
+    created_at: '2026-11-02T05:11:10Z'
+    last_edited: '2026-11-02T05:11:10Z'
+  - id: note-33583b0
+    text: 'QA S10 refiner 2026-11-02 at 5dcf90dc (8 stories live, 4 plans + Standalone,
+      200x110). (1) Pre-existing, also on master with exact-id /pr select: when a
+      command-bar command hands focus back to the tree (_focus_current_view -> tree.focus(),
+      Textual default scroll_visible), the tree can scroll to its top and leave the
+      cursor box off-screen below the fold. Seen at 200x50 on master (re-select of
+      the PR under the cursor, Escape in the bar, 60f857a -> e9b0e10) and on this
+      branch in the same cases; the next ]/[ scrolls it back. Not filed as a bug PR
+      yet. Size scenario windows so the whole tree fits. (2) Identical consecutive
+      log messages are deduplicated on screen, in L and in frames.json, so ] then
+      [ with no list shows a single "No match results" line; put a /pr select usage
+      error between them as a discriminator.'
+    created_at: '2026-11-02T07:04:58Z'
+    last_edited: '2026-11-02T07:04:58Z'
+  - id: note-08f2635
+    text: 'QA S15 refiner (2026-11-02, code 5dcf90dc), pre-existing, not filed: a
+      queued SIGUSR2 command (pm autostart status/list in a loop) that is drained
+      after a command-bar command is handled but before its deferred tree focus runs
+      still sees the bar focused (_drain_command_queue typing=_command_bar_in_use())
+      and calls CommandBar.focus(), so focus ends on the bar. Live, sync `pr note
+      add` with no key after it: 10/20 here, 13/20 on origin/master 5b352d16. `/pr
+      select q` Enter `]`: 2/20 (] lost, or ] typed into the refocused bar). Debug-log
+      signature: `log: Selected: ...` immediately followed by `queue dispatch: cmd=autostart
+      ...`. The select text was never garbled (the key hold works). Separately, one
+      send-keys burst of `/plan select watch` Enter garbles (pan seect watc], pr-edit
+      pane launched) with or without a first command: pr-6412997 (tree eats h/j/k/l/Enter
+      while / is pending).'
+    created_at: '2026-11-02T08:38:30Z'
+    last_edited: '2026-11-02T08:38:30Z'
+  - id: note-1197e30
+    text: 'Sign-off IMPL return handled 2026-11-02. The conflict with master@4d0c07a5
+      was registry-only, and no code changed. Master merged as a0c488f3: pm/project.yaml
+      was resolved from master''s text, adding the branch''s 4 changed records (pr-6aa74c6,
+      pr-0939d97, pr-adfdce3, pr-291ed27) and its 4 new ones (pr-bda8833, pr-dd3682f,
+      pr-39f8040, pr-45ffba0). As a multiset, the PR entries equal store.merge_3way(base,
+      ours=master, theirs=branch): 601 records, every note kept, and master''s duplicate
+      pr-049649a untouched. Every other path is exactly one side''s blob, and the
+      tree equals sign-off candidate 3fc2fb02 apart from the registry layout and qa.md.
+      Also committed: the QA planner''s qa.md (779c1617); this commit files pr-25d4825
+      (the S10 focus-handback tree scroll, which leaves the cursor off-screen; pre-existing,
+      also on master) and updates impl.md (sign-off return, list of filed bugs). Full
+      suite on a0c488f3: 5611 passed, 1 skipped (env -u PM_HOST_HOME PATH=/usr/bin:/bin,
+      pm venv pytest 9.0.3 plus markdown). The live registry delta (status, model,
+      effort, workdir, 2 notes here, note-ce368b8 on pr-adfdce3) is still uncommitted.
+      In that live file, an earlier pm write had collapsed the duplicate pr-049649a
+      into a YAML anchor/alias of the newer copy; it was kept as is.'
+    created_at: '2026-11-02T09:56:30Z'
+    last_edited: '2026-11-02T09:56:30Z'
+  - id: note-5d883d8
+    text: 'QA S21 refiner (2026-11-02, 61b1c3d9): all 4 stories held live (12-PR/3-plan
+      fixture, 200x110, private socket). Story 2: two 60 s actors, 38 writes; every
+      add, note, effort, close and the new plan landed. A close under a retained pr-select
+      list was skipped (Match 4/12 -> 6/12). Story 4: when the key really moved the
+      cursor, the TUI pending save won 5/5 with ] and Down alike (pr-39f8040). A key
+      at a tree edge moves nothing, so the CLI wins; that is not a valid arrow control.
+      Pre-existing, not this PR: pm pr model set sends no TUI reload, so the tree
+      badge for an effort setting appears only at the next reload. Check effort with
+      pm pr model show.'
+    created_at: '2026-11-02T11:28:04Z'
+    last_edited: '2026-11-02T11:28:04Z'
+  - id: note-7109e0d
+    text: 'QA S22 refiner (2026-11-02, 6 stories live at 61b1c3d9, S15 fixture, 200x120).
+      (1) Second command typed behind a first Enter: if the text follows `/` within
+      ~0.15 s, the second command garbles 7/10 under a pm pr edit loop. With NO first
+      command, the same `/` + 0.15 s + text garbles 4/8 under the loop and 1/5 idle,
+      so this is pre-existing pr-6412997: the held `/` and text are replayed as one
+      burst. With about 1 s between `/` and the text (`/` sent with, or 0.1 s after,
+      the first Enter; `]` sent with the second Enter): 10/10 clean. (2) Rare and
+      pre-existing, not filed: under a `pm autostart status/list` loop the bar lost
+      focus mid-typing once in 38 slow-typing rounds, with no Enter pressed, so the
+      key hold was not involved. The next letters acted as tree hotkeys (e = pr-edit
+      pane, c = "Claude CLI not found"), and the text stayed in the unfocused bar
+      (clear it with `/` + Escape). _drain_command_queue, _command_bar_in_use and
+      the autostart focus branch are identical to master 4d0c07a5. If a run sees it
+      again, file it separately. (3) An outside `pm pr select <id>` while the bar
+      holds text moves the cursor box and logs no TUI line; the bar keeps its text
+      and focus.'
+    created_at: '2026-11-02T12:03:23Z'
+    last_edited: '2026-11-02T12:03:23Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-6aa74c6-fuzzy-select-for-pr-and-plan-command-ab512a43
 - id: pr-98bf8df
   plan: plan-qa
@@ -11486,11 +11586,24 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-09T11:42:16.820369+00:00'
-  updated_at: '2026-04-09T11:42:16.820369+00:00'
+  updated_at: '2026-11-02T06:11:33.324032+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-d3c9b21
+    text: 'From pr-6aa74c6 review 0402 i3: once pr-6aa74c6 merges, the TUI /pr select
+      no longer shells out to pm pr select. pm_core/tui/fuzzy_select_cmd.handle_pr_select
+      resolves it in-process: a PR in a collapsed plan group is expanded and selected;
+      an exact id hidden by the status filters logs "<id> <title> is hidden by the
+      current filters (X: merged, f: status filter)" and the cursor stays put; fuzzy
+      matches hidden by filters are only counted ("N hidden by filters"). Left for
+      this PR: name the specific filter that hides the PR (tree_layout.passes_status_filter
+      is the shared predicate to extend with a reason), keyboard navigation, and the
+      CLI pm pr select of a hidden PR while a TUI is running (_follow_active_pr ->
+      select_pr is silent).'
+    created_at: '2026-11-02T06:11:33Z'
+    last_edited: '2026-11-02T06:11:33Z'
 - id: pr-6634fb0
   plan: bugs
   title: Convert all pane registry callers to locked_read_modify_write
@@ -37831,6 +37944,15 @@ prs:
   reviewed_at: null
   merged_at: null
   notes:
+  - id: note-5fbd062
+    text: 'From pr-6aa74c6 review 0402 i1: ProjectManagerApp._focus_current_view()
+      (plans pane / QA pane / tree, whichever view is visible) now exists and is shared
+      by Esc in the command bar and the fuzzy pr/plan select branch of pr_view.handle_command_submitted.
+      Use it for the other focus restores in handle_command_submitted (autostart,
+      action-guard refusal, review-loop, edit, pr qa, generic tail) instead of adding
+      a new helper.'
+    created_at: '2026-11-02T05:34:35Z'
+    last_edited: '2026-11-02T05:34:35Z'
   - id: note-1451e3c
     text: 'pr-7d5d036 QA S18 (2026-11-02): the same hidden-tree focus steal also follows
       every command-bar submit made from the QA view, not only autostart. handle_command_submitted
@@ -37867,11 +37989,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T05:08:46.426074+00:00'
-  updated_at: '2026-10-13T05:08:46.426074+00:00'
+  updated_at: '2026-11-02T05:34:36.685747+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-beacec6
+    text: 'From pr-6aa74c6 review 0402 i1: keyboard navigation, fuzzy pr/plan select
+      and ]/[ cycling now all persist the selection through pr_view.persist_active_pr,
+      so set _followed_active_pr there. Land pr-dd3682f first (the sync reloads do
+      not flush the pending active_pr write): with followed = navigation target, every
+      reload that reads the stale disk value would snap the cursor back.'
+    created_at: '2026-11-02T05:34:36Z'
+    last_edited: '2026-11-02T05:34:36Z'
 - id: pr-7e0eec4
   plan: bugs
   title: 'Bug: container .claude.json copy ignores CLAUDE_CONFIG_DIR'
@@ -55762,6 +55892,240 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T13:58:00.818355+00:00'
   updated_at: '2026-11-02T13:58:00.818355+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-bda8833
+  plan: bugs
+  title: 'Bug: hiding a plan with x moves the TUI cursor but leaves active_pr on the
+    hidden PR'
+  branch: pm/pr-bda8833-bug-hiding-a-plan-with-x-moves-the-tui-cursor-but-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/pr_view.py hide_plan() -> TechTree._recompute()
+    clamps/moves selected_index when the selected PR''s plan collapses, but no PRSelected
+    is posted, so pr_view.persist_active_pr is never called. Repro (seen in pr-6aa74c6
+    QA scenario 4 at 87a42088; hide_plan/_recompute are unchanged from master merge
+    base c1fcecc5): put the TUI cursor on the only PR of a plan (e.g. pr-146d1ae in
+    plan "Spec review"), press x. The log says "Hidden: <plan>", the double-bordered
+    cursor box jumps to another PR (pr-65f889c), but `pm pr list` still marks the
+    hidden PR with * (checked 2 s later). Effect: CLI commands that default to the
+    active PR and a TUI restart target the hidden PR rather than the PR under the
+    cursor. Expected: when hiding moves the cursor, persist the new cursor PR the
+    same way keyboard navigation does (persist_active_pr).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T04:00:50.977706+00:00'
+  updated_at: '2026-11-02T06:47:42.911457+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-9e55fd9
+    text: 'QA pr-6aa74c6 S8 (2026-11-02, 5dcf90dc): second symptom of the stale active_pr.
+      After x hides the group holding the active PR, the next reload through _update_display
+      -> _follow_active_pr (here the 300 s background sync, 12 s later, no keypress)
+      calls TechTree.select_pr(active_pr), which un-hides that group and moves the
+      cursor back onto the hidden PR. Repro: /pr select lockfile (pr-fe15681, Standalone),
+      press x (log "Hidden: Standalone"; cursor rests on the "Standalone (hidden,
+      2 PRs)" label, not on a PR); at TUI start + 300 s the Standalone row reappears
+      with pr-fe15681 double-bordered and the header flips to "up to date". Evidence:
+      /pm-captures/scenarios/8/tui (cast t=216.5 s, steps.log). Hiding the last group
+      leaves no PR under the cursor, so the fix needs a rule for that case too.'
+    created_at: '2026-11-02T06:47:42Z'
+    last_edited: '2026-11-02T06:47:42Z'
+- id: pr-dd3682f
+  plan: bugs
+  title: 'Bug: TUI periodic sync reloads project.yaml without flushing the pending
+    active_pr write, snapping the cursor back'
+  branch: pm/pr-dd3682f-bug-tui-periodic-sync-reloads-project-yaml-without
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/sync.py background_sync() (store.load -> app._data
+    = data) and the reloads in do_normal_sync() (store.load / store.locked_update
+    after the GitHub sync). Unlike ProjectManagerApp._load_state, which calls self._write_queue.flush_sync()
+    before re-reading disk, these paths replace app._data while the WriteQueue may
+    still hold the 1.5 s debounced active_pr write from cursor navigation. _update_display
+    -> _follow_active_pr then sees the stale on-disk active_pr; when it differs from
+    _followed_active_pr the cursor snaps back to that earlier PR, while the queue
+    later writes the new PR to disk (display and project.yaml disagree until the next
+    reload). Repro (pr-6aa74c6 QA S4, reproduced live at 87a42088 with a plain Down
+    arrow, not fuzzy select): start the TUI (first background tick = start + 300 s);
+    let one navigation flush to disk (PR B), then press Down to PR C about 0.7 s before
+    a tick: the cursor jumps back to B with no keypress. Applies equally to fuzzy
+    pr select / ]/[ (pr_view.persist_active_pr). Expected: flush the write queue before
+    each sync reload, as _load_state does. Related: pr-291ed27 (setting _followed_active_pr
+    on navigation) is only safe once this is fixed, because otherwise every stale
+    reload would snap back.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T05:34:01.802707+00:00'
+  updated_at: '2026-11-02T05:34:01.802707+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-39f8040
+  plan: bugs
+  title: 'Bug: TUI''s debounced active_pr save overwrites an outside pm pr select
+    made within 1.5 s of a cursor move'
+  branch: pm/pr-39f8040-bug-tui-s-debounced-active-pr-save-overwrites-an-o
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/app.py ProjectManagerApp._load_state -> self._write_queue.flush_sync()
+    (pm_core/store.py WriteQueue), fed by pm_core/tui/pr_view.py persist_active_pr,
+    which enqueues the 1.5 s debounced ("set", "active_pr") op on every cursor move
+    (arrows, ]/[, fuzzy pr select). When a CLI write of active_pr (pm pr select X,
+    or pm pr add, which makes the new PR active) lands inside that debounce window
+    after the user moved the cursor to Y, the CLI writes active_pr=X and signals the
+    TUI (SIGUSR1); _load_state first flush_syncs the still-pending active_pr=Y over
+    X and only then re-reads disk, so the outside selection is silently lost: the
+    CLI printed "Active PR: X" but the cursor box, the * in pm pr list and pm status
+    all show Y. Repro (pr-6aa74c6 QA S14, live at b803a7ba / code 5dcf90dc, local-backend
+    project in a pm session on a private tmux server): in the TUI press ] (or a Down
+    arrow that moves the cursor) to land on Y; 0.2-0.5 s later run pm pr select X
+    from another window of the session (pm takes ~0.1 s; X must not be the PR the
+    TUI last followed, see pr-291ed27); 3 s later cursor, * and Active PR are all
+    Y. Observed 5/5 with ] and 4/4 with Down across the S14 refiner and run; in S14
+    story 2, five pm pr add "(now active)" writes made while ] was pressed every 0.4
+    s were all overwritten the same way. Display and disk agree, so nothing is corrupted,
+    but the newer outside selection loses. Expected: an outside active_pr write newer
+    than the TUI pending navigation wins (e.g. drop the pending active_pr op when
+    disk active_pr changed since the TUI last read it, then follow it). Related: pr-dd3682f
+    (300 s background-sync variant), pr-291ed27 (ignored re-select of the last-followed
+    PR).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T08:16:42.408216+00:00'
+  updated_at: '2026-11-02T08:16:42.408216+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-45ffba0
+  plan: bugs
+  title: 'Bug: a SIGUSR2 queue drain right after a command-bar command refocuses the
+    command bar, so the next key is lost or typed into the bar'
+  branch: pm/pr-45ffba0-bug-a-sigusr2-queue-drain-right-after-a-command-ba
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/app.py _drain_command_queue (unchanged from
+    master): typing = self._command_bar_in_use() is read when a queued outside command
+    (pm autostart status/list, picker) is drained; if that drain lands after a command-bar
+    command was handled but before the command deferred tree focus (call_later) runs,
+    the bar still has focus, so the drain calls CommandBar.focus() and focus ends
+    on the empty bar after the command finished. A key typed right after the Enter
+    (] after /pr select q, arrows after a sync command) is then lost or typed into
+    the bar.
+
+
+    Repro (QA pr-6aa74c6 S15, 2026-11-02; local-backend scratch project, private tmux
+    socket, 200x120 TUI): in another pm-session window run `while :; do pm autostart
+    status; pm autostart list; done` (~5 queued commands/s, all rc 0). In the TUI
+    submit `/pr note add <pr> "drain probe n"` with no key after it and read the bar
+    2 s later: focused and empty ("Type command (e.g. pr start pr-001)...") in 14
+    of 20 rounds (refiner: 10/20 on pr-6aa74c6, 13/20 on origin/master 5b352d16).
+    With `/pr select q` Enter `]` the refiner saw 2 of 20 rounds lose the `]` or leave
+    `]` in the bar (0 of 20 in the S15 run). Debug-log signature: `log: Selected:
+    ...` / `log: Added note ...` immediately followed by `queue dispatch: cmd=autostart
+    ...`.
+
+
+    Related: pr-adfdce3 (plans/QA-view variant), note-08f2635 on pr-6aa74c6. Captures:
+    /pm-captures/scenarios/15/ (driver/steps-s6.jsonl, ev=drain). Fix direction: decide
+    "user is typing" from the bar state before the queued dispatch, ignoring a bar
+    whose command was just submitted (held keys / CommandSubmitted in flight), instead
+    of refocusing whenever the bar has focus.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T09:09:12.448622+00:00'
+  updated_at: '2026-11-02T09:09:12.448622+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-25d4825
+  plan: bugs
+  title: 'Bug: handing focus back to the TUI tree after a command-bar command or Esc
+    scrolls a tall tree to its top and leaves the cursor off-screen'
+  branch: pm/pr-25d4825-bug-handing-focus-back-to-the-tui-tree-after-a-com
+  status: pending
+  depends_on: []
+  description: 'Location: every place that hands focus back to the PR tree after a
+    command-bar command calls Widget.focus() with Textual''s default scroll_visible=True:
+
+    - ProjectManagerApp._focus_current_view in pm_core/tui/app.py. On pr-6aa74c6 it
+    serves Esc in the command bar and the /pr select and /plan select branch. Master''s
+    action_unfocus_command does the same inline.
+
+    - The query_one("#tech-tree").focus() calls in pm_core/tui/pr_view.py handle_command_submitted:
+    action-guard refusal, review-loop, edit, pr qa, autostart and the generic run_command
+    tail.
+
+
+    Mechanism (read from the Textual 8.2.7 source, not re-run separately):
+
+    - Screen.set_focus queues scroll_to_center(widget, origin_visible=True) whenever
+    `not self.can_view_entire(widget)`.
+
+    - TechTree is a single widget. Once the tree overflows #tree-container, it is
+    taller than the viewport, so that call scrolls the container to the tree''s origin
+    (its top), and the cursor box ends up below the fold.
+
+    - When the command also moved the cursor, TechTree.select_pr''s call_after_refresh(_scroll_selected_into_view)
+    usually runs later and hides the problem. With no cursor move (a re-select of
+    the PR under the cursor, or Esc in the bar), nothing scrolls back.
+
+
+    Repro (QA pr-6aa74c6 S10 refiner, 2026-11-02; seen on master with an exact-id
+    /pr select and on pr-6aa74c6 at 5dcf90dc):
+
+    1. Use a 200x50 TUI with a tree that overflows (4 plans plus Standalone, about
+    14 PRs).
+
+    2. Put the cursor on a PR below the first screenful, e.g. pr-60f857a.
+
+    3. Either submit `/pr select <the PR under the cursor>`, or type `/` and press
+    Esc. Either way the tree jumps to its top and the cursor box is off-screen. (The
+    refiner also listed 60f857a -> e9b0e10.)
+
+    4. The next cursor move (j/k, ]/[) scrolls the cursor back into view.
+
+    At 200x110, where the whole tree fits, it does not happen.
+
+
+    Fix direction:
+
+    - In one shared helper (_focus_current_view), hand focus back with focus(scroll_visible=False)
+    and then call TechTree._scroll_selected_into_view(). Alternatively, make TechTree''s
+    focus scrolling target the selected node instead of the widget origin.
+
+    - pr-adfdce3 note-5fbd062 already asks the other handback sites to reuse _focus_current_view,
+    so they inherit the fix.
+
+    - Add a Textual pilot test: a tall tree in a small terminal with the cursor below
+    the fold. After Esc from the command bar, the selected node''s region must stay
+    inside the visible region of #tree-container.
+
+
+    Related:
+
+    - pr-562d71d: the selected node sits under the bottom bars after a select (a different
+    symptom, same scroll code).
+
+    - pr-adfdce3: which view gets focus after a command.
+
+    - note-33583b0 on pr-6aa74c6 (the S10 refiner note).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T09:50:08.146101+00:00'
+  updated_at: '2026-11-02T09:50:08.146101+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
