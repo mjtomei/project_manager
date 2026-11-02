@@ -859,8 +859,22 @@ def _finalize_all_transcripts(app) -> None:
             finalize_transcript(p)
 
 
+def _release_hold_journal(app, pr_ids) -> None:
+    """End the history journal's merge hold of PRs no longer held."""
+    if not pr_ids:
+        return
+    try:
+        from pm_core.tui.review_loop_ui import release_merge_hold_journal
+        release_merge_hold_journal(app, pr_ids)
+    except Exception:
+        _log.debug("auto_start: releasing journaled merge holds failed",
+                   exc_info=True)
+
+
 def _disable(app) -> None:
     """Disable auto-start mode (in-memory only) and drop all targets."""
+    _release_hold_journal(app, sorted(getattr(app, "_history_merge_holds",
+                                              None) or ()))
     _finalize_all_transcripts(app)
     # Stop the watcher loop if it's running
     from pm_core.tui import watcher_ui
@@ -1027,6 +1041,7 @@ def add_targets(app, ids: list[str], policy: str | None = None,
     released = sorted(held_before - set(merge_holds(app)))
     if released:
         _log.info("auto_start: released merge holds on %s", released)
+        _release_hold_journal(app, released)
 
     def _label(c: dict) -> str:
         if c["action"] == "policy_changed":
@@ -1082,6 +1097,7 @@ def remove_targets(app, ids: list[str]) -> dict:
               ids, removed, list(targets))
     _sync_enabled(app)
     released = sorted(held_before - set(merge_holds(app)))
+    _release_hold_journal(app, released)
     # hold: a racing ``g`` merge's spinner frames would overwrite this
     # within 0.1s (QA s18), like "targets +=" above.
     if removed:
@@ -1107,6 +1123,8 @@ def clear_targets(app) -> dict:
     if was:
         _disable(app)
     else:
+        _release_hold_journal(app, sorted(
+            getattr(app, "_history_merge_holds", None) or ()))
         app._auto_start_targets = {}
     app.log_message("Auto-start: OFF" if was else "Auto-start: already off",
                     force=True, hold=CONFIRM_HOLD_SECONDS)

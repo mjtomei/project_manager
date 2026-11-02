@@ -4139,11 +4139,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-02T23:28:28.300859+00:00'
-  updated_at: '2026-03-02T23:28:28.300859+00:00'
+  updated_at: '2026-10-22T04:07:24.681140+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-9c8ec52
+    text: 'From pr-8020495 (PR action history): the loop timeouts are now also journaled
+      as history timers at their arm sites — review_loop._run_claude_review (review
+      verdict grace, _VERDICT_GRACE_PERIOD), qa_loop._poll_tmux_verdicts._arm_grace
+      (QA verdict grace), qa_loop._run_qa_sync planner deadline (_PLANNER_TIMEOUT,
+      cleared "fired" vs "cancelled" by comparing to the same deadline), and signoff_ui._launch
+      (RELAUNCH_BACKOFF_SECONDS throttle). When these become project settings, pass
+      the same resolved value to both the wait and the _ah.arm_timer(duration=...)
+      call so pm pr history countdowns match the real timeout.'
+    created_at: '2026-10-22T00:11:00Z'
+    last_edited: '2026-10-22T00:11:00Z'
 - id: pr-442e51c
   plan: bugs
   title: Fix tmux commands targeting one session disconnecting other sessions
@@ -9199,11 +9210,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-21T18:01:28.274120+00:00'
-  updated_at: '2026-03-21T18:01:28.274120+00:00'
+  updated_at: '2026-10-21T20:03:23.722978+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-5f48f2f
+    text: 'From pr-8020495 (PR action history): the per-PR journal pm_core/action_history.py
+      records events with an `owner` (pid/start/instance, used only for liveness)
+      and accepts an optional `context` field on every event (action_history.record(...,
+      context={...})). It defines no attribution model of its own. When this PR adds
+      the action-context structure (session/window/task), populate `context` from
+      it in action_history.record so `pm pr history` and the History pane can show
+      who started each attempt.'
+    created_at: '2026-10-21T20:03:23Z'
+    last_edited: '2026-10-21T20:03:23Z'
 - id: pr-2c67d50
   plan: plan-qa
   title: Resume QA scenario polling after INPUT_REQUIRED with follow-up verdict loop
@@ -14091,11 +14112,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-03T15:42:10.423044+00:00'
-  updated_at: '2026-05-03T15:42:10.423044+00:00'
+  updated_at: '2026-10-22T04:25:14.880195+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-07d3e56
+    text: 'From pr-8020495 (PR action history): ~/.pm/history/<pr>.jsonl journals
+      persist the action name "start" (runtime_state action key, via runtime_state._journal_transition)
+      and history_query._ACTION_ORDER / _attempt_name / the badge render it as-is.
+      Journals written before the rename will keep "start"; when renaming the runtime
+      action key, map old "start" to "implement" at read time in history_query (e.g.
+      in _replay) rather than rewriting journals, and update _ACTION_ORDER.'
+    created_at: '2026-10-22T04:25:14Z'
+    last_edited: '2026-10-22T04:25:14Z'
 - id: pr-1cb6e15
   plan: bugs
   title: pm pr review silently regresses qa → in_review status
@@ -30341,6 +30371,21 @@ prs:
       a TUI restart: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-3d1fa55-c66689e5322c9701)'
     created_at: '2026-05-25T04:20:49Z'
     last_edited: '2026-05-25T04:20:49Z'
+  - id: note-33a68ec
+    text: 'Seen in pr-8020495 QA S5: `pm pr close <pr>` (pm_core/cli/pr.py pr_close)
+      removes the PR and deletes its workdir but never kills its tmux windows (<pr-id>,
+      review-<pr-id> stayed open pointing at a deleted cwd). Same class as this bug;
+      cover the close path too.'
+    created_at: '2026-10-21T22:19:50Z'
+    last_edited: '2026-10-21T22:19:50Z'
+  - id: note-7b7f154
+    text: 'Related (seen in pr-8020495 QA S10, 2026-10-21): `pm pr close <pr>` also
+      leaves the removed PR''s impl window and review-<pr> window open (their cwd
+      is the deleted workdir); pr_close in pm_core/cli/pr.py never kills windows.
+      Repro: pm pr start X --background; /review-loop X; pm pr close X; tmux list-windows
+      still shows X and review-X.'
+    created_at: '2026-10-21T23:37:40Z'
+    last_edited: '2026-10-21T23:37:40Z'
   - id: note-fd141d0
     text: 'Cross-PR interaction from pr-62ad13d (review c02f i10): `pm pr close` now
       retains the entry with status: closed (non-destructive close — entry/notes/branch/workdir
@@ -38667,11 +38712,803 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-21T21:40:00.306182+00:00'
+  updated_at: '2026-11-02T02:01:25.784391+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-be7015d
+    text: 'Impl done (head 5bddb270): journal pm_core/action_history.py (~/.pm/history/{pr}.jsonl,
+      append+flock; owner liveness via per-process-image lock in history/owners, exec-safe),
+      model+render pm_core/history_query.py, catalog pm_core/action_catalog.py, CLI
+      `pm pr history <pr> [--json]`, picker H/History row (also for merged PRs). Instrumented:
+      runtime_state.set_action_state (generic attempts, excluding qa), review_loop
+      iterations/grace/INPUT_REQUIRED hold, qa_loop run/planner/deadline/scenarios
+      (ScenarioObserver)/backoff/grace, signoff_ui router launches + throttle, merge
+      holds. Live-verified in an isolated tmux (-L) with scratch HOME + fake-claude:
+      review NEEDS_WORK→INPUT_REQUIRED→PASS, z d cancel, Ctrl+R restart mid-loop and
+      mid-QA, 3 overlapping QA scenarios. The live env needs `env -i` (CLAUDECODE
+      / PM_HOST_HOME leak in otherwise) and a dummy `claude` on PATH. 13 pre-existing
+      test failures (markdown module + hook installer) also fail on master.'
+    created_at: '2026-10-21T20:03:25Z'
+    last_edited: '2026-10-21T20:03:25Z'
+  - id: note-c450740
+    text: 'S6 refine (concurrency/rotation): only qa-run-bg (spawned by `pm pr auto-sequence
+      <pr>` on an in_review PR with an auto-seq review PASS transcript) and auto-sequence
+      itself (impl-idle check registers the start mirror) write journals from a non-TUI
+      process; `pm pr review` from a shell writes nothing itself (TUI mirror journals
+      it, and ignores PASS). fake-claude scripted cursor is per session_type and session-wide,
+      so concurrent reviews on different PRs share one NW/NW/PASS sequence; `pm fake-claude
+      config set` resets the cursor. Rotation = single `<pr>.1.jsonl` generation,
+      threshold 4194304 bytes.'
+    created_at: '2026-10-21T21:55:44Z'
+    last_edited: '2026-10-21T21:55:44Z'
+  - id: note-d3dc6f7
+    text: 'QA S6 (2026-10-21): all concurrency/rotation Thens held at f21fca85. Side
+      observation (not asserted): a start mirror attempt opened by the `pm pr auto-sequence`
+      CLI (impl-idle check) is never ended, so history shows "start interrupted —
+      owner process exited (pid N); end time unknown" right after a successful start
+      while runtime shows start=idle. `pm pr start` from CLI records no start row
+      at all. Consider ending/not opening that attempt in short-lived CLI processes.'
+    created_at: '2026-10-21T22:12:21Z'
+    last_edited: '2026-10-21T22:12:21Z'
+  - id: note-6ed3c23
+    text: 'QA S3 (cancel/supersede/restart) PASS on f21fca85, no edits. Observations
+      for follow-up: (1) superseded loop child i1 is first closed "superseded / parent
+      run ended first", then ~7s later rewritten to "cancelled KILLED" when the old
+      loop thread sees its pane gone; (2) once (pre-restart, A after loop 8333 PASS)
+      the non-loop review tracker re-registered the finished loop pane as a new "review
+      running" attempt (Waiting for: review: agent working) until the next tui-mount
+      sweep; not reproduced on demand; (3) "runtime: review-loop=running KILLED" shows
+      the previous verdict next to running; (4) popup history without less prints
+      + waits and the top scrolls off a 40-row popup. Captures /pm-captures/scenarios/3.'
+    created_at: '2026-10-21T22:13:27Z'
+    last_edited: '2026-10-21T22:13:27Z'
+  - id: note-a22aa79
+    text: 'QA S2 (d2db746b): fixed ScenarioObserver timing. _launch_next_queued blocks
+      on the dequeued scenario concretizer, so verified scenarios were journaled ending
+      ~17 s late and the concretize was booked as queued wait. It now observes before
+      the launch, and the dequeued scenario gets a "launching" phase. Live-env gotcha:
+      the env -i tmux PATH also needs fake-claude (symlink ~/.local/bin/fake-claude
+      into $SCR/bin), or TUI-launched QA planner panes die "command not found" and
+      QA ends ERROR.'
+    created_at: '2026-10-21T22:18:01Z'
+    last_edited: '2026-10-21T22:18:01Z'
+  - id: note-e39c90f
+    text: 'Concretizer S5 (edge cases) findings: (1) local backend never sets gh_pr_number,
+      so testing "#N" for `pm pr history` needs a bootstrap edit of gh_pr_number on
+      a never-run PR (project.yaml is 0444; chmod u+w, edit, chmod 444). (2) Spec
+      E4 broken-history variants are a read-only ~/.pm/history dir or ~/.pm/history/<pr>.jsonl
+      being a directory; both render "No recorded action history" without traceback
+      in a manual check. (3) Unspecced: if ~/.pm/history is a regular FILE, `pm pr
+      history` (text and --json) tracebacks with FileExistsError from action_history.history_dir()
+      mkdir (journal_path is called outside read_events try). Loop writers swallow
+      it. (4) Popup History row needs a PR window open; drive it via `pm _popup-picker
+      <session> <pr-window>` or a real prefix+P with an attached client, then press
+      H.'
+    created_at: '2026-10-21T21:52:48Z'
+    last_edited: '2026-10-21T21:52:48Z'
+  - id: note-4612cd0
+    text: 'QA S5 (2026-10-21): fixed 2 history bugs. 7aa2fe72: popup History pager
+      read the PR workdir''s stale committed project.yaml (status [pending], missing
+      milestones) because state_root() ignores the in-process PM_PROJECT; now resolves
+      the session root like the picker rows. 8d6704f7: journal record() glued the
+      next event onto a crash-truncated last line (lost e.g. the next review-loop''s
+      top-level attempt_start); now starts a fresh line. Long-running TUIs need Ctrl+R
+      to pick up 8d6704f7.'
+    created_at: '2026-10-21T22:19:51Z'
+    last_edited: '2026-10-21T22:19:51Z'
+  - id: note-3d3249e
+    text: 'QA S5: also fixed concretizer finding (3): ~/.pm/history being a regular
+      file made `pm pr history` traceback (FileExistsError from history_dir mkdir);
+      history_dir now ignores mkdir OSError, verified live in a scratch HOME (honest
+      empty history, rc 0).'
+    created_at: '2026-10-21T22:23:16Z'
+    last_edited: '2026-10-21T22:23:16Z'
+  - id: note-98081f9
+    text: 'S1 refine (f21fca85): fake-claude cannot hold a review INPUT_REQUIRED wait.
+      The fake re-emits idle_prompt every 2 s with the same transcript, so wait_for_follow_up_verdict
+      re-reads INPUT_REQUIRED within ~0.2-2.2 s and coerces it to NEEDS_WORK. The
+      "review INPUT_REQUIRED hold" lasts at most ~2 s and the iteration ends done
+      NEEDS_WORK; nobody can answer it. Catch the hold with a background `pm pr history
+      --json` poll every 0.25 s; its popup badge is not observable. Grace is 20 s
+      from the agent phase: per-iteration fake delay must be <~15 s for "turn finished;
+      verdict grace until" to show. Start the PR with CLI `pm pr start` (TUI s passes
+      --transcript and journals a start attempt). fzf/less are missing from the image;
+      sudo apt-get install them for the popup.'
+    created_at: '2026-10-21T21:55:48Z'
+    last_edited: '2026-10-21T21:55:48Z'
+  - id: note-834a179
+    text: 'QA S1 (2026-10-21): fixed 3 popup issues at 80 cols — (1) shortcut hint
+      truncated to "H=h.." → header wraps between items (36a08f72); (2) pre-existing
+      picker bug: Enter on ANY action row (incl. history) did nothing because stdout.strip()
+      ate fzf --expect empty key line + row indent → _parse_fzf_expect (b51784bb);
+      (3) History pager hard-broken mid-word by less in ~74-col popup → wrap with
+      CLI record wrapper (b51784bb). All S1 history/timer/hold Thens otherwise held.'
+    created_at: '2026-10-21T22:14:21Z'
+    last_edited: '2026-10-21T22:14:21Z'
+  - id: note-0c3afa9
+    text: 'QA S4 (sign-off/holds/derived holds/merged history) PASS on b51784bb. Env
+      gaps in the S4 recipe: the env -i shim dir also needs fake-claude (ln -s /workspace/bin/fake-claude)
+      or every TUI-launched pane dies with status 127 (impl window vanishes, pipeline
+      stalls); tmux new-window from an outer shell inherits that shell PATH (real
+      claude + git proxy), so create windows via env -i and set default-command "bash
+      --noprofile --norc". Observation, not fixed: impl "start" attempts are opened
+      by the pane-idle mirror, not at launch — the row starts ~5 s after impl launch
+      and a phantom "start untracked (5s)" row appears again when each review loop
+      ends (seen at QA start), so a 1-PR auto-sequence shows 1-2 extra start rows.'
+    created_at: '2026-10-21T22:19:46Z'
+    last_edited: '2026-10-21T22:19:46Z'
+  - id: note-90b78f5
+    text: 'Review i1 (609ef8f9): (1) runtime-derived attempts the live runtime mirror
+      still tracks in flight are now running regardless of opener — fixes S6 "start
+      interrupted — owner process exited" after a CLI pm pr auto-sequence opened it;
+      (2) cleanup_pr_resources now clears in-flight runtime entries before unlinking
+      (ends attempts interrupted "PR resources cleaned up") — unlink alone left e.g.
+      a merge-pane attempt open and shown running after merge. Still open (cosmetic):
+      S4 phantom "start untracked" rows when pane_idle re-registers the impl pane
+      after a review loop ends (same session_id → new attempt); fixing it needs a
+      runtime tombstone or a query-time merge of same-session runtime attempts.'
+    created_at: '2026-10-21T22:56:37Z'
+    last_edited: '2026-10-21T22:56:37Z'
+  - id: note-153e694
+    text: 'Review i2 (1eb51561): history Now line shows an in-flight runtime entry
+      verdict as "(last X)" (QA S3 obs 3: "review-loop=running KILLED"). Still open,
+      cosmetic: S4 phantom "start untracked" rows when pane_idle re-registers the
+      impl pane after a review loop.'
+    created_at: '2026-10-21T23:04:57Z'
+    last_edited: '2026-10-21T23:04:57Z'
+  - id: note-c86c649
+    text: 'Review i3: fixed S4 phantom "start untracked" rows at query time (history_query._fold_retracked):
+      a runtime attempt re-tracking the previous same-action attempt session that
+      ended untracked continues it after a "not tracked" span (neither exec nor wait);
+      runtime attempt_id of the re-opened attempt aliases to the kept one. Spec E8.'
+    created_at: '2026-10-21T23:12:25Z'
+    last_edited: '2026-10-21T23:12:25Z'
+  - id: note-3f8d031
+    text: 'S9 refine (ae71ba0e): (1) plain `pm pr cleanup <pr>` only removes the workdir;
+      the resource teardown that ends in-flight attempts ("PR resources cleaned up")
+      is `pm pr cleanup <pr> --resources` (or TUI Y). (2) `pm pr auto-sequence` opens
+      the CLI-owned start mirror only on the in_progress tick that finds the impl
+      transcript; that same tick sees idle and prints "advanced: in_review" (the "started"
+      tick opens nothing). (3) Local-backend merges (g / pm pr merge -> _finalize_merge)
+      only kill windows, never cleanup_pr_resources; the sync merge-detection path
+      is GitHub-only (old_statuses diff is pre-empted by the SIGUSR1 reload). A start
+      entry opened by auto-sequence (never TUI-tracked) may therefore stay in flight
+      and be shown running after the merge (S9 story 5 probes this). (4) Merge INPUT_REQUIRED
+      is not drivable with the fake (merge has no verdicts), and a clean g merge journals
+      no merge attempt, so S9 uses the stop-before-merge hold. (5) cleanup --resources
+      kills windows before clearing runtime: the loop thread may end the iteration
+      first (vanished KILLED / loop failed KILLED); _on_complete then rewrites review-loop=failed
+      KILLED (not in flight).'
+    created_at: '2026-10-21T23:25:04Z'
+    last_edited: '2026-10-21T23:25:04Z'
+  - id: note-5533a1a
+    text: 'QA S9 (2026-10-21): stories 1-3 held; fixed 3 bugs (both live pre/post
+      captures in /pm-captures/scenarios/9). f0041424: (a) poll_for_verdict sat out
+      its 15 s hook wait after z d / pr cleanup killed the pane, so history booked
+      the cancel late and a z d during grace read "elapsed" → pane_exists checked
+      ≤1 s during the wait; (b) pre-existing race: z d in the 2 s launch settle let
+      the stopped loop adopt the fresh review pane by window name (loop stayed "running")
+      → find pane right after the synchronous launch. 1d6cd097: pm pr merge (_finalize_merge)
+      only killed windows, so a CLI-opened start attempt stayed "running → now" forever
+      after merge → pr_cleanup.end_in_flight_actions. Env gotcha: windows made with
+      tmux -L new-window from an outer shell inherit its PATH (~/.local/bin git proxy)
+      → local pm pr merge fetch fails "does not appear to be a git repository"; export
+      the $SCR/bin PATH in cli. Driver gotcha: completion markers stay in -S scrollback;
+      use unique markers/clear-history.'
+    created_at: '2026-10-21T23:58:47Z'
+    last_edited: '2026-10-21T23:58:47Z'
+  - id: note-9b07de8
+    text: 'QA S7 refine (2026-10-21, head ae71ba0e): the "impl start folded into one
+      row" Then (E8, efa2cd57) needs P started with TUI `s`, not CLI `pm pr start`.
+      Only `s` passes --transcript, so only then is the impl pane tracked (a start
+      attempt). The loop then untracks it ("untracked"), and _poll_impl_idle re-registers
+      the same session after the loop ends (status stays in_review when autostart
+      is off). A CLI start gives no start row at all. After the loop, the popup History
+      badge is the open start row (e.g. [start: turn done]), not [N runs].'
+    created_at: '2026-10-21T23:20:40Z'
+    last_edited: '2026-10-21T23:20:40Z'
+  - id: note-1298545
+    text: 'QA S7 (2026-10-21): all review-loop/timer/hold/fold Thens held on ae71ba0e
+      (323 JSON + 99 text polls; hold caught 6x; start folded to one row with ''not
+      tracked''). Fixed 5edccb25: popup History pager (and pm pr history on a narrow
+      TTY) re-wrapped 8-space phase lines with a fixed 4-space continuation, so ''[launching
+      …'' looked like a sibling row; continuation now >= own indent + 2. Live env:
+      TUI s needs pm push + git merge of the sync branch first; popup client without
+      LANG renders → as _. Captures /pm-captures/scenarios/7.'
+    created_at: '2026-10-21T23:32:00Z'
+    last_edited: '2026-10-21T23:32:00Z'
+  - id: note-80c4836
+    text: 'S8 refine (QA run 2 re-check of S2): corrected draft predictions. The planner
+      timer is "QA planner deadline" with expected "stop waiting for a plan → QA INPUT_REQUIRED".
+      On a found plan it resolves "cancelled", not "cleared". Children are "qa planner"
+      and "qa sN"; a retry shows as "qa sN retry 1". A scenario attempt spans agent
+      + verifying, and a slot frees only after verification. A pane verdict is accepted
+      only after the shared 30 s "QA scenario verdict grace" and the verifier also
+      has 30 s grace, so a scenario end matches the TUI "Scenario N (...): PASS (verified)"
+      log line or the verifier VERIFIED, not the worker pane PASS. With 3 short scenarios
+      the run elapsed (planning + launching + finalize) can exceed the summed scenario
+      time; the safe check is summed > wall, wall <= run elapsed, and "up to 2 at
+      once" under cap 2. Relaunch backoff = 5 s (_SCENARIO_RETRY_BASE). Use a reader
+      poll of 0.5 s or less to catch it active.'
+    created_at: '2026-10-21T23:19:28Z'
+    last_edited: '2026-10-21T23:19:28Z'
+  - id: note-ff29c26
+    text: 'QA S8 (2026-10-21) PASS at ae71ba0e: S2 re-check after d2db746b held in
+      two fresh envs — s3 launching starts −0.35 s from s1 end, scenario ends within
+      1 s of TUI "PASS (verified)", planner deadline cancelled Δ0 s, backoff timer
+      counted 4.85→0.14 s then fired, popup pager rows == CLI. Notes: vanished end
+      is stamped at loop detection (5 s _POLL_INTERVAL → 0–5 s lag; saw 3.6 s); planner
+      timer absent for the first ~2 s of the planner child (armed at pane launch);
+      due time shows a date when it crosses UTC midnight. Drivers in /pm-captures/scenarios/8/scripts.'
+    created_at: '2026-10-21T23:35:08Z'
+    last_edited: '2026-10-21T23:35:08Z'
+  - id: note-dc16052
+    text: 'S11 refine (SIGKILL TUI): (1) a SIGKILLed TUI writes no breadcrumb (only
+      action_restart with the merge-restart marker does), so the new TUI never resumes/adopts
+      the killed review loop; the user restarts it with /review-loop, and its attempts
+      are new but not flagged resumed/adopted. (2) Predicted defect, verified with
+      a scratch-HOME repro (child sets runtime review-loop=running + iteration + grace,
+      then SIGKILL): before a new TUI mounts, history_query._reconcile_attempts treats
+      the runtime-derived loop attempt as tracked (stale runtime entry state=running),
+      so it shows open, and Now shows "loop running; next iteration launching", while
+      its iteration is interrupted owner-exited and the grace timer is lost. This
+      breaks the spec fail criterion "running after its owner process exited". E12
+      tracked-override should not apply when the opener is dead and it is a TUI-owned
+      loop (no pane), or the runtime entry should carry an owner token. (3) The new
+      TUI skips qa-run-bg QA because resume_owned_elsewhere is true, so there is no
+      resumed QA run.'
+    created_at: '2026-10-21T23:21:37Z'
+    last_edited: '2026-10-21T23:21:37Z'
+  - id: note-a0dfeaf
+    text: 'QA S11 (SIGKILL TUI + qa-run-bg + rotation + readers) fixed 2 bugs in cc2f86a5:
+      (1) review-loop runtime attempt of a SIGKILLed TUI read "running" + Now "loop
+      running; next iteration launching" until the next TUI mount sweep (runtime-tracked
+      exemption) — loop entries (loop_id) now follow owner liveness, runtime line
+      says "(stale: owner exited)"; (2) owner-lock liveness probe race: concurrent
+      readers probing the same dead owner saw each other LOCK_EX and reported it alive
+      (3-5% of probes; 2/1932 live post-kill reads) — probes serialize on history/owners/.probe.
+      Post-fix rerun: all S11 Thens held. Observations not fixed: after the new TUI
+      mount sweep the killed loop ends at the sweep time (elapsed includes TUI-down
+      time; before the sweep it read end unknown); E impl start mirror attempt (opened
+      by CLI auto-sequence) still reads running while no TUI is alive (pane-mirror
+      exemption). Setup: pm pr spec needs a fake-claude config set first; pm session
+      typed in a session pane attaches a nested client there (detach it).'
+    created_at: '2026-10-21T23:49:36Z'
+    last_edited: '2026-10-21T23:49:36Z'
+  - id: note-631ff26
+    text: 'QA S15 (2026-10-22, dc41da83): every story-1 (SIGKILL TUI + qa-run-bg +
+      rotation + 3 readers, 5580 reads) and story-2 (zombie qa-run-bg owner, 300 dead-owner
+      attempts, z1/z2 polls) Then held. Fixed 6801b978: a gate cleared "elapsed" late
+      (QA grace cleared at scenario end) moved its "elapsed at" from the due time
+      to the clear time (00:47:00 -> 00:48:05 between reads); now min(clear, due).
+      Spec nits: scenario numbering continues across runs on one QA workdir (story-2
+      runs are s4-s6 / s7-s9, not s1-s3); with less installed `pm pr list` pages (pipe
+      to cat in drivers). Captures /pm-captures/scenarios/15.'
+    created_at: '2026-10-22T01:15:20Z'
+    last_edited: '2026-10-22T01:15:20Z'
+  - id: note-b5a8d4b
+    text: 'S12 refine (dc41da83): plain Ctrl+R (or pm tui restart without --breadcrumb)
+      writes no breadcrumb, so the review loop is NOT resumed (only swept interrupted).
+      A mid-loop restart that resumes needs ''pm tui restart --breadcrumb'' from a
+      shell pane in the test session. The resumed review-loop parent attempt is a
+      new runtime attempt (new id, same loop id) and is NOT flagged resumed; only
+      its first child (the in-flight iteration) is flagged ''(adopted)'', and adopted
+      iterations arm no grace timer. The ''start'' fold into one row shows only after
+      the loop ends and the impl pane is re-tracked; during the loop a separate ''start
+      untracked'' row is expected.'
+    created_at: '2026-10-22T00:39:39Z'
+    last_edited: '2026-10-22T00:39:39Z'
+  - id: note-a155b4e
+    text: 'S13 refine (dc41da83): a resumed QA run reuses loop_id, so its grace timer
+      id qa-grace:<loop_id> is the same as the pre-restart one. The pre-restart grace
+      reads "lost (owner process exited)" only until the resumed run arms its grace;
+      after that _replay lists the old entry in Recent as "re-armed" (spec R14 says
+      lost). Restart within 30 s of the poll-loop grace arm, or no QA timer is active
+      to lose (grace is a gate and goes "elapsed"). Resumed scenario children are
+      plain "qa sN" under "qa (loop …) (resumed)", with no resumed/adopted flag of
+      their own. Literal text is "lost (owner process exited)", not "lost (owner exited)".'
+    created_at: '2026-10-22T00:39:39Z'
+    last_edited: '2026-10-22T00:39:39Z'
+  - id: note-7437321
+    text: 'QA S13 (2026-10-22): fixed c0761fa8. After TUI Ctrl+R mid-QA, the pre-restart
+      qa s1/s2/s3 read elapsed "unknown" (lower bound 0, their last own event was
+      their start), not ">Ns". restart_app now journals owner_exit to PRs with open
+      attempts, and history bounds owner-exited attempts by the owner''s newest event
+      (now >10s children, >42s run). All other S13 Thens held pre and post (cap 2,
+      s3 queued then launching, vanished s1 + retry backoff fired, shared grace re-armed
+      then elapsed, ends match the TUI verified line, 1.4-1.5k JSON reads per story
+      clean, popup badge = focus row, popup rows = CLI). Obs: the badge shows no countdown
+      on a working row (the shared grace shows only on turn-finished rows). The lost-grace
+      window after Ctrl+R is ~1 s before the resume re-arms it. Drivers in /pm-captures/scenarios/13/scripts.'
+    created_at: '2026-10-22T01:05:37Z'
+    last_edited: '2026-10-22T01:05:37Z'
+  - id: note-0f1f9fb
+    text: 'S14 refine (dc41da83): (1) pm pr merge needs --no-signoff-check for an
+      un-signed-off PR. (2) Stale spec flag on a merged PR: `pm set spec-mode review`
+      + `pm pr spec <pr> qa` while in_review sets spec_pending (hold "qa spec awaiting
+      approval"); revert with `pm set spec-mode prompt` (global setting, would pause
+      later starts). Merge does not clear spec_pending; history drops it as a hold
+      once merged (9ad31733). (3) sign-off relaunch throttle (60 s gate) is never
+      released on a ready_to_merge hop, so once the router attempt ends done it reads
+      "cancelled (owner ended)" in Recent timers, not active. (4) Plain pm pr cleanup
+      rmtree of a workdir under a live fake pane: fake os.getcwd() raises in transcript
+      writes (idle hooks swallow it), so run the plain-cleanup check on a PR whose
+      fake panes already emitted (idle), never mid-iteration.'
+    created_at: '2026-10-22T00:41:31Z'
+    last_edited: '2026-10-22T00:41:31Z'
+  - id: note-076418b
+    text: 'S18 refine (00ffb399): (1) after a finished QA run the qa-<pr> window stays,
+      so plain t only logs ''Focused QA window'' — later runs need z t (logs ''Fresh
+      QA start for <pr>...''). (2) Fake config needs _all:{} + qa_finalize FINALIZE_DONE,
+      or the finalize pane never verdicts (also runs for an INPUT_REQUIRED run). (3)
+      Scenario numbering continues per PR across loops'' workdirs (~/.pm/workdirs/qa/<pr>-<loop>/s-N),
+      so after a 3-scenario run the next runs are s4 then s5. (4) TUI logs ''QA [<pr>]:
+      QA complete: INPUT_REQUIRED …'' then ''QA INPUT_REQUIRED for <pr> — paused for
+      human input''; the derived hold needs runtime qa done INPUT_REQUIRED (set on
+      the 2nd TUI poll tick after completion) + status qa; badge truncates to ''[hold:
+      QA INPUT_REQUIRED (auto-start…]''. (5) For a lost-then-re-armed grace, Ctrl+R
+      must land while the grace re-armed by the s1 relaunch still has >=10 s left;
+      ''scenario passed into grace'' is not needed.'
+    created_at: '2026-10-22T01:45:18Z'
+    last_edited: '2026-10-22T01:45:18Z'
+  - id: note-55b0a0d
+    text: 'S20 refine (00ffb399): verified in scratch HOMEs that read-only ~/.pm/history
+      (no owners/), ~/.pm/history as a regular file, and history/owners as a regular
+      file never raise. The first two give honest empty history (attempts [], missing
+      note). With owners as a file, writes still land and liveness falls back to the
+      pid start token: live attempts read open, and a dead writer reads interrupted.
+      A popup on a never-run PR needs a window named after its display id (the picker
+      home_pr comes from the window name). Break the store before `pm session` in
+      a fresh HOME per pass, never under a live TUI. The S16 driver lib (/pm-captures/scenarios/16/scripts)
+      fits this sweep.'
+    created_at: '2026-10-22T01:46:15Z'
+    last_edited: '2026-10-22T01:46:15Z'
+  - id: note-49f2b17
+    text: 'S17 refine (sign-off relaunch/restart): signoff_ui._end_attempt journals
+      adopted=True on the attempt_end of a router run that a restarted TUI picks up
+      (newest_open_attempt fallback), but history_query._replay stores it as end_adopted
+      and _export/_render_attempt never surface it. So after pm tui restart --breadcrumb
+      the pre-restart signoff attempt reads plain "done SIGNOFF_BLOCKED" (detail "routed
+      → blocked", same attempt id) with no (adopted) flag in text or JSON. The spec
+      (R10/R14) does not require the flag; export end_adopted as adopted if a flag
+      is wanted. Other S17 facts: throttle id signoff-throttle:<pr>, gate 60 s, re-armed
+      on relaunch (Recent timers lists the first one "re-armed"); SIGNOFF_REVIEW hop
+      releases it ("released"); the BLOCKED hop does not, so it reads "lost (owner
+      process exited)" then "cancelled (owner ended)". The fake signoff cursor advances
+      at launch, so a killed router consumes a script slot.'
+    created_at: '2026-10-22T01:46:21Z'
+    last_edited: '2026-10-22T01:46:21Z'
+  - id: note-18ed0c0
+    text: 'S19 refine (00ffb399): (1) Ctrl+R must land while A i2 "review verdict
+      grace (iteration 2)" AND B "QA scenario verdict grace (all scenarios)" are both
+      active: use review [NW delay 3, NW delay 20, PASS delay 5], press t on B first,
+      start /review-loop A as soon as B grace is armed. (2) After restart, A loop
+      row reads >Ns owner-exited only until the new TUI mount sweep, then interrupted
+      "swept on tui-mount" with an exact elapsed (end = mount time); A i2 + B qa run/sN
+      stay owner-exited >Ns (owner_exit bound). (3) Untested edge: an uncleared QA
+      grace that already read "elapsed" flips to "lost (owner process exited)" once
+      its owner dies (alive check precedes due check in _reconcile_timers), then "re-armed"
+      on resume; S19 avoids it by timing, it is not asserted. (4) The TUI review mirror
+      may hold an open review attempt on C (prep auto-seq review pane), so an owner_exit
+      line from the TUI owner can appear in C journal; it must not touch C qa-run-bg
+      attempts. (5) Text Recent timers lists only 10 rows; check elapsed-at on JSON
+      timers.recent.'
+    created_at: '2026-10-22T01:46:42Z'
+    last_edited: '2026-10-22T01:46:42Z'
+  - id: note-a2f8a26
+    text: 'QA S19 (2026-10-22) PASS on 00ffb399, no edits: one TUI ran A review loop
+      + B QA while a qa-run-bg wrote C; Ctrl+R at A i2 grace 19.7 s / B grace 6.7
+      s left. owner_exit bounded A i2 (>1s) and B run/children (>43s/>24s); A loop
+      swept on tui-mount; B resumed (same loop id), old grace lost then re-armed;
+      C 1932 qa-run-bg rows never interrupted; 1791 JSON reads all OK; late-cleared
+      graces keep resolved_at=due (6801b978); popup/CLI/JSON agree at 80 cols. Obs:
+      exec->mount sweep ~20 ms, so the pre-sweep owner-exited loop state is not catchable
+      by 0.3 s readers; the prep review launched by auto-sequence is never journaled
+      (no C review row). Captures /pm-captures/scenarios/19.'
+    created_at: '2026-10-22T02:03:58Z'
+    last_edited: '2026-10-22T02:03:58Z'
+  - id: note-eb374a5
+    text: 'QA S18 (2026-10-22): fixed 6813a7ec (qa_loop, pre-existing): qa_resume.json
+      was only refreshed at the top of each 5 s poll, so Ctrl+R within ~5 s of a scenario
+      relaunch (or dequeue) resumed with the dead pane id → resumed run marked the
+      live retry vanished, launched a duplicate s1 worker (3 live under cap 2) and
+      history showed a spurious vanished+retry in the resumed run. Now snapshotted
+      right after relaunch/dequeue. All S18 Thens held post-fix: >49s/>17s/>7s interrupted
+      bounds, grace lost→re-armed, planner deadline cancelled, backoff fired, IR hold
+      text/JSON/badge/pager agree, s4/s5. Filed pr-1b90b51 (new_window_get_pane resolves
+      by window name → wrong pane on duplicate names). Captures /pm-captures/scenarios/18.'
+    created_at: '2026-10-22T02:06:12Z'
+    last_edited: '2026-10-22T02:06:12Z'
+  - id: note-da86dc8
+    text: 'QA S17 (2026-10-22): fixed 26b2d1d1 — history_query._replay overwrote a
+      cleared timer when the same timer id was re-armed, so the sign-off relaunch
+      throttle "released at …" row of the SIGNOFF_REVIEW router vanished from Recent
+      timers once the next router armed the throttle (one id per PR). All other S17
+      Thens held live post-fix (superseded relaunch +3.99 s after due, re-armed/released/lost/cancelled
+      throttle, 3 distinct signoff rows, interrupted >9s across pm tui restart --breadcrumb
+      then done SIGNOFF_BLOCKED same id, derived BLOCKED hold, badges, pager==CLI
+      at 74 cols). Driver tip: Down keys sent <1 s after the popup appears may not
+      move the fzf cursor; wait ~2 s.'
+    created_at: '2026-10-22T02:12:16Z'
+    last_edited: '2026-10-22T02:12:16Z'
+  - id: note-08becc4
+    text: 'S22 refine (0d3edf6d): (1) Neither relaunch nor dequeue has a TUI log line.
+      Trigger the restarts on ~/.pm/debug/<tag>.log "[qa_loop] Relaunched scenario
+      1 in window qa-<pr>-s1" and "[qa_loop] Launched scenario 3 (...) in window qa-<pr>-s3".
+      (2) A dequeue spends ~15 s in the concretizer (history "launching: slot free;
+      preparing worker", window qa-<pr>-s3 already exists) before the worker pane
+      splits; the 6813a7ec snapshot is written only after that split. A restart between
+      "Launching queued scenario 3" and "Launched scenario 3" is outside the fix and
+      may hit pr-1b90b51 (duplicate window name), so restart 2 must follow "Launched".
+      (3) A QA run ends INPUT_REQUIRED from a qa_scenario INPUT_REQUIRED verdict.
+      qa_finalize only offers FINALIZE_DONE/FINALIZE_BLOCKED and does not change the
+      overall verdict. (4) The grace timer qa-grace:<loop> is cleared only at loop
+      end, so after restart 2 the long-elapsed grace still reads "lost (owner process
+      exited)" (the owner check comes before the due check), then "re-armed". (5)
+      The second resumed run has children only for s1 and s3; s2 settled earlier and
+      gets no child.'
+    created_at: '2026-10-22T02:35:22Z'
+    last_edited: '2026-10-22T02:35:22Z'
+  - id: note-31db863
+    text: 'QA S22 (2026-10-22): fixed d6d0987a. A pm tui restart --breadcrumb within
+      ~2 s of a dequeued scenario launch resumed QA wrongly: (1) a verification pass
+      that landed during the dequeue concretizer (~16 s block) was missing from the
+      post-launch snapshot, so the resumed run re-verified s1; (2) resumed runs polled
+      already-settled scenarios again (second "qa s2 done PASS", "up to 3 at once"
+      under cap 2); (3) re-verifying into fake panes that had exited raised CalledProcessError
+      out of the poll loop, ending QA ERROR; (4) pre-existing ScenarioObserver zero-length
+      "settled without running" attempt re-journaled every tick. Post-fix all S22
+      Thens held (two restarts, grace lost→re-armed twice, one done PASS per scenario,
+      IR hold). With the spec timing s1 always settles before restart 2, so the final
+      run holds s3 only and has no scenario summary (needs ≥2 attempts); check the
+      summary on resumed run 1. Captures /pm-captures/scenarios/22.'
+    created_at: '2026-10-22T03:18:15Z'
+    last_edited: '2026-10-22T03:18:15Z'
+  - id: note-0409155
+    text: 'QA S23 (2026-10-22) PASS on 0d3edf6d, no edits: real O auto-start A→B (B
+      depends on A) to stop-before-merge, g merge A, B auto-starts, g merge B. All
+      history Thens held: one untracked start row, review i1 NW/i2 PASS, qa planner+s1/s2
+      (wall 65s < sum 130s, cap 2), signoff detail JSON-only, hold no countdown →
+      released (PR merged) = merged_at, merged-A popup single history row, A JSON
+      after B merge == post-A-merge minus generated_at, 970+972 reader files clean,
+      0 cross-PR ids. Obs: review launching phase ~0.2 s (A 0.5 s reader missed it,
+      B caught it); popup pager re-wraps rows wider than 74 cols collapsing column
+      spacing (signoff row, Milestones line), word-equal to CLI. Captures /pm-captures/scenarios/23.'
+    created_at: '2026-10-22T02:49:42Z'
+    last_edited: '2026-10-22T02:49:42Z'
+  - id: note-d8bb004
+    text: 'QA S25 (2026-10-22) PASS on 0d3edf6d, no edits: no-TUI CLI history held
+      — P via pm pr start/review: honest empty form (#7/7/id identical, JSON attempts
+      [] + missing note), pm pr qa rc=1 guidance, popup [no history]; Q via pm pr
+      auto-sequence: one open start row (→ now running, open true, no owner-exited),
+      prep review not journaled (absent), popup [start: turn done]; cleanup --resources
+      ended the same attempt interrupted "PR resources cleaned up", runtime gone,
+      popup [1 run]; pagers == COLUMNS=74 CLI. Spec nit: the runtime line reads "start=idle"
+      (runtime file state written by the auto-seq tick), not "start=running". Captures
+      /pm-captures/scenarios/25.'
+    created_at: '2026-10-22T02:42:31Z'
+    last_edited: '2026-10-22T02:42:31Z'
+  - id: note-d6a5d93
+    text: 'S24 refine (0d3edf6d, two projects one HOME): predicted cross-project defects
+      to watch, from code: (1) runtime_state.sweep_stale_states("tui-mount") clears
+      in-flight entries for EVERY PR in ~/.pm/runtime, so X Ctrl+R ends Y running
+      review-loop parent attempt "interrupted swept on tui-mount" (written by X);
+      Y loop keeps running and its next _on_iteration mirror opens a 2nd review-loop
+      attempt (same loop id). (2) _resume_incomplete_qa scans ~/.pm/workdirs/qa/*/qa_resume.json
+      of the whole HOME every ~5 s in every TUI; after X TUI SIGKILL, Y TUI finds
+      the dead-owner snapshot, store.get_pr(Y data) misses or status!=qa, and clear_resume_file
+      deletes X snapshot, so the respawned X TUI cannot resume. (3) _reconcile_timers
+      checks owner liveness before due, so an uncleared, already-elapsed QA grace
+      flips "elapsed" -> "lost (owner process exited) at unknown" after SIGKILL. (4)
+      Same title+desc => same id (sha256(title\n desc)), shared ~/.pm/history/<id>.jsonl
+      and ~/.pm/runtime/<id>.json, so Y never-run twin shows X attempts/running loop.
+      pm pr history <id-not-in-project> errors "PR ... not found" only while no journal
+      exists; once one exists it renders it with no title/status.'
+    created_at: '2026-10-22T02:35:59Z'
+    last_edited: '2026-10-22T02:35:59Z'
+  - id: note-24fad67
+    text: 'QA S24 (two projects, one HOME): fixed e084185d. (1) X TUI mount sweep
+      (Ctrl+R) cleared Y live review-loop runtime entry → Y PY loop "interrupted swept
+      on tui-mount" written by X pid, split into 2 attempts, i1 "parent run ended
+      first", grace "cancelled (owner ended)"; runtime entries now carry owner, sweep
+      skips other live owners. (2) Y _resume_incomplete_qa deleted X qa_resume.json
+      ~4 s after X kill -9 (PX not a Y PR) → X could not resume; scan now skips snapshots
+      with another session_tag. (3) already-elapsed QA grace flipped to "lost" after
+      owner kill -9; owners heartbeat their lock (1 s mtime), a gate due <= owner
+      last-alive stays elapsed, heartbeat also bounds owner-exited attempts (qa s1
+      >30s, was unknown). Not fixed, filed pr-c64eb04: same title => same PR id across
+      projects, so Y never-run "History demo" shows X loop/grace/[1 run], picker review
+      [loop]/[done i2 PASS], and pm pr history <X-only id> in Y renders X attempts
+      once a journal exists. Captures /pm-captures/scenarios/24 (pre-fix/post-fix).
+      Env gotcha: run pm session with </dev/null from the recorded boot pane (nested
+      attach deadlocked tmux -L server); pm pr start </dev/null outside a session.'
+    created_at: '2026-10-22T03:21:22Z'
+    last_edited: '2026-10-22T03:21:22Z'
+  - id: note-0fce646
+    text: 'QA S28 (2026-10-22): fixed c0d2f019. kill -9 0.4 s after a QA grace due
+      (last 1 s heartbeat 0.5 s before due) flipped the already-elapsed gate to "lost
+      (owner process exited)"; arm_timer now schedules an extra owner-lock beat just
+      after each gate due (_beat_after). Post-fix all S28 Thens held (X C-r: XA loop
+      swept/i1 >9s/grace lost, YB untouched one loop done PASS all Y-pid events; kill
+      -9: run >49s, s1 >30s, grace elapsed x4 reads, qa_resume.json kept, resumed
+      done PASS, 857+543 reader files clean). Spec gap: step 7 leaves XQ in_progress,
+      so t never sets status qa and the respawned TUI drops qa_resume.json (by design)
+      -> add `pm pr edit XQ --status in_review` before t. Obs: picker review badge
+      [loop i1] while i2 runs (runtime iteration = completed count). Captures /pm-captures/scenarios/28.'
+    created_at: '2026-10-22T05:17:00Z'
+    last_edited: '2026-10-22T05:17:00Z'
+  - id: note-58164eb
+    text: 'S26 refine (653c26c6): (1) loop children (iterations) render oldest first
+      (start order) under a newest-first top-level list; (2) the review INPUT_REQUIRED
+      hold is in JSON holds[] (due_at/remaining_s null), not timers.active; text "armed
+      …, no countdown"; (3) TUI stop = z d, which also opens a plain fresh review
+      (a non-loop review row) that consumes a fake review cursor slot, so with [NW,NW,PASS]
+      wrap + z d + a superseded zz d loop the final zz d loop runs NW,NW,PASS; (4)
+      popup at an 80-col window is 95% wide (~74 inner), so pager vs COLUMNS=80 CLI
+      compares word-for-word, not line-for-line.'
+    created_at: '2026-10-22T04:53:34Z'
+    last_edited: '2026-10-22T04:53:34Z'
+  - id: note-007af98
+    text: 'QA S26 (2026-10-22): fixed c4e3f5b0. After z d (plain fresh review left
+      review-<pr>.jsonl naming its own session) and a later review loop ending, the
+      TUI non-loop review tracker paired the loop''s leftover iteration pane with
+      that stale symlink, so the runtime mirror journaled a phantom top-level "review
+      running" reading "agent working" forever (Waiting for: review: agent working
+      1m51s+, popup badge [review: working], runtime review=running). _poll_impl_idle
+      now compares the pane start-command --session-id with the transcript session
+      and treats a mismatch like an unregisterable pane (orphan trust watch); cached
+      per pane. Post-fix all S26 Thens held (badge working / turn done 12s vs R1 11.7s,
+      grace armed/due fixed + strictly falling, IR hold 5 reads, (last X) only, start
+      folded, pager==CLI at 74 cols, A cancelled 1.0 s after z d, B superseded, C
+      NW/NW/PASS, order C,B,A,S1). Obs: one R1 read caught an iteration as "running
+      for 0s" (phase start) in the 8 ms between attempt_start and its launching phase;
+      the z d plain review row appears (vanished) only when the 5 s tracker tick lands
+      before zz d replaces its window. Captures /pm-captures/scenarios/26 (pre-fix/
+      post-fix/).'
+    created_at: '2026-10-22T05:18:38Z'
+    last_edited: '2026-10-22T05:18:38Z'
+  - id: note-5b192f0
+    text: 'S27 refine (653c26c6): re-check of S22 d6d0987a reuses /pm-captures/scenarios/22/scripts
+      (bootstrap.sh/setup.sh/cfg-a.json/cfg-b.json/driver1.py/driver2.py/poller.py).
+      Adds E17 latency check: time pm pr history --json (median of 5) before QA and
+      after QA end; the journal grows, so expect a small rise, not a step per restart
+      owner (only owners with open attempts/uncleared timers are probed). Have the
+      rj reader log each call duration to see no step at each restart. Scenario summary
+      lives on resumed run 1 only (run 2 holds s3 only).'
+    created_at: '2026-10-22T04:50:43Z'
+    last_edited: '2026-10-22T04:50:43Z'
+  - id: note-82f11d3
+    text: 'QA S27 (2026-10-22) PASS on 653c26c6, no edits: S22 re-check held — restart
+      2 s after s1 relaunch + 1.2 s after "Launched scenario 3"; one done PASS per
+      scenario, no s1 re-verify, cap 2, QA PASS; IR hold agrees text/JSON/badge/pager;
+      latency flat (median 0.065→0.079 s, no step at restarts). Spec nit: after restart
+      2 the grace armed by resumed run 1 is long elapsed, so it stays "elapsed" then
+      "re-armed" (qa.md e084185d rule), not "lost". Captures /pm-captures/scenarios/27.'
+    created_at: '2026-10-22T05:03:15Z'
+    last_edited: '2026-10-22T05:03:15Z'
+  - id: note-a42b8af
+    text: 'S29 refine (db9e04e5): offline render of the S23 journal predicts (1) under
+      faketime +1y the only raw `pm pr history` line >80 cols is the Recent-timers
+      "manual merge hold (stop-before-merge): released (PR merged) at YYYY-MM-DD HH:MM:SS"
+      (84 cols); the TTY wrapper splits it at " (" — attempt rows max 77-78. (2) Year-ahead
+      END times stay time-only (ref = attempt start), only starts/timers/milestones
+      get YYYY-. (3) A review-loop ROOT row straddling local midnight under +1y would
+      be 83 cols — S29 puts midnight inside the QA run. (4) _reconcile_timers marks
+      a merged PR merge-hold "lost (owner process exited) at unknown" once the TUI
+      owner is gone, before _release_terminal_holds can say "released (PR merged)"
+      — so a later-day read after TUI exit loses the released row; S29 keeps the TUI
+      alive. faketime installs via sudo apt-get install faketime.'
+    created_at: '2026-10-22T04:55:34Z'
+    last_edited: '2026-10-22T04:55:34Z'
+  - id: note-37ae873
+    text: 'QA S31 (2026-10-22) PASS on aed1565b, no edits: S26 phantom re-check held
+      — after plain z d (ended done NEEDS_WORK before zz d) + 2-iteration loop, 88
+      s of reads show no open review row / review=running / stuck waiting_for, badges
+      [start: turn done]; story 1 (3 graces fixed+falling, IR hold 5 reads null due,
+      badge 12s vs R1 11.5s, R1/R2 0 mismatches), pager==CLI (only live start-row/idle
+      diffs, max 74/78 cols), cancel A ≤0.4 s, B superseded, C NW/NW/PASS all held.
+      Captures /pm-captures/scenarios/31.'
+    created_at: '2026-10-22T05:55:11Z'
+    last_edited: '2026-10-22T05:55:11Z'
+  - id: note-5bd15bf
+    text: 'QA S32 (2026-10-22) PASS on aed1565b, no edits. This re-checks c0d2f019
+      and e084185d with 3 QA scenarios at cap 2 in two projects sharing one HOME.
+      Story 1: X C-r swept only XA (loop interrupted, i1 >8s owner-exited, grace lost).
+      YB had one loop, done PASS, with all 16 journal lines from the Y pid. Story
+      2: kill -9 landed 0.41 s after the QA grace due; the owner lock last beat at
+      due+0.003 s; the grace stayed elapsed in all 31 pre-respawn reads. Run, s1 and
+      s2 read >49s/>30s/>30s owner-exited, current was empty, and qa_resume.json was
+      kept for 12 s while Y ran. The resumed run launched s3 and ended done PASS,
+      and the old grace reads re-armed. YB was unchanged. Popups/pagers matched the
+      CLI. Obs: the queued s3 also reads interrupted. Captures /pm-captures/scenarios/32.'
+    created_at: '2026-10-22T05:57:15Z'
+    last_edited: '2026-10-22T05:57:15Z'
+  - id: note-f309c0a
+    text: 'S34 refine (aed1565b): single-run variant of S22/S27. s3 INPUT_REQUIRED
+      comes from a scripted qa_scenario sequence [PASS d40, PASS d40, PASS d40, INPUT_REQUIRED
+      d20]: the cursor advances per worker launch (s1, s2, s1 retry 1, s3), and a
+      5th (duplicate) launch would also emit IR. Restart 1 (after Relaunched scenario
+      1) is a plain `pm tui restart`, because QA resume runs from the TUI poll-tick
+      qa_resume scan without a breadcrumb. Restart 2 (after Launched scenario 3) is
+      `--breadcrumb`. The final resumed run holds only s3, so it has no scenario summary.
+      Check wall < summed on the earlier runs. Recent timers keeps only 10 rows, so
+      read the planner "cancelled" row soon after the plan is found, or from JSON.
+      bbd53aab wraps Recent-timer rows: a "lost (owner process exited) at unknown
+      (armed …)" row should wrap to ≤80 cols. Drivers: /pm-captures/scenarios/27/scripts.
+      Change the END regex to "QA INPUT_REQUIRED for".'
+    created_at: '2026-10-22T05:43:49Z'
+    last_edited: '2026-10-22T05:43:49Z'
+  - id: note-eeb44f4
+    text: 'QA S34 (2026-10-22) PASS on aed1565b, no edits: one QA run, cap 2, s1 killed+retry,
+      plain pm tui restart 2 s after the s1 relaunch (QA resumes without a breadcrumb;
+      grace lost then re-armed; >44s/>17s/>7s), and --breadcrumb 1.2 s after "Launched
+      scenario 3" (grace elapsed then re-armed; >1m23s). One done per scenario (s1/s2
+      PASS, s3 INPUT_REQUIRED), cap held, 502 JSON + 95 text reads clean, Recent timers
+      <=75 cols, latency 0.090 -> 0.073 s with no step, IR hold agrees across text/JSON/badge/pager.
+      Spec nit: the interactive Scenario 0 pane takes qa_scenario scripted slot 0,
+      so a [PASS,PASS,PASS,IR] sequence needs a filler first slot. The resumed s1
+      retry PASS is on a plain "qa s1" child. Captures /pm-captures/scenarios/34.'
+    created_at: '2026-10-22T05:58:43Z'
+    last_edited: '2026-10-22T05:58:43Z'
+  - id: note-a85ec1b
+    text: 'QA S33 (2026-10-22) PASS on aed1565b, no edits: O auto-start A→hold with
+      signoff delay 30 s — router Waiting for/badge [signoff router: working]/one
+      60 s throttle, hold text/JSON/badge; kill -9 TUI then CLI pm pr merge A and
+      pm session kill then pm pr merge B both read "released (PR merged)" at merged_at
+      (481 no-TUI reader polls, never lost/active); merged popups single history [4
+      runs], pager word-equal; A JSON stable across 3 reads; shifted TZ/+2d/+365d
+      TTY==|cat, max 79 cols, year merge-hold row wraps between parts. Driver gotcha:
+      quote a POSIX TZ like <-0548>+05:48:30 inside script -qec. Captures /pm-captures/scenarios/33.'
+    created_at: '2026-10-22T06:01:08Z'
+    last_edited: '2026-10-22T06:01:08Z'
+  - id: note-63d2023
+    text: 'QA S35 (2026-10-22): fixed 76742637 — a TUI command-bar `/pr review <pr>`
+      launched the review pane without --transcript (only the d key passed one), so
+      the review was never tracked or journaled and history said "No recorded action
+      history". The command bar now adds --transcript like d. After the fix all S35
+      Thens held: #42/id/unknown/closed-PR/Actions-before note; 840 concurrent reads
+      over 2 TUI loops + qa-run-bg + CLI-opened F start with R rotation mid-loop;
+      garbage+fragment then cleanup --resources; 5 broken-store passes identical (NW→PASS,
+      QA PASS), owners-file kill -9 → interrupted pid. Setup nit: spec-mode auto alone
+      leaves QA INPUT_REQUIRED with the fake; also run pm pr spec R qa. Captures /pm-captures/scenarios/35.'
+    created_at: '2026-10-22T06:21:16Z'
+    last_edited: '2026-10-22T06:21:16Z'
+  - id: note-6e898e4
+    text: 'QA S41 (2026-10-22): story 1 (rotation 22 s into the loop, 2846 reads,
+      no count dip across 18 reads near the rotation, B QA up to 2 at once and wall
+      < summed, C CLI start open in all reads) and story 2 (kill -9 in the i3 grace:
+      lost grace is recent[0] ahead of 14 elapsed graces, stale runtime line, swept
+      on tui-mount, new loop fresh i1) held. Fixed b29bcdfa: the E10 fold dropped
+      the re-tracked start attempt id from --json (runtime.start.attempt_id dangling);
+      the kept attempt now exports merged_ids. Spec nit: i3 text elapsed reads "unknown",
+      because the kill lands 0.38 s after i3 starts (the bound is shown only from
+      1 s). Filed pr-9c5f1b5 (pm session attach traceback inside a pane). Captures
+      /pm-captures/scenarios/41.'
+    created_at: '2026-10-22T16:01:58Z'
+    last_edited: '2026-10-22T16:01:58Z'
+  - id: note-00883ce
+    text: 'QA S40 (2026-10-22): fixed a07a4d46. After a plain review (command-bar
+      /pr review or d) printed its verdict, the history Now line said "review=idle
+      (last NEEDS_WORK)", not the spec "review=done NEEDS_WORK". The open idle review
+      pane hook state relabeled the finished runtime entry. _runtime_actions now keeps
+      a non-in-flight entry state. All other S40 Thens held: the 76742637 command-bar
+      review is tracked (running row, Waiting for, [review: working], pager==CLI,
+      no context key); #42/42/id honest empty + pr-0000000 rc 1; garbage + \xff\xfe
+      + truncated tail kept all 5 attempts, fragment alone on its own line, 81 reader
+      reads rc 0; base/ro/file/dir passes identical (NW→PASS 2 iters, QA PASS, pending→in_progress→in_review→qa),
+      [no history]. Obs: like d, the review attempt registers ~4 s after launch (tracker
+      tick), so early reads show only start. Captures /pm-captures/scenarios/40.'
+    created_at: '2026-10-22T16:14:41Z'
+    last_edited: '2026-10-22T16:14:41Z'
+  - id: note-50e61bf
+    text: 'S42 refine (05913801): in a plain O pipeline (no router window killed)
+      the SIGNOFF_REVIEW hop clears the throttle "released", so the next router arms
+      a cleared id and no "re-armed" row appears at BLOCKED time. "re-armed" appears
+      only after a relaunch while the throttle is uncleared, e.g. the stale relaunch
+      after the user moves HEAD (git commit in pm pr cd <pr>) to clear a BLOCKED record;
+      router 2 throttle then reads re-armed. ctrl+q only detaches (TUI keeps running);
+      use pm session kill for "no TUI". The auto-start target is lost without a breadcrumb,
+      so B needs O again after pm session. Review fake slots: A i1, the z d plain
+      review, the superseded i1 and each later iteration each take one.'
+    created_at: '2026-10-22T15:42:07Z'
+    last_edited: '2026-10-22T15:42:07Z'
+  - id: note-05664e9
+    text: 'QA S42 (2026-10-22): fixed 3ccea259. pm pr history attempt rows with a
+      dated start (shifted TZ / +365d) plus a flagged name (signoff router (adopted)/(stale),
+      review-loop (loop …) cancelled KILLED) were 84-89 cols in | cat, and only the
+      TTY wrapper re-wrapped them (TTY != cat). Rows now wrap between parts like Recent
+      timers. Run 2 on 3ccea259 held every Then: z d cancel 0.96 s, grace cancelled/never
+      elapsed, loop 2 superseded, one folded start row, router 1 throttle 60 s falling,
+      router 2 >5s interrupted + lost throttle → same id done SIGNOFF_BLOCKED (adopted)
+      with the \xff line in the journal, stale router 3 MERGE, re-armed/cancelled
+      throttles, holds, no-TUI merge released at merged in 466 reads, merged popup
+      [11 runs] word-equal, 80-col TZ/year reads <=80 and TTY==cat. Spec nits: TZ
+      <Q> is invalid POSIX (name needs >=3 chars; use <QQQ>); restart >=1 s into router
+      2 or the bound reads unknown. Captures /pm-captures/scenarios/42.'
+    created_at: '2026-10-22T16:26:45Z'
+    last_edited: '2026-10-22T16:26:45Z'
+  - id: note-86817d4
+    text: 'S43 refine (05913801; S39 never launched): two-HOME + S34 single-run IR
+      combined. In S34 the X restarts came about 44 s and 128 s after t, and QA ended
+      about 191 s after t. So YB''s review uses [NEEDS_WORK d60, PASS d60] started
+      with t, and YC''s background QA is started (third auto-sequence -> ''advanced:
+      qa'') just before t, so both are live across both X restarts. A 20 s YB loop
+      would finish before restart 2. Do YC''s prep (spec + auto-sequence x2 + review
+      PASS) under a prep config, then set Y''s main config, which resets the shared
+      review cursor. X''s qa_scenario sequence is [filler PASS d40, PASS d40, PASS
+      d40, PASS d40, INPUT_REQUIRED d20] (Scenario 0 takes slot 0). Run pm pr edit
+      XQ --status in_review before t. Match the debug-log triggers in X''s ~/.pm/debug/<X
+      tag>.log and the window name qa-<XQ>-sN. YC''s CLI-opened start row may read
+      ''swept on tui-mount'' (the owner CLI is dead); that is not a QA interruption.'
+    created_at: '2026-10-22T15:38:52Z'
+    last_edited: '2026-10-22T15:38:52Z'
+  - id: note-9b7eaf0
+    text: 'QA S43 (2026-10-22) PASS on 05913801, no edits: two projects in one HOME.
+      X TUI QA (cap 2) got a plain pm tui restart 2.0 s after the s1 relaunch and
+      --breadcrumb 1.3 s after "Launched scenario 3", while Y ran a /review-loop YB
+      and a qa-run-bg YC. YB had one loop done PASS (NW/PASS) with all 16 journal
+      lines from the Y pid, no sweep; YC was never interrupted or resumed, done PASS;
+      no cross-project Resuming or windows. XQ: >44s interrupted, then (resumed) >1m23s
+      interrupted, then resumed done IR with only s3; one done per scenario; grace
+      lost→re-armed, then elapsed→re-armed; IR hold agrees in text/JSON/badge/pager;
+      latency 0.069→0.081 s with no step at restarts. Obs: finished qa-<pr>-sN windows
+      stay open, so raw window count hits 3 under cap 2 (only 2 live workers). Captures
+      /pm-captures/scenarios/43.'
+    created_at: '2026-10-22T16:01:42Z'
+    last_edited: '2026-10-22T16:01:42Z'
+  - id: note-611a922
+    text: 'S46 refine (b28d2f62): re-run of S42 on the i2-i6 head. Draft fixes: (1)
+      the commit that yields the MERGE router must come AFTER the BLOCKED verdict
+      (BLOCKED is terminal until HEAD moves -> stale router 3 MERGE); a commit after
+      the SIGNOFF_REVIEW hop does nothing (the bounce already consumes the record,
+      router 2 launches fresh). (2) review grace is a 20 s minimum from poll start,
+      so z d ''in the i2 grace'' needs a short i2 delay (d5), not d20 (turn_finished
+      would land with ~0 s left). Offline render of the S42 run2 journal on b28d2f62:
+      max 79 cols, TTY==cat under today/<QQQ> TZ/+2d/+365d; MM-DD form wraps ''signoff
+      router (adopted)'' but the ''review-loop (loop ..) cancelled KILLED'' root row
+      fits unwrapped (wraps only under +365d); BLOCKED hold head wraps as ''... (signoff)
+      [project.yaml signoff'' / ''    record]''. S42 drivers: /pm-captures/scenarios/42/run2/scripts.'
+    created_at: '2026-10-22T17:32:43Z'
+    last_edited: '2026-10-22T17:32:43Z'
+  - id: note-a6447cb
+    text: 'QA S46 (2026-10-22) PASS on 95d8d990 (app b28d2f62), no edits: z d in loop-1
+      i2 grace (15 s left) -> loop+i2 cancelled KILLED +0.88 s, i2 grace cancelled
+      never elapsed; loop 2 superseded; one folded start row; router 1 throttle 60
+      s falling/released; restart 5.5 s into router 2 with \xff line -> >6s interrupted
+      + lost throttle -> same id done SIGNOFF_BLOCKED (adopted); BLOCKED hold head
+      wraps "[project.yaml signoff" / "    record]" TTY==cat; stale router 3 MERGE,
+      re-armed row; no-TUI merges released at merged in 351 polls; merged popups [11
+      runs]/[4 runs] word-equal; today/TZ/+2d/+365d all <=80, TTY==cat, wraps only
+      >80. Obs: one read 0.27 s after z d still had the i2 grace active (before the
+      0.88 s cancel journal). Captures /pm-captures/scenarios/46.'
+    created_at: '2026-10-22T18:52:47Z'
+    last_edited: '2026-10-22T18:52:47Z'
+  - id: note-3c66acb
+    text: 'Impl resumed 2026-11-02 (Opus 5.5): merged origin/master@c1fcecc5 as 20273e15
+      (pushed, fast-forward from 243ca527). Re-grounded on master: review launch retries
+      are backoff phases with a review-launch-retry timer, the lease wait is a queued
+      phase, CLOSED/HOLD/LAUNCH_FAILED end the iteration, and the auto-start re-arm
+      cooldown is a timer. Held QA runs journal a "QA INPUT_REQUIRED hold" and the
+      waiting scenario stays open in waiting_human (the observer is per run). Journals
+      are per pm session (~/.pm/history/<pm-session>/<pr>.jsonl, like the S93 runtime
+      dirs). The wait-for-merge hold is released when auto-start drops the target.
+      A merged PR''s picker keeps master''s notice row plus History (H only). Dropped
+      in favour of master: the branch''s QA-resume session-tag filter (master S39/S41
+      rules), _send_followup, _parse_fzf_expect, and the immediate pane lookup (now
+      a stop check after the window wait). impl.md updated. Validation: full suite
+      5572 passed, 1 skipped, 0 failed; isolated sandbox e2e (fake-claude) review
+      loop, held QA, kill/retry/reopen all read correctly; evidence /pm-captures/pr-8020495/impl-2026-11-02-master-merge.
+      Overlap with open PRs (textual; whichever lands second resolves; no ordering
+      decision needed): #241 pr-1139060 qa_loop +8 hunks and pr_cleanup 1; #247 pr-1ab9075
+      qa_loop +5; #257 pr-6566901 restructures poll_for_verdict (keep our once-a-second
+      pane check during the hook wait); #275 pr-9ee4d64 review_loop adopt path (combine
+      resolve_iteration_transcript with _start_iteration_attempt); #244 and #274 none.
+      Left uncommitted as found: the pm/project.yaml delta (status, notes b8f5690/dc959dc/61763c9,
+      model/effort) and verify-s12/s6-followup.md.'
+    created_at: '2026-11-02T02:01:25Z'
+    last_edited: '2026-11-02T02:01:25Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
@@ -51452,3 +52289,204 @@ prs:
     signoff: provider:claude-work-xhigh-249
     merge: provider:deepseek-flash
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-049649a-remove-all-pr-autostart-and-fail-clo-registered-20261027
+- id: pr-72c8695
+  plan: tui-ux
+  title: Mobile PR actions pane with shared dispatch and app session links
+  branch: pm/pr-72c8695-mobile-pr-actions-pane-with-shared-dispatch-and-ap
+  status: pending
+  depends_on:
+  - pr-3ae2fc3
+  description: 'Add a phone-friendly web version of the PR actions pane to the existing
+    PM dashboard/report service. A user should be able to select a PR, see its action
+    state, start or resume an action, and open that action''s session in ChatGPT or
+    Claude on their phone. Existing remote-control connections are already working;
+    build on them.
+
+
+    - Extract the action definitions, availability/status, variants, and launch-or-attach
+    dispatch from `pm_core/cli/session.py` and the current TUI handlers into a shared
+    layer. Terminal and web render that layer, so adding or changing an action happens
+    in one place. Include current fresh/loop options and #236''s spec-review visibility
+    and approval controls. Non-session actions such as editing metadata, reading history,
+    or approving a spec use their appropriate UI rather than a fabricated session
+    link.
+
+    - Reuse a live action session or launch through the existing PM flow, then resolve
+    its actual provider-issued link. Preserve project, host, PR, action and pane identity,
+    including QA scenario sessions. Repeated taps, slow launches and reconnects must
+    not create duplicate workers or dispatch against a newly selected PR. Keep existing
+    spec-approval and merge gates authoritative.
+
+    - Enable Claude Remote Control centrally on new session startup, or enable it
+    on demand in an existing session at a safe prompt without interrupting work. Capture/reuse
+    the actual remote URL; a local Claude session UUID is not necessarily a remote
+    session identifier. Use existing ChatGPT/Codex host pairing and supported session
+    links. Keep provider link resolution separate from PM action behavior so other
+    backends can supply it later; this does not require the full planned backend migration.
+
+    - Keep report/evidence links and the current localhost/Tailscale deployment. Use
+    validated action requests through existing dispatch, with normal request-origin
+    protection, rather than GET mutations or a shell-command endpoint. Show startup/link
+    availability and actionable failures, with browser/status fallback when an app
+    cannot open. Refresh state after returning from the mobile app.
+
+
+    Verify action parity against the terminal pane, narrow-screen use, existing-session
+    reuse and new-session launch, spec holds/manual merge holds, duplicate requests,
+    reconnects and stale links. Exercise a real phone handoff for each configured
+    provider and record the supported app/platform behavior; mocks alone do not establish
+    that an app link works.
+
+
+    Coordinate with pr-8020495 for the shared History action, pr-3a8111d for Claude
+    session names, and pr-291e891/pr-c41f029 for action-source context. Keep pr-4702a11''s
+    document/voice editor a separate surface. Starting points: `pm_core/cli/session.py`,
+    TUI action dispatch, `runtime_state.py`, `pane_registry.py`, `claude_launcher.py`,
+    and `dashboard_server.py`.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T19:14:51.114484+00:00'
+  updated_at: '2026-10-21T20:03:24.740138+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-c12bdf5
+    text: 'From pr-8020495: pm_core/action_catalog.py is the start of the shared action
+      catalog. It holds ActionDef records; the History view action (key history, kind
+      view, shortcut H, cli `pr history {pr_id}`) exposes query=history_query.build_history
+      (JSON model, schema pm.pr.history/1) and render=history_query.render_text, plus
+      badge=summary_badge. It is available for every status, including merged and
+      closed. The terminal picker (cli/session.py) already renders view actions from
+      the catalog (`view:<key> <pr_id>` commands). Move the session actions from session.py
+      `_ALL_ACTIONS` into the same module, and have the mobile pane render the History
+      model from `query()` instead of shelling out.'
+    created_at: '2026-10-21T20:03:24Z'
+    last_edited: '2026-10-21T20:03:24Z'
+- id: pr-2fed1ab
+  plan: bugs
+  title: 'Bug: picker review row keeps "[loop]" badge after the owning TUI is SIGKILLed'
+  branch: pm/pr-2fed1ab-bug-picker-review-row-keeps-loop-badge-after-the-o
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/session.py _format_action_status (review-loop
+    branch) reads runtime_state.derive_action_status, which still has review-loop
+    state=running from a SIGKILLed TUI. Repro (found in pr-8020495 QA S16 story 3):
+    /review-loop <pr> in the TUI, kill -9 the TUI pid (~/.pm/tui-<session>.pid) during
+    iteration 1, open prefix+P from review-<pr>: the review row reads "● review [open]
+    [loop]" although nothing drives the loop. pm pr history already marks the same
+    runtime entry "(stale: owner exited)" via the owner-liveness probe (history_query);
+    the picker badge should use the same staleness check (or show [stale]) until the
+    next TUI mount sweep clears it.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T01:12:34.877341+00:00'
+  updated_at: '2026-10-22T01:12:34.877341+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1b90b51
+  plan: bugs
+  title: 'Bug: tmux.new_window_get_pane returns the first same-named window pane,
+    not the window it just created'
+  branch: pm/pr-1b90b51-bug-tmux-new-window-get-pane-returns-the-first-sam
+  status: pending
+  depends_on: []
+  description: 'pm_core/tmux.py new_window_get_pane runs new-window then find_window_by_name(session,
+    name) and returns that window first pane. When a window with the same name already
+    exists (e.g. a QA scenario relaunch while the old qa-<pr>-sN window is still alive,
+    as seen in pr-8020495 QA S18 pre-fix: resumed run relaunched s1 into new window
+    @14 but got pane %16 of the old @13), the caller tracks the wrong pane and the
+    new worker is orphaned. Fix: new-window -P -F "#{window_id} #{window_index} #{pane_id}"
+    and use that output.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T01:55:36.713710+00:00'
+  updated_at: '2026-10-22T01:55:36.713710+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c64eb04
+  plan: bugs
+  title: 'Bug: PR ids collide across projects sharing one HOME, so per-HOME history/runtime/QA
+    stores leak between projects'
+  branch: pm/pr-c64eb04-bug-pr-ids-collide-across-projects-sharing-one-hom
+  status: pending
+  depends_on: []
+  description: 'PR ids are sha256(title + "\n" + description), so two projects in
+    one HOME with a same-titled PR (e.g. "History demo", no description) get the same
+    id. ~/.pm/history/<pr>.jsonl, ~/.pm/runtime/<pr>.json and ~/.pm/workdirs/qa/<pr>-<loop>
+    are keyed by PR id only. Repro (QA pr-8020495 scenario 24, captures /pm-captures/scenarios/24/story1):
+    project X runs /review-loop on "History demo" while project Y has its own never-run,
+    pending "History demo". In Y, pm pr history <id> shows X''s running loop, "runtime:
+    review-loop=running" and X''s review verdict grace counting down; afterwards [1
+    run] / review-loop done PASS. The Y actions popup History badge shows "[review-loop
+    i1: working, 17s left]" then "[1 run]", and its review row shows "[loop]" then
+    "[done i2 PASS]" (from the shared runtime file). Also pm pr history <X-only PR
+    id> run in Y renders X''s attempts as a removed PR instead of "not found" once
+    X has journaled it. Fix idea: namespace the journal and runtime mirror per project
+    (e.g. a project key from the repo root or session tag in the path, or recorded
+    on each event and filtered at read time), with a migration or legacy fallback
+    for existing ~/.pm/history files. The TUI mount sweep and QA resume scan cross-project
+    cleanup was fixed separately in pr-8020495 (8103cc94).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T03:19:23.471649+00:00'
+  updated_at: '2026-10-22T03:19:23.471649+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-4fa69f1
+  plan: bugs
+  title: fake-claude cannot emit merge MERGED / INPUT_REQUIRED verdicts
+  branch: pm/pr-4fa69f1-fake-claude-cannot-emit-merge-merged-input-require
+  status: pending
+  depends_on: []
+  description: 'pm_core/fake_claude.py SESSION_TYPE_VERDICTS["merge"] is (), so the
+    fake merge-conflict window never prints MERGED or INPUT_REQUIRED. The TUI merge
+    verdict path (review_loop_ui._poll_merge / _finalize_detected_merge, _handle_merge_input_required,
+    the merge-input-required hold timer) cannot be exercised live in QA; pr-8020495
+    QA notes hit this repeatedly (merge INPUT_REQUIRED hold, Claude-resolved merge
+    ending done MERGED). Proposal: allow ("MERGED","INPUT_REQUIRED") for merge only
+    via an explicit per-type entry, keeping the _all catch-all a no-verdict merge
+    session (paths.fake_claude_config gives catch-all verdict types their first verdict,
+    so merge must be special-cased or other QA flows would auto-merge).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T04:46:51.884122+00:00'
+  updated_at: '2026-10-22T04:46:51.884122+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-9c5f1b5
+  plan: bugs
+  title: 'Bug: pm session run inside a tmux pane prints a CalledProcessError traceback
+    when the final attach fails'
+  branch: pm/pr-9c5f1b5-bug-pm-session-run-inside-a-tmux-pane-prints-a-cal
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/session.py _session_start -> tmux_mod.attach(grouped)
+    (tmux.py attach, check=True). Repro (QA pr-8020495 S41): from a shell window inside
+    the pm session, with the TUI pane dead, run `pm session </dev/null`; it prints
+    "TUI pane missing — respawning..." and "Attaching to session <S>~1...", respawns
+    the TUI fine, then tmux attach-session exits 1 (nested client / no tty) and pm
+    prints a full Traceback ending in subprocess.CalledProcessError. Expected: a one-line
+    message (or switch-client when $TMUX is set) and a clean exit code, no traceback.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T15:57:27.860328+00:00'
+  updated_at: '2026-10-22T15:57:27.860328+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

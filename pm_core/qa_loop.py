@@ -15,6 +15,7 @@ Verdicts (shared with review):
   INPUT_REQUIRED — Issues found but not fixed, or ambiguity requiring human judgment.
 """
 
+import contextlib
 import json
 import os
 import re
@@ -28,6 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from pm_core import action_history as _ah
 from pm_core import qa_instructions
 from pm_core.paths import configure_logger
 from pm_core.pr_utils import TERMINAL_PR_STATES
@@ -341,6 +343,13 @@ class QALoopState:
     # that a ``z t`` cleared.
     _resume_lock: threading.Lock = field(
         default_factory=threading.Lock, repr=False, compare=False)
+    # Action-history journal ids (pm_core.action_history): the run attempt
+    # and, while planning, the planner child attempt.
+    history_attempt: str = ""
+    _history_planner: str = ""
+    # The run's ScenarioObserver (created by the first verdict poll).
+    _history_observer: object = field(default=None, repr=False,
+                                      compare=False)
 
 
 # ---------------------------------------------------------------------------
@@ -4253,6 +4262,11 @@ def _poll_tmux_verdicts(
                 and s.index not in state.verified_scenarios)
 
     pending = {s.index for s in state.scenarios if _needs_polling(s)}
+    # Scenarios a resumed run restored already settled: their attempts are
+    # in the earlier run's history, so the observer journals none for them.
+    settled_before = {s.index for s in state.scenarios
+                      if s.window_name and not _needs_polling(s)
+                      and s.index not in state.waiting_for_input}
     retry_counts: dict[int, int] = {}  # scenario_index -> retries used
     # Track how many verification failures each scenario has had
     verification_failures: dict[int, int] = {}
@@ -4297,7 +4311,39 @@ def _poll_tmux_verdicts(
                            verdict_reasons=state.scenario_verdict_reasons,
                            waiting_for_input=state.waiting_for_input)
 
+    # One observer per run, kept on the state: a held run's waiting
+    # scenarios stay open across the hold, and the reopened poll settles
+    # them (see _execute_and_finalize).
+    observer = state._history_observer
+    if observer is None:
+        observer = state._history_observer = _ah.ScenarioObserver(
+            state.pr_id, state.history_attempt or None, state.loop_id,
+            settled_before=settled_before)
+    _grace_timer = f"qa-grace:{state.loop_id}"
+    # Journal clock (not monotonic) so the clear reason costs no extra
+    # monotonic reads and agrees with controlled-clock tests.
+    _grace_due = [0.0]
+
+    def _arm_grace() -> None:
+        _grace_due[0] = _ah.now() + _VERDICT_GRACE_PERIOD
+        _ah.arm_timer(state.pr_id, _grace_timer,
+                      purpose="QA scenario verdict grace (all scenarios)",
+                      owner_action="qa",
+                      owner_attempt=state.history_attempt or None,
+                      duration=_VERDICT_GRACE_PERIOD, effect="gate",
+                      expected="scenario verdicts accepted on the next "
+                               "idle turn")
+
+    def _observe() -> None:
+        with verification_lock:
+            verifying_now = set(verifying)
+        observer.observe(state.scenarios, pending=pending,
+                         verifying=verifying_now, queued=_queued_indices,
+                         verdicts=state.scenario_verdicts,
+                         waiting=state.waiting_for_input)
+
     grace_start = time.monotonic()
+    _arm_grace()
 
     def _run_verification(scenario: QAScenario, verdict: str, content: str):
         """Background thread: run verification in this scenario's
@@ -4362,6 +4408,47 @@ def _poll_tmux_verdicts(
                            verdict_reasons=state.scenario_verdict_reasons,
                            waiting_for_input=state.waiting_for_input)
 
+    # Verification passes settled outside the main loop's result handling
+    # (see _drain_verified); the main loop runs their follow-ups.
+    _drained: list[int] = []
+
+    def _accept_verified(scenario: QAScenario) -> None:
+        verifying.discard(scenario.index)
+        _log.info("Verification passed for scenario %d (%s)",
+                  scenario.index, scenario.title)
+        state.verified_scenarios.add(scenario.index)
+        state.latest_output = (
+            f"Scenario {scenario.index} ({scenario.title}): "
+            f"{state.scenario_verdicts[scenario.index]} (verified)"
+        )
+        _notify()
+
+    def _drain_verified() -> bool:
+        """Settle verification passes that landed while the loop was blocked
+        (a dequeued scenario's concretizer, a relaunch backoff, the poll
+        sleep).  The snapshot written next must record them: a restart
+        before the main loop got to them would otherwise resume the
+        scenario as unverified and verify it a second time."""
+        with verification_lock:
+            done = sorted(i for i, (ok, _) in verification_results.items()
+                          if ok)
+            for i in done:
+                del verification_results[i]
+        for i in done:
+            scenario = next((s for s in state.scenarios if s.index == i), None)
+            if scenario is None:
+                verifying.discard(i)
+                continue
+            _accept_verified(scenario)
+            _drained.append(i)
+        return bool(done)
+
+    def _snapshot() -> None:
+        if _drain_verified():
+            _observe()
+        _write_resume_file(state, use_containers, concurrency_cap,
+                           _queued_indices)
+
     def _launch_next_queued():
         """Launch the next queued scenario if concurrency allows."""
         if not _launch_queue:
@@ -4373,8 +4460,12 @@ def _poll_tmux_verdicts(
         # A provider setup error stops the run inside this launch, before
         # the tick's own dashboard write: record what has settled first.
         _write_dashboard()
+        # The launch below blocks (concretizer + window), so journal the
+        # scenarios that just finished now, not after it returns.
+        _observe()
         scenario = _launch_queue.pop(0)
         _queued_indices.discard(scenario.index)
+        observer.launching(scenario)
         _log.info("Launching queued scenario %d (%s), %d remain in queue",
                   scenario.index, scenario.title, len(_launch_queue))
         # Launch this single scenario by temporarily swapping state.scenarios
@@ -4397,6 +4488,10 @@ def _poll_tmux_verdicts(
             state.scenarios = orig
         if scenario.window_name:
             pending.add(scenario.index)
+            # Snapshot now, not on the next poll: a TUI restart in between
+            # would resume with this scenario still queued and launch a
+            # second worker beside the live one.
+            _snapshot()
         else:
             # Window creation failed — mark INPUT_REQUIRED so this
             # scenario isn't silently lost (which could cause a false
@@ -4571,13 +4666,13 @@ def _poll_tmux_verdicts(
         _write_dashboard()
 
     while (pending or verifying or _launch_queue) and not state.stop_requested:
+        _observe()
         time.sleep(_POLL_INTERVAL)
 
         # Refresh the resume snapshot each iteration so a TUI restart can
         # re-enter this loop with up-to-date scenario pane/session state
         # (queued launches and verdicts both mutate it).
-        _write_resume_file(state, use_containers, concurrency_cap,
-                           _queued_indices)
+        _snapshot()
 
         in_grace = (time.monotonic() - grace_start) < _VERDICT_GRACE_PERIOD
         verdicts_changed = False
@@ -4591,6 +4686,8 @@ def _poll_tmux_verdicts(
             setup_error = setup_errors[0] if setup_errors else None
             completed_verifications = dict(verification_results)
             verification_results.clear()
+        drained = bool(_drained)
+        _drained.clear()
 
         for scenario_idx, (passed, reason) in completed_verifications.items():
             verifying.discard(scenario_idx)
@@ -4602,14 +4699,7 @@ def _poll_tmux_verdicts(
                              scenario_idx)
                 continue
             if passed:
-                _log.info("Verification passed for scenario %d (%s)",
-                          scenario_idx, scenario.title)
-                state.verified_scenarios.add(scenario_idx)
-                state.latest_output = (
-                    f"Scenario {scenario_idx} ({scenario.title}): "
-                    f"{state.scenario_verdicts[scenario_idx]} (verified)"
-                )
-                _notify()
+                _accept_verified(scenario)
             else:
                 fails = verification_failures.get(scenario_idx, 0) + 1
                 verification_failures[scenario_idx] = fails
@@ -4768,10 +4858,15 @@ def _poll_tmux_verdicts(
                         f"{retries + 1}/{_SCENARIO_MAX_RETRIES} "
                         f"(backoff {backoff:.0f}s)")
                     _notify()
+                    observer.relaunching(scenario, retries + 1, backoff)
                     time.sleep(backoff)
                     if state.stop_requested:
                         # A stop (e.g. ``z t`` fresh start) killed the
                         # window; relaunching would orphan a worker.
+                        _ah.clear_timer(
+                            state.pr_id,
+                            f"qa-backoff:{state.loop_id}:s{scenario.index}",
+                            "cancelled")
                         break
                     retry_counts[scenario.index] = retries + 1
                     try:
@@ -4786,17 +4881,19 @@ def _poll_tmux_verdicts(
                         _write_dashboard()
                         raise
                     if relaunched:
+                        observer.relaunched(scenario, True)
                         # Persist the new pane now, not at the next tick:
                         # this tick may still sleep through other dead
                         # scenarios' backoffs, and a TUI death meanwhile
                         # would resume onto the dead pane id and relaunch
                         # a second worker beside this live one (S43).
-                        _write_resume_file(state, use_containers,
-                                           concurrency_cap, _queued_indices)
+                        _snapshot()
                         # Reset grace period for this retry
                         grace_start = time.monotonic()
+                        _arm_grace()
                         _last_scenario_hook_ts.pop(scenario.index, None)
                         continue
+                    observer.relaunched(scenario, False)
                     if scenario.index in state.scenario_verdicts:
                         # It already carries a verdict (e.g. an unverified
                         # PASS whose pane died): keep it and stop retrying,
@@ -4925,11 +5022,18 @@ def _poll_tmux_verdicts(
                 _accept_hit(scenario, hit)
 
         # Launch queued scenarios after verified completions too
-        if completed_verifications:
+        if completed_verifications or drained:
             _launch_next_queued()
 
-        if verdicts_changed or completed_verifications:
+        if verdicts_changed or completed_verifications or drained:
             _write_dashboard()
+
+    _observe()
+    # A scenario waiting for input stays open: the run holds on it, and a
+    # reopened poll settles it (the observer is the run's, see above).
+    observer.finish(stopped=state.stop_requested, keep_waiting=True)
+    _ah.clear_timer(state.pr_id, _grace_timer,
+                    "elapsed" if _ah.now() >= _grace_due[0] else "cancelled")
 
 
 # ---------------------------------------------------------------------------
@@ -5480,6 +5584,54 @@ def _add_status_pane(session: str, planner_pane: str, status_path) -> None:
         _log.exception("Failed to create status pane")
 
 
+@contextlib.contextmanager
+def _journal_qa_run(state: QALoopState, *, resumed: bool):
+    """Journal one QA run (or resume) as an action-history attempt."""
+    state.history_attempt = _ah.start_attempt(
+        state.pr_id, "qa", loop_id=state.loop_id,
+        label="QA resume" if resumed else "QA run",
+        resumed=True if resumed else None)
+
+    def _finish_scenarios(stopped: bool) -> None:
+        # Scenario attempts still open (waiting for input, or cut off by a
+        # crash) end with the run.
+        observer = state._history_observer
+        if observer is not None:
+            observer.finish(stopped=stopped,
+                            verdicts=dict(state.scenario_verdicts))
+
+    try:
+        yield
+    except BaseException as e:
+        _finish_scenarios(state.stop_requested)
+        _ah.end_attempt(state.pr_id, state._history_planner, "failed",
+                        detail="QA run crashed")
+        _ah.end_attempt(state.pr_id, state.history_attempt, "failed",
+                        verdict="ERROR", detail=f"{type(e).__name__}: {e}"[:300])
+        raise
+    else:
+        verdict = state.latest_verdict or None
+        if state.stop_requested or not verdict:
+            # No verdict: aborted before running (e.g. the PR merged).
+            outcome = "cancelled"
+        elif verdict == "ERROR":
+            outcome = "failed"
+        else:
+            outcome = "done"
+        _finish_scenarios(outcome == "cancelled")
+        # A planner still open here was abandoned with its run: cancelled
+        # with it (stop, PR merged mid-planning), otherwise failed.
+        _ah.end_attempt(state.pr_id, state._history_planner,
+                        "cancelled" if outcome == "cancelled" else "failed",
+                        detail="planning did not finish")
+        _ah.end_attempt(state.pr_id, state.history_attempt, outcome,
+                        verdict=verdict,
+                        detail=(state.latest_output or "")[:300] or None)
+    finally:
+        state._history_planner = ""
+        state._history_observer = None
+
+
 def run_qa_sync(
     state: QALoopState,
     pm_root: Path,
@@ -5498,10 +5650,13 @@ def run_qa_sync(
 
     Returns the updated state.  The run record this process wrote is marked
     ended however the run leaves (completion, an aborted run, a crash), so
-    no other driver waits on it afterwards.
+    no other driver waits on it afterwards.  The run is journaled as an
+    action-history attempt (:func:`_journal_qa_run`).
     """
     try:
-        return _run_qa_sync(state, pm_root, pr_data, on_update, max_scenarios)
+        with _journal_qa_run(state, resumed=False):
+            return _run_qa_sync(state, pm_root, pr_data, on_update,
+                                max_scenarios)
     finally:
         end_run_record(state)
 
@@ -5630,6 +5785,12 @@ def _run_qa_sync(
     # --- Phase 1: Planning (if no scenarios pre-loaded) ---
     if state.planning_phase and not state.scenarios:
         _log.info("QA planning phase for %s", state.pr_id)
+        _ah.phase(state.pr_id, state.history_attempt, "planning")
+        state._history_planner = _ah.start_attempt(
+            state.pr_id, "qa", parent=state.history_attempt or None,
+            loop_id=state.loop_id, label="planner")
+        _ah.phase(state.pr_id, state._history_planner, "planning",
+                  "building planner prompt and window")
 
         state.latest_output = "Planning QA scenarios..."
         _notify()
@@ -5768,6 +5929,16 @@ def _run_qa_sync(
         plan_problem = ""
         deadline = time.monotonic() + _PLANNER_TIMEOUT
         poll_start = time.monotonic()
+        _ah.phase(state.pr_id, state._history_planner, "agent",
+                  f"planner pane {planner_pane}",
+                  session_id=planner_session_id)
+        _planner_timer = f"qa-planner-deadline:{state.loop_id}"
+        _ah.arm_timer(state.pr_id, _planner_timer,
+                      purpose="QA planner deadline",
+                      owner_action="qa",
+                      owner_attempt=state._history_planner or None,
+                      duration=_PLANNER_TIMEOUT, effect="fires",
+                      expected="stop waiting for a plan → QA INPUT_REQUIRED")
         from pm_core import hook_events as _hook_events
         from pm_core.claude_launcher import WorkspacePromptWatch
         _hook_baseline = time.time()
@@ -5801,6 +5972,10 @@ def _run_qa_sync(
                 _log.info("QA aborted mid-planning: %s is %s; tearing down "
                           "qa window", pr_id, _live_status)
                 _cleanup_stale_scenario_windows(session, pr_data)
+                _ah.clear_timer(state.pr_id, _planner_timer, "cancelled")
+                _ah.end_attempt(state.pr_id, state._history_planner,
+                                "cancelled", detail=f"PR is {_live_status}")
+                state._history_planner = ""
                 state.running = False
                 return state
 
@@ -5869,6 +6044,10 @@ def _run_qa_sync(
             # the QA window otherwise sees only the prompt, no explanation.
             if planner_pane and tmux_mod.pane_exists(planner_pane):
                 _add_status_pane(session, planner_pane, status_path)
+            _ah.clear_timer(state.pr_id, _planner_timer, "cancelled")
+            _ah.end_attempt(state.pr_id, state._history_planner, "failed",
+                            detail="blocked at the workspace-trust prompt")
+            state._history_planner = ""
             _notify()
             state.running = False
             return state
@@ -5891,6 +6070,9 @@ def _run_qa_sync(
             elif plan.problems:
                 plan_problem = "; ".join(plan.problems)
 
+        _ah.clear_timer(state.pr_id, _planner_timer,
+                        "fired" if time.monotonic() >= deadline
+                        else "cancelled")
         if plan_found:
             _log.info("QA plan parsed: %d scenario(s) for %s",
                       len(state.scenarios), state.pr_id)
@@ -5940,6 +6122,17 @@ def _run_qa_sync(
             # Otherwise keep the "not consumed" / "no parseable scenarios"
             # explanation set above on screen.
             state.latest_output = f"Plan: {len(state.scenarios)} scenario(s)"
+        if state.stop_requested:
+            _ah.end_attempt(state.pr_id, state._history_planner, "cancelled")
+        else:
+            _ah.end_attempt(
+                state.pr_id, state._history_planner, "done",
+                verdict=None if state.scenarios else VERDICT_INPUT_REQUIRED,
+                detail=(f"{len(state.scenarios)} scenario(s)"
+                        if state.scenarios else state.latest_output[:300]))
+        state._history_planner = ""
+        _ah.phase(state.pr_id, state.history_attempt, "launching",
+                  "spec gate, concretizing and launching scenarios")
         _notify()
 
     # --- Spec gate: verify the planner generated a QA spec ---
@@ -6161,8 +6354,12 @@ def _execute_and_finalize(
     # restart can pick the run back up.
     _write_resume_file(state, use_containers, concurrency_cap, queued_indices)
 
+    reopened = False
     while True:
         state.running = True
+        _ah.phase(state.pr_id, state.history_attempt, "agent",
+                  "collecting the follow-up after the INPUT_REQUIRED wait"
+                  if reopened else "collecting scenario verdicts")
         try:
             _poll_tmux_verdicts(state, data, pr_data, session, workdir_path,
                                 status_path, notify,
@@ -6186,6 +6383,8 @@ def _execute_and_finalize(
             notify()
             return state
 
+        _ah.phase(state.pr_id, state.history_attempt, "verdict",
+                  "aggregating verdicts and running the finalize pane")
         # --- Aggregate verdicts ---
         verdicts = list(state.scenario_verdicts.values())
         # A stopped run can leave scenarios without a verdict; never call
@@ -6334,9 +6533,25 @@ def _execute_and_finalize(
         if not state.held:
             break
 
-        if not _hold_for_follow_up(
-                state, pm_root, status_path,
-                use_containers, concurrency_cap, queued_indices):
+        _hold_timer = f"qa-input-hold:{state.loop_id}"
+        _waiting = ", ".join(str(i) for i in sorted(state.waiting_for_input))
+        _ah.phase(state.pr_id, state.history_attempt, "waiting_human",
+                  f"held at INPUT_REQUIRED; waiting for input in "
+                  f"scenario(s) {_waiting}")
+        _ah.arm_timer(state.pr_id, _hold_timer,
+                      purpose=f"QA INPUT_REQUIRED hold (scenario(s) "
+                              f"{_waiting})",
+                      owner_action="qa",
+                      owner_attempt=state.history_attempt or None,
+                      duration=None, effect="fires",
+                      expected="human answers in the worker pane; its "
+                               "follow-up verdict reopens the run")
+        reopened = _hold_for_follow_up(
+            state, pm_root, status_path,
+            use_containers, concurrency_cap, queued_indices)
+        _ah.clear_timer(state.pr_id, _hold_timer,
+                        "cancelled" if state.stop_requested else "released")
+        if not reopened:
             # Stopped, the PR left qa, or nothing is waiting any more.
             # Persist the settled wait (e.g. the last attempt dropped) so a
             # restart does not re-adopt a hold that is already over.
@@ -6452,10 +6667,12 @@ def resume_qa_sync(
     context and re-enter the verdict-collection + finalize phase.
 
     Like :func:`run_qa_sync`, the run record is marked ended however the
-    resume leaves, so other drivers stop deferring to it.
+    resume leaves, so other drivers stop deferring to it, and the resume is
+    journaled as its own action-history attempt.
     """
     try:
-        return _resume_qa_sync(state, pm_root, pr_data, on_update)
+        with _journal_qa_run(state, resumed=True):
+            return _resume_qa_sync(state, pm_root, pr_data, on_update)
     finally:
         end_run_record(state)
 

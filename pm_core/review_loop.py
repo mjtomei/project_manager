@@ -31,6 +31,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+from pm_core import action_history as _ah
 from pm_core.paths import configure_logger
 from pm_core.pr_utils import TERMINAL_PR_STATES
 from pm_core.loop_shared import (
@@ -190,6 +191,14 @@ class ReviewLoopState:
     # or earlier symlink to recognise it by.  Adopting it would record an
     # older review's verdict for an iteration that never ran.
     stale_pane_session_id: str = ""
+    # Action-history journal id of the iteration in progress
+    # (pm_core.action_history).  Not in the breadcrumb: a restarted loop
+    # journals the adopted iteration as a new attempt.
+    _history_attempt: str = ""
+
+
+def _history_attempt(state: ReviewLoopState | None) -> str | None:
+    return (getattr(state, "_history_attempt", "") or None) if state else None
 
 
 def _match_verdict(line: str) -> str | None:
@@ -881,7 +890,11 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
     window_name = _compute_review_window_name(pr_data)
     workdir = pr_data.get("workdir")
     stale_session_id = getattr(state, "stale_session_id", "") if state else ""
+    history_attempt = _history_attempt(state)
 
+    _ah.phase(pr_id, history_attempt, "launching",
+              f"launch attempt {attempt}/{REVIEW_LAUNCH_MAX_ATTEMPTS} "
+              f"(window {window_name})")
     cmd = _launch_review_window(
         pr_id, pm_root, iteration=iteration, loop_id=loop_id,
         transcript=transcript, attempt=attempt, workdir=workdir,
@@ -889,6 +902,12 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
 
     # Wait briefly for the window to appear
     time.sleep(_WINDOW_WAIT)
+
+    if state is not None and state.stop_requested:
+        # A z d / zz d during the wait killed this window and may have
+        # opened a same-named one: never take the replacement's pane for
+        # this stopped loop's own (it would poll it as long as it lived).
+        raise PaneKilledError("Review loop stopped during launch")
 
     pane_id = _find_review_claude_pane(session, window_name, workdir)
     if not pane_id:
@@ -928,6 +947,18 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
     _log.info("review_loop: polling pane %s in window %s (transcript=%s)",
               pane_id, window_name, transcript)
 
+    _ah.phase(pr_id, history_attempt, "agent", f"review pane {pane_id}",
+              session_id=session_id)
+    grace_timer = f"review-grace:{history_attempt}"
+    if history_attempt:
+        _ah.arm_timer(pr_id, grace_timer,
+                      purpose=f"review verdict grace (iteration {iteration})",
+                      owner_action="review-loop",
+                      owner_attempt=history_attempt,
+                      duration=_VERDICT_GRACE_PERIOD, effect="gate",
+                      expected="verdicts accepted on the next idle turn")
+    # Journal clock (not monotonic) so controlled-clock tests agree.
+    grace_end = _ah.now() + _VERDICT_GRACE_PERIOD
     stop_check = _lease_keepalive(state) if state is not None else None
     try:
         content = _poll_for_verdict(pane_id, transcript,
@@ -936,6 +967,11 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
                                      stop_check=stop_check)
     except WorkspaceTrustBlocked as e:
         raise ReviewHoldError(str(e)) from e
+    finally:
+        if history_attempt:
+            _ah.clear_timer(pr_id, grace_timer,
+                            "elapsed" if _ah.now() >= grace_end
+                            else "cancelled")
     if content is None:
         raise PaneKilledError(f"Review pane disappeared (window: {window_name})")
     return content
@@ -997,7 +1033,12 @@ def _poll_adopted_review(state: ReviewLoopState, pane_id: str,
     output = _landed_verdict(transcript)
     if output:
         return output
-    from pm_core.claude_launcher import WorkspaceTrustBlocked
+    from pm_core.claude_launcher import (
+        WorkspaceTrustBlocked, session_id_from_transcript,
+    )
+    _ah.phase(state.pr_id, _history_attempt(state), "agent",
+              f"adopted review pane {pane_id}",
+              session_id=session_id_from_transcript(transcript) or None)
     try:
         return _poll_for_verdict(
             pane_id, transcript, workdir=pr_data.get("workdir"),
@@ -1174,6 +1215,35 @@ def _interruptible_sleep(seconds: float, state: ReviewLoopState,
         time.sleep(min(0.25, end - now))
 
 
+def _backoff_sleep(state: ReviewLoopState, pm_root: str | None,
+                   delay: float, detail: str) -> None:
+    """Sleep out a launch-retry backoff, journaling it as a wait.
+
+    The iteration attempt enters a ``backoff`` phase and a ``fires`` timer
+    shows when the next launch attempt is due; the sleep itself is the
+    unchanged :func:`_interruptible_sleep`.
+    """
+    hist = _history_attempt(state)
+    timer = f"review-launch-retry:{hist}"
+    _ah.phase(state.pr_id, hist, "backoff", detail)
+    due = _ah.now() + max(0.0, delay)
+    if hist:
+        _ah.arm_timer(
+            state.pr_id, timer,
+            purpose=f"review launch retry backoff (iteration "
+                    f"{state.iteration}, attempt "
+                    f"{state.launch_attempts + 1}/{REVIEW_LAUNCH_MAX_ATTEMPTS})",
+            owner_action="review-loop", owner_attempt=hist,
+            duration=max(0.0, delay), effect="fires",
+            expected="relaunch the review window")
+    try:
+        _interruptible_sleep(delay, state, pm_root)
+    finally:
+        if hist:
+            _ah.clear_timer(state.pr_id, timer,
+                            "fired" if _ah.now() >= due else "cancelled")
+
+
 def _clear_launch_failure(state: ReviewLoopState) -> None:
     """Drop the failed-attempt evidence of an episode.
 
@@ -1245,7 +1315,9 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
 
     # A merge-restart may land mid-backoff: honour the remaining delay.
     if state.next_retry_at > time.time():
-        _interruptible_sleep(state.next_retry_at - time.time(), state, pm_root)
+        _backoff_sleep(state, pm_root, state.next_retry_at - time.time(),
+                       f"launch attempt {state.launch_attempts} failed "
+                       f"before the restart; remaining backoff")
 
     pending_checks = 0
     while True:
@@ -1259,6 +1331,9 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
         # the launch for the whole discover -> launch window.
         next_attempt = state.launch_attempts + 1
         if not _claim_launch(state, iteration, next_attempt):
+            _ah.phase(pr_id, _history_attempt(state), "queued",
+                      "waiting for another loop's launch lease "
+                      f"(up to {REVIEW_LAUNCH_CLAIM_WAIT:.0f}s)")
             if not _wait_for_claim(state, pm_root, iteration):
                 if state.stop_requested:
                     # Cancelled while waiting: this is a user stop, not a
@@ -1372,7 +1447,9 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
                 "review_loop: launch attempt %d/%d failed for %s (%s); "
                 "retrying in %.0fs", attempt, REVIEW_LAUNCH_MAX_ATTEMPTS,
                 pr_id, e.reason or "launch", delay)
-            _interruptible_sleep(delay, state, pm_root)
+            _backoff_sleep(state, pm_root, delay,
+                           f"launch attempt {attempt} failed "
+                           f"({e.reason or 'launch'}); retry in {delay:.0f}s")
             continue
 
         state.last_session_id = info.get("session_id") or state.last_session_id
@@ -1405,6 +1482,27 @@ def _wait_for_follow_up_verdict(pr_data: dict,
         session, window_name, iter_transcript, verdicts=ALL_VERDICTS,
         stop_check=_stop, log_prefix="review_loop",
     )
+
+
+def _start_iteration_attempt(state: ReviewLoopState,
+                             transcript_dir: str | None,
+                             adopted: bool = False) -> str:
+    """Journal the start of review iteration ``state.iteration``."""
+    transcript = (f"{transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
+                  if transcript_dir else None)
+    parent = None
+    try:
+        from pm_core import runtime_state as _rs
+        entry = _rs.get_action_state(state.pr_id, "review-loop")
+        if entry.get("loop_id") == state.loop_id:
+            parent = entry.get("attempt_id")
+    except Exception:
+        pass
+    return _ah.start_attempt(
+        state.pr_id, "review-loop", loop_id=state.loop_id, parent=parent,
+        iteration=state.iteration, transcript=transcript,
+        label=f"iteration {state.iteration}",
+        adopted=True if adopted else None)
 
 
 def should_stop(verdict: str) -> bool:
@@ -1460,14 +1558,23 @@ def run_review_loop_sync(
                 _log.info("review_loop: stop requested after %d iterations", state.iteration)
                 break
 
+            attempt = None
             try:
                 output = None
                 if adopt:
                     adopt = False
+                    attempt = state._history_attempt = \
+                        _start_iteration_attempt(
+                            state, saved_transcript_dir, adopted=True)
                     output = _adopt_in_flight_review(
                         state, pr_data, saved_transcript_dir)
                     if output is None:
                         # Nothing live to adopt — rerun the same iteration.
+                        _ah.end_attempt(state.pr_id, attempt, "vanished",
+                                        detail="nothing live to adopt; "
+                                               "rerunning iteration")
+                        attempt = None
+                        state._history_attempt = ""
                         state.iteration -= 1
                     else:
                         # The adopted iteration is complete: clear its retry
@@ -1482,6 +1589,8 @@ def run_review_loop_sync(
                 if output is None:
                     state.iteration += 1
                     _log.info("review_loop: iteration %d for %s", state.iteration, state.pr_id)
+                    attempt = state._history_attempt = \
+                        _start_iteration_attempt(state, transcript_dir)
                     output = _run_iteration_with_retry(
                         state, pm_root, pr_data, transcript_dir,
                         state.iteration,
@@ -1490,11 +1599,17 @@ def run_review_loop_sync(
                 _log.warning("review_loop: pane killed on iteration %d: %s", state.iteration, e)
                 state.latest_verdict = VERDICT_KILLED
                 state.latest_output = str(e)
+                _ah.end_attempt(state.pr_id, attempt,
+                                "cancelled" if state.stop_requested
+                                else "vanished",
+                                verdict=VERDICT_KILLED, detail=str(e)[:300])
                 break
             except ReviewClosedError as e:
                 _log.info("review_loop: %s", e)
                 state.latest_verdict = VERDICT_CLOSED
                 state.latest_output = str(e)
+                _ah.end_attempt(state.pr_id, attempt, "cancelled",
+                                verdict=VERDICT_CLOSED, detail=str(e)[:300])
                 break
             except ReviewHoldError as e:
                 _log.warning("review_loop: review held on iteration %d "
@@ -1503,6 +1618,10 @@ def run_review_loop_sync(
                 state.latest_verdict = VERDICT_HOLD
                 state.latest_output = str(e)
                 state.launch_retryable = False
+                _ah.end_attempt(state.pr_id, attempt, "failed",
+                                verdict=VERDICT_HOLD,
+                                detail=("held at a permission/trust prompt: "
+                                        + str(e))[:300])
                 break
             except ReviewLaunchError as e:
                 # A genuine failed authorized launch.  Never fabricate an
@@ -1517,13 +1636,22 @@ def run_review_loop_sync(
                 state.last_launch_artifact = e.artifact
                 if e.retryable:
                     state.retry_ready_at = time.time() + REVIEW_LAUNCH_REARM_SECONDS
+                _ah.end_attempt(state.pr_id, attempt,
+                                "superseded" if e.reason == "superseded"
+                                else "failed",
+                                verdict=VERDICT_LAUNCH_FAILED,
+                                detail=str(e)[:300])
                 break
             except Exception as e:
                 _log.exception("review_loop: review failed on iteration %d", state.iteration)
                 state.latest_verdict = VERDICT_ERROR
                 state.latest_output = str(e)
+                _ah.end_attempt(state.pr_id, attempt, "failed",
+                                verdict=VERDICT_ERROR, detail=str(e)[:300])
                 break
 
+            _ah.phase(state.pr_id, attempt, "verdict",
+                      "verdict found; processing")
             verdict = parse_review_verdict(output)
             state.latest_verdict = verdict
             state.latest_output = output
@@ -1553,16 +1681,40 @@ def run_review_loop_sync(
                 # rounds within the same loop still show a notification.
                 state._ui_notified_input = False
 
+                hold = f"review-input-required:{attempt}"
+                _ah.phase(state.pr_id, attempt, "waiting_human",
+                          "INPUT_REQUIRED — waiting for a follow-up verdict "
+                          "from the review pane")
+                if attempt:
+                    _ah.arm_timer(
+                        state.pr_id, hold,
+                        purpose=f"review INPUT_REQUIRED hold "
+                                f"(iteration {state.iteration})",
+                        owner_action="review-loop", owner_attempt=attempt,
+                        duration=None, effect="fires",
+                        expected="human answers in the review pane; "
+                                 "next verdict resumes the loop")
                 follow_up_output = _wait_for_follow_up_verdict(pr_data, state)
                 state.input_required = False
+                if attempt:
+                    _ah.clear_timer(state.pr_id, hold,
+                                    "released" if follow_up_output
+                                    else "cancelled")
 
                 if follow_up_output is None:
                     # Pane died or stop requested
                     if state.stop_requested:
+                        _ah.end_attempt(state.pr_id, attempt, "cancelled",
+                                        verdict=VERDICT_INPUT_REQUIRED)
                         break
                     state.latest_verdict = VERDICT_KILLED
                     state.latest_output = "Review pane disappeared during INPUT_REQUIRED wait"
+                    _ah.end_attempt(state.pr_id, attempt, "vanished",
+                                    verdict=VERDICT_KILLED,
+                                    detail=state.latest_output)
                     break
+                _ah.phase(state.pr_id, attempt, "verdict",
+                          "follow-up verdict found; processing")
 
                 verdict = parse_review_verdict(follow_up_output)
                 # Treat repeated INPUT_REQUIRED as NEEDS_WORK
@@ -1585,6 +1737,9 @@ def run_review_loop_sync(
                     except Exception:
                         _log.exception("review_loop: on_iteration callback failed")
 
+            _ah.end_attempt(state.pr_id, attempt, "done", verdict=verdict)
+            state._history_attempt = ""
+
             if should_stop(verdict):
                 _log.info("review_loop: stopping — verdict=%s", verdict)
                 break
@@ -1597,6 +1752,15 @@ def run_review_loop_sync(
 
     finally:
         state.running = False
+        # An exception none of the handlers above caught escapes the loop
+        # with its iteration still open, which would read "running" for as
+        # long as this process lives.
+        if _ah.is_open(state._history_attempt):
+            _ah.end_attempt(state.pr_id, state._history_attempt, "failed",
+                            verdict=VERDICT_ERROR,
+                            detail="review loop exited without a verdict "
+                                   "for this iteration")
+        state._history_attempt = ""
         _release_lease(state)
 
     return state

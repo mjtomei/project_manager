@@ -15,6 +15,7 @@ from pm_core.cli.session import (
     _no_actions_notice,
     _run_picker_command,
     _ALL_ACTIONS,
+    _wrap_picker_header,
 )
 
 
@@ -179,17 +180,23 @@ class TestBuildPickerLines:
         assert "#158" in displays
         assert "#160" not in displays
 
-    def test_merged_pr_returns_empty(self):
+    def test_merged_pr_offers_only_history(self):
+        # Session actions are gone after merge; the History view stays.
         prs = [_pr("pr-001", "merged", "Done PR", gh_pr_number=158)]
-        assert _build_picker_lines(prs, "#158") == []
+        lines = _build_picker_lines(prs, "#158")
+        cmds = [cmd for _, cmd, _ in lines if cmd]
+        assert cmds == ["view:history pr-001"]
 
     def test_only_window_actions_get_rows(self):
         # start / review / qa / signoff / merge each have their own window
         # and should appear; edit and review-loop are shortcut-only.
         prs = [_pr("pr-001", "pending", "New PR", gh_pr_number=158)]
         lines = _build_picker_lines(prs, "#158")
-        action_lines = [d for d, cmd, _ in lines if cmd]
+        action_lines = [d for d, cmd, _ in lines
+                        if cmd and not cmd.startswith("view:")]
         assert len(action_lines) == 5
+        view_cmds = [cmd for _, cmd, _ in lines if cmd.startswith("view:")]
+        assert view_cmds == ["view:history pr-001"]
         assert any("start" in d for d in action_lines)
         assert any("review" in d and "review-loop" not in d
                    for d in action_lines)
@@ -313,7 +320,7 @@ class TestPerSessionWindowIndicator:
              else "signoff" if "signoff" in d
              else "merge" if "merge" in d
              else "start"): d
-            for d, cmd, _ in lines if cmd
+            for d, cmd, _ in lines if cmd and not cmd.startswith("view:")
         }
 
     def test_caller_active_window_gets_filled_dot(self):
@@ -766,13 +773,14 @@ class TestPopupPickerNoActions:
         assert _header(first).startswith("PR Actions — #238  (1/3)")
         assert "No actions — PR is merged." in first["input"]
         assert "merged or closed" not in first["input"]
-        # Action keys aren't accepted for the merged PR; nav keys are.
+        # Session action keys aren't accepted for the merged PR; nav keys
+        # and its History view (pr-8020495) are.
         exp = _expect(first)
-        assert "l" in exp and "h" in exp and "0" in exp
+        assert "l" in exp and "h" in exp and "0" in exp and "H" in exp
         assert not ({"s", "e", "d", "t", "i", "g", "z"} & set(exp))
-        assert "enter:ignore" in next(a for a in first["cmd"]
-                                      if a.startswith("--bind="))
+        assert "history" in first["input"]
         assert "s=start" not in _header(first)
+        assert "H=history" in _header(first)
         # After l: next PR with its actions and full key set.
         assert _header(second).startswith("PR Actions — #240  (2/3)")
         assert "s" in _expect(second)
@@ -818,18 +826,26 @@ class TestPopupPickerNoActions:
         run_cmd.assert_not_called()
 
     def test_single_actionless_pr_does_not_exit_on_keypress(self, tmp_path, monkeypatch):
-        """Only PR is merged: no accept keys at all, Enter is ignored, and
+        """Only PR is merged: no session action keys, only its History view
+        (pr-8020495); Enter on the title or notice row runs nothing, and
         only q/Esc (fzf abort) closes the popup."""
         prs = [self.PRS[0]]
         fzf, run_cmd = _run_picker(
-            tmp_path, monkeypatch, prs, ["#238"], "#238", [(130, "")])
-        (call,) = fzf.calls
-        # Only (unadvertised) nav keys are accepted — no action keys.
-        assert set(_expect(call)) == {"h", "l", "left", "right", "0"}
-        assert "h/l" not in _header(call)
-        assert "enter:ignore" in next(a for a in call["cmd"]
-                                      if a.startswith("--bind="))
+            tmp_path, monkeypatch, prs, ["#238"], "#238",
+            [(0, "\n  #238  (merged)  Merged\n"),
+             (0, "\n  No actions — PR is merged.\n"), (130, "")])
+        first = fzf.calls[0]
+        # Only History plus the (unadvertised) nav keys are accepted.
+        assert set(_expect(first)) == {"H", "h", "l", "left", "right", "0"}
+        assert "h/l" not in _header(first)
+        assert len(fzf.calls) == 3
         run_cmd.assert_not_called()
+
+    def test_merged_pr_history_runs_the_view(self, tmp_path, monkeypatch):
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, [self.PRS[0]], ["#238"], "#238",
+            [(0, "H\n")])
+        run_cmd.assert_called_once_with("view:history pr-m", "pm-x")
 
     def test_local_id_window_resolves_to_display_id(self, tmp_path, monkeypatch):
         """Window named pr-r (before #240 existed) resolves to #240's actions."""
@@ -1524,7 +1540,8 @@ class TestPopupPickerPresentation:
         fzf, run_cmd = _run_picker(
             tmp_path, monkeypatch, prs, ["pr-a"], "pr-a", [(130, "")])
         rows = fzf.calls[0]["input"].splitlines()
-        assert len(rows) == 6
+        # Title, five session actions and the History view (pr-8020495).
+        assert len(rows) == 7
         assert all(row.isprintable() for row in rows)
         assert "Title continued" in rows[0]
         run_cmd.assert_not_called()
@@ -1992,3 +2009,28 @@ class TestPopupPickerTypeAhead:
             [(0, "s\n")])
         run_cmd.assert_called_once()
         assert "\033[2J" in capsys.readouterr().out
+
+
+class TestWrapPickerHeader:
+    HINT = ("q/Esc: quit  s=start  e=edit  d=review  t=qa  i=signoff  "
+            "g=merge  H=history")
+
+    def _wrap(self, header, cols):
+        import os
+        with patch("shutil.get_terminal_size",
+                   return_value=os.terminal_size((cols, 30))):
+            return _wrap_picker_header(header)
+
+    def test_long_hint_wraps_between_items_at_popup_width(self):
+        """An 80-col client gives a ~74-col popup; fzf would truncate the
+        shortcut hint to ``H=h..`` instead of showing ``H=history``."""
+        out = self._wrap(f"PR Actions — pr-1\n{self.HINT}", 74)
+        lines = out.split("\n")
+        assert all(len(ln) <= 72 for ln in lines)
+        assert lines[-1].strip() == "H=history"
+        assert " ".join(out.split()) == " ".join(
+            f"PR Actions — pr-1 {self.HINT}".split())
+
+    def test_fitting_header_unchanged(self):
+        header = f"PR Actions — pr-1\n{self.HINT}"
+        assert self._wrap(header, 200) == header

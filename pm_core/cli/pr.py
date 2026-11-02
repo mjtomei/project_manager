@@ -2046,6 +2046,10 @@ def _finalize_merge(root, pr_entry: dict, pr_id: str,
             kill_pr_windows(session, pr_entry)
     except Exception:
         pass
+    # The killed panes' in-flight runtime entries would otherwise keep
+    # their history attempts shown running after the merge.
+    from pm_core import pr_cleanup as pr_cleanup_mod
+    pr_cleanup_mod.end_in_flight_actions(pr_id)
 
     # Finalize merge transcript if provided
     if transcript:
@@ -3656,6 +3660,42 @@ def pr_note_edit(pr_id: str, note_id: str, text: str):
     store.locked_update(root, apply)
     click.echo(f"Updated note {note_id} → {new_id} on {_pr_display_id(pr_entry)}")
     trigger_tui_refresh()
+
+
+@pr.command("history")
+@click.argument("pr_id")
+@click.option("--json", "as_json", is_flag=True,
+              help="Machine-readable JSON output (schema pm.pr.history/1)")
+def pr_history(pr_id: str, as_json: bool):
+    """Show a PR's action attempts, timings, and active timers/holds.
+
+    Lists past review/QA/sign-off/merge attempts with start/end times,
+    elapsed time (split into execution vs waiting where recorded), outcome
+    and iteration/scenario, plus the timers and human holds PM is waiting
+    on right now.  Works after merge and without a running TUI.
+    """
+    import json as _json
+    from pm_core import action_history, history_query
+
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _resolve_pr_id(data, pr_id)
+    if pr_entry is None:
+        if not action_history.has_journal(pr_id):
+            _require_pr(data, pr_id)  # prints the not-found error and exits
+        # Removed from project.yaml but its journal survives.
+        model = history_query.build_history(pr_id)
+    else:
+        model = history_query.build_history(pr_entry["id"], pr=pr_entry)
+    if as_json:
+        click.echo(_json.dumps(model, indent=2))
+        return
+    # A narrower TTY gets lines rendered at its width, not 80-column
+    # lines that the pager wrapper would break a second time.
+    width = 80
+    if sys.stdout.isatty():
+        width = min(80, shutil.get_terminal_size((80, 24)).columns)
+    emit_paged(history_query.render_text(model, width=width), indent="    ")
 
 
 @pr_note.command("list")

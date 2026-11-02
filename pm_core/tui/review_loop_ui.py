@@ -405,7 +405,14 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
         # status` / the runs popup would keep reporting a stale artifact.
         extras.update(retryable=None, attempts=None, error=None,
                       artifact=None, retry_ready_at=None)
-    _rs.set_action_state(state.pr_id, "review-loop", final_state, **extras)
+    # A stop (or the PR closing under the loop) ended the loop early: its
+    # history attempt is cancelled, whatever verdict the stop produced.
+    _rs.set_action_state(
+        state.pr_id, "review-loop", final_state,
+        history_outcome=("cancelled"
+                         if state.stop_requested
+                         or state.latest_verdict == VERDICT_CLOSED else None),
+        **extras)
 
 
 def _is_active_loop(state: ReviewLoopState) -> bool:
@@ -686,15 +693,23 @@ def _schedule_retry_rearm(app, state: ReviewLoopState) -> None:
         return
     delay = max(1.0, (getattr(state, "retry_ready_at", 0.0) or 0.0)
                 - time.time())
+    from pm_core import action_history as _ah
+    rearm_timer = f"review-launch-rearm:{state.pr_id}"
 
     def _fire():
         app._review_retry_timer = None
+        _ah.clear_timer(state.pr_id, rearm_timer, "fired")
         try:
             app.run_worker(_auto_start.check_and_start(app))
         except Exception:
             _log.exception("review_loop_ui: retry re-arm pass failed")
 
     app._review_retry_timer = set_timer(delay, _fire)
+    _ah.arm_timer(state.pr_id, rearm_timer,
+                  purpose="review launch re-arm cooldown (auto-start)",
+                  owner_action="review-loop", duration=delay,
+                  effect="fires",
+                  expected="auto-start pass re-arms the review loop")
 
 
 def _refresh_tech_tree(app) -> None:
@@ -973,6 +988,36 @@ def _signoff_gate(app, pr_id: str) -> tuple[str | None, str | None, dict]:
     return sha, signoff_mod.merge_gate_refusal(pr, sha, base_branch), pr
 
 
+def _journal_merge_hold(app, pr_id: str, hold: dict) -> None:
+    """Journal a wait-for-merge hold as an indefinite history hold."""
+    from pm_core import action_history as _ah
+    _ah.arm_timer(pr_id, f"merge-hold:{pr_id}",
+                  purpose=("manual merge hold (wait-for-merge: "
+                           f"{', '.join(hold.get('targets') or [])})"),
+                  owner_action="merge", duration=None, effect="fires",
+                  expected="human presses g (or pm pr merge) to merge")
+    held = getattr(app, "_history_merge_holds", None)
+    if held is None:
+        held = app._history_merge_holds = set()
+    held.add(pr_id)
+
+
+def release_merge_hold_journal(app, pr_ids, *, force: bool = False) -> None:
+    """Release the history journal's merge hold of *pr_ids*.
+
+    Called when a merge attempt starts (*force*: an earlier TUI may have
+    armed it) and when auto-start drops the wait-for-merge target that
+    held the PR.  Without *force* only holds this TUI journaled are
+    released, so PRs that never had one get no journal events.
+    """
+    held = getattr(app, "_history_merge_holds", None) or set()
+    from pm_core import action_history as _ah
+    for pr_id in pr_ids:
+        if force or pr_id in held:
+            _ah.clear_timer(pr_id, f"merge-hold:{pr_id}", "released")
+        held.discard(pr_id)
+
+
 def _maybe_auto_merge(app, pr_id: str) -> None:
     """Auto-merge a signed-off PR (auto-start only).
 
@@ -1045,6 +1090,7 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
             f"— {tail}",
             force=True, hold=_auto_start.CONFIRM_HOLD_SECONDS,
         )
+        _journal_merge_hold(app, pr_id, hold)
         return
 
     _log.info("auto_merge: %s signed off, merging", pr_id)
@@ -1092,6 +1138,7 @@ def _attempt_merge(app, pr_id: str, *, resolve_window: bool = False,
     """
     from pm_core.tui import auto_start as _auto_start
     from pm_core.tui import pr_view
+    release_merge_hold_journal(app, [pr_id], force=True)
 
     # Pass the flag explicitly in both directions — the in-tmux env-var
     # default would otherwise flip resolve_window=False back on.
@@ -1193,7 +1240,20 @@ def _finalize_detected_merge(app, pr_id: str, merge_key: str,
     """
     from pm_core.tui import auto_start as _auto_start
 
+    # Clear merge input_required state if it was set
+    if pr_id in app._merge_input_required_prs:
+        from pm_core import action_history as _ah
+        _ah.clear_timer(pr_id, f"merge-input-required:{pr_id}", "released")
     app._merge_input_required_prs.discard(pr_id)
+
+    # Record the verdict before the window goes: unregistering a pane whose
+    # runtime entry is still in flight would journal this successful merge
+    # attempt as "vanished".
+    from pm_core import runtime_state as _rs
+    try:
+        _rs.set_action_state(pr_id, "merge", "done", verdict="MERGED")
+    except Exception:
+        _log.debug("runtime_state merge verdict mirror failed", exc_info=True)
     _kill_merge_window(app, pr_id)
     tracker.unregister(merge_key)
     active_merge_keys.discard(merge_key)
@@ -1223,6 +1283,13 @@ def _handle_merge_input_required(app, pr_id: str, merge_key: str) -> None:
     verdict detection finalizes.
     """
     # Track which PRs have merge input_required (for TUI display)
+    if pr_id not in app._merge_input_required_prs:
+        from pm_core import action_history as _ah
+        _ah.arm_timer(pr_id, f"merge-input-required:{pr_id}",
+                      purpose="merge INPUT_REQUIRED hold",
+                      owner_action="merge", duration=None, effect="fires",
+                      expected="human answers in the merge window; "
+                               "MERGED finalizes the merge")
     app._merge_input_required_prs.add(pr_id)
 
     # Reset the verdict tracker so we can detect MERGED after the user helps
@@ -1292,12 +1359,43 @@ def _watch_untracked_trust(app, pane_id: str, workdir: str | None,
 
 
 def _prune_untracked_trust(app, seen: set[str]) -> None:
-    """Drop orphan trust watches for panes that are gone or now tracked."""
+    """Drop orphan trust watches (and cached foreign-session verdicts) for
+    panes that are gone or now tracked."""
     watches = getattr(app, "_untracked_trust_watches", None) or {}
     for pane_id in list(watches):
         if pane_id not in seen:
             watches.pop(pane_id, None)
             app._untracked_trust_reported.discard(pane_id)
+    foreign = getattr(app, "_foreign_review_panes", None) or {}
+    for pane_id in list(foreign):
+        if pane_id not in seen:
+            foreign.pop(pane_id, None)
+
+
+def _transcript_is_another_session(app, pane_id: str,
+                                   transcript: str) -> bool:
+    """Whether *transcript* names a different Claude session than *pane_id*.
+
+    The ``review-<pr>.jsonl`` symlink may belong to an earlier plain
+    review (z d) while the review window now holds a finished loop
+    iteration's pane.  Pairing them mirrors a phantom "review running"
+    that never sees its own hooks.  A mismatch is cached per pane so the
+    pane's start command is read once, not on every poll.
+    """
+    from pm_core.claude_launcher import (
+        pane_session_id, session_id_from_transcript)
+    if not hasattr(app, "_foreign_review_panes"):
+        app._foreign_review_panes = {}  # pane -> transcript session id
+    foreign = app._foreign_review_panes
+    t_sid = session_id_from_transcript(transcript)
+    if not t_sid:
+        return False
+    if foreign.get(pane_id) != t_sid:
+        pane_sid = pane_session_id(pane_id)
+        if not pane_sid or pane_sid == t_sid:
+            return False
+        foreign[pane_id] = t_sid
+    return True
 
 
 def _poll_impl_idle(app) -> None:
@@ -1497,6 +1595,9 @@ def _poll_impl_idle(app) -> None:
                 continue
             review_transcript = str(tdir / f"review-{pr_id}.jsonl")
             try:
+                if _transcript_is_another_session(app, pane_id,
+                                                  review_transcript):
+                    raise ValueError("review transcript is another session")
                 tracker.register(review_key, pane_id, review_transcript)
             except ValueError:
                 # e.g. a review-loop pane left in flight across a TUI

@@ -596,6 +596,31 @@ class TestStartReviewLoopBackground:
         complete_callback.assert_called_once_with(state)
 
 
+class TestRunClaudeReviewStopDuringWindowWait:
+    def test_stop_during_window_wait_never_takes_the_pane(self):
+        """A z d / zz d that lands while the launch waits for its window
+        kills that window and may open a same-named one: the stopped loop
+        must not take the replacement's pane for its own (it would poll it
+        for as long as it lived)."""
+        from pm_core import review_loop as rl
+        state = rl.ReviewLoopState(pr_id="pr-001")
+
+        def _sleep(_s):
+            state.stop_requested = True
+
+        with patch.object(rl, "_launch_review_window"), \
+                patch.object(rl, "_get_pm_session", return_value="pm-x"), \
+                patch("pm_core.tmux.session_exists", return_value=True), \
+                patch.object(rl.time, "sleep", side_effect=_sleep), \
+                patch.object(rl, "_find_review_claude_pane") as find, \
+                patch.object(rl, "_poll_for_verdict") as poll:
+            with pytest.raises(rl.PaneKilledError):
+                rl._run_claude_review("pr-001", "/tmp", _PR_DATA,
+                                      "/tmp/t.jsonl", state=state)
+        find.assert_not_called()
+        poll.assert_not_called()
+
+
 # --- generate_review_prompt with review_loop tests ---
 
 class TestGenerateReviewPrompt:

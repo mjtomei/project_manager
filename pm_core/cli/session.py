@@ -1008,6 +1008,18 @@ _SHORTCUT_FOLD_INTO: dict[str, str] = {
 # (pr_utils.TERMINAL_PR_STATES) shared with the sync/close guards.
 _TERMINAL_STATUSES = set(TERMINAL_PR_STATES)
 
+# Commands prefixed with "view:" render a catalog view action (``view:<key>
+# <pr_id>``) inside the popup instead of running a pm subcommand.
+_VIEW_PREFIX = "view:"
+
+
+def _view_actions_for_status(status: str) -> list[tuple[str, str]]:
+    """(label, command template) pairs for the catalog's view actions."""
+    from pm_core import action_catalog
+    return [(a.key, f"{_VIEW_PREFIX}{a.key} {{pr_id}}")
+            for a in action_catalog.view_actions(status)]
+
+
 # Map status to the action label representing the current phase.
 _STATUS_PHASE: dict[str, str] = {
     "in_progress": "start",
@@ -1358,7 +1370,8 @@ def _build_picker_lines(
 
     status = pr.get("status", "")
     actions = _actions_for_status(status)
-    if not actions:
+    view_actions = _view_actions_for_status(status)
+    if not actions and not view_actions:
         return []
 
     lines: list[tuple[str, str, str]] = []
@@ -1371,6 +1384,11 @@ def _build_picker_lines(
     short_title = "".join(ch if ch.isprintable() else " " for ch in short_title)
 
     lines.append((f"  {display_id}  ({status})  {short_title}", "", display_id))
+    if not actions:
+        # Merged/closed: say why there are no session actions above the
+        # view actions (History) that stay available.
+        lines.append((f"  {_no_actions_notice(display_id, pr)}", "",
+                      display_id))
 
     # Phase indicator reflects the *current window* (where the user is),
     # not the PR's status — e.g. sitting in the impl window of an
@@ -1429,7 +1447,88 @@ def _build_picker_lines(
         lines.append((f"  {indicator} {label:<18s}"
                       f"{open_tag}{status_tag}", cmd, display_id))
 
+    # Read-only view actions (History): no window, so no indicator/[open];
+    # the badge is the view's own one-line summary.
+    for label, cmd_template in view_actions:
+        lines.append((f"    {label:<18s}{_view_action_badge(label, pr)}",
+                      cmd_template.format(pr_id=pr["id"]), display_id))
+
     return lines
+
+
+def _view_action_badge(key: str, pr: dict) -> str:
+    try:
+        from pm_core import action_catalog
+        action = action_catalog.get(key)
+        if action is None or action.badge is None or action.query is None:
+            return ""
+        return action.badge(action.query(pr["id"], pr))
+    except Exception:
+        _log.debug("view badge %s failed for %s", key, pr.get("id"),
+                   exc_info=True)
+        return ""
+
+
+def _show_view_action(cmd: str, session: str = "") -> None:
+    """Render a ``view:<key> <pr_id>`` command inside the popup.
+
+    The text is paged with ``less -R`` reading keys from the popup's tty
+    (q closes it); without ``less`` it is printed and the popup waits for
+    a dismiss key.
+
+    The PR record comes from the session's project root, like the picker
+    rows (``PM_PROJECT``, which the picker exports, else the session's
+    persisted root): the popup's cwd is usually a PR workdir whose
+    committed ``pm/project.yaml`` is stale, and ``state_root()`` ignores
+    ``PM_PROJECT``.
+    """
+    import shutil
+    from pm_core import action_catalog
+    key, _, pr_id = cmd[len(_VIEW_PREFIX):].partition(" ")
+    action = action_catalog.get(key)
+    if action is None or action.query is None or action.render is None:
+        click.echo(f"Unknown view action: {key}")
+        _wait_dismiss()
+        return
+    root = os.environ.get("PM_PROJECT")
+    root = Path(root) if root else None
+    if root is None and session:
+        try:
+            base = pane_registry.pm_session_name(session)
+        except Exception:
+            base = session
+        try:
+            root = _resolve_root_from_session(base)
+        except Exception:
+            root = None
+    try:
+        pr = store.get_pr(store.load(root or state_root()), pr_id)
+    except Exception:
+        pr = None
+    try:
+        # Render at the popup width (at most 80) and wrap the way
+        # ``emit_paged`` does on a TTY, so the pager shows the same lines
+        # as ``pm pr history`` instead of breaking 80-column lines again
+        # or less hard-breaking them mid-word.
+        from pm_core.cli.helpers import _wrap_record_to_width
+        width = shutil.get_terminal_size((80, 24)).columns
+        lines = action.render(action.query(pr_id, pr), width=min(80, width))
+        text = "\n".join(
+            _wrap_record_to_width(line, width, "    ") for line in lines) + "\n"
+    except Exception as e:
+        _log.exception("view action %s failed for %s", key, pr_id)
+        click.echo(f"{action.label} failed: {e}")
+        _wait_dismiss()
+        return
+    if shutil.which("less"):
+        try:
+            subprocess.run(["less", "-R", "-+F", "-+X"], input=text,
+                           text=True, check=False)
+            return
+        except OSError:
+            pass
+    click.echo(text, nl=False)
+    _wait_dismiss()
 
 
 def _fzf_supports_no_input() -> bool:
@@ -1457,6 +1556,36 @@ def _fzf_supports_no_input() -> bool:
         supported = False
     _fzf_supports_no_input._cached = supported  # type: ignore[attr-defined]
     return supported
+
+
+def _wrap_picker_header(header: str) -> str:
+    """Wrap fzf header lines to the popup width instead of letting fzf
+    truncate them with ``..``.
+
+    Hint lines are runs of ``key=label`` items separated by two or more
+    spaces; lines are broken only between items so each item stays
+    whole.  fzf draws the header after a 2-column gutter.
+    """
+    import re
+    import shutil
+    width = shutil.get_terminal_size((80, 24)).columns - 2
+    if width < 20:
+        return header
+    out: list[str] = []
+    for line in header.split("\n"):
+        if len(line) <= width:
+            out.append(line)
+            continue
+        parts = re.split(r"(\s{2,})", line)
+        cur = parts[0]
+        for sep, item in zip(parts[1::2], parts[2::2]):
+            if len(cur) + len(sep) + len(item) <= width:
+                cur += sep + item
+            else:
+                out.append(cur)
+                cur = "  " + item
+        out.append(cur)
+    return "\n".join(out)
 
 
 def _parse_tui_action(tui_cmd: str) -> tuple[str | None, str | None, bool]:
@@ -1901,9 +2030,12 @@ def _wait_dismiss(prompt: str = "\nPress q/Esc/Enter to close...") -> None:
 
 def _run_picker_command(cmd: str, session: str) -> None:
     """Execute a picker command — either direct CLI or routed through TUI."""
-    route = "tui" if cmd.startswith("tui:") else "direct"
+    route = ("tui" if cmd.startswith("tui:")
+             else "view" if cmd.startswith(_VIEW_PREFIX) else "direct")
     _log.info("picker dispatch: cmd=%r route=%s", cmd, route)
-    if cmd.startswith("tui:"):
+    if cmd.startswith(_VIEW_PREFIX):
+        _show_view_action(cmd, session)
+    elif cmd.startswith("tui:"):
         # Route through the TUI's SIGUSR2 + queue-file IPC.  Focus-
         # independent: doesn't depend on tmux send-keys timing, can't
         # be eaten by whichever widget has focus, and supports queuing
@@ -2175,7 +2307,9 @@ def popup_picker_cmd(session: str, window_name: str):
         label_to_cmd: dict[str, str] = {}
         pr_lines: list[tuple[str, str, str]] = []
         if picked is not None:
-            for lbl, tpl in _actions_for_status(picked.get("status", "")):
+            status = picked.get("status", "")
+            for lbl, tpl in (_actions_for_status(status)
+                             + _view_actions_for_status(status)):
                 label_to_cmd[lbl] = tpl.format(pr_id=picked["id"])
             # Phase indicator only meaningful for the invoking PR — when
             # navigating to a different PR the user isn't "in" any of its
@@ -2334,6 +2468,10 @@ def popup_picker_cmd(session: str, window_name: str):
         "i": "signoff",
         "g": "merge",
     }
+    from pm_core import action_catalog
+    for _view in action_catalog.view_actions():
+        _SHORTCUT_KEYS[_view.shortcut] = _view.key
+    _VIEW_LABELS = {a.key for a in action_catalog.view_actions()}
     if has_fzf:
         shortcut_hint = "  ".join(
             f"{key}={label}" for key, label in _SHORTCUT_KEYS.items()
@@ -2372,7 +2510,7 @@ def popup_picker_cmd(session: str, window_name: str):
                 # double-click must not complete fzf and close the popup.
                 binds += ["enter:ignore", "double-click:ignore"]
             cmd = ["fzf", "--ansi", "--no-sort", "--reverse",
-                   f"--header={header}",
+                   f"--header={_wrap_picker_header(header)}",
                    "--header-first",
                    "--pointer=>",
                    "--no-info",
@@ -2411,7 +2549,19 @@ def popup_picker_cmd(session: str, window_name: str):
                 # only offers quit + navigation: leaving the action keys
                 # out of --expect binds them to fzf's ignore.
                 has_actions = bool(_label_to_cmd)
-                if has_actions:
+                # A merged/closed PR offers only view actions (History):
+                # advertise and accept just those keys, no z chords.
+                view_only = has_actions and all(
+                    lbl in _VIEW_LABELS for lbl in _label_to_cmd)
+                if view_only:
+                    keys = {k: lbl for k, lbl in _SHORTCUT_KEYS.items()
+                            if lbl in _label_to_cmd}
+                    header_lines = [
+                        f"PR Actions — {_display_id(current_pr)}{pr_pos}",
+                        "q/Esc: quit  " + "  ".join(
+                            f"{k}={lbl}" for k, lbl in keys.items())]
+                    expect = list(keys)
+                elif has_actions:
                     header_lines = [f"PR Actions — {_display_id(current_pr)}{pr_pos}",
                                     f"q/Esc: quit  {shortcut_hint}",
                                     chord_hint]
@@ -2484,7 +2634,7 @@ def popup_picker_cmd(session: str, window_name: str):
                     # Nothing to run for this PR — never let a keypress
                     # on it close the picker; only q/Esc does.
                     continue
-                if pressed_key == "z":
+                if pressed_key == "z" and not view_only:
                     chord_state = "z"
                     continue
                 if pressed_key in _SHORTCUT_KEYS:

@@ -25,6 +25,21 @@ def _isolated_runtime_state(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_action_history(tmp_path_factory, monkeypatch):
+    """Keep the action-history journal out of the real ``~/.pm/history``.
+
+    ``runtime_state`` transitions and the review/QA loops journal attempts;
+    tests that drive them must not write (or read) a live session's history.
+    """
+    from pm_core import action_history
+    d = tmp_path_factory.mktemp("history")
+    monkeypatch.setattr(action_history, "history_dir", lambda: d)
+    # Journals are per pm session; tests use the session-less layout
+    # unless they opt in.
+    monkeypatch.setattr(action_history, "_scope", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def _no_qa_launch_records(monkeypatch):
     """Keep QA launch records out of the real ``~/.pm/workdirs/qa``.
 

@@ -925,6 +925,167 @@ def test_slow_launch_in_flight_is_not_duplicated(world_factory):
     assert len(w.launches()) == 1
 
 
+def test_signoff_history_attempts_throttle_and_merge_hold(world_factory):
+    """Router launches are journaled as sign-off attempts with the relaunch
+    throttle as a timer; an O-held PR shows an indefinite manual-merge hold."""
+    from pm_core import action_history, history_query
+    # Frozen clock: the throttle countdown and "newest first" ordering must
+    # not depend on how fast these steps run.
+    with action_history.use_clock(lambda: 1_800_000_000.0):
+        app, w = world_factory(wait=True)
+        _qa_pass(app)
+        m = history_query.build_history(PR, pr=app.pr(), live=False)
+        (att,) = [a for a in m["attempts"] if a["action"] == "signoff"]
+        assert att["open"] and att["phases"][0]["phase"] == "launching"
+        (thr,) = m["timers"]["active"]
+        assert thr["purpose"] == "sign-off relaunch throttle"
+        assert 0 < thr["remaining_s"] <= 60
+
+        w.emit("SIGNOFF_MERGE")
+        _poll(app)
+        m = history_query.build_history(PR, pr=app.pr(), live=False)
+        (att,) = [a for a in m["attempts"] if a["action"] == "signoff"]
+        assert (att["outcome"], att["verdict"]) == ("done", "SIGNOFF_MERGE")
+        (hold,) = m["holds"]
+        assert hold["purpose"].startswith("manual merge hold")
+        assert hold["remaining_s"] is None
+        assert m["waiting_for"].startswith("human: manual merge hold")
+
+        # HEAD moves: the stale run is relaunched as a new, flagged attempt,
+        # and the previous SIGNOFF_MERGE's manual-merge hold no longer applies.
+        w.head = "f" * 40
+        _poll(app)
+        m = history_query.build_history(PR, pr=app.pr(), live=False)
+        runs = [a for a in m["attempts"] if a["action"] == "signoff"]
+        assert len(runs) == 2 and runs[0].get("stale") is True
+        assert m["holds"] == []
+        assert any(r["timer"] == f"merge-hold:{PR}"
+                   and r["resolution"] == "superseded"
+                   for r in m["timers"]["recent"])
+
+
+@pytest.mark.parametrize("drop", ["remove", "clear"])
+def test_auto_start_dropping_wait_target_releases_journaled_hold(
+        world_factory, drop):
+    """Removing the wait-for-merge target that held the PR (or turning
+    auto-start off) ends its manual-merge hold in history too, instead of
+    the hold reading active for as long as the TUI lives."""
+    from unittest.mock import MagicMock
+    from pm_core import action_history, history_query
+    with action_history.use_clock(lambda: 1_800_000_000.0):
+        app, w = world_factory(wait=True, targets=(PR, "pr-out"))
+        app._update_display = lambda: None
+        app._watcher_manager = MagicMock()
+        _qa_pass(app)
+        w.emit("SIGNOFF_MERGE")
+        _poll(app)
+        m = history_query.build_history(PR, pr=app.pr(), live=False)
+        (hold,) = m["holds"]
+        assert hold["timer"] == f"merge-hold:{PR}"
+
+        if drop == "remove":
+            res = auto_start.remove_targets(app, [PR])
+            assert res["ok"] and auto_start.is_enabled(app)  # pr-out stays
+        else:
+            auto_start.clear_targets(app)
+            assert not auto_start.is_enabled(app)
+        m = history_query.build_history(PR, pr=app.pr(), live=False)
+        assert m["holds"] == []
+        (row,) = [r for r in m["timers"]["recent"]
+                  if r["timer"] == f"merge-hold:{PR}"]
+        assert row["resolution"] == "released"
+        # Released once (the router launch's "superseded" clear came before
+        # the hold was armed), however many paths saw the hold go.
+        evs = [e for e in action_history.read_events(PR)
+               if e.get("timer") == f"merge-hold:{PR}"]
+        assert [e.get("reason") or e["kind"] for e in evs] == [
+            "superseded", "timer_arm", "released"]
+        # The other PR never had a hold: it gets no journal events.
+        assert not action_history.has_journal("pr-out")
+
+
+def test_terminal_signoff_hop_does_not_reread_journal_each_poll(
+        world_factory):
+    """ready_to_merge repeats on every 5 s poll; journaling the routed
+    attempt (and the adopted-run journal scan) happens once, not per poll."""
+    from pm_core import action_history
+    app, w = world_factory(wait=True)
+    _qa_pass(app)
+    w.emit("SIGNOFF_MERGE")
+    calls = []
+    real = action_history.newest_open_attempt
+    with patch.object(action_history, "newest_open_attempt",
+                      side_effect=lambda *a: calls.append(a) or real(*a)):
+        _poll(app, n=5)
+    ends = [e for e in action_history.read_events(PR)
+            if e["kind"] == "attempt_end"]
+    assert len(ends) == 1 and ends[0]["verdict"] == "SIGNOFF_MERGE"
+    assert calls == []
+
+
+def test_merge_input_required_hold_armed_once(world_factory):
+    from pm_core import action_history
+    from pm_core.tui import review_loop_ui
+    app, _w = world_factory(wait=True)
+    review_loop_ui._handle_merge_input_required(app, PR, f"merge:{PR}")
+    review_loop_ui._handle_merge_input_required(app, PR, f"merge:{PR}")
+    arms = [e for e in action_history.read_events(PR)
+            if e["kind"] == "timer_arm"
+            and e["timer"].startswith("merge-input-required")]
+    assert len(arms) == 1
+    assert arms[0]["indefinite"] is True  # a hold: no due time, no countdown
+
+
+def test_adopted_verdict_closes_only_newest_open_router_attempt():
+    """After a restart the routed verdict belongs to the newest router run;
+    older abandoned runs stay interrupted rather than being marked done."""
+    from types import SimpleNamespace
+    from pm_core import action_history
+    from pm_core.tui import signoff_ui
+    action_history.start_attempt(PR, "signoff", label="old")
+    new = action_history.start_attempt(PR, "signoff", label="new")
+    signoff_ui._end_attempt(SimpleNamespace(), PR, "done",
+                            verdict="SIGNOFF_MERGE")
+    assert action_history.newest_open_attempt(PR, "signoff") is None
+    (end,) = [e for e in action_history.read_events(PR)
+              if e["kind"] == "attempt_end"]
+    assert (end["attempt"], end["adopted"]) == (new, True)
+
+
+def test_router_attempt_fails_when_transcript_dir_cannot_be_made(tmp_path):
+    """A launch that stops before any worker starts ends its attempt, so
+    history does not show a router run in flight that never launched."""
+    from types import SimpleNamespace
+    from pm_core import action_history
+    from pm_core.tui import signoff_ui
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    app = SimpleNamespace(log_message=lambda *a, **k: None,
+                          run_worker=lambda *a, **k: pytest.fail("launched"))
+    signoff_ui._launch(app, PR, blocker / "tdir")
+    (end,) = [e for e in action_history.read_events(PR)
+              if e["kind"] == "attempt_end"]
+    assert end["outcome"] == "failed"
+    assert "cannot create transcript dir" in end["detail"]
+    assert action_history.newest_open_attempt(PR, "signoff") is None
+
+
+def test_adopted_verdict_leaves_abandoned_run_when_newest_ended():
+    """A run abandoned before a relaunch that already delivered its verdict
+    must not absorb a re-routed verdict after a later TUI restart."""
+    from types import SimpleNamespace
+    from pm_core import action_history
+    from pm_core.tui import signoff_ui
+    abandoned = action_history.start_attempt(PR, "signoff", label="old")
+    relaunch = action_history.start_attempt(PR, "signoff", label="new")
+    action_history.end_attempt(PR, relaunch, "done", verdict="SIGNOFF_MERGE")
+    signoff_ui._end_attempt(SimpleNamespace(), PR, "done",
+                            verdict="SIGNOFF_MERGE")
+    ends = [e["attempt"] for e in action_history.read_events(PR)
+            if e["kind"] == "attempt_end"]
+    assert ends == [relaunch] and abandoned not in ends
+
+
 # --- pr-ac10f03: integration-aware approvals, returns, holds ---------------
 
 def _back_to_signoff(app):

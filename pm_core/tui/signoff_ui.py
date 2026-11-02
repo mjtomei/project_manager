@@ -132,7 +132,7 @@ def start_signoff(app, pr_id: str,
     waiting.discard(pr_id)
     if moved["from"]:
         _log.info("start_signoff: %s %s -> sign_off", pr_id, moved["from"])
-        _launched_at(app).pop(pr_id, None)
+        _release_throttle(app, pr_id)
         _reload(app)
         app.log_message(f"Auto-start: {pr_id} → sign-off", **_SHOWN)
     step(app, pr_id)
@@ -151,6 +151,40 @@ def _launched_at(app) -> dict:
         d = {}
         app._signoff_launched_at = d
     return d
+
+
+def _attempts(app) -> dict:
+    """``{pr_id: attempt id}`` of the journaled router launch in flight."""
+    d = getattr(app, "_signoff_history_attempts", None)
+    if not isinstance(d, dict):
+        d = {}
+        app._signoff_history_attempts = d
+    return d
+
+
+def _throttle_timer(pr_id: str) -> str:
+    return f"signoff-throttle:{pr_id}"
+
+
+def _release_throttle(app, pr_id: str) -> None:
+    if _launched_at(app).pop(pr_id, None) is not None:
+        from pm_core import action_history as _ah
+        _ah.clear_timer(pr_id, _throttle_timer(pr_id), "released")
+
+
+def _end_attempt(app, pr_id: str, outcome: str, **kw) -> None:
+    from pm_core import action_history as _ah
+    attempt = _attempts(app).pop(pr_id, None)
+    if attempt:
+        _ah.end_attempt(pr_id, attempt, outcome, **kw)
+    elif outcome == "done":
+        # A router launched before a TUI restart (adopted run) delivered
+        # the verdict: close the newest attempt if its old owner left it
+        # open.  Older open ones were abandoned runs, not this verdict's,
+        # and an ended newest one means the verdict was already journaled.
+        prev = _ah.newest_open_attempt(pr_id, "signoff")
+        if prev:
+            _ah.end_attempt(pr_id, prev, outcome, adopted=True, **kw)
 
 
 def _launch(app, pr_id: str, tdir, force: bool = False) -> None:
@@ -173,10 +207,28 @@ def _launch(app, pr_id: str, tdir, force: bool = False) -> None:
     # skipped poll read as a relaunch every 5 s in the L log.
     _log.info("signoff: launching router for %s (stale=%s)", pr_id, force)
     launched[pr_id] = now
+    from pm_core import action_history as _ah
+    # A new router run means the PR is no longer signed off at this HEAD,
+    # so any manual-merge hold from the previous SIGNOFF_MERGE is moot.
+    _ah.clear_timer(pr_id, f"merge-hold:{pr_id}", "superseded")
+    _end_attempt(app, pr_id, "superseded",
+                 detail=("stale run (HEAD moved) relaunched" if force
+                         else "router window gone; relaunched"))
+    attempt = _ah.start_attempt(pr_id, "signoff", label="router",
+                                stale=True if force else None)
+    _attempts(app)[pr_id] = attempt
+    _ah.phase(pr_id, attempt, "launching", "pm pr signoff --background")
+    _ah.arm_timer(pr_id, _throttle_timer(pr_id),
+                  purpose="sign-off relaunch throttle",
+                  owner_action="signoff", owner_attempt=attempt,
+                  duration=RELAUNCH_BACKOFF_SECONDS, effect="gate",
+                  expected="a vanished router window may be relaunched")
     try:
         tdir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
         app.log_message(f"[red]Cannot create transcript dir[/] {tdir}: {e}")
+        _end_attempt(app, pr_id, "failed",
+                     detail=f"cannot create transcript dir: {e}"[:300])
         return
     transcript = signoff_mod.signoff_transcript(tdir, pr_id)
     _inflight(app).add(pr_id)
@@ -223,6 +275,7 @@ async def _launch_quiet(app, pr_id: str, transcript) -> None:
         _log.exception("signoff_ui: launch failed for %s", pr_id)
         app.log_message(f"[red]Sign-off launch failed[/] for {pr_id}: "
                         f"{escape(str(e))}")
+        _end_attempt(app, pr_id, "failed", detail=f"launch failed: {e}"[:300])
         return
     finally:
         _inflight(app).discard(pr_id)
@@ -236,8 +289,15 @@ async def _launch_quiet(app, pr_id: str, transcript) -> None:
         reason = err.splitlines()[-1] if err else f"exit {proc.returncode}"
         app.log_message(f"[red]Sign-off launch failed[/] for {pr_id}: "
                         f"{escape(reason)}")
+        _end_attempt(app, pr_id, "failed",
+                     detail=f"pm pr signoff exit={proc.returncode}: "
+                            f"{reason}"[:300])
     else:
         _log.info("signoff_ui: pm pr signoff %s launched", pr_id)
+        attempt = _attempts(app).get(pr_id)
+        if attempt:
+            from pm_core import action_history as _ah
+            _ah.phase(pr_id, attempt, "agent", "router window launched")
     _reload(app)
 
 
@@ -355,7 +415,11 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
         _acted(app)[pr_id] = key
     else:
         _acted(app).pop(pr_id, None)
-        _launched_at(app).pop(pr_id, None)
+        _release_throttle(app, pr_id)
+    # Past the dedupe: a terminal hop repeats on every poll, and the
+    # adopted-run fallback in _end_attempt reads the whole journal.
+    _end_attempt(app, pr_id, "done", verdict=result.verdict,
+                 detail=f"routed → {hop}" if hop else None)
     _reload(app)  # verdict record / hop status written behind the TUI's back
     _log.info("signoff: %s routed %s -> %s", pr_id, result.verdict, hop)
     if result.coerced and hop != "unknown":

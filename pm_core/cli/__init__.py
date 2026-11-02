@@ -621,6 +621,7 @@ COMMANDS
   pm pr signoff record <pr-id>  Record reviewer approval of report.html (feeds merge gate)
   pm pr signoff integrate <pr-id>  Check integration with the latest base (isolated candidate)
   pm pr dashboard               Serve the all-PR behavior dashboard (HTTP, localhost)
+  pm pr history <pr-id> [--json]  Past action attempts, timings, active timers/holds
   pm pr note add <pr-id> <text>        Add a note to a PR
   pm pr note edit <pr-id> <id> <text>  Edit a note's text
   pm pr note list <pr-id>              List notes on a PR
