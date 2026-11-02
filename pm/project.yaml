@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T10:32:21.227486+00:00'
+  updated_at: '2026-11-02T10:33:35.320652+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25988,6 +25988,28 @@ prs:
       it). Captures: /pm-captures/scenarios/25/.'
     created_at: '2026-11-02T10:32:21Z'
     last_edited: '2026-11-02T10:32:21Z'
+  - id: note-8744867
+    text: 'QA S26 (2026-11-02): PASS at 41c71fa0 (pm_core = 7518aa8a merge), all 5
+      stories live from /scratch/s26 with pm session --global (pm-proj-dfc0df42, share
+      tag proj-dfc0df42, plain proj-6ca247fc), no fix. TUI Enter: 99x50+100x50 split,
+      captures under the share tag, stand-in cwd=clone stdin_tty=yes with the 7 vars
+      unset and PM_TMUX_SOCKET=GS, socket note + Filing Findings (-C), pane gone 0.11
+      s after exit, registry sha restored. Command bar: --branch alt runs as typed
+      (no --file-prs/Filing Findings); the 5 malformed lines are refused in order
+      with no pane or record. pm qa launch --target-window / new window (rc 0, no
+      switch) and the prefix+M popup from a /tmp pane (targets proj, closed 0.32 s,
+      stdin_tty=no = pr-a589f09) all scrubbed. 4 runs in one second: A/B/C distinct
+      ids/clones/prompts, D (--branch no-such-branch) rc 1 leaves nothing; aaa-one/aaa-two
+      test sessions in their own groups/pm_roots, user windows/panes/registry s1==s2,
+      only the 2 seed-fallback reloads. 4 simultaneous filings: proj +4 reloads in
+      the T2 second, aaa-* 0, 5 PRs without r; solo shows 6 PRs in 0.12 s. Observation:
+      pm qa launch --target-window adds an empty @<win> user_modified entry to the
+      user registry via the generic _pane-opened hook (pane itself not registered).
+      Rig: per-story recorder = attach client on US~1 from tmux -L s26rec under asciinema
+      (restart per story, destroy-unattached is off); CLI = recorded inspection shell
+      on -L s26cli. Captures: /pm-captures/scenarios/26/.'
+    created_at: '2026-11-02T10:33:35Z'
+    last_edited: '2026-11-02T10:33:35Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
