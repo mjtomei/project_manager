@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T05:51:12.670970+00:00'
+  updated_at: '2026-11-02T06:14:50.865310+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25709,6 +25709,19 @@ prs:
       Captures: /pm-captures/scenarios/17/.'
     created_at: '2026-11-02T05:51:12Z'
     last_edited: '2026-11-02T05:51:12Z'
+  - id: note-e13cc34
+    text: 'Review 0140 i2: the PM_SHARE_MODE scrub (a7b2e4c4) had undone R35 for pm
+      session --global/--group sessions. With it dropped, pm -C <registry> pr add
+      computed the plain tag, which names no session, so a filing from the disposable
+      test project reloaded that project own TUI again (real tmux, private socket:
+      pre-fix [Session: pm-ztest-..], post-fix the user global pm-proj-<share tag>).
+      Fix: _find_tui_pane -C step goes through helpers._project_sessions, which falls
+      back to the live pm session that persisted the -C pm dir as its pm_root. Tests:
+      TestFindTuiPaneProjectOverride share-mode cases (1 fails pre-fix). Filed pr-e6d0439
+      (pre-existing): _setup_clone_override writes the clone override under the PM_SHARE_MODE
+      tag, which the wrapper never reads.'
+    created_at: '2026-11-02T06:14:50Z'
+    last_edited: '2026-11-02T06:14:50Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
@@ -53005,6 +53018,38 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T05:38:48.530599+00:00'
   updated_at: '2026-11-02T05:38:48.530599+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e6d0439
+  plan: bugs
+  title: 'Bug: QA/regression clone override is written under the PM_SHARE_MODE session
+    tag, which the pm wrapper never reads'
+  branch: pm/pr-e6d0439-bug-qa-regression-clone-override-is-written-under-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_loop._setup_clone_override computes the clone
+    tag with paths.get_session_tag(start_path=clone), which mixes PM_SHARE_MODE into
+    the hash; pm_core/wrapper._find_active_override derives the cwd tag with wrapper._get_session_tag,
+    which never does. So in a pm session --global/--group TUI (its env has PM_SHARE_MODE),
+    every QA scenario, pm qa debug and pm qa regression clone gets ~/.pm/sessions/<repo>-<md5(clone\0global)>/override,
+    while pm run in the clone reads ~/.pm/sessions/<repo>-<md5(clone)>/override, misses
+    it, and falls back to pm_root/cwd_walk/installed pm_core instead of the pm_core
+    that launched the run. Repro (found in pr-7d5d036 review 0140 i2): in an empty
+    git repo r, python -c "from pm_core import paths, wrapper; ..." prints wrapper
+    tag r-2731b1fe and paths tag r-2731b1fe, but with PM_SHARE_MODE=global paths gives
+    r-ca4bdeac. pm qa regression makes it worse, since it scrubs PM_SHARE_MODE from
+    the session env but writes the override before exec. Expected: writer and reader
+    agree (probably compute the clone override tag ignoring PM_SHARE_MODE, as the
+    wrapper does). Care: making the override effective changes which pm_core a share-mode
+    QA scenario clone of the pm repo runs (today cwd_walk picks the clone own pm_core),
+    so check that is the intended code.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T06:14:41.358727+00:00'
+  updated_at: '2026-11-02T06:14:41.358727+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

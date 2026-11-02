@@ -81,7 +81,12 @@ Change:
     `pm -C <registry> pr add` resolves the TUI to reload from the `-C`
     project (`_find_tui_pane` tries its session before the cwd), not from
     the clone or test-project cwd, which reloaded another project's TUI
-    (QA S14, R35).
+    (QA S14, R35). That includes a `pm session --global`/`--group` user
+    session: with `PM_SHARE_MODE` dropped the run computes the plain tag,
+    which names no session, so `_find_tui_pane` then looks for the session
+    that persisted the `-C` pm dir as its `pm_root`
+    (`helpers._project_sessions`, review 0140 i2). Before that, a filing
+    from the test project reloaded the test project's own TUI again.
   - No pm session is required. The old `--session/-s` option is kept,
     hidden, only so existing invocations still parse: it is ignored with
     a note on stderr, because a regression run never targets a pm session.

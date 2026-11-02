@@ -637,8 +637,10 @@ class TestFindTuiPaneProjectOverride:
         tags = {str(tmp_path / "mproj" / "pm"): "mproj-2222",
                 str(tmp_path / "clone"): "repo-9999",
                 str(tmp_path / "ztest"): "ztest-3333"}
-        for d in ("mproj/pm", "clone", "ztest"):
+        for d in ("mproj/pm", "clone", "ztest", "home"):
             (tmp_path / d).mkdir(parents=True)
+        # Persisted session pm_roots live under ~/.pm/sessions/.
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
         monkeypatch.setattr(
             paths, "get_session_tag",
             lambda start_path=None, use_github_name=True:
@@ -692,6 +694,37 @@ class TestFindTuiPaneProjectOverride:
         (tmp_path / "gone").mkdir()
         monkeypatch.setattr(env.helpers, "_project_override",
                             tmp_path / "gone")
+        assert env.helpers._find_tui_pane() == ("%3333", "pm-ztest-3333")
+
+    def _share_mode_session(self, env, monkeypatch):
+        """Make mproj's live session a ``pm session --global`` one: its name
+        carries the share-mode tag, which a run without PM_SHARE_MODE does
+        not compute, and it persisted mproj's pm dir as its project."""
+        sessions = ("pm-aproj-1111", "pm-mproj-5555", "pm-ztest-3333")
+        monkeypatch.setattr(self, "SESSIONS", sessions)
+        sd = env.root / "home" / ".pm" / "sessions"
+        for tag, root in (("mproj-5555", env.root / "mproj" / "pm"),
+                          ("aproj-1111", env.root / "aproj" / "pm")):
+            (sd / tag).mkdir(parents=True)
+            (sd / tag / "pm_root").write_text(f"{root}\n")
+
+    def test_filing_reaches_a_share_mode_registry_session(self, env,
+                                                          monkeypatch):
+        self._share_mode_session(env, monkeypatch)
+        monkeypatch.chdir(env.root / "ztest")
+        monkeypatch.setattr(env.helpers, "_project_override",
+                            env.root / "mproj" / "pm")
+        # Not the test project's own TUI (cwd), nor the first one listed.
+        assert env.helpers._find_tui_pane() == ("%5555", "pm-mproj-5555")
+
+    def test_share_mode_lookup_matches_only_the_registry_project(
+            self, env, monkeypatch, tmp_path):
+        self._share_mode_session(env, monkeypatch)
+        monkeypatch.chdir(env.root / "ztest")
+        (tmp_path / "other" / "pm").mkdir(parents=True)
+        monkeypatch.setattr(env.helpers, "_project_override",
+                            tmp_path / "other" / "pm")
+        # No session persisted that project: falls through to the cwd.
         assert env.helpers._find_tui_pane() == ("%3333", "pm-ztest-3333")
 
     def test_reload_signals_the_registry_sessions_tui(self, env,

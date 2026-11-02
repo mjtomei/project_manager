@@ -1380,6 +1380,39 @@ def _get_pm_session() -> str | None:
     return _get_session_name_for_cwd()
 
 
+def _project_sessions(pm_root: Path):
+    """Live pm sessions of the project whose pm dir is *pm_root*.
+
+    Yields the session its tag names (``pm-<tag>``), then, only if that one
+    is not running, any other session that persisted *pm_root* as its
+    project (``paths.set_session_pm_root``).  The second case is a
+    ``pm session --global``/``--group`` session: its tag mixes in
+    ``PM_SHARE_MODE``, so a command that lacks it (a host-mode regression
+    run drops it, ``cli.qa._REGRESSION_SCRUBBED_ENV``) computes the plain
+    tag, which names no session (QA S16 vs R35).
+    """
+    from pm_core.paths import get_session_tag, sessions_dir
+    tag = get_session_tag(start_path=pm_root)
+    if tag and tmux_mod.session_exists(f"pm-{tag}"):
+        yield f"pm-{tag}"
+        return
+    result = subprocess.run(
+        tmux_mod._tmux_cmd("list-sessions", "-F", "#{session_name}"),
+        capture_output=True, text=True)
+    if result.returncode != 0:
+        return
+    want = Path(pm_root).resolve()
+    for sess in result.stdout.splitlines():
+        if not sess.startswith("pm-") or "~" in sess:
+            continue
+        try:
+            persisted = (sessions_dir() / sess[3:] / "pm_root").read_text()
+        except OSError:
+            continue
+        if persisted.strip() and Path(persisted.strip()).resolve() == want:
+            yield sess
+
+
 def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     """Find the TUI pane in a pm session.
 
@@ -1419,12 +1452,10 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     # test project's own TUI, never the user's (QA S14, R35).  Same order
     # as ``_get_pm_session``.
     if _project_override:
-        from pm_core.paths import get_session_tag
-        tag = get_session_tag(start_path=_project_override)
-        if tag and tmux_mod.session_exists(f"pm-{tag}"):
-            pane_id = registry_tui(f"pm-{tag}")
+        for sess in _project_sessions(_project_override):
+            pane_id = registry_tui(sess)
             if pane_id:
-                return pane_id, f"pm-{tag}"
+                return pane_id, sess
 
     # Try to find session matching current directory first
     expected_session = _get_session_name_for_cwd()
