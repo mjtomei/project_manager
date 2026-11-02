@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T07:57:46.757047+00:00'
+  updated_at: '2026-11-02T08:11:17.807359+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7552,6 +7552,34 @@ prs:
       width = longest name). Killed servers stay as Zs <defunct> (PID 1 does not reap).'
     created_at: '2026-11-02T07:57:46Z'
     last_edited: '2026-11-02T07:57:46Z'
+  - id: note-a8de0e9
+    text: 'QA S30 (container-mode agents in two sessions; pm session kill scoping)
+      NEEDS_WORK: one defect found and fixed in 7deab88ed; full suite 5559 passed
+      / 1 skipped. Stories 1-3 PASS on 6bd7c312e with nested podman and a stand-in
+      claude (no fake config): (1) simultaneous TUI s in two private sessions: both
+      sends rc 0, containers Up in <=1.3 s, windows 1:<own PR> and clients moved in
+      <=2.1 s, one push-proxy dir+.lock+daemon per session, 4997-byte prompt via "$(cat
+      /workspace/pm/prompts/pm_prompt_<sid>.txt)" (no host path), no "No such file".
+      (2) kill A from a plain shell during a 12-send l/h loop to B: A fully cleaned
+      with the three log lines; B container Id, push.sock inode, proxy pid and window
+      capture identical; no default socket. (3) kill B the moment A container is listed
+      (A only 0:main): A keeps its new Id, same proxy token, socket accepts; B fully
+      cleaned. (4) BUG, fixed: pm session kill typed in a C-b c window INSIDE the
+      session it kills died on SIGHUP when the server exited; kin.out empty, no cleanup
+      lines, proxy dir+.lock+daemon and the /tmp/pm-sessions socket file leaked (container
+      only via the pane EXIT trap). Fix in pm_core/cli/session.py: the teardown runs
+      under _hangup_ignored() (SIGHUP ignored, previous handler restored) and the
+      result line goes through _echo_surviving_hangup() (EIO from the dead pane dropped).
+      Post-fix: kin.out has Killed session, everything gone in ~1 s, three cleanup
+      lines, No pm sessions found; story 2 re-driven post-fix still PASS. New real-tmux
+      tests TestSessionKillFromInsideItsOwnSession fail pre-fix. kin.out never gets
+      the rc= line: the window bash dies with its pane by design. Harness tips: run
+      setup under a PR_SET_CHILD_SUBREAPER parent (no new PID-1 zombies); filter proxy
+      processes by argv[1]==-m pm_core.push_proxy, since grep [p]m_core.push_proxy
+      also matches the QA agent argv. Captures: /pm-captures/scenarios/30/ (manifest.md;
+      s4-in-session-kill/pre-fix and post-fix).'
+    created_at: '2026-11-02T08:11:17Z'
+    last_edited: '2026-11-02T08:11:17Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
