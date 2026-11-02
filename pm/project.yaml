@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T02:10:57.042043+00:00'
+  updated_at: '2026-11-02T02:14:16.674890+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25399,6 +25399,26 @@ prs:
       ro check.'
     created_at: '2026-11-02T02:10:56Z'
     last_edited: '2026-11-02T02:10:56Z'
+  - id: note-ca96045
+    text: 'QA S8 refiner (2026-11-02): all S8 stories held live at a610bc87 (project
+      in /scratch, private PM_TMUX_SOCKET, stand-in claude + fake {"qa_regression":
+      {"preamble": 3}}). Two pre-existing bugs, neither caused by this PR: (1) any
+      command-bar line with an unbalanced quote (qa regression x --branch "side, or
+      pr list "x) kills the TUI with ValueError: No closing quotation, from the unguarded
+      shlex.split at pm_core/tui/pr_view.py:644 (on master since Feb). Not filed as
+      of this note; the S8 worker files it once. (2) launch_pane interpolates the
+      tmux session name unquoted into its bash -c trap (pane_ops.py:191, also :674).
+      A project whose git-root basename has an apostrophe gets a session name like
+      pm-it''s here-<hash>, and every TUI pane dies at once (TUI logs Error: select-pane
+      -t %N). Noted on pr-e847a7a. So put the space and apostrophe in a parent dir
+      (/scratch/.../o''brien dir/proj2), not the basename. Traps: the TUI crash closes
+      its window. pm session re-run from outside restarts it, but the grouped <ses>~1
+      then has the driver window current, so TUI panes open in the driver window until
+      you select-window -t <ses>~1:0. Run the unbalanced-quote story last. A slow
+      docker stand-in (sleep 8; exit 1) on the TUI PATH makes the off-loop check observable.
+      A missing binary returns at once.'
+    created_at: '2026-11-02T02:14:16Z'
+    last_edited: '2026-11-02T02:14:16Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
@@ -46434,11 +46454,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-27T23:16:14.111057+00:00'
-  updated_at: '2026-10-27T23:16:14.111057+00:00'
+  updated_at: '2026-11-02T02:14:18.339501+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-0d81055
+    text: 'Related site found in pr-7d5d036 QA S8 refiner (2026-11-02), pre-existing
+      on master: pm_core/tui/pane_ops.py launch_pane builds bash -c ''trap "pm _pane-exited
+      {session} {window} ..." EXIT; <cmd>'' with the tmux session name unquoted (line
+      191; same shape at line 674). The session name is pm-<git-root basename>-<hash>,
+      so a project dir named like it''s here makes every TUI-launched pane die at
+      once (the single quote ends the bash -c string; the TUI logs Error: ... select-pane
+      -t %N ... can''t find pane). A space in the basename splits the trap args. Fix
+      together with the other unquoted interpolations here (shlex.quote the session
+      name, or pass it through the environment).'
+    created_at: '2026-11-02T02:14:18Z'
+    last_edited: '2026-11-02T02:14:18Z'
 - id: pr-a9803aa
   plan: bugs
   title: 'Bug: push proxy local-path origin rejection is bypassed by git push --repo=<path>'
