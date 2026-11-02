@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T15:44:34.836851+00:00'
+  updated_at: '2026-11-02T16:01:47.458607+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40282,6 +40282,28 @@ prs:
       the loop-open Waiting-for forms.'
     created_at: '2026-11-02T15:44:34Z'
     last_edited: '2026-11-02T15:44:34Z'
+  - id: note-673d750
+    text: 'QA S69 refiner (2026-11-02, 38d5baad5, code f5d778bf3): all five stories
+      dry-run live once (/pm-captures/pr-8020495/s69-refiner, README + scripts). Draft
+      fixes: (1) M PRs must have NO commit of their own: --no-signoff-check is recovery-only
+      and refuses a HEAD not in master (probe rc 1); with the fake impl the branch
+      HEAD is master tip, so it prints "already in master; recovering" then "marked
+      as merged". (2) A plain window named exactly <Y1> is adopted by the TUI at its
+      next 5 s impl-idle tick (master _poll_impl_idle: pane_runs_transcript treats
+      a pane with no session id in its start command as a match): the killed start
+      re-opens running "PM watching the pane again" and the popup reads [open] [idle];
+      open the Y1 popup from a window named review-<Y1> instead (pre-existing master
+      hazard, not filed). (3) cleanup --resources does not stop a QA run (qa attempts
+      are owner-journaled, not runtime-ended): killed scenarios end vanished, get
+      "qa sN retry 1" with a 5 s backoff timer (handled one at a time, ~5 s apart),
+      the queued scenario stays queued then runs, run ends done PASS ~3.5 min later
+      with "3 (5 attempts) up to 2 at once". (4) TUI "Cleaned <Y>: 2 window(s)" can
+      be hidden by the loop sticky "Review loop done ... KILLED" (debug suffix "(hidden
+      by sticky message)"). E11 held on all review/merge paths: parent interrupted
+      "PR resources cleaned up", child vanished KILLED, parent-ended-first only <=0.21
+      s, never failed KILLED.'
+    created_at: '2026-11-02T16:01:47Z'
+    last_edited: '2026-11-02T16:01:47Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
