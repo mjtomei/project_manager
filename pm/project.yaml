@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-01T23:24:16.364867+00:00'
+  updated_at: '2026-11-02T00:03:33.932093+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38865,6 +38865,43 @@ prs:
       helper/prompt/verifier work stays dropped.'
     created_at: '2026-11-01T23:24:16Z'
     last_edited: '2026-11-01T23:24:16Z'
+  - id: note-270c2eb
+    text: 'Review loop 928f i43: the completion mark''s write (tmux), its stale copies
+      and its reach in step 5 had no case; test-only, no recipe or pm_core change.
+      R109: R108''s recorder.command-done mark is the only handle that tells a finished
+      recording from one whose recorder was *stopped* (asciinema 2.1.0 catches SIGTERM/SIGHUP
+      and exits 0), and three of its halves were unpinned. (1) The tmux pane command''s
+      write had no case at all: dropping `; printf done > <capture-dir>/recorder.command-done`
+      from the new-session -c value left tests/test_qa_artifact_recording_recipes.py
+      green (386 passed) while the recipe then refuses *every* finished recording
+      at step 5 — reproduced live in this container on tmux 3.2a + asciinema 2.1.0
+      with a private TMUX_TMPDIR: a nominal detach left a complete cast, recorder.status
+      0, the transcript and no mark, and step 5 exited 1 with "the recorder''s command
+      did not return" (the shipped recipe exits 0 on the same flow). (2) The mark''s
+      clear was pinned only as text, and only for step 3''s restart: removing recorder.command-done
+      from the CLI preamble and scaffold clears (and from tmux step 0) left the file
+      green, and a stale mark is a false pass — a recorder this run *stops* leaves
+      a clean status and a non-empty cast, so with the earlier attempt''s mark on
+      disk the CLI''s `termed` case exits 0 and the truncated cast is reported as
+      finished. (3) Step 5''s target-alive branch — the state its own in-progress
+      refusal''s remedy produces (claim and marks cleared) — was pinned only in the
+      both-gone branch. Fix (tests only): test_tmux_scaffold_writes_the_completion_mark
+      drives the recipe''s own new-session statement with TARGET=pm-test and runs
+      the captured pane command as tmux does (sh -c) against a stub asciinema that
+      runs its -c value, requiring `(tmux attach -t =pm-test); printf done > .../recorder.command-done`
+      and the mark on disk; test_capture_section_clears_the_previous_completion_mark
+      requires the mark in both recipes'' first-block and scaffold rm; test_a_stale_completion_mark_is_not_read_as_this_runs
+      seeds the previous attempt''s mark in modes termed/termedboth and requires the
+      mark message and the file gone; test_tmux_stop_step_with_a_cleared_claim_still_needs_the_mark
+      runs step 5 alone on the target-alive state and requires the mark message. Each
+      of the four mutations fails exactly its case (mutation-checked, then restored).
+      Recipe file 392 passed (was 386); related suites 145 passed; full suite 5589
+      passed, 1 skipped, 0 failed (509.37 s, once on the final tree). Evidence: /pm-captures/review-928f-i43/
+      (probe.log, mutation-check.log, recipe-file.log, related-suites.log, suite.log,
+      README.md, scripts/). impl.md R109, qa.md. The dropped helper/prompt/verifier
+      work stays dropped.'
+    created_at: '2026-11-02T00:03:33Z'
+    last_edited: '2026-11-02T00:03:33Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
