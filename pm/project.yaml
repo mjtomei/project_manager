@@ -55701,7 +55701,7 @@ prs:
   title: 'Hardening after #249: providers.yaml lock timeout + set-default re-check
     under lock; model popup textual>=2 pin'
   branch: pm/pr-5f30bdf-hardening-after-249-providers-yaml-lock-timeout-se
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Found at sign-off of #249 (pr-592e4bd), HEAD 49bbc7e4; non-blocking.
     (1) pm provider default X racing pm provider remove X: cli/provider.py ~417 validates
@@ -55713,12 +55713,12 @@ prs:
     exists only in textual 2.x+, while pyproject.toml declares textual>=0.40 — on
     an older install opening the TUI o popup raises ImportError; pin textual>=2 or
     guard the import.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/296
+  gh_pr_number: 296
   created_at: '2026-10-28T02:46:55.100157+00:00'
-  updated_at: '2026-11-02T02:24:48.894904+00:00'
-  started_at: null
+  updated_at: '2026-11-02T10:14:00.423103+00:00'
+  started_at: '2026-11-02T02:27:56.323149+00:00'
   reviewed_at: null
   merged_at: null
   notes:
@@ -55747,12 +55747,203 @@ prs:
       wait-for-merge remains required.'
     created_at: '2026-11-02T02:24:48Z'
     last_edited: '2026-11-02T02:24:48Z'
+  - id: note-937a08c
+    text: 'Incidental fix (review-loop 7e77 i2): the Dockerfile pre-install list (whose
+      comment says keep it in sync with pyproject [project.dependencies]) was missing
+      markdown>=3.5, added by fb988d1f; added it so containers can run `pm md-render`
+      (sign-off report embedding) without an ImportError. Also added a positive test
+      that set_default_provider accepts a configured provider and writes default:
+      <name>.'
+    created_at: '2026-11-02T03:13:48Z'
+    last_edited: '2026-11-02T03:13:48Z'
+  - id: note-59efdd1
+    text: 'Review-loop 7e77 i2 scope note for QA/sign-off: the providers.yaml write
+      paths now report an unwritable lock/temp/target as one Error: line. But a wholly
+      unwritable ~/.pm (e.g. chmod 500 ~/.pm) still tracebacks at import, in pm_core/paths.py
+      configure_logger -> debug_dir mkdir, before any provider code runs. That is
+      a pre-existing, command-wide defect outside this PR, filed as pr-78e8ebe and
+      noted in the spec edge cases; do not fail this PR for that scenario. A read-only
+      ~/.pm/providers.yaml.lock is the reachable providers-specific case and does
+      produce one Error: line.'
+    created_at: '2026-11-02T03:16:08Z'
+    last_edited: '2026-11-02T03:16:08Z'
+  - id: note-f9b8d33
+    text: 'Review-loop 7e77 i3: the textual floor is now >=2.0.1, not >=2.0. 2.0.0
+      ships textual.markup.to_content but mis-parses an escaped \[...]: to_content("a
+      \[OK]").plain == "a [OK", so the model popup measures an [OK] route status two
+      cells short, sizes the box too narrow and clips the column (tests/test_model_settings.py::test_tui_project_view_shows_ok_route_status
+      fails at 2.0.0, passes at 2.0.1). Full suite verified green at 2.0.1 (5445 passed,
+      1 skipped, with markdown installed; the 12 test_markdown_render failures seen
+      without it are the missing dep, not textual). Also added tests for the save_providers
+      mkstemp-failure branch and the `pm provider default` CLI success path. (2026-11-02T03:30:00Z)'
+    created_at: '2026-11-02T03:33:49Z'
+    last_edited: '2026-11-02T03:33:49Z'
+  - id: note-72f0a2b
+    text: 'QA S4 (write-failure/credential-protection scenario) PASS, no code change.
+      Spec note for future runs: part 5''s hand-written providers.yaml block lost
+      its indentation in prompt.md — a literal column-0 `providers:`/`alpha:` file
+      is a null providers block (list shows only claude; `pm provider default bad`
+      -> Provider not found). The THEN is reproducible only with the indented form
+      (`providers:` -> nested `alpha:`/`bad:`), which was tested and matches exactly.
+      Also observed part 6 both variants: fresh ~/.pm with no debug/ tracebacks in
+      paths.py debug_dir (pr-78e8ebe, out of scope); a used HOME with debug/ gives
+      the single providers Error line.'
+    created_at: '2026-11-02T05:17:28Z'
+    last_edited: '2026-11-02T05:17:28Z'
+  - id: note-893d994
+    text: 'QA scenario 5 (textual 2.0.1 floor): Esc in the model popup crashed the
+      TUI at the declared floor. In 2.0.1 App.query_one searches only the active screen''s
+      DOM, so with the ModalScreen pushed #command-bar was unreachable and App.on_key
+      raised NoMatches; a background reload could hit _command_bar_in_use the same
+      way. Fixed in ff85d13a with ProjectManagerApp._command_bar() (None when unreachable)
+      at all six query sites, plus a regression test. Verified: full 2.0.1 suite 5461
+      passed/1 skipped (neutral HOME), test_view_focus_command_bar 8/8 at 2.0.1 and
+      8.2.8, and the live TUI closes the popup cleanly on Esc on both. Pre-fix/post-fix
+      captures: /pm-captures/scenarios/5/{pre-fix,post-fix}/.'
+    created_at: '2026-11-02T06:02:59Z'
+    last_edited: '2026-11-02T06:02:59Z'
+  - id: note-f75f0dd
+    text: 'Review-loop a9aa i1: spec synced with QA s5 — impl R4 now documents the
+      _command_bar() None-safe fix (ff85d13a) and qa R13 requires Esc to close the
+      popup; the regression test also calls App.on_key directly with a z event under
+      a modal (raises NoMatches pre-fix at textual 2.0.1, passes at 2.0.1 and 8.2.7).
+      Merge preview against current master (5b352d16, which merged #283 and pr-3d3b3ce):
+      code files auto-merge clean; only the usual pm/project.yaml registry conflict.
+      The merged tree passes tests/test_providers.py tests/test_router_route.py tests/test_model_settings.py
+      tests/test_view_focus_command_bar.py (437 passed). Full suite on the branch:
+      5461 passed, 1 skipped. For QA/sign-off: the QA verdict note at 06:08:16 still
+      lists scenario 5 (TUI model popup at the textual floor) as NEEDS_WORK although
+      the fix note at 06:02:59 reports it fixed and verified — re-run scenario 5 (or
+      refresh that verdict) before sign-off.'
+    created_at: '2026-11-02T06:26:43Z'
+    last_edited: '2026-11-02T06:26:43Z'
+  - id: note-473052f
+    text: 'QA planner probe (2026-11-02, not a live-TUI verdict): at the declared
+      floor textual 2.0.1 a background reload while the model popup is open still
+      raises NoMatches after ff85d13a. Headless repro: ProjectManagerApp + push ModelSettingsScreen
+      + action_reload() -> _load_state -> _update_display -> _update_status_bar ->
+      self.query_one(''#tech-tree'') (app.py:963) raises NoMatches; _show_normal_view''s
+      #tree-container queries would hit the same. The _command_bar() guard covers
+      on_key/check_action/_command_bar_in_use but not the reload path''s other default-screen
+      queries. Scenario 7''s ''background reload under the popup'' story targets this;
+      live effect is a logged traceback and a skipped reload while the popup is up
+      (the popup itself still renders and Esc still closes it).'
+    created_at: '2026-11-02T07:28:40Z'
+    last_edited: '2026-11-02T07:28:40Z'
+  - id: note-5c3a4db
+    text: 'QA scenario 7 (model popup at the textual floor, project view): PASS, no
+      code change. All seven stories verified live at textual 2.0.1 in an isolated
+      HOME/venv/project: title/providers block/`(default)` placement, literal `[UNAVAILABLE:
+      router not reachable at 127.0.0.1:19001]` with closing bracket and unclipped
+      border, `[OK]` only after close+reopen with a listener up (toggling `p` keeps
+      the cached status), `pm provider default beta`, add gamma/edit alpha/remove
+      beta, app-level `r z w y` (no crash, no watcher, popup keeps focus; `p`+Down
+      still work), and the command bar (`/` -> "Type command (e.g. pr start pr-001)...",
+      Esc -> "press / to type a command · a Runs"). The background-reload finding
+      is confirmed exactly as the scenario describes: `pm pr add "Third PR"` (SIGUSR1)
+      under the open popup does not crash and does not lose focus, but the reload
+      does not apply — header stays 2 PRs after Esc and only `r` then shows the third
+      PR; `grep -rn "NoMatches\|Traceback" ~/.pm/debug/` is empty. Nav note: at the
+      200x50 pane the scenario requires, the tech tree is a single horizontal row
+      so Down/Up are layout no-ops; the command-bar THEN was additionally verified
+      at 80x24 where Down/Up move the highlight between rows. Captures: /pm-captures/scenarios/7/
+      (checks/*.txt per story, recording.cast/.mp4, and story-g-nav/ for the clean
+      80x24 nav cut).'
+    created_at: '2026-11-02T07:57:32Z'
+    last_edited: '2026-11-02T07:57:32Z'
+  - id: note-c9f7f5c
+    text: 'QA scenario 7 follow-up: the assigned cli-recording captures are now recorded
+      and present under /pm-captures/scenarios/7/ — cli-provider-default/ (pm provider
+      default beta between two pm provider list runs: alpha (default) -> beta (default)),
+      cli-provider-add-edit-remove/ (pm provider add gamma, edit alpha --model alpha-model-2,
+      remove beta, then list: gamma present, alpha at alpha-model-2, beta gone, (default)
+      on claude), and cli-pr-add/ (pm pr add "Third PR" with a live TUI session whose
+      pidfile caps include sigusr1; the TUI logged "action: reload (state only)" at
+      that moment, and pm pr list shows 2 -> 3 PRs). Each has recording.cast, recording.mp4
+      and manifest.md in the recipe format; the top-level manifest lists them. These
+      were re-run for real in a fresh isolated project (HOME=/scratch/home3, /scratch/proj7c).
+      No code change; the scenario-7 behavioral verdict is unchanged.'
+    created_at: '2026-11-02T08:11:15Z'
+    last_edited: '2026-11-02T08:11:15Z'
+  - id: note-ddf4fe6
+    text: 'Sign-off return (implementation): merged master@5b352d16 into the branch
+      with store.merge_3way(base=c1fcecc5, ours=master, theirs=branch) -- 586 unique
+      PR ids, all 10 notes kept, every other record identical to master; no code change
+      (all code files auto-merged). Full suite on the merged tree: 5554 passed, 1
+      skipped (textual 8.2.7, markdown installed). Committed the sign-off''s uncommitted
+      spec correction and filed the F1 follow-up as pr-3199f44 ("TUI at Textual 2.x:
+      background reloads/syncs are dropped while a modal is open", plan improvements,
+      pending). Branch ready for a fresh sign-off.'
+    created_at: '2026-11-02T08:57:49Z'
+    last_edited: '2026-11-02T08:57:49Z'
+  - id: note-a70f631
+    text: 'QA S13 refiner rehearsal (2026-11-02): venv-only mirror PASS — fresh venv
+      + the Dockerfile pip3 list (click/pyyaml/textual/pyperclip/markdown) + PYTHONPATH=/workspace
+      renders body-only HTML and opens the project-view popup (alpha (default); route1
+      [UNAVAILABLE: router not reachable at 127.0.0.1:1] in full) with Esc closing
+      cleanly. Container build is feasible in the scenario container only with ''podman
+      build --uts=host'' (plain ''podman build'' dies ''sethostname: Operation not
+      permitted''); ''podman run'' also needs --uts=host, and the built image needs
+      the checkout bind-mounted at /opt/pm-src.'
+    created_at: '2026-11-02T09:59:05Z'
+    last_edited: '2026-11-02T09:59:05Z'
+  - id: note-7b333a9
+    text: 'QA scenario 12 (unreadable/malformed providers.yaml) PASS: all 7 stories
+      matched their THENs exactly — add refusals are one Error: line (exit 1, empty
+      stdout, file byte-identical and 0600/000/dir intact), list exits 0 with a single
+      NOT READ line, and the 200x55 project popup renders the full NOT READ / INVALID
+      ENTRY lines unclipped with Esc + r still working. Captures: /pm-captures/scenarios/12/
+      (cli-invalid-yaml, cli-shape-list, cli-unreadable, cli-partly-invalid, tui-invalid-yaml,
+      tui-unreadable, tui-partly-invalid; each with cast+mp4+manifest). Prompt caveat:
+      the story-7 YAML block again lost its indentation in prompt.md (literal column-0
+      providers:/alpha: is a null block, same as the S4 note); the capture uses the
+      correctly indented form the THEN requires. No code change. Minor observation:
+      the TUI debug log emits one WARNING [providers] Failed to read line per role
+      resolution while the popup is open (17x for a directory), no traceback and no
+      user-visible effect.'
+    created_at: '2026-11-02T10:01:30Z'
+    last_edited: '2026-11-02T10:01:30Z'
+  - id: note-5f6b0d9
+    text: 'QA S13 (deps sufficient) PASS. Extra env gotcha beyond the known --uts=host:
+      the in-image checks also need `podman run --userns=keep-id`, because the image
+      ends with USER pm (uid 1000) and /workspace is mode 0700, so without keep-id
+      the container uid 1000 maps to a subuid and /opt/pm-src is unreadable -> ModuleNotFoundError:
+      No module named pm_core (container.py passes keep-id too). Build took 2m42s
+      (BUILD_RC=0, 1.87 GB). Captures: /pm-captures/scenarios/13/.'
+    created_at: '2026-11-02T10:14:00Z'
+    last_edited: '2026-11-02T10:14:00Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
     signoff: provider:claude-main-xhigh-pm
   session_effort:
     signoff: high
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-5f30bdf-hardening-after-249-providers-yaml-l-0c82d63b
+- id: pr-78e8ebe
+  plan: bugs
+  title: 'Bug: every pm command tracebacks at import when ~/.pm is unwritable (configure_logger
+    creates ~/.pm/debug)'
+  branch: pm/pr-78e8ebe-bug-every-pm-command-tracebacks-at-import-when-pm-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/paths.py debug_dir() (~line 59) called from configure_logger()
+    (~line 555), which pm_core/claude_launcher.py runs at import time. Repro: H=$(mktemp
+    -d); mkdir -p $H/.pm; chmod 500 $H/.pm; HOME=$H pm provider default claude ->
+    PermissionError traceback from Path.mkdir creating ~/.pm/debug, before the command
+    runs (exit 1, no Error: line). Any pm command hits this, so "unwritable ~/.pm
+    -> one Error: line" (pr-5f30bdf goal 2) is only reachable when the CLI can import,
+    e.g. a read-only providers.yaml.lock. Suggested: make configure_logger/debug_dir
+    degrade (stderr warning + NullHandler, or lazy log-file creation) when the log
+    dir cannot be created. Found during review-loop 7e77 i2 of pr-5f30bdf.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T03:15:39.614318+00:00'
+  updated_at: '2026-11-02T03:15:39.614318+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
 - id: pr-0ebbc91
   plan: bugs
   title: 'Bug: pm provider test --live crashes with a raw ValueError traceback when
@@ -55814,6 +56005,48 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T09:48:47.287671+00:00'
   updated_at: '2026-11-02T09:48:47.287671+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3199f44
+  plan: improvements
+  title: 'TUI at Textual 2.x: background reloads/syncs are dropped while a modal is
+    open'
+  branch: pm/pr-3199f44-tui-at-textual-2-x-background-reloads-syncs-are-dr
+  status: pending
+  depends_on: []
+  description: 'At the declared Textual floor (2.0.1, pinned by pr-5f30bdf), App.query_one
+    searches only the active screen''s DOM, so with any modal open (e.g. the model
+    popup, `o`) background paths that query main-screen widgets fail.
+
+
+    Observed headless and live at 2.0.1: a `pm pr add` SIGUSR1 reload under the popup
+    replaces in-memory state but raises NoMatches on `#tech-tree` in `_update_status_bar`/`_update_display`;
+    the tree stays stale after Esc and `auto_start.on_state_loaded` is skipped, so
+    the next reload''s "previous state" already contains the change (a merge seen
+    only in that reload can miss its auto-start transition). The 5-minute sync tick
+    survives but logs `Sync error: No nodes match ''#tech-tree''`.
+
+
+    Textual 3.0.0+ lets App.query_one reach the default screen under a modal (bisected:
+    2.0.1 and 2.1.2 NoMatches; 3.0.0, 3.7.1, 5.0.0, 8.2.7 found), and at 8.2.7 the
+    same reload applies normally under the popup.
+
+
+    Options: raise the floor to textual>=3.0 (re-check the popup''s escaped-bracket
+    rendering at 3.0.0) or make the reload/sync path''s main-screen queries screen-aware.
+    Until then, TUI code running from background paths must not assume App.query_one
+    can see the main screen.
+
+
+    Evidence: pr-5f30bdf sign-off report section F1 (signoff/textual-2x-modal-followup:
+    version bisect, reload under the popup at 2.0.1 vs 8.2.7, sync tick at 2.0.1).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T08:57:36.104793+00:00'
+  updated_at: '2026-11-02T08:57:36.104793+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
