@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T11:03:11.834775+00:00'
+  updated_at: '2026-11-02T11:29:23.372085+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -26086,6 +26086,32 @@ prs:
       the prototype diff and rehearsal evidence are in /pm-captures/scenarios/28/refiner-helpers.'
     created_at: '2026-11-02T11:03:11Z'
     last_edited: '2026-11-02T11:03:11Z'
+  - id: note-870b381
+    text: 'QA S28 (2026-11-02): NEEDS_WORK, R41 fixed in ef4f5c19. Pre-fix (f710bb11),
+      a container-mode regression run on a router default (r-ctr -> 127.0.0.1:18428
+      request log) died at the bridge step on the CLI and TUI Enter (''pm route: route
+      r-ctr socket /run/pm-route/router.sock is not mounted in this container''),
+      rc 0, with no stand-in and no request, even with the ''pm provider test r-ctr
+      --container'' bridge up. Fix: cli/qa.py _regression_route_mounts resolves the
+      session''s provider (PM_PROVIDER, the session file, then the default), runs
+      router_route.require_setup(container=True), skips a qa_regression fake, and
+      passes router_route.container_mounts(strict=True) as create_qa_container route_mounts.
+      Tests: test_regression_launch.py (6 fail pre-fix). Full suite: 5581 passed/1
+      skipped/12 failed, all test_markdown_render (markdown dep missing). Post-fix
+      live: in CLI and TUI runs the stand-in got ANTHROPIC_BASE_URL=http://127.0.0.1:18428
+      with the DEFAULT_*_MODEL vars, and its GET reached the server; route-bridge/r-ctr
+      is mounted at /run/pm-route; podman exec passes -e NAME only. The p-env rerun
+      gets no route mount. R43: two same-second runs behind one host bridge each logged
+      their own GET, and the survivor''s route-ping reached the server after the other
+      container was removed. Stories 1 (docker/missing image fail closed), 2 (p-env
+      token by name only, /pm-project ro overlay, -C filing) and 4 held. Behaviour
+      change for story 4 (R42 no-model router): the same message now comes in 0.45
+      s, before any container exists; before, a container was created and removed
+      over about 12 s. Not checked here: pm qa debug''s container path likely lacks
+      the same mount (A15); confirm before filing. Captures: /pm-captures/scenarios/28/
+      (story1, story2, pre-fix, post-fix).'
+    created_at: '2026-11-02T11:29:23Z'
+    last_edited: '2026-11-02T11:29:23Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
