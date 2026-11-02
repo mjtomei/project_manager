@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T17:01:58.434909+00:00'
+  updated_at: '2026-11-02T17:19:25.086355+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8286,6 +8286,52 @@ prs:
       (README.md; pre-fix/ and post-fix/).'
     created_at: '2026-11-02T17:01:58Z'
     last_edited: '2026-11-02T17:01:58Z'
+  - id: note-55e2fe2
+    text: 'QA S47 refiner (c326fb31, tmux 3.2a, live): every Then held except one.
+      pane_layout._process_registry_pane_closed takes tui_respawn_lock once per registry
+      window. With a stuck holder, a C-b x close or a TUI kill therefore freezes the
+      closing client for 10 s x windows: 10.15 s with main only, 30.2 s with main
+      + 2 review windows (three ''still held after 10s'' warnings 10 s apart). Under
+      that 30 s freeze the TUI still respawns after the first wait (~11 s), and only
+      once. Impl windows (TUI s) are not registry windows; review windows (TUI d,
+      needs s first) are. A pm session attach waits once (10.19 s), with no respawn
+      line. Session B stayed at 0.15-0.27 s with no warnings. A lock path replaced
+      by a directory gives one ''cannot lock ... [Errno 21] Is a directory'' warning
+      per window, and every action takes 0.1-0.2 s. Harness: no vi/vim/nano in the
+      container, so a notes pane exits after its splash; set EDITOR to a script that
+      stays open (cat file; exec cat) before pm session. Client-freeze probe: C-b
+      x, y, then C-b t, and time until #{pane_in_mode}=1 (keys queue behind the synchronous
+      run-shell hook). Stop the flock holder with kill %1, because its sleep child
+      keeps the lock fd. Scripts are in /scratch/q47 (probe.py, poll47.py, attach_probe.py,
+      bin/ed47).'
+    created_at: '2026-11-02T16:58:24Z'
+    last_edited: '2026-11-02T16:58:24Z'
+  - id: note-34c9ed4
+    text: 'QA S47 (stuck or unusable TUI-respawn lock) NEEDS_WORK: one defect found
+      and fixed in b89aa9a40 (live-verified as ee8a43dd9, before rebasing onto S45''s f162a71cc); full suite 5604 passed / 1 skipped (12 test_markdown_render
+      failures = markdown missing from this container). Spec ambiguity 15 confirmed
+      live on c326fb31 (tmux 3.2a): _process_registry_pane_closed took tui_respawn_lock
+      once per registered window inside the synchronous after-kill-pane run-shell,
+      so with a stuck holder (flock <lock> sleep 3600) the closing client froze 10
+      s per window: a review-pane close with main + 2 review windows froze 30.20 s,
+      a TUI kill 30.34 s (3 "still held after 10s" warnings each; the TUI still came
+      back once after ~10.1 s). Fix: take the lock once around the whole reconcile/respawn
+      pass and rebalance after releasing it. Post-fix live: review-pane close 10.17
+      s, TUI kill 10.27 s (one warning each, one TUI in A dir, listed once); S1 notes
+      close 10.17 s, S3 attach 10.19 s (unchanged, attach already took the lock once);
+      session B 0.11-0.27 s with 0 lock lines; after kill %1 everything 0.15-0.21
+      s. Story 5 consequence: a directory at the lock path now logs one "cannot lock
+      ... [Errno 21]" line per close/kill/attach (was one per window), all actions
+      0.11-0.27 s; rmdir recreates an empty regular lock file. No traceback anywhere.
+      New tests in tests/test_tui_respawn_race.py (one lock for all windows + rebalance
+      after; real stuck-holder timing waits once) fail on c326fb31. qa.md ambiguity
+      15 and the S5 "one cannot-lock line per window" Then should be updated to one
+      per event. Captures /pm-captures/scenarios/47 (README.md; pre-fix/ + post-fix/
+      tui+cli casts/mp4s, measurements.log; harness/ scripts reusable). Harness: container
+      has no vi/vim/nano, so EDITOR=bin/ed47 (cat file; exec cat); time freezes with
+      C-b x, y, C-b t and poll #{pane_in_mode}.'
+    created_at: '2026-11-02T17:19:24Z'
+    last_edited: '2026-11-02T17:19:24Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
