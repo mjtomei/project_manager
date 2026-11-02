@@ -5173,7 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-11-02T17:51:56.500551+00:00'
+  updated_at: '2026-11-02T17:52:55.980457+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5450,6 +5450,24 @@ prs:
       all clone yamls unchanged.'
     created_at: '2026-11-02T17:51:56Z'
     last_edited: '2026-11-02T17:51:56Z'
+  - id: note-79cdc4b
+    text: 'QA S19 run 2026-11-02 at d911598b: PASS 5/5 live via the tmux popups in
+      an isolated pm session (fake-claude, fzf 0.60.3, two harness clients; captures
+      /pm-captures/scenarios/19/{fixture,baseline,story1-5,raw,harness,evidence}).
+      From C''s window: prefix+P h d re-linked B and opened review-B in its clone;
+      prefix+M pr start E reused the dirty clone (no clone/pull); D with 2 clones:
+      d listed the ambiguity and changed nothing, s held "pm error ... Not creating
+      another workdir" until Enter, after moving the copy d re-linked and switched
+      to the same review-D window; g merged F from the re-linked clone (master 2 ->
+      3 first-parent, card merged); two clients sent i on G together: one sign-off
+      window, one re-link line. Every re-link landed in the main yaml; C''s clone
+      stayed clean, its yaml (and B''s) sha unchanged. Findings outside this PR: (1)
+      E19: rc-0 popups close at once, so the D ambiguity listing and hint are never
+      visible on screen (filed pr-ade4427, cause _run_picker_command echoes stderr
+      on rc 0 without _wait_dismiss); (2) the merge opens pm-home in C''s clone /pm
+      listing C''s committed yaml, all pending (existing pr-3f52b15, note added).'
+    created_at: '2026-11-02T17:52:55Z'
+    last_edited: '2026-11-02T17:52:55Z'
   model: provider:claude-main-xhigh-pm
   effort: high
 - id: pr-0778fbe
@@ -41512,7 +41530,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T16:09:51.542797+00:00'
-  updated_at: '2026-10-28T08:38:31.390723+00:00'
+  updated_at: '2026-11-02T17:52:54.395595+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -41527,6 +41545,16 @@ prs:
       for the window cwd would fix both. Captures: /pm-captures/scenarios/121/post-fix/s4/pm-home-pane.txt.'
     created_at: '2026-10-28T08:38:31Z'
     last_edited: '2026-10-28T08:38:31Z'
+  - id: note-3452fa2
+    text: 'QA S19 of pr-4258a32 (2026-11-02, d911598b) hit this from the merge path:
+      in an isolated pm session, prefix+P from PR C''s window, then g on another PR
+      F at sign_off (pm pr merge --resolve-window F) merged F and opened pm-home (new_window
+      session=<S>~1 name=pm-home switch=False) with pane cwd <C clone>/pm. It lists
+      C''s committed project.yaml, every PR [pending] including the just-merged F,
+      while the session registry has F merged and others in_review/sign_off. Nothing
+      is written (C clone stays clean). Capture: /pm-captures/scenarios/19/story4/pm-home-pane.txt.'
+    created_at: '2026-11-02T17:52:54Z'
+    last_edited: '2026-11-02T17:52:54Z'
 - id: pr-8700be3
   plan: improvements
   title: Improve autostart status readability with compact text and highlighted human
@@ -56213,6 +56241,44 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T17:51:35.706301+00:00'
   updated_at: '2026-11-02T17:51:35.706301+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+
+- id: pr-ade4427
+  plan: bugs
+  title: 'Bug: prefix+P / prefix+M popup closes at once when the dispatched pm command
+    exits 0, so its stderr (e.g. the two-clone workdir ambiguity from pr review) is
+    never readable'
+  branch: pm/pr-ade4427-bug-prefix-p-prefix-m-popup-closes-at-once-when-th
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/session.py _run_picker_command, direct route:
+    on returncode 0 it echoes result.stderr ("so they don''t vanish") but never calls
+    _wait_dismiss(), so display-popup -E closes the popup as soon as the command returns;
+    only rc != 0 gets "pm error: ..." + "Press q/Esc/Enter to close...". Repro (QA
+    S19 of pr-4258a32 at d911598b, isolated pm session, fake-claude): PR D in_review,
+    its recorded workdir missing and two verified clones of its branch in the workdirs
+    dir. From another PR''s window press prefix+P, l to D, d. pm pr review prints
+    "PR D is already in_review." and "Review window: no workdir for D. 2 clones of
+    pm/<D-branch> in <WD>, not choosing one; move the extra clone(s) aside." plus
+    the stderr listing (both clone paths, "Not choosing one. Move the extra clone(s)
+    out of that directory ..."), exits 0, and the popup is gone: 50 ms capture-pane
+    polling saw the picker at +0.004 s, an empty popup frame at +0.057 s, no popup
+    at +0.161 s. The text exists only in a raw pipe-pane stream; the client stays
+    on its window with no review window and no visible reason. Same path for pr signoff
+    (rc 0 on the ambiguity) and any rc-0 command that warns on stderr. Fix idea: hold
+    the popup (_wait_dismiss) when the command wrote to stderr or printed a "no workdir"/refusal
+    line, or route that line to tmux display-message / the TUI message line; note
+    that re-link success lines are on stdout, so holding on stderr would not stop
+    normal re-link popups from closing. Captures: /pm-captures/scenarios/19/story3
+    (poll-t1-*.txt, raw-text-t1-a.txt, checks.txt).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T17:52:31.779846+00:00'
+  updated_at: '2026-11-02T17:52:31.779846+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
