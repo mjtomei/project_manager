@@ -36243,7 +36243,18 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T01:34:52.458271+00:00'
-  updated_at: '2026-10-13T01:34:52.458271+00:00'
+  updated_at: '2026-11-02T02:38:58.474825+00:00'
+  notes:
+  - id: note-b1ed487
+    text: 'Also on the stop/complete path (QA S20 of pr-9ee4d64, 2026-11-02): after
+      "pm tui send ws" stops the auto-start watcher (watcher_ui: loop complete --
+      verdict=KILLED, ww lists "stopped KILLED (i3)"), the header keeps "WCH" — still
+      shown 110 s later with auto-start off, until the next unrelated status refresh
+      (5-min background sync). watcher_ui._on_complete_from_thread / poll_watcher_state
+      never call app._update_status_bar(). Evidence: /pm-captures/scenarios/20/story1/evidence/cast-frames.txt
+      (final frame) on the pr-9ee4d64 captures.'
+    created_at: '2026-11-02T02:38:58Z'
+    last_edited: '2026-11-02T02:38:58Z'
 - id: pr-ae66f59
   plan: bugs
   title: 'Bug: QA resume after TUI restart crashes (QA ERROR) when a scenario/verifier
@@ -39215,7 +39226,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-11-02T02:38:48.519868+00:00'
+  updated_at: '2026-11-02T02:39:00.279222+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40179,6 +40190,23 @@ prs:
       (README.md). This supersedes note-5250c4d only as to captures; the verdict stands.'
     created_at: '2026-11-02T02:38:48Z'
     last_edited: '2026-11-02T02:38:48Z'
+  - id: note-9af6236
+    text: 'QA S20 (2026-11-02) PASS, all three stories, at 25c5c2f8e (code = 58b3ece2b),
+      private HOME/socket per story, fake-Claude. (1) pm tui send ws && pm autostart
+      clear over one shared run dir (rework impl link, frozen L1, held L2, auto-start-i1..i3):
+      stop, disable sweep and loop complete KILLED iterations=3 in 02:36:07-08; every
+      top-level line byte-identical before/after; the 2 archive links frozen (same
+      sha256, sid-matched records), exactly one finalize line each, none naming a
+      top-level path; probes visible through live links; recipe A on L2 collected
+      2.1 s later, then L2 froze only itself (cmp-equal archive copy), no auto_qa
+      hand-off (49/49). (2) finished impl, window killed, autostart clear: impl canonical
+      stays a live link, same target/sha256, no finalize/WARNING (14/14). (3) second
+      watcher run: archived auto-start-i1 -> archive/auto-start-i1.<OLD>.jsonl link,
+      new sid linked, next completion froze that entry, i1 stays a link to NEW (15/15).
+      Captures: /pm-captures/scenarios/20/{story1,story2,story3,scripts}. Side note:
+      stale WCH after watcher stop is pre-existing (pr-edc256b; cross-note added).'
+    created_at: '2026-11-02T02:39:00Z'
+    last_edited: '2026-11-02T02:39:00Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
