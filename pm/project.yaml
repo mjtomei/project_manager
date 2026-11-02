@@ -29555,7 +29555,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/222
   gh_pr_number: 222
   created_at: '2026-05-21T04:06:05.061620+00:00'
-  updated_at: '2026-10-21T23:45:02.916394+00:00'
+  updated_at: '2026-11-02T10:31:37.314358+00:00'
   started_at: '2026-05-25T02:58:20.169677+00:00'
   reviewed_at: '2026-05-25T03:13:02.415469+00:00'
   merged_at: null
@@ -29657,6 +29657,18 @@ prs:
       this PR''s lock/_NEVER_STASH approach when rebasing.'
     created_at: '2026-10-21T23:45:02Z'
     last_edited: '2026-10-21T23:45:02Z'
+  - id: note-72bea94
+    text: 'From pr-5cee3d5 QA S74 (2026-11-02): this race reproduced in 5 of 5 runs
+      on master code: pm pr merge racing pm pr note add / model set / signoff integrate
+      --record against the live pm/project.yaml. Seen: [Errno 2] project.yaml.tmp
+      -> project.yaml (writer or the merge itself, rc 1), lost notes, merged branch
+      records missing from the live registry, `stash pop had conflicts` + leaked auto-stash,
+      3 files stashed. Branch 6bfcc556 is behind master@5b352d16 and conflicts in
+      11 hunks (pm_core/cli/pr.py 7, prompt_gen.py 3, store.py 1) with pr-5cee3d5.
+      Integrate master first. pr-5cee3d5 S74 story 1 is a ready acceptance test (harness
+      /pm-captures/scenarios/74/harness on the pr-5cee3d5 captures).'
+    created_at: '2026-11-02T10:31:37Z'
+    last_edited: '2026-11-02T10:31:37Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ca6981c-bug-pm-merge-s-git-stash-pop-corrupt-ac115969
 - id: pr-c41f029
   plan: bugs
