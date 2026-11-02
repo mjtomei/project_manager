@@ -1,13 +1,15 @@
-"""Tests for QA worker routing through a host router provider.
+"""Tests for role-neutral routing through a host router provider.
 
-Covers pm_core.worker_route, pm_core.route_bridge, the router provider
-type, the launcher boundary (claude_launcher.build_claude_shell_cmd), the
-QA loop's role isolation, and that a router that is down gets no special
-waiting or recovery (it fails like the default provider does).
+Covers pm_core.router_route, pm_core.route_bridge, the router provider
+type, the launcher boundary (claude_launcher.build_claude_shell_cmd), role
+isolation (including the legacy Scenario-0 compatibility shim), container
+placement, and that a router that is down gets no special waiting or
+recovery (it fails like the default provider does).
 """
 
 import json
 import re
+import shlex
 import os
 import shutil
 import socket
@@ -22,7 +24,7 @@ from unittest.mock import patch
 import pytest
 
 from pm_core.model_config import get_pr_model_override
-from pm_core import route_bridge, worker_route
+from pm_core import route_bridge, router_route
 from pm_core.model_config import ModelResolution, resolve_model_and_provider
 from pm_core.providers import (
     LAUNCH_ROUTING_ENV_VARS, ProviderConfig, ProviderNotFoundError,
@@ -46,7 +48,7 @@ def pm_home_dir(short_dir, monkeypatch):
     """Isolated ~/.pm holding providers.yaml and the route-bridge dir."""
     home = short_dir / "pm"
     home.mkdir()
-    for mod in ("pm_core.providers", "pm_core.worker_route"):
+    for mod in ("pm_core.providers", "pm_core.router_route"):
         monkeypatch.setattr(f"{mod}.pm_home", lambda: home)
     monkeypatch.delenv("PM_PROVIDER", raising=False)
     monkeypatch.delenv("PM_MODEL", raising=False)
@@ -259,7 +261,7 @@ class TestBuildShellCmd:
         """A router whose own settings cannot launch a session fails the
         build like a missing provider: no command, no fallback."""
         _write_providers(pm_home_dir, **entry)
-        with pytest.raises(worker_route.RouteSetupError, match=problem) as exc:
+        with pytest.raises(router_route.RouteSetupError, match=problem) as exc:
             self._build(provider=ROUTE)
         assert isinstance(exc.value, ProviderNotFoundError)
         assert f"provider '{ROUTE}'" in str(exc.value)
@@ -304,6 +306,7 @@ class TestBuildShellCmd:
                        "-u ANTHROPIC_DEFAULT_FABLE_MODEL "
                        "-u ANTHROPIC_SMALL_FAST_MODEL "
                        "-u CLAUDE_CODE_AUTO_MODE_MODEL -u PM_ROUTE_BASE_URL "
+                       "-u CLAUDE_CODE_EFFORT_LEVEL "
                        "claude --model claude-opus-5-5 --effort high")
         assert cmd.env == {"CLAUDE_CODE_SUBAGENT_MODEL": "claude-opus-5-5",
                            "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"}
@@ -369,15 +372,30 @@ class TestBuildShellCmd:
         assert "route_bridge" not in cmd
 
 
+def _assignment_words(cmd: str) -> list[str]:
+    """``NAME=value`` words in *cmd*: values a process argument would carry."""
+    return [w for w in shlex.split(cmd)
+            if re.match(r"[A-Za-z_][A-Za-z0-9_]*=", w)]
+
+
 def _cmd_env(cmd: str) -> dict[str, str]:
-    """The values a built command sets for claude: its ``env_out`` (and any
-    ``NAME=value`` assignment in the string, e.g. a probe command)."""
-    import re
-    import shlex
-    env = dict(w.split("=", 1) for w in shlex.split(cmd)
-               if re.match(r"[A-Z_][A-Z0-9_]*=", w))
-    env.update(getattr(cmd, "env", None) or {})
-    return env
+    """The values a built command sets for claude: its ``env_out``.
+
+    The command string itself holds none (it becomes a process argument,
+    readable by every local user), so every caller also guards that.
+    """
+    assert not _assignment_words(cmd), "a value is inlined in the command"
+    return dict(getattr(cmd, "env", None) or {})
+
+
+def _probe_cmd(cfg: ProviderConfig, *, container: bool = False) -> Launch:
+    """The live probe's command with its ``env_out`` attached (as
+    :func:`_launch`), so ``_cmd_env`` / ``_sourced`` see what Claude gets."""
+    env: dict[str, str] = {}
+    cmd = Launch(router_route._probe_shell_cmd(cfg, "sid", container=container,
+                                               env_out=env))
+    cmd.env = env
+    return cmd
 
 
 class TestClassifierRoute:
@@ -432,7 +450,7 @@ class TestClassifierRoute:
     def test_live_probe_cmd_carries_it(self, pm_home_dir):
         _write_providers(pm_home_dir, classifier_model=self.CLASSIFIER)
         cfg = get_provider(ROUTE, strict=True)
-        cmd = worker_route._probe_shell_cmd(cfg, "sid", container=False)
+        cmd = _probe_cmd(cfg)
         assert _cmd_env(cmd)["CLAUDE_CODE_AUTO_MODE_MODEL"] == self.CLASSIFIER
 
     def test_live_probe_cmd_unsets_what_launches_unset(self, pm_home_dir,
@@ -444,7 +462,7 @@ class TestClassifierRoute:
         monkeypatch.setenv("CLAUDE_CODE_AUTO_MODE_MODEL", self.CLASSIFIER)
         _write_providers(pm_home_dir, model="z-ai/glm-5.3-flash")
         cfg = get_provider(ROUTE, strict=True)
-        cmd = worker_route._probe_shell_cmd(cfg, "sid", container=False)
+        cmd = _probe_cmd(cfg)
         for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
                     "CLAUDE_CODE_AUTO_MODE_MODEL"):
             assert self._shell_env(cmd, var) == "unset", var
@@ -999,7 +1017,7 @@ class TestSubagentPin:
     def test_live_probe_cmd_is_pinned(self, pm_home_dir):
         _write_providers(pm_home_dir)
         cfg = get_provider(ROUTE, strict=True)
-        cmd = worker_route._probe_shell_cmd(cfg, "sid", container=False)
+        cmd = _probe_cmd(cfg)
         assert self._pin(cmd) == (MODEL, "1")
 
 
@@ -1109,17 +1127,83 @@ class TestRoleIsolation:
         assert "route_bridge.py ensure /run/pm-route/router.sock 1" in run
 
 
+class TestPlacement:
+    """``SCENARIO_CONTAINER_TYPES`` describes where a session runs, not who
+    may be routed.  Every role may select a provider; only the two QA roles
+    that run in scenario containers need (and get) the bridge mount."""
+
+    def test_scenario_container_types_are_the_two_scenario_roles(self):
+        assert router_route.SCENARIO_CONTAINER_TYPES == ("qa_concretize",
+                                                         "qa_scenario")
+        assert router_route.CONTAINER_SESSION_TYPES == (
+            "impl", "review", "signoff", "qa_concretize", "qa_scenario")
+
+    def test_placement_does_not_restrict_routing_for_other_roles(
+            self, pm_home_dir):
+        """Every role outside the placement constant is still routable: the
+        constant is not a routing allowlist."""
+        from pm_core.model_config import SESSION_TYPES
+        _write_providers(pm_home_dir)
+        others = [st for st in SESSION_TYPES
+                  if st not in router_route.SCENARIO_CONTAINER_TYPES]
+        assert others, "every role would be a scenario-container role"
+        for st in others:
+            data = {"project": {"model_config": {"session_models": {
+                st: f"provider:{ROUTE}"}}}}
+            res = resolve_model_and_provider(st, project_data=data)
+            assert (res.provider, res.model) == (ROUTE, None), st
+
+    def test_scenario_setup_checks_only_scenario_container_roles(
+            self, monkeypatch):
+        from pm_core import qa_loop
+        # Isolate resolution: only the project setting below may decide.
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        monkeypatch.setattr("pm_core.model_config.get_global_setting_value",
+                            lambda *a, **k: None)
+        seen = []
+        monkeypatch.setattr(router_route, "require_setup",
+                            lambda res, **kw: seen.append(res.provider))
+        data = {"project": {"model_config": {"session_models": {
+            "qa_planning": "provider:other",
+            "qa_concretize": f"provider:{ROUTE}"}}}}
+        qa_loop._require_scenario_setup({}, data, container=True)
+        # Only the two scenario roles are checked; qa_planning's route is not.
+        assert seen == [ROUTE, None]
+        assert "other" not in seen
+
+    def test_route_mounts_consider_only_scenario_container_roles(
+            self, monkeypatch):
+        """A route on a host role (qa_planning) must not mount the bridge
+        into a scenario container; the scenario roles' routes do."""
+        from pm_core import qa_loop
+        # Isolate resolution: only the project setting below may decide.
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        monkeypatch.setattr("pm_core.model_config.get_global_setting_value",
+                            lambda *a, **k: None)
+        seen = []
+        monkeypatch.setattr(router_route, "container_mounts",
+                            lambda res, **kw: seen.append(res.provider) or {})
+        monkeypatch.setattr("pm_core.paths.fake_claude_config_for_type",
+                            lambda *a, **k: None)
+        data = {"project": {"model_config": {"session_models": {
+            "qa_planning": "provider:other",
+            "qa_scenario": f"provider:{ROUTE}"}}}}
+        qa_loop._route_mounts({}, data, None)
+        assert seen == [None, ROUTE]
+        assert "other" not in seen
+
+
 # ---------------------------------------------------------------------------
 # Preflight
 # ---------------------------------------------------------------------------
 
 class TestCheckRoute:
     def test_unrouted_is_ok(self, pm_home_dir):
-        assert worker_route.check_route(ModelResolution(model="x")).ok
-        assert worker_route.check_route(ModelResolution()).ok
+        assert router_route.check_route(ModelResolution(model="x")).ok
+        assert router_route.check_route(ModelResolution()).ok
 
     def test_missing_provider(self, pm_home_dir):
-        st = worker_route.check_route(ModelResolution(provider="ghost"))
+        st = router_route.check_route(ModelResolution(provider="ghost"))
         assert not st.ok and "not configured" in st.problem
         assert "'pm model set <session-type> <model> --project'" in st.remedy
         assert "change the PR's model setting" in st.remedy
@@ -1128,7 +1212,7 @@ class TestCheckRoute:
         s, port = _listener()
         s.close()
         _write_providers(pm_home_dir, api_base=f"http://127.0.0.1:{port}")
-        st = worker_route.check_route(ModelResolution(provider=ROUTE))
+        st = router_route.check_route(ModelResolution(provider=ROUTE))
         assert not st.ok and f"127.0.0.1:{port}" in st.problem
         assert "start the router" in st.remedy
 
@@ -1145,7 +1229,7 @@ class TestCheckRoute:
                          credentials_file=str(creds),
                          refresh_command=f"touch {marker}")
         try:
-            st = worker_route.check_route(ModelResolution(provider=ROUTE))
+            st = router_route.check_route(ModelResolution(provider=ROUTE))
         finally:
             s.close()
         assert st.ok and st.route == ROUTE
@@ -1156,7 +1240,7 @@ class TestCheckRoute:
         s.close()
         _write_providers(pm_home_dir, api_base=f"http://127.0.0.1:{port}",
                          remedy="run 'my-router start'")
-        st = worker_route.check_route(ModelResolution(provider=ROUTE))
+        st = router_route.check_route(ModelResolution(provider=ROUTE))
         assert not st.ok and st.remedy == "run 'my-router start'"
 
     def test_missing_launcher(self, pm_home_dir):
@@ -1164,8 +1248,8 @@ class TestCheckRoute:
         _write_providers(pm_home_dir, api_base=f"http://127.0.0.1:{port}",
                          launcher="/nonexistent/claude-mixed")
         try:
-            host = worker_route.check_route(ModelResolution(provider=ROUTE))
-            cont = worker_route.check_route(ModelResolution(provider=ROUTE),
+            host = router_route.check_route(ModelResolution(provider=ROUTE))
+            cont = router_route.check_route(ModelResolution(provider=ROUTE),
                                             container=True)
         finally:
             s.close()
@@ -1178,9 +1262,9 @@ class TestCheckRoute:
         s, port = _listener()
         _write_providers(pm_home_dir, api_base=f"http://127.0.0.1:{port}")
         try:
-            with patch("pm_core.worker_route.container_has_route_mount",
+            with patch("pm_core.router_route.container_has_route_mount",
                        return_value=False):
-                st = worker_route.check_route(ModelResolution(provider=ROUTE),
+                st = router_route.check_route(ModelResolution(provider=ROUTE),
                                               container_name="pm-qa-old")
         finally:
             s.close()
@@ -1192,11 +1276,11 @@ class TestCheckRoute:
     def test_describe_is_credential_free(self, pm_home_dir):
         _write_providers(pm_home_dir)
         res = ModelResolution(provider=ROUTE, effort="high")
-        assert worker_route.describe(res) == (
+        assert router_route.describe(res) == (
             f"route={ROUTE} model={MODEL} effort=high via=host")
-        assert worker_route.describe(res, container=True).endswith(
+        assert router_route.describe(res, container=True).endswith(
             "via=container-bridge")
-        assert worker_route.describe(ModelResolution(
+        assert router_route.describe(ModelResolution(
             model="claude-opus-5-5", effort="high")) == (
             "route=none model=claude-opus-5-5 effort=high via=claude")
 
@@ -1290,7 +1374,7 @@ class TestBridge:
         sock = sock_dir / "router.sock"
         env = dict(os.environ, PYTHONPATH=str(shadow))
         host = subprocess.Popen(
-            worker_route.bridge_host_argv(sock, "127.0.0.1", ports[0]),
+            router_route.bridge_host_argv(sock, "127.0.0.1", ports[0]),
             cwd=shadow, env=env, stderr=subprocess.PIPE)
         try:
             for _ in range(50):
@@ -1336,13 +1420,13 @@ class TestBridge:
         cfg = ProviderConfig(name=ROUTE, type="router",
                              api_base=f"http://127.0.0.1:{port}", model=MODEL)
         try:
-            sock = worker_route.ensure_host_bridge(cfg)
+            sock = router_route.ensure_host_bridge(cfg)
             assert route_bridge.unix_connectable(str(sock))
             assert oct(sock.parent.stat().st_mode & 0o777) == "0o700"
             assert oct(sock.stat().st_mode & 0o777) == "0o600"
             ino = sock.parent.stat().st_ino
             sock.unlink()  # bridge exits; next ensure starts a new one
-            sock2 = worker_route.ensure_host_bridge(cfg)
+            sock2 = router_route.ensure_host_bridge(cfg)
             assert sock2 == sock and route_bridge.unix_connectable(str(sock))
             assert sock.parent.stat().st_ino == ino  # same dir for mounts
         finally:
@@ -1384,19 +1468,19 @@ class TestBridge:
         target.mkdir(mode=0o755)
         link = short_dir / "planted"
         link.symlink_to(target)
-        monkeypatch.setattr(worker_route, "bridge_dir", lambda route: link)
+        monkeypatch.setattr(router_route, "bridge_dir", lambda route: link)
         cfg = ProviderConfig(name=ROUTE, type="router",
                              api_base="http://127.0.0.1:1", model=MODEL)
         with pytest.raises(OSError, match="not a directory owned"):
-            worker_route.ensure_host_bridge(cfg)
-        with patch("pm_core.worker_route.get_provider", return_value=cfg):
-            assert worker_route.container_mounts(
+            router_route.ensure_host_bridge(cfg)
+        with patch("pm_core.router_route.get_provider", return_value=cfg):
+            assert router_route.container_mounts(
                 ModelResolution(provider=ROUTE)) == {}
         assert oct(target.stat().st_mode & 0o777) == "0o755"
         assert not (target / route_bridge.SOCKET_NAME).exists()
 
     def test_long_route_name_socket_path_fits(self, pm_home_dir):
-        p = worker_route.bridge_socket("r" * 200)
+        p = router_route.bridge_socket("r" * 200)
         assert len(str(p)) <= 100
 
 
@@ -1477,7 +1561,7 @@ class TestPollLoopNoRouteGating:
              patch("pm_core.qa_loop.find_verdict_turn",
                    return_value=_hit("PASS")), \
              patch("pm_core.tmux.pane_exists", return_value=True), \
-             patch("pm_core.worker_route.check_route",
+             patch("pm_core.router_route.check_route",
                    side_effect=AssertionError("route checked")), \
              patch("pm_core.route_bridge.tcp_connectable",
                    side_effect=AssertionError("router probed")):
@@ -1778,7 +1862,7 @@ class TestPollLoopNoRouteGating:
             launch = (qa_loop._launch_scenarios_in_containers
                       if mode == "container"
                       else qa_loop._launch_scenarios_in_tmux)
-            with pytest.raises(worker_route.RouteSetupError,
+            with pytest.raises(router_route.RouteSetupError,
                                match="no model configured"):
                 launch(state, PROJECT, {"id": "pr-1"}, "sess", None,
                        str(tmp_path))
@@ -1858,7 +1942,7 @@ class TestPollLoopNoRouteGating:
              patch("pm_core.tmux.pane_exists", return_value=True), \
              patch("pm_core.tmux.send_keys",
                    side_effect=lambda p, m: sent.append(m)), \
-             patch("pm_core.worker_route.check_route",
+             patch("pm_core.router_route.check_route",
                    side_effect=AssertionError("route checked")):
             self._poll(state, tmp_path, data=PROJECT if routed else None)
         assert len(sent) == 3 and sent[0].startswith("Reminder: your verdict")
@@ -2166,13 +2250,13 @@ class TestLiveProbe:
         monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
         monkeypatch.setenv("PROBE_HOOKS_DIR", str(hooks))
         monkeypatch.setattr("pm_core.hook_events._HOOKS_BASE", hooks)
-        monkeypatch.setattr("pm_core.worker_route.time.sleep", lambda s: None)
+        monkeypatch.setattr("pm_core.router_route.time.sleep", lambda s: None)
         return short_dir
 
     def _probe(self, cwd, model=MODEL):
         cfg = ProviderConfig(name=ROUTE, type="router",
                              api_base="http://127.0.0.1:1", model=model)
-        return worker_route.live_probe(cfg, cwd=str(cwd))
+        return router_route.live_probe(cfg, cwd=str(cwd))
 
     def test_underscore_cwd_finds_transcript(self, probe_env):
         # Supervisor-found: tempfile.mkdtemp suffixes may contain '_'; Claude
@@ -2204,16 +2288,16 @@ class TestLiveProbe:
         cfg = ProviderConfig(name=ROUTE, type="router",
                              api_base="http://127.0.0.1:1", model=f"{MODEL}[1m]",
                              probe_models=["claude-opus-5-5"])
-        assert worker_route.model_on_route(cfg, "claude-opus-5-5")
-        assert worker_route.model_on_route(cfg, f"{MODEL}[1m]")
-        assert worker_route.model_on_route(cfg, MODEL)
-        assert not worker_route.model_on_route(cfg, "claude-fable-5-1")
-        assert not worker_route.model_on_route(cfg, "opus-5-5")
+        assert router_route.model_on_route(cfg, "claude-opus-5-5")
+        assert router_route.model_on_route(cfg, f"{MODEL}[1m]")
+        assert router_route.model_on_route(cfg, MODEL)
+        assert not router_route.model_on_route(cfg, "claude-fable-5-1")
+        assert not router_route.model_on_route(cfg, "opus-5-5")
 
     def test_transcript_model_unjudged_without_probe_models(self):
         cfg = ProviderConfig(name=ROUTE, type="router",
                              api_base="http://127.0.0.1:1", model=MODEL)
-        assert worker_route.model_on_route(cfg, "anything-the-backend-says")
+        assert router_route.model_on_route(cfg, "anything-the-backend-says")
 
     def test_missing_transcript_is_a_failure(self, probe_env, monkeypatch):
         monkeypatch.setenv("PROBE_TRANSCRIPT", "0")
@@ -2254,6 +2338,221 @@ def test_transcript_path_matches_claude_mangling():
     from pm_core.claude_launcher import transcript_path_for
     p = transcript_path_for("/tmp/pm-route-probe-020ea4s_/a.b c", "sid")
     assert p.parent.name == "-tmp-pm-route-probe-020ea4s--a-b-c"
+
+
+# A synthetic canary in a variable pm classifies as secret
+# (providers.is_secret_env_var): a router's ``env`` may carry a key or token,
+# e.g. a team header.
+_CANARY = "CANARY-not-a-real-secret-3d3b3ce"
+_HEADER = f"x-team-token: {_CANARY}"
+_TEAM = "blue-team-3d3b3ce"
+
+# Stand-in for claude -p that records the environment it was started with.
+_ENV_PROBE_CLAUDE = r"""#!/usr/bin/env python3
+import json, os, sys
+names = os.environ["PROBE_ENV_NAMES"].split(",")
+with open(os.environ["PROBE_ENV_OUT"], "w") as f:
+    json.dump({n: os.environ.get(n) for n in names}, f)
+model = sys.argv[sys.argv.index("--model") + 1]
+print(json.dumps({"result": "ok", "is_error": False,
+                  "modelUsage": {model: {}}}))
+"""
+
+
+class TestProbeEnvTransport:
+    """``pm provider test --live`` hands the route's environment to Claude
+    without putting a value in any process's arguments (pr-3d3b3ce).
+
+    Arguments are readable by every local user (/proc/<pid>/cmdline, ps)
+    and kept by execve auditing.  The probe used to inline every value
+    (``env NAME=value ... claude -p``) into its ``bash -c`` argument and,
+    for a container, into the host-side ``podman exec`` argv that lives as
+    long as the probe.  As in a pane launch, the command now names only the
+    variables it unsets; the values travel in the process environment and
+    the container runtime forwards each by name (``-e NAME``).
+    """
+
+    CONTAINER = "pm-route-test-3d3b3ce"
+
+    @pytest.fixture
+    def route(self, pm_home_dir):
+        _write_providers(pm_home_dir, env={
+            "ANTHROPIC_CUSTOM_HEADERS": _HEADER, "ACME_TEAM": _TEAM})
+        return get_provider(ROUTE, strict=True)
+
+    @staticmethod
+    def _expected(cfg, *, container):
+        """``(assign, unset)`` the probe's selection decides."""
+        _, env, _ = router_route.launch_parts(cfg, container=container)
+        return launch_env(cfg, env, cfg.model)
+
+    def _run_probe(self, monkeypatch, cfg, short_dir, *, container):
+        """live_probe with its subprocess captured: ``(argv, env)``."""
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen.update(argv=list(argv), env=kwargs.get("env"))
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(
+                {"result": "ok", "is_error": False,
+                 "modelUsage": {MODEL: {}}}), stderr="")
+
+        monkeypatch.setattr("pm_core.router_route.subprocess.run", fake_run)
+        monkeypatch.setattr("pm_core.router_route.time.sleep", lambda s: None)
+        monkeypatch.setattr("pm_core.container._get_runtime", lambda: "podman")
+        kw = ({"container_name": self.CONTAINER} if container
+              else {"cwd": str(short_dir)})
+        router_route.live_probe(cfg, **kw)
+        return seen["argv"], seen["env"]
+
+    @pytest.mark.parametrize("container", [False, True])
+    def test_no_value_in_the_probe_argv(self, route, short_dir, monkeypatch,
+                                        container):
+        argv, env = self._run_probe(monkeypatch, route, short_dir,
+                                    container=container)
+        assign, unset = self._expected(route, container=container)
+        joined = "\0".join(argv)
+        assert _CANARY not in joined
+        assert _TEAM not in joined
+        for var in assign:  # secret or not: no assignment at all
+            assert f"{var}=" not in joined, var
+        # The values reach the probe through its environment, on top of the
+        # caller's own (PATH, HOME, ...).
+        assert env is not None
+        assert {k: env.get(k) for k in assign} == assign
+        assert env["ANTHROPIC_CUSTOM_HEADERS"] == _HEADER
+        assert env["PATH"] == os.environ["PATH"]
+        # What the probe removes is still removed, by name.
+        for var in unset:
+            assert f"-u {var} " in argv[-1], var
+
+    def test_container_runtime_gets_names_only(self, route, short_dir,
+                                               monkeypatch):
+        argv, env = self._run_probe(monkeypatch, route, short_dir,
+                                    container=True)
+        assign, _ = self._expected(route, container=True)
+        cut = argv.index(self.CONTAINER)
+        opts, rest = argv[:cut], argv[cut + 1:]
+        assert opts[:4] == ["podman", "exec", "-w", "/workspace"]
+        names = [opts[i + 1] for i, a in enumerate(opts) if a == "-e"]
+        assert sorted(names) == sorted(assign)
+        assert len(opts) == 4 + 2 * len(names)  # nothing else forwarded
+        assert rest[:2] == ["bash", "-c"] and len(rest) == 3
+        assert rest[2].startswith(
+            router_route.container_ensure_cmd(route) + " && env -u ")
+        # The in-container forwarder's URL, not the host router's.
+        assert env["ANTHROPIC_BASE_URL"] == router_route.container_base_url(
+            route)
+
+    @pytest.mark.parametrize("container", [False, True])
+    def test_probe_cmd_hands_values_to_env_out(self, route, container):
+        env: dict[str, str] = {}
+        cmd = router_route._probe_shell_cmd(route, "sid", container=container,
+                                            env_out=env)
+        assert _CANARY not in cmd and _TEAM not in cmd
+        assert not _assignment_words(cmd)
+        assert env == self._expected(route, container=container)[0]
+        assert f" --model {MODEL} " in cmd
+
+    @pytest.mark.parametrize("container", [False, True])
+    def test_nothing_to_unset(self, pm_home_dir, container):
+        # unset_env: [] plus a classifier model assigns every routing
+        # variable, so the probe unsets nothing and runs claude directly.
+        _write_providers(pm_home_dir, unset_env=[],
+                         classifier_model="work/classifier",
+                         env={"ANTHROPIC_CUSTOM_HEADERS": _HEADER})
+        cfg = get_provider(ROUTE, strict=True)
+        assign, unset = self._expected(cfg, container=container)
+        assert unset == ()
+        env: dict[str, str] = {}
+        cmd = router_route._probe_shell_cmd(cfg, "sid", container=container,
+                                            env_out=env)
+        prefix = (router_route.container_ensure_cmd(cfg) + " && "
+                  if container else "")
+        assert cmd.startswith(f"{prefix}claude -p "), cmd
+        assert _CANARY not in cmd and not _assignment_words(cmd)
+        assert env == assign
+        assert env["ANTHROPIC_CUSTOM_HEADERS"] == _HEADER
+
+    def test_env_out_is_required(self, route):
+        # Without it the route's environment (ANTHROPIC_BASE_URL) could not
+        # reach Claude, and the probe would run on the caller's account.
+        with pytest.raises(TypeError):
+            router_route._probe_shell_cmd(route, "sid", container=False)
+
+    @staticmethod
+    def _argv_recorder(bindir: Path, name: str, log: Path) -> None:
+        """A *name* on PATH that logs its argv (one line, fields split by
+        \\x1f) and then runs the real *name* unchanged."""
+        real = shutil.which(name)
+        shim = bindir / name
+        log_q, real_q = shlex.quote(str(log)), shlex.quote(real)
+        shim.write_text("#!/bin/sh\n"
+                        f"printf '%s\\037' {name} \"$@\" >> {log_q}\n"
+                        f"echo >> {log_q}\nexec {real_q} \"$@\"\n")
+        shim.chmod(0o755)
+
+    def test_host_probe_end_to_end(self, route, short_dir, monkeypatch):
+        """Real processes: no argv the probe execs (bash, env, claude) holds
+        a value, and Claude still gets the route's environment over the
+        caller's, minus what the probe unsets."""
+        bindir = short_dir / "bin"
+        bindir.mkdir()
+        argv_log, env_out = short_dir / "argv.log", short_dir / "env.json"
+        for name in ("bash", "env"):
+            self._argv_recorder(bindir, name, argv_log)
+        claude = bindir / "claude"
+        claude.write_text(_ENV_PROBE_CLAUDE)
+        claude.chmod(0o755)
+        assign, unset = self._expected(route, container=False)
+        monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
+        monkeypatch.setenv("PROBE_ENV_OUT", str(env_out))
+        monkeypatch.setenv("PROBE_ENV_NAMES", ",".join([*assign, *unset]))
+        # What a caller's shell may carry: a stray key, its own endpoint,
+        # another route's subagent pin.
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-stray-not-real")
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:9")
+        monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", "other/model")
+        monkeypatch.setattr("pm_core.router_route.time.sleep", lambda s: None)
+        out = router_route.live_probe(route, cwd=str(short_dir))
+        assert out["exit"] == 0, out
+        execs = [line.split("\x1f")[:-1]
+                 for line in argv_log.read_text().splitlines()]
+        assert [a[0] for a in execs] == ["bash", "env"]
+        for argv in execs:
+            joined = "\0".join(argv)
+            assert _CANARY not in joined and _TEAM not in joined, argv
+            assert not [v for v in assign if f"{v}=" in joined], argv
+        got = json.loads(env_out.read_text())
+        assert {k: got[k] for k in assign} == assign
+        assert got["ANTHROPIC_CUSTOM_HEADERS"] == _HEADER
+        assert got["ANTHROPIC_BASE_URL"] == route.api_base
+        assert got["CLAUDE_CODE_SUBAGENT_MODEL"] == MODEL
+        assert {k: got[k] for k in unset} == dict.fromkeys(unset)
+        assert "ANTHROPIC_API_KEY" in unset
+
+    def test_container_runtime_end_to_end(self, route, short_dir,
+                                          monkeypatch):
+        """A real runtime process gets each value in its environment under
+        the name it is told to forward, and none in its argv."""
+        log = short_dir / "runtime.json"
+        runtime = short_dir / "fake-runtime"
+        runtime.write_text(
+            "#!/usr/bin/env python3\nimport json, os, sys\n"
+            "a = sys.argv\n"
+            "names = [a[i + 1] for i, x in enumerate(a) if x == '-e']\n"
+            f"json.dump({{'argv': a, 'env': {{n: os.environ.get(n) "
+            f"for n in names}}}}, open({str(log)!r}, 'w'))\n"
+            "print(json.dumps({'result': 'ok', 'is_error': False}))\n")
+        runtime.chmod(0o755)
+        monkeypatch.setattr("pm_core.container._get_runtime",
+                            lambda: str(runtime))
+        monkeypatch.setattr("pm_core.router_route.time.sleep", lambda s: None)
+        out = router_route.live_probe(route, container_name=self.CONTAINER)
+        assert out["exit"] == 0, out
+        rec = json.loads(log.read_text())
+        assert _CANARY not in "\0".join(rec["argv"])
+        assign, _ = self._expected(route, container=True)
+        assert rec["env"] == assign
 
 
 # ---------------------------------------------------------------------------
@@ -2322,23 +2621,23 @@ def test_workflow_container_route_mount_and_fail_closed(pm_home_dir, monkeypatch
     monkeypatch.setattr(cm, "_make_container_name", lambda *a, **k: "review-test")
     monkeypatch.setattr(cm, "container_is_running",
                         lambda name: state.startswith("reused"))
-    monkeypatch.setattr(worker_route, "container_has_route_mount",
+    monkeypatch.setattr(router_route, "container_has_route_mount",
                         lambda name: state == "reused_mounted")
     create = Mock()
     monkeypatch.setattr(cm, "create_container", create)
     monkeypatch.setattr(cm, "build_exec_cmd", lambda name, cmd, **kw: cmd)
     monkeypatch.setattr("pm_core.push_proxy.get_proxy_socket_path",
                         lambda name, **kw: None)
-    monkeypatch.setattr(worker_route, "check_route",
+    monkeypatch.setattr(router_route, "check_route",
                         Mock(side_effect=AssertionError("route checked")))
     monkeypatch.setattr(route_bridge, "tcp_connectable",
                         Mock(side_effect=AssertionError("router probed")))
-    sock = worker_route.bridge_socket(ROUTE)
+    sock = router_route.bridge_socket(ROUTE)
     if state == "bridge_fails":
-        monkeypatch.setattr(worker_route, "ensure_host_bridge",
+        monkeypatch.setattr(router_route, "ensure_host_bridge",
                             Mock(side_effect=OSError("permission denied")))
     else:
-        monkeypatch.setattr(worker_route, "ensure_host_bridge",
+        monkeypatch.setattr(router_route, "ensure_host_bridge",
                             lambda cfg: sock)
         monkeypatch.setattr(route_bridge, "unix_connectable", lambda p: True)
     bridge = {sock.parent: "/run/pm-route"}
@@ -2381,7 +2680,7 @@ def test_unrouted_provider_reuses_a_running_container_untouched(pm_home_dir, mon
     monkeypatch.setattr(cm, "_make_container_name", lambda *a, **k: "impl-test")
     monkeypatch.setattr(cm, "container_is_running", lambda name: True)
     has_mount = Mock(return_value=False)
-    monkeypatch.setattr(worker_route, "container_has_route_mount", has_mount)
+    monkeypatch.setattr(router_route, "container_has_route_mount", has_mount)
     create = Mock()
     monkeypatch.setattr(cm, "create_container", create)
     monkeypatch.setattr(cm, "build_exec_cmd", lambda name, cmd, **kw: cmd)
@@ -2555,12 +2854,12 @@ def test_invalid_selected_entry_is_reported_like_a_missing_provider(
     with pytest.raises(ProviderNotFoundError):
         _resolve_provider(ROUTE)
     res = ModelResolution(provider=ROUTE, effort="high")
-    st = worker_route.check_route(res)  # the QA gates wait on this
+    st = router_route.check_route(res)  # the QA gates wait on this
     assert not st.ok and "is not a valid entry" in st.problem
     assert "Remedy:" in st.message()
-    assert worker_route.describe(res) == (
+    assert router_route.describe(res) == (
         f"route={ROUTE} (INVALID ENTRY in providers.yaml) effort=high")
-    assert worker_route.container_mounts(res) == {}
+    assert router_route.container_mounts(res) == {}
 
 
 def test_invalid_selected_entry_is_a_clean_cli_error(pm_home_dir, monkeypatch,
@@ -2702,12 +3001,12 @@ def test_unreadable_providers_file_is_named_not_reported_missing(
                                   f"in {path}: {why}; fix the file by hand")
     assert get_provider().name == "claude"  # nothing selected: unchanged
     res = ModelResolution(provider=ROUTE, effort="high")
-    st = worker_route.check_route(res)  # the QA gates wait on this
+    st = router_route.check_route(res)  # the QA gates wait on this
     assert not st.ok and why in st.problem
     assert st.remedy.startswith(f"fix {path} by hand, or ")
-    assert worker_route.describe(res) == (
+    assert router_route.describe(res) == (
         f"route={ROUTE} (providers.yaml UNREADABLE) effort=high")
-    assert worker_route.container_mounts(res) == {}
+    assert router_route.container_mounts(res) == {}
     cli = TestProviderCLI()
     r = cli._run("list")
     assert r.exit_code == 0, r.output
@@ -2787,7 +3086,7 @@ def test_qa_provider_check_reports_unusable_router_settings(pm_home_dir, role):
     from pm_core import qa_loop
     _write_providers(pm_home_dir, model="")
     pr = {"id": "pr-001", "session_models": {role: f"provider:{ROUTE}"}}
-    with pytest.raises(worker_route.RouteSetupError,
+    with pytest.raises(router_route.RouteSetupError,
                        match="no model configured"):
         qa_loop.check_qa_providers(pr, {})
 
@@ -3410,7 +3709,7 @@ def test_refused_launch_leaves_no_secret_env_file(pm_home_dir, tmp_path,
                         lambda cwd: None)
     monkeypatch.setattr(cm, "is_container_mode_enabled", lambda: True)
     monkeypatch.setattr(cm, "_make_container_name", lambda *a, **k: "impl-t")
-    monkeypatch.setattr(worker_route, "ensure_host_bridge",
+    monkeypatch.setattr(router_route, "ensure_host_bridge",
                         lambda cfg: (_ for _ in ()).throw(OSError("denied")))
     wd = tmp_path / "wd"
     wd.mkdir()

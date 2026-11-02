@@ -2,10 +2,14 @@
 endpoint that holds its own upstream credentials).
 
 A *route* is a ``type: router`` provider in ``~/.pm/providers.yaml`` (see
-pm_core.providers), selected like any model: per session type, e.g. for the
-QA refiner (``qa_concretize``) and workers (``qa_scenario``)
+pm_core.providers).  It is selected like any model, per role: every role
+in ``model_config.SESSION_TYPES`` may be routed, and the setting is
+explicit -- a role with no setting of its own follows its parent role,
+and with nothing configured at all runs plain ``claude`` on the CLI
+default.  For example
 
-    pm model set qa_concretize provider:<name> --project
+    pm model set impl provider:<name> --project
+    pm model set signoff provider:<name> --project
     pm model set qa_scenario provider:<name> --project
 
 or per PR (``pm pr model set <pr> provider:<name> [--role ...]``).  How the
@@ -14,8 +18,9 @@ provider's ``api_base`` and model names to Claude -- never a token.
 
 This module owns everything route-specific outside the launch command:
 
-  * :func:`describe` -- the ``route=... model=... via=...`` line shown in QA
-    logs and status so the selection is visible without credentials;
+  * :func:`describe` -- the ``route=... model=... via=...`` line shown in
+    session logs and status so the selection is visible without
+    credentials;
   * :func:`setup_problem` -- the provider settings a launch cannot work
     without.  :func:`launch_parts` raises :class:`RouteSetupError` for them,
     so the session fails like any other launch of a misconfigured provider
@@ -54,17 +59,21 @@ from pm_core.providers import (ProviderConfig, ProviderEntryError,
                                ProvidersFileUnreadableError, get_provider,
                                launch_env)
 
-_log = configure_logger("pm.worker_route")
+_log = configure_logger("pm.router_route")
 
-# QA session types that run in scenario containers (refiner, worker): a
-# scenario container mounts the bridge for whichever of them is routed.
-ROUTED_SESSION_TYPES = ("qa_concretize", "qa_scenario")
+# The QA session types that run in scenario containers (refiner, worker):
+# a scenario container mounts the bridge for whichever of them is routed.
+# Placement only -- routing eligibility is not limited to these types: any
+# role in the model-config set may select a provider, on the host or
+# through the bridge.
+SCENARIO_CONTAINER_TYPES = ("qa_concretize", "qa_scenario")
 # Session types that run inside a pm container in container mode, so a
 # route reaches them through the container bridge: impl, review and
 # sign-off (wrap_claude_cmd) and the QA refiner/worker (scenario
 # containers).  Every other type (planner, s0, verifier, finalizer, merge)
-# runs on the host.
-CONTAINER_SESSION_TYPES = ("impl", "review", "signoff") + ROUTED_SESSION_TYPES
+# runs on the host.  Placement only: it decides the launch path and the
+# bridge mount, never whether a role may be routed.
+CONTAINER_SESSION_TYPES = ("impl", "review", "signoff") + SCENARIO_CONTAINER_TYPES
 # A PR's own override wins over the project setting, so a remedy that
 # moves a session off the route names it first.
 _PR_OVERRIDE_REMEDY = ("change the PR's model setting if it selects this "
@@ -229,7 +238,20 @@ def bridge_host_argv(sock: Path, host: str, port: int) -> list[str]:
 
 def describe(resolution, *, container: bool = False) -> str:
     """One-line, credential-free description of where a session runs."""
-    effort = getattr(resolution, "effort", None) or "(default)"
+    # A provider's own env assignment decides the level when pm passes no
+    # --effort; showing "(default)" there would name a level the session
+    # does not run.
+    effort = (getattr(resolution, "effort", None)
+              or getattr(resolution, "effort_env_level", None)
+              or "(default)")
+    # Never let a bare level read as verified when it is known not to be.
+    # ``unverified`` (the route declares no capability metadata) stays out
+    # of this inline marker to keep route lines readable; it is reported in
+    # the effort notes of ``pm model show`` / ``pm pr model show``.
+    from pm_core.model_config import MARKED_EFFORT_STATUSES
+    status = getattr(resolution, "effort_status", "none")
+    if status in MARKED_EFFORT_STATUSES:
+        effort = f"{effort} ({status})"
     try:
         cfg = router_for(resolution)
     except ProviderEntryError:
@@ -310,8 +332,8 @@ def ensure_host_bridge(cfg: ProviderConfig) -> Path:
         if route_bridge.unix_connectable(str(sock)):
             return sock
         host, port = router_address(cfg)
-        # Cross-process lock: two QA loops must not race two bridges onto
-        # one socket path.
+        # Cross-process lock: two pm processes must not race two bridges
+        # onto one socket path.
         with open(d / ".lock", "w") as lockf:
             fcntl.flock(lockf, fcntl.LOCK_EX)
             if route_bridge.unix_connectable(str(sock)):
@@ -486,13 +508,26 @@ PROBE_PROMPT = "Reply with exactly: ok"
 
 
 def _probe_shell_cmd(cfg: ProviderConfig, session_id: str, *,
-                     container: bool) -> str:
-    """Tools-disabled one-shot claude call through the route."""
+                     container: bool, env_out: dict[str, str]) -> str:
+    """Tools-disabled one-shot claude call through the route.
+
+    The probe's environment (the route's ``env_vars()`` -- which may carry
+    a key or token, e.g. ANTHROPIC_CUSTOM_HEADERS -- plus launch_env's
+    pins) goes to *env_out*, never into the returned command: that string
+    becomes process arguments (``bash -c``, and for a container the host
+    ``podman exec`` that lasts as long as the probe), which every local
+    user can read (/proc/<pid>/cmdline, ps) and execve auditing records.
+    Like a pane launch's (claude_launcher.build_claude_shell_cmd), it names
+    only the variables the probe unsets.  The caller runs it with
+    *env_out* in the process environment (:func:`live_probe`).
+    """
     prefix, env, exe = launch_parts(cfg, container=container)
     env, unset_vars = launch_env(cfg, env, cfg.model)
-    unset = "".join(f"-u {v} " for v in unset_vars)
-    assigns = " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items())
-    return (f"{prefix}env {unset}{assigns} {exe} -p {shlex.quote(PROBE_PROMPT)}"
+    env_out.update(env)
+    # Only names: unsetting carries no value.
+    unset = ("env " + "".join(f"-u {v} " for v in unset_vars)
+             if unset_vars else "")
+    return (f"{prefix}{unset}{exe} -p {shlex.quote(PROBE_PROMPT)}"
             f" --model {shlex.quote(cfg.model)} --tools '' --output-format json"
             f" --session-id {session_id}")
 
@@ -530,22 +565,30 @@ def live_probe(cfg: ProviderConfig, *, container_name: str | None = None,
     from pm_core.claude_launcher import transcript_path_for
 
     sid = str(uuid.uuid4())
+    # Values reach the probe only through process environments, never an
+    # argv (see _probe_shell_cmd): on the host bash inherits them; for a
+    # container the runtime reads each ``-e NAME`` from its own environment
+    # (as container._run_runtime(env=...) and a pane's build_exec_cmd).
+    env: dict[str, str] = {}
     if container_name:
         from pm_core.container import _CONTAINER_WORKDIR, _get_runtime
         run_cwd = _CONTAINER_WORKDIR
-        inner = _probe_shell_cmd(cfg, sid, container=True)
-        argv = [_get_runtime(), "exec", "-w", run_cwd, container_name,
-                "bash", "-c", inner]
+        inner = _probe_shell_cmd(cfg, sid, container=True, env_out=env)
+        argv = [_get_runtime(), "exec", "-w", run_cwd,
+                *(arg for name in env for arg in ("-e", name)),
+                container_name, "bash", "-c", inner]
         popen_cwd = None
     else:
         run_cwd = cwd or tempfile.mkdtemp(prefix="pm-route-probe-")
-        argv = ["bash", "-c", _probe_shell_cmd(cfg, sid, container=False)]
+        argv = ["bash", "-c",
+                _probe_shell_cmd(cfg, sid, container=False, env_out=env)]
         popen_cwd = run_cwd
     out: dict = {"session_id": sid}
     try:
         r = subprocess.run(argv, cwd=popen_cwd, capture_output=True,
                            text=True, timeout=timeout,
-                           stdin=subprocess.DEVNULL)
+                           stdin=subprocess.DEVNULL,
+                           env={**os.environ, **env})
     except subprocess.TimeoutExpired:
         out.update(ok=False, exit=None, error=f"timed out after {timeout:.0f}s")
         return out

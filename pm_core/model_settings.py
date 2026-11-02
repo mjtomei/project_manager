@@ -16,11 +16,12 @@ launcher path and api_base only.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pm_core.model_config import (
-    EFFORT_LEVELS, PR_SESSION_TYPES, SESSION_TYPES, _is_model_value,
-    config_block, project_model_config, resolve_model_and_provider,
+    EFFORT_LEVELS, MARKED_EFFORT_STATUSES, PR_SESSION_TYPES, SESSION_TYPES,
+    _is_model_value, config_block, project_model_config,
+    resolve_model_and_provider, unsupported_effort_problem,
 )
 
 # PR-level keys: the all-role value and the per-role mapping.
@@ -40,6 +41,26 @@ class RoleRow:
     source: str         # setting that chose ``value`` ("(CLI default)")
     effort_source: str
     problem: str = ""   # provider not configured / invalid entry
+    effort_status: str = "none"       # model_config status vocabulary
+    effort_notes: list[str] = field(default_factory=list)
+
+
+def effort_text(res) -> str:
+    """The effort column text for a :class:`ModelResolution`.
+
+    The effective level; the *requested* one when it was suppressed as not
+    applicable (so "configured xhigh, nothing passed" stays visible); the
+    level a provider's own ``env:`` block applies when pm passes none (the
+    session runs it even though pm's ``--effort`` is absent); or
+    ``(default)`` when nothing was selected.
+    """
+    if res.effort:
+        return res.effort
+    if res.effort_status == "not_applicable" and res.effort_requested:
+        return res.effort_requested
+    if res.effort_env_level:
+        return res.effort_env_level
+    return "(default)"
 
 
 def role_rows(data: dict, pr: dict | None = None, *,
@@ -49,7 +70,7 @@ def role_rows(data: dict, pr: dict | None = None, *,
     With a PR only the types a PR decides are listed (the watcher is a
     project session).
     """
-    from pm_core import worker_route
+    from pm_core import router_route
     from pm_core.providers import ProviderNotFoundError, get_provider
     if container_mode is None:
         from pm_core.container import is_container_mode_enabled
@@ -69,18 +90,35 @@ def role_rows(data: dict, pr: dict | None = None, *,
             if cfg is not None:
                 model = model or cfg.model_flag()
                 in_container = (container_mode and st in
-                                worker_route.CONTAINER_SESSION_TYPES)
+                                router_route.CONTAINER_SESSION_TYPES)
                 if cfg.type == "router" and cfg.launcher and not in_container:
                     command = cfg.launcher
                 elif cfg.type == "router" and in_container:
                     command = "claude (container route bridge)"
         rows.append(RoleRow(
             role=st, value=value, model=model or "(default)",
-            effort=res.effort or "(default)", command=command, route=route,
+            effort=effort_text(res),
+            command=command, route=route,
             source=res.source or "(CLI default)",
             effort_source=res.effort_source or "(CLI default)",
-            problem=problem))
+            problem=problem,
+            effort_status=res.effort_status,
+            effort_notes=list(res.effort_notes)))
     return rows
+
+
+def effort_mark(text: str, status: str) -> str:
+    """*text* marked with how far pm could confirm the level *status* names."""
+    if status in MARKED_EFFORT_STATUSES:
+        return f"{text} *"
+    if status == "not_applicable":
+        return f"{text} (n/a)"
+    return text
+
+
+def effort_cell(row: RoleRow) -> str:
+    """The effort column for *row*, marked when pm cannot confirm it."""
+    return effort_mark(row.effort, row.effort_status)
 
 
 def format_rows(rows: list[RoleRow]) -> list[str]:
@@ -89,7 +127,7 @@ def format_rows(rows: list[RoleRow]) -> list[str]:
     table = [head] + [
         (r.role, r.value + (f" [{r.model}]" if r.value.startswith("provider:")
                             and r.model != "(default)" else ""),
-         r.effort, r.command,
+         effort_cell(r), r.command,
          f"model: {r.source}; effort: {r.effort_source}")
         for r in rows]
     widths = [max(len(row[i]) for row in table) for i in range(4)]
@@ -97,10 +135,40 @@ def format_rows(rows: list[RoleRow]) -> list[str]:
     for row in table:
         lines.append("  ".join(row[i].ljust(widths[i]) for i in range(4))
                      + "  " + row[4])
+    if any(r.effort_status in MARKED_EFFORT_STATUSES for r in rows):
+        # ``*`` covers both "the route declares it unsupported" and "the
+        # environment/provider overrides it", so name neither: the notes
+        # say which.
+        lines.append("* effort not confirmed by pm (see the notes below)")
+    seen_notes: set[tuple[str, str]] = set()
     for r in rows:
         if r.problem:
             lines.append(f"! {r.role}: {r.problem}")
+        for note in r.effort_notes:
+            # One note per distinct finding: a route-wide fact repeats for
+            # every role it decides.  The route is part of the key: the
+            # wording does not name it, so the same level on a different
+            # route is a different finding and must still be printed.
+            key = (r.route, note)
+            if key in seen_notes:
+                continue
+            seen_notes.add(key)
+            lines.append(f"! {r.role}: {note}")
     return lines
+
+
+def effort_warning(project_data: dict | None, session_type: str,
+                   pr: dict | None = None) -> str | None:
+    """A warning when the selected route declares the role's effort
+    unsupported.
+
+    Configuration-only (``use_env=False``): the caller's environment is not
+    what the command just wrote.  The setting is still valid (the metadata
+    is dated), so this is a warning, not a refusal.
+    """
+    res = resolve_model_and_provider(session_type, project_data=project_data,
+                                     pr_entry=pr, use_env=False)
+    return unsupported_effort_problem(res)
 
 
 def check_model_value(value: str) -> str | None:
