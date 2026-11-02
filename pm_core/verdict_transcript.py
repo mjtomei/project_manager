@@ -56,17 +56,17 @@ _USER_RE = re.compile(r'"type"\s*:\s*"user"')
 
 
 def _read_transcript_text(transcript_path: str | Path | None) -> str:
-    """Read a Claude transcript, tolerating slug-mismatched symlinks.
+    """Read a Claude transcript, tolerating a slug-mismatched path.
 
-    Band-aid for pr-488b748: when ``build_claude_shell_cmd`` creates the
-    transcript symlink it derives the target's parent dir from the cwd
-    *we* passed in, but Claude writes to a parent derived from its
-    actual runtime cwd. If those diverge (e.g. a worktree symlinked to a
-    different canonical path, or a nested pm invocation that registered
-    one workdir while launching the pane at another), the symlink
-    target never appears. The session_id is unique, though, so we can
-    recover the real path by scanning ``~/.claude/projects/*/`` for the
-    matching ``<session_id>.jsonl``.
+    Band-aid for pr-488b748: the native path pm predicts (and the session
+    ledger records) for a launch derives its parent dir from the cwd *we*
+    passed in, but Claude writes to a parent derived from its actual
+    runtime cwd. If those diverge (e.g. a worktree symlinked to a different
+    canonical path, or a nested pm invocation that registered one workdir
+    while launching the pane at another), the predicted file never appears.
+    The session_id is unique, though, so we can recover the real path by
+    looking up ``~/.claude/projects/*/<session_id>.jsonl`` (a pre-upgrade
+    symlink names the session by its target).
     """
     if not transcript_path:
         return ""

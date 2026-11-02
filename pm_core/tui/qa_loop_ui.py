@@ -1661,7 +1661,7 @@ def _start_self_driving_review(app, pr_id: str) -> bool | None:
     _log.info("Self-driving review for %s", pr_id)
     review_loop_ui._start_loop(
         app, pr_id, pr,
-        transcript_dir=str(_auto_start.get_transcript_dir(app)),
+        run_id=_auto_start.get_run_id(app),
     )
 
 

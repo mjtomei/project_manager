@@ -517,13 +517,15 @@ def test_adopted_review_polls_with_pr_workdir(tmp_path):
     """Restart handoff: an adopted in-flight review pane is watched with the
     PR workdir, so a pre-fix container dialog (/workspace) can still fall
     back to the approved host checkout."""
-    from pm_core import review_loop
-    transcript_dir = tmp_path / "t"
-    transcript_dir.mkdir()
+    from pm_core import review_loop, session_log
     sid = str(uuid.uuid4())
-    (transcript_dir / "review-pr-x-i2.jsonl").symlink_to(tmp_path / f"{sid}.jsonl")
     state = review_loop.ReviewLoopState(pr_id="pr-x")
     state.iteration = 2
+    # The in-flight attempt recorded itself under the loop's identity.
+    session_log.register(
+        session_log.SessionLaunch(subject="pr-x", phase="review",
+                                  loop_id=state.loop_id, iteration=2),
+        sid, "/wd/pr-x", log=tmp_path / f"{sid}.jsonl")
     # A resumed loop only adopts an iteration it actually launched; the
     # breadcrumb records that (pr-e040aeb's fabrication guard).
     state.iteration_attempted = True
@@ -533,8 +535,7 @@ def test_adopted_review_polls_with_pr_workdir(tmp_path):
          patch("pm_core.hook_events.read_event", return_value=None), \
          patch("pm_core.review_loop._poll_for_verdict",
                return_value="PASS") as poll:
-        assert review_loop._adopt_in_flight_review(
-            state, pr_data, str(transcript_dir)) == "PASS"
+        assert review_loop._adopt_in_flight_review(state, pr_data) == "PASS"
     assert poll.call_args.kwargs["workdir"] == "/wd/pr-x"
 
 

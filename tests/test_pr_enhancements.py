@@ -458,7 +458,7 @@ class TestPullAfterMerge:
             ok = pr_mod._pull_after_merge(
                 data, data["prs"][0], str(tmp_path), "master",
                 resolve_window=resolve_window, background=False,
-                transcript=None)
+                run_id=None)
         return ok, [c[0] for c in g.run_git.call_args_list], \
             [c[1].get("cwd") for c in g.run_git.call_args_list], launch
 

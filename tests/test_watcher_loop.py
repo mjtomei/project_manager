@@ -437,12 +437,15 @@ class TestAutoStartWatcher:
     def test_build_launch_cmd(self):
         from pm_core.watchers.auto_start_watcher import AutoStartWatcher
         w = AutoStartWatcher("/tmp", auto_start_target="pr-001")
-        cmd = w.build_launch_cmd(3, transcript="/tmp/t.jsonl")
+        sid = "11111111-2222-4333-8444-555555555555"
+        cmd = w.build_launch_cmd(3, session_id=sid, run_id="run-1")
         assert "--iteration" in cmd
         assert "3" in cmd
         assert "--auto-start-target" in cmd
         assert "pr-001" in cmd
-        assert "--transcript" in cmd
+        assert cmd[cmd.index("--session-id") + 1] == sid
+        assert cmd[cmd.index("--run-id") + 1] == "run-1"
+        assert "--transcript" not in cmd
 
     def test_parse_verdict(self):
         from pm_core.watchers.auto_start_watcher import AutoStartWatcher
@@ -642,7 +645,7 @@ class TestWatcherCLI:
         from pm_core.cli import cli
         runner = CliRunner()
         result = runner.invoke(cli, ["watcher", "--iteration", "3"])
-        mock_create.assert_called_once_with(3, "", None, auto_start_targets=[], meta_pm_root=None, watcher_type="auto-start")
+        mock_create.assert_called_once_with(3, "", session_id=None, run_id="", auto_start_targets=[], meta_pm_root=None, watcher_type="auto-start")
 
     def test_list_subcommand(self):
         from click.testing import CliRunner
@@ -672,8 +675,8 @@ class TestRegressionLoopStart:
         class FakeManager:
             def register(self, w):
                 registered.append(w)
-            def start(self, wid, on_iteration=None, transcript_dir=None):
-                started.append(wid)
+            def start(self, wid, on_iteration=None, run_id=""):
+                started.append((wid, run_id))
                 return True
             def is_any_running(self):
                 return False
@@ -685,6 +688,8 @@ class TestRegressionLoopStart:
             result = runner.invoke(cli, ["watcher", "start", "regression-loop"])
 
         assert result.exit_code == 0, result.output
+        # Each watcher records its sessions under its own run.
+        assert len({run for _, run in started}) == 3
         types = sorted(w.WATCHER_TYPE for w in registered)
         assert types == ["bug-fix-impl", "discovery", "improvement-fix-impl"]
         assert len(started) == 3

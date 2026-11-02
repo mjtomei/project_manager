@@ -12,11 +12,13 @@ HEAD).
 
 import asyncio
 import json
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from pm_core import session_log
 from pm_core import store
 from pm_core import autostart_state as st
 from pm_core.qa_loop import QALoopState, VERDICT_PASS
@@ -102,7 +104,11 @@ class World:
         self.head = "c0ffee" * 6 + "abcd"
         self.window = False
         self.commands: list[str] = []
-        self.tdir = app._root / "transcripts" / "run"
+        # The current router session (recorded in the session ledger by the
+        # launch) and its native log, which the router pane appends to.
+        self.sid: str | None = None
+        self.log: Path | None = None
+        self.record_head = True
 
     def run_command(self, app, cmd, *a, **kw):
         self.commands.append(cmd)
@@ -118,22 +124,30 @@ class World:
                 store.get_pr(d, PR)["status"] = "merged"
             store.locked_update(self.app._root, apply)
 
-    def launch_quiet(self, app, pr_id, transcript):
+    def launch_quiet(self, app, pr_id, run_id):
         """Stand-in for ``signoff_ui._launch_quiet`` (a worker coroutine in
         the TUI): records the command via the patchable ``run_command``."""
-        from pm_core import signoff as so
         from pm_core.tui import pr_view
         try:
             pr_view.run_command(
-                app,
-                f"pr signoff --background --transcript {transcript} {pr_id}")
-            # What ``launch_signoff_window`` stamps next to the transcript of
-            # a newly created window: the HEAD the router run reviews, and
-            # the integration check it records before building the prompt.
-            so.stamp_signoff_launch(transcript, self.head)
+                app, f"pr signoff --background --run-id {run_id} {pr_id}")
+            # What ``launch_signoff_window`` records for a newly created
+            # window: the router session with the HEAD it reviews, and the
+            # integration check it records before building the prompt.
+            self.record_launch(run_id)
             self.record_integration()
         finally:
             app._signoff_launch_inflight.discard(pr_id)  # worker finished
+
+    def record_launch(self, run_id: str):
+        self.sid = str(uuid.uuid4())
+        rec = session_log.register(
+            session_log.SessionLaunch(
+                subject=PR, phase="signoff", run_id=run_id,
+                head=self.head if self.record_head else ""),
+            self.sid, str(self.app._root / "wd"))
+        self.log = Path(rec.log)
+        return rec
 
     def record_integration(self, status: str = "up_to_date") -> None:
         head = self.head
@@ -147,15 +161,8 @@ class World:
         store.locked_update(self.app._root, apply)
 
     def emit(self, verdict: str) -> None:
-        """The router pane prints its verdict into the TUI's transcript."""
-        self.tdir.mkdir(parents=True, exist_ok=True)
-        lines = [
-            {"type": "user", "message": {"content": "go"}},
-            {"type": "assistant", "message": {"content": [
-                {"type": "text", "text": f"Report written.\n\n{verdict}"}]}},
-        ]
-        (self.tdir / f"signoff-{PR}.jsonl").write_text(
-            "\n".join(json.dumps(x) for x in lines) + "\n")
+        """The router pane prints its verdict into its own session log."""
+        _write_verdict(self.log, verdict)
 
     def merges(self):
         return [c for c in self.commands if c.startswith("pr merge")]
@@ -165,8 +172,10 @@ class World:
 
 
 @pytest.fixture
-def world_factory(tmp_path):
+def world_factory(tmp_path, monkeypatch):
     patches = []
+    # Native session logs go under $HOME/.claude/projects: keep them here.
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
 
     def make(**kw):
         app = App(tmp_path, **kw)
@@ -177,6 +186,11 @@ def world_factory(tmp_path):
             patch("pm_core.signoff.head_sha", lambda wd: w.head),
             patch("pm_core.signoff.signoff_window_pane",
                   lambda s, pr: "%9" if w.window else None, create=True),
+            # The router pane runs the current router session.
+            patch("pm_core.tmux.pane_start_command",
+                  lambda pane: (f"claude --session-id {w.sid}"
+                                if w.window and w.sid and pane == "%9"
+                                else "")),
             patch("pm_core.tmux.find_window_by_name",
                   lambda s, n: ({"id": "@9", "index": 9, "name": n}
                                 if w.window and n.startswith("signoff-")
@@ -223,10 +237,8 @@ def test_qa_pass_hands_off_to_signoff_not_merge(world_factory, wait):
     pr = app.pr()
     assert pr["status"] == "sign_off"
     assert pr.get("signoff") is None
-    # Router launched in the background with the TUI transcript.
-    assert w.launches() == [
-        f"pr signoff --background --transcript "
-        f"{w.tdir / f'signoff-{PR}.jsonl'} {PR}"]
+    # Router launched in the background under the TUI's run.
+    assert w.launches() == [f"pr signoff --background --run-id run {PR}"]
     assert w.merges() == []
     assert not any("waiting for manual merge" in m for m in app.logs)
     assert any("handing off to sign-off" in m for m in app.logs)
@@ -292,10 +304,13 @@ def test_head_moved_after_approval_reruns_signoff(world_factory):
     _poll(app)
     assert app.pr()["signoff"]["sha"] == w.head
 
+    old_sid, old_log = w.sid, w.log
     w.head = "f" * 40                      # new commit on the branch
     _poll(app)
     assert app.pr().get("signoff") is None  # stale record cleared
-    assert not (w.tdir / f"signoff-{PR}.jsonl").exists()  # transcript retired
+    # The old run is retired, not deleted: its session stays as history.
+    assert session_log.by_session(PR, old_sid).retired
+    assert "SIGNOFF_MERGE" in old_log.read_text()
     assert len(w.launches()) == 2           # fresh router against new HEAD
     assert w.merges() == []
 
@@ -305,11 +320,13 @@ def test_verdict_from_run_launched_on_old_head_is_not_recorded(world_factory,
                                                               wait):
     """HEAD moves while the router still runs: its verdict reviewed the old
     HEAD and must never be recorded (or merged) against the new one."""
+    from pm_core import signoff as so
     app, w = world_factory(wait=wait)
     _qa_pass(app)                          # router launched on HEAD A
     head_a = w.head
     w.head = "e" * 40                      # unreviewed commit B lands
     w.emit("SIGNOFF_MERGE")                # the old run (on A) finishes
+    old_sid = w.sid
     _poll(app)
 
     assert app.pr().get("signoff") is None  # nothing recorded against B
@@ -317,9 +334,9 @@ def test_verdict_from_run_launched_on_old_head_is_not_recorded(world_factory,
     assert not any("waiting for manual merge" in m or "signed off" in m
                    for m in app.logs)
     assert any("stale (HEAD moved)" in m for m in app.logs)
-    assert not (w.tdir / f"signoff-{PR}.jsonl").exists()  # old run retired
+    assert session_log.by_session(PR, old_sid).retired  # old run retired
     assert len(w.launches()) == 2           # fresh router against B
-    assert (w.tdir / f"signoff-{PR}.head").read_text().strip() == w.head
+    assert so.current_signoff_session("run", PR).head == w.head
 
     _poll(app, 2)                           # new run still working
     assert app.pr().get("signoff") is None and w.merges() == []
@@ -350,15 +367,14 @@ def test_head_moved_before_verdict_retires_running_run(world_factory):
 @pytest.mark.parametrize("stamp", ["old", None], ids=["old-stamp", "unstamped"])
 def test_restart_does_not_adopt_run_of_another_head(world_factory, stamp):
     """A TUI restart reuses the running router window.  Its verdict counts
-    only when the run's launch stamp equals the current HEAD; an unstamped
-    run (launched by an older pm) reviewed an unknown revision."""
+    only when the HEAD its launch recorded equals the current HEAD; a run
+    that recorded none reviewed an unknown revision."""
     app, w = world_factory(wait=False)
+    if not stamp:
+        w.record_head = False
     _qa_pass(app)
-    stamp_path = w.tdir / f"signoff-{PR}.head"
     if stamp:
-        w.head = "e" * 40                   # stamp says A, HEAD is B
-    else:
-        stamp_path.unlink()
+        w.head = "e" * 40                   # launch says A, HEAD is B
     # Restart: in-memory driver state is gone, window + transcript remain.
     for attr in ("_signoff_acted", "_signoff_launched_at",
                  "_signoff_launch_inflight"):
@@ -371,30 +387,29 @@ def test_restart_does_not_adopt_run_of_another_head(world_factory, stamp):
     assert len(w.launches()) == 2
 
 
-def _restart_into_new_run_dir(app, run_id="run2"):
-    """Ctrl+R leaves auto-start off; re-arming creates a fresh run dir while
-    the router window launched under the old one keeps running."""
+def _restart_into_new_run(app, run_id="run2"):
+    """Ctrl+R leaves auto-start off; re-arming starts a fresh run while the
+    router window launched under the old one keeps running."""
     for attr in ("_signoff_acted", "_signoff_launched_at",
                  "_signoff_launch_inflight"):
         if hasattr(app, attr):
             delattr(app, attr)
     app._auto_start_run_id = run_id
-    return app._root / "transcripts" / run_id
+    return run_id
 
 
-def _router_symlink(w, tmp_path):
-    """Like claude_launcher: the run dir transcript is a symlink to the
-    router session's JSONL, which the router keeps appending to."""
-    target = tmp_path / "router-session.jsonl"
-    target.write_text("")
-    (w.tdir / f"signoff-{PR}.jsonl").symlink_to(target)
-    return target
+def _router_log(w):
+    """The router session's own native log, which it keeps appending to."""
+    w.log.parent.mkdir(parents=True, exist_ok=True)
+    w.log.write_text("")
+    return w.log
 
 
 def _write_verdict(target, verdict):
     lines = [{"type": "user", "message": {"content": "go"}},
              {"type": "assistant", "message": {"content": [
                  {"type": "text", "text": f"Report written.\n\n{verdict}"}]}}]
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
 
 
@@ -404,14 +419,17 @@ def test_restart_with_new_run_dir_adopts_running_router(world_factory,
     """pr-5410ae4 in the restart story: after Ctrl+R + re-arm the TUI reads a
     new run dir.  The still-running router (same window, HEAD unchanged) must
     be adopted and its verdict recorded once — not read as running forever."""
+    from pm_core import signoff as so
     app, w = world_factory(wait=wait)
     _qa_pass(app)
-    target = _router_symlink(w, tmp_path)
-    new_tdir = _restart_into_new_run_dir(app)
+    target = _router_log(w)
+    new_run = _restart_into_new_run(app)
 
     _poll(app)                             # mid-run: adopted, still running
-    assert (new_tdir / f"signoff-{PR}.head").read_text().strip() == w.head
-    assert not (w.tdir / f"signoff-{PR}.head").exists()
+    adopted = so.current_signoff_session(new_run, PR)
+    assert (adopted.session_id, adopted.head) == (w.sid, w.head)
+    assert adopted.adopted_from == "run"
+    assert so.current_signoff_session("run", PR) is None  # moved, not copied
     assert app.pr().get("signoff") is None
     assert w.window and len(w.launches()) == 1
     assert not any("stale" in m for m in app.logs)
@@ -436,9 +454,9 @@ def test_restart_with_new_run_dir_retires_run_of_another_head(world_factory,
     across the restart -> retired and relaunched, never recorded."""
     app, w = world_factory(wait=False)
     _qa_pass(app)
-    target = _router_symlink(w, tmp_path)
+    target = _router_log(w)
     _write_verdict(target, "SIGNOFF_MERGE")
-    _restart_into_new_run_dir(app)
+    _restart_into_new_run(app)
     w.head = "e" * 40
     _poll(app)
     assert app.pr().get("signoff") is None
@@ -451,18 +469,19 @@ def test_run_from_earlier_signoff_episode_is_not_adopted(world_factory,
                                                          tmp_path):
     """Only runs launched since the PR entered sign_off are adopted; an older
     leftover next to a live (e.g. manual ``i``) window is left alone."""
-    import os
+    import time
+    from pm_core import signoff as so
     app, w = world_factory(wait=False)
     _qa_pass(app)
-    target = _router_symlink(w, tmp_path)
+    target = _router_log(w)
     _write_verdict(target, "SIGNOFF_MERGE")
-    stamp = w.tdir / f"signoff-{PR}.head"
-    old = stamp.stat().st_mtime - 3600
-    os.utime(stamp, (old, old))
-    new_tdir = _restart_into_new_run_dir(app)
-    _poll(app)
-    assert stamp.exists()
-    assert not (new_tdir / f"signoff-{PR}.head").exists()
+    new_run = _restart_into_new_run(app)
+    # The PR entered sign_off (again) an hour after that run was launched.
+    with patch("pm_core.tui.signoff_ui._entered_signoff_epoch",
+               lambda pr: time.time() + 3600):
+        _poll(app)
+    assert so.current_signoff_session("run", PR).session_id == w.sid
+    assert so.current_signoff_session(new_run, PR) is None
     assert app.pr().get("signoff") is None
     assert w.merges() == []
 
@@ -609,7 +628,7 @@ def test_review_route_restarts_review_loop(world_factory):
     assert app.pr()["status"] == "in_review"
     sl.assert_called_once()
     assert sl.call_args.args[1] == PR
-    assert sl.call_args.kwargs["transcript_dir"] == str(w.tdir)
+    assert sl.call_args.kwargs["run_id"] == "run"
     assert w.merges() == []
 
 
@@ -801,7 +820,7 @@ def test_manual_approval_with_changed_report_is_not_merged(world_factory,
 
 
 def test_launch_quiet_runs_signoff_off_the_event_loop(tmp_path):
-    """The real launcher: argv list (no shlex of the transcript path), async
+    """The real launcher: argv list (no shlex of the run id), async
     subprocess, failure surfaced in the log."""
     from pm_core.tui import signoff_ui
     app = App(tmp_path, wait=True)
@@ -817,11 +836,10 @@ def test_launch_quiet_runs_signoff_off_the_event_loop(tmp_path):
         seen["cmd"] = cmd
         return Proc()
 
-    transcript = tmp_path / "a dir" / f"signoff-{PR}.jsonl"
     with patch("pm_core.tui._shell._run_shell_async", fake_shell):
-        asyncio.run(signoff_ui._launch_quiet(app, PR, transcript))
-    assert seen["cmd"][-5:] == ["signoff", "--background", "--transcript",
-                                str(transcript), PR]
+        asyncio.run(signoff_ui._launch_quiet(app, PR, "a run"))
+    assert seen["cmd"][-5:] == ["signoff", "--background", "--run-id",
+                                "a run", PR]
     assert any("Sign-off launch failed" in m and "is merged" in m
                for m in app.logs)
 
@@ -1009,3 +1027,39 @@ def test_conflicted_integration_routes_to_impl_not_merge(world_factory):
     assert pr["signoff_return"]["awaiting"] == "impl"
     relaunch.assert_called_once()
     assert any("coerced to SIGNOFF_IMPL" in m for m in app.logs)
+
+
+def test_each_signoff_return_collects_its_own_router_session(world_factory):
+    """Exact-session collection across sign-off returns (pr-ec5bc84): a
+    REVIEW return retires the first router run, the re-entered sign-off
+    launches a new one, and only that run's verdict is recorded — the first
+    run's verdict is never replayed, and both sessions stay discoverable
+    with their logs."""
+    from pm_core import signoff as so
+    app, w = world_factory(wait=True)
+    _qa_pass(app)
+    first_sid, first_log = w.sid, w.log
+    w.emit("SIGNOFF_REVIEW")
+    with patch("pm_core.tui.review_loop_ui._start_loop"):
+        _poll(app)
+    assert app.pr()["status"] == "in_review"
+    assert session_log.by_session(PR, first_sid).retired
+
+    # Review + QA pass again: sign-off re-entered on the same run.
+    def back_to_qa(d):
+        store.get_pr(d, PR)["status"] = "qa"
+    store.locked_update(app._root, back_to_qa)
+    _qa_pass(app)
+    assert w.sid != first_sid and len(w.launches()) == 2
+    _poll(app, 2)                              # new router still working
+    assert app.pr().get("signoff") is None     # old REVIEW never replayed
+    w.emit("SIGNOFF_MERGE")
+    _poll(app)
+    rec = app.pr()["signoff"]
+    assert (rec["verdict"], rec["sha"]) == ("SIGNOFF_MERGE", w.head)
+    assert so.current_signoff_session("run", PR).session_id == w.sid
+    # History: both router sessions, the first retired with its log intact.
+    sids = [r.session_id for r in session_log.find(
+        PR, phase="signoff", include_retired=True)]
+    assert sids == [first_sid, w.sid]
+    assert "SIGNOFF_REVIEW" in first_log.read_text()

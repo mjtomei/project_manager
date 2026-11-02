@@ -50,7 +50,8 @@ class DiscoverySupervisorWatcher(BaseWatcher):
             return ""
 
     def build_launch_cmd(self, iteration: int,
-                         transcript: str | None = None) -> list[str]:
+                         session_id: str | None = None,
+                         run_id: str = "") -> list[str]:
         cmd = [
             sys.executable, "-m", "pm_core.wrapper",
             "watcher", "--watcher-type", self.WATCHER_TYPE,
@@ -58,8 +59,10 @@ class DiscoverySupervisorWatcher(BaseWatcher):
         ]
         if self.state.loop_id:
             cmd.extend(["--loop-id", self.state.loop_id])
-        if transcript:
-            cmd.extend(["--transcript", transcript])
+        if session_id:
+            cmd.extend(["--session-id", session_id])
+        if run_id:
+            cmd.extend(["--run-id", run_id])
         if self.meta_pm_root:
             cmd.extend(["--meta-pm-root", self.meta_pm_root])
         return cmd

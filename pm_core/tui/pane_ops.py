@@ -490,20 +490,10 @@ def launch_watcher_review(app) -> None:
         if app._root:
             meta_pm_root = str(Path(app._root) / "pm")
 
-    transcript_dir: str | None = None
-    try:
-        from pm_core.tui import auto_start
-        tdir = auto_start.get_transcript_dir(app)
-        if tdir:
-            transcript_dir = str(tdir)
-    except Exception:
-        _log.exception("launch_watcher_review: could not resolve transcript dir")
-
     sess = app._session_name or "default"
     prompt = generate_watcher_review_prompt(
         session_name=sess,
         meta_pm_root=meta_pm_root,
-        transcript_dir=transcript_dir,
     )
 
     env: dict[str, str] = {}

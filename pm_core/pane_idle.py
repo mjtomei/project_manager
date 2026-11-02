@@ -8,12 +8,11 @@ this tracker on its timer; pane liveness is verified via
 the one exception is the workspace-trust dialog, which fires no hook, so
 a pane with no hook event yet is captured (rate-limited) to detect it.
 
-Every ``register`` caller must supply a ``transcript_path`` — either a
-symlink created by ``build_claude_shell_cmd(transcript=...)`` or a
-direct path computed via
-``claude_launcher.transcript_path_for(cwd, session_id)``.  The
-session_id is recovered from that path so callers don't have to thread
-the UUID through subprocess boundaries.
+Every ``register`` caller must supply a ``transcript_path``: the native
+Claude log of the exact session the pane runs — the path the session
+ledger recorded at launch (:func:`pm_core.session_log.log_path`) or one
+computed via ``claude_launcher.transcript_path_for(cwd, session_id)``.  The
+session_id is parsed from that path.
 
 Thread-safe: the review loop runs in a background thread while the
 TUI poll timer runs on the main thread.
@@ -87,8 +86,8 @@ class PaneIdleTracker:
                  transcript_path: str) -> None:
         """Start tracking a pane.
 
-        *transcript_path* must resolve to a Claude session_id (either a
-        pm-generated symlink or a direct JSONL path with a UUID name).
+        *transcript_path* must name a Claude session_id: the native JSONL
+        path of the session (``<session-id>.jsonl``).
         Raises ValueError when no session_id can be recovered — callers
         that don't have one should not register a pane here.
         """

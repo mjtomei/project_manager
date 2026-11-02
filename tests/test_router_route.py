@@ -1091,7 +1091,7 @@ class TestRoleIsolation:
                                                 env_out=ref_env)
             run_env: dict[str, str] = {}
             run, _ = qa_loop._build_scenario_run_cmd(
-                sc, state, PROJECT, str(tmp_path / "t.jsonl"),
+                sc, state, PROJECT, "11111111-2222-4333-8444-555555555555",
                 qa_loop._resolve_qa_model({}, PROJECT, "qa_scenario"),
                 session="sess", workdir_path=str(tmp_path), env_out=run_env)
             ver = resolve_model_and_provider("qa_verification", project_data=PROJECT)
@@ -1116,7 +1116,7 @@ class TestRoleIsolation:
              patch("pm_core.container._get_runtime", return_value="podman"):
             env: dict[str, str] = {}
             run, _ = qa_loop._build_scenario_run_cmd(
-                sc, state, PROJECT, str(tmp_path / "t.jsonl"),
+                sc, state, PROJECT, "11111111-2222-4333-8444-555555555555",
                 qa_loop._resolve_qa_model({}, PROJECT, "qa_scenario"),
                 session=None, workdir_path=str(tmp_path), env_out=env)
         # Values reach the exec'd claude by name (``-e NAME``) from the
@@ -3304,8 +3304,6 @@ def _review_pass_tick(pr, data):
     with patch.object(pr_cli, "state_root", return_value=Path("/nonexistent")), \
             patch.object(pr_cli.store, "load", return_value=data), \
             patch.object(pr_cli, "_get_pm_session", return_value="pm-test"), \
-            patch.object(pr_cli, "_auto_seq_transcript_dir",
-                         return_value=Path(tempfile.mkdtemp())), \
             patch.object(pr_cli, "_check_review_verdict",
                          return_value=("PASS", 2)), \
             patch.object(pr_cli, "trigger_tui_refresh"), \

@@ -13,6 +13,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pm_core.model_config import (
     AMBIENT_EFFORT_ENV, accepted_efforts_of, classify_effort_env,
@@ -21,6 +22,10 @@ from pm_core.paths import configure_logger, log_shell_command, write_env_file
 from pm_core.prompt_bounds import (
     PROMPT_ARG_LIMIT, PromptTooLargeError, prompt_bytes,
 )
+
+if TYPE_CHECKING:  # pragma: no cover
+    from pm_core.session_log import SessionLaunch
+
 _log = configure_logger("pm.claude_launcher")
 
 # The fake-claude executable is invoked by bare name and resolved from PATH —
@@ -946,7 +951,7 @@ def build_claude_shell_cmd(
     session_id: str | None = None,
     resume: bool = False,
     session_tag: str | None = None,
-    transcript: str | None = None,
+    launch: "SessionLaunch | None" = None,
     cwd: str | None = None,
     model: str | None = None,
     provider: str | None = None,
@@ -967,13 +972,17 @@ def build_claude_shell_cmd(
         session_id: Session ID for --session-id or --resume
         resume: If True and session_id is set, use --resume instead of --session-id
         session_tag: Override session tag for skip-permissions check
-        transcript: Path where the transcript symlink should be created.
-            Requires ``cwd`` to compute Claude's native transcript location.
-            Generates a UUID session ID and creates a symlink from
-            ``transcript`` to Claude's native .jsonl file.
-        cwd: Working directory for computing Claude's project dir (required
-            when ``transcript`` is set).  Also used as the reference path
-            for the prompt file in the generated command (see ``write_dir``).
+        launch: The launch's own identity
+            (:class:`pm_core.session_log.SessionLaunch`: subject, phase, run,
+            loop, iteration, attempt).  Requires ``cwd``.  The session runs
+            as ``--session-id`` with *session_id* (a collector that waits on
+            this exact attempt pre-generates it) or a fresh UUID, and the
+            launch is recorded in the session ledger with Claude's native
+            JSONL path for ``cwd``.  Nothing is linked or copied.
+        cwd: The directory Claude runs in (required with ``launch``): it
+            determines Claude's native log location, and it is the
+            reference path for the prompt file in the generated command
+            (see ``write_dir``).
         model: Model identifier to pass via ``--model`` flag.  When set,
             overrides Claude CLI's default model selection and any
             provider-resolved model.
@@ -1010,20 +1019,19 @@ def build_claude_shell_cmd(
     :class:`~pm_core.providers.ProviderNotFoundError` instead of silently
     launching on the built-in claude provider.
     """
-    # When transcript is requested, generate a UUID and create a symlink
-    if transcript and cwd:
-        sid = str(uuid.uuid4())
-        session_id = sid
+    # A launch whose output pm collects records its own identity (see
+    # pm_core.session_log).  The record is written once the command is fully
+    # built (every raising step is behind us), right before each return.
+    if launch is not None:
+        if not cwd:
+            raise ValueError("build_claude_shell_cmd: launch= requires cwd")
+        session_id = session_id or str(uuid.uuid4())
         resume = False
-        claude_dir = _claude_project_dir(cwd)
-        target = claude_dir / f"{sid}.jsonl"
-        transcript_path = Path(transcript)
-        transcript_path.parent.mkdir(parents=True, exist_ok=True)
-        # Remove stale symlink if present
-        if transcript_path.is_symlink() or transcript_path.exists():
-            transcript_path.unlink()
-        transcript_path.symlink_to(target)
-        _log.info("transcript: symlink %s -> %s", transcript_path, target)
+
+    def _register_launch() -> None:
+        if launch is not None:
+            from pm_core import session_log
+            session_log.register(launch, session_id, cwd)
 
     # Resolve provider configuration.  Values stay out of the command string
     # (see ``env_out``); the caller transports them via the process env.
@@ -1080,8 +1088,8 @@ def build_claude_shell_cmd(
     from pm_core.paths import skip_permissions_enabled, fake_claude_config_for_type
     fc_config = fake_claude_config_for_type(session_type, session_tag)
     if fc_config is not None:
-        # Thread the session_id (generated above for transcript=, or passed
-        # by the caller) so the fake writes the JSONL transcript + hook event
+        # Thread the session_id (generated above for launch=, or passed by
+        # the caller) so the fake writes the JSONL transcript + hook event
         # the verdict poller reads.  None for interactive panes that aren't
         # polled — the fake then just writes to stdout.
         fake_args = _fake_claude_args(fc_config, session_id=session_id,
@@ -1089,6 +1097,7 @@ def build_claude_shell_cmd(
                                       session_tag=session_tag)
         cmd = env_prefix + shlex.quote(_FAKE_CLAUDE_BIN) + " " + " ".join(shlex.quote(a) for a in fake_args)
         log_shell_command(cmd, prefix="claude")
+        _register_launch()
         return cmd
     else:
         # Host launches establish workspace trust here, at the one boundary
@@ -1173,27 +1182,23 @@ def build_claude_shell_cmd(
             cmd += f" '{escaped}'"
 
     log_shell_command(cmd, prefix="claude")
+    _register_launch()
     return cmd
 
 
 def session_id_from_transcript(transcript_path: str | Path) -> str | None:
-    """Return the Claude session_id associated with a transcript symlink.
+    """Return the Claude session_id a transcript path names.
 
-    ``build_claude_shell_cmd(transcript=...)`` writes a symlink pointing at
-    ``~/.claude/projects/<mangled>/<session-id>.jsonl``.  This helper lets
-    callers recover the session_id without threading it through subprocess
-    boundaries.
+    A native log is ``~/.claude/projects/<mangled>/<session-id>.jsonl``; the
+    path is parsed whether or not Claude has written it yet.  A pre-upgrade
+    ``pm/transcripts`` symlink (or a QA resume snapshot's link) names its
+    target's session — read, never written.
     """
     p = Path(transcript_path)
     target: Path = p
     try:
         if p.is_symlink():
             target = Path(os.readlink(p))
-        elif p.exists():
-            target = p
-        # else: fall through and parse the path literally — callers
-        # (QA verification/planner panes) may pass a path that Claude
-        # has not yet opened.
     except OSError:
         return None
     name = target.name
@@ -1208,9 +1213,8 @@ def session_id_from_transcript(transcript_path: str | Path) -> str | None:
 def transcript_path_for(cwd: str, session_id: str) -> Path:
     """Return Claude's native transcript path for a cwd + session_id.
 
-    Lets callers pass a concrete JSONL path to hook-driven pollers when
-    they generated the session_id themselves (no symlink) rather than
-    letting ``build_claude_shell_cmd(transcript=...)`` create one.
+    The one place pm predicts where Claude writes a session's JSONL; the
+    session ledger (:mod:`pm_core.session_log`) records it at launch.
     """
     return _claude_project_dir(cwd) / f"{session_id}.jsonl"
 
@@ -1223,15 +1227,22 @@ _PANE_CD_RE = re.compile(r'^"?cd ((?:\'[^\']*\'|[^\s\'])+) && ')
 _PANE_CONTAINER_RE = re.compile(r"\b(?:podman|docker) exec\b")
 
 
+def pane_session_id(pane_id: str) -> str | None:
+    """The Claude session a pane was launched with (its start command's
+    ``--session-id``/``--resume``), or None when none shows."""
+    from pm_core import tmux as tmux_mod
+    m = _PANE_SESSION_RE.search(tmux_mod.pane_start_command(pane_id) or "")
+    return m.group(1) if m else None
+
+
 def pane_transcript_path(pane_id: str, workdir: str | None) -> Path | None:
     """Claude's native transcript for the session a pane was launched with.
 
-    A restarted TUI can't find the transcript symlinks an earlier TUI made
-    (they live in that TUI's run dir), so it would never track, idle-detect
-    or trust-watch those panes again.  The session id is in the pane's own
-    start command (``--session-id``/``--resume``), and the directory Claude
-    runs in is the ``cd`` prefix of a host launch, ``/workspace`` for a
-    container exec, else *workdir*.  Returns None when no session id shows.
+    Lets a restarted TUI track, idle-detect or trust-watch a pane it did not
+    launch: the session id is in the pane's own start command
+    (``--session-id``/``--resume``), and the directory Claude runs in is the
+    ``cd`` prefix of a host launch, ``/workspace`` for a container exec, else
+    *workdir*.  Returns None when no session id shows.
     """
     from pm_core import tmux as tmux_mod
     from pm_core.container import _CONTAINER_WORKDIR
@@ -1252,40 +1263,6 @@ def pane_transcript_path(pane_id: str, workdir: str | None) -> Path | None:
     else:
         return None
     return transcript_path_for(cwd, m.group(1))
-
-
-def pane_runs_transcript(pane_id: str, workdir: str | None,
-                         transcript_path: str | Path) -> bool:
-    """Whether *pane_id* runs the session the *transcript_path* symlink names.
-
-    Drivers keep one ``impl-<pr>.jsonl`` symlink per run dir, so a pane
-    another driver launched meets this driver's symlink to an *earlier*
-    session.  A pane whose start command shows no session id cannot be
-    checked and counts as a match.
-    """
-    own = pane_transcript_path(pane_id, workdir)
-    if own is None:
-        return True
-    return session_id_from_transcript(own) == \
-        session_id_from_transcript(transcript_path)
-
-
-def finalize_transcript(transcript_path: Path) -> None:
-    """Replace a transcript symlink with a copy of the target file.
-
-    Called when a session finishes so the transcript is self-contained
-    and survives Claude session pruning.  No-op if the path is not a
-    symlink or the target doesn't exist.
-    """
-    if not transcript_path.is_symlink():
-        return
-    target = transcript_path.resolve()
-    if target.exists():
-        transcript_path.unlink()
-        shutil.copy2(target, transcript_path)
-        _log.info("transcript: finalized %s (copied from %s)", transcript_path, target)
-    else:
-        _log.debug("transcript: target %s does not exist, skipping finalize", target)
 
 
 def launch_claude_in_tmux(pane_target: str, prompt: str, cwd: str | None = None,

@@ -153,9 +153,8 @@ def _launched_at(app) -> dict:
     return d
 
 
-def _launch(app, pr_id: str, tdir, force: bool = False) -> None:
+def _launch(app, pr_id: str, run_id: str, force: bool = False) -> None:
     import time
-    from pm_core import signoff as signoff_mod
     if pr_id in _inflight(app):
         # A launch slower than the backoff (container start) is still
         # running; a second ``pm pr signoff`` would only queue on its lock.
@@ -173,14 +172,8 @@ def _launch(app, pr_id: str, tdir, force: bool = False) -> None:
     # skipped poll read as a relaunch every 5 s in the L log.
     _log.info("signoff: launching router for %s (stale=%s)", pr_id, force)
     launched[pr_id] = now
-    try:
-        tdir.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        app.log_message(f"[red]Cannot create transcript dir[/] {tdir}: {e}")
-        return
-    transcript = signoff_mod.signoff_transcript(tdir, pr_id)
     _inflight(app).add(pr_id)
-    app.run_worker(_launch_quiet(app, pr_id, transcript))
+    app.run_worker(_launch_quiet(app, pr_id, run_id))
 
 
 def _inflight(app) -> set:
@@ -192,8 +185,8 @@ def _inflight(app) -> set:
     return s
 
 
-async def _launch_quiet(app, pr_id: str, transcript) -> None:
-    """``pm pr signoff --background --transcript <t> <pr>`` off the event loop.
+async def _launch_quiet(app, pr_id: str, run_id: str) -> None:
+    """``pm pr signoff --background --run-id <run> <pr>`` off the event loop.
 
     Like ``auto_start._start_pr_quiet``: the launch can take a while (prompt
     build, container start), so it must not run synchronously in the 5 s
@@ -205,7 +198,7 @@ async def _launch_quiet(app, pr_id: str, transcript) -> None:
     from pm_core.tui._shell import _run_shell_async
 
     cmd = [sys.executable, "-m", "pm_core.wrapper", "pr", "signoff",
-           "--background", "--transcript", str(transcript), pr_id]
+           "--background", "--run-id", run_id, pr_id]
     proc = None
     try:
         proc = await _run_shell_async(
@@ -253,57 +246,102 @@ def _entered_signoff_epoch(pr: dict) -> float | None:
         return None
 
 
-def _adopt_orphaned_run(app, pr: dict, tdir, session: str) -> None:
-    """Move the PR's live router run from an earlier auto-start run dir into *tdir*.
+def _adopt_orphaned_run(app, pr: dict, run_id: str, session: str) -> None:
+    """Adopt the PR's live router session from an earlier auto-start run.
 
-    A user restart (Ctrl+R) leaves auto-start off, so re-arming creates a new
-    ``autostart-*`` run dir, but the router window launched under the old
-    dir keeps writing its transcript there.  :func:`step_signoff` only reads
-    *tdir*, so the adopted window read as "running" forever and its verdict
-    was never recorded (pr-5410ae4).  When *tdir* holds no run of its own,
-    no launch is in flight and the PR's sign-off window is alive, move the
-    newest stamped run of another auto-start run dir (``manual-*`` dirs and
-    unstamped runs are never adopted) launched since the PR entered
-    ``sign_off`` (transcript + launch stamp) into *tdir*.  ``step_signoff``
-    then binds it to HEAD as usual: recorded when its stamp is the current
-    HEAD, retired as stale otherwise.  Moving (not copying) keeps a consumed
-    verdict from being replayed by a later sign_off entry.
+    A user restart (Ctrl+R) leaves auto-start off, so re-arming starts a new
+    ``autostart-*`` run, but the router window launched under the old run
+    keeps running.  :func:`step_signoff` only reads this run's session, so
+    the adopted window read as "running" forever and its verdict was never
+    recorded (pr-5410ae4).  When this run has no router session of its own,
+    no launch is in flight and the PR's sign-off window is alive, the
+    session that window runs is adopted if another auto-start run launched
+    it (``manual-*`` runs and runs that recorded no HEAD are never adopted)
+    since the PR entered ``sign_off``: it is retired in its old run and
+    recorded under this one with the HEAD/base its launch recorded, so a
+    consumed verdict is not replayed by a later sign_off entry (a move, not
+    a copy — no log is touched).  ``step_signoff`` then binds it to HEAD as
+    usual.  A router launched before the upgrade is found by its old
+    ``transcripts/<run>/signoff-<pr>.jsonl`` link (read-only).
     """
+    from pm_core import session_log
     from pm_core import signoff as signoff_mod
     pr_id = pr["id"]
-    own = signoff_mod.signoff_transcript(tdir, pr_id)
-    own_stamp = signoff_mod.signoff_launch_stamp(own)
-    if own.is_symlink() or own.exists() or own_stamp.exists():
+    if signoff_mod.current_signoff_session(run_id, pr_id,
+                                           root=app._root) is not None:
         return
+    if session_log.latest(pr_id, phase="signoff", run_id=run_id,
+                          include_retired=True) is not None:
+        return  # this run's own (retired) router: never adopt over it
     if pr_id in _inflight(app) or not app._root:
         return
+    pane = signoff_mod.signoff_window_pane(session, pr)
+    if pane is None:
+        return
+    from pm_core.claude_launcher import pane_session_id
+    try:
+        pane_sid = pane_session_id(pane)
+    except Exception:
+        pane_sid = None
     since = _entered_signoff_epoch(pr)
+
+    def _eligible_run(other: str) -> bool:
+        return bool(other) and other != run_id \
+            and not other.startswith("manual-")
+
+    def _recent(epoch: float | None) -> bool:
+        return since is None or (epoch is not None and epoch >= since - 1)
+
     best = None
-    for stamp in (app._root / "transcripts").glob(f"*/{own_stamp.name}"):
-        if stamp.parent == tdir or stamp.parent.name.startswith("manual-"):
+    for rec in session_log.find(pr_id, phase="signoff"):
+        if not (_eligible_run(rec.run_id) and rec.head):
+            continue
+        if pane_sid and rec.session_id != pane_sid:
             continue
         try:
-            mtime = stamp.stat().st_mtime
-        except OSError:
-            continue
-        if since is not None and mtime < since - 1:
-            continue  # a run from an earlier sign_off episode
-        if best is None or mtime > best[0]:
-            best = (mtime, stamp)
-    if best is None or signoff_mod.signoff_window_pane(session, pr) is None:
+            at = signoff_mod.parse_ts(rec.at).timestamp()
+        except (TypeError, ValueError):
+            at = None
+        if _recent(at) and (best is None or (at or 0) >= best[0]):
+            best = (at or 0, rec.session_id, rec.log, rec.run_id,
+                    rec.head, rec.base, "")
+    if best is None:
+        # A router launched before the upgrade: its old run-dir link.
+        for link_path in (app._root / session_log.LEGACY_DIRNAME).glob(
+                f"*/signoff-{pr_id}.jsonl"):
+            other = link_path.parent.name
+            if not _eligible_run(other):
+                continue
+            link = session_log.read_legacy_link(link_path)
+            if link is None or not link.head:
+                continue
+            if pane_sid and link.session_id != pane_sid:
+                continue
+            if session_log.by_session(pr_id, link.session_id) is not None:
+                continue  # already handled by the ledger
+            try:
+                at = link.path.with_suffix(".head").stat().st_mtime
+            except OSError:
+                at = None
+            if _recent(at) and (best is None or (at or 0) >= best[0]):
+                best = (at or 0, link.session_id, str(link.log), other,
+                        link.head, link.base, str(link.path))
+    if best is None:
         return
-    stamp = best[1]
-    transcript = signoff_mod.signoff_transcript(stamp.parent, pr_id)
+    _at, sid, log, other, head, base, legacy = best
     try:
-        tdir.mkdir(parents=True, exist_ok=True)
-        if transcript.is_symlink() or transcript.exists():
-            transcript.rename(own)
-        stamp.rename(own_stamp)
-    except OSError as e:
+        if not legacy:
+            session_log.retire(pr_id, sid, f"adopted by run {run_id}")
+        session_log.register(
+            session_log.SessionLaunch(subject=pr_id, phase="signoff",
+                                      run_id=run_id, head=head, base=base),
+            sid, "", log=log, legacy=legacy, adopted_from=other)
+    except (OSError, ValueError) as e:
         _log.warning("signoff: adopting %s run from %s failed: %s",
-                     pr_id, stamp.parent.name, e)
+                     pr_id, other, e)
         return
-    _log.info("signoff: %s adopted router run from %s", pr_id, stamp.parent.name)
+    _log.info("signoff: %s adopted router session %s from %s", pr_id, sid,
+              other)
 
 
 def step(app, pr_id: str, pr: dict | None = None) -> None:
@@ -327,9 +365,10 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
     if not pr or pr.get("status") != "sign_off":
         return
 
-    tdir = _auto_start.get_transcript_dir(app)
-    _adopt_orphaned_run(app, pr, tdir, session)
-    result = signoff_mod.step_signoff(app._root, pr, session=session, tdir=tdir)
+    run_id = _auto_start.get_run_id(app)
+    _adopt_orphaned_run(app, pr, run_id, session)
+    result = signoff_mod.step_signoff(app._root, pr, session=session,
+                                      run_id=run_id)
     _log.debug("signoff step %s: %r", pr_id, result)
 
     if result.action == "running":
@@ -341,7 +380,7 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
             app.log_message(
                 f"Sign-off for {pr_id} is stale ({result.reason or 'HEAD moved'})"
                 " — re-running")
-        _launch(app, pr_id, tdir, force=result.stale)
+        _launch(app, pr_id, run_id, force=result.stale)
         return
 
     hop = result.hop
@@ -406,7 +445,7 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
         # `pm pr auto-sequence` tick doesn't relaunch — kill — our window.)
         fresh = _load_pr(app, pr_id)
         from pm_core.tui.review_loop_ui import _start_loop
-        _start_loop(app, pr_id, fresh, transcript_dir=str(tdir))
+        _start_loop(app, pr_id, fresh, run_id=run_id)
     elif hop == "impl":
         app.log_message(
             f"Sign-off routed {pr_id} back to implementation (SIGNOFF_IMPL)")

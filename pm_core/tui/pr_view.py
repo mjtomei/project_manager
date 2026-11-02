@@ -140,21 +140,21 @@ def start_pr(app, companion: bool = False) -> None:
         cmd_parts.append("--fresh")
     if companion:
         cmd_parts.append("--companion")
-    # Pass --transcript so the resulting Claude session writes a hook
-    # transcript symlink that ``_poll_impl_idle`` can register in the
-    # PaneIdleTracker.  Without it a manually-started PR is never tracked,
-    # so its in_progress node shows a static ``◎`` with no live spinner /
-    # ⏸ marker.  Mirrors review_pr and auto_start._start_pr_quiet, which
-    # both use the canonical ``impl-{pr_id}.jsonl`` name.  (Auto-advance on
-    # idle stays gated on auto-start being enabled, so this only animates
-    # the marker — it does not force a manual start to auto-review.)
+    # Pass --run-id so the resulting Claude session is recorded under this
+    # TUI's run, which is how ``_poll_impl_idle`` recognises the pane and
+    # registers it in the PaneIdleTracker.  Without it a manually-started PR
+    # is never tracked, so its in_progress node shows a static ``◎`` with no
+    # live spinner / ⏸ marker.  Mirrors review_pr and
+    # auto_start._start_pr_quiet.  (Auto-advance on idle stays gated on
+    # auto-start being enabled, so this only animates the marker — it does
+    # not force a manual start to auto-review.)
     from pm_core.tui import auto_start as _auto_start
     try:
-        tdir = _auto_start.get_transcript_dir(app)
+        run_id = _auto_start.get_run_id(app)
     except Exception:
-        tdir = None
-    if tdir:
-        cmd_parts.append(f"--transcript {tdir}/impl-{pr_id}.jsonl")
+        run_id = None
+    if run_id:
+        cmd_parts.append(f"--run-id {run_id}")
     cmd_parts.append(pr_id)
     cmd = " ".join(cmd_parts)
     run_command(app, cmd, working_message=action_key, action_key=action_key)
@@ -198,20 +198,17 @@ def review_pr(app, fresh: bool = False) -> None:
     if not guard_pr_action(app, action_key):
         return
     app._inflight_pr_action = action_key
-    # Pass --transcript so the resulting Claude session writes a hook
-    # transcript symlink the auto-start scheduler can poll for idle/
-    # working state and verdicts.  Mirrors the pattern used by review-
-    # loop iterations and QA scenarios.
+    # Pass --run-id so the resulting Claude session is recorded under this
+    # TUI's run: the poll then tracks that exact session for idle/working
+    # state and its verdict.
     from pm_core.tui import auto_start as _auto_start
     try:
-        tdir = _auto_start.get_transcript_dir(app)
+        run_id = _auto_start.get_run_id(app)
     except Exception:
-        tdir = None
-    transcript_arg = ""
-    if tdir:
-        transcript_arg = f" --transcript {tdir}/review-{pr_id}.jsonl"
+        run_id = None
+    run_arg = f" --run-id {run_id}" if run_id else ""
     fresh_arg = " --fresh" if fresh else ""
-    cmd = f"pr review{fresh_arg}{transcript_arg} {pr_id}"
+    cmd = f"pr review{fresh_arg}{run_arg} {pr_id}"
     run_command(app, cmd, working_message=action_key, action_key=action_key)
 
 
