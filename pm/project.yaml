@@ -53266,3 +53266,34 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-7f0daef
+  plan: bugs
+  title: 'Bug: one transient podman timeout on a queued QA scenario launch ends the
+    whole container-mode QA run and drops an in-flight scenario verdict'
+  branch: pm/pr-7f0daef-bug-one-transient-podman-timeout-on-a-queued-qa-sc
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_loop.py _poll_tmux_verdicts -> queued launch
+    (_launch_next_queued -> create_qa_container -> container.create_container -> container_is_running,
+    a podman inspect with timeout=10 and no retry); the subprocess.TimeoutExpired
+    surfaces as ContainerLaunchError, and run_qa_sync calls _fail_run_infrastructure
+    at once. Repro (pr-7d5d036 QA loop 7d9d67512107bb12, 2026-11-02, container mode,
+    nested podman, concurrency cap 2): S21 was still running and finished both stories
+    at 07:35 UTC; queued S22 was launched at 07:36, podman inspect -f {{.State.Running}}
+    pm-...-s22 timed out after 10 s (podman was busy with S21 container teardown),
+    and the run ended ERROR at 07:37. qa_status.json kept S21 with an empty verdict,
+    S22/S23 never ran, and S21 worker wrote PASS and committed its notes plus a bug
+    filing (pr-7ebc650) at 07:38 into its clone, where nothing pushed them (recovered
+    by hand). Expected: fail-closed means never fall back to the host, not abort on
+    the first slow inspect; retry the inspect/create (or requeue the scenario) and
+    let in-flight scenarios finish and record their verdicts before the run reports
+    ERROR. Related: pr-7ab0a99, pr-f8acf21, #280.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T08:18:28.627726+00:00'
+  updated_at: '2026-11-02T08:18:28.627726+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

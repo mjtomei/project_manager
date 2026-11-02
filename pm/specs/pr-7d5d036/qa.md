@@ -46,6 +46,23 @@ command run outside a pm session, not only by regression runs. R7, R34,
 R35 and E18 are amended, R37–R39, E21–E23, A13 and A14 are added, A7 and A9
 are extended, and the other items are unchanged.
 
+Revised 2026-11-02 (round 5) at head `ad5fb106`. `pm_core` is unchanged
+since `a3777520`; the later commits are QA notes and this spec. Round 4
+(S18–S23) ran at `a3777520`. S18 (every launch surface from a
+`--global` session), S19 (share-mode filings, R37/E21–E23), S20 (plain
+multi-project `-C`/`PM_PROJECT`, R38) and S21 (container mode from a
+`--global` TUI, R13/R15/R16/R21/A14) all passed live, with no fix. The run
+then ended ERROR before S22 (R39 concurrency) and S23 (R36/R37 with a real
+Claude) could start. A queued S22 launch hit a 10 s `podman inspect`
+timeout while S21's container was being torn down, and the QA loop stopped
+the whole run. That is a QA-loop problem, not this PR's, and is filed as
+pr-7f0daef. S21 finished both stories, but its verdict never reached the
+loop. Its notes, the S18–S20 notes and its A14 filing (pr-7ebc650) were
+committed only in S21's clone, and have been recovered onto this branch.
+R39 and the real-Claude share-mode path are therefore still unexercised.
+R33 is amended: `pm qa launch` also adds `--file-prs`. A14, A7 and A9 are
+extended. The other items are unchanged.
+
 ## What changed, as a user sees it
 
 - The 20 old regression scenarios under `pm/qa/regression/` are gone. The
@@ -287,7 +304,8 @@ are extended, and the other items are unchanged.
   same test, then both panes run a command of the form
   `pm -C <root> qa regression <id> …` with the typed options in the typed
   order. The command bar adds no `--file-prs` the user didn't type; Enter
-  always adds `--file-prs`.
+  always adds `--file-prs`, and so does `pm qa launch regression:<id>`
+  (round 4 S18).
 
 ### Added in the round-3 revision
 
@@ -559,10 +577,10 @@ exercised.
   `pm -C /pm-project pr add` inside the container, which can't see the
   host tmux server or signal the host TUI, so the user's TUI shows the PR
   only after `r` or its 300 s sync. That predates the `-C` lookup and is
-  not a failure of this PR; if observed, check `pm pr list --plan bugs`
-  and file it once. Since the `-C` lookup now runs inside the container at
-  filing time, the filing itself must still exit 0 with no traceback and
-  land in the host registry.
+  not a failure of this PR. Round 4 S21 observed it and filed it as
+  pr-7ebc650; don't file it again. Since the `-C` lookup now runs inside
+  the container at filing time, the filing itself must still exit 0 with
+  no traceback and land in the host registry (it did in S21).
 
 - **A7** Bugs found in round 1 and filed elsewhere are not failures of this
   PR: pr-a571291 (`--file-prs` filings make the filed PR the user's active
@@ -584,7 +602,14 @@ exercised.
   project's session on that server inherits it, E18), pr-60d2e79 (the
   pytest suite writes into the real `~/.pm`; don't run it during a story
   that diffs `~/.pm`) and pr-c3bf868 (a stale TUI pidfile can make a
-  reload target a dead or wrong process). A worker that sees them should cite the
+  reload target a dead or wrong process). Round 5 adds pr-7ebc650 (A14:
+  a container run's filing never reloads the host TUI), pr-7f0daef (one
+  transient `podman inspect` timeout on a queued scenario's launch stops
+  the whole QA run and drops an in-flight scenario's verdict; QA-loop
+  infrastructure, not a scenario failure) and the pr-adfdce3 note (after a
+  command-bar submit made from the QA view, focus stays on the hidden PR
+  tree, so the next Enter opens pr-edit for the selected PR; press `q`
+  twice first). A worker that sees them should cite the
   PR id and move on. Because of pr-e847a7a, E14's awkward project path is
   checked only on regression launches, which quote it.
 - **A8** pr-e64ecb6 and pr-9ff8a1b report the cross-device clone failure
@@ -618,6 +643,21 @@ exercised.
   alternate screen, so read its tmux use from pipe-pane hooks (put them at
   `after-split-window[1]`; on tmux 3.2a `[0]` is pm's own hook) or from the
   Bash `tool_use` entries in `~/.claude/projects/<clone-slug>/*.jsonl`, and
-  end it with `/exit` typed in its pane.
+  end it with `/exit` typed in its pane. Round 4 added these: a test
+  project's TUI on a shared server logs to
+  `~/.pm/debug/<name>-<share-mode hash>.log` (pr-50e1e3f), not to its
+  session's hash, so find each TUI's log by the pid in its mount line; take
+  reload baselines after any test-project `pm pr add` made before its
+  session exists; after TUI Enter, press `q` to get the PR list back;
+  `C-b d` sent to a run pane detaches the test session nested in it; end
+  a TUI-launched run before a second TUI Enter (one at a time); name a test
+  project `zz-*` when checking that `pm tui view` in it finds its own TUI
+  (an `aaa-*` name would be the fallback's first pick and hide a missed
+  lookup), and `aaa-*` when checking that a filing does not reload it; a
+  PID-1 `sleep infinity` container needs a subreaper (`setsid python3
+  reaper.py …`) for `pm session`, and the reaper must drain its children
+  before it exits; the QA container has no `bc`; a test project with no
+  PRs starts its TUI in guide mode, whose guide pane runs `claude`, so
+  seed one PR first when a real Claude is on PATH.
 
 No [UNRESOLVED] items.
