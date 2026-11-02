@@ -2667,8 +2667,6 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     if not pr:
         raise ValueError(f"PR {pr_id} not found")
 
-    pr_path_seg = pr["id"]
-
     title = pr.get("title", "")
     description = _pr_text(pr, "description").strip()
     branch = pr.get("branch", f"pm/{pr_id}")

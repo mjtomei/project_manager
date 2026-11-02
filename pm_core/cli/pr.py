@@ -940,8 +940,16 @@ def _signoff_evidence_lines(record) -> list[str]:
     qa = evidence.get("qa")
     qa = qa if isinstance(qa, dict) else {}
     qa_head = integration.revision_of(qa.get("planner_head"))
-    if qa_head or qa.get("overall"):
-        lines.append("QA: " + str(qa.get("overall") or "?")
+    # Hand-edited state: only text is a verdict to print.  A truthy non-string
+    # ``overall`` (a list/mapping) used to render its repr here — the reader
+    # printing a value the record does not hold, the rule this block applies
+    # to every other member.  It reads as absent (the ``?`` placeholder), and
+    # a usable ``planner_head`` still names the revision the QA ran on.
+    qa_overall = qa.get("overall")
+    qa_overall = qa_overall if isinstance(qa_overall, str) and qa_overall \
+        else None
+    if qa_head or qa_overall:
+        lines.append("QA: " + (qa_overall or "?")
                      + (f" at {qa_head[:12]}" if qa_head else ""))
     reused = evidence.get("reused")
     reused = [str(v) for v in reused] if isinstance(reused, list) else []

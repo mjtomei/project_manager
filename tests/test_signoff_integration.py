@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, patch
 
 import os
 import pytest
+import yaml
 from click.testing import CliRunner
 
 from pm_core import integration, prompt_gen, signoff, store
@@ -141,6 +142,28 @@ def test_a_malformed_base_branch_reads_as_the_default_in_the_gate(w):
     def _malform(d):
         d["project"]["base_branch"] = {"bad": True}
     store.locked_update(w.pm_dir, _malform)
+    app = SimpleNamespace(_root=w.pm_dir, _data=None)
+    assert _signoff_gate(app, PR)[1] is None
+
+
+def test_a_non_mapping_project_reads_as_absent_in_the_gate(w):
+    """A hand-edited non-mapping ``project`` must not crash the TUI gate.
+
+    The approval path reads ``project.base_branch``; ``(project or {}).get``
+    raised ``AttributeError`` on a truthy scalar/list ``project`` — a crash on
+    the TUI event loop, where the gate runs.  It is no configuration, so the
+    default base branch applies (the same fallback the integration check's own
+    ``project`` reader uses), and a valid approval still passes.
+    """
+    from pm_core.tui.review_loop_ui import _signoff_gate
+    integration.check_integration(w.pm_dir, PR)
+    step(w, SIGNOFF_MERGE)
+
+    path = w.pm_dir / "project.yaml"
+    doc = yaml.safe_load(path.read_text())
+    doc["project"] = ["not", "a", "mapping"]
+    path.chmod(0o644)
+    path.write_text(yaml.safe_dump(doc, sort_keys=False))
     app = SimpleNamespace(_root=w.pm_dir, _data=None)
     assert _signoff_gate(app, PR)[1] is None
 

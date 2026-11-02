@@ -596,7 +596,11 @@ file's basename. A resolved candidate must not be a dead end there (the
 prompt's abbreviated lists point at this command). It also prints the
 recorded sign-off decision and its evidence block (R6) under `## Sign-off`,
 so the reuse statement a person must assess is readable without hand-parsing
-`project.yaml`.
+`project.yaml`. Every member of that block is hand-edited state: a member
+that is not the expected type contributes no line (or the shared placeholder)
+rather than printing its repr — including a truthy non-string `qa.overall`,
+which used to render as `QA: ['PASS']` while a usable `planner_head` still
+names the revision QA ran on.
 
 ### R9. Regression coverage
 Real-git tests (new `tests/test_signoff_resolution.py` plus resolver unit
@@ -1005,7 +1009,12 @@ tests):
     arguments) is no configuration, so `integration.target_for` and
     `run_check`'s own fallback read it as absent/default instead of raising
     `AttributeError` out of a check that promises a `status: error` record and
-    out of the approval/recovery paths.  The same rule covers the `base_sha` a
+    out of the approval/recovery paths.  The TUI auto-merge gate
+    (`review_loop_ui._signoff_gate`) is one of those approval paths: it read
+    `(project or {}).get("base_branch")`, so a truthy non-mapping `project`
+    raised `AttributeError` on the TUI event loop; it now normalises
+    `project` to a mapping first (a non-string `base_branch` already fell back
+    to `master`).  The same rule covers the `base_sha` a
     re-check is handed: `prepare`'s post-apply re-check and its lost-race
     re-check pass `previous.get("base_sha")`, and `prepare` can be handed the
     *stored* record when a concurrent apply won the race — so the value is

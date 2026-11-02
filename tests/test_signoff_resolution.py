@@ -5778,6 +5778,38 @@ def test_the_signoff_evidence_block_tolerates_every_malformed_member():
     assert _signoff_evidence_lines(None) == []
 
 
+def test_a_truthy_malformed_qa_overall_is_not_printed_as_a_verdict():
+    """A hand-edited ``qa.overall`` that is not text reads as absent.
+
+    The evidence block is written into the tracked project.yaml, so ``overall``
+    is hand-editable state.  A truthy non-string (a list/mapping) used to
+    render its repr as the QA verdict — a value the record does not hold.  It
+    must contribute no verdict (the ``?`` placeholder at most), while a usable
+    ``planner_head`` still names the revision QA ran on.
+    """
+    from pm_core.cli.pr import _signoff_evidence_lines
+
+    base = {
+        "verdict": SIGNOFF_MERGE,
+        "evidence": {"qa": {"planner_head": None, "overall": ["PASS"]}},
+    }
+    # No usable revision: the malformed verdict contributes no line at all.
+    assert _signoff_evidence_lines(base) == [
+        f"Verdict: {SIGNOFF_MERGE}"]
+
+    # A usable revision is still named; only the verdict falls back.
+    base["evidence"]["qa"]["planner_head"] = "a" * 40
+    lines = _signoff_evidence_lines(base)
+    assert any(line == "QA: ? at " + "a" * 12 for line in lines), lines
+    joined = "\n".join(lines)
+    assert "PASS" not in joined and "['PASS']" not in joined
+
+    # A string verdict still prints normally.
+    base["evidence"]["qa"]["overall"] = "PASS"
+    assert any(line == "QA: PASS at " + "a" * 12
+               for line in _signoff_evidence_lines(base))
+
+
 def test_a_non_utf8_launch_stamp_does_not_crash_the_driver(w):
     """A stamp file that cannot be decoded reads as "no stamp".
 
