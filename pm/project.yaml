@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T08:11:17.807359+00:00'
+  updated_at: '2026-11-02T08:13:29.243057+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7580,6 +7580,28 @@ prs:
       s4-in-session-kill/pre-fix and post-fix).'
     created_at: '2026-11-02T08:11:17Z'
     last_edited: '2026-11-02T08:11:17Z'
+  - id: note-55590dd
+    text: 'QA S31 (busy machine: racing starts/lists/kills/attaches/TUI driving across
+      private, shared and legacy sessions) PASS 5/5 on 3700dd7ee (code = origin 6bd7c312e),
+      no source changes. (1) Paired P1/P2 starts behind one barrier: each printed
+      only its Creating line; /tmp/pm-sessions pm 1777 with two srwx------ sockets;
+      each TUI %0 "PM_TMUX_SOCKET=... pm _tui"; L (pre-change, /opt/pm-src, TUI pid
+      46082) byte-identical. (2) 4 rounds of paired P3 starts + plain-shell kill:
+      4/4 converged on base + ~1 att=2 with a single %0 (refiner saw 3/4); rounds
+      3-4 printed the pr-ea98f71 "TUI pane missing — respawning..." residue; every
+      kill rc=0 and socket gone. (3) Four simultaneous cross-server sendloops (40x20
+      digits, notes every 13): 4x DONE 800/3/0, 883 sends each all naming their own
+      session %0; each command log = 800 of its own digit only (legacy TUI 4s); notes
+      %3 live on alpha, gamma and legacy at once, each registry naming only its own;
+      registries back to tui %0. (4) shared P2 = pm-beta-de4c084b (0777, (shared)
+      row only there); simultaneous kill + kill --global + pasted attach under load:
+      kill rc=0 x2, loops 240/240 bad=0, tP1 on ~1 + tNew on base, list switched 4
+      rows -> alpha 2 + legacy 1 in one step. (5) L kill then P1 kill: "No pm sessions
+      found." list rc=0, empty dir, no live tmux beyond harness. List loops: 1254
+      + 196 runs, all rc=0 errbytes=0; 0-client rows only at the instant a session
+      starts. Captures: /pm-captures/scenarios/31 (README.md, 31 casts+mp4, evidence/).'
+    created_at: '2026-11-02T08:13:29Z'
+    last_edited: '2026-11-02T08:13:29Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
