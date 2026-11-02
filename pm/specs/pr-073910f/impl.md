@@ -4022,10 +4022,10 @@ used a disposable socket directory, a temporary HOME or a mocked tmux.
 
 ## QA-driven fixes and reviews (2026-11-02)
 
-QA scenarios 23–42 ran after review loop b48f i21.  Eight of them found
+QA scenarios 23–48 ran after review loop b48f i21.  Ten of them found
 defects, each fixed in a `qa:` commit.  The review loops after them
-(54bf, 68bd, e661, 4c75) made cleanups only.  None of this changes a
-requirement.  R1.1, R3.3 and R3.4 above now state the rules these fixes
+(54bf, 68bd, e661, 4c75, ad65, f905) made cleanups only.  None of this
+changes a requirement.  R1.1, R3.3 and R3.4 above now state the rules these fixes
 introduced.  `qa.md` has the per-scenario expectations.
 
 1. **QA S23, `87b2d1d1`: an awkward name broke the pane-switch gate and
@@ -4110,6 +4110,41 @@ introduced.  `qa.md` has the per-scenario expectations.
    registered it, and the hook's `_insert_tui` then listed it twice.
    `_insert_tui` now skips a pane already listed.  Tests:
    `tests/test_tui_respawn_race.py` (real tmux, stand-in `pm`).
+9. **QA S45, `f162a71c`: a joiner's attach moved the owner's client.**
+   Pre-existing on master.  In a shared session, the owner closed the
+   TUI's window, and the joiner then ran `pm session --global --dir`
+   from outside tmux.  The attach respawned the TUI in a new window, and
+   `_respawn_tui` selected that window with `tmux.select_window`.
+   Outside tmux, `current_or_base_session` falls back to the first
+   *attached* grouped session.  That was the owner's `~1`, so the owner
+   was switched off the window they were using.  The joiner reattached
+   its old `~2`, which still showed the owner's shell window.  Now
+   `_ensure_tui_running` calls `_respawn_tui(..., select=False)`.
+   `_session_start` then selects the respawned window with
+   `select_window_in_session`, in the grouped session it is about to
+   attach, and in no other session.  It does this whether the TUI was
+   split into its old window or given a new one.  Before the fix, a
+   split was never selected.  So a reattach that has to respawn the TUI
+   now always lands on the TUI's window.  The `after-kill-pane` hook
+   still calls `_respawn_tui` with its default `select=True`.  Tests:
+   `TestAttachRespawnLeavesOtherClientsAlone` (real tmux, a pty client
+   on `~1`) and `TestSessionStartSelectsTheRespawnedWindowInItsOwnSession`.
+10. **QA S47, `b89aa9a4`: a stuck respawn lock froze a pane close once
+    per window.**  This branch only, from item 8's lock.
+    `_process_registry_pane_closed` took `tui_respawn_lock` once for
+    each registered window.  The `after-kill-pane` hook is a synchronous
+    `run-shell`, so the client that closed a pane stays frozen until the
+    hook returns.  With a stuck holder, that client waited the full
+    10 s once per window.  It froze for 30.2 s with the main window and
+    two review windows.  Now the hook takes the lock once for the whole
+    event.  It reconciles every window and does any respawn under that
+    one lock, then rebalances after releasing it.  A pane close now
+    waits at most once (about 10 s), and a lock that cannot be used logs
+    one "cannot lock" line per event (`qa.md` ambiguity 15).  Tests:
+    `test_one_lock_for_all_windows_rebalances_after` and
+    `TestStuckHolderDelaysOneWait` (a real `flock` holder).
+
+QA scenarios 43, 44, 46 and 48 passed with no source changes.
 
 The review loops in between:
 
@@ -4135,3 +4170,7 @@ The review loops in between:
   holder has the lock.  The copy retried every `OSError`, so a
   filesystem that cannot lock (`ENOLCK`) held up the hook and the
   attach for the full 10 s on every call.
+- **ad65 i2** passed with no changes.
+- **f905 i1** reviewed the S45 and S47 fixes and found no code defect.
+  It added items 9 and 10 above, which no earlier pass had recorded.
+  Reverting either fix in a copy of the tree fails its new tests.
