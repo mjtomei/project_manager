@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T03:46:19.242299+00:00'
+  updated_at: '2026-11-02T04:06:14.677172+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25572,6 +25572,18 @@ prs:
       a panning recorder before TUI Enter. Captures: /pm-captures/scenarios/12/.'
     created_at: '2026-11-02T03:46:19Z'
     last_edited: '2026-11-02T03:46:19Z'
+  - id: note-17d435b
+    text: 'QA S13 (2026-11-02): PASS at faf02162, all 3 stories live from /scratch/s13
+      (device differs from ~/.pm), no fix needed. QA loop: s-1/s-2 plain-cloned in
+      the same second (no --local), origin set to the file:// upstream, objects hardlinked
+      (link count 4); PASS 1:55 after t. pm qa debug: the /scratch clone copies (link
+      1), with no cross-device error; --foreground runs in the calling pane; container
+      mode with docker missing fails closed (rc=1, nothing created). Capture trap:
+      when the loop starts, pm selects the planner window on the session, so an attach-client
+      recorder misses the TUI log lines. Run a camera loop that selects window 0 again
+      (captures helpers/cam1.sh).'
+    created_at: '2026-11-02T04:06:14Z'
+    last_edited: '2026-11-02T04:06:14Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
