@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T08:39:32.345349+00:00'
+  updated_at: '2026-11-02T08:50:54.264970+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25909,6 +25909,23 @@ prs:
       (tui/, cli/, evidence/).'
     created_at: '2026-11-02T08:39:32Z'
     last_edited: '2026-11-02T08:39:32Z'
+  - id: note-7b9d77b
+    text: 'QA S23 (2026-11-02): PASS at 633f3537 (pm_core = a3777520), all 3 stories
+      live from /scratch/s23 with a pm session --global proj and a private-socket
+      proj2, no fix. Runs A (TUI Enter), B (pm qa launch), C (proj2 CLI --file-prs)
+      and D (--branch failure) started in one second with distinct ids, clones and
+      prompts. The stand-in env was scrubbed, with PM_TMUX_SOCKET = GS/priv. D left
+      nothing. aaa-one/two/three test sessions from the run panes were all SESSION-RC=0
+      in their own groups, and the user windows/panes/registry sha stayed identical
+      with 0 new user-log lines. Four simultaneous filings gave proj +3 and proj2
+      +1 reloads at T2 (aaa-* 0), and both TUIs updated in 0.25 s. After A exited
+      (pane gone in 0.11 s, rebalance 200x50), the B and C solo filings showed in
+      0.11 s, each reloading only its own TUI. The default server never existed. Rig
+      trap: tmux after-split-window[1]/after-new-window[1] pipe-pane hooks for the
+      run panes fired but wrote no file (cause unknown), so save run-pane text with
+      capture-pane -S - before ending a run. Captures: /pm-captures/scenarios/23/.'
+    created_at: '2026-11-02T08:50:54Z'
+    last_edited: '2026-11-02T08:50:54Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
