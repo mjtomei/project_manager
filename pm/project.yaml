@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-01T23:39:57.597122+00:00'
+  updated_at: '2026-11-02T00:37:04.536946+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6907,6 +6907,44 @@ prs:
       HOME or a mocked tmux.'
     created_at: '2026-11-01T23:39:57Z'
     last_edited: '2026-11-01T23:39:57Z'
+  - id: note-525e243
+    text: 'Review loop b48f i17 (no requirement changes; full suite 5496 passed /
+      1 skipped, 422.7 s, log /pm-captures/review-b48f-i17/full-suite-final.log; two
+      test-hygiene edits made after that run were re-run green, tests/test_session_socket_isolation.py
+      17 passed). Verification pass over the head after the b48f i16 fixes; two shell-quoting
+      gaps and one prefix-match residue. (1) i15 quoted the pane-switch gate''s *condition*
+      but not the command it runs: `run-shell ''pm _pane-switch #{session_name} {direction}''`
+      let tmux expand the name into the shell unquoted, so a repo directory containing
+      a space split it into two arguments (Click rejected the command, so the mobile-aware
+      switch the gate had just selected never ran) and one containing a `$` or backtick
+      ran command substitution; the `_pane-opened`/`_window-resized` hooks had the
+      same value in double quotes (no word splitting, but `$`/backtick still expanded).
+      All three now use tmux''s `#{q:...}` shell-quote modifier — the one the popup
+      bindings already used — verified present on tmux 3.2a (the supported floor).
+      (2) The pane EXIT traps interpolated the session name into the double-quoted
+      `bash -c ''trap "pm _pane-exited {session} …" EXIT; …''` in three places (two
+      in pane_ops, one in _session_start); a space name gave the handler extra arguments
+      (pane stayed registered, no rebalance) and a `$`/backtick name ran command substitution
+      at trap definition. New `tmux.wrap_with_exit_trap()` is the single definition
+      (shlex.quote for the trap''s own re-parse, then double-quote and outer single-quote
+      escaping). (3) `_find_tui_pane()`''s cwd branch called the exact/group-confirmed
+      `_select_session_socket` and then a bare (prefix) `session_exists`; with only
+      a different session merely named like the cwd one on the legacy default server
+      it identified a session that is not running and could return a colliding recorded
+      pane id. It now uses the resolver''s own answer. Tests: TestTmuxCommandsQuoteAwkwardSessionNames
+      (real tmux expansion vs a stub pm; space/backtick/quote/`;` names), TestExitTrapQuoting
+      (space/quote/backtick/`$`/`;`, exact argv and no metacharacter executed), and
+      TestFindTuiPaneAcrossServers::test_cwd_session_merely_named_like_a_group_is_not_identified;
+      every fix-asserting test was checked against the pre-fix code (pre-fix file
+      copy, or the old inline trap wrapper reproduced verbatim). A `$` cannot be round-tripped
+      through a session *name* — tmux stores a backslash before it at creation — so
+      the `$` case is pinned at the trap layer only. The i16 residual (other commands
+      still passing a base name to prefix-matched tmux targets, e.g. `pm pr start`)
+      is unchanged. No live session, server or shared host configuration was touched
+      — every fixture used a disposable socket directory, a temporary HOME or a mocked
+      tmux. Commit 497963731.'
+    created_at: '2026-11-02T00:37:04Z'
+    last_edited: '2026-11-02T00:37:04Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
