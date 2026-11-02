@@ -88,6 +88,29 @@ pane unless stated otherwise.
   **THEN** both invocations attach to the existing session on the existing
   server; no second session, no second server, and no second TUI appear;
   `pm session list` still shows exactly one row for A.
+- **GIVEN** a repo whose directory name contains characters tmux rewrites
+  in a session name — a `.` (`next.js`), a `:`, a `#`, a backslash, or a
+  `$` followed by a letter (`my $HOME repo`) —
+  **WHEN** the user runs `pm session` from a plain shell, and then again,
+  **THEN** the first run creates a session whose printed name is exactly
+  the name tmux lists (each such character becomes `_`, e.g.
+  `pm-next_js-<hash>`), with no "Failed to detect TUI pane after session
+  creation."; the second run attaches to it (no "duplicate session"
+  traceback); panes open in the repo's real path with its literal
+  characters, and a `#(cmd)` in the path is never run (QA S28, commit
+  78b7b2fa).  Everything keyed by the session tag — `~/.pm/sessions/<tag>/`
+  (pm_root, session override, fake-claude config), the pane registry, the
+  mobile flag, `pm session list`, `--print-connect`, `pm tui -s` — uses
+  that same tmux-safe name.
+- **GIVEN** such a dotted-name project for which an *older* pm (before
+  this change) ran `pm session`: it printed "Failed to detect TUI pane
+  after session creation." but left `pm-next_js-<hash>` running its TUI
+  on the default server,
+  **WHEN** the user runs `pm session` with this build,
+  **THEN** the leftover is adopted as a legacy session (R10: attached, with
+  the one-line rollout note; no private twin is created), and after
+  `pm session kill` the next `pm session` starts it on its private socket
+  (QA planning 2026-11-02, from the S28 tag change).
 
 ### R3 — `pm session list` enumerates every pm session across servers
 
@@ -118,6 +141,19 @@ pane unless stated otherwise.
     are listed as two rows, each under its own full name and its own
     socket.  `~N` is a *grouped-session* suffix only when it is numeric,
     so a `~` in the tag must not be truncated (review-loop b48f i11).
+- **GIVEN** `/tmp/pm-sessions` is a directory owned by another user
+  (e.g. root) with mode `1733` — sticky and world-writable, so `pm
+  session` accepts it and creates sockets there, but not readable by
+  others, so its entries cannot be enumerated —
+  **WHEN** the user, with a private session running, runs `pm session
+  list`,
+  **THEN** it does not silently report "No pm sessions found." as if
+  nothing were running: it either lists the sessions it can still reach
+  or says that the socket directory cannot be read; it never crashes, and
+  `pm session`, `--print-connect`, `pm tui view` and `pm session kill` in
+  the project's directory still find the session through its
+  deterministic socket path (QA planning 2026-11-02; `list` now applies
+  `paths.shared_socket_dir_is_usable`, review-loop 68bd i4).
 
 ### R4 — Connect commands name the right server
 
@@ -357,6 +393,22 @@ pane unless stated otherwise.
   **WHEN** the user runs `pm session kill`, **THEN** it reports no session
   and removes the stale file; a later `pm session` starts a fresh server
   at the same path.
+- **GIVEN** a shell window *inside* session A (or a terminal that is
+  closed while the kill runs),
+  **WHEN** the user runs `pm session kill` there — its own terminal dies
+  with the server it is tearing down —
+  **THEN** the teardown still completes: A's base, grouped sessions and
+  views are gone, A's containers and push proxies are cleaned up, and its
+  socket file is removed; no traceback is left anywhere, and `pm session
+  list` from another terminal shows A gone (QA S30, commit 7deab88e).
+- **GIVEN** A's private server also hosts a session that is not part of
+  A's group (a hand-made `tmux -S <A's socket> new-session -s scratch`),
+  **WHEN** the user runs `pm session kill` for A,
+  **THEN** A's group is killed and reported, but the server stays up for
+  `scratch`, so its socket file is kept and `scratch`'s client stays
+  attached; a later `pm session` in A's project starts A again on that
+  socket and leaves `scratch` alone (review-loop 68bd i4 folded both
+  kill branches into one stale-socket rule).
 - **GIVEN** any of the above, **WHEN** the kill completes,
   **THEN** the default tmux server and any unrelated non-pm tmux sessions
   are unaffected.
@@ -419,6 +471,21 @@ pane unless stated otherwise.
   respawned, **THEN** the new window carries `window-size=smallest` (read
   from the session environment), so the smallest connected client still
   sees the full layout.
+- **GIVEN** a `--global` (or `--group`) session for project P in which
+  the owner ran `pm meta` from a shell pane (it prints "Set session
+  override: ~/.pm/sessions/<tag>/override" with the *shared* session's
+  tag and opens a meta window on the shared server),
+  **WHEN** the owner runs a plain `pm` command (`pm which`, `pm pr list`)
+  from a shell pane of that shared session in P's directory,
+  **THEN** it runs the meta workdir's pm (`pm which` names
+  `<meta workdir>/pm_core`), the same code the session's prefix+M popup
+  runs; the same holds for a session whose project is a pm source
+  checkout (its persisted pm_root).  A private twin session of P, and a
+  plain shell outside tmux, keep their own resolution: the shared
+  session's override never applies to them, and a twin's own `pm meta`
+  override never applies to the shared session.  Closing the meta window
+  removes only its own override (review-loop 68bd i1/i2: the wrapper
+  derived the tag without `PM_SHARE_MODE` and missed both files).
 
 ### R10 — Existing (legacy) sessions are preserved, not migrated
 
@@ -485,6 +552,25 @@ pane unless stated otherwise.
   **WHEN** pm commands run inside it,
   **THEN** they are not redirected to any pm socket and that session is
   left alone.
+- **GIVEN** a running TUI (its pane is the session's lifeline: if the
+  TUI exits, the window and possibly the session and server go with it),
+  **WHEN** the user submits a command-bar line with an unbalanced quote —
+  a plain command (`pr note add <id> don't forget`) or a PR action
+  (`pr start <id> "oops`) —
+  **THEN** the TUI logs "Error: cannot parse command: …" and keeps
+  running; nothing is launched or recorded; the next valid PR action is
+  accepted, not refused as already in flight; and the prefix+M popup
+  answers the same line with "Invalid command syntax".  The TUI's own
+  launches (`s`, `d`, auto-merge) quote their transcript path, so a
+  project path with an apostrophe launches normally (review-loop 68bd
+  i1; QA S28).
+- **GIVEN** a session window killed outside pm (`C-b &`, `tmux
+  kill-window`), which fires no pm hook,
+  **WHEN** the session next rebalances (a pane opens or closes, a client
+  attaches),
+  **THEN** the killed window's entry is dropped from the session's pane
+  registry, and later pane launches and layouts in the surviving windows
+  are unaffected (QA S28).
 
 ### R12 — The socket directory fails closed
 
@@ -645,6 +731,16 @@ them.
 - A grouped-session suffix (`~N`) passed to a session-keyed command.
 - A second `HOME` inheriting a foreign `$TMUX`/`$TMUX_PANE` (the guard that
   keeps tooling from adopting a live session).
+- Repo directory names tmux rewrites in a session name (`.`, `:`, `#`,
+  `\`, `$` + letter), including a leftover default-server session that an
+  older pm half-started for such a name.
+- A socket directory pm can write but not read (`1733`, owned by another
+  user).
+- `pm meta` run in a shared session and in its private twin at the same
+  time; plain `pm` commands in each resolve their own override.
+- `pm session kill` typed inside the session it kills; a non-pm session
+  hand-made on a pm session's private server.
+- Command-bar and popup lines with unbalanced quotes.
 
 ## Pass / fail criteria
 
@@ -707,3 +803,13 @@ Resolved by judgement (no **[UNRESOLVED]** items):
    refusal (the user cannot create a socket there), not as "owned by
    another user is fine"; R12's 1777-owned-by-another-user case is the
    only cross-owner case that proceeds.
+9. **A socket directory pm can write but not read (`1733`)** — added by
+   the 2026-11-02 planning pass. `ensure_socket_dir` accepts it (sticky +
+   world-writable), but `pm session list` cannot enumerate it. Resolved by
+   judgement: silently printing "No pm sessions found." while the user's
+   own session runs is a failure; listing what is reachable, or a clear
+   "cannot read" message, passes.
+10. **Which pm a shared session's pane runs** — the share-mode tag's own
+   session override / pm_root, exactly as that session's popups resolve
+   it (review-loop 68bd i1/i2). A private twin of the same project is a
+   different session with its own tag and its own override.
