@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T11:36:18.634720+00:00'
+  updated_at: '2026-11-02T12:35:19.926197+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7886,6 +7886,39 @@ prs:
       check showed each change is caught. Full suite 5579 passed / 1 skipped (/pm-captures/review-e661-i1/full-suite.log).'
     created_at: '2026-11-02T11:36:18Z'
     last_edited: '2026-11-02T11:36:18Z'
+  - id: note-88f2c09
+    text: 'QA S37 refiner (2026-11-02, 6f24e3a1, tmux 3.2a): 4/4 stories held live.
+      Adopt log line: "TUI pane %0 is running but was not registered; adopted it instead
+      of respawning" in ~/.pm/debug/<tag>.log; adopted entry = {"id": "%0", "role":
+      "tui", "order": 0, "cmd": "tui"}. B panes inherit PM_TMUX_SOCKET=<B socket>
+      from B server env; `unset TMUX` alone still lands on A (good). Make B shell
+      with `new-window -d` (no pm hook; split-window fires after-split-window and
+      changes B registry). Concurrent attaches may share one ~N (reuse/convergence
+      by design) so count clients, not distinct sessions. Ctrl+R keeps the pid; restart
+      sent at the same instant -> adopt wins, >=0.35 s before -> heal_registry wins.
+      Held lock: ~5 s wait, warning is logged WITH the TimeoutError traceback (exc_info)
+      - terminal clean. Dead pane: respawn splits a new pane (new id) beside the dead
+      %0; respawned TUI keeps the earlier selection, so pick the key that moves it.'
+    created_at: '2026-11-02T12:15:58Z'
+    last_edited: '2026-11-02T12:15:58Z'
+  - id: note-a9a090b
+    text: 'QA S37 (adopt unregistered running TUI) PASS 4/4 on 6f24e3a1, no source
+      changes. Captures /pm-captures/scenarios/37 (README.md). (1) Plain-shell and
+      in-B-pane attaches each logged one "adopted it instead of respawning"; A polls
+      constant %0:<pid>:0, registry exactly %0 tui cmd "tui", ~3 client tty = B shell
+      pane_tty, B md5/panes/client/tui view identical. (2) Racers x Ctrl+R: lead 0
+      -> 2 adopts + heal OK (3rd racer saw tui), 0.2 s -> 1 adopt + heal OK, 0.4 s
+      -> heal re-registered, no adopt; CLIENTS 6 = list-clients. (3) Held flock: Attaching
+      after 5.2 s, warning + TimeoutError traceback in log only, registry absent while
+      held; post-release attach 0.17 s. (4) Dead pane respawned as %7 beside dead
+      %0, registry only %7 "pm _tui", tui send h -> %7. Harness gotchas: tmux 3.2a
+      here sometimes never reaps a kill -9 pane process (zombie, no "Pane is dead"
+      line until another child exits; bare python3 sleep shows it too), so check #{pane_dead};
+      each grouped session uses up a pane id (respawn got %7, not %1); throwaway dirs
+      /workspace/qa37-{alpha,beta,gamma} left behind (rm -rf of the workspace subdir
+      is blocked for the agent).'
+    created_at: '2026-11-02T12:35:19Z'
+    last_edited: '2026-11-02T12:35:19Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
