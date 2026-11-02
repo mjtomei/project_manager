@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T05:19:02.257326+00:00'
+  updated_at: '2026-11-02T05:41:31.543483+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39592,6 +39592,51 @@ prs:
       Captures /pm-captures/scenarios/52 (pre-fix/, post-fix/, README).'
     created_at: '2026-11-02T05:19:02Z'
     last_edited: '2026-11-02T05:19:02Z'
+  - id: note-fa14bb3
+    text: 'S53 refine (815d6bfe, live dry run 5/5): (1) The fake impl commits nothing,
+      so sign-off coerces the fake SIGNOFF_MERGE to SIGNOFF_BLOCKED (''already contained
+      in master''). Fix: before pm autostart add, commit one file on each PR''s branch
+      in the project repo (pm pr start checks out an existing branch). (2) A breadcrumb
+      restart while A is held: one 0.5 s poll read the old hold ''lost (owner process
+      exited)'' with no active hold and ''Waiting for: nothing''; it was re-armed
+      about 0.6 s later. R11''s ''never reads as having only a lost hold'' therefore
+      holds only after the re-arm, and the refined Then allows a gap of 2 s or less.
+      If the spec means every read, this is a defect. (3) After adding A as a target
+      and removing B, the hold stays active but its purpose still names B, while pm
+      autostart status says ''held by <A>''. The purpose is not re-journaled, because
+      sign-off acts once per (verdict, sha, policy); suspected stale label. (4) pm
+      autostart remove A releases A''s hold before the merge, so after the merge it
+      reads ''released at <remove time>'' plus a ''re-armed'' row, not ''released
+      (PR merged)''. B, as an auto-merge target, has no merge-hold row. (5) While
+      the router is interrupted, Waiting for reads ''nothing (no open attempts or
+      timers)'' for about 25 s, until the adopted verdict lands. (6) The merge closes
+      A''s windows, so the merged popup needs a window named A. (7) Compute the other-day
+      TZ at read time: TZ=''<QQQ>+HH:MM:SS'', with HH:MM:SS a UTC time after B''s
+      merge.'
+    created_at: '2026-11-02T05:18:07Z'
+    last_edited: '2026-11-02T05:18:07Z'
+  - id: note-432b81d
+    text: 'QA S53 (2026-11-02) PASS on 3a314bb81, no code edits. Live env -i sandbox
+      /tmp/s53.ijdX; A=pr-8c3c6af, B=pr-de4b959 depends on A. (1) autostart add B
+      (wait-for-merge) ran A to sign-off. At router +2.6 s: one 60 s signoff-throttle,
+      falling over 14 JSON reads, 4 roots, start untracked, popup [signoff router:
+      working]. Breadcrumb restart at +8.4 s: same id interrupted >8s 0.59 s later,
+      throttle lost, Waiting for nothing for 24.8 s, then done SIGNOFF_MERGE adopted.
+      The throttle was cancelled (owner ended) at the router end; that same read had
+      the merge hold (due null, kind hold, active []). 313 earlier reads had no merge-hold
+      row, so the unconditional superseded clear added none. (2) Second restart: re-armed
+      0.58 s after the command; one 1 s text read at +0.36 s saw lost/none active/Waiting
+      for nothing (allowed gap). (3) add A, remove B (hold kept; purpose still names
+      B while status says held by A, an expected observation), remove A (released
+      0.07 s after; [4 runs]; no new router for 56 s). (4) add B --auto-merge: A merged
+      in 0.22 s with no g, rows stayed [released, re-armed]; B ran the full pipeline
+      and merged with no merge-hold row; 1346 JSON reads all parse. (5) Merged reads
+      after pm session kill, 85 checks OK: today/<QQQ> TZ/+365d formats, adopted row
+      and year merge-hold rows wrap, max 77 cols, TTY==cat, JSON equal across modes.
+      Merged popup notice + [4 runs], z inert, H pager word-equal. Captures /pm-captures/scenarios/53
+      (README).'
+    created_at: '2026-11-02T05:41:31Z'
+    last_edited: '2026-11-02T05:41:31Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
