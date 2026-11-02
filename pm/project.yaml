@@ -8457,6 +8457,26 @@ prs:
       (cd: too many arguments) -> use `cd /scratch/q51/beta\ it*`.'
     created_at: '2026-11-02T19:28:44Z'
     last_edited: '2026-11-02T19:28:44Z'
+  - id: note-45ffec6
+    text: 'QA S50 refiner (7f5bcd51, tmux 3.2a; harness /pm-captures/scenarios/50/refiner):
+      stories 1 and 3 held live. Story 1 clients were back in 0.17 s or less. Story
+      3 burst 1 froze each client 10.2-10.3 s with 3 "still held" lines and 1 TUI.
+      In burst 2 each client was back within 0.16 s of the release. Story 2 FAILS:
+      a round can end with NO TUI. Repro: start `pm session` in A 0.60-0.65 s before
+      the `y` that kills the TUI, so the attach sees the TUI alive. Its _schedule_rebalance
+      (0.5 s sleep) then runs rebalance() -> _reconcile_registry, which drops the
+      dead TUI entry without tui_respawn_lock. The after-kill-pane hook reconcile
+      then removes nothing, and _process_registry_pane_closed only respawns a TUI
+      that its own reconcile removed. Result: 5 of 8 rounds in that band had no TUI.
+      Log signature: "reconcile: removed dead panes [%TUI] from window @W" with no
+      "handle_any_pane_closed: ... removed=[%TUI]". Master has the same structure.
+      Fix idea: under the lock, respawn when the window snapshot listed a TUI and
+      _running_tui_pane() finds none. Harness tips: `pm session` opens no notes pane,
+      so press `n` through the client viewing the TUI. With several clients attached,
+      `pm tui send n` opens notes in the most recently active client window. A 1-pane
+      review window only switches on `d`, so close it with C-b & and press `d` again.'
+    created_at: '2026-11-02T18:48:58Z'
+    last_edited: '2026-11-02T18:48:58Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
