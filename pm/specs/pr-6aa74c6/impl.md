@@ -287,7 +287,10 @@ of them blocks this PR.
   - Unbalanced-quote and bracket queries work.
   - I9: a `]` posted right behind a command-bar Enter cycles after the
     select instead of joining the query. Keys held behind an empty Enter
-    are replayed into the bar.
+    are replayed into the bar. A held Enter that goes to the bar again on
+    replay holds the keys behind it until its own command is handled.
+    With no `CommandSubmitted`, the `HELD_KEYS_TIMEOUT` fallback still
+    delivers the held keys in order (review-loop 0402 i2).
   - Esc in the command bar focuses the plans pane, the QA pane or the tree
     (`_focus_current_view`).
 - Help screen markup test (R6).

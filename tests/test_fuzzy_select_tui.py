@@ -566,6 +566,72 @@ async def test_keys_held_behind_empty_enter_are_replayed(project):
         assert app.messages == []
 
 
+@async_test
+async def test_replayed_enter_holds_the_keys_behind_it(project):
+    """A held Enter that goes to the bar again on replay starts a new hold:
+    the keys queued behind it wait for that command too, instead of being
+    typed into the bar ahead of its submission (``pr select watcher]``)."""
+    app = _app(project)
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        bar = app.query_one("#command-bar", CommandBar)
+        bar.focus()
+        await pilot.pause()
+        app.post_message(events.Key("enter", "\r"))  # empty: bar keeps focus
+        for ch in "pr select watcher":
+            app.post_message(events.Key("space" if ch == " " else ch, ch))
+        app.post_message(events.Key("enter", "\r"))
+        app.post_message(events.Key("right_square_bracket", "]"))
+        for _ in range(5):
+            await pilot.pause()
+        assert not any("No PR matches" in m for m in app.messages)
+        assert app.messages[-2].startswith("Selected:")
+        assert app.messages[-1].startswith("Match 2/")
+        assert app.tree.selected_pr_id == app._fuzzy_results[1]
+        assert isinstance(app.focused, TechTree)
+        assert app._held_keys is None
+
+
+@async_test
+async def test_held_keys_released_by_timeout_without_a_submission(project):
+    """Fallback: if no CommandSubmitted follows the Enter, the held keys are
+    still delivered, in order, once HELD_KEYS_TIMEOUT expires — the hold can
+    never swallow keys for good."""
+    class _LostSubmit(Host):
+        # Well above a first pilot.pause() (~0.2 s: initial render), so the
+        # held state is observed before the fallback fires.
+        HELD_KEYS_TIMEOUT = 1.5
+
+        def on_command_submitted(self, message):
+            # Textual also runs the base classes' handler unless the
+            # default is prevented; that one would release the hold.
+            message.prevent_default()
+            self.messages.append(f"lost {message.command!r}")
+
+    app = _LostSubmit(project, store.load(project))
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        bar = app.query_one("#command-bar", CommandBar)
+        bar.focus()
+        await pilot.pause()
+        app.post_message(events.Key("enter", "\r"))
+        for ch in "ab":
+            app.post_message(events.Key(ch, ch))
+        for _ in range(3):
+            await pilot.pause()
+        assert app.messages == ["lost ''"]
+        assert [k.key for k in app._held_keys] == ["a", "b"]
+        assert bar.value == ""
+        for _ in range(60):  # up to 6 s for the 1.5 s fallback timer
+            if app._held_keys is None:
+                break
+            await pilot.pause(0.1)
+        await pilot.pause()
+        assert bar.value == "ab"
+        assert app._held_keys is None
+        assert app._held_keys_timer is None
+
+
 # ---------------------------------------------------------------------------
 # View switching / focus
 # ---------------------------------------------------------------------------
