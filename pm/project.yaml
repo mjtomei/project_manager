@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T06:49:33.781015+00:00'
+  updated_at: '2026-11-02T06:53:22.993616+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25738,6 +25738,20 @@ prs:
       -i hits EOF). Helpers: /pm-captures/scenarios/18/refiner-helpers.'
     created_at: '2026-11-02T06:49:33Z'
     last_edited: '2026-11-02T06:49:33Z'
+  - id: note-14e10a5
+    text: 'QA S19 refiner (2026-11-02, live at 9a919d0a, /scratch/s19r): all 4 stories
+      held (R37/R35/E21-E23). 4 solo -C filings (aaa-test, clone, symlink, relative+slash)
+      and the --group filing each reloaded only the user share-mode TUI at +0 s; TUI
+      down: rc 0, no TUI reloaded, stale pidfile removed; pm session --global respawns
+      it; plain+global: each run reloads its own TUI, the other needs r. Traps: a
+      test-project TUI on a shared server logs to ~/.pm/debug/<name>-<share-mode hash>.log,
+      not its session hash (pr-50e1e3f), so find logs by the TUI mount pid; the test
+      project seed pm pr add reloads the user TUI before its session exists (baseline
+      after); after TUI Enter press q to get the PR list back; C-b d detaches the
+      nested test session from the run pane; end the old run (type exit) before a
+      2nd TUI Enter. Helpers: /pm-captures/scenarios/19/refiner-helpers.'
+    created_at: '2026-11-02T06:53:22Z'
+    last_edited: '2026-11-02T06:53:22Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
