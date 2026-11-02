@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T17:19:34.288727+00:00'
+  updated_at: '2026-11-02T17:27:48.626499+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40378,6 +40378,38 @@ prs:
       not preinstalled: aarch64 v1.9.0 binary in /scratch/tools.'
     created_at: '2026-11-02T17:19:34Z'
     last_edited: '2026-11-02T17:19:34Z'
+  - id: note-87fab91
+    text: 'QA S71 refiner (2026-11-02, code f5d778bf3): all 6 stories held live in
+      /scratch/s71 (~10 min) with the S64 drivers copied and sed-rewritten (/scratch/r64->sandbox,
+      rr64/rc64->new socket names, CAP->scenarios/71). The fresh container lacked
+      fzf and less, so install them with sudo apt-get. HOLD detail was whole in all
+      13 HOLD polls. Corrections: (1) no text read wraps a path. An artifact or workdir
+      path (with its ")" or backtick) sits alone on an indented line and may exceed
+      80 columns (by design, break_long_words=False), and every other line fits 80.
+      (2) The popup badge is computed when the popup opens and does not refresh, so
+      the story-2 badge can predate the 5 s tick that re-tracks start ([3 runs] at
+      open while a Waiting-for read 2 s later showed start). Compare the badge with
+      a Waiting-for read taken just before prefix+P. 14 Tracebacks, all injected.'
+    created_at: '2026-11-02T17:10:26Z'
+    last_edited: '2026-11-02T17:10:26Z'
+  - id: note-827ae67
+    text: 'QA S71 (2026-11-02) PASS on 1f647355 (app f5d778bf3), no code edits: S64
+      drivers re-run live in env -i sandbox /scratch/r71 (torn down); captures + per-Then
+      README in /pm-captures/scenarios/71 (scripts/, ev/ with 1106 clean polls + analysis/).
+      f5d778bf3 recheck held: 13/13 JSON polls holding the review HOLD row, plus the
+      text read, keep the whole trust instruction through "then restart this step."
+      (never stops at "To proceed: "). Also held literally: 5 s/10 s backoffs (one
+      i1 id, one timer id, due-armed 5.0/10.0, first reads 5s/10s, strictly falling),
+      whole artifact paths alone on their line, re-arm due = failure + 60.000 s (first
+      read 59s, no 1m00s anywhere), plain restart -> cooldown lost and never fires,
+      autostart off, P2 start untracked 3.7 s after the add, P/P3/P4 swept; P3 stop
+      timer cancelled 3.25 s before due, P4 close -> CLOSED 1.44 s; closed popup without
+      z chords; unauthorized image one launch 0.16 s; HOLD 33.0 s; 14 Tracebacks,
+      all injected. Driver tweak: story2/story6 read Waiting for just before prefix+P
+      (badge frozen at open); in this run start was already re-tracked, so both reads
+      and the badge said start.'
+    created_at: '2026-11-02T17:27:48Z'
+    last_edited: '2026-11-02T17:27:48Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
