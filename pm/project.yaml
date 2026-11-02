@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T03:13:38.366606+00:00'
+  updated_at: '2026-11-02T03:49:01.153628+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7101,6 +7101,31 @@ prs:
       host config was touched.'
     created_at: '2026-11-02T03:13:38Z'
     last_edited: '2026-11-02T03:13:38Z'
+  - id: note-bbaeef8
+    text: 'QA S21 (legacy default server shared with pm-<tagX>~foo-<hash> + its ~1
+      and a hand-made pm-<tagX>~²) PASS 4/4 on e372706b, no source changes. Story
+      1: --print-connect is exactly `tmux -S /tmp/pm-sessions/pm-<tagX> attach`, X
+      goes to a private srwx------ socket, and the default server is byte-identical
+      to its baseline. Story 2: the legacy attach printed the rollout note plus "Attaching
+      to session ...~2". `L` gave 200x49 with 99|100 panes, unzoomed. `pm session
+      home` moved only X~1. C-q detached exactly /dev/pts/8 (detach_current_client
+      log line). `pm session list` listed ~² as its own 0-client row and nothing crashed.
+      Story 3: two kills under a 4 Hz Right/Left loop on Y TUI. Y sessions, panes,
+      pid and tty were identical before and after, the second kill printed "No session
+      ... found." on stderr only (rc 1), and Y kept toggling. Story 4: with Y~1 as
+      the only prefix survivor (bare has-session rc 0), pm session created a private
+      X session and kill removed it. Harness notes for the next run: (1) grepping
+      the WHOLE X debug log for `rebalance: window` also shows story 1 private window
+      `@0 size=80x24` (logged when the session is created detached, before any client
+      attaches). Scope the grep to X legacy window id (`@2` here); every line for
+      it said 200x49. (2) Record user terminals by running `asciinema rec -c bash`
+      inside each host pane, not with an extra recorder client: the Thens count clients
+      exactly. (3) Teardown `kill-server` makes Y pre-change `pm session` print an
+      attach TmuxCommandError traceback. That is the existing bug pr-e848481 (note
+      added there), and this branch calls attach the same uncaught way. Captures:
+      /pm-captures/scenarios/21 (README.md index).'
+    created_at: '2026-11-02T03:49:01Z'
+    last_edited: '2026-11-02T03:49:01Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
@@ -51521,11 +51546,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-11-01T03:32:43.543097+00:00'
-  updated_at: '2026-11-01T03:32:43.543097+00:00'
+  updated_at: '2026-11-02T03:47:04.754424+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-65cc751
+    text: 'Another trigger for the same uncaught tmux.attach(check=True) failure (QA
+      S21 of pr-073910f, 2026-11-02): when the tmux server under an attached `pm session`
+      is killed (`tmux -S <sock> kill-server`), attach-session exits 1 and `pm session`
+      ends with a raw TmuxCommandError traceback (cli/session.py _session_start ->
+      tmux.attach). Seen live with the pre-change build at teardown; this branch still
+      calls tmux_mod.attach uncaught at cli/session.py:799 and :915. A killed-session
+      detach (`pm session kill`) exits 0 and prints nothing, so only a server kill/crash
+      hits it. Fix with the same one-line-message handling.'
+    created_at: '2026-11-02T03:47:04Z'
+    last_edited: '2026-11-02T03:47:04Z'
 - id: pr-a5be49f
   plan: bugs
   title: 'Bug: after-kill-pane respawn mounts the wrong pm project when kill-pane
