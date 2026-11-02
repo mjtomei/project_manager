@@ -271,8 +271,8 @@ the routed form and `--fresh` so help is complete.
 - `pm_core/cli/__init__.py` — `HELP_TEXT` completion.
 - `pm_core/cli/helpers.py` — not-found remedies.
 - `pm_core/cli/qa.py` — not-found + single-instruction clarification.
-- `pm_core/cli/plan.py`, `provider.py`, `tui.py`, `watcher.py` — remedies
-  and `pm tui keys`.
+- `pm_core/cli/plan.py`, `provider.py`, `tui.py`, `watcher.py`, `session.py`,
+  `cluster.py` — remedies and `pm tui keys`.
 - `pm_core/tui/pr_view.py` — command-bar parser (`--fresh`/`--loop`),
   `help`/`?` routing, not-found remedies.
 - `pm_core/tui/screens.py` — Command Bar section in HelpScreen.
@@ -280,7 +280,8 @@ the routed form and `--fresh` so help is complete.
   actionable state messages.
 - `pm_core/prompt_gen.py`, `pm_core/watchers/*.py` — `ux` → `improvements`.
 - `pm/plans/plan-regression.md`, `pm/docs/literature-review.md` — same.
-- `tests/test_command_surface.py` (new).
+- `tests/test_command_surface.py` (new); `tests/test_log_message_force.py`
+  and `tests/test_qa_background_focus.py` updated for the new QA messages.
 
 ## Implementation Notes (shipped)
 
