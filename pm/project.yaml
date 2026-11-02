@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T05:54:26.855491+00:00'
+  updated_at: '2026-11-02T06:18:08.901319+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7298,6 +7298,26 @@ prs:
       manifests, debug-log excerpts in evidence/).'
     created_at: '2026-11-02T05:54:26Z'
     last_edited: '2026-11-02T05:54:26Z'
+  - id: note-b02146f
+    text: 'Review loop 54bf i1 (no code changes, no requirement changes; full suite
+      5522 passed / 1 skipped, 442 s, log /pm-captures/review-54bf-i1/full-suite.log).
+      Verification pass over the only code change since b48f i22, QA S23 commit 87b2d1d1:
+      the prefix+o gate now uses #{q:session_group}/#{q:session_name} (safe; tmux
+      session names cannot contain ":" so the unescaped "~" cannot tilde-expand after
+      a colon, and a pm name never starts with "~"), and build_claude_shell_cmd quotes
+      the cwd inside "$(cat ...)". The matching container.wrap_claude_cmd edit is
+      consistent but that rewrite is dead: every caller (pr.py impl/review, signoff.py)
+      already passes cwd=_CONTAINER_WORKDIR, and a host cwd would fail first at the
+      launcher cd <host path> inside the container. Filed pr-d22a090 rather than pin
+      it with a test. Master integration heads-up: origin/master is now 5b352d16 (#293,
+      209 commits past eaf3372e). A trial merge conflicts in pm/project.yaml (registry)
+      and pm_core/tui/qa_loop_ui.py _resume_incomplete_qa, where both sides add a
+      block right before claim_resume_file: keep both, master qa_status.json re-read
+      (overall + status_error) first, then this PR needs_driving / run_session_live_elsewhere
+      skip so it sees the refreshed overall. Master new code adds no raw tmux invocations
+      (all go through tmux_mod), so nothing it adds bypasses the per-session socket.'
+    created_at: '2026-11-02T06:18:08Z'
+    last_edited: '2026-11-02T06:18:08Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
@@ -51797,6 +51817,35 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-01T19:51:29.990480+00:00'
   updated_at: '2026-11-01T19:51:29.990480+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-d22a090
+  plan: bugs
+  title: 'Bug: container.wrap_claude_cmd prompt-path rewrite is dead code with a stale
+    comment'
+  branch: pm/pr-d22a090-bug-container-wrap-claude-cmd-prompt-path-rewrite-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/container.py wrap_claude_cmd, the block that rewrites
+    "$(cat <host workdir>/" to "$(cat /workspace/" (comment: build_claude_shell_cmd
+    "embeds $(cat <host_workdir>/pm_prompt_*.txt)"). No caller reaches it: all three
+    callers (cli/pr.py impl ~1157 and review ~1397, signoff.py ~507) already pass
+    cwd=_CONTAINER_WORKDIR plus write_dir=<host path>, so the launcher emits $(cat
+    /workspace/pm/prompts/...) and nothing matches. A caller that did pass a host
+    cwd could not be rescued by it: build_claude_shell_cmd also emits cd <host cwd>
+    && ... whenever write_dir is None and the dir exists on the host, and that cd
+    fails inside the container, so claude never runs. Found in pr-073910f review 54bf
+    i1 while checking the QA S23 change (87b2d1d1) that made both sides shell-quote
+    the directory; that change is consistent but untestable end to end for this reason.
+    Fix: delete the rewrite (or make wrap_claude_cmd refuse a claude_cmd that still
+    names the host workdir), and drop the stale comment. Same code on origin/master.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T06:11:04.638705+00:00'
+  updated_at: '2026-11-02T06:11:04.638705+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
