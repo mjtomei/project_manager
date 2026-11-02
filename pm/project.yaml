@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-01T21:57:43.374710+00:00'
+  updated_at: '2026-11-02T00:27:01.888902+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25310,6 +25310,19 @@ prs:
       widened here.'
     created_at: '2026-11-01T21:57:43Z'
     last_edited: '2026-11-01T21:57:43Z'
+  - id: note-0ff919a
+    text: 'QA S4 (TUI launch): with the disposable project in /scratch (a different
+      filesystem from ~/.pm), TUI Enter on a regression item logged "Launched qa-item
+      pane" and the pane closed within a second: create_scenario_workdir ran git clone
+      --local, which dies with "Invalid cross-device link". The error is visible only
+      when the pane command is run in a shell. Pushed QA S3''s unpushed fix (9f81a0fc,
+      applied with git am as 2f6c2fc9: plain path clone, no --local). After it, all
+      7 TUI stories held. Captures: /pm-captures/scenarios/4/ (pre-fix/ and post-fix/).
+      Scenario wording, not product bugs: Refreshed clears 1 s after r (sync.py),
+      so S4 story 6 sees a blank log line during the 8 s check rather than Refreshed;
+      in a one-row PR tree j/k do not move the selection (l/h do).'
+    created_at: '2026-11-02T00:27:01Z'
+    last_edited: '2026-11-02T00:27:01Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
@@ -46292,11 +46305,18 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-27T22:20:00.072106+00:00'
-  updated_at: '2026-10-27T22:20:00.072106+00:00'
+  updated_at: '2026-11-02T00:27:04.769260+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-dd3a638
+    text: 'Fixed on pr-7d5d036 branch (commit 2f6c2fc9, from QA S3/S4 of that PR):
+      create_scenario_workdir now runs a plain path git clone instead of git clone
+      --local, so a project on another filesystem than ~/.pm clones by copying. Covers
+      pm qa debug/launch and pm qa regression. Close this PR once pr-7d5d036 merges.'
+    created_at: '2026-11-02T00:27:04Z'
+    last_edited: '2026-11-02T00:27:04Z'
 - id: pr-e847a7a
   plan: bugs
   title: 'Bug: launch commands interpolate the workdir prompt path and TUI transcript
@@ -51888,11 +51908,18 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-29T13:47:39.297913+00:00'
-  updated_at: '2026-10-29T13:47:39.297913+00:00'
+  updated_at: '2026-11-02T00:27:03.332427+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-a757241
+    text: 'Fixed on pr-7d5d036 branch (commit 2f6c2fc9, from QA S3/S4 of that PR):
+      create_scenario_workdir now runs a plain path git clone instead of git clone
+      --local, so a project on another filesystem than ~/.pm clones by copying. Covers
+      pm qa debug/launch and pm qa regression. Close this PR once pr-7d5d036 merges.'
+    created_at: '2026-11-02T00:27:03Z'
+    last_edited: '2026-11-02T00:27:03Z'
 - id: pr-849a3e6
   plan: bugs
   title: 'Bug: container-mode review/sign-off with a missing runtime binary dies with
