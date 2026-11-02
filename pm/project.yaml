@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T03:49:01.153628+00:00'
+  updated_at: '2026-11-02T04:21:09.909106+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7126,6 +7126,30 @@ prs:
       /pm-captures/scenarios/21 (README.md index).'
     created_at: '2026-11-02T03:49:01Z'
     last_edited: '2026-11-02T03:49:01Z'
+  - id: note-9db4183
+    text: 'QA S22 (legacy twin + TMUX_TMPDIR fallbacks) PASS 4/4 on 6ffbc8544, no
+      source changes. All four stories ran live with a disposable HOME (/tmp/q22/home)
+      and pre-change fixtures from /opt/pm-src. (1) TMUX_TMPDIR set to a nonexistent
+      absolute path, a nonexistent relative path, or empty: every `pm session list`
+      showed one row with CLIENTS 1/2/3 on (default server). --print-connect printed
+      `tmux -S /tmp/tmux-1000/default attach -t pm-L-…`, tmux ls agreed, and attaches
+      went to ~2/~3/~4 after the rollout note. No private socket was created, the
+      fallback dirs were never created, and the TUI pid did not change. (2) TMUX_TMPDIR=reltmp
+      (exists): one CLIENTS 0 row, connect via <L2>/reltmp/tmux-1000/default, attach
+      reused ~1, and the kill left that server not running. L stayed at 4 clients.
+      (3) Same-named twins, both TUI %0: pm tui view/send from each twin''s shell
+      reached its own TUI. The concurrent 50-send loops landed exactly 50 l on the
+      legacy twin and 50 p on the private twin, with no cross-talk and no FAIL. C-q
+      in the legacy client detached only that client. (4) Kill 1 removed the private
+      twin, kill 2 the legacy twin, and kill 3 printed "No session … found." with
+      exit 1; the unrelated scratch session was untouched. Harness note: the twin
+      fixture only works with the private TUI''s pidfile moved aside (the pre-change
+      TUI refuses a same-HOME twin otherwise). Run no-tty fixture starts from a clean
+      shell, not an asciinema-wrapped one, so PROMPT_COMMAND/PS1 do not leak into
+      the new server''s global env. Captures: /pm-captures/scenarios/22 (README.md
+      index).'
+    created_at: '2026-11-02T04:21:09Z'
+    last_edited: '2026-11-02T04:21:09Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
