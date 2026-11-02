@@ -211,9 +211,19 @@ class TestKillWindow:
     @patch("pm_core.tmux.subprocess.run")
     def test_kill(self, mock_run):
         kill_window("sess", "1")
-        cmd = mock_run.call_args[0][0]
-        assert "kill-window" in cmd
-        assert "sess:1" in cmd
+        calls = [c[0][0] for c in mock_run.call_args_list]
+        kill = next(cmd for cmd in calls if "kill-window" in cmd)
+        assert "sess:1" in kill
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_kill_prunes_dead_registry_windows(self, mock_run):
+        """``kill-window`` never fires ``after-kill-pane``, so the killed
+        window's registry entry has to be pruned here or it lingers under a
+        stale ``@id``."""
+        mock_run.return_value = MagicMock(returncode=0)
+        with patch("pm_core.pane_registry.prune_dead_windows") as prune:
+            kill_window("sess", "1")
+        prune.assert_called_once_with("sess")
 
 
 # ---------------------------------------------------------------------------

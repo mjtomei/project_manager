@@ -108,6 +108,86 @@ def fake_tmux(tmp_path, monkeypatch):
     return {"workdir": str(workdir), "captured": captured}
 
 
+# --- pr-5cee3d5: the diff pane names the base the branch contains ---
+
+def test_diff_pane_uses_the_base_the_branch_contains(fake_tmux, monkeypatch):
+    """After a bounce integrated the base, the workdir's own base ref is stale.
+
+    The human diff pane must show the PR's changes on top of the exact base
+    the branch contains — the same rule the review / sign-off prompts follow —
+    or it lists the merged base commits as the PR's own changes.
+    """
+    import pm_core.integration as integration_mod
+    base = "b" * 40
+    monkeypatch.setattr(integration_mod, "contained_base", lambda pr: base)
+    pr_mod._launch_review_window(_make_data(),
+                                 _make_pr("Demo PR", fake_tmux["workdir"]))
+    diff_cmd = fake_tmux["captured"]["diff_cmd"]
+    assert f"{base}...HEAD" in diff_cmd
+    assert "origin/master...HEAD" not in diff_cmd
+
+
+def test_diff_pane_falls_back_to_the_base_branch_without_a_merged_base(
+        fake_tmux, monkeypatch):
+    """An unmerged base keeps the usual backend ref (origin/<base>)."""
+    import pm_core.integration as integration_mod
+    monkeypatch.setattr(integration_mod, "contained_base", lambda pr: None)
+    pr_mod._launch_review_window(_make_data(),
+                                 _make_pr("Demo PR", fake_tmux["workdir"]))
+    diff_cmd = fake_tmux["captured"]["diff_cmd"]
+    assert "origin/master...HEAD" in diff_cmd
+
+
+def test_diff_pane_quotes_a_hostile_base_branch(fake_tmux, monkeypatch,
+                                                tmp_path):
+    """``base_branch`` is project.yaml state: it must not inject shell tokens.
+
+    The pane command interpolates the fallback ref (``origin/<base>``) when the
+    branch carries no merged base; an unquoted ``base_branch`` containing
+    shell metacharacters would run in the pane's shell.
+    """
+    import pm_core.integration as integration_mod
+    from pm_core.shell import shell_quote
+    monkeypatch.setattr(integration_mod, "contained_base", lambda pr: None)
+    marker = tmp_path / "pwned"
+    data = _make_data()
+    data["project"]["base_branch"] = f"master; touch {marker}"
+    pr_mod._launch_review_window(data,
+                                 _make_pr("Demo PR", fake_tmux["workdir"]))
+
+    diff_cmd = fake_tmux["captured"]["diff_cmd"]
+    hostile_ref = f"origin/master; touch {marker}"
+    assert shell_quote(hostile_ref) in diff_cmd
+    assert f"{hostile_ref}...HEAD" not in diff_cmd
+
+    bash = shutil.which("bash")
+    if not bash:
+        pytest.skip("bash not available")
+    pane_cmd, sep, _ = diff_cmd.rpartition("; exec ")
+    assert sep, f"diff_cmd no longer ends in exec $SHELL: {diff_cmd}"
+    _real_run([bash, "-c", pane_cmd], capture_output=True, text=True)
+    assert not marker.exists()
+
+
+def test_diff_pane_reads_a_non_string_base_branch_as_the_default(
+        fake_tmux, monkeypatch):
+    """``base_branch`` is hand-edited project.yaml state, like ``workdir``.
+
+    On the local backend the fallback ref is ``shell_quote(base_branch)``;
+    ``shlex.quote(5)`` raised ``TypeError`` out of the launch before the
+    window was created.  A value that is not a branch name falls back to the
+    default, so the pane is still built.
+    """
+    import pm_core.integration as integration_mod
+    monkeypatch.setattr(integration_mod, "contained_base", lambda pr: None)
+    data = _make_data()
+    data["project"]["backend"] = "local"
+    data["project"]["base_branch"] = 5
+    pr_mod._launch_review_window(data, _make_pr("Demo PR", fake_tmux["workdir"]))
+    diff_cmd = fake_tmux["captured"]["diff_cmd"]
+    assert "diff master...HEAD" in diff_cmd
+
+
 @pytest.mark.parametrize("title", HOSTILE_TITLES)
 def test_diff_cmd_is_shell_safe(fake_tmux, title):
     """diff_cmd must be syntactically valid bash for any PR title."""

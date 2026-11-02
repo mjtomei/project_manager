@@ -72,7 +72,9 @@ def _find_connected_components(
             parent[ra] = rb
 
     for pr in prs:
-        for dep_id in pr.get("depends_on") or []:
+        # ``graph_mod.deps_of``: a hand-edited scalar ``depends_on`` is not a
+        # list of ids (iterating an int raises out of every render).
+        for dep_id in graph_mod.deps_of(pr):
             if dep_id in pr_ids:
                 union(pr["id"], dep_id)
 
@@ -190,7 +192,8 @@ def compute_tree_layout(
         children_of: dict[str, list[str]] = {}
         for pr in component:
             node = pr["id"]
-            parents_of[node] = [d for d in (pr.get("depends_on") or []) if d in comp_ids]
+            parents_of[node] = [d for d in graph_mod.deps_of(pr)
+                                if d in comp_ids]
             children_of.setdefault(node, [])
             for d in parents_of[node]:
                 children_of.setdefault(d, [])

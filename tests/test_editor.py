@@ -195,6 +195,35 @@ class TestParsePrEditRaw:
         assert parsed["status"] == "in_progress"
         assert parsed["depends_on_str"] == "pr-002"
 
+    def test_description_keeps_markdown_headings(self):
+        """Everything below the description header is the description.
+
+        A PR description commonly carries markdown headings (``## Goal``).
+        Skipping every ``#``-prefixed line before looking at the description
+        section dropped them, so a no-op editor save rewrote the description
+        without them.
+        """
+        from pm_core.cli.pr import _parse_pr_edit_raw
+        raw = (
+            "# Editing pr-001\n"
+            "# Lines above the description starting with # are ignored.\n"
+            "\n"
+            "title: My Title\n"
+            "status: pending\n"
+            "depends_on: \n"
+            "\n"
+            "# Notes (bulleted list, one per line starting with '- '):\n"
+            "\n"
+            "# Description (everything below this line):\n"
+            "## Goal\n"
+            "Ship the fix.\n"
+            "## Notes\n"
+            "Nothing special.\n"
+        )
+        parsed = _parse_pr_edit_raw(raw)
+        assert parsed["description"] == (
+            "## Goal\nShip the fix.\n## Notes\nNothing special.")
+
     def test_parse_note_prefix_not_corrupted(self):
         """The '- ' note prefix must not be converted to en-dash."""
         from pm_core.cli.pr import _parse_pr_edit_raw

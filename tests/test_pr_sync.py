@@ -235,8 +235,16 @@ class TestSyncPrs:
         assert result.was_skipped is True
         assert "synced" in result.skipped_reason
 
-    def test_sync_prs_error_when_no_workdir(self, tmp_pm_root_with_prs):
-        """sync_prs returns error when no workdir available."""
+    def test_sync_prs_error_when_no_workdir(self, tmp_pm_root_with_prs,
+                                            tmp_path, monkeypatch):
+        """sync_prs reports when there is no directory to check from.
+
+        A gone workdir is not fatal on its own: sync falls back to the
+        project repo (R3.5, pr-2e06289).  Here neither exists — the project's
+        ``repo`` path is absent and the cwd is not a git repo either — so
+        there is nothing to read the merge state from.
+        """
+        monkeypatch.chdir(tmp_path)
         result = pr_sync.sync_prs(tmp_pm_root_with_prs, force=True)
 
         assert result.synced is False
@@ -831,3 +839,41 @@ class TestSyncIgnoresUnusablePrEntries:
         assert usable_prs(prs) == [{"id": "pr-a"}]
         assert usable_prs(None) == []
         assert usable_prs([]) == []
+
+
+class TestBaseBranchOf:
+    """``project.base_branch`` is hand-edited state (R9-14).
+
+    The sync reads it through ``store.base_branch`` (the one reader every
+    prompt builder, launch and merge path shares).  The value reaches git
+    (``is_merged``) and the merge-integrity
+    verification, which interpolates it into a ``git log`` range.  A
+    non-string either raised out of the sync or turned a real verification
+    into an ``error`` that finalized the merge without checking it, so it
+    reads as the default the rest of pm assumes.
+    """
+
+    @pytest.mark.parametrize("project", [
+        {"base_branch": "main"},
+        {"base_branch": "release/1.0"},
+    ])
+    def test_a_real_branch_is_kept(self, project):
+        assert store.base_branch({"project": project}) \
+            == project["base_branch"]
+
+    @pytest.mark.parametrize("project", [
+        {"base_branch": {"bad": True}},
+        {"base_branch": 5},
+        {"base_branch": ["main"]},
+        {"base_branch": ""},
+        {"base_branch": None},
+        {},
+    ])
+    def test_a_malformed_branch_reads_as_master(self, project):
+        assert store.base_branch({"project": project}) == "master"
+
+    @pytest.mark.parametrize("data", [{}, {"project": None},
+                                      {"project": "nope"},
+                                      {"project": [1, 2]}])
+    def test_a_malformed_project_reads_as_master(self, data):
+        assert store.base_branch(data) == "master"

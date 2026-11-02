@@ -238,6 +238,45 @@ class TestPrStartCreatesDraftPr:
         assert pr["gh_pr"] == "https://github.com/owner/repo/pull/42"
         assert pr["gh_pr_number"] == 42
 
+    def test_draft_pr_reads_a_malformed_base_branch_as_the_default(
+            self, tmp_project_with_pending_pr, mock_gh_ops):
+        """``project.base_branch`` is hand-edited state.
+
+        The GitHub draft-PR block re-read it raw and passed a mapping to
+        ``gh pr create --base`` (``subprocess`` rejects a non-string), so a
+        malformed value crashed `pm pr start`.  It now reuses the value the
+        rest of ``pr_start`` already reads as the default.
+        """
+        runner = CliRunner()
+        pm_dir = tmp_project_with_pending_pr["pm_dir"]
+
+        def _malform(d):
+            d["project"]["base_branch"] = {"bad": True}
+        store.locked_update(pm_dir, _malform)
+
+        with mock.patch.object(pr_mod, "state_root", return_value=pm_dir):
+            with mock.patch.object(pr_mod, "find_claude", return_value=None):
+                with mock.patch.object(pr_mod, "_workdirs_dir", return_value=tmp_project_with_pending_pr["workdir"].parent):
+                    with mock.patch.object(pr_mod.tmux_mod, "has_tmux", return_value=False):
+                        with mock.patch.multiple(
+                            git_ops,
+                            clone=mock.DEFAULT,
+                            checkout_branch=mock.DEFAULT,
+                            pull_rebase=mock.DEFAULT,
+                            is_git_repo=mock.Mock(return_value=True),
+                            run_git=mock.Mock(side_effect=_run_git_mock(tmp_project_with_pending_pr["data"])),
+                        ):
+                            with mock.patch("shutil.rmtree"):
+                                with mock.patch("shutil.move"):
+                                    result = runner.invoke(pr_mod.pr, [
+                                        "start", "pr-001",
+                                        "--workdir", str(tmp_project_with_pending_pr["workdir"]),
+                                    ])
+
+        assert result.exit_code == 0, result.output
+        mock_gh_ops["create_draft_pr"].assert_called_once()
+        assert mock_gh_ops["create_draft_pr"].call_args[0][2] == "master"
+
     def test_skips_draft_pr_if_already_set(self, tmp_project_with_pr, mock_gh_ops):
         """pr_start should not create draft PR if gh_pr_number already exists."""
         runner = CliRunner()

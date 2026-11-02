@@ -220,6 +220,61 @@ class TestPrListLine:
         line = format_pr_line({"id": "pr-001", "title": "T", "status": "qa"})
         assert "[qa]" in line
 
+    def test_malformed_verdict_reads_as_absent(self):
+        """A hand-edited non-string verdict is no verdict.
+
+        ``project.yaml`` is hand-editable state, and the recorded verdict is
+        read on every PR row (``pm pr list`` / ``pm pr show`` / the home
+        window) and every TUI tech-tree render.  A dict/list value used to
+        raise ``TypeError: unhashable type`` out of the icon lookup (and the
+        freshness check adopted it as a real verdict).
+        """
+        from pm_core.cli.helpers import format_pr_line
+        from pm_core.tui import tech_tree
+
+        for bad in ({"SIGNOFF_MERGE": True}, [SIGNOFF_MERGE], 5):
+            # The icon helper is the shared lookup; a non-string is unknown.
+            assert signoff.signoff_verdict_icon(bad) == ""
+            # The readers hand a value to that lookup: no verdict.
+            assert latest_signoff_verdict({"signoff": {"verdict": bad}}) is None
+            assert signoff.fresh_recorded_verdict(
+                {"signoff": {"verdict": bad, "sha": "abc"}}, "abc") is None
+            assert signoff.display_signoff_verdict(
+                {"status": "sign_off", "signoff": {"verdict": bad}}) is None
+            # A return episode's verdict is hand-edited state too.
+            assert signoff.display_signoff_verdict(
+                {"status": "in_progress",
+                 "signoff_return": {"verdict": bad}}) is None
+            # The TUI layout signature is documented as hashable: a mapping
+            # member would break that invariant.
+            assert tech_tree._signoff_verdict(
+                {"signoff": {"verdict": bad}}) is None
+            # Both list surfaces still render the row.
+            line = format_pr_line({"id": "pr-001", "title": "T",
+                                   "status": "sign_off",
+                                   "signoff": {"verdict": bad}})
+            assert "[sign_off]" in line
+            line = format_pr_line({"id": "pr-001", "title": "T",
+                                   "status": "in_progress",
+                                   "signoff_return": {"verdict": bad}})
+            assert "[in_progress]" in line
+
+    def test_string_verdict_still_shown(self):
+        """The guard is narrow: a real verdict keeps its icon everywhere."""
+        from pm_core.cli.helpers import format_pr_line
+        from pm_core.tui import tech_tree
+
+        assert signoff.signoff_verdict_icon(SIGNOFF_IMPL) == \
+            signoff.SIGNOFF_VERDICT_ICONS[SIGNOFF_IMPL]
+        assert latest_signoff_verdict(
+            {"signoff": {"verdict": SIGNOFF_IMPL}}) == SIGNOFF_IMPL
+        assert tech_tree._signoff_verdict(
+            {"signoff": {"verdict": SIGNOFF_IMPL}}) == SIGNOFF_IMPL
+        line = format_pr_line({"id": "pr-001", "title": "T",
+                               "status": "sign_off",
+                               "signoff": {"verdict": SIGNOFF_IMPL}})
+        assert signoff.SIGNOFF_VERDICT_ICONS[SIGNOFF_IMPL] in line
+
 
 class TestSignoffCommand:
     def _invoke(self, tmp_path, pr, skip_qa=False, launch_error=None):
@@ -966,16 +1021,31 @@ class TestSignoffQaStatusFallback:
 
     ``_signoff_qa_scenarios_parts`` is inlined into the prompt the sign-off
     session reads; an unhandled AttributeError here fails prompt generation
-    for the whole PR.  A valid-JSON non-object file is treated like an
-    unreadable one (the fallback tells the session to read the captures).
+    for the whole PR.  A valid-JSON non-object file is reported as *malformed*
+    evidence: the file parsed, so "unreadable" would send the session looking
+    for a permissions problem instead of a bad value.  Either way the
+    fallback tells the session to read the captures.
     """
 
-    def test_non_object_status_file_uses_the_unreadable_fallback(self,
-                                                                 tmp_path):
+    def test_non_object_status_file_is_reported_as_malformed(self,
+                                                             tmp_path):
         from pm_core import prompt_gen
 
         status = tmp_path / "qa_status.json"
         status.write_text("[]")
+        with patch("pm_core.paths.latest_qa_status_path",
+                   return_value=status):
+            head, listing = prompt_gen._signoff_qa_scenarios_parts("pr-001")
+        assert "qa_status.json malformed" in head
+        assert "read the captures dir" in head
+        assert listing == ""
+
+    def test_unparseable_status_file_uses_the_unreadable_fallback(self,
+                                                                  tmp_path):
+        from pm_core import prompt_gen
+
+        status = tmp_path / "qa_status.json"
+        status.write_text("{not json")
         with patch("pm_core.paths.latest_qa_status_path",
                    return_value=status):
             head, listing = prompt_gen._signoff_qa_scenarios_parts("pr-001")

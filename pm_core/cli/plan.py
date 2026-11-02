@@ -8,7 +8,7 @@ from pathlib import Path
 
 import click
 
-from pm_core import store, notes
+from pm_core import store, notes, graph
 from pm_core.plans.parser import parse_plan_prs
 from pm_core.plans import review as review_mod
 from pm_core.claude_launcher import find_claude, launch_claude, clear_session
@@ -204,7 +204,7 @@ def plan_breakdown(plan_id: str | None, initial_prs: str | None, fresh: bool):
     existing_context = ""
     if existing_prs:
         def _existing_line(pr: dict) -> str:
-            deps = pr.get("depends_on") or []
+            deps = graph.deps_of(pr)
             dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
             return (f"  {pr['id']}: {pr.get('title', '???')} "
                     f"[{pr.get('status', '?')}]{dep_str}")
@@ -299,7 +299,7 @@ def plan_review(plan_id: str | None, fresh: bool):
     other_prs = [pr for pr in all_prs if pr.get("plan") != plan_id]
 
     def _format_pr(pr):
-        deps = pr.get("depends_on") or []
+        deps = graph.deps_of(pr)
         dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
         desc = pr.get("description", "")
         desc_str = f"\n    description: {desc}" if desc else ""
@@ -506,9 +506,12 @@ def plan_deps():
     truncated_ids: list[str] = []
 
     def _dep_pr_line(p: dict) -> str:
-        deps = p.get("depends_on") or []
+        deps = graph.deps_of(p)
         dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
-        desc = " ".join((p.get("description") or "").split())
+        # Hand-edited state: only text has whitespace to collapse (a scalar
+        # ``description`` raised ``AttributeError`` out of the plan prompt).
+        raw_desc = p.get("description")
+        desc = " ".join(raw_desc.split()) if isinstance(raw_desc, str) else ""
         display_id = _pr_display_id(p)
         if len(desc) > _PLAN_DESC_CHARS:
             desc = desc[:_PLAN_DESC_CHARS].rstrip() + "…"

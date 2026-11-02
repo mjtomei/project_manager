@@ -294,3 +294,37 @@ class TestRenderStaticGraph:
         ]:
             prs = [{"id": "x", "title": "T", "status": status}]
             assert icon in render_static_graph(prs)
+
+
+# ---------------------------------------------------------------------------
+# Malformed (hand-edited) depends_on
+# ---------------------------------------------------------------------------
+
+class TestMalformedDependsOn:
+    """A scalar where a list of ids belongs must not crash the graph.
+
+    ``project.yaml`` is hand-editable state.  ``for dep in 5`` raised
+    ``TypeError`` (``pm pr merge`` calls :func:`ready_prs` after publishing,
+    so the crash landed *after* the merge), and iterating a string yielded
+    single-character deps pm could never resolve.
+    """
+
+    def test_scalar_depends_on_is_absent(self):
+        prs = [
+            {"id": "a", "status": "merged"},
+            {"id": "b", "status": "pending", "depends_on": 5},
+            {"id": "c", "status": "pending", "depends_on": "a"},
+        ]
+        assert build_adjacency(prs) == {}
+        assert {p["id"] for p in ready_prs(prs)} == {"b", "c"}
+        assert blocked_prs(prs) == []
+        assert set(topological_sort(prs)) == {"a", "b", "c"}
+        assert sorted(map(sorted, compute_layers(prs))) == [["a", "b", "c"]]
+
+    def test_non_string_members_are_ignored(self):
+        prs = [
+            {"id": "a", "status": "merged"},
+            {"id": "b", "status": "pending", "depends_on": ["a", 7, None]},
+        ]
+        assert build_adjacency(prs) == {"a": ["b"]}
+        assert [p["id"] for p in ready_prs(prs)] == ["b"]

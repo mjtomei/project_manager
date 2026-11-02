@@ -646,6 +646,48 @@ def generate_note_id(pr_id: str, text: str, existing_ids: set[str] | None = None
     raise RuntimeError("Could not generate unique note ID")
 
 
+def notes_of(pr: dict) -> list:
+    """A PR's ``notes`` as a list (hand-edited state may hold a scalar).
+
+    ``project.yaml`` is hand-editable: a ``notes`` value that is not a list is
+    no collection to iterate (a string would be walked character by
+    character, an int raises).  Members are returned as they are — use
+    :func:`note_id` to read an id, so a malformed member is preserved by the
+    writers instead of being dropped.
+    """
+    notes = pr.get("notes")
+    return notes if isinstance(notes, list) else []
+
+
+def note_id(n) -> str | None:
+    """A note's ``id`` when it is a non-empty string, else ``None``.
+
+    Hand-edited members read as absent.  Callers collect ids into the
+    ``set`` :func:`generate_note_id` takes, so a list/mapping id (unhashable)
+    raised ``TypeError`` out of every writer that added a note — the note
+    commands, the merge-integrity record and the QA completion note.
+    """
+    value = n.get("id") if isinstance(n, dict) else None
+    return value if isinstance(value, str) and value else None
+
+
+def base_branch(data) -> str:
+    """The project's base branch, or ``master`` when unset or malformed.
+
+    ``project.yaml`` is hand-editable state: a ``project`` that is not a
+    mapping, or a ``base_branch`` that is not a non-empty string, is no
+    configuration.  The value is passed to git as a ref (``git show``,
+    ``is_merged``, the integration fetch), quoted into the review window's
+    diff pane, interpolated into the ``git log`` range of the merge-integrity
+    verification and into the diff instructions every prompt hands an agent —
+    so every reader falls back to the default instead of raising or rendering
+    a repr.  This is the one implementation of that rule.
+    """
+    project = data.get("project") if isinstance(data, dict) else None
+    value = project.get("base_branch") if isinstance(project, dict) else None
+    return value if isinstance(value, str) and value else "master"
+
+
 def get_pr(data: dict, pr_id: str) -> Optional[dict]:
     """Get a PR entry by id.
 

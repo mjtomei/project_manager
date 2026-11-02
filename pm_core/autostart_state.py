@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 
+from pm_core import graph
 from pm_core.pr_utils import TERMINAL_PR_STATES, usable_prs
 
 SCHEMA = "pm.autostart.status/1"
@@ -104,7 +105,7 @@ def transitive_deps(prs: list[dict], target_id: str) -> set[str]:
         pr = pr_map.get(pr_id)
         if not pr:
             continue
-        for dep_id in pr.get("depends_on") or []:
+        for dep_id in graph.deps_of(pr):
             if dep_id not in deps:
                 deps.add(dep_id)
                 stack.append(dep_id)
@@ -618,7 +619,7 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
         return "merge", "failed", "merge attempt failed; no merge window"
 
     if status == "pending":
-        deps = pr.get("depends_on") or []
+        deps = graph.deps_of(pr)
         blocking = []
         for d in deps:
             dpr = pr_map.get(d)
@@ -814,7 +815,7 @@ def build_status(inp: dict) -> dict:
             "reason": reason,
             "is_target": pr_id in targets,
             "needed_by": nb.get(pr_id, []),
-            "depends_on": list(pr.get("depends_on") or []),
+            "depends_on": graph.deps_of(pr),
             "policy": effective_policy(pr_id, holds),
             "held_by": list((holds.get(pr_id) or {}).get("targets") or []),
             "window": ({"name": win["name"], "id": win["id"]} if win else None),

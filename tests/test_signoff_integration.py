@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, patch
 
 import os
 import pytest
+import yaml
 from click.testing import CliRunner
 
 from pm_core import integration, prompt_gen, signoff, store
@@ -124,6 +125,47 @@ def test_tui_gate_checks_the_configured_base_branch(w):
     store.locked_update(w.pm_dir, _retarget)
     refusal = _signoff_gate(app, PR)[1]
     assert refusal and "'develop'" in refusal
+
+
+def test_a_malformed_base_branch_reads_as_the_default_in_the_gate(w):
+    """The TUI auto-merge gate reads ``project.base_branch`` defensively too.
+
+    A hand-edited value that is not a branch name is not a base the approval
+    can be compared against — it falls back to the default the other readers
+    assume, so a valid approval still passes instead of being refused with
+    "the project merges into {'bad': True}".
+    """
+    from pm_core.tui.review_loop_ui import _signoff_gate
+    integration.check_integration(w.pm_dir, PR)
+    step(w, SIGNOFF_MERGE)
+
+    def _malform(d):
+        d["project"]["base_branch"] = {"bad": True}
+    store.locked_update(w.pm_dir, _malform)
+    app = SimpleNamespace(_root=w.pm_dir, _data=None)
+    assert _signoff_gate(app, PR)[1] is None
+
+
+def test_a_non_mapping_project_reads_as_absent_in_the_gate(w):
+    """A hand-edited non-mapping ``project`` must not crash the TUI gate.
+
+    The approval path reads ``project.base_branch``; ``(project or {}).get``
+    raised ``AttributeError`` on a truthy scalar/list ``project`` — a crash on
+    the TUI event loop, where the gate runs.  It is no configuration, so the
+    default base branch applies (the same fallback the integration check's own
+    ``project`` reader uses), and a valid approval still passes.
+    """
+    from pm_core.tui.review_loop_ui import _signoff_gate
+    integration.check_integration(w.pm_dir, PR)
+    step(w, SIGNOFF_MERGE)
+
+    path = w.pm_dir / "project.yaml"
+    doc = yaml.safe_load(path.read_text())
+    doc["project"] = ["not", "a", "mapping"]
+    path.chmod(0o644)
+    path.write_text(yaml.safe_dump(doc, sort_keys=False))
+    app = SimpleNamespace(_root=w.pm_dir, _data=None)
+    assert _signoff_gate(app, PR)[1] is None
 
 
 def test_conflicted_integration_routes_merge_to_impl(w):
@@ -261,6 +303,39 @@ def test_legacy_and_invalidated_records_relaunch(w):
     assert signoff.latest_signoff_verdict(pr(w)) is None   # display: spinner
     res, _ = step(w, None)
     assert res.stale and res.reason == "master moved since sign-off"
+
+
+def test_malformed_verdict_is_no_verdict_not_a_stale_one(w):
+    """A hand-edited non-string verdict is no verdict for the driver too.
+
+    ``fresh_recorded_verdict`` already reads it as absent, but the stale
+    branch tested the raw value's truthiness: a mapping looked like a
+    recorded verdict that had gone stale, so the driver retired the run,
+    deleted ``pr["signoff"]`` and reported ``HEAD moved`` — a false
+    provenance claim, since HEAD had not moved.  It must fall through to the
+    no-verdict path (relaunch), leaving the record alone.
+    """
+    signoff.record_signoff_verdict(w.pm_dir, PR, SIGNOFF_MERGE, w.head,
+                                   "manual")
+
+    def _bad(d):
+        store.get_pr(d, PR)["signoff"]["verdict"] = {"verdict": SIGNOFF_MERGE}
+    store.locked_update(w.pm_dir, _bad)
+
+    res, retired = step(w, None, window=None)
+    assert (res.action, res.stale) == ("launch", False)
+    assert res.reason is None
+    assert retired == []
+    assert pr(w).get("signoff")          # not cleared as a stale record
+
+    # The guard is narrow: a real but stale verdict still takes the stale
+    # path and still reports why.
+    def _string(d):
+        store.get_pr(d, PR)["signoff"]["verdict"] = SIGNOFF_MERGE
+    store.locked_update(w.pm_dir, _string)
+    res, retired = step(w, None)
+    assert res.stale and res.reason          # a real verdict keeps its reason
+    assert "signoff" not in pr(w)
 
 
 def test_next_signoff_decision_resolves_the_return(w):
@@ -1110,6 +1185,23 @@ def test_claim_return_launch_expires(tmp_path):
                             "base_branch": "master", "backend": "local"},
                 "prs": [p]}, tmp_path)
     assert signoff.claim_return_launch(tmp_path, PR, "review") is True
+
+
+def test_claim_return_launch_reads_a_malformed_claim_as_no_claim(tmp_path):
+    """project.yaml is hand-editable state: a non-mapping ``launch_claim``
+    must read as absent, not raise out of the locked update.
+
+    The exception would be swallowed by ``claim_return_launch``'s guard, which
+    returns False — read by the driver as "another launcher holds it" — so a
+    scalar value would silently strand the returned PR's relaunch forever.
+    """
+    p = _returned("in_review", "review", launch_claim="garbage")
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master", "backend": "local"},
+                "prs": [p]}, tmp_path)
+    assert signoff.claim_return_launch(tmp_path, PR, "review") is True
+    ret = store.get_pr(store.load(tmp_path), PR)["signoff_return"]
+    assert ret["launch_claim"]["hop"] == "review"
 
 
 def test_cli_leaves_a_claimed_review_return_launch_alone(tmp_path):
