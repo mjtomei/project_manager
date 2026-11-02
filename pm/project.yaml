@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T07:32:43.138317+00:00'
+  updated_at: '2026-11-02T08:59:26.982275+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39813,6 +39813,47 @@ prs:
       a session_log record.'
     created_at: '2026-11-02T07:32:43Z'
     last_edited: '2026-11-02T07:32:43Z'
+  - id: note-cf2cbdb
+    text: 'QA S57 refiner (2026-11-02, 12b3dc14): all 4 stories ran live in /scratch/s57
+      (drivers /scratch/s57/scripts = S50 drivers re-pointed; evidence /scratch/s57/ev).
+      Holds: backoff badge [review-loop i1: backoff, 4s left]; LAUNCH_FAILED i1 detail
+      keeps the whole (artifact: …-i1-attempt3-<stamp>.log) in text + JSON (2d8a84f7);
+      one start row throughout (merged_ids); re-arm cooldown fixed due, fired at 60
+      s, re-armed loop reuses story 2 loop id; plain restart → cooldown lost from
+      the first post-mount poll. Draft corrections: the artifact file holds pm wrapper
+      stderr "Failed to create container … Is podman running?" (rc 1), not the shim
+      text; story-2 popup badge depends on the 5 s impl-idle re-track ([3 runs] +
+      Waiting for: nothing before it, [start: turn done] after); story 3 must start
+      >=60 s after story 2 LAUNCH_FAILED or an extra short cooldown (due = failure+60)
+      fires first; cooldown badge reads [N runs] (badge ignores standalone fires timers,
+      impl R8).'
+    created_at: '2026-11-02T08:30:07Z'
+    last_edited: '2026-11-02T08:30:07Z'
+  - id: note-aacc5b3
+    text: 'QA S57 (2026-11-02) PASS on 12b3dc14, no code edits. Main run /scratch/r57,
+      all 4 stories in one session. (1) Repair in the 5 s backoff: one i1 row, timer
+      review-launch-retry:<i1> fires with due-armed 5.0 (4.75->0.55, 101 polls), Waiting
+      for 4s then 3s, popup [loop i1]/[review-loop i1: backoff, 4s left]; i1 kept
+      its id, done NEEDS_WORK exec 23s wait 5s. (2) Manual loop gives up: failed LAUNCH_FAILED
+      16 s / i1 15 s with 5 s+10 s backoffs (both fired, same id); the text and JSON
+      keep the whole (artifact: ...-i1-attempt3-<stamp>.log); the file holds pm wrapper
+      stderr, 0 shim text; no cooldown; popup [failed; retryable]/[start: turn done].
+      (3) autostart add 65.6 s after the failure: new attempt, same loop id, i1 (adopted)
+      vanished; re-arm cooldown fires with due-armed 59.52 (59.35->0.45, 101 polls),
+      popup [4 runs], H pager word-equal to the CLI, autostart status text/JSON agree
+      (attempts 3, same artifact), fired -> loop done PASS, 4->5 top-level, no row
+      overwritten. (4) A plain pm tui restart makes the cooldown read lost from the
+      mount on (125 polls rc 0, never active/fired), no loop at the old due time,
+      autostart off/targets [], P start interrupted swept on tui-mount. Run 1 (/scratch/q57)
+      discarded: story 3 started 37 s after the failure, so the short failure+60 cooldown
+      fired first (as the refiner predicted). Start row: the flip to untracked lands
+      at the first 5 s impl-idle tick inside the loop (0.16-3.79 s after it opens;
+      zz d timed 0.25 s before a tick gives 0.16-0.18 s; supplementary /pm-captures/scenarios/57/supp-timed-s12),
+      so 0-6 polls per loop read loop open + start running. Filed pr-1fa9504 (cosmetic:
+      the TUI done message clips the inline artifact path at 300 chars before its
+      full Artifact: line). Captures: /pm-captures/scenarios/57 (README).'
+    created_at: '2026-11-02T08:59:26Z'
+    last_edited: '2026-11-02T08:59:26Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
@@ -52817,6 +52858,36 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T04:19:51.064978+00:00'
   updated_at: '2026-11-02T04:19:51.064978+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1fa9504
+  plan: bugs
+  title: 'Bug: TUI LAUNCH_FAILED done message clips the inline "(artifact: …)" path
+    at 300 chars before its full "Artifact:" line'
+  branch: pm/pr-1fa9504-bug-tui-launch-failed-done-message-clips-the-inlin
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/review_loop_ui.py builds the review-loop done message
+    as "Error: {escape(state.latest_output[:300])}" and then "Artifact: <path>". When
+    the concise launch error already ends with " (artifact: <path>)" (container-mode
+    launch failure: "Review window launch failed (rc=1): Failed to create container
+    ... Is podman running? ... (artifact: .../launch-artifacts/review-<pr>-i1-attempt3-<stamp>.log)"),
+    the 300-char clip cuts that inline pointer mid-path ("...-i1-attemp"), and the
+    full path is printed again on the next line. The log/status line reads "(artifact:
+    ...review-pr-e626745-i1-attemp Artifact: <full path>". Seen in pr-8020495 QA S57
+    (debug log 08:45:23 "Review loop done for pr-e626745: ↻ LAUNCH_FAILED (1 iteration)
+    Error: ..."). Repro: podman shim failing run/create + pm container enable, zz
+    d on a PR, wait for LAUNCH_FAILED. Fix idea: strip a trailing " (artifact: ...)"
+    from latest_output before clipping (as review_loop._history_end_detail does for
+    history rows, 2d8a84f7), since the Artifact: line follows anyway. Cosmetic: nothing
+    is lost.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T08:59:11.163808+00:00'
+  updated_at: '2026-11-02T08:59:11.163808+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
