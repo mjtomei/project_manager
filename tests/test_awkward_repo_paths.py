@@ -89,6 +89,32 @@ class TestTmuxSafeName:
         assert tag.startswith("it's my `touch PWNED` _HOME repo-")
         assert tag == tmux_safe_name(tag)
 
+    @pytest.mark.parametrize("share_mode", [None, "", "global", "group:devteam"])
+    def test_wrapper_tag_equals_paths_tag(self, tmp_path, monkeypatch,
+                                          share_mode):
+        """The wrapper finds pm_root and a pm meta override by this tag.
+
+        Both are written under ``paths.get_session_tag``, which mixes the
+        share mode in; a shared session's panes carry PM_SHARE_MODE, so the
+        wrapper's own derivation has to mix it in the same way.
+        """
+        from pm_core import wrapper
+        repo = tmp_path / "next.js"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        monkeypatch.chdir(repo)
+        if share_mode is None:
+            monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        else:
+            monkeypatch.setenv("PM_SHARE_MODE", share_mode)
+        paths._session_tag_cache.clear()
+        try:
+            expected = paths.get_session_tag()
+        finally:
+            paths._session_tag_cache.clear()
+        assert expected.startswith("next_js-")
+        assert wrapper._get_session_tag() == expected
+
 
 @pytest.mark.skipif(not TMUX, reason="tmux not installed")
 class TestRealTmuxStoresThePmName:

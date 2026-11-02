@@ -22,7 +22,14 @@ def _get_session_tag() -> str | None:
         return None
 
     repo_name = get_github_repo_name(git_root) or git_root.name
-    path_hash = hashlib.md5(str(git_root).encode()).hexdigest()[:8]
+    # Mix in the share mode exactly as ``paths.get_session_tag`` does: a
+    # shared session's panes carry PM_SHARE_MODE, and its pm_root (and a
+    # ``pm meta`` override) are written under the share-mode tag.
+    hash_input = str(git_root)
+    share_mode = os.environ.get("PM_SHARE_MODE")
+    if share_mode:
+        hash_input += "\0" + share_mode
+    path_hash = hashlib.md5(hash_input.encode()).hexdigest()[:8]
 
     return _tmux_safe_name(f"{repo_name}-{path_hash}")
 
