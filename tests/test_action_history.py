@@ -1741,6 +1741,30 @@ class TestReconciliation:
         assert {r["resolution"] for r in m["timers"]["recent"]
                 if r["timer"] in ("a", "f")} == {"cancelled (owner ended)"}
 
+    def test_countdown_never_rounds_up_into_the_next_unit(self, clock):
+        """QA S59/S60: a 60 s sign-off throttle read 0.24 s after its arm
+        has 59.76 s left and read "1m00s left" (a 1 h planner deadline
+        read "1h00m left").  A value below a unit boundary keeps the
+        smaller unit; whole values and everything else round as before."""
+        owner = ah.start_attempt(PR, "signoff", label="router")
+        ah.arm_timer(PR, f"signoff-throttle:{PR}",
+                     purpose="sign-off relaunch throttle",
+                     owner_action="signoff", owner_attempt=owner,
+                     duration=60, effect="gate")
+        ah.arm_timer(PR, "deadline", purpose="QA planner deadline",
+                     owner_action="signoff", owner_attempt=owner,
+                     duration=3600, effect="fires")
+        clock.advance(0.24)
+        m = hq.build_history(PR, now=clock.t, live=False)
+        text = "\n".join(hq.render_text(m))
+        assert "due" in text and "59s left" in text
+        assert "59m59s left" in text
+        assert "1m00s left" not in text and "1h00m" not in text
+        assert [hq._dur(s) for s in (4.6, 59.4, 59.5, 59.99, 60, 60.4,
+                                     3599.6, 3600, 172799.7, 172800)] \
+            == ["5s", "59s", "59s", "59s", "1m00s", "1m00s", "59m59s",
+                "1h00m", "47h59m", "2d00h"]
+
     def test_late_elapsed_clear_keeps_due_time(self, clock):
         # The owner books an elapsed gate when it notices (QA: at scenario
         # end, a minute later); the elapsed time must not move to that clear.

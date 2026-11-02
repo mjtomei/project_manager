@@ -957,7 +957,13 @@ def _iso_norm(v) -> str | None:
 def _dur(s: float | None) -> str:
     if s is None:
         return "unknown"
-    s = max(0, int(round(s)))
+    raw = max(0.0, s)
+    s = int(round(raw))
+    # Never round up into the next unit: a 60 s throttle read 0.24 s
+    # after its arm (59.76 s left) reads "59s left", not "1m00s left",
+    # and a 1 h deadline "59m59s", not "1h00m".
+    if s > raw and s in (60, 3600, 48 * 3600):
+        s -= 1
     if s < 60:
         return f"{s}s"
     m, sec = divmod(s, 60)
