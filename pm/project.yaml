@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T17:54:02.429550+00:00'
+  updated_at: '2026-11-02T19:01:31.235242+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8379,6 +8379,50 @@ prs:
       harness/).'
     created_at: '2026-11-02T17:54:02Z'
     last_edited: '2026-11-02T17:54:02Z'
+  - id: note-51db98f
+    text: 'QA S49 refiner (7f5bcd51, tmux 3.2a): all 5 stories driven live. Stories
+      1-3 and 5 held: the attach selects only in its own ~N (log `select_window_in_session:
+      target=<A>~N:@W`). The race ran 3 rounds with one TUI each, and both landing
+      cases showed up (different ~N, and a shared ~2). Story 4 FAILS as drafted, pre-existing
+      (master 5b134584 does the same): after a `tmux kill-pane` from a plain shell
+      outside tmux, the after-kill-pane hook select_window goes through current_or_base_session,
+      then display-message "current client", which is the client with the latest activity.
+      That moved T1 off its shell window (`select_window: target=<A>~1:@N`). Outside
+      a client, tmux 3.2a expands #{hook_client} and #{hook_session_name} to empty.
+      Traps: press n from a client that is viewing the TUI window, because `send-keys
+      -t <tui> n` with no viewer opens notes in another window. pm session prints
+      its lines before the attach screen, so read them after C-b d. A user view (zview)
+      is never reused by pm session, only <base>~N. /scratch is 0700, so put the shared
+      project under /tmp. Run the outside kill from the project directory: the hook
+      logs by cwd (pr-3121cc8), and on master the TUI starts in the cwd of the shell
+      that ran the kill.'
+    created_at: '2026-11-02T18:40:19Z'
+    last_edited: '2026-11-02T18:40:19Z'
+  - id: note-af1609b
+    text: 'QA S49 (attach-time respawn selects only the attaching client; hook path
+      ambiguity 16) on 7f5bcd51, tmux 3.2a, no source changes. Stories 1, 2, 3, 5
+      PASS live: (1) kill-window then plain-shell pm session -> new window, only `select_window_in_session:
+      target=<A>~2:@new`, T1 (~1 shell, partial typing) and T2 (zview) unmoved, B
+      untouched; (2) kill -9 TUI beside notes -> T2 respawn split into @W, notes id/pid
+      kept, reused ~2 selected; reattach with TUI running selects nothing; pm session
+      -d detached ~1/~2/zview, 50 ms poller never saw them move or 2 TUIs; (3) 14
+      racing rounds (T4/T5 vs kill-window), exactly one respawner per round landing
+      on its own ~N, poller max 1 TUI / 933 samples, T1 never moved, no pidfile refusals;
+      both-on-one-~N not reproduced in 14 rounds; (5) shared: userb joiner respawned
+      split-back on @W, selected only its ~2, owner shell + typing intact, TUI owned
+      by pm in /tmp/q49P, window-size smallest. Story 4: control C-b x OK (`select_window:
+      target=<A>~2:@new`), but the plain-shell `tmux kill-pane` of a TUI alone in
+      its window logs `select_window: target=pm-A-21d1472e~1:@22 rc=0` and yanks T1
+      (latest-active client, typing in its shell) onto the TUI; master 5b134584 identical.
+      tmux 3.2a probe: #{hook_client}/#{hook_session_name} empty for every kill, run-shell
+      #{client_name} = latest-active client even for a kill typed in another client
+      pane, so the hook cannot identify the killer; fix needs a design choice -> filed
+      pr-939ea27. Also filed pr-07541e7 (pm session TmuxCommandError traceback when
+      its server is kill-server-ed; branch + master). Captures /pm-captures/scenarios/49
+      (README.md). Harness: per-terminal recorders = grouped view v_<win> of the -L
+      q49h harness session attached under asciinema in a -L q49rec pane (scripts/h.sh).'
+    created_at: '2026-11-02T19:01:31Z'
+    last_edited: '2026-11-02T19:01:31Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
@@ -53093,6 +53137,65 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T17:01:35.235572+00:00'
   updated_at: '2026-11-02T17:01:35.235572+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-939ea27
+  plan: bugs
+  title: 'Bug: TUI killed from outside tmux — after-kill-pane respawn switches the
+    latest-active client (a bystander) to the new TUI window'
+  branch: pm/pr-939ea27-bug-tui-killed-from-outside-tmux-after-kill-pane-r
+  status: pending
+  depends_on: []
+  description: 'pm_core/pane_layout.py handle_any_pane_closed -> _respawn_tui(select=True)
+    -> tmux.select_window -> current_or_base_session -> get_session_name: run from
+    the global after-kill-pane run-shell hook with no TMUX_PANE, so display-message
+    resolves tmux "current client" = the client with the latest activity. Repro (QA
+    S49 story 4, pr-073910f at 7f5bcd51, tmux 3.2a; master 5b134584 identical): session
+    A with T1 on ~1 typing in a shell window and T2 on ~2 viewing the TUI (alone in
+    its window); T1 typed last; from a plain shell outside tmux run `tmux -S <sock>
+    kill-pane -t <TUI pane>`. Log: `select_window: target=<A>~1:@<new> rc=0`; T1 is
+    switched onto the new TUI (its next keystrokes go to the TUI) and T2 (whose window
+    vanished) lands on a shell window. Intended (pr-073910f qa.md ambiguity 16): a
+    client whose window did not vanish must not be moved. Probe: on tmux 3.2a #{hook_client}/#{hook_session_name}
+    expand empty for every kill and the run-shell #{client_name} is the latest-active
+    client even for a kill typed in another client pane shell, so the killer cannot
+    be identified from the hook; a fix needs a design choice (e.g. track displaced
+    sessions via session-window-changed, select only when the resolved client was
+    viewing the killed window, or never select on the hook path at the cost of C-b
+    x no longer following the new TUI). Evidence: /pm-captures/scenarios/49/story4
+    (evidence/debug-since-kill1.txt, hook-probe.txt, master/).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T18:58:55.983267+00:00'
+  updated_at: '2026-11-02T18:58:55.983267+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-07541e7
+  plan: bugs
+  title: 'Bug: pm session prints a raw TmuxCommandError traceback when its attached
+    tmux server is killed (kill-server)'
+  branch: pm/pr-07541e7-bug-pm-session-prints-a-raw-tmuxcommanderror-trace
+  status: pending
+  depends_on: []
+  description: 'pm_core/tmux.py attach() runs attach-session with check=True, so when
+    the server a `pm session` client is attached to exits (tmux -S <sock> kill-server,
+    or pm session kill from elsewhere), tmux returns rc 1 ("[server exited]") and
+    pm session ends with an unhandled TmuxCommandError traceback (cli/session.py _session_start
+    -> tmux.attach -> _run). Repro: `pm session` in a terminal (attached to <base>~1),
+    then from another shell `tmux -S /tmp/pm-sessions/<base> kill-server`. Seen in
+    QA S49 teardown on pr-073910f 7f5bcd51 (T1/BT/O terminals) and on master 5b134584
+    (default server, M1/M2); also noted in QA S34 refiner note. Expected: a one-line
+    "session ended" message (or silent exit), no traceback. Captures: /pm-captures/scenarios/49/teardown.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T18:59:18.672232+00:00'
+  updated_at: '2026-11-02T18:59:18.672232+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
