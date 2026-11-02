@@ -19984,11 +19984,86 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/195
   gh_pr_number: 195
   created_at: '2026-05-04T14:20:49.261555+00:00'
-  updated_at: '2026-05-05T20:46:31.254553+00:00'
+  updated_at: '2026-11-02T02:05:26.588819+00:00'
   started_at: '2026-05-04T17:51:45.692159+00:00'
   reviewed_at: '2026-05-04T19:01:36.956517+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-2706ffb
+    text: 'User-authorized restart 2026-11-02: Resume #195 in this existing workdir
+      with MAIN-account Opus 5.5/xhigh for all roles, helpers and sign-off. First
+      fetch/reconcile the current remote PR branch and merge current origin/master
+      INTO this PR branch. Preserve earlier implementation/review/QA fixes, dirty
+      registry/spec updates, verification files, stashes, drafts and captures; inspect
+      provenance before deciding to commit previously excluded content. Historical
+      QA INPUT_REQUIRED/NEEDS_WORK records remain evidence, not fresh approval.
+
+
+      Scheduling: implementation/master integration is authorized now. Downstream
+      review/QA is held until #278 (pr-073910f) is actually merged and its changes
+      are integrated into this PR. PM''s supervising check-in will re-enable autostart
+      after integration and a genuine completed implementation handoff. Do not self-launch
+      review/QA or operate the live TUI to advance the PR. Preserve manual wait-for-merge
+      and existing spec gates. No PR merge is authorized.
+
+
+      Keep the feature bounded to the existing description. Use the launching client/window
+      and the current server-scoped targeting interfaces; keep shell/spec/diff actions
+      consistent between picker and CLI, and keep spec viewers read-only.
+
+
+      Tests must use isolated containers and test projects/tmux servers. Do not manipulate
+      shared host PM settings, the user''s live TUI/session, or unrelated agents.
+      Never force-push/reset/delete master or other branches. Current main-account
+      routing supersedes old work/DeepSeek instructions for this PR.'
+    created_at: '2026-11-02T01:28:46Z'
+    last_edited: '2026-11-02T01:28:46Z'
+  - id: note-d119ff5
+    text: '2026-11-02 impl handoff (Opus 5.5 main): origin/master@81e5d7f4 merged
+      into #195 as 67c074a9 (conflicts only in pr.py, session.py, test_popup_picker.py).
+      Master now binds picker `i` to sign-off, so impl-spec moved to `o`; the pane
+      keys are c=shell o=impl-spec u=qa-spec y=diff.
+
+
+      Rework commit 78c4ad32. The picker''s pane keys now dispatch the same CLI commands
+      as prefix+M and a typed shell (`pm pr shell|view-spec|view-diff <pm-id>`) through
+      _run_picker_command. In a pm session, the CLI opens the pane in the caller''s
+      current window: $TMUX_PANE''s window, or for popups the opening client''s session
+      (PM_POPUP_SESSION, exact `=sess:` target, so a grouped view gets its own window).
+      Otherwise it prints to stdout. In-session detection uses _get_current_pm_session,
+      not _get_pm_session (that one falls back to the cwd project''s session even
+      outside tmux).
+
+
+      The shared _open_pane_for_pr splits the active pane by its physical aspect,
+      registers role pr-shell/pr-impl-spec/pr-qa-spec/pr-diff, rebalances unless the
+      window is hand-arranged, and wraps the pane in the pm _pane-exited trap. The
+      spec viewer is read-only (LESSSECURE=1; glow -p -> less -R -> cat+key). view-diff
+      is byte-identical to the review window''s diff pane (shared _build_diff_cmd,
+      which now carries master''s less->cat fallback). A PR without a workdir is diffed
+      from its branch ref in the project repo. Pane keys are also offered for merged/closed
+      PRs (read-only), so one master picker test assertion was widened. The spec at
+      pm/specs/pr-cfe24ea/impl.md is updated.
+
+
+      Tests: new tests/test_pr_pane_actions.py (includes a real isolated tmux server:
+      private socket + HOME), TestPickerPaneKeys in test_popup_picker.py, and a review/view-diff
+      parity test. Full suite: 5489 passed, 12 failed (all tests/test_markdown_render.py,
+      missing markdown module; identical on origin/master), 1 skipped. Evidence: /pm-captures/pr-cfe24ea-integration-81e5d7f4/.
+
+
+      Registry: the workdir project.yaml delta (restart note, status in_progress,
+      model/effort override) was preserved uncommitted and re-applied onto master''s
+      registry with merge_3way. Only the notes are committed.
+
+
+      Still held: #278 (pr-073910f) is NOT merged into master (its branch is on GitHub
+      at 8cd63663), so review/QA must stay held. After it merges, merge master into
+      #195 again and re-check _caller_window_id/_open_pane_for_pr against its per-session
+      tmux-server interfaces. Incidental: master''s registry has a duplicate pr-049649a
+      entry.'
+    created_at: '2026-11-02T02:05:26Z'
+    last_edited: '2026-11-02T02:05:26Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-cfe24ea-picker-action-open-shell-pane-in-cur-563aedc0
 - id: pr-8ed578d
   plan: plan-regression
