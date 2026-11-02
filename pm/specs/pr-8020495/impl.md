@@ -380,6 +380,17 @@ attempt rows uninterpreted (omitted when absent).
   (`secrets.token_hex(6)`); restarts never reuse an attempt.
 - I3. Reading tolerates torn/garbage lines (skip; a non-UTF-8 byte spoils only its own line, and a line whose `t`/`armed_t`/`due_t` is not a finite number is skipped like bad JSON), unknown kinds, and
   events for unknown attempts (shown as orphan phase/ends are ignored).
+  A line that parses but has the wrong shape is skipped too
+  (`action_history._sane_event`): times outside 1970–3000 (no date can
+  show `"t": 1e20`), identity fields readers key or join by (`kind`,
+  `attempt`, `parent`, `action`, `phase`, `loop_id`, `timer`,
+  `owner_attempt`, `outcome`, `purpose`) that are not strings, a
+  non-scalar `iteration`/`scenario`/`retry`, or an owner with a non-int
+  pid; so is a digit run past Python's int-conversion limit or deep
+  nesting (`ValueError`/`RecursionError` from `json.loads`).  A hook
+  event file of the wrong shape reads as no event.  None of these may
+  raise out of `pm pr history`, the popup or sign-off routing
+  (`newest_open_attempt`).
 - I4. Liveness check: the TUI restarts in place with `exec` (Ctrl+R),
   keeping its pid and start time, so pid checks alone would call a
   pre-restart owner alive. Each writing process image holds a shared flock
@@ -403,6 +414,10 @@ attempt rows uninterpreted (omitted when absent).
   year), and an attempt's end dated only when it falls on another day
   than its start, so rows from earlier days (most of a merged PR's
   history) still fit unwrapped; durations `1h02m`, `3m05s`, `12s`.
+  A countdown never rounds up into the next unit: 59.76 s left reads
+  `59s`, not `1m00s`, and a fresh 1 h deadline `59m59s`, not `1h00m`
+  (QA S59/S60, 92b59c3c).  `build_history` takes its `now` after reading
+  the journal, so no snapshot predates an event it renders (79de8949).
   Rows that still exceed 80 columns (a dated start plus a flagged name,
   a dated Recent-timers resolution) wrap between their parts, so plain
   `| cat` output fits and matches the TTY wrapper (QA S42, 3ccea259).
@@ -469,7 +484,10 @@ attempt rows uninterpreted (omitted when absent).
 - E4. Merge: `cleanup_pr_resources` (and `pm pr merge`'s
   `_finalize_merge`, via `pr_cleanup.end_in_flight_actions`, since local
   merges kill windows without a resource cleanup) first clears in-flight runtime
-  entries (ending their attempts `interrupted`, "PR resources cleaned
+  entries — before killing the panes as well as after, since the TUI
+  review loop notices its pane gone within a second and would otherwise
+  record its own `failed KILLED` end first (QA S62, 75b777d9) — (ending
+  their attempts `interrupted`, "PR resources cleaned
   up" — unlinking alone would leave them open and shown running after
   merge), then deletes runtime state; the journal remains, so `pm pr history` still works and the picker shows History for
   merged PRs.

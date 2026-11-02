@@ -134,6 +134,52 @@ class TestJournal:
         model = hq.build_history(PR, now=clock.t, live=False)
         assert model["attempts"] and hq.render_text(model)
 
+    def test_parseable_lines_of_the_wrong_shape_are_skipped(self, clock):
+        # Lines that still raised out of readers: a digit run past Python's
+        # int-conversion limit (ValueError), deep nesting (RecursionError),
+        # times no date can show (OverflowError), and identity fields of
+        # the wrong type (TypeError; sign-off routing reads "attempt").
+        a = ah.start_attempt(PR, "signoff")
+        t = clock.t
+        bad = [
+            '{"kind": "phase", "t": ' + "9" * 5000 + '}',
+            "[" * 100000 + "]" * 100000,
+            '{"kind": "phase", "attempt": "%s", "t": 1e20}' % a,
+            '{"kind": "phase", "attempt": "%s", "t": -5}' % a,
+            '{"kind": "timer_arm", "timer": "x", "t": %s, "due_t": 1e300}' % t,
+            '{"kind": "attempt_end", "attempt": ["%s"], "t": %s}' % (a, t),
+            '{"kind": "timer_arm", "timer": ["x"], "t": %s}' % t,
+            '{"kind": "timer_arm", "timer": "h", "purpose": 7, "t": %s}' % t,
+            '{"kind": "attempt_start", "attempt": "b", "action": "qa", '
+            '"loop_id": 7, "t": %s}' % t,
+            '{"kind": "attempt_start", "attempt": "c", "action": "qa", '
+            '"scenario": [1], "t": %s}' % t,
+            '{"kind": "attempt_start", "attempt": "d", "action": "qa", '
+            '"t": %s, "owner": {"pid": "abc"}}' % t,
+            '{"kind": ["phase"], "t": %s}' % t,
+        ]
+        with open(ah.journal_path(PR), "a") as f:
+            f.write("\n".join(bad) + "\n")
+        assert [e["kind"] for e in ah.read_events(PR)] == ["attempt_start"]
+        assert ah.newest_open_attempt(PR, "signoff") == a
+        model = hq.build_history(PR, now=clock.t, live=False)
+        assert [r["id"] for r in model["attempts"]] == [a]
+        assert hq.render_text(model) and hq.summary_badge(model)
+
+    def test_damaged_hook_event_is_ignored(self, clock, monkeypatch):
+        # The live view formats the hook event's timestamp: a hook file of
+        # the wrong shape reads as no event, not a traceback.
+        from pm_core import hook_events
+        a = ah.start_attempt(PR, "review", session_id="sess-1")
+        ah.phase(PR, a, "agent")
+        for ev in (["idle_prompt"], {"event_type": "idle_prompt",
+                                     "timestamp": "abc"},
+                   {"event_type": "idle_prompt", "timestamp": 1e20}):
+            monkeypatch.setattr(hook_events, "read_event", lambda sid: ev)
+            m = hq.build_history(PR, now=clock.t)
+            assert m["current"][0]["state"] == "agent_working"
+            assert hq.render_text(m)
+
     def test_attempt_start_without_action_is_readable(self, clock):
         # A damaged start line that still parses (no "action") must not
         # raise out of the model build, whose QA-run check once indexed
@@ -790,6 +836,32 @@ class TestRuntimeCapture:
         assert rs.get_action_state(PR, "review-loop")["verdict"] == "KILLED"
         assert not any(a["open"] for a in
                        hq.build_history(PR, now=clock.t)["attempts"])
+
+    def test_finalize_merge_beats_a_loop_that_sees_its_pane_killed(
+            self, clock, tmp_path):
+        """E11 for ``pm pr merge``: the TUI review loop records its own
+        failed/KILLED end as soon as the merge kills its pane, so in-flight
+        entries are ended before the kill, not only after it."""
+        from pm_core.cli import pr as pr_cli
+        root = _project(tmp_path)
+        rs.set_action_state(PR, "review-loop", "running", iteration=1,
+                            loop_id="loop-1")
+        aid = rs.get_action_state(PR, "review-loop")["attempt_id"]
+
+        def kill_windows(session, pr):
+            rs.set_action_state(PR, "review-loop", "failed", iteration=1,
+                                verdict="KILLED")
+
+        with patch("pm_core.cli.helpers._find_tui_pane",
+                   return_value=("%0", "pm-sess")), \
+                patch.object(pr_cli, "kill_pr_windows",
+                             side_effect=kill_windows) as kill, \
+                patch.object(pr_cli, "trigger_tui_refresh"):
+            pr_cli._finalize_merge(root, {"id": PR}, PR)
+        kill.assert_called_once()
+        end = _ends()[aid]
+        assert end["outcome"] == "interrupted", end
+        assert end["detail"] == "PR resources cleaned up"
 
     def test_detected_merge_verdict_ends_merge_attempt_done(self, clock):
         """A merge window's MERGED verdict ends its attempt done; killing

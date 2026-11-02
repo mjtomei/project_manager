@@ -678,9 +678,15 @@ def _hook_event_for(a: dict) -> dict | None:
         return None
     try:
         from pm_core import hook_events
-        return hook_events.read_event(sid)
+        ev = hook_events.read_event(sid)
     except Exception:
         return None
+    # The live view does math on the timestamp and formats it: a damaged
+    # hook file (valid JSON, wrong shape) must not raise out of the build.
+    if not isinstance(ev, dict) or not _ah.is_valid_time(
+            ev.get("timestamp") or 0):
+        return None
+    return ev
 
 
 def _attempt_name(a: dict) -> str:
@@ -1167,7 +1173,7 @@ def _render_attempt(a: dict, t_now: float, depth: int,
     # flagged name can push the row past 80 columns.
     out = _wrap_joined(f"{ind}{start} → {end}  {dur:>7}  ",
                        [name, outcome], sub, sep=" ", width=width)
-    if a.get("detail") and outcome.split()[0] != "done":
+    if a.get("detail") and outcome.split()[:1] != ["done"]:
         out.extend(_wrap_words(sub, a["detail"], sub, width=width))
     phases = [p for p in a.get("phases", []) if p["phase"] != "start"]
     if phases and a.get("exec_s") is not None:

@@ -539,31 +539,71 @@ def read_events(pr_id: str) -> list[dict]:
                 continue
             try:
                 ev = json.loads(line)
-            except json.JSONDecodeError:
+            except (ValueError, RecursionError):
+                # JSONDecodeError, but also a digit run past Python's
+                # int-conversion limit (ValueError) or deeply nested
+                # brackets (RecursionError).
                 continue
-            if isinstance(ev, dict) and ev.get("kind") and _sane_times(ev):
+            if _sane_event(ev):
                 events.append(ev)
     # Stable: file order breaks ties between equal timestamps.
     events.sort(key=lambda e: float(e.get("t") or 0))
     return events
 
 
-def _is_time(v: Any) -> bool:
+# Latest time a journal event may carry (3000-01-01 UTC).  Readers format
+# every time as a date, and ``datetime`` only covers years up to 9999 (less
+# on a 32-bit ``time_t``): e.g. ``"t": 1e20`` raised OverflowError.
+_MAX_JOURNAL_T = 32503680000.0
+
+# Fields readers use as dict/set keys, slice, or join into text: a line that
+# parses but carries e.g. a list or a number here would raise TypeError out
+# of every reader, sign-off routing (``newest_open_attempt``) included.
+_TEXT_FIELDS = ("kind", "attempt", "parent", "action", "phase", "loop_id",
+                "timer", "owner_attempt", "outcome", "purpose")
+# Identity values readers collect in sets (scenario) or format.
+_SCALAR_FIELDS = ("iteration", "scenario", "retry")
+
+
+def is_valid_time(v: Any) -> bool:
+    """Whether *v* is an epoch time readers can do math on and format."""
     return (isinstance(v, (int, float)) and not isinstance(v, bool)
-            and v == v and abs(v) != float("inf"))
+            and 0 <= v < _MAX_JOURNAL_T)
 
 
-def _sane_times(ev: dict) -> bool:
-    """Whether *ev*'s time fields are numbers readers can do math on.
+def _sane_owner(owner: Any) -> bool:
+    if not isinstance(owner, dict):
+        return True  # absent or foreign: readers treat liveness as unknown
+    pid = owner.get("pid")
+    if pid is not None and (not isinstance(pid, int) or isinstance(pid, bool)):
+        return False  # owner_alive does int(pid) and kill(pid, 0)
+    return all(owner.get(k) is None or isinstance(owner.get(k), str)
+               for k in ("host", "start", "instance"))
 
-    A line that parses as JSON but carries e.g. ``"t": "abc"`` would
-    otherwise raise out of every reader (sorting, span math), sign-off
-    routing included, the way an undecodable line no longer does.
+
+def _sane_event(ev: Any) -> bool:
+    """Whether a parsed journal line has the shape readers rely on.
+
+    Only pm writes the journal, but a damaged or hand-edited line can still
+    parse.  One whose times are not numbers (``"t": "abc"``), out of range,
+    or whose identity fields have the wrong type is skipped like bad JSON
+    instead of raising out of ``pm pr history``, the popup and sign-off
+    routing.
     """
-    if not _is_time(ev.get("t")):
+    if not isinstance(ev, dict) or not ev.get("kind"):
         return False
-    return all(ev.get(k) is None or _is_time(ev.get(k))
-               for k in ("armed_t", "due_t"))
+    if not is_valid_time(ev.get("t")):
+        return False
+    if not all(ev.get(k) is None or is_valid_time(ev.get(k))
+               for k in ("armed_t", "due_t")):
+        return False
+    if not all(ev.get(k) is None or isinstance(ev.get(k), str)
+               for k in _TEXT_FIELDS):
+        return False
+    if not all(ev.get(k) is None or isinstance(ev.get(k), (str, int, float))
+               for k in _SCALAR_FIELDS):
+        return False
+    return _sane_owner(ev.get("owner"))
 
 
 def has_journal(pr_id: str) -> bool:
