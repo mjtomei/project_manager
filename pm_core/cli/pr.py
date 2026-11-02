@@ -492,6 +492,24 @@ def pr_select(pr_id: str):
     trigger_tui_refresh()
 
 
+def _resolve_workdir(data: dict, pr_entry: dict, root: Path, *,
+                     persist: bool = True) -> "workdirs_mod.WorkdirResolution":
+    """:func:`pm_core.workdirs.resolve_workdir` for a per-PR command.
+
+    A stale record is recovered from this project's workdirs dir when the
+    PR's clone is still there (``pr_entry["workdir"]`` is updated).  A
+    persisted re-link is reported on stdout; an ambiguity, or same-named
+    clones that were skipped, on stderr.  Without *persist* the clone is
+    only used in memory (nothing to announce as re-linked).
+    """
+    found = workdirs_mod.resolve_workdir(data, pr_entry, root,
+                                         project_dir=_workdirs_dir(data),
+                                         persist=persist)
+    if found.reportable and (persist or found.path is None):
+        click.echo(found.describe(), err=found.path is None)
+    return found
+
+
 @pr.command("cd")
 @click.argument("identifier")
 def pr_cd(identifier: str):
@@ -506,12 +524,7 @@ def pr_cd(identifier: str):
     if not pr_entry:
         click.echo(f"PR '{identifier}' not found.", err=True)
         raise SystemExit(1)
-    # A stale record is recovered from this project's workdirs dir when the
-    # PR's clone is still there (pm_core.workdirs).
-    found = workdirs_mod.resolve_workdir(data, pr_entry, root,
-                                         project_dir=_workdirs_dir(data))
-    if found.reportable:
-        click.echo(found.describe(), err=found.path is None)
+    found = _resolve_workdir(data, pr_entry, root)
     workdir = found.path
     if not workdir or not Path(workdir).is_dir():
         if not found.reportable:
@@ -962,10 +975,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     def _recover():
         nonlocal recovery
         if recovery is None:
-            recovery = workdirs_mod.resolve_workdir(
-                data, pr_entry, root, project_dir=_workdirs_dir(data))
-            if recovery.reportable:
-                click.echo(recovery.describe(), err=recovery.path is None)
+            recovery = _resolve_workdir(data, pr_entry, root)
         return recovery
 
     if pr_entry.get("status") == "in_progress":
@@ -1959,11 +1969,19 @@ def pr_signoff_record(pr_id: str):
             f"PR {pr_id}: report.html carries no valid pm-signoff-verdict "
             f"meta tag — regenerate with `pm pr signoff {pr_id}`.", err=True)
         raise SystemExit(1)
+    # A stale record is re-linked first, like the merge gate this feeds.
+    found = _resolve_workdir(data, pr_entry, root)
     sha = signoff_mod.head_sha(pr_entry.get("workdir"))
     if not sha:
-        click.echo(
-            f"PR {pr_id}: no workdir/HEAD to record the verdict against.",
-            err=True)
+        if found.status == workdirs_mod.AMBIGUOUS:
+            click.echo(
+                f"PR {pr_id}: not recording: the HEAD to bind is in one of "
+                f"the clones listed above. Move the extra clone(s) aside, "
+                f"then re-run `pm pr signoff record {pr_id}`.", err=True)
+        else:
+            click.echo(
+                f"PR {pr_id}: no workdir/HEAD to record the verdict "
+                f"against.", err=True)
         raise SystemExit(1)
 
     # Bind the approval to the integration check the report assessed: the
@@ -2042,6 +2060,11 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool):
     data = store.load(root)
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
+    # Re-link a stale record to the PR's clone first: otherwise --record
+    # replaces a valid check with "no PR workdir" while the clone is still
+    # here.  The default check stays read-only: the clone is used but the
+    # re-link isn't written.
+    _resolve_workdir(data, pr_entry, root, persist=record or apply_)
     if record or apply_:
         rec = integration.check_integration(root, pr_id, data=data)
     else:
@@ -2933,10 +2956,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     # never cloned — so the gate below reads the PR's actual HEAD instead of
     # refusing for a missing workdir (pm_core.workdirs).  The gate still
     # decides: a re-linked HEAD that isn't the approved one refuses as usual.
-    found = workdirs_mod.resolve_workdir(data, pr_entry, root,
-                                         project_dir=_workdirs_dir(data))
-    if found.reportable:
-        click.echo(found.describe(), err=found.path is None)
+    found = _resolve_workdir(data, pr_entry, root)
 
     backend_name = data["project"].get("backend", "vanilla")
     base_branch = data["project"].get("base_branch", "master")
@@ -2975,9 +2995,18 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     if current_sha is None and refusal and merge_gate_refusal(
             pr_entry, (pr_entry.get("signoff") or {}).get("sha"),
             base_branch) is None:
-        refusal = (f"PR {pr_id} workdir not found; the approved HEAD and "
-                   f"candidate live there, so nothing can be published. "
-                   f"Restore the workdir, then re-run sign-off.")
+        if found.status == workdirs_mod.AMBIGUOUS:
+            # The approved HEAD is in one of the clones listed above; the
+            # sign-off itself is fine, so don't send the user back to it.
+            refusal = (f"PR {pr_id}: the approved HEAD is in one of the "
+                       f"clones listed above, so nothing can be published "
+                       f"until one remains. Move the extra clone(s) aside, "
+                       f"then re-run `pm pr merge {pr_id}`.")
+        else:
+            refusal = (f"PR {pr_id} workdir not found; the approved HEAD "
+                       f"and candidate live there, so nothing can be "
+                       f"published. Restore the workdir, then re-run "
+                       f"sign-off.")
     if refusal:
         click.echo(refusal, err=True)
         raise SystemExit(1)

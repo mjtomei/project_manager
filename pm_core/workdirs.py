@@ -394,7 +394,15 @@ def _resolve_matches(data: dict, pr_entry: dict, root: Path | None,
         return res
 
     found = res.candidates[0]
-    if persist and root is not None:
+    if persist and root is not None and _is_within(root, found):
+        # Run from inside the clone itself (an agent's or user's shell in
+        # the PR worktree): *root* is that clone's tracked project.yaml.
+        # Writing there would only dirty the PR's tree (which blocks e.g.
+        # sign-off's clean-base integration); the registry pm runs from is
+        # elsewhere.  The in-memory adoption still stands.
+        _log.info("workdir for %s: not recording %s in its own "
+                  "project.yaml (%s)", pr_id, found, root)
+    elif persist and root is not None:
         found = _persist(root, pr_id, found)
     pr_entry["workdir"] = found
     res.path = found
@@ -402,6 +410,15 @@ def _resolve_matches(data: dict, pr_entry: dict, root: Path | None,
     _log.info("workdir for %s: recorded %s missing; re-linked %s",
               pr_id, recorded, found)
     return res
+
+
+def _is_within(path: Path, parent: str) -> bool:
+    """Whether *path* is *parent* or below it (symlinks resolved)."""
+    try:
+        Path(path).resolve().relative_to(Path(parent).resolve())
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def stored_workdir(root: Path, pr_id: str) -> str | None:

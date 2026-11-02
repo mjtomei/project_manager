@@ -117,16 +117,23 @@ def test_local_publishes_the_approved_candidate(local):
     assert git(local.wd, "rev-parse", "HEAD") == local.head
 
 
+def _make_stale(w) -> Path:
+    """Move the PR's clone to pm's naming and point the record elsewhere
+    (another HOME), as after a moved HOME; returns the clone's path."""
+    moved = w.wd.parent / "pm-pr-001-10e74920"
+    w.wd.rename(moved)
+    stale = "/home/someone-else/.pm/workdirs/proj/pm-pr-001-ab512a43"
+    store.locked_update(w.pm_dir, lambda d: store.get_pr(d, PR)
+                        .update(workdir=stale))
+    return moved
+
+
 def test_stale_workdir_record_is_relinked_not_refused(local):
     """The record points at a path from another HOME, but the PR's clone is
     still in this project's workdirs dir: the gate re-links it (no clone) and
     publishes the approved HEAD instead of "workdir not found"."""
     rec = approve(local)
-    moved = local.wd.parent / "pm-pr-001-10e74920"   # how pm names clones
-    local.wd.rename(moved)
-    stale = "/home/someone-else/.pm/workdirs/proj/pm-pr-001-ab512a43"
-    store.locked_update(local.pm_dir, lambda d: store.get_pr(d, PR)
-                        .update(workdir=stale))
+    moved = _make_stale(local)
     result, windows, finalized = merge(local)
     assert result.exit_code == 0, result.output
     assert "re-linked" in result.output
@@ -137,6 +144,68 @@ def test_stale_workdir_record_is_relinked_not_refused(local):
     assert [p.name for p in moved.parent.iterdir()
             if not p.name.startswith(".")] == [moved.name]
     assert git(local.repo, "rev-parse", "master^{tree}") == rec["candidate_tree"]
+
+
+def test_ambiguous_clones_refuse_without_sending_back_to_signoff(local):
+    """Two verified clones of the PR branch: the gate refuses, but the
+    approval is fine — it says to move the extra clone aside and re-run the
+    merge, not "Restore the workdir, then re-run sign-off"."""
+    approve(local)
+    moved = _make_stale(local)
+    extra = moved.parent / "pm-pr-001"     # a second clone of the branch
+    git(local.tmp, "clone", "-q", str(moved), str(extra))
+    git(extra, "checkout", "-q", BRANCH)
+    git(extra, "remote", "set-url", "origin", str(local.repo))
+    before = git(local.repo, "rev-parse", "master")
+    result, windows, finalized = merge(local)
+    assert result.exit_code == 1, result.output
+    assert "2 existing clones" in result.output
+    assert f"re-run `pm pr merge {PR}`" in result.output
+    assert "re-run sign-off" not in result.output
+    assert not finalized and windows == []
+    assert git(local.repo, "rev-parse", "master") == before
+
+
+def test_signoff_record_relinks_a_stale_record(local):
+    """`pm pr signoff record` binds the approval to the HEAD of the PR's
+    clone after re-linking it, instead of "no workdir/HEAD to record"."""
+    rec = integration.check_integration(local.pm_dir, PR)
+    moved = _make_stale(local)
+    report = local.tmp / "captures" / PR / "report.html"
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text(
+        f'<html><head><meta name="pm-signoff-verdict" '
+        f'content="{signoff.SIGNOFF_MERGE}">'
+        f'<meta name="pm-signoff-head" content="{rec["head"]}">'
+        f'<meta name="pm-signoff-base" content="{rec["base_sha"]}">'
+        f'</head><body/></html>')
+    with mock.patch.object(pr_mod, "state_root", return_value=local.pm_dir):
+        result = CliRunner().invoke(pr_mod.pr, ["signoff", "record", PR])
+    assert result.exit_code == 0, result.output
+    assert "re-linked" in result.output
+    entry = pr_entry(local)
+    assert entry["workdir"] == str(moved)
+    assert entry["signoff"]["sha"] == local.head
+    assert entry["signoff"]["verdict"] == signoff.SIGNOFF_MERGE
+
+
+def test_signoff_integrate_record_relinks_instead_of_clobbering(local):
+    """`--record` with a stale record re-checks the PR's clone; it used to
+    overwrite the valid check with "error: no PR workdir"."""
+    integration.check_integration(local.pm_dir, PR)
+    moved = _make_stale(local)
+    with mock.patch.object(pr_mod, "state_root", return_value=local.pm_dir):
+        ro = CliRunner().invoke(pr_mod.pr, ["signoff", "integrate", PR])
+        assert ro.exit_code == 0, ro.output
+        # The default check is read-only: the re-link isn't written either.
+        assert pr_entry(local)["workdir"] != str(moved)
+        result = CliRunner().invoke(pr_mod.pr,
+                                    ["signoff", "integrate", PR, "--record"])
+    assert result.exit_code == 0, result.output
+    entry = pr_entry(local)
+    assert entry["workdir"] == str(moved)
+    assert entry["integration"]["status"] in integration.MERGEABLE
+    assert entry["integration"]["head"] == local.head
 
 
 def test_local_publish_does_not_rely_on_main_repo_fetch_head(local):

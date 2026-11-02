@@ -275,6 +275,24 @@ class TestRecovery:
         assert workdirs._persist(env.root, PR_ID, str(clone)) == str(other)
         assert env.fresh()[1]["workdir"] == str(other)
 
+    def test_run_from_inside_the_clone_does_not_write_its_project_yaml(
+            self, env):
+        """pm run from a shell in the PR worktree finds that clone's own
+        tracked pm/project.yaml as its root: the clone is used, but the
+        re-link is not written there (it would dirty the PR's tree)."""
+        clone = env.clone(f"{SLUG}-10e74920")
+        inner = clone / "pm"
+        inner.mkdir()
+        data, pr = env.fresh()
+        store.save(data, inner)
+        git(clone, "add", "pm")
+        git(clone, "commit", "-q", "-m", "registry")
+        res = workdirs.resolve_workdir(data, pr, inner)
+        assert (res.status, res.path) == (workdirs.RECOVERED, str(clone))
+        assert pr["workdir"] == str(clone)
+        assert store.get_pr(store.load(inner), PR_ID)["workdir"] == env.stale
+        assert git(clone, "status", "--porcelain") == ""
+
     def test_stale_path_reappearing_before_the_write_wins(self, env,
                                                           tmp_path):
         # The recorded path was missing when resolution started, then came

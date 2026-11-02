@@ -118,7 +118,10 @@ identity; it also separates PRs whose 50-char-truncated slugs collide.
   record is still empty or still points at a non-existent path; if another
   writer recorded an existing path meanwhile, that path is adopted instead).
   A persistence failure (lock timeout etc.) is logged; the in-memory result
-  still stands.
+  still stands.  Nothing is written when `root` lies inside the recovered
+  clone itself (pm run from a shell in the PR worktree resolves that
+  clone's own tracked `pm/project.yaml`): the write would only dirty the
+  PR's tree, which e.g. sign-off's clean-base integration refuses.
 - Two or more verified → `status="ambiguous"`, `path=None`, all candidates
   listed by `describe()`; nothing is written and callers must **not** clone.
   More than `MAX_CANDIDATES` name matches are `ambiguous` without being
@@ -169,7 +172,20 @@ deadlock).
   the workdir HEAD only) so a stale record is re-linked instead of refused as
   "workdir not found … Restore the workdir".  The gate still decides: a
   re-linked HEAD that isn't the approved one refuses as usual; ambiguity is
-  reported and the gate refuses as it would for a missing workdir.
+  reported and the gate refuses — when the approval is otherwise valid,
+  saying to move the extra clone(s) aside and re-run `pm pr merge`, not
+  "Restore the workdir, then re-run sign-off".
+- `pm_core/cli/pr.py:pr_signoff_record` (`pm pr signoff record`) and
+  `pr_signoff_integrate` (`pm pr signoff integrate`) — resolve (never
+  clone) before reading the workdir HEAD, so a stale record between the
+  sign-off launch and the merge is re-linked instead of refused ("no
+  workdir/HEAD to record the verdict against") or, with `--record`,
+  recorded as `status: error / no PR workdir` over the valid check (QA S7
+  follow-ups).  The default `integrate` check stays read-only: it uses the
+  clone without persisting the re-link.
+
+The CLI call sites share `cli/pr.py:_resolve_workdir` (resolve + report
+via `describe()`).
 
 Nothing is added to `store.load`, the TUI tech tree, `pm pr list`, sync or
 other all-PR loops.
@@ -261,6 +277,9 @@ parent (it belongs to another HOME/machine), not `qa/`, not other projects.
 - **Stale path reappears** (a remount) after the fast-path check: the
   under-lock re-read and the compare-and-set both keep any record that
   exists by then — never overwritten with the discovered clone.
+- **pm run from inside the PR worktree** (`state_root()` is the clone's
+  tracked `pm/project.yaml`): the clone is used; the re-link is not
+  written into its own project.yaml.
 - **Workdirs dir absent** (fresh machine): no listing error, no `mkdir`,
   `missing`.
 - **Fresh clone's name already taken** (an existing `<slug>-<hash>` dir
