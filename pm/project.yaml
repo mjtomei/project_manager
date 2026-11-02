@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-02T00:26:10.826076+00:00'
+  updated_at: '2026-11-02T00:51:43.786955+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48267,6 +48267,25 @@ prs:
       verify-s51-followup.md.'
     created_at: '2026-11-02T00:26:10Z'
     last_edited: '2026-11-02T00:26:10Z'
+  - id: note-f750806
+    text: 'review-loop 48dd i3: closed the residual hand-edited base_branch leaks
+      QA flagged (note-75b9fea) plus the same class in every prompt diff command.
+      Fixed: (1) pm pr start''s GitHub draft-PR block re-read project.base_branch
+      raw and passed a mapping to `gh pr create --base` (subprocess rejects a non-string)
+      — it now reuses the value pr_start already guards; (2) pr_sync.sync_prs / sync_from_github
+      and the `pm pr sync` CLI passed it to git (is_merged) and to the merge-integrity
+      `git log` range — a non-string crashed the command or turned a real verification
+      into an `error` that finalized the merge unverified (shared `pr_sync._base_branch_of`);
+      (3) every prompt builder fell back to it for `git diff <base>...HEAD` (impl/review/sign-off/QA-planner/QA-interactive/watcher/...),
+      rendering `git diff origin/<repr>...HEAD` (`prompt_gen._base_branch`, the fallback
+      the QA spec prompt and the review window pane already apply). Regression tests
+      fail on the pre-fix tree. impl.md R9-14 updated. Full suite: 5760 passed, 1
+      skipped. Not fixed (pre-existing, filed): pr-852dde2 / pr-a187153 (non-mapping
+      top-level `project` in the other readers). Left untouched: the uncommitted R19
+      additions in pm/specs/pr-5cee3d5/qa.md and the untracked verify-s51-followup.md
+      (QA-session artifacts).'
+    created_at: '2026-11-02T00:51:43Z'
+    last_edited: '2026-11-02T00:51:43Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
