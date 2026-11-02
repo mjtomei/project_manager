@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T07:01:29.895274+00:00'
+  updated_at: '2026-11-02T07:10:03.746138+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25770,6 +25770,20 @@ prs:
       Captures: /pm-captures/scenarios/18/.'
     created_at: '2026-11-02T07:01:29Z'
     last_edited: '2026-11-02T07:01:29Z'
+  - id: note-a90fda1
+    text: 'QA S19 (2026-11-02): PASS at 677702dd (pm_core = a3777520), all 4 share-mode
+      filing stories live from /scratch/s19, no fix. --global session: solo pm -C
+      filings from the aaa-test project, the clone, a symlink and a relative path
+      with a trailing slash each took the user TUI 1->5 PRs within 1 s, one reload
+      line at the filing second each; aaa-test (log aaa-test-<share hash>.log) and
+      the leftover plain pm_root never reloaded. --group proj2: 1->2 at +0 s, proj
+      untouched. TUI SIGTERMed: filing rc=0, no reload anywhere, home-refresh touched,
+      stale pidfile removed; pm session --global printed "TUI pane missing — respawning..."
+      and the respawned TUI showed 6 then 7 at +0 s. Plain + global sessions of one
+      project: each filing reloaded only its own server TUI (8 / 9); the plain TUI
+      caught up on r. Captures: /pm-captures/scenarios/19/ (story1-4 tui + cli, evidence/).'
+    created_at: '2026-11-02T07:10:03Z'
+    last_edited: '2026-11-02T07:10:03Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
