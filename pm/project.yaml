@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T11:07:22.865103+00:00'
+  updated_at: '2026-11-02T11:24:23.976345+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40065,6 +40065,32 @@ prs:
       post-fix/).'
     created_at: '2026-11-02T11:01:14Z'
     last_edited: '2026-11-02T11:07:22Z'
+  - id: note-c1801df
+    text: 'QA S62 (2026-11-02): fixed 75b777d9a (live-tested as 7260c1046 before the
+      rebase onto the S61 commits, plus 1 run on 75b777d9a). E11: `pm pr cleanup <R>
+      --resources` mid-i1 ended the loop parent `failed KILLED` with no `PR resources
+      cleaned up` reason. cleanup_pr_resources killed the windows, then ran two podman
+      ps calls before end_in_flight_actions, and the TUI loop thread''s 1 s pane check
+      recorded failed KILLED first (debug order: pane %18 disappeared, to=failed verdict=KILLED,
+      then cleanup_pr_resources). This hit 1 of 1 pre-fix runs here (refiner: 2 of
+      3). cleanup_pr_resources and _finalize_merge now end in-flight entries before
+      the kill as well as after it. Post-fix 5 of 5 live runs read `interrupted /
+      PR resources cleaned up` with i1 `vanished KILLED`, even though the loop thread
+      still noticed first in 4 (`from=None to=failed`). When cleanup finishes first,
+      i1 shows the allowed `parent run ended first` transient for up to ~1 s, the
+      loop''s poll period. Test: test_pr_cleanup_beats_a_loop_that_sees_its_pane_killed
+      (fails on 9cc519e7c). Stories 1-4 held with no edits on 9cc519e7c. (1) F no-history
+      text/JSON, pr-deadbee rc 1, spec_pending hold; popup `[no history]`. (2) CLI
+      start + command-bar /pr review: 46 reads clean; 3 `review=idle` transient reads,
+      never `idle (last`; `[1 run]`. (3) Five damage lines during i2: the `?` row
+      heads Waiting for in all 23 later reads; the fragment is followed by a timer_clear
+      on its own line; badge `[?: start]`; pager == CLI. (4) Base and (a)-(d) give
+      the same verdicts and status sequence; (a)-(d) read honest-empty; journal.exists
+      F/F/F/T(0); 0 Tracebacks. Story 5: all 6 runs beat the first tick, each with
+      one `start untracked` row. Plain cleanup of G left its JSON identical, including
+      the open `?`. Captures /pm-captures/scenarios/62 (README, pre-fix/, post-fix/).'
+    created_at: '2026-11-02T11:24:23Z'
+    last_edited: '2026-11-02T11:24:23Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
