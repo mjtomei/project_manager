@@ -39215,7 +39215,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-11-02T02:19:29.205680+00:00'
+  updated_at: '2026-11-02T02:38:48.519868+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40160,6 +40160,25 @@ prs:
       (S15 prerequisite, outside the story).'
     created_at: '2026-11-02T02:19:29Z'
     last_edited: '2026-11-02T02:19:29Z'
+  - id: note-869843e
+    text: 'QA S19 RE-EVALUATION (2026-11-02, after the verifier flagged the first
+      PASS for a missing cli-recording capture): re-ran all 3 stories from fresh fixtures
+      with BOTH assigned recipes. Each story now has tui/ (tmux-screen-recording:
+      TUI cast+mp4+transcript) and cli/ (cli-recording: the pm session drive window
+      ran under asciinema, and every pm command plus every run-dir/log inspection
+      - ls -la, readlink, test -L/-e, wc -l, grep sessionId, cmp, log greps - was
+      typed live at the moment its Then applies). Results are unchanged: story1 30/30,
+      story2 18/18, story3 20/20 (evidence/then-checks.txt). Story 3 now also shows
+      on camera the fake idle_prompt hook being re-written every ~2 s during the 20
+      s quiet wait, with 0 follow-up/done lines. One on-camera slip: in the story1
+      main CLI cast the final log-scope grep single-quoted $PR (empty range, sed error);
+      story1/cli/logscope-rerun.cast re-runs the corrected inspection against the
+      same log (only finalized line in the window = loop 1; 0 lines naming loop 2
+      before its own finalize; 0 ownership-skip; 1 symlink line per path). The first
+      run is kept under storyN/previous-run-tui-only/. Captures: /pm-captures/scenarios/19/
+      (README.md). This supersedes note-5250c4d only as to captures; the verdict stands.'
+    created_at: '2026-11-02T02:38:48Z'
+    last_edited: '2026-11-02T02:38:48Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
