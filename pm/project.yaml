@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T04:02:57.598766+00:00'
+  updated_at: '2026-11-02T04:24:02.800066+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39529,6 +39529,29 @@ prs:
       fails = missing markdown module in the container. Captures /pm-captures/scenarios/50.'
     created_at: '2026-11-02T04:02:57Z'
     last_edited: '2026-11-02T04:02:57Z'
+  - id: note-5711db9
+    text: 'QA S51 (2026-11-02) PASS on cf06f24f, no code edits: all four non-retry
+      launch endings held live (sandbox /scratch/q51). (1) z d 1.5 s into the first
+      backoff: loop+i1 cancelled KILLED ("Review loop stopped during launch retry",
+      [launching 0s · backoff 2s]), retry timer cancelled 0.07 s after the stop (resolved_t
+      < due_t, never fired in 37 polls), runtime failed KILLED, one relauncher line,
+      none active. (2) unauthorized:latest: one launching phase, failed LAUNCH_FAILED
+      with the whole artifact path (file exists), ERROR not WARNING, "Needs attention
+      before it can be retried.", popup review [failed]. (3) trust stand-in: HOLD
+      33.2 s after zz d, two Enter presses 15 s apart, visible 31s, [launching 2s
+      · agent 31s], only the verdict grace in Recent timers, derived hold in text/JSON/popup
+      badge [hold: review HOLD at a permission/t…]. (4) pm pr close 1 s into the backoff:
+      cancelled CLOSED 1.22 s later (timer resolved 0.89 s after close, 3.0 s before
+      due), runtime done CLOSED, closed popup q/Esc: quit  H=history + No actions,
+      z/d inert, H pager == pm pr history | cat except 2 less-split path tokens. Spec
+      nit: the closed-PR badge is [start: turn done] only if no TUI impl-idle tick
+      (every ~5 s) lands during the 2 s loop; _poll_impl_idle skips PRs with a running
+      loop and ends the start attempt untracked, and a closed PR is never re-tracked,
+      so it can read [5 runs] next to Waiting for: nothing (seen here; still agrees).
+      Filed pr-04b4bc3 (TUI LAUNCH_FAILED message clips "(artifact: …" at 300 chars).
+      Captures /pm-captures/scenarios/51.'
+    created_at: '2026-11-02T04:24:02Z'
+    last_edited: '2026-11-02T04:24:02Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
@@ -52506,6 +52529,33 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T15:57:27.860328+00:00'
   updated_at: '2026-10-22T15:57:27.860328+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-04b4bc3
+  plan: bugs
+  title: 'Bug: review-loop LAUNCH_FAILED completion message clips the error at 300
+    chars mid "(artifact: …" path before the full Artifact: line'
+  branch: pm/pr-04b4bc3-bug-review-loop-launch-failed-completion-message-c
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/review_loop_ui.py _announce_loop_done builds "Error: {latest_output[:300]}"
+    and then appends "Artifact: <path>". A non-retryable launch failure whose error
+    text ends with " (artifact: <long path>)" (e.g. podman image inspect failing for
+    an unauthorized image, with container mode on: pm container set image unauthorized:latest,
+    then zz d) is cut mid-path, so pm log grep "Review loop done" shows "...(artifact:
+    /…/launch-artifacts/review-<pr>-i1-attempt1-20261102T041433479445 Artifact: /…/…479445.log
+    See log: …" — a truncated duplicate path with no closing paren next to the full
+    one. Seen in QA S51 of pr-8020495 (evidence /pm-captures/scenarios/51/s2). Fix
+    idea: strip the trailing " (artifact: …)" suffix from latest_output before clipping
+    when the Artifact: line follows (like review_loop._history_end_detail keeps/clips
+    it for the journal, 2d8a84f7). Cosmetic; only the first line is painted on screen.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T04:19:51.064978+00:00'
+  updated_at: '2026-11-02T04:19:51.064978+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
