@@ -5173,7 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-11-02T07:34:30.176359+00:00'
+  updated_at: '2026-11-02T07:37:50.223762+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5282,6 +5282,25 @@ prs:
       /pm-captures/scenarios/11/story3.'
     created_at: '2026-11-02T07:34:30Z'
     last_edited: '2026-11-02T07:34:30Z'
+  - id: note-2c7ee63
+    text: 'QA S11 run 2026-11-02 at 990c5b4f (code = 0d42e087): PASS 5/5 live, plain
+      shell + private tmux, no pm session (captures /pm-captures/scenarios/11/{fixture,story1-5,evidence}).
+      (1) pm pr cd B from inside B''s own clone (twice, and via a symlinked cwd) entered
+      the clone, wrote nothing: clone clean, its yaml and the main yaml sha unchanged;
+      only a 0-byte .workdir-<B>.lock appears. (2) main-repo signoff integrate B --apply
+      after master moved: merges cleanly, merged into the PR branch, rc 0, empty stderr,
+      clone still clean. (3) from C''s clone, pm pr cd B dirties C''s tracked yaml
+      and C''s integrate --apply is refused rc 1 (finding, note-8fee005). (4) renamed
+      B clone: main-repo cd re-links once, then the fast path, record lands only in
+      the main yaml. (5) flock barrier with 8 waiters (4 in-clone, 4 main), all rc
+      0 and empty stderr, exactly 1 main re-link line, one B clone, no .tmp- entry.
+      Wording observation: an in-clone run says "no workdir is recorded; re-linked
+      the existing clone ..." every time although nothing is recorded (resolve_workdir
+      reports RECOVERED for the not-persisted own-clone case). Also: d384a302 (S11
+      note commit) was briefly pushed with conflict markers in pm/project.yaml, fixed
+      in 990c5b4f; anyone who pulled d384a302 should pull again.'
+    created_at: '2026-11-02T07:37:50Z'
+    last_edited: '2026-11-02T07:37:50Z'
 - id: pr-0778fbe
   plan: plan-003
   title: Add PR ownership tracking with workdir history
