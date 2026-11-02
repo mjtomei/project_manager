@@ -173,11 +173,18 @@ def _register_tmux_bindings(session_name: str) -> None:
     # name contains a space, and every user view never matched their
     # registry file — pm's mobile-aware switch was silently replaced by the
     # plain fallback for exactly those sessions (review-loop b48f i15).
-    # ``#{}`` values are expanded by tmux before the shell runs; the
-    # registry path and the derived name are shell-quoted (a home directory
-    # or a repo directory may contain a space).  A session name containing
-    # a single quote still breaks the assignment, which fails the condition
-    # and so keeps the plain fallback — the safe direction.
+    # ``#{}`` values are expanded by tmux before the shell runs, so the
+    # names must reach the shell already quoted: ``#{q:...}`` backslash-
+    # escapes every shell metacharacter (space, quotes, backtick, ``$``).
+    # Wrapping a bare ``#{session_name}`` in single quotes was not enough —
+    # a name containing ``'`` closed the quote, which silently dropped
+    # such a session to the plain fallback and, with a backtick after the
+    # quote (repo ``qa'`touch X`'repo``), ran that command on every
+    # prefix+o (QA scenario 23).  ``~`` is left unescaped; it is only
+    # expanded right after the ``=``, which a pm name (``pm-…``) never
+    # puts there, and a user's own view named ``~x`` is grouped, so the
+    # test uses ``g`` (its base), not ``s``.  The registry path is
+    # shell-quoted too (a home directory may contain a space).
     #
     # The *command* the gate runs needs the same treatment, and quoting the
     # condition alone is not enough: ``pm _pane-switch #{session_name}``
@@ -190,7 +197,7 @@ def _register_tmux_bindings(session_name: str) -> None:
     # ids are tmux-generated (``@N``/``%N``) and need no quoting.
     registry_dir = pane_registry.registry_dir()
     registry_test = (
-        f"g='#{{session_group}}'; s='#{{session_name}}'; "
+        f"g=#{{q:session_group}}; s=#{{q:session_name}}; "
         f"test -f {shlex.quote(str(registry_dir))}/\"${{g:-$s}}\".json")
     switch_keys = {
         "o": ("next", "select-pane -t :.+"),

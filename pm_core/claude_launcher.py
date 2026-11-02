@@ -1079,7 +1079,17 @@ def build_claude_shell_cmd(
                             "using file-backed bootstrap %s",
                             prompt_bytes(prompt), PROMPT_ARG_LIMIT, _prompt_ref)
                     else:
-                        cmd += f' "$(cat {_prompt_ref})"; rm -f {shlex.quote(str(_prompt_ref))}'
+                        # Quote the path inside the substitution: the cwd
+                        # may contain a space (the prompt then splits into
+                        # a failed cat and Claude starts with an EMPTY
+                        # prompt) or a backtick / ``$(`` (which would run).
+                        # The base directory is quoted on its own so the
+                        # prefix stays ``$(cat <quoted cwd>/`` — the shape
+                        # container.wrap_claude_cmd rewrites to the
+                        # container path (QA scenario 23).
+                        _cat_ref = (f"{shlex.quote(str(_ref_base))}/pm/prompts/"
+                                    f"{shlex.quote(_fname)}")
+                        cmd += f' "$(cat {_cat_ref})"; rm -f {shlex.quote(str(_prompt_ref))}'
                     _prompt_written = True
             except Exception:
                 pass

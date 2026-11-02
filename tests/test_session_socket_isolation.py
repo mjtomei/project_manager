@@ -4110,13 +4110,21 @@ class TestPaneSwitchBindingGate:
         raise AssertionError("no if-shell binding was registered")
 
     @staticmethod
-    def _fires(condition, real_run, registry_dir, *, name, group,
+    def _tmux_q(value):
+        """tmux's ``#{q:...}`` (format.c ``format_quote_shell``)."""
+        return "".join("\\" + c if c in "|&;<>()$`\\\"'*?[# =%" else c
+                       for c in value)
+
+    @classmethod
+    def _fires(cls, condition, real_run, registry_dir, *, name, group,
                registry_names):
         """Run the expanded gate; True when the pm binding would be used."""
         for registry_name in registry_names:
             (registry_dir / f"{registry_name}.json").write_text("{}")
         try:
             expanded = (condition
+                        .replace("#{q:session_group}", cls._tmux_q(group))
+                        .replace("#{q:session_name}", cls._tmux_q(name))
                         .replace("#{session_group}", group)
                         .replace("#{session_name}", name))
             return real_run(["sh", "-c", expanded]).returncode == 0
@@ -4139,6 +4147,11 @@ class TestPaneSwitchBindingGate:
              ["pm-my~repo-abc12345"]),                   # ~ in the tag
             ("pm-my~repo-abc12345~2", "pm-my~repo-abc12345",
              ["pm-my~repo-abc12345"]),                   # grouped ~ tag
+            # A single quote in the name (QA scenario 23): the old
+            # single-quoted assignment broke on it.
+            ("pm-qa'quote repo-abc", "", ["pm-qa'quote repo-abc"]),
+            ("pm-qa'`true`'repo-abc~1", "pm-qa'`true`'repo-abc",
+             ["pm-qa'`true`'repo-abc"]),
         ]
         for name, group, registry_names in cases:
             assert self._fires(condition, real_run, registry,
@@ -4294,6 +4307,65 @@ class TestTmuxCommandsQuoteAwkwardSessionNames:
 
         self._check(short_sock_dir, tmp_path, monkeypatch, command_for,
                     nargs=4)
+
+    @pytest.mark.parametrize("name", CASES + [
+        "pm-qa'quote repo-abc",
+        "pm-qa'`touch injected-abc`'repo-abc",
+        "pm-qa~tilde-abc",
+        "pm-plain-abc",
+    ])
+    def test_the_pane_switch_gate_condition_matches_the_registry(
+            self, short_sock_dir, tmp_path, monkeypatch, name):
+        """The gate's *condition* must find the registry for any name.
+
+        It used to wrap the bare ``#{session_group}`` / ``#{session_name}``
+        in single quotes, so a name containing ``'`` closed the quote: that
+        session silently got plain ``select-pane`` (no mobile zoom), and with
+        a backtick after the quote every prefix+o ran the backticked command
+        (QA scenario 23).  Run tmux's own ``if-shell`` with the registered
+        condition, for the lone base (empty group → name branch) and for a
+        grouped ``<base>~1`` (group branch), with and without the registry.
+        """
+        from pm_core import pane_registry
+
+        sock = str(short_sock_dir / "pm-gate.sock")
+        reg_dir = tmp_path / "reg dir"
+        reg_dir.mkdir()
+        work = tmp_path / "work"
+        work.mkdir()
+        monkeypatch.setattr(pane_registry, "registry_dir", lambda: reg_dir)
+
+        def gate(target):
+            # if-shell runs its condition in the command client's cwd, so
+            # run tmux from *work*: an injected command would land there.
+            r = subprocess.run(
+                ["tmux", "-S", sock, "if-shell", "-t", f"={target}:", cond,
+                 "set -g @gate pm", "set -g @gate plain"],
+                capture_output=True, text=True, cwd=work)
+            assert r.returncode == 0, r.stderr
+            return _tmux_out(sock, "show", "-gv", "@gate").strip()
+
+        r = _tmux(sock, "new-session", "-d", "-s", name, "-c", str(work),
+                  "sleep 60")
+        assert r.returncode == 0, r.stderr
+        try:
+            calls = self._register(sock, monkeypatch, name)
+            cond = next(c[c.index("if-shell") + 1] for c in calls
+                        if "if-shell" in c)
+            assert gate(name) == "plain"          # no registry yet
+            (reg_dir / f"{name}.json").write_text("{}")
+            assert gate(name) == "pm"             # lone base: name branch
+            r = _tmux(sock, "new-session", "-d", "-t", f"={name}",
+                      "-s", f"{name}~1")
+            assert r.returncode == 0, r.stderr
+            assert gate(f"{name}~1") == "pm"      # grouped view: group branch
+            (reg_dir / f"{name}.json").unlink()
+            assert gate(f"{name}~1") == "plain"
+            # No part of the name ever ran as a command.
+            assert not list(tmp_path.rglob("injected*"))
+        finally:
+            _tmux(sock, "kill-server")
+            Path(sock).unlink(missing_ok=True)
 
 
 class TestExitTrapQuoting:
