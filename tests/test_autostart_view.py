@@ -212,6 +212,9 @@ class TestDedupe:
             "verdict": "SIGNOFF_MERGE", "fresh": False,
             "stale_reason": "base moved"}}}, "sign-off",
          "SIGNOFF_MERGE stale (base moved); re-runs against the current base"),
+        ("sign_off", {"signoff": {"pr-x": {
+            "verdict": "SIGNOFF_BLOCKED", "fresh": True}}}, "sign-off",
+         "SIGNOFF_BLOCKED — read the report and decide"),
         ("qa", {"qa_loops": {"pr-x": {"error": "boom"}}}, "qa", "error: boom"),
         ("sign_off", {"pending_merge": {"pr-x"}, "signoff": {"pr-x": {
             "verdict": "SIGNOFF_MERGE", "fresh": True}}}, "merge",

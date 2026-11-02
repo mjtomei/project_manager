@@ -77,7 +77,8 @@ R2 — Phase/progress once per PR.
   `no window…`); failed and stale rows likewise (`FAILED qa` → `error: …`,
   not `QA error: …`; `FAILED merge` → `attempt failed; no merge window`;
   stale sign-off → `SIGNOFF_MERGE stale (HEAD moved); relaunches against
-  current HEAD`).
+  current HEAD`; `DECISION NEEDED sign-off` → `SIGNOFF_BLOCKED — read the
+  report and decide`, not `sign-off BLOCKED — read the sign-off report…`).
 - `_derive()` returns `(phase, state, reason, info)`; info carries
   `attention`, the short reason and `blockers`.  The JSON `reason` keeps its
   full text (machine-readable data unchanged); `short_reason`, `attention`,

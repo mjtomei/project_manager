@@ -861,8 +861,9 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
             return phase, "waiting", reason, info
         if verdict == "SIGNOFF_BLOCKED":
             return (phase, "paused", "sign-off BLOCKED — needs human decision",
-                    _info("decision", "sign-off BLOCKED — read the sign-off "
-                          "report and decide"))
+                    # The ``sign-off`` token already names the phase.
+                    _info("decision",
+                          "SIGNOFF_BLOCKED — read the report and decide"))
         return phase, "waiting", f"routed {verdict}", plain
 
     return phase, "queued", f"status {status}", plain
