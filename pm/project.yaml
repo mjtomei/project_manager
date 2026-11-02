@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T13:19:14.122732+00:00'
+  updated_at: '2026-11-02T13:31:39.243999+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -26236,6 +26236,30 @@ prs:
       p-env needs --api-base (claude type). Helpers: /pm-captures/scenarios/31/refiner-helpers.'
     created_at: '2026-11-02T13:19:14Z'
     last_edited: '2026-11-02T13:19:14Z'
+  - id: note-c9d8de0
+    text: 'QA S31 (2026-11-02): PASS at 68e372c55 (pm_core unchanged since the S31
+      refiner), all 4 shared route-bridge stories live under slirp4netns from /scratch/s31,
+      no fix. Cold start: pm qa regression --file-prs (CLI), pm qa launch regression:demo
+      (qa-cli window in the user pm session) and pm provider test r-ctr --container
+      started in one second and shared ONE host bridge (one pid, one "route bridge
+      for r-ctr started" debug line, r-ctr dir 0700 with .lock + srw------- router.sock);
+      provider test "Container route: OK" rc 0, throwaway removed; the two runs got
+      distinct ids/workdirs/captures/containers, both mounted route-bridge/r-ctr at
+      /run/pm-route, and each start GET was logged once; prompt.md files identical
+      (container paths only). Three same-second filings (2 container pm -C /pm-project,
+      1 host) all rc 0: registry 1->4, no tmp, 444; active = last writer (pr-a571291).
+      kill <bridge pid>: stale socket kept, run A GET -> ConnectionResetError(104)
+      in 0.01 s; the next pm qa regression started a new bridge (new pid, 2nd debug
+      line) that served run C and the still-running A (same container, restarts 0).
+      Three providers in one second (PM_PROVIDER r-ctr / r-two, default p-env): each
+      run got only its own mount/token/model, podman exec -e names only, two bridges,
+      every token only in providers.yaml; 6 runs -> 6 workdirs + 6 captures. Rig traps:
+      this QA container is reused from the refiner, so move its ~/.pm/workdirs/qa
+      and ~/.pm/sessions leftovers aside first; a redaction sed "s/$(cat token)/.../"
+      puts the token in ps argv (use a redactor that reads the token file); pane-scrollback
+      prompt waits match old prompts after a cast roll. Captures: /pm-captures/scenarios/31/.'
+    created_at: '2026-11-02T13:31:39Z'
+    last_edited: '2026-11-02T13:31:39Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
