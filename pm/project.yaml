@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T11:01:14.162831+00:00'
+  updated_at: '2026-11-02T11:07:22.865103+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40031,7 +40031,7 @@ prs:
       0s" (not agent working).'
     created_at: '2026-11-02T10:43:33Z'
     last_edited: '2026-11-02T10:43:33Z'
-  - id: note-477d95e
+  - id: note-50cbbd2
     text: 'QA S61 (2026-11-02, two projects one HOME, same-id S started with TUI s
       in both TUIs + /review-loop before the first impl-idle tick): race hit in both
       first try (start notes +3.1/+3.6 s after the loops, one start row per project,
@@ -40040,14 +40040,14 @@ prs:
       dip, YC qa-run-bg E12 held, XB cap 2, kill/respawn/resume/sweep Thens held,
       Y untouched. One Then failed: after kill -9 of X TUI, XD start row (re-tracked
       by that TUI after round 1) read running in all 26 gap reads until the mount
-      sweep. Fixed 262e2480: pm _tui marks its owner token role "tui"; history_query
+      sweep. Fixed d6a95eaf: pm _tui marks its owner token role "tui"; history_query
       does not count an in-flight entry a dead TUI drove as tracked, so it reads interrupted
       (owner exited) + runtime start=idle (stale: owner exited); CLI-opened entries
       keep E12 (live pre/post repro: 15/15 running -> 15/15 interrupted, auto-sequence
       start running 16/16 both). Captures /pm-captures/scenarios/61 (README, pre-fix/,
       post-fix/).'
     created_at: '2026-11-02T11:01:14Z'
-    last_edited: '2026-11-02T11:01:14Z'
+    last_edited: '2026-11-02T11:07:22Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
