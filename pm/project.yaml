@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T16:01:47.458607+00:00'
+  updated_at: '2026-11-02T16:31:05.333010+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40304,6 +40304,32 @@ prs:
       s, never failed KILLED.'
     created_at: '2026-11-02T16:01:47Z'
     last_edited: '2026-11-02T16:01:47Z'
+  - id: note-b5d25af
+    text: 'QA S69 (2026-11-02) INPUT_REQUIRED on 8bf627f6 (app f5d778bf3), no code
+      edits; captures /pm-captures/scenarios/69 (README). E11 held on every teardown
+      path except one literal story-3 Then. (1) cleanup --resources x3 (R1/R2 at i1
+      agent 8 s, R3 at grace 5 s left): loop interrupted "PR resources cleaned up",
+      i1 vanished KILLED, grace cancelled, parent-ended-first <= +0.15 s, start untracked
+      unchanged, nothing open, an1 BAD 0. (2) TUI Y: modal, "Cleaned" hidden by the
+      sticky loop message, Down/Up Selected, popup from review-<Y1> [open]/[2 runs],
+      pager == | cat. (4) merge after loop PASS: re-tracked start ends interrupted
+      "PR resources cleaned up" [running 5s · not tracked 55s · running 3s], loop
+      rows kept, runtime done PASS. (5) cleanup during QA: 5 windows; s1/s2 vanished
+      + retry 1 (5 s backoff fired), grace re-armed x2 then elapsed, s3 queued 1m30s
+      then PASS, run done PASS 3 (5 attempts) up to 2; 528 reads clean, 0 Tracebacks.
+      Open item, story 3 (pm pr merge mid-i2): _finalize_merge ends the loop parent
+      at about +0.2 s and returns at about +0.32 s. The TUI loop thread journals i2
+      vanished KILLED at its next pane check (about 1 s, in 0.2 s ticks). In 2 of
+      4 runs (main: i2 end +1.20 s; rerun1), the first read after the merge returned
+      showed i2 `interrupted / parent run ended first`, grace `cancelled (owner ended)`
+      and no runtime line. That is the E11 transient story 1 and the S62 note allow,
+      but the story-3 Then (every read after return = vanished KILLED + runtime failed
+      KILLED, later read equals the first) omits it. Reruns 2/3 (+0.41/+0.26 s) and
+      the refiner held literally. The race is not user-controllable. Next plan: allow
+      that <= ~1.2 s transient in the merge-mid Then, or have merge/cleanup wait for
+      the loop child end.'
+    created_at: '2026-11-02T16:31:05Z'
+    last_edited: '2026-11-02T16:31:05Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
