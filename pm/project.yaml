@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T10:46:07.797092+00:00'
+  updated_at: '2026-11-02T11:02:04.201222+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -26036,6 +26036,30 @@ prs:
       remove ~/.pm/providers.yaml at teardown. Helpers: /pm-captures/scenarios/27/refiner-helpers.'
     created_at: '2026-11-02T10:46:07Z'
     last_edited: '2026-11-02T10:46:07Z'
+  - id: note-f340586
+    text: 'QA S27 (2026-11-02): PASS at 6aec1bb3 (pm_core = 7518aa8a), all 4 provider
+      stories live from /scratch/s27 on a private socket, with no fix. p-env with
+      an --env token: the CLI run and the TUI Enter run (pane start cmd pm -C …/proj/pm
+      qa regression demo --file-prs) recorded cwd=clone, --model p-env-model <prompt>
+      with no --effort, the token only in the env, aliases and PM_ROUTE_BASE_URL unset,
+      the ambient API key passed through, R7 unset and PM_TMUX_SOCKET kept. The token
+      count was 0 in a ps -eo args file, the pane start cmds, both headers, both prompt.md
+      files and ~/.pm/debug, and grep -rl ~/.pm listed only providers.yaml. Router
+      r-host + --launcher: exe=rlaunch in the clone, API_KEY/AUTH_TOKEN unset, the
+      header token in the env only, GET /v1/s27-launcher-ping?pid=<pid> 404 in the
+      HTTP log, only env -u names in ps. r-bad (http://:8080): the CLI printed "has
+      no host. Remedy" rc=1 (hand-edited no-model: "no model configured. Remedy" rc=1);
+      the TUI Enter pane lived 0.21 s and the pm qa launch qa-demo window ~0.1 s (pr-089af69);
+      nothing was left behind. Same-second p-env / PM_PROVIDER=p-two runs (105658Z-ed4b/-6d5a):
+      no crossover, no --effort, CLAUDE_CODE_EFFORT_LEVEL=low (E24/A15). E25 recorded:
+      the zz-e25 test TUI environ has no PM_PROVIDER, and its guide ran on p-env with
+      TOK1. Incidental, filed as pr-659c098 (pre-existing on master): with an unlaunchable
+      default provider, TUI Enter on a QA instruction or artifact recipe makes the
+      TUI exit (uncaught RouteSetupError from in-process build_claude_shell_cmd).
+      Trap: after q, the QA cursor resumes where it was left, so check pm tui view
+      before j/Enter. Captures: /pm-captures/scenarios/27/.'
+    created_at: '2026-11-02T11:02:04Z'
+    last_edited: '2026-11-02T11:02:04Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
@@ -53344,6 +53368,39 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T03:23:55.443880+00:00'
   updated_at: '2026-11-02T03:23:55.443880+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-659c098
+  plan: bugs
+  title: 'Bug: TUI exits with an uncaught RouteSetupError on Enter on a QA instruction
+    or artifact recipe when the default provider cannot launch'
+  branch: pm/pr-659c098-bug-tui-exits-with-an-uncaught-routesetuperror-on-
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/pane_ops.py launch_qa_item, non-regression branch (line
+    ~634 on pr-7d5d036, 576 on origin/master 5b352d16): it calls claude_launcher.build_claude_shell_cmd
+    inside the TUI process, and build_claude_shell_cmd -> router_route.launch_parts
+    raises RouteSetupError for an unlaunchable provider (seen: router api_base "http://:8080"
+    -> "has no host. Remedy: fix its api_base in ~/.pm/providers.yaml"). Nothing in
+    pm_core catches RouteSetupError, so the Textual app exits: the debug log says
+    "TUI unmount", the TUI pane disappears ~0.5 s after Enter and ~/.pm/debug/tui-stderr.log
+    holds the traceback (app.py on_qaitem_activated -> pane_ops.launch_qa_item ->
+    build_claude_shell_cmd -> launch_parts). pm session then prints "TUI pane missing
+    - respawning...". Repro: pm provider add r-bad --type router --api-base http://:8080
+    --model m; pm provider default r-bad; in the TUI press q, put the cursor on an
+    instruction or an artifact recipe, press Enter. Reproduced twice (artifact cli-recording,
+    instruction tui-manual-test). Regression items do not crash (they run pm qa regression
+    in a pane, whose error is lost: pr-089af69). The other in-process build_claude_shell_cmd
+    calls in pane_ops.py (discuss at :391/:456, watcher_review at :510) probably share
+    this exposure; not driven. Expected: log the error and remedy in the TUI log and
+    keep the TUI running. Found in pr-7d5d036 QA S27; captures /pm-captures/scenarios/27/incidental-tui-crash/.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T10:59:16.128416+00:00'
+  updated_at: '2026-11-02T10:59:16.128416+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
