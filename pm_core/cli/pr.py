@@ -794,25 +794,12 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
     emit_paged(out)
 
 
-def _notes_of(pr_entry: dict) -> list:
-    """A PR's ``notes`` as a list (hand-edited state may hold a scalar).
-
-    The readers below must not raise on a shape ``project.yaml`` can hold: a
-    ``notes`` value that is not a list is no collection to iterate.
-    """
-    notes = pr_entry.get("notes")
-    return notes if isinstance(notes, list) else []
-
-
-def _note_id(n) -> str | None:
-    """A note's ``id`` when it is a string (hand-edited members read absent).
-
-    The note commands index every member with ``n["id"]``/``n["text"]``, so a
-    scalar member, or a member without those keys, raised ``TypeError`` /
-    ``KeyError`` out of ``pm pr note add`` — the canonical handoff channel.
-    """
-    value = n.get("id") if isinstance(n, dict) else None
-    return value if isinstance(value, str) and value else None
+# The note commands index every member, so a scalar ``notes`` value, a scalar
+# member, or a member without a string ``id`` raised ``TypeError``/``KeyError``
+# out of ``pm pr note add`` — the canonical handoff channel.  One reader for
+# every note writer (see :func:`pm_core.store.notes_of`).
+_notes_of = store.notes_of
+_note_id = store.note_id
 
 
 def _note_text(n) -> str | None:

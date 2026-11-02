@@ -801,9 +801,7 @@ def merge_gate_refusal(pr: dict, current_sha: str | None,
     # The approval names the exact head/candidate it reviewed.  A re-check
     # that produced another candidate (a moved base, a changed resolution)
     # makes the approval stale even before the merge re-fetches anything.
-    def _short(value) -> str:
-        return value[:12] if isinstance(value, str) and value else "?"
-
+    _short = integ.short_revision
     current = _mapping(pr.get("integration"))
     if bound.get("head") and current.get("head") \
             and current["head"] != bound["head"]:
@@ -1495,26 +1493,13 @@ def clear_return_awaiting(root: Path, pr_id: str, hop: str,
     return True
 
 
-def _mapping(value) -> dict:
-    """*value* when it is a mapping, else ``{}``.
-
-    ``project.yaml`` is hand-editable state: a malformed ``integration`` /
-    ``resolution`` / ``signoff`` value must read as absent, never raise out of
-    a prompt, a CLI surface or the merge gate (the same contract
-    :func:`pm_core.integration.contained_base` and :func:`qa_evidence` follow).
-    """
-    return value if isinstance(value, dict) else {}
-
-
-def _text(value, default: str = "?") -> str:
-    """*value* when it is text, else *default*.
-
-    ``project.yaml`` is hand-editable state: a reader must not print a value
-    the record does not hold, so an absent (or non-string) ``target_repo`` /
-    ``base_branch`` renders as the ``?`` placeholder the rest of the return
-    text and ``pm pr show`` use — not the literal ``None``.
-    """
-    return value if isinstance(value, str) and value else default
+# ``project.yaml`` is hand-editable state: a malformed ``integration`` /
+# ``resolution`` / ``signoff`` value reads as absent (``_mapping``), and a
+# reader never prints a value the record does not hold (``_text`` renders the
+# ``?`` placeholder).  One implementation, shared with the integration record
+# readers, the sign-off prompt and ``pm pr show``.
+_mapping = integration._mapping
+_text = integration._text
 
 
 def _resolution_of(record) -> dict:
@@ -1547,7 +1532,7 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
     if not rec:
         return ""
     reviewed = rec.get("reviewed_head")
-    head = reviewed[:12] if isinstance(reviewed, str) and reviewed else "?"
+    head = integration.short_revision(reviewed)
     # The provenance line below is a command the agent is told to run, and
     # ``signoff_return`` is hand-editable project.yaml state: only a git
     # object name may become its revision (the same rule ``contained_base``

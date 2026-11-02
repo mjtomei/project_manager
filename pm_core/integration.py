@@ -894,10 +894,21 @@ def _text(value, default: str = "?") -> str:
     ``project.yaml`` is hand-editable state: a reader must not print a value
     the record does not hold, so an absent (or non-string) ``base_branch`` /
     ``target_repo`` / ``error`` renders as the ``?`` placeholder every other
-    surface uses — not the literal ``None`` or a mapping's repr.  The same
-    rule :func:`pm_core.signoff._text` applies to the return text.
+    surface uses — not the literal ``None`` or a mapping's repr.  The return
+    text (:mod:`pm_core.signoff`) and the sign-off prompt use this same helper.
     """
     return value if isinstance(value, str) and value else default
+
+
+def short_revision(value, default: str = "?") -> str:
+    """The 12-character label of a revision/tree, or *default*.
+
+    For *display* only (messages, prompt lines, ``pm pr show``): a hand-edited
+    non-string value is rendered as *default* instead of being sliced (which
+    raised ``TypeError`` on an int).  A revision that becomes part of a
+    command must go through :func:`_sha_like` first.
+    """
+    return value[:12] if isinstance(value, str) and value else default
 
 
 _OBJECT_NAME_RE = re.compile(r"[0-9a-fA-F]{7,64}\Z")

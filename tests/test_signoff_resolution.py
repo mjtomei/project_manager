@@ -5497,7 +5497,8 @@ def test_github_merge_verification_only_passes_object_names_to_git(
     ``verify_github_merge`` builds ``<base_sha>..<tip>``.  A hand-edited
     ``base_sha`` that is merely a non-empty string (``--output=<file>``) was
     handed to git as an *option* — the log was written to a file — instead of
-    reading as no revision to verify.
+    reading as no revision to verify.  Nothing was compared, so the result is
+    a could-not-verify ``error`` — never an ``ok`` verification.
     """
     from pm_core import merge_integrity
 
@@ -5515,7 +5516,8 @@ def test_github_merge_verification_only_passes_object_names_to_git(
         result = merge_integrity.verify_github_merge(
             PR, str(w.wd), "repo", "master", base, head,
             {"candidate_tree": "d" * 40})
-        assert result.ok and result.problem is None, (base, head)
+        assert not result.ok and result.problem is None, (base, head)
+        assert "does not name a git revision" in result.error, (base, head)
     assert calls == []
     assert not list(w.tmp.glob("written-by-git-log*"))
     # A real object name still reaches the log.
@@ -5573,6 +5575,14 @@ def test_approved_candidate_reads_malformed_approvals_as_absent():
     assert merge_integrity.approved_candidate(
         {"signoff": {"verdict": SIGNOFF_MERGE, "sha": "a" * 40,
                      "integration": {"base_sha": 456}}}) is None
+    # Nor can a string that is not a git object name: it would become a
+    # ``git log`` argument (an option, or a ref that names something else).
+    for sha, base in (("HEAD", "b" * 40), ("a" * 40, "--output=/tmp/x"),
+                      ("a" * 40, "master")):
+        assert merge_integrity.approved_candidate(
+            {"signoff": {"verdict": SIGNOFF_MERGE, "sha": sha,
+                         "integration": {"base_sha": base}}}) is None, (
+            sha, base)
 
 
 def test_apply_to_pr_tolerates_malformed_notes():

@@ -941,12 +941,14 @@ tests):
     `pm_core/merge_integrity.py`, the single implementation shared by the
     publisher, the TUI sync paths and `pm pr sync` (see "Integration with
     master: merge_integrity" below): `approved_candidate` reads a scalar
-    `signoff`/`integration` as absent and validates both revisions through
-    `integration.revision_of`, `verify_github_merge` passes only git object
-    names (`integration._sha_like`) into the `git log` range — a non-empty
+    `signoff`/`integration` as absent and accepts only git object names
+    (`integration._sha_like`) as the approved revisions, `verify_github_merge`
+    passes only object names into the `git log` range — a non-empty
     string such as `--output=<file>` is an option to git, not a revision —
-    and reads a non-mapping `bound` as absent,
-    and `apply_to_pr` collects note ids through `_notes_of`/`_note_id` so a
+    and answers a could-not-verify `error` (never an `ok` result it did not
+    check) when handed one that is not, and reads a non-mapping `bound` as
+    absent,
+    and `apply_to_pr` collects note ids through `store.notes_of`/`store.note_id` so a
     hand-edited unhashable id cannot raise `TypeError` out of the set it
     builds for `generate_note_id`.
     `pm pr show` — the reader `integration_pointer` tells a session to run —
@@ -1235,27 +1237,36 @@ lock). This PR's R9-14 hand-edited-state guards were inline in
 merge keeps master's structure and ports them into `merge_integrity`:
 
 - `approved_candidate()` reads a non-mapping `signoff`/`integration` as absent
-  and validates `sha`/`base_sha` through `integration.revision_of` — a
-  revision that is not a string cannot name the signed-off candidate, so the
-  recovery path skips verification instead of raising.
+  and validates `sha`/`base_sha` through `integration._sha_like` — a
+  revision that is not a git object name (a non-string, a ref, an
+  option-looking string) cannot name the signed-off candidate, so the
+  recovery and sync paths skip verification (exactly as for a PR with no
+  approval) instead of raising.
 - `verify_github_merge()` validates `base_sha`/`head` as git object names
   (`integration._sha_like`, the rule `contained_base` applies to every
   revision it hands to a command) before interpolating them into the
   `git log` range — `git log` parses an argument starting with `-` as an
   option, so a hand-edited `base_sha` of `--output=<file>` wrote the log to a
   file instead of reading as no revision — and reads a non-mapping `bound` as
-  absent. Every displayed revision/tree goes through `_short`
-  (a hand-edited `candidate_tree` renders `?` and the mismatch is recorded
-  rather than raising `TypeError`).
-- `apply_to_pr()` reads notes through `_notes_of`/`_note_id`, so a hand-edited
+  absent. Such a call compares nothing, so it returns a could-not-verify
+  `error`, never an `ok` verification (`approved_candidate` keeps the
+  recovery and sync callers from reaching it). Every displayed revision/tree
+  goes through `integration.short_revision` (a hand-edited `candidate_tree`
+  renders `?` and the mismatch is recorded rather than raising `TypeError`);
+  the merge gate, the sign-off prompt and the return text use the same
+  helper, and `signoff` reuses `integration._mapping`/`_text` instead of
+  keeping copies.
+- `apply_to_pr()` reads notes through `store.notes_of`/`store.note_id`, so a hand-edited
   unhashable id cannot raise `TypeError` out of the set passed to
   `generate_note_id`; malformed members are preserved, and the mismatch note
   is still added once.
 - `pm_core/cli/pr.py` keeps master's thin `_verify_github_merge` wrapper
   (verify → record under the store lock) and the recovery path's
-  `merge_integrity.approved_candidate` call. `_notes_of`/`_note_id`/
-  `_note_text` stay in `pm_core/cli/pr.py` for the note commands;
-  `merge_integrity` has its own small pair.
+  `merge_integrity.approved_candidate` call. The note readers
+  (`store.notes_of`/`store.note_id`, beside `store.generate_note_id`) are
+  shared by the note commands, `merge_integrity.apply_to_pr` and the TUI's
+  QA completion note instead of each keeping a copy; `_note_text` stays in
+  `pm_core/cli/pr.py`, its only user.
 
 Regression: `test_github_merge_verification_renders_a_malformed_candidate_safely`
 and `test_recovery_skips_verification_for_a_malformed_approval` (this branch's

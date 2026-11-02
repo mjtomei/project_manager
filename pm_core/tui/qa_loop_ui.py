@@ -1756,8 +1756,7 @@ def _record_qa_note(app, state: QALoopState,
             # member that is not a mapping has no ``id`` — neither is a note
             # (``n["id"]`` raised ``TypeError``/``KeyError`` and the QA note,
             # the next session's handoff, was silently lost).
-            notes = pr.get("notes")
-            notes = notes if isinstance(notes, list) else []
+            notes = store.notes_of(pr)
             run_tail = f" (workdir: {state.qa_workdir})"
 
             def _this_run_note(n) -> bool:
@@ -1776,8 +1775,7 @@ def _record_qa_note(app, state: QALoopState,
                 # is rebuilt from the snapshot, so match the run, not it.
                 _log.info("QA note for %s already recorded", state.pr_id)
                 return
-            existing_ids = {n.get("id") for n in notes
-                            if isinstance(n, dict) and isinstance(n.get("id"), str)}
+            existing_ids = {i for i in map(store.note_id, notes) if i}
             note_id = store.generate_note_id(state.pr_id, note_text, existing_ids)
             now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             notes.append({"id": note_id, "text": note_text,

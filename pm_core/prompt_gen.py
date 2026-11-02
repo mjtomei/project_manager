@@ -856,19 +856,11 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
                 f"integrate {pr_id}` before routing; {SIGNOFF_MERGE} is "
                 "impossible without one._\n")
 
-    def _short(value, default="?"):
-        """The 12-character form of a revision/tree, or *default*."""
-        return value[:12] if isinstance(value, str) and value else default
-
-    def _text(value, default="?"):
-        """*value* when it is text, else *default* (hand-edited state).
-
-        A reader must not print a value the record does not hold: an absent
-        (or non-string) ``target_repo``/``base_branch`` rendered as the
-        literal ``None``, beside the ``?`` placeholders the rest of this block
-        and ``pm pr show`` use for an absent revision.
-        """
-        return value if isinstance(value, str) and value else default
+    # Hand-edited state: a revision/tree that is not text renders as the
+    # placeholder, and a reader never prints a value the record does not hold
+    # (an absent ``target_repo``/``base_branch`` is ``?``, not ``None``).
+    _short = integ.short_revision
+    _text = integ._text
 
     # Revisions from the record are interpolated into commands the agent is
     # told to run (``git diff <rev> HEAD``).  project.yaml is hand-editable

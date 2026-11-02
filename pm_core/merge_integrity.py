@@ -43,14 +43,10 @@ class MergeVerification:
         return self.problem is None and self.error is None
 
 
-def _short(value) -> str:
-    """*value* as a short revision/tree label, never sliced if not a string.
-
-    The approval is hand-editable state: a non-string revision or candidate
-    tree is rendered as ``"?"`` instead of raising ``TypeError`` out of the
-    recovery path, which does not go through the merge gate.
-    """
-    return value[:12] if isinstance(value, str) and value else "?"
+# The approval is hand-editable state: a non-string revision or candidate tree
+# renders as ``"?"`` instead of raising ``TypeError`` out of the recovery path,
+# which does not go through the merge gate.
+_short = integration.short_revision
 
 
 def approved_candidate(pr_entry: dict) -> tuple[str, dict] | None:
@@ -61,9 +57,11 @@ def approved_candidate(pr_entry: dict) -> tuple[str, dict] | None:
     so it cannot be verified (and the merge gate never accepts it anyway).
 
     ``signoff``/``integration`` are hand-editable state: a value that is not a
-    mapping is no record, and a revision that is not a string cannot name the
-    candidate that was signed off, so it reads as absent — verification is
-    skipped, not crashed.
+    mapping is no record, and a revision that is not a git object name (a
+    non-string, a ref, an option-looking string) cannot name the candidate
+    that was signed off, so it reads as absent — verification is skipped, not
+    crashed, exactly like a PR with no approval.  The rule is the one
+    :func:`verify_github_merge` applies to the ``git log`` range it builds.
 
     ``candidate_tree`` is deliberately *not* normalized here.  It is the value
     the published tree is compared against, not a revision to look up: a
@@ -76,8 +74,8 @@ def approved_candidate(pr_entry: dict) -> tuple[str, dict] | None:
     approved = approved if isinstance(approved, dict) else {}
     bound = approved.get("integration")
     bound = bound if isinstance(bound, dict) else {}
-    head = integration.revision_of(approved.get("sha"))
-    base_sha = integration.revision_of(bound.get("base_sha"))
+    head = integration._sha_like(approved.get("sha"))
+    base_sha = integration._sha_like(bound.get("base_sha"))
     if (approved.get("verdict") == signoff.SIGNOFF_MERGE
             and head and base_sha):
         return head, bound
@@ -94,17 +92,20 @@ def verify_github_merge(pr_id: str, workdir: str, target_repo: str,
     ``bound["candidate_tree"]``.  This is the check ``pm pr merge`` runs
     after publication, shared with every sync path that discovers a merge.
     """
-    # The approval is hand-editable state: a revision that is not a string is
-    # no revision to verify, and one interpolated into the ``git log`` range
-    # must be a real object name — both read as absent.  A bare non-empty
-    # string is not enough: ``git log`` parses an argument that starts with
-    # ``-`` as an option, so a recorded ``base_sha`` of ``--output=<file>``
-    # made the verification write the log to a file instead of reading it.
+    # The approval is hand-editable state: only a git object name may go into
+    # the ``git log`` range.  A bare non-empty string is not enough: ``git
+    # log`` parses an argument that starts with ``-`` as an option, so a
+    # recorded ``base_sha`` of ``--output=<file>`` made the verification write
+    # the log to a file instead of reading it.  :func:`approved_candidate`
+    # already reads such an approval as absent; a direct caller gets a
+    # could-not-verify ``error``, never an ``ok`` result for a merge nothing
+    # was compared against.
     base_sha = integration._sha_like(base_sha)
     head = integration._sha_like(head)
     bound = bound if isinstance(bound, dict) else {}
     if not base_sha or not head:
-        return MergeVerification()
+        return MergeVerification(
+            error="the approval does not name a git revision to verify")
     tip, err = integration.fetch_base(workdir, target_repo, base_branch)
     if err or not tip:
         return MergeVerification(error=err or "no base revision")
@@ -184,23 +185,6 @@ def verify_detected_merge(root, data: dict, pr_entry: dict, workdir: str,
         return MergeVerification(error=str(e) or type(e).__name__)
 
 
-def _notes_of(pr: dict) -> list:
-    """A PR's ``notes`` as a list (hand-edited state may hold a scalar)."""
-    notes = pr.get("notes")
-    return notes if isinstance(notes, list) else []
-
-
-def _note_id(n) -> str | None:
-    """A note's ``id`` when it is a string (hand-edited members read absent).
-
-    The ids are collected into a ``set`` for :func:`store.generate_note_id`, so
-    a list/mapping id (an unhashable value) raised ``TypeError`` out of every
-    check that recorded a mismatch — including the TUI sync paths.
-    """
-    value = n.get("id") if isinstance(n, dict) else None
-    return value if isinstance(value, str) and value else None
-
-
 def apply_to_pr(pr: dict, verification: MergeVerification | None) -> None:
     """Record a mismatch on *pr* and note it once (mutates *pr*).
 
@@ -217,12 +201,12 @@ def apply_to_pr(pr: dict, verification: MergeVerification | None) -> None:
     text = f"Merge integrity: {problem}."
     # Hand-edited state: a malformed member is not a note, so it neither
     # suppresses this warning nor contributes an id.
-    notes = _notes_of(pr)
+    notes = store.notes_of(pr)
     if any(isinstance(n, dict) and n.get("text") == text for n in notes):
         return
     created = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     note_id = store.generate_note_id(
         pr.get("id") or "", text,
-        {i for i in (_note_id(n) for n in notes) if i})
+        {i for i in (store.note_id(n) for n in notes) if i})
     pr["notes"] = notes + [{"id": note_id, "text": text,
                             "created_at": created, "last_edited": created}]
