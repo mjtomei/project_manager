@@ -137,10 +137,16 @@ def preferred_split_direction(session: str, window: str) -> str:
     is physically wider than tall, vertically otherwise.
     """
     w, h = get_reliable_window_size(session, window)
-    if w <= 0 or h <= 0:
+    return split_direction(w, h)
+
+
+def split_direction(width: int, height: int) -> str:
+    """'h' (left|right) when a *width* x *height* cell area is physically
+    wider than tall, else 'v' (top/bottom); 'h' for an unknown size."""
+    if width <= 0 or height <= 0:
         return "h"  # fallback
     # Same heuristic as _layout_node: physical_width ∝ w, physical_height ∝ h*2
-    return "h" if w >= h * 2 else "v"
+    return "h" if width >= height * 2 else "v"
 
 
 def _ensure_logging():

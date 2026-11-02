@@ -824,8 +824,10 @@ class TestPopupPickerNoActions:
         fzf, run_cmd = _run_picker(
             tmp_path, monkeypatch, prs, ["#238"], "#238", [(130, "")])
         (call,) = fzf.calls
-        # Only (unadvertised) nav keys are accepted — no action keys.
-        assert set(_expect(call)) == {"h", "l", "left", "right", "0"}
+        # Only (unadvertised) nav keys and the read-only pane keys are
+        # accepted — no phase-action keys.
+        assert set(_expect(call)) == {"h", "l", "left", "right", "0",
+                                      "c", "o", "u", "y"}
         assert "h/l" not in _header(call)
         assert "enter:ignore" in next(a for a in call["cmd"]
                                       if a.startswith("--bind="))
@@ -1993,200 +1995,140 @@ class TestPopupPickerTypeAhead:
         run_cmd.assert_called_once()
         assert "\033[2J" in capsys.readouterr().out
 
-class TestOpenPaneForPr:
-    """Picker shortcuts c/i/Q open a split pane in the launching window."""
 
-    def _patches(self):
-        return (
-            patch("pm_core.cli.session.tmux_mod.find_window_by_name",
-                  return_value={"id": "@7", "index": "3", "name": "main"}),
-            patch("pm_core.cli.session.tmux_mod.split_pane",
-                  return_value="%42"),
-            patch("pm_core.cli.session.pane_registry.register_pane"),
-            patch("pm_core.cli.session._wait_dismiss"),
-        )
+class TestPickerPaneKeys:
+    """c/o/u/y open a pane for the shown PR by dispatching the CLI command.
 
-    def test_shell_no_workdir_errors(self, tmp_path):
-        from pm_core.cli.session import _open_pane_for_pr
-        find, split, reg, dismiss = self._patches()
-        with find, split as split_mock, reg, dismiss as dismiss_mock:
-            _open_pane_for_pr("sess", "main",
-                              {"id": "pr-001", "workdir": None},
-                              "shell", tmp_path)
-        assert not split_mock.called
-        assert dismiss_mock.called
+    The picker runs the same ``pm pr shell`` / ``view-spec`` / ``view-diff``
+    commands a typed shell or prefix+M would, with the PR's pm id; the
+    popup's exported session makes the command target the opening
+    client's window.
+    """
 
-    def test_shell_with_workdir_splits_and_registers(self, tmp_path):
-        from pm_core.cli.session import _open_pane_for_pr
-        wd = tmp_path / "work"
-        wd.mkdir()
-        find, split, reg, dismiss = self._patches()
-        with find, split as split_mock, reg as reg_mock, dismiss:
-            _open_pane_for_pr("sess", "main",
-                              {"id": "pr-001", "workdir": str(wd)},
-                              "shell", tmp_path)
-        assert split_mock.called
-        assert split_mock.call_args.kwargs.get("window") == "main"
-        cmd = split_mock.call_args.args[2]
-        assert str(wd) in cmd
-        assert reg_mock.called
-        assert reg_mock.call_args.args[3] == "pr-shell"
+    PRS = [
+        {"id": "pr-m", "status": "merged", "title": "Merged",
+         "gh_pr_number": 238},
+        {"id": "pr-r", "status": "in_review", "title": "Review",
+         "gh_pr_number": 240},
+    ]
+    WINDOWS = ["tui", "#238", "#240"]
 
-    def test_impl_spec_missing_errors(self, tmp_path):
-        from pm_core.cli.session import _open_pane_for_pr
-        find, split, reg, dismiss = self._patches()
-        with find, split as split_mock, reg, dismiss as dismiss_mock:
-            _open_pane_for_pr("sess", "main", {"id": "pr-001"},
-                              "impl-spec", tmp_path)
-        assert not split_mock.called
-        assert dismiss_mock.called
+    @pytest.mark.parametrize("key, cmd", [
+        ("c", "pr shell pr-r"),
+        ("o", "pr view-spec pr-r --kind impl"),
+        ("u", "pr view-spec pr-r --kind qa"),
+        ("y", "pr view-diff pr-r"),
+    ])
+    def test_pane_key_dispatches_cli_command(self, tmp_path, monkeypatch,
+                                             key, cmd):
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, self.PRS, self.WINDOWS, "#240",
+            [(0, f"{key}\n")])
+        run_cmd.assert_called_once_with(cmd, "pm-x")
+        assert len(fzf.calls) == 1
 
-    def test_impl_spec_present_opens_pane(self, tmp_path):
-        from pm_core.cli.session import _open_pane_for_pr
-        spec_dir = tmp_path / "specs" / "pr-001"
-        spec_dir.mkdir(parents=True)
-        (spec_dir / "impl.md").write_text("# spec\n")
-        find, split, reg, dismiss = self._patches()
-        with find, split as split_mock, reg as reg_mock, dismiss:
-            _open_pane_for_pr("sess", "main", {"id": "pr-001"},
-                              "impl-spec", tmp_path)
-        cmd = split_mock.call_args.args[2]
-        assert "impl.md" in cmd
-        assert "glow" in cmd
-        assert reg_mock.call_args.args[3] == "pr-impl-spec"
+    def test_header_and_expect_list_pane_keys(self, tmp_path, monkeypatch):
+        fzf, _ = _run_picker(
+            tmp_path, monkeypatch, self.PRS, self.WINDOWS, "#240",
+            [(130, "")])
+        call = fzf.calls[0]
+        assert "pane: c=shell  o=impl-spec  u=qa-spec  y=diff" in _header(call)
+        assert {"c", "o", "u", "y"} <= set(_expect(call))
+        # Bound to fzf's ignore otherwise: every pane key must be expected.
+        binds = next(a for a in call["cmd"] if a.startswith("--bind="))
+        for key in "couy":
+            assert f"{key}:ignore" not in binds
 
-    def test_qa_spec_prefers_workdir_copy(self, tmp_path):
-        from pm_core.cli.session import _open_pane_for_pr
-        canon = tmp_path / "specs" / "pr-001"
-        canon.mkdir(parents=True)
-        (canon / "qa.md").write_text("canonical\n")
-        wd = tmp_path / "work"
-        (wd / "pm" / "specs" / "pr-001").mkdir(parents=True)
-        wd_spec = wd / "pm" / "specs" / "pr-001" / "qa.md"
-        wd_spec.write_text("fresh\n")
-        find, split, reg, dismiss = self._patches()
-        with find, split as split_mock, reg, dismiss:
-            _open_pane_for_pr("sess", "main",
-                              {"id": "pr-001", "workdir": str(wd)},
-                              "qa-spec", tmp_path)
-        cmd = split_mock.call_args.args[2]
-        assert str(wd_spec) in cmd
+    def test_i_still_runs_signoff(self, tmp_path, monkeypatch):
+        """Master binds i to sign-off; the impl-spec pane key must not
+        shadow it (it moved to o)."""
+        _, run_cmd = _run_picker(
+            tmp_path, monkeypatch, self.PRS, self.WINDOWS, "#240",
+            [(0, "i\n")])
+        run_cmd.assert_called_once_with("pr signoff pr-r", "pm-x")
 
-    def test_diff_no_workdir_errors(self, tmp_path):
-        from pm_core.cli.session import _open_pane_for_pr
-        find, split, reg, dismiss = self._patches()
-        with find, split as split_mock, reg, dismiss as dismiss_mock:
-            _open_pane_for_pr("sess", "main",
-                              {"id": "pr-001", "workdir": None},
-                              "diff", tmp_path,
-                              data={"project": {"base_branch": "master"}})
-        assert not split_mock.called
-        assert dismiss_mock.called
+    def test_pane_keys_distinct_from_every_other_key(self):
+        from pm_core.cli.session import _PANE_SHORTCUT_KEYS, _PANE_ACTION_CMDS
+        taken = {"q", "s", "e", "d", "t", "i", "g", "z", "h", "l", "0"}
+        assert not taken & set(_PANE_SHORTCUT_KEYS)
+        assert set(_PANE_SHORTCUT_KEYS.values()) == set(_PANE_ACTION_CMDS)
 
-    def test_diff_present_opens_pane(self, tmp_path):
-        from pm_core.cli.session import _open_pane_for_pr
-        wd = tmp_path / "work"
-        wd.mkdir()
-        find, split, reg, dismiss = self._patches()
-        data = {"project": {"base_branch": "main", "backend": "github"}}
-        with find, split as split_mock, reg as reg_mock, dismiss:
-            _open_pane_for_pr("sess", "main",
-                              {"id": "pr-001", "workdir": str(wd),
-                               "title": "x"},
-                              "diff", tmp_path, data=data)
-        cmd = split_mock.call_args.args[2]
-        assert "git --no-pager diff" in cmd
-        assert "origin/main...HEAD" in cmd
-        assert "less -R" in cmd
-        assert reg_mock.call_args.args[3] == "pr-diff"
+    def test_merged_home_pr_keeps_pane_keys_only(self, tmp_path, monkeypatch):
+        """A merged PR has no phase actions but its spec/diff/shell views
+        stay available (the CLI serves them for any status)."""
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, self.PRS, self.WINDOWS, "#238",
+            [(0, "o\n")])
+        call = fzf.calls[0]
+        assert set(_expect(call)) == {"c", "o", "u", "y",
+                                      "h", "l", "left", "right", "0"}
+        assert "pane: c=shell" in _header(call)
+        assert "s=start" not in _header(call)
+        run_cmd.assert_called_once_with("pr view-spec pr-m --kind impl", "pm-x")
 
-    def test_diff_local_backend_uses_bare_base(self, tmp_path):
-        from pm_core.cli.session import _open_pane_for_pr
-        wd = tmp_path / "work"
-        wd.mkdir()
-        find, split, reg, dismiss = self._patches()
-        data = {"project": {"base_branch": "master", "backend": "local"}}
-        with find, split as split_mock, reg, dismiss:
-            _open_pane_for_pr("sess", "main",
-                              {"id": "pr-001", "workdir": str(wd),
-                               "title": "t"},
-                              "diff", tmp_path, data=data)
-        cmd = split_mock.call_args.args[2]
-        assert "master...HEAD" in cmd
-        assert "origin/master" not in cmd
+    def test_unresolvable_pr_has_no_pane_keys(self, tmp_path, monkeypatch):
+        """Window #193 whose PR no longer resolves: nothing to target."""
+        prs = [{"id": "pr-f5b7eef", "status": "in_review", "title": "x"}]
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["#193"], "#193", [(130, "")])
+        call = fzf.calls[0]
+        assert not {"c", "o", "u", "y"} & set(_expect(call))
+        assert "pane:" not in _header(call)
+        run_cmd.assert_not_called()
 
+    def test_pr_vanishing_before_dispatch_runs_nothing(self, tmp_path,
+                                                       monkeypatch):
+        """The press refreshes first, like phase actions: a PR deleted
+        while the popup was open is not targeted by a stale snapshot."""
+        prs = [dict(p) for p in self.PRS]
 
-class TestPrCliPaneCommands:
-    """CLI parity for pr shell / view-spec / view-diff."""
+        def on_launch(n):
+            if n == 1:
+                del prs[1]
 
-    def test_view_spec_outside_tmux_prints_to_stdout(self, tmp_path, capsys):
-        from pm_core.cli.pr import _open_pane_for_pr_cli
-        spec_dir = tmp_path / "specs" / "pr-001"
-        spec_dir.mkdir(parents=True)
-        (spec_dir / "impl.md").write_text("# the spec\n")
-        with patch("pm_core.cli.pr._get_pm_session", return_value=None):
-            _open_pane_for_pr_cli({"id": "pr-001", "title": "t"},
-                                  "impl-spec", {}, tmp_path)
-        out = capsys.readouterr().out
-        assert "# the spec" in out
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, self.WINDOWS, "#240",
+            [(0, "y\n"), (130, "")], on_launch=on_launch)
+        run_cmd.assert_not_called()
+        assert len(fzf.calls) == 2
+        assert "pane:" not in _header(fzf.calls[1])
 
-    def test_view_spec_missing_errors(self, tmp_path):
-        from pm_core.cli.pr import _open_pane_for_pr_cli
-        with patch("pm_core.cli.pr._get_pm_session", return_value=None):
-            try:
-                _open_pane_for_pr_cli({"id": "pr-001"}, "impl-spec", {},
-                                      tmp_path)
-            except SystemExit as e:
-                assert e.code == 1
-            else:
-                assert False, "expected SystemExit"
+    def test_failed_refresh_runs_nothing(self, tmp_path, monkeypatch):
+        loads = {"n": 0}
 
-    def test_view_diff_outside_tmux_runs_subprocess(self, tmp_path):
-        from pm_core.cli.pr import _open_pane_for_pr_cli
-        wd = tmp_path / "work"
-        wd.mkdir()
-        data = {"project": {"base_branch": "main", "backend": "github"}}
-        with patch("pm_core.cli.pr._get_pm_session", return_value=None), \
-             patch("pm_core.cli.pr.subprocess.run") as run_mock:
-            _open_pane_for_pr_cli({"id": "pr-001", "workdir": str(wd),
-                                   "title": "x"},
-                                  "diff", data, tmp_path)
-        assert run_mock.called
-        cmd = run_mock.call_args.args[0]
-        assert cmd[0] == "/bin/bash"
-        # No piping to less for stdout invocation.
-        assert "less -R" not in cmd[2]
-        assert "origin/main...HEAD" in cmd[2]
+        def load_project(*a, **k):
+            loads["n"] += 1
+            if loads["n"] > 1:
+                raise ValueError("bad yaml")
+            return {"prs": [dict(p) for p in self.PRS]}
 
-    def test_shell_in_pm_tmux_splits_pane(self, tmp_path):
-        from pm_core.cli.pr import _open_pane_for_pr_cli
-        wd = tmp_path / "work"
-        wd.mkdir()
-        with patch("pm_core.cli.pr._get_pm_session", return_value="pm-x"), \
-             patch("pm_core.cli.pr.tmux_mod.in_tmux", return_value=True), \
-             patch("pm_core.cli.pr.tmux_mod.session_exists", return_value=True), \
-             patch("pm_core.cli.pr._current_tmux_window_id", return_value="@5"), \
-             patch("pm_core.cli.pr.tmux_mod.split_pane",
-                   return_value="%9") as split_mock, \
-             patch("pm_core.cli.pr.pane_registry.register_pane") as reg_mock:
-            _open_pane_for_pr_cli({"id": "pr-001", "workdir": str(wd)},
-                                  "shell", {}, tmp_path)
-        assert split_mock.called
-        assert split_mock.call_args.kwargs.get("window") == "@5"
-        assert str(wd) in split_mock.call_args.args[2]
-        assert reg_mock.call_args.args[3] == "pr-shell"
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, self.PRS, self.WINDOWS, "#240",
+            [(0, "c\n"), (130, "")], load_project=load_project)
+        run_cmd.assert_not_called()
+        assert "Could not refresh PR actions" in fzf.calls[1]["input"]
 
-    def test_build_diff_cmd_keep_pane_open_appends_exec_shell(self):
-        from pm_core.cli.pr import _build_diff_cmd
-        cmd = _build_diff_cmd("/tmp/wd", "#1", "title", "main", "github",
-                              shell="/bin/zsh")
-        assert cmd.endswith("; exec /bin/zsh")
-        assert ("| if command -v less >/dev/null 2>&1;"
-                " then less -R; else cat; echo; echo; fi") in cmd
+    def test_no_fzf_fallback_accepts_pane_key(self, tmp_path, monkeypatch,
+                                              capsys):
+        monkeypatch.setattr("builtins.input", lambda prompt="": "u")
+        _, run_cmd = _run_picker(
+            tmp_path, monkeypatch, self.PRS, self.WINDOWS, "#240", [],
+            has_fzf=False)
+        assert "Panes: c=shell  o=impl-spec  u=qa-spec  y=diff" in \
+            capsys.readouterr().out
+        run_cmd.assert_called_once_with("pr view-spec pr-r --kind qa", "pm-x")
 
-    def test_build_diff_cmd_stdout_variant_no_less_no_exec(self):
-        from pm_core.cli.pr import _build_diff_cmd
-        cmd = _build_diff_cmd("/tmp/wd", "#1", "t", "main", "github",
-                              pipe_to_less=False, keep_pane_open=False)
-        assert "less" not in cmd
-        assert "exec" not in cmd
+    def test_no_fzf_fallback_merged_pr_offers_panes(self, tmp_path,
+                                                    monkeypatch, capsys):
+        prompts = []
+
+        def fake_input(prompt=""):
+            prompts.append(prompt)
+            return "y"
+
+        monkeypatch.setattr("builtins.input", fake_input)
+        _, run_cmd = _run_picker(
+            tmp_path, monkeypatch, self.PRS, self.WINDOWS, "#238", [],
+            has_fzf=False)
+        assert prompts == ["Pane key: "]
+        run_cmd.assert_called_once_with("pr view-diff pr-m", "pm-x")

@@ -975,6 +975,27 @@ _MODIFIED_ACTION_CMDS: dict[tuple[str, str], str] = {
     ("z",  "signoff"): "pr signoff --fresh {pr_id}",
 }
 
+# Picker keys that open a pane for the shown PR in the window the picker
+# was opened over, rather than run a phase action: they dispatch the same
+# CLI commands a typed shell or a prefix+M command would (the popup's
+# exported session makes the command target the opening client's current
+# window).  Read-only views, so they are offered for any PR that resolves,
+# including merged/closed ones.  Keys avoid q (quit), the phase shortcuts
+# (_SHORTCUT_KEYS: s/e/d/t/i/g), z (chord) and h/l/0 (navigation).
+_PANE_SHORTCUT_KEYS: dict[str, str] = {
+    "c": "shell",
+    "o": "impl-spec",
+    "u": "qa-spec",
+    "y": "diff",
+}
+
+_PANE_ACTION_CMDS: dict[str, str] = {
+    "shell": "pr shell {pr_id}",
+    "impl-spec": "pr view-spec {pr_id} --kind impl",
+    "qa-spec": "pr view-spec {pr_id} --kind qa",
+    "diff": "pr view-diff {pr_id}",
+}
+
 # Map action labels to tmux window name patterns.
 # ``None`` means the action doesn't open its own tmux window — it's a
 # *shortcut-only* action.  Such actions don't appear as rows in the
@@ -1899,91 +1920,6 @@ def _wait_dismiss(prompt: str = "\nPress q/Esc/Enter to close...") -> None:
         pass
 
 
-def _open_pane_for_pr(
-    session: str,
-    window_name: str,
-    pr: dict,
-    kind: str,
-    root: Path,
-    data: dict | None = None,
-) -> None:
-    """Open a split pane in *window_name* for the given PR.
-
-    *kind* is one of 'shell', 'impl-spec', 'qa-spec', 'diff'.  Returns
-    silently after dispatching; on user-facing errors prints a message
-    and waits for dismiss so the popup stays visible.
-    """
-    from pm_core.cli.pr import (
-        _build_diff_cmd,
-        _build_shell_at_workdir_cmd,
-        _build_spec_viewer_cmd,
-        _resolve_spec_path,
-    )
-
-    pr_id = pr.get("id", "")
-
-    if kind == "shell":
-        workdir = pr.get("workdir")
-        if not workdir or not Path(workdir).is_dir():
-            click.echo(f"PR {pr_id} has no workdir; start it first.")
-            _wait_dismiss()
-            return
-        cmd = _build_shell_at_workdir_cmd(workdir)
-        role = "pr-shell"
-    elif kind in ("impl-spec", "qa-spec"):
-        phase = "impl" if kind == "impl-spec" else "qa"
-        spec_path = _resolve_spec_path(pr, root, phase)
-        if spec_path is None:
-            click.echo(
-                f"No {phase} spec for {pr_id} — "
-                f"run 'pm pr spec {pr_id} {phase}' first."
-            )
-            _wait_dismiss()
-            return
-        cmd = _build_spec_viewer_cmd(spec_path)
-        role = f"pr-{kind}"
-    elif kind == "diff":
-        workdir = pr.get("workdir")
-        if not workdir or not Path(workdir).is_dir():
-            click.echo(f"PR {pr_id} has no workdir; start it first.")
-            _wait_dismiss()
-            return
-        # Reuse review window's diff command builder so picker D, CLI
-        # view-diff, and review pane all show identical content.
-        from pm_core.cli.helpers import _pr_display_id, state_root
-        if data is None:
-            try:
-                from pm_core import store
-                data = store.load(state_root())
-            except Exception:
-                data = {}
-        display_id = _pr_display_id(pr)
-        title = pr.get("title", "")
-        base_branch = (data.get("project", {}) or {}).get("base_branch", "master")
-        backend_name = (data.get("project", {}) or {}).get("backend", "vanilla")
-        cmd = _build_diff_cmd(workdir, display_id, title, base_branch,
-                              backend_name)
-        role = "pr-diff"
-    else:
-        return
-
-    # Resolve the launching window's id so we can register the pane.
-    win = tmux_mod.find_window_by_name(session, window_name) if window_name else None
-    target_window = window_name or None
-    try:
-        pane_id = tmux_mod.split_pane(session, "h", cmd, window=target_window)
-    except subprocess.CalledProcessError as e:
-        click.echo(f"split-window failed: {e}")
-        _wait_dismiss()
-        return
-
-    if win and win.get("id"):
-        try:
-            pane_registry.register_pane(session, win["id"], pane_id, role, cmd)
-        except Exception:
-            pass
-
-
 def _run_picker_command(cmd: str, session: str) -> None:
     """Execute a picker command — either direct CLI or routed through TUI."""
     route = "tui" if cmd.startswith("tui:") else "direct"
@@ -2366,8 +2302,13 @@ def popup_picker_cmd(session: str, window_name: str):
 
     fzf_input_lines = [display for display, _, _ in lines]
 
-    def _still_has_action(label: str) -> bool:
-        """Refresh before either interface dispatches a selected action."""
+    def _refresh_selected() -> bool:
+        """Refresh before either interface dispatches for the shown PR.
+
+        Rebinds ``_picked_pr`` / ``_label_to_cmd`` to the refreshed entry
+        (``None`` / empty when the PR vanished) and returns False when the
+        refresh itself failed; the rows then explain why nothing ran.
+        """
         # ``current_pr`` is only read here — navigation owns it.
         nonlocal nav_index, lines, _picked_pr, _label_to_cmd
         nonlocal fzf_input_lines
@@ -2403,7 +2344,21 @@ def popup_picker_cmd(session: str, window_name: str):
         else:
             lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)
         fzf_input_lines = [d for d, _, _ in lines]
-        return label in _label_to_cmd
+        return True
+
+    def _still_has_action(label: str) -> bool:
+        """Refresh before either interface dispatches a selected action."""
+        return _refresh_selected() and label in _label_to_cmd
+
+    def _pane_action_cmd(key: str) -> str | None:
+        """Refresh, then the pane-action command for *key* on the shown PR.
+
+        None when the refresh failed or the PR no longer resolves.
+        """
+        if not _refresh_selected() or _picked_pr is None:
+            return None
+        return _PANE_ACTION_CMDS[_PANE_SHORTCUT_KEYS[key]].format(
+            pr_id=_picked_pr["id"])
 
     has_fzf = shutil.which("fzf") is not None
 
@@ -2419,20 +2374,14 @@ def popup_picker_cmd(session: str, window_name: str):
         "i": "signoff",
         "g": "merge",
     }
-    # Shortcuts that open a split pane in the launching window
-    # rather than firing a phase action (see _open_pane_for_pr).
-    _PANE_SHORTCUT_KEYS = {
-        "c": "shell",
-        "o": "impl-spec",
-        "u": "qa-spec",
-        "y": "diff",
-    }
+    # Pane keys (c/o/u/y, see _PANE_SHORTCUT_KEYS) open a pane in the
+    # window the picker was opened over instead of running a phase action.
+    pane_hint = "  ".join(
+        f"{key}={label}" for key, label in _PANE_SHORTCUT_KEYS.items()
+    )
     if has_fzf:
         shortcut_hint = "  ".join(
             f"{key}={label}" for key, label in _SHORTCUT_KEYS.items()
-        )
-        pane_hint = "  ".join(
-            f"{key}={label}" for key, label in _PANE_SHORTCUT_KEYS.items()
         )
         chord_hint = "z s/d/t/i: fresh   zz d/t: loop"
 
@@ -2507,18 +2456,21 @@ def popup_picker_cmd(session: str, window_name: str):
                 # only offers quit + navigation: leaving the action keys
                 # out of --expect binds them to fzf's ignore.
                 has_actions = bool(_label_to_cmd)
+                # The read-only pane keys need only a resolved PR, so a
+                # merged/closed PR keeps them; an unresolvable one doesn't.
+                has_panes = _picked_pr is not None
                 if has_actions:
                     header_lines = [f"PR Actions — {_display_id(current_pr)}{pr_pos}",
                                     f"q/Esc: quit  {shortcut_hint}",
-                                    f"pane: {pane_hint}",
                                     chord_hint]
-                    expect = (list(_SHORTCUT_KEYS.keys())
-                              + list(_PANE_SHORTCUT_KEYS.keys())
-                              + ["z"])
+                    expect = list(_SHORTCUT_KEYS.keys()) + ["z"]
                 else:
                     header_lines = [f"PR Actions — {_display_id(current_pr)}{pr_pos}",
                                     "q/Esc: quit"]
                     expect = []
+                if has_panes:
+                    header_lines.insert(2, f"pane: {pane_hint}")
+                    expect += list(_PANE_SHORTCUT_KEYS.keys())
                 if nav_hint:
                     header_lines.append(nav_hint)
                 header = "\n".join(header_lines)
@@ -2579,6 +2531,11 @@ def popup_picker_cmd(session: str, window_name: str):
                     lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)
                     fzf_input_lines = [d for d, _, _ in lines]
                     continue
+                if has_panes and pressed_key in _PANE_SHORTCUT_KEYS:
+                    cmd_to_run = _pane_action_cmd(pressed_key)
+                    if cmd_to_run is None:
+                        continue  # the rows now say why
+                    break
                 if not has_actions:
                     # Nothing to run for this PR — never let a keypress
                     # on it close the picker; only q/Esc does.
@@ -2586,15 +2543,6 @@ def popup_picker_cmd(session: str, window_name: str):
                 if pressed_key == "z":
                     chord_state = "z"
                     continue
-                if pressed_key in _PANE_SHORTCUT_KEYS:
-                    if _picked_pr is not None:
-                        # Target the launching window in the base session;
-                        # the popup runs in a transient overlay.
-                        _open_pane_for_pr(
-                            base, window_name, _picked_pr,
-                            _PANE_SHORTCUT_KEYS[pressed_key], Path(root),
-                            data=data)
-                    raise SystemExit(0)
                 if pressed_key in _SHORTCUT_KEYS:
                     action_label = _SHORTCUT_KEYS[pressed_key]
                     if not _still_has_action(action_label):
@@ -2675,21 +2623,36 @@ def popup_picker_cmd(session: str, window_name: str):
                 numbered.append((num, cmd))
                 click.echo(f"  {num}) {display.strip()}")
 
-        if not numbered:
+        has_panes = _picked_pr is not None
+        if not numbered and not has_panes:
             # No actions for this PR (notice row printed above); there is
             # no navigation without fzf, so wait for the user to read it.
             _pause_and_exit(0)
 
-        shortcut_hint = "  ".join(
-            f"{key}={label}" for key, label in _SHORTCUT_KEYS.items()
-        )
-        click.echo(f"\nShortcuts: {shortcut_hint}")
+        if numbered:
+            shortcut_hint = "  ".join(
+                f"{key}={label}" for key, label in _SHORTCUT_KEYS.items()
+            )
+            click.echo(f"\nShortcuts: {shortcut_hint}")
+        if has_panes:
+            click.echo(("" if numbered else "\n") + f"Panes: {pane_hint}")
+        prompt = (f"Select [1-{num}] or shortcut key: " if numbered
+                  else "Pane key: ")
         try:
-            choice = input(f"Select [1-{num}] or shortcut key: ").strip()
+            choice = input(prompt).strip()
         except (EOFError, KeyboardInterrupt):
             raise SystemExit(0)
 
-        target_label = _SHORTCUT_KEYS.get(choice)
+        if has_panes and choice in _PANE_SHORTCUT_KEYS:
+            pane_cmd = _pane_action_cmd(choice)
+            if pane_cmd is None:
+                for display, _, _ in lines:
+                    click.echo(display)
+                _pause_and_exit(0)
+            _run_picker_command(pane_cmd, session)
+            raise SystemExit(0)
+
+        target_label = _SHORTCUT_KEYS.get(choice) if numbered else None
         if target_label is None:
             try:
                 choice_num = int(choice)

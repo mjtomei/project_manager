@@ -328,3 +328,15 @@ def test_review_container_uses_selected_route(fake_tmux, monkeypatch):
     # creates; the untagged name left a running one to be reused.
     remove.assert_called_once_with(
         cm._make_container_name("review-pr-001", session_tag="test"))
+
+
+@pytest.mark.parametrize("title", HOSTILE_TITLES[:2])
+def test_review_diff_pane_is_the_view_diff_pane(fake_tmux, tmp_path, title):
+    """pr-cfe24ea: the review window builds its diff pane through the same
+    code path as ``pm pr view-diff`` (prefix+P ``y``), so the two panes
+    always show the same content."""
+    data = _make_data()
+    pr_entry = _make_pr(title, fake_tmux["workdir"])
+    pr_mod._launch_review_window(data, pr_entry)
+    view_diff_cmd, _ = pr_mod._pr_pane_command(pr_entry, "diff", data, tmp_path)
+    assert fake_tmux["captured"]["diff_cmd"] == view_diff_cmd
