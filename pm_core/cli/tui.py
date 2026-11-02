@@ -34,6 +34,12 @@ def tui_cmd():
 
     log = configure_logger("pm.tui.crash")
 
+    # Journal events and runtime entries this image writes carry
+    # owner.role "tui": a reader then knows that an in-flight entry this
+    # TUI drives dies with it (until the next TUI's mount sweep).
+    from pm_core import action_history
+    action_history.set_owner_role("tui")
+
     # Protect the startup window from IPC signals: until the real asyncio
     # handlers are installed, the default action for SIGUSR1/SIGUSR2 is
     # terminate.  These no-ops are replaced on mount.

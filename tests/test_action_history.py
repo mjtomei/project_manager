@@ -558,6 +558,42 @@ class TestRuntimeCapture:
                 a = hq.build_history(PR, now=clock.t)["attempts"][0]
             assert a["outcome"] == "interrupted"
 
+    def test_attempt_a_dead_tui_drove_is_not_tracked(self, clock):
+        # QA S61: a TUI tracks the impl pane (start entry in flight, stamped
+        # by the TUI) and is SIGKILLed.  Until the next TUI's mount sweep
+        # nothing drives that entry, so its attempt reads interrupted (owner
+        # exited) like a loop's, and the Now line marks the entry stale.
+        ah.set_owner_role("tui")
+        try:
+            rs.set_action_state(PR, "start", "running", pane_id="%1",
+                                session_id="s1")
+            rs.set_action_state(PR, "start", "idle")
+        finally:
+            ah.set_owner_role(None)
+        entry = rs.get_action_state(PR, "start")
+        assert entry["owner"]["role"] == "tui"
+        (ev,) = ah.read_events(PR)
+        assert ev["owner"]["role"] == "tui"
+        clock.advance(20)
+        # Live TUI: tracked, running.
+        assert hq.build_history(PR, now=clock.t)["attempts"][0]["open"]
+        with patch.object(ah, "owner_alive", return_value=False):
+            m = hq.build_history(PR, now=clock.t)
+        (a,) = m["attempts"]
+        assert a["id"] == entry["attempt_id"] and not a["open"]
+        assert a["outcome"] == "interrupted"
+        assert a["inferred"] == "owner-exited"
+        assert m["runtime"]["start"]["stale"] == "owner exited"
+        assert not m["current"]
+        assert "start=idle (stale: owner exited)" in "\n".join(
+            hq.render_text(m))
+        # A CLI opener (no role) keeps E12: the entry outlives it.
+        rs.set_action_state(PR, "start", "idle", pane_id="%1",
+                            session_id="s1")
+        assert "role" not in rs.get_action_state(PR, "start")["owner"]
+        with patch.object(ah, "owner_alive", return_value=False):
+            assert hq.build_history(PR, now=clock.t)["attempts"][0]["open"]
+
     def test_loop_attempt_tracked_by_runtime_dies_with_its_owner(self, clock):
         # A SIGKILLed TUI leaves its loop's entry "running" until the next
         # TUI's mount sweep; only that loop thread could have ended it.

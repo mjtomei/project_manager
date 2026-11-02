@@ -288,7 +288,12 @@ The model contains:
     exception: only the opening process's loop thread advances or clears
     them, so a dead owner (e.g. a SIGKILLed TUI before the next mount
     sweep) interrupts them and the `runtime` line marks the entry
-    `(stale: owner exited)`.
+    `(stale: owner exited)`.  So is an in-flight entry last driven by a TUI
+    (the entry's stamped owner carries `role: "tui"`, set by `pm _tui`;
+    e.g. the impl `start` its idle tracker registered): only that TUI's
+    trackers advance it and the next TUI's mount sweep ends it, so once
+    that TUI image is gone its attempt reads `interrupted` (owner exited)
+    and the entry `(stale: owner exited)` until the sweep (QA S61).
   - For parents with two or more scenario children: a `scenarios` dict
     with `count` (distinct scenarios), `attempts` (incl. retries),
     `wall_s` (union of child execution intervals: a scenario's wait

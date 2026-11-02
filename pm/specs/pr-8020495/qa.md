@@ -414,6 +414,10 @@ leave-qa timing corrected to the held run's 60 s status check.*
   short-lived CLI process (e.g. the start mirror registered by
   `pm pr auto-sequence`) that the runtime mirror still tracks in flight,
   then history shows it running, not "interrupted — owner process exited".
+  This does not extend to an entry a TUI drove: once that TUI is gone
+  (SIGKILL), e.g. its tracked impl `start` reads `interrupted` (owner
+  exited) with the `start=… (stale: owner exited)` runtime line until the
+  next TUI's mount sweep ends it "swept on tui-mount" (QA S61).
 - **E13 — Now line verdicts.** An in-flight runtime entry shows its stale
   verdict as `(last X)` (e.g. `review-loop=running (last NEEDS_WORK)`),
   never as if it were the running attempt's outcome. A finished entry

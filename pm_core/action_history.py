@@ -109,6 +109,12 @@ def iso(t: float | None) -> str | None:
 # ---------------------------------------------------------------------------
 
 _owner_cache: dict | None = None
+# What kind of process this image is (``"tui"`` for the pm TUI, unset for
+# CLI processes).  Recorded in the owner token so a reader can tell an
+# in-flight runtime entry driven by a TUI (only that TUI's trackers advance
+# it until the next mount sweep) from one a short-lived CLI opened (any
+# later process may advance it).  See history_query._runtime_tracked_attempts.
+_owner_role: str | None = None
 # Loop threads and the TUI main thread may write their first event at the
 # same time; without this each would create (and the later one would close)
 # its own instance lock, making the earlier events' owner look dead.
@@ -294,6 +300,12 @@ def _hold_owner_lock(instance: str) -> None:
         _log.debug("action_history: owner lock failed", exc_info=True)
 
 
+def set_owner_role(role: str | None) -> None:
+    """Mark this process image's owner token with *role* (e.g. ``"tui"``)."""
+    global _owner_role
+    _owner_role = role
+
+
 def owner_token() -> dict:
     """Identity of the current process image, used to judge liveness."""
     global _owner_cache
@@ -308,7 +320,10 @@ def owner_token() -> dict:
                 cache = {"pid": pid, "start": _start_token(pid),
                          "host": socket.gethostname(), "instance": instance}
                 _owner_cache = cache
-    return dict(cache)
+    tok = dict(cache)
+    if _owner_role:
+        tok["role"] = _owner_role
+    return tok
 
 
 def _instance_alive(instance: str) -> bool | None:

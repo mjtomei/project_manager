@@ -99,7 +99,7 @@ def build_history(pr_id: str, *, pr: dict | None = None,
         p = a.get("_parent_obj")
         if p is not None:
             p["last_seen_t"] = max(p["last_seen_t"], a["last_seen_t"])
-    tracked = _runtime_tracked_attempts(pr_id) if live else set()
+    tracked = _runtime_tracked_attempts(pr_id, alive) if live else set()
     _reconcile_attempts(attempts, {aliases.get(i, i) for i in tracked},
                         alive)
     for a in attempts.values():
@@ -364,7 +364,9 @@ def _reconcile_attempts(attempts: dict[str, dict],
     the exception: only the loop thread of the process that opened the
     attempt advances or clears it, so a killed owner (e.g. a SIGKILLed
     TUI, which leaves the entry ``running`` until the next TUI's mount
-    sweep) interrupts it like any other attempt.
+    sweep) interrupts it like any other attempt.  So does an entry a
+    now-dead TUI drove (e.g. its tracked impl ``start``): it is left out of
+    *tracked* (:func:`_runtime_tracked_attempts`).
     """
     for a in attempts.values():
         if a["ended_t"] is not None:
@@ -617,13 +619,28 @@ def _release_terminal_holds(pr: dict, timer_rows: dict) -> None:
     timer_rows["active"] = still
 
 
-def _runtime_tracked_attempts(pr_id: str) -> set[str]:
+def _runtime_tracked_attempts(pr_id: str, owner_alive=None) -> set[str]:
     """Attempt ids of the runtime mirror's in-flight entries (raw state:
-    the hook-derived status can relabel an entry but not end it)."""
+    the hook-derived status can relabel an entry but not end it).
+
+    An entry last driven by a TUI image that is gone (e.g. SIGKILLed) is
+    not tracked: only that TUI's trackers advance it, and the next TUI's
+    mount sweep ends it, so until then nothing drives it.  An entry a
+    short-lived CLI stamped (no owner role) stays tracked: any later
+    process may advance or clear it (E12)."""
+    alive = owner_alive or _ah.owner_alive
     try:
-        return {e["attempt_id"] for e in _rs.get_pr_actions(pr_id).values()
-                if isinstance(e, dict) and e.get("attempt_id")
-                and e.get("state") in _rs.IN_FLIGHT_STATES}
+        out = set()
+        for e in _rs.get_pr_actions(pr_id).values():
+            if not (isinstance(e, dict) and e.get("attempt_id")
+                    and e.get("state") in _rs.IN_FLIGHT_STATES):
+                continue
+            drv = e.get("owner")
+            if (isinstance(drv, dict) and drv.get("role") == "tui"
+                    and alive(drv) is False):
+                continue
+            out.add(e["attempt_id"])
+        return out
     except Exception:
         return set()
 
