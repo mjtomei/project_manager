@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T09:37:28.823367+00:00'
+  updated_at: '2026-11-02T10:14:47.729809+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7688,6 +7688,40 @@ prs:
       is for the master-integration step, not review.'
     created_at: '2026-11-02T09:37:28Z'
     last_edited: '2026-11-02T09:37:28Z'
+  - id: note-e4f04ab
+    text: 'QA S33 refiner (2026-11-02, c13abe72): all 4 stories smoke-run live on
+      tmux 3.2a, all PASS. Traps: pm pr start refuses until the PR is on master (pm
+      push + git merge the pm/sync-* branch first); with two independent PRs, j/k
+      has no neighbour, so use h/l (Selected: <id>) as the ''responds to a key'' check;
+      loop keys sent while B''s command bar is open land in the line (still one quote,
+      same parse error); a prefix+M parse error needs two keys to close (q, then any
+      key after ''pm popup failed (exit 1).''); a successful prefix+M pr list closes
+      at once, so read its output from a pipe-pane raw transcript; give B different
+      PR titles (identical titles give identical ids).'
+    created_at: '2026-11-02T10:04:32Z'
+    last_edited: '2026-11-02T10:04:32Z'
+  - id: note-abf75f4
+    text: 'QA S33 (unparsable lines in the TUI command bar and the prefix+M prompt,
+      apostrophe project + a second driven session) PASS 4/4 on c13abe72, no source
+      changes. Fixture /tmp/q33/{"qa it''s here",beta}, harness tmux -L q33h, captures
+      /pm-captures/scenarios/33 (README.md). (1) Command-bar lines with one apostrophe
+      in both sessions while a 40-round pm tui send h/l loop drove B: both logs show
+      cannot parse ... No closing quotation then Error: cannot parse command; both
+      TUIs keep responding; TUI %0 pids, ~1 att=1 and sockets unchanged; loop 80 sends
+      all rc=0; no notes written; then pr note add <A1> "it''s fine" adds the note.
+      On attempt 1 B never painted the error, because the loop''s next Selected: replaced
+      the single log line within one frame (0 Error bytes in B''s pane transcript).
+      Re-driving the same When showed it for ~0.15 s. Expected under a ~13 keys/s
+      loop, not a parse-guard defect. (2) A bad pr start "oops line followed 0.3 s
+      later by a valid pr start: error only, then Launched with no Busy: line. (3)
+      d/s pass --transcript with the apostrophe path (repr in running command, ''"''"''
+      in shell async); autostart status and auto start status open the Auto-start
+      runs overlay; 0 parse errors, tui-stderr empty. (4) prefix+M parse error in
+      both popups (two keys to close), state unchanged; pr list popups print only
+      their own project''s PRs. Teardown: both pm session kill rc 0, /tmp/pm-sessions
+      empty.'
+    created_at: '2026-11-02T10:14:47Z'
+    last_edited: '2026-11-02T10:14:47Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
