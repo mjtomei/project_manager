@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T00:37:04.536946+00:00'
+  updated_at: '2026-11-02T01:38:26.039714+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6945,6 +6945,43 @@ prs:
       tmux. Commit 497963731.'
     created_at: '2026-11-02T00:37:04Z'
     last_edited: '2026-11-02T00:37:04Z'
+  - id: note-9f2c446
+    text: 'Review loop b48f i18 (no requirement changes; full suite 5500 passed /
+      1 skipped (429.8 s), log /pm-captures/review-b48f-i18/full-suite-final.log).
+      Verification pass over the head after the b48f i17 fixes; one dead-code removal,
+      one test gap in the i17 change set, and one incidental prompt-quoting fix of
+      the same "a name is a shell word" class. (1) `_session_start()` still carried
+      a local `_wrap()` that built the pane EXIT trap: i17 pointed it at `tmux.wrap_with_exit_trap()`
+      and its note counted it as one of the three wrapper sites, but nothing calls
+      it — the notes pane is no longer auto-started and every pane that needs a trap
+      is launched through `pane_ops` (`launch_pane` / `_wrap_pane_cmd`). Removed;
+      the wrapper now has exactly two live call sites (both in `pane_ops`) and the
+      registry generation value it used is still written by the same function. (2)
+      i17 requoted three tmux bindings with `#{q:...}` but `TestTmuxCommandsQuoteAwkwardSessionNames`
+      exercised only the pane-switch gate and `window-resized`; the `after-split-window`
+      -> `pm _pane-opened` hook (which also passes the window and pane ids) had no
+      test. New `test_the_pane_opened_hook_keeps_the_name_whole` registers the real
+      binding on a disposable server and runs tmux''s own expansion against a stub
+      `pm` for the same space/backtick/quote/`;` names, asserting the name arrives
+      as one of four arguments; verified against the pre-fix form, where the backtick
+      name executed `id` and the stub received `pm-auid=1000(pm) gid=...-abc` instead
+      of the name. (3) Incidental: `pm qa launch` (CLI and TUI), `pm qa regression`,
+      the meta prompt and `prompt_gen.tui_section` told the agent to run `pm tui view
+      -s <session>`, `pm tui send ... -s <session>` and `cat ~/.pm/pane-registry/<session>.json`
+      unquoted; a session name derived from a repo directory may contain a space,
+      so the copyable example was two arguments and Click rejected it. All now use
+      `shlex.quote` (ordinary names stay bare; the `~` stays outside the quotes),
+      with tests in test_cli_qa, test_regression_prompts and test_qa_pane. Residuals
+      unchanged: the i16 raw-prefix mutation targets (e.g. `pm pr start`), and a narrow
+      rollout case noticed here — a legacy *shared* session created by a pre-PR pm
+      whose tag kept the unhashed socket path (repo directory name 72-78 characters)
+      is still listed by `pm session list` but not found by name-based lookups, which
+      compute the md5 path; not migrated (R6) and not fixed here because it means
+      probing a second path in the security-sensitive resolver. No live session, server
+      or shared host configuration was touched — every fixture used a disposable socket
+      directory, a temporary HOME or a mocked tmux.'
+    created_at: '2026-11-02T01:38:25Z'
+    last_edited: '2026-11-02T01:38:25Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
