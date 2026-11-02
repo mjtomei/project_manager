@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T06:12:40.181191+00:00'
+  updated_at: '2026-11-02T07:02:48.641306+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39675,6 +39675,46 @@ prs:
       Captures /pm-captures/scenarios/54.'
     created_at: '2026-11-02T06:12:23Z'
     last_edited: '2026-11-02T06:12:40Z'
+  - id: note-7e39877
+    text: 'QA S55 refiner (2026-11-02, 815d6bfe): all 5 stories dry-run live (scratch
+      HOME, env -i, tmux -L, fake-claude). Findings for the run: (1) R cannot be reset
+      in place, so run the baseline and each broken-storage pass in its own fresh
+      project (same title gives the same id). Break storage after `pm session`, before
+      `s`. In pass (b) mkdir ~/.pm/history first, because it does not exist until
+      the first read/write. (2) A TUI start is R selected + `s`. A command-bar `/pr
+      start` passes no --transcript, so nothing is journaled. (3) Generate QA specs
+      before `pm set spec-mode review` (global), and set it back to prompt right after
+      F. (4) While a TUI loop owns R, the impl `start` attempt has already ended `untracked`
+      ("pane still open; PM stopped tracking it"). cleanup --resources ends the loop
+      parent `interrupted` "PR resources cleaned up", i1 `vanished KILLED` "Review
+      pane disappeared", grace `cancelled`. (5) Pass (d) journal-as-directory reads
+      journal.exists true with 0 events. (6) The plain/command-bar review slot must
+      be NEEDS_WORK (the manual mirror ignores PASS). Re-apply the fake config before
+      each loop. (7) The F popup needs a window named F''s id. (8) rp-style markers
+      must start their own line.'
+    created_at: '2026-11-02T06:14:47Z'
+    last_edited: '2026-11-02T06:14:47Z'
+  - id: note-d618416
+    text: 'QA S55 (2026-11-02): fixed 439b5927. If a review loop started within the
+      first ~5 s impl-idle tick after TUI `s` (story 5 Given: /review-loop as soon
+      as the window appears), _poll_impl_idle skipped the PR before registering its
+      impl pane. The launched session then had no `start` attempt: no row while the
+      loop ran or after cleanup --resources, and after a finished loop only a lone
+      `start running` row dated after the loop (launched 06:42:45, row 06:43:44 →
+      now 10s). The fix journals the start once as `untracked` while the loop runs,
+      and the post-loop re-track folds into it (E8). It is observational only (no
+      tracking or polling). Test: test_impl_start_taken_by_loop_before_first_tick.
+      All other Thens held: F no-history text/JSON/[no history], pr-deadbee rc 1,
+      spec_pending hold; CLI start + command-bar review (47 reads, 0 context keys);
+      four damaged lines (garbage, \xff\xfe, t=abc, unterminated fragment) during
+      i2 (60+60 reads rc 0, nothing dropped, fragment on its own line, pager==CLI);
+      story 4: base/(a)/(b)/(c)/(d) give the same verdicts and status sequence, honest-empty
+      reads, [no history], 0 Tracebacks, and the same again post-fix for base/a/c.
+      Residual: a start noted during a loop is dated at the tick, so it can sort just
+      above that loop. Obs: ~4 s of `agent turn finished (idle Ns)` before the TUI
+      records a plain review verdict. Captures /pm-captures/scenarios/55.'
+    created_at: '2026-11-02T07:02:48Z'
+    last_edited: '2026-11-02T07:02:48Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
