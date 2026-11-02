@@ -10,7 +10,8 @@ screen with '?', verify its contents, then systematically test each key.
 
 The TUI has a help modal (HelpScreen) that opens when the user presses '?'.
 It lists all available keybindings grouped by category:
-- Tree Navigation: arrow keys, hjkl, J/K, x, X, f, F
+- Tree Navigation: arrow keys, hjkl, J/K, x, X, f, F, ] / [ (cycle fuzzy
+  match results), /pr select, /plan select
 - PR Actions: s, d, g, i, e/Enter, v, M, O, A, a, V, w
 - Panes & Views: c, H, /, n, m, L, p, t, q, b
 - Companion Pane: S, G
@@ -62,6 +63,10 @@ ctrl+b d to detach from the tmux session.
      * X - Toggle merged PRs
      * f - Cycle status filter
      * F - Cycle sort field
+     * ] / [ - Cycle fuzzy match results (the row must read exactly
+       "] / [" with only the two keys bold — no stray "[/]" text)
+     * /pr select <query> - Fuzzy-find PR
+     * /plan select <query> - Fuzzy-find plan
    - PR Actions section:
      * s - Start selected PR
      * d - Review (zz d: loop)
@@ -190,6 +195,18 @@ Test each key that is safe to press (won't change PR state):
     - `pm tui send p`
     - `pm tui view` -> should show plans view
     - `pm tui send p` -> toggle back to tree view
+
+15. **/pr select**, **/plan select** and **] / [** (fuzzy select + cycling):
+    - `pm tui send /`, type `pr select <a word from two or more visible PR
+      titles>`, then Enter
+    - `pm tui view` -> cursor on the best match; log line
+      `Selected: <#N> <title> [K matches]`
+    - `pm tui send ]` -> log `Match 2/K: …`, cursor moves to that PR;
+      `pm tui send [` -> back to `Match 1/K`
+    - `/plan select <part of a plan name>` -> cursor on that plan's first
+      PR (collapsed group expanded); log `Plan: <id>: <name> → <pr>`
+    - With no prior select, `]` logs
+      `No match results to cycle (use /pr select or /plan select)`
 
 ### Part 3: QA View Help
 

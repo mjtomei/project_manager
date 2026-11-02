@@ -497,8 +497,9 @@ class ProjectManagerApp(App):
         # Command-input race condition fix: buffer keystrokes between / and focus
         self._command_pending: bool = False
         self._command_buffer: list[str] = []
-        # Fuzzy select state: ranked result list and current index for n/N cycling
-        self._fuzzy_results: list[str] = []  # list of PR or plan IDs
+        # Fuzzy select state: ranked result list and current index for ]/[
+        # cycling (local pm ids: PR ids for "pr", plan ids for "plan").
+        self._fuzzy_results: list[str] = []
         self._fuzzy_index: int = 0
         self._fuzzy_kind: str = ""  # "pr" or "plan"
 

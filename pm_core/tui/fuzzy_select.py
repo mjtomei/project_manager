@@ -1,114 +1,174 @@
-"""Fuzzy matching and ranked selection for PRs and plans in the TUI."""
+"""Fuzzy matching and ranked selection for PRs and plans in the TUI.
+
+Pure functions only — no Textual imports — so ranking is unit-testable.
+Used solely by the ``pr select`` / ``plan select`` command-bar commands and
+the ``]`` / ``[`` result-cycling keys; every other command keeps exact id
+resolution.
+"""
+
+from __future__ import annotations
+
+import re
+
+# Scoring weights.  An exact id always outranks any non-exact combination
+# (500 + 200 + 100 + 50 < 1000), and an id prefix outranks any combination
+# of title/description/plan matches (200 + 100 + 50 < 500).
+EXACT_ID = 1000
+ID_PREFIX = 500
+TITLE = 200
+DESCRIPTION = 100
+PLAN_NAME = 50
+
+_BARE_NUMBER = re.compile(r"#?(\d+)")
 
 
-def _fuzzy_contains(haystack: str, needle: str) -> bool:
-    """Case-insensitive substring match."""
-    return needle.lower() in haystack.lower()
+def _text(value) -> str:
+    """Lower-cased string form of a field that may be missing or None."""
+    return value.lower() if isinstance(value, str) else ""
+
+
+def _norm(query: str) -> str:
+    return " ".join((query or "").split()).lower()
+
+
+def _gh_number(pr: dict) -> int | None:
+    num = pr.get("gh_pr_number")
+    return num if isinstance(num, int) and not isinstance(num, bool) else None
+
+
+def is_exact_pr_match(pr: dict, query: str) -> bool:
+    """True if *query* names *pr* exactly, the way ``_resolve_pr_id`` does.
+
+    Accepts the raw pm id (``pr-942aa21``), the display id (``#125``) and a
+    bare GitHub number (``125``).  Case-insensitive.
+    """
+    q = _norm(query)
+    if not q:
+        return False
+    if _text(pr.get("id")) == q:
+        return True
+    gh = _gh_number(pr)
+    m = _BARE_NUMBER.fullmatch(q)
+    return gh is not None and m is not None and int(m.group(1)) == gh
 
 
 def score_pr(pr: dict, query: str, plan_map: dict) -> float:
-    """Score a PR against a query string.
+    """Score a PR against a query string (0 = no match).
 
     Scoring weights (higher = better match):
-      - Exact ID match:     1000  (raw ID or display ID e.g. #125)
-      - ID prefix match:    500
-      - Title substring:    200
-      - Description substr: 100
-      - Plan name substr:    50
+      - Exact ID match:     1000  (raw ID, display ID ``#125`` or bare ``125``)
+      - ID prefix match:     500  (raw or display ID; only if not exact)
+      - Title substring:     200
+      - Description substr:  100
+      - Plan name/id substr:  50
 
     Multiple field matches combine additively.
     """
-    q = query.lower()
+    q = _norm(query)
+    if not q:
+        return 0.0
     score = 0.0
 
-    pr_id = pr.get("id", "")
-    title = pr.get("title", "")
-    description = pr.get("description", "")
-    plan_id = pr.get("plan", "")
+    pr_id = _text(pr.get("id"))
+    gh = _gh_number(pr)
+    display_id = f"#{gh}" if gh is not None else pr_id
 
-    # Display ID (e.g. "#125")
-    gh_num = pr.get("gh_pr_number")
-    display_id = f"#{gh_num}" if gh_num else pr_id
+    if is_exact_pr_match(pr, q):
+        score += EXACT_ID
+    elif pr_id.startswith(q) or display_id.startswith(q):
+        score += ID_PREFIX
 
-    # Exact ID match (raw or display)
-    if pr_id.lower() == q or display_id.lower() == q:
-        score += 1000
-    # ID prefix match
-    elif pr_id.lower().startswith(q) or display_id.lower().startswith(q):
-        score += 500
+    if q in _text(pr.get("title")):
+        score += TITLE
 
-    # Title substring
-    if _fuzzy_contains(title, query):
-        score += 200
+    if q in _text(pr.get("description")):
+        score += DESCRIPTION
 
-    # Description substring
-    if _fuzzy_contains(description, query):
-        score += 100
-
-    # Plan name substring
-    if plan_id:
-        plan = plan_map.get(plan_id, {})
-        plan_name = plan.get("name", "")
-        if _fuzzy_contains(plan_name, query) or _fuzzy_contains(plan_id, query):
-            score += 50
+    plan_id = pr.get("plan")
+    if isinstance(plan_id, str) and plan_id:
+        plan = plan_map.get(plan_id) or {}
+        if q in _text(plan.get("name")) or q in _text(plan_id):
+            score += PLAN_NAME
 
     return score
 
 
 def score_plan(plan: dict, query: str) -> float:
-    """Score a plan against a query string.
+    """Score a plan against a query string (0 = no match).
 
     Scoring weights:
       - Exact ID match:    1000
       - ID prefix match:    500
       - Name substring:     200
     """
-    q = query.lower()
+    q = _norm(query)
+    if not q:
+        return 0.0
     score = 0.0
 
-    plan_id = plan.get("id", "")
-    name = plan.get("name", "")
+    plan_id = _text(plan.get("id"))
+    if plan_id == q:
+        score += EXACT_ID
+    elif plan_id.startswith(q):
+        score += ID_PREFIX
 
-    if plan_id.lower() == q:
-        score += 1000
-    elif plan_id.lower().startswith(q):
-        score += 500
-
-    if _fuzzy_contains(name, query):
-        score += 200
+    if q in _text(plan.get("name")):
+        score += TITLE
 
     return score
 
 
-def fuzzy_match_prs(prs: list[dict], query: str, plan_map: dict,
-                    cursor_index: int = 0) -> list[dict]:
-    """Return PRs matching query, ranked by score descending.
+def _rank(items: list[dict], scorer, cursor_index: int,
+          positions: dict[str, int] | None) -> list[dict]:
+    """Rank *items* by score (desc), then by distance to *cursor_index*.
 
-    Ties are broken by proximity to cursor_index (closer = preferred).
-    Returns list of PR dicts with score > 0.
+    With *positions* (id -> navigation index), distance is measured in that
+    index space and items without a position sort after positioned ones of
+    the same score.  Without it, the item's list index is used.  Entries
+    without a usable string id, and repeated ids, are skipped.
     """
     scored = []
-    for i, pr in enumerate(prs):
-        s = score_pr(pr, query, plan_map)
-        if s > 0:
-            scored.append((s, abs(i - cursor_index), pr))
+    seen: set[str] = set()
+    for i, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
+        item_id = item.get("id")
+        if not isinstance(item_id, str) or not item_id or item_id in seen:
+            continue
+        seen.add(item_id)
+        s = scorer(item)
+        if s <= 0:
+            continue
+        if positions is None:
+            dist = (0, abs(i - cursor_index))
+        elif item_id in positions:
+            dist = (0, abs(positions[item_id] - cursor_index))
+        else:
+            dist = (1, 0)
+        scored.append((-s, dist, i, item))
+    scored.sort(key=lambda x: x[:3])
+    return [x[3] for x in scored]
 
-    # Sort: highest score first, then closest to cursor
-    scored.sort(key=lambda x: (-x[0], x[1]))
-    return [item[2] for item in scored]
+
+def fuzzy_match_prs(prs: list[dict], query: str, plan_map: dict,
+                    cursor_index: int = 0,
+                    positions: dict[str, int] | None = None) -> list[dict]:
+    """Return PRs matching *query*, ranked by score descending.
+
+    Ties are broken by proximity to *cursor_index* (closer = preferred),
+    measured in *positions* (pr id -> tree navigation index) when given.
+    """
+    return _rank(prs, lambda pr: score_pr(pr, query, plan_map),
+                 cursor_index, positions)
 
 
 def fuzzy_match_plans(plans: list[dict], query: str,
-                      cursor_index: int = 0) -> list[dict]:
-    """Return plans matching query, ranked by score descending.
+                      cursor_index: int = 0,
+                      positions: dict[str, int] | None = None) -> list[dict]:
+    """Return plans matching *query*, ranked by score descending.
 
-    Returns list of plan dicts with score > 0.
+    Ties are broken by proximity to *cursor_index*, measured in *positions*
+    (plan id -> index) when given, else the plan's list index.
     """
-    scored = []
-    for i, plan in enumerate(plans):
-        s = score_plan(plan, query)
-        if s > 0:
-            scored.append((s, abs(i - cursor_index), plan))
-
-    scored.sort(key=lambda x: (-x[0], x[1]))
-    return [item[2] for item in scored]
+    return _rank(plans, lambda plan: score_plan(plan, query),
+                 cursor_index, positions)

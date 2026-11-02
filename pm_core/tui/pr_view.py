@@ -46,7 +46,16 @@ def handle_pr_selected(app, pr_id: str) -> None:
     _log.debug("PR selected: %s", pr_id)
     app.log_message(f"Selected: {pr_id}")
     app.call_after_refresh(app._capture_frame, f"pr_selected:{pr_id}")
+    persist_active_pr(app, pr_id)
 
+
+def persist_active_pr(app, pr_id: str) -> None:
+    """Record *pr_id* as ``project.active_pr`` (cursor selection).
+
+    Shared by keyboard navigation and programmatic selection (fuzzy
+    ``pr select`` / ``plan select`` and match cycling) so every way of
+    moving the cursor persists it the same way.
+    """
     # Persist selection so TUI restarts on this PR.  Update in-memory state
     # immediately (source of truth for the running TUI), then enqueue the
     # disk write so rapid navigation doesn't block the event loop on a full
@@ -636,30 +645,18 @@ def handle_command_submitted(app, cmd: str) -> None:
             app._inflight_pr_action = action_key
             break
 
+    # Fuzzy ``pr select`` / ``plan select``: handled in-process (cursor move
+    # + active_pr), parsed before the generic shlex split so a query such as
+    # ``user's`` cannot raise on an unbalanced quote.
+    from pm_core.tui import fuzzy_select_cmd
+    select_cmd = fuzzy_select_cmd.parse_select_command(cmd)
+    if select_cmd is not None:
+        kind, query = select_cmd
+        fuzzy_select_cmd.handle_select_command(app, kind, query)
+        fuzzy_select_cmd.focus_current_view(app)
+        return
+
     parts = shlex.split(cmd)
-
-    # Handle fuzzy pr select / plan select in-process (no subprocess needed)
-    if len(parts) >= 2 and parts[0] == "pr" and parts[1] == "select":
-        from pm_core.tui import fuzzy_select_cmd
-        query = " ".join(parts[2:]) if len(parts) > 2 else ""
-        if not query:
-            app.log_message("Usage: pr select <query>")
-        else:
-            fuzzy_select_cmd.handle_pr_select(app, query)
-        # handle_pr_select switches to tree view, so always focus tree
-        app.query_one("#tech-tree", TechTree).focus()
-        return
-
-    if len(parts) >= 2 and parts[0] == "plan" and parts[1] == "select":
-        from pm_core.tui import fuzzy_select_cmd
-        query = " ".join(parts[2:]) if len(parts) > 2 else ""
-        if not query:
-            app.log_message("Usage: plan select <query>")
-        else:
-            fuzzy_select_cmd.handle_plan_select(app, query)
-        # plan select always switches to tree view, so focus tree
-        app.query_one("#tech-tree", TechTree).focus()
-        return
 
     # Handle review loop commands
     # Accepts: review-loop [start] [PR_ID]

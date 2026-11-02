@@ -241,7 +241,8 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]X[/]  Toggle merged PRs", classes="help-row")
                 yield Label("  [bold]f[/]  Cycle status filter", classes="help-row")
                 yield Label("  [bold]F[/]  Cycle sort field", classes="help-row")
-                yield Label("  [bold]][/] / [bold][[/]  Cycle fuzzy match results", classes="help-row")
+                # Textual markup: "]" is literal, "[" needs "\[" ("[[" is not an escape).
+                yield Label("  [bold]][/] / [bold]\\[[/]  Cycle fuzzy match results", classes="help-row")
                 yield Label("  [bold]/[/]pr select [dim]<query>[/]  Fuzzy-find PR", classes="help-row")
                 yield Label("  [bold]/[/]plan select [dim]<query>[/]  Fuzzy-find plan", classes="help-row")
                 yield Label("PR Actions", classes="help-section")

@@ -158,3 +158,132 @@ class TestFuzzyMatchPlans:
         plans = [_make_plan("plan-001", "Watchers")]
         results = fuzzy_match_plans(plans, "zzz")
         assert results == []
+
+
+# ---------------------------------------------------------------------------
+# Restart (2026-11-02) additions: exact-id parity, robustness, tree-order
+# tie-break, shared status-filter predicate.
+# ---------------------------------------------------------------------------
+
+from pm_core.tui.fuzzy_select import is_exact_pr_match  # noqa: E402
+
+
+class TestExactIdParity:
+    """Queries that ``_resolve_pr_id`` resolves exactly stay exact."""
+
+    def test_bare_number_is_exact_gh_match(self):
+        pr = _make_pr("pr-001", gh_pr_number=136)
+        assert is_exact_pr_match(pr, "136")
+        assert score_pr(pr, "136", {}) == 1000
+
+    def test_bare_number_is_not_a_display_prefix(self):
+        pr = _make_pr("pr-001", gh_pr_number=136)
+        assert score_pr(pr, "13", {}) == 0
+        assert score_pr(pr, "#13", {}) == 500
+
+    def test_raw_id_case_insensitive_exact(self):
+        assert score_pr(_make_pr("pr-942aa21"), "PR-942AA21", {}) == 1000
+
+    def test_exact_always_beats_every_non_exact_combination(self):
+        named = _make_pr("pr-942aa21")
+        mentions = _make_pr("pr-942aa21x", title="pr-942aa21",
+                            description="see pr-942aa21", plan="pr-942aa21")
+        plan_map = {"pr-942aa21": {"name": "pr-942aa21"}}
+        assert score_pr(mentions, "pr-942aa21", plan_map) == 850
+        ranked = fuzzy_match_prs([mentions, named], "pr-942aa21", plan_map)
+        assert ranked[0]["id"] == "pr-942aa21"
+
+    def test_resolve_pr_id_agreement(self):
+        from pm_core.cli.helpers import _resolve_pr_id
+        prs = [_make_pr("pr-a", title="136 things"),
+               _make_pr("pr-b", gh_pr_number=136),
+               _make_pr("pr-c", description="#136")]
+        data = {"prs": prs}
+        for q in ("136", "#136", "pr-b"):
+            assert fuzzy_match_prs(prs, q, {})[0]["id"] == \
+                _resolve_pr_id(data, q)["id"]
+
+    def test_duplicate_gh_number_both_exact(self):
+        prs = [_make_pr("pr-a", gh_pr_number=7), _make_pr("pr-b", gh_pr_number=7)]
+        ranked = fuzzy_match_prs(prs, "#7", {}, cursor_index=5,
+                                 positions={"pr-a": 0, "pr-b": 4})
+        assert [p["id"] for p in ranked] == ["pr-b", "pr-a"]
+
+
+class TestRobustness:
+    def test_none_fields(self):
+        pr = {"id": "pr-001", "title": None, "description": None,
+              "plan": None, "gh_pr_number": None}
+        assert score_pr(pr, "x", {}) == 0
+        assert score_pr(pr, "pr-0", {}) == 500
+
+    def test_plan_with_none_name(self):
+        pr = _make_pr("pr-001", plan="bugs")
+        assert score_pr(pr, "bug", {"bugs": {"id": "bugs", "name": None}}) == 50
+        assert score_plan({"id": "bugs", "name": None}, "bug") == 500
+
+    def test_empty_or_blank_query_matches_nothing(self):
+        prs = [_make_pr("pr-001", title="anything")]
+        assert fuzzy_match_prs(prs, "", {}) == []
+        assert fuzzy_match_prs(prs, "   ", {}) == []
+        assert fuzzy_match_plans([_make_plan("p", "n")], " ") == []
+
+    def test_inner_whitespace_collapsed(self):
+        assert score_pr(_make_pr("pr-1", title="spec gen"), "spec   gen", {}) == 200
+
+    def test_entries_without_id_and_duplicates_skipped(self):
+        prs = [{"title": "spec"}, {"id": None, "title": "spec"}, "junk",
+               _make_pr("pr-1", title="spec"), _make_pr("pr-1", title="other spec")]
+        ranked = fuzzy_match_prs(prs, "spec", {})
+        assert [p["id"] for p in ranked] == ["pr-1"]
+        assert ranked[0]["title"] == "spec"
+
+    def test_bool_gh_number_ignored(self):
+        assert score_pr({"id": "pr-1", "gh_pr_number": True}, "1", {}) == 0
+
+
+class TestTreeOrderTieBreak:
+    def test_positions_override_list_order(self):
+        prs = [_make_pr("pr-a", title="fix"), _make_pr("pr-b", title="fix"),
+               _make_pr("pr-c", title="fix")]
+        # Tree order differs from list order: c is next to the cursor.
+        positions = {"pr-a": 9, "pr-b": 0, "pr-c": 4}
+        ranked = fuzzy_match_prs(prs, "fix", {}, cursor_index=5,
+                                 positions=positions)
+        assert [p["id"] for p in ranked] == ["pr-c", "pr-a", "pr-b"]
+
+    def test_unpositioned_sort_after_positioned(self):
+        prs = [_make_pr("pr-hidden", title="fix"), _make_pr("pr-far", title="fix")]
+        ranked = fuzzy_match_prs(prs, "fix", {}, cursor_index=0,
+                                 positions={"pr-far": 50})
+        assert [p["id"] for p in ranked] == ["pr-far", "pr-hidden"]
+
+    def test_score_still_dominates_proximity(self):
+        prs = [_make_pr("pr-a", title="spec"),
+               _make_pr("pr-b", title="spec", description="spec")]
+        ranked = fuzzy_match_prs(prs, "spec", {}, cursor_index=0,
+                                 positions={"pr-a": 0, "pr-b": 99})
+        assert ranked[0]["id"] == "pr-b"
+
+    def test_plan_tiebreak_by_cursor_plan_index(self):
+        plans = [_make_plan("a", "fix x"), _make_plan("b", "fix y"),
+                 _make_plan("c", "fix z")]
+        assert fuzzy_match_plans(plans, "fix", cursor_index=2)[0]["id"] == "c"
+        assert fuzzy_match_plans(plans, "fix", cursor_index=0)[0]["id"] == "a"
+
+
+class TestPassesStatusFilterParity:
+    """The shared predicate must agree with compute_tree_layout."""
+
+    def test_matches_layout_for_every_combination(self):
+        from pm_core.tui.tree_layout import compute_tree_layout, passes_status_filter
+        statuses = ["pending", "in_progress", "in_review", "qa", "merged", "closed"]
+        prs = [{"id": f"pr-{s}", "status": s, "title": s} for s in statuses]
+        for status_filter in (None, *statuses):
+            for hide_merged in (False, True):
+                for hide_closed in (False, True):
+                    kw = dict(status_filter=status_filter,
+                              hide_merged=hide_merged, hide_closed=hide_closed)
+                    laid_out = set(compute_tree_layout(prs, **kw).ordered_ids)
+                    passing = {p["id"] for p in prs if passes_status_filter(p, **kw)}
+                    assert laid_out == passing, kw

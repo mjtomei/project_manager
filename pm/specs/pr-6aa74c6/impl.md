@@ -134,6 +134,9 @@ Plan: `tui-ux`
   renders every help-row string through `textual.content.Content.from_markup`
   and asserts that the bracket row's plain text contains `] / [` and that the
   bold spans cover only the two key characters.
+- `pm/qa/regression/help-keybindings.md` (the regression instruction that
+  checks every help row) lists the three new rows and adds a safe step for
+  select plus `]`/`[`.
 - `pm_core/cli/__init__.py` help text (`pm pr select <pr-id>  Set the active
   PR`) describes the CLI, which stays exact-id. It is unchanged.
 
