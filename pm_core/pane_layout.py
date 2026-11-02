@@ -619,6 +619,18 @@ def _respawn_tui(session: str, window: str) -> str:
 
     Returns the window ID the TUI was actually created in (may differ
     from *window* when a new window had to be created).
+
+    The TUI starts in the directory the session was created in (the
+    project's repo directory), not in tmux's default — the cwd of the
+    client that ran the command.  The ``after-kill-pane`` hook runs this
+    for whichever client killed the pane, so a ``tmux kill-pane`` typed in
+    another project's directory used to start a TUI for *that* project in
+    this session (its pidfile and registry), and one typed outside any
+    project started the pm guide there (QA S42).
+
+    Callers decide that the TUI is missing and call this while holding
+    ``pane_registry.tui_respawn_lock``, so two of them never both start
+    one.
     """
     from pm_core import tmux as tmux_mod
 
@@ -629,11 +641,15 @@ def _respawn_tui(session: str, window: str) -> str:
         if live_panes:
             # Window exists — split into it
             target = f"{session}:{window}"
-            pane_id = tmux_mod.split_pane(target, "h", "pm _tui")
+            pane_id = tmux_mod.split_pane(
+                target, "h", "pm _tui",
+                start_dir_format=tmux_mod.SESSION_START_DIR)
         else:
             # Window is gone (TUI was the last pane) — create a new one
             _logger.info("_respawn_tui: window %s gone, creating new window", window)
-            pane_id, window = tmux_mod.create_window(session, "pm _tui")
+            pane_id, window = tmux_mod.create_window(
+                session, "pm _tui",
+                start_dir_format=tmux_mod.SESSION_START_DIR)
             tmux_mod.set_shared_window_size(session, window)
             # Switch the client to the new window so the user sees it
             tmux_mod.select_window(session, window)
@@ -644,13 +660,18 @@ def _respawn_tui(session: str, window: str) -> str:
         def _insert_tui(raw):
             data = _prepare_registry_data(raw, session)
             wdata = get_window_data(data, window)
-            min_order = min((p["order"] for p in wdata["panes"]), default=1) - 1
-            wdata["panes"].insert(0, {
-                "id": pane_id,
-                "role": "tui",
-                "order": min_order,
-                "cmd": "pm _tui",
-            })
+            # The new TUI may already be listed: it records itself once
+            # mounted, and a `pm session` that ran without the respawn
+            # lock may have adopted it.  List it once (QA S42).
+            if not any(p["id"] == pane_id for p in wdata["panes"]):
+                min_order = min((p["order"] for p in wdata["panes"]),
+                                default=1) - 1
+                wdata["panes"].insert(0, {
+                    "id": pane_id,
+                    "role": "tui",
+                    "order": min_order,
+                    "cmd": "pm _tui",
+                })
             # Reset user_modified — same pattern as pane_ops.launch_pane()
             # and cli/pr.py review window (after-split-window hook may have
             # set it before panes are registered).  Caller rebalances.
@@ -670,25 +691,52 @@ def _process_registry_pane_closed(data: dict) -> None:
     if not session:
         return
 
+    from pm_core.pane_registry import tui_respawn_lock
+
     for window_id, wdata in list(data.get("windows", {}).items()):
         # Snapshot TUI pane IDs before reconciliation removes them
         tui_ids = {p["id"] for p in wdata.get("panes", [])
                    if p.get("role") == "tui"}
-        removed = _reconcile_registry(session, window_id)
-        if removed:
-            _logger.info("handle_any_pane_closed: session=%s window=%s removed=%s",
-                         session, window_id, removed)
+        actual_window = None
+        # A `pm session` attach may find the TUI gone at this same moment
+        # and respawn it; deciding under the lock it also holds means only
+        # one of us starts a TUI (QA S42).
+        with tui_respawn_lock(session):
+            removed = _reconcile_registry(session, window_id)
+            if removed:
+                _logger.info("handle_any_pane_closed: session=%s window=%s removed=%s",
+                             session, window_id, removed)
             # Always respawn TUI regardless of user_modified
-            if tui_ids & set(removed):
-                _logger.info("handle_any_pane_closed: TUI pane was killed, respawning")
-                actual_window = _respawn_tui(session, window_id)
-                # _respawn_tui resets user_modified; always rebalance
-                # after respawn so the new TUI pane is sized correctly.
-                # Use the actual window ID (may differ if a new window
-                # was created because the TUI was the last pane).
-                rebalance(session, actual_window)
-            elif not wdata.get("user_modified"):
-                rebalance(session, window_id)
+            if removed and tui_ids & set(removed):
+                running = _running_tui_pane(session)
+                if running:
+                    _logger.info("handle_any_pane_closed: TUI pane was killed, "
+                                 "but TUI pane %s is already running; not "
+                                 "respawning", running)
+                else:
+                    _logger.info("handle_any_pane_closed: TUI pane was killed, respawning")
+                    actual_window = _respawn_tui(session, window_id)
+        if not removed:
+            continue
+        if actual_window:
+            # _respawn_tui resets user_modified; always rebalance
+            # after respawn so the new TUI pane is sized correctly.
+            # Use the actual window ID (may differ if a new window
+            # was created because the TUI was the last pane).
+            rebalance(session, actual_window)
+        elif not wdata.get("user_modified"):
+            rebalance(session, window_id)
+
+
+def _running_tui_pane(session: str) -> str | None:
+    """Pane id of a running TUI of *session*, or ``None``.
+
+    The same definition ``pm session`` adopts by (a live ``pm _tui`` pane
+    of the session's group: ``cli.helpers._find_running_tui_pane``).
+    """
+    from pm_core.cli.helpers import _find_running_tui_pane
+    running = _find_running_tui_pane(session)
+    return running[0] if running else None
 
 
 def handle_any_pane_closed() -> None:

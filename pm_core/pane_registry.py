@@ -5,6 +5,7 @@ Each session has a registry file in ~/.pm/pane-registry/<session>.json
 containing per-window pane IDs, roles, and ordering information.
 """
 
+import contextlib
 import fcntl
 import json
 import os
@@ -124,6 +125,59 @@ def locked_read_modify_write(path: Path, modifier_fn, *, timeout: float = 5.0):
         lock_fd.close()  # closing the fd releases the flock
 
     return result
+
+
+@contextlib.contextmanager
+def tui_respawn_lock(session: str, *, timeout: float = 10.0):
+    """Hold the per-session lock under which a missing TUI is started.
+
+    Two pm processes can find a session's TUI gone at the same moment: the
+    ``after-kill-pane`` hook (``pm _pane-closed``) that respawns a killed
+    TUI, and a ``pm session`` attach that checks for the TUI before it
+    attaches.  Each used to look, see no TUI, and split a new one, so the
+    session ran two TUIs until the second one's pidfile refusal (with a
+    traceback in the debug log) — and when the attach looked just after
+    the hook's split, it adopted the hook's pane and the hook then listed
+    it a second time (QA scenario 42).  Both now look for a running TUI
+    and start one while holding this lock, so the second of them sees the
+    first one's TUI.
+
+    The lock is a sidecar of the registry, ``<registry>.respawn.lock``,
+    separate from the read-modify-write lock (``locked_read_modify_write``
+    takes that one for every write the holder makes).  Yields whether the
+    lock was taken.  If it cannot be taken within *timeout* seconds, or the
+    file cannot be opened, the caller goes ahead without it — the
+    behaviour before the lock existed — rather than leave the session
+    without a TUI.
+    """
+    path = registry_path(session)
+    lock_path = path.with_suffix(path.suffix + ".respawn.lock")
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_fd = open(lock_path, "w")
+    except OSError as e:
+        _logger.warning("tui_respawn_lock: cannot open %s (%s); going ahead "
+                        "without it", lock_path, e)
+        yield False
+        return
+    try:
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                locked = True
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    _logger.warning("tui_respawn_lock: %s still held after "
+                                    "%.0fs; going ahead without it",
+                                    lock_path, timeout)
+                    locked = False
+                    break
+                time.sleep(0.01)
+        yield locked
+    finally:
+        lock_fd.close()  # closing the fd releases the flock
 
 
 def get_window_data(data: dict, window: str) -> dict:

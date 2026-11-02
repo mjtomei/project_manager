@@ -24,11 +24,10 @@ from pm_core.claude_launcher import find_editor
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
+    _find_running_tui_pane,
     _get_current_pm_session,
     _get_session_name_for_cwd,
-    _live_panes_and_tuis,
     _log,
-    _pm_session_of,
     _private_session_context,
     _select_session_socket,
     _set_share_mode_env,
@@ -154,10 +153,11 @@ def _adopt_running_tui(session_name: str) -> str | None:
     TUI is adopted instead, so no second TUI is ever started next to it.
 
     "A pane running the TUI" has the same definition as in the
-    ``pm tui view``/``send`` discovery (``_live_panes_and_tuis``, matched
-    through the session group).  A dead pane, kept by a user's
-    ``remain-on-exit``, is not adopted.  The entry is added under the
-    registry lock, and only if it is missing
+    ``pm tui view``/``send`` discovery (a ``pm _tui`` start command,
+    matched through the session group; ``_find_running_tui_pane``, which
+    the TUI-respawn hook also uses).  A dead pane, kept by a user's
+    ``remain-on-exit``, is not adopted.  The
+    entry is added under the registry lock, and only if it is missing
     (``pane_registry.register_tui_pane``), so it does not duplicate the
     entry the TUI's own heal may write at the same moment.
 
@@ -167,34 +167,85 @@ def _adopt_running_tui(session_name: str) -> str | None:
     it mounts.  Failing the attach on that, or respawning, would start
     the second TUI this function exists to prevent.
     """
-    _, live_tuis = _live_panes_and_tuis()
-    for pane_id, tmux_session in live_tuis:
-        if _pm_session_of(tmux_session) != session_name:
-            continue
-        result = tmux_mod._run(
-            tmux_mod._tmux_cmd("display", "-p", "-t", pane_id,
-                               "#{pane_dead} #{window_id}"),
-            text=True)
-        fields = result.stdout.split() if result.returncode == 0 else []
-        if len(fields) != 2 or fields[0] != "0":
-            continue
-        window = fields[1]
+    running = _find_running_tui_pane(session_name)
+    if running is None:
+        return None
+    pane_id, window = running
 
-        def _add(raw, pane_id=pane_id, window=window):
-            data = pane_registry._prepare_registry_data(raw, session_name)
-            if pane_registry.register_tui_pane(data, window, pane_id):
-                return data
-            return None  # already recorded there: skip the write
+    def _add(raw):
+        data = pane_registry._prepare_registry_data(raw, session_name)
+        if pane_registry.register_tui_pane(data, window, pane_id):
+            return data
+        return None  # already recorded there: skip the write
 
-        try:
-            pane_registry.locked_read_modify_write(
-                pane_registry.registry_path(session_name), _add)
-        except OSError:  # includes the lock wait's TimeoutError
-            _log.warning("could not record running TUI pane %s of %s in "
-                         "the pane registry; it registers itself once "
-                         "mounted", pane_id, session_name, exc_info=True)
-        return pane_id
-    return None
+    try:
+        pane_registry.locked_read_modify_write(
+            pane_registry.registry_path(session_name), _add)
+    except OSError:  # includes the lock wait's TimeoutError
+        _log.warning("could not record running TUI pane %s of %s in "
+                     "the pane registry; it registers itself once "
+                     "mounted", pane_id, session_name, exc_info=True)
+    return pane_id
+
+
+def _ensure_tui_running(session_name: str) -> str | None:
+    """Make sure the running session *session_name* has a TUI pane.
+
+    Returns the window a TUI was respawned in (for the caller to
+    rebalance), or ``None`` when one was already there or none could be
+    started.  ``_session_start`` calls this under
+    ``pane_registry.tui_respawn_lock``, which the ``after-kill-pane`` hook
+    also holds while it respawns a killed TUI, so a TUI the hook has just
+    started is registered by the time this looks (QA S42).
+    """
+    live_panes = tmux_mod.get_pane_indices(session_name)
+    registry = pane_registry.load_registry(session_name)
+    all_registered = [p for _, p in pane_registry._iter_all_panes(registry)]
+
+    # Find which registered panes are still alive
+    live_pane_ids = {p[0] for p in live_panes}
+    roles_alive = {p["role"] for p in all_registered if p["id"] in live_pane_ids}
+    _log.info("roles_alive: %s", roles_alive)
+    if "tui" in roles_alive:
+        return None
+
+    # The registry may not list a TUI that is running (it registers
+    # itself once mounted): adopt it rather than starting a second one.
+    adopted = _adopt_running_tui(session_name)
+    if adopted:
+        _log.info("TUI pane %s is running but was not registered; "
+                  "adopted it instead of respawning", adopted)
+        return None
+
+    # The TUI is missing: respawn it rather than killing the session
+    _log.info("TUI missing, respawning in existing session")
+    click.echo("TUI pane missing — respawning...")
+    # Find the window where TUI was registered (or fall back to first window)
+    tui_window = None
+    for wid, wdata in registry.get("windows", {}).items():
+        for p in wdata.get("panes", []):
+            if p.get("role") == "tui":
+                tui_window = wid
+                break
+        if tui_window:
+            break
+    if not tui_window:
+        # Fall back to window named 'main' (or first window) rather
+        # than the active window, which may be a QA/work window.
+        main_win = tmux_mod.find_window_by_name(session_name, "main")
+        if main_win:
+            tui_window = main_win["id"]
+        else:
+            all_wins = tmux_mod.list_windows(session_name)
+            if all_wins:
+                tui_window = all_wins[0]["id"]
+    if not tui_window:
+        _log.warning("TUI respawn failed — no windows found in session")
+        click.echo("Could not respawn TUI (no windows). "
+                   "Kill the session manually and re-run pm session.",
+                   err=True)
+        return None
+    return pane_layout._respawn_tui(session_name, tui_window)
 
 
 def _register_tmux_bindings(session_name: str) -> None:
@@ -817,58 +868,14 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     _log.info("checking if session exists: %s (socket=%s, running=%s)",
               session_name, socket_path, session_running)
     if session_running:
-        # Check if the session has the expected panes
-        live_panes = tmux_mod.get_pane_indices(session_name)
-        registry = pane_registry.load_registry(session_name)
-        all_registered = [p for _, p in pane_registry._iter_all_panes(registry)]
-
-        # Find which registered panes are still alive
-        live_pane_ids = {p[0] for p in live_panes}
-        roles_alive = {p["role"] for p in all_registered if p["id"] in live_pane_ids}
-
         _log.info("session exists: %s", session_name)
-        _log.info("roles_alive: %s", roles_alive)
-
-        # The registry may not list a TUI that is running (it registers
-        # itself once mounted): adopt it rather than starting a second one.
-        if "tui" not in roles_alive:
-            adopted = _adopt_running_tui(session_name)
-            if adopted:
-                _log.info("TUI pane %s is running but was not registered; "
-                          "adopted it instead of respawning", adopted)
-                roles_alive.add("tui")
-
-        # If TUI is missing, respawn it rather than killing the session
-        if "tui" not in roles_alive:
-            _log.info("TUI missing, respawning in existing session")
-            click.echo("TUI pane missing — respawning...")
-            # Find the window where TUI was registered (or fall back to first window)
-            tui_window = None
-            for wid, wdata in registry.get("windows", {}).items():
-                for p in wdata.get("panes", []):
-                    if p.get("role") == "tui":
-                        tui_window = wid
-                        break
-                if tui_window:
-                    break
-            if not tui_window:
-                # Fall back to window named 'main' (or first window) rather
-                # than the active window, which may be a QA/work window.
-                main_win = tmux_mod.find_window_by_name(session_name, "main")
-                if main_win:
-                    tui_window = main_win["id"]
-                else:
-                    all_wins = tmux_mod.list_windows(session_name)
-                    if all_wins:
-                        tui_window = all_wins[0]["id"]
-            if tui_window:
-                pane_layout._respawn_tui(session_name, tui_window)
-                pane_layout.rebalance(session_name, tui_window)
-            else:
-                _log.warning("TUI respawn failed — no windows found in session")
-                click.echo("Could not respawn TUI (no windows). "
-                           "Kill the session manually and re-run pm session.",
-                           err=True)
+        # The after-kill-pane hook may be respawning a killed TUI at this
+        # moment; deciding under the same lock means only one of us starts
+        # it (QA S42).
+        with pane_registry.tui_respawn_lock(session_name):
+            respawned_window = _ensure_tui_running(session_name)
+        if respawned_window:
+            pane_layout.rebalance(session_name, respawned_window)
 
         if tmux_mod.session_exists(session_name, socket_path=socket_path):
             _log.info("TUI present, finding/creating grouped session")

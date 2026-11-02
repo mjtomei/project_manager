@@ -5582,13 +5582,8 @@ class TestAdoptRunningTuiRegistryWrite:
         from pm_core.cli import session as session_mod
         from pm_core import pane_registry
 
-        monkeypatch.setattr(session_mod, "_live_panes_and_tuis",
-                            lambda: ({}, [("%7", "pm-x~1")]))
-        monkeypatch.setattr(session_mod, "_pm_session_of",
-                            lambda s: "pm-x")
-        monkeypatch.setattr(session_mod.tmux_mod, "_run",
-                            lambda *a, **k: MagicMock(returncode=0,
-                                                      stdout="0 @3\n"))
+        monkeypatch.setattr(session_mod, "_find_running_tui_pane",
+                            lambda s: ("%7", "@3") if s == "pm-x" else None)
         monkeypatch.setattr(pane_registry, "locked_read_modify_write", write)
         return session_mod._adopt_running_tui("pm-x")
 

@@ -1724,6 +1724,35 @@ def _live_panes_and_tuis() -> tuple[dict[str, str], list[tuple[str, str]]]:
     return panes, tuis
 
 
+def _find_running_tui_pane(session_name: str) -> tuple[str, str] | None:
+    """Return ``(pane_id, window_id)`` of a running TUI of *session_name*.
+
+    A running TUI is a pane whose start command runs ``pm _tui``
+    (``_live_panes_and_tuis``), in a tmux session that resolves to
+    *session_name* through its group (``_pm_session_of``), and whose
+    process has not exited: a dead pane kept by a user's ``remain-on-exit``
+    is not one.  Returns ``None`` when there is none, or when tmux cannot
+    be queried.
+
+    ``pm session`` adopts this pane when the registry does not list it
+    (QA S35), and the TUI-respawn hook leaves a session alone when it has
+    one (QA S42), so both agree on whether a TUI is running.
+    """
+    _, live_tuis = _live_panes_and_tuis()
+    for pane_id, tmux_session in live_tuis:
+        if _pm_session_of(tmux_session) != session_name:
+            continue
+        result = tmux_mod._run(
+            tmux_mod._tmux_cmd("display", "-p", "-t", pane_id,
+                               "#{pane_dead} #{window_id}"),
+            text=True)
+        fields = result.stdout.split() if result.returncode == 0 else []
+        if len(fields) != 2 or fields[0] != "0":
+            continue
+        return pane_id, fields[1]
+    return None
+
+
 def _shell_words(command: str) -> list[str]:
     """Split *command* into shell words; degrade to a whitespace split.
 

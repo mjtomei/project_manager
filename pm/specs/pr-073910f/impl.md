@@ -4022,7 +4022,7 @@ used a disposable socket directory, a temporary HOME or a mocked tmux.
 
 ## QA-driven fixes and reviews (2026-11-02)
 
-QA scenarios 23–40 ran after review loop b48f i21.  Seven of them found
+QA scenarios 23–42 ran after review loop b48f i21.  Eight of them found
 defects, each fixed in a `qa:` commit.  The review loops after them
 (54bf, 68bd, e661, 4c75) made cleanups only.  None of this changes a
 requirement.  R1.1, R3.3 and R3.4 above now state the rules these fixes
@@ -4084,6 +4084,28 @@ introduced.  `qa.md` has the per-scenario expectations.
    `$HOME` or a PR workdir clone.  `pm session list` now also probes the
    socket of the session the command runs in, and the warning names
    what was checked (R3.3; `qa.md` ambiguity 12).
+8. **QA S42: the killed-TUI respawn hook and a `pm session` attach.**
+   Three defects, seen live on tmux 3.2a.  (a) Pre-existing on master:
+   `_respawn_tui` split the new TUI with no `-c`, so it started in the
+   cwd of the client that ran `kill-pane`.  A `tmux kill-pane` typed in
+   another project's directory gave this session a TUI for that
+   project, and one typed in `/tmp` started the pm guide (and Claude)
+   there.  The split and the new-window fallback now pass
+   `-c '#{session_path}'` (`tmux.SESSION_START_DIR`), the directory the
+   session was created in.  (b) Pre-existing on master (5/5 rounds
+   there): the hook and the attach each saw no TUI and each split one;
+   the loser's pidfile refusal logged a traceback.  Both now decide and
+   respawn under `pane_registry.tui_respawn_lock(session)`, a sidecar
+   `<registry>.respawn.lock` taken before the registry lock.  The
+   attach's check is `_ensure_tui_running` (registry, then adopt, then
+   respawn).  The hook, after reconciling, leaves the session alone when
+   `_find_running_tui_pane` (the adopt's definition, now in
+   `cli/helpers.py`) finds a live `pm _tui` pane.  A lock that cannot be
+   taken in 10 s is logged and skipped (the old behaviour).  (c) This
+   branch only: the attach adopted the hook's new pane before the hook
+   registered it, and the hook's `_insert_tui` then listed it twice.
+   `_insert_tui` now skips a pane already listed.  Tests:
+   `tests/test_tui_respawn_race.py` (real tmux, stand-in `pm`).
 
 The review loops in between:
 

@@ -547,9 +547,15 @@ def create_session(name: str, cwd: str, cmd: str, socket_path: str | None = None
         _log.info("create_session: %s created concurrently; converging", name)
 
 
+# A ``-c`` start directory that tmux expands against the target session:
+# the directory the session was created in (``new-session -c``).
+SESSION_START_DIR = "#{session_path}"
+
+
 def split_pane(session: str, direction: str, cmd: str,
                window: str | None = None,
-               env: dict[str, str] | None = None) -> str:
+               env: dict[str, str] | None = None,
+               start_dir_format: str | None = None) -> str:
     """Split a pane and run cmd. Returns new pane ID.
 
     direction: 'h' for horizontal (left/right), 'v' for vertical (top/bottom)
@@ -557,12 +563,18 @@ def split_pane(session: str, direction: str, cmd: str,
         the active pane of the session's active window.
     env: environment variables for the new pane, exported via a private
         file (see ``_wrap_cmd_env``).
+    start_dir_format: the new pane's start directory as a tmux *format*
+        (passed to ``-c`` unescaped, e.g. ``SESSION_START_DIR``).  Without
+        it, tmux starts the pane in the cwd of the client that ran the
+        command.
     """
     flag = "-h" if direction == "h" else "-v"
     target = f"{session}:{window}" if window else session
+    args = ["split-window", flag, "-t", target, "-P", "-F", "#{pane_id}"]
+    if start_dir_format:
+        args += ["-c", start_dir_format]
     result = _run_with_env(
-        _tmux_cmd("split-window", flag, "-t", target, "-P", "-F",
-                  "#{pane_id}", cmd),
+        _tmux_cmd(*args, cmd),
         env,
         text=True,
         check=True,
@@ -715,16 +727,21 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
 
 
 def create_window(session: str, cmd: str,
-                  env: dict[str, str] | None = None) -> tuple[str, str]:
+                  env: dict[str, str] | None = None,
+                  start_dir_format: str | None = None) -> tuple[str, str]:
     """Create a new window in *session* running *cmd*.
 
     Returns ``(pane_id, window_id)`` of the newly created window.
     *env* is exported into the new pane through a private file (see
-    ``_wrap_cmd_env``).
+    ``_wrap_cmd_env``).  *start_dir_format* is the pane's start directory
+    as a tmux format, as for ``split_pane``.
     """
+    args = ["new-window", "-t", f"{session}:", "-P", "-F",
+            "#{pane_id} #{window_id}"]
+    if start_dir_format:
+        args += ["-c", start_dir_format]
     result = _run_with_env(
-        _tmux_cmd("new-window", "-t", f"{session}:",
-                  "-P", "-F", "#{pane_id} #{window_id}", cmd),
+        _tmux_cmd(*args, cmd),
         env,
         text=True, check=True,
     )
