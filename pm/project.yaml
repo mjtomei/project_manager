@@ -22364,11 +22364,46 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/198
   gh_pr_number: 198
   created_at: '2026-05-04T16:52:29.746985+00:00'
-  updated_at: '2026-05-04T19:01:37.495672+00:00'
+  updated_at: '2026-11-02T02:21:39.817063+00:00'
   started_at: '2026-05-04T17:52:29.154111+00:00'
   reviewed_at: '2026-05-04T19:01:37.495672+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-bf6dc79
+    text: 'Impl handoff 2026-11-02 (main-account Opus 5.5 restart). Merged origin/master@81e5d7f4
+      INTO the branch as 8497388f (only conflict: popup_cmd_cmd in session.py, resolved
+      onto master''s _session_pm_argv session-code dispatch). Completed the bounded
+      scope in 773db4bf (pushed to GitHub; the proxy refuses the local-mirror origin):
+
+      - pm_core/command_history.py: per-session ~/.pm/sessions/<tag>/command_history
+      (cap 1000) + popup_scrollback.jsonl (200 entries/1 MB), keyed by the tmux session
+      tag (never cwd), sidecar flock + atomic trim.
+
+      - pm_core/cli/popup_shell.py: long-lived prefix+M loop. readline Up/Down/Ctrl-R;
+      Tab = menu-complete (list, then cycle); PgUp/:scrollback pages the popup-owned
+      transcript (less, built-in pager fallback; tmux popups have no copy-mode); lone
+      Esc / Ctrl-D / exit close; Esc/Ctrl-C still abort a running command. Child output
+      captured via a private pty, relayed live.
+
+      - pm_core/cli/completion.py: Click-tree completer (subcommands, options, pr-xxxx
+      + #N via gh_pr_number, plan ids, Choice values, --depends-on lists), reloads
+      on project.yaml change.
+
+      - TUI command bar: shared-history Up/Down with draft restore + Tab completion
+      (same completer).
+
+      - _run_picker_command(wait_on_error=) -> bool; dispatch shape and pr qa/review-loop
+      TUI carve-outs unchanged.
+
+      Spec revised in pm/specs/pr-3526677/impl.md (Corrections section). New tests:
+      test_command_history, test_completion, test_popup_shell (pty e2e of real _popup-cmd),
+      test_command_bar_history. Full suite at 773db4bf: 5517 passed, 1 skipped, 0
+      failed (pytest<9, env -u PM_HOST_HOME PATH=/usr/bin:/bin). Also smoke-tested
+      in a disposable tmux 3.2a display-popup on a private -L socket (Esc close, Tab,
+      PgUp). Review/QA NOT self-started: gated on #278 (pr-073910f) and #195 (pr-cfe24ea)
+      merging per the restart note.'
+    created_at: '2026-11-02T02:21:39Z'
+    last_edited: '2026-11-02T02:21:39Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3526677-improvement-prefix-m-command-popup-b-1d7ca7a5
 - id: pr-438028c
   plan: improvements
