@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T01:54:44.526739+00:00'
+  updated_at: '2026-11-02T02:09:50.903350+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7005,6 +7005,34 @@ prs:
       server or shared host config touched.'
     created_at: '2026-11-02T01:54:44Z'
     last_edited: '2026-11-02T01:54:44Z'
+  - id: note-c696bf2
+    text: 'Review loop b48f i20 (no requirement changes; full suite 5505 passed /
+      1 skipped, 428 s, log /pm-captures/review-b48f-i20/full-suite-final.log). Verification
+      pass over the head after the b48f i19 fixes. One item: an implicit socket lookup
+      that skipped the ownership check. (1) qa_loop.run_session_live_elsewhere() (added
+      in b48f i15 for the TUI''s QA resume scan) called find_session_server(run_session)
+      without owned_only, although the name comes from the run snapshot''s session_tag,
+      which makes the lookup implicit. It was the last implicit caller without the
+      flag; every find_session_server/_select_session_socket caller was checked, and
+      the only other one without it is the explicit -s branch of _find_tui_pane, which
+      is exempt by design. Another local user could bind a server at the run''s deterministic
+      name in the 1777 socket directory. The victim''s TUI connected to it and, because
+      it answered, left the run unresumed. The call now passes owned_only=True unconditionally.
+      The run was launched by this user''s pm, whose server binds a socket this user
+      owns, and that holds for shared sessions too because the snapshot lives in the
+      sharing user''s ~/.pm. With no server of ours the session counts as gone and
+      the run is resumed here. Test: TestCrossServerRunSession::test_a_socket_another_user_planted_is_not_the_run_session
+      (real socket with a foreign owner). It fails on the pre-fix code (returned True
+      after probing the planted socket). Heads-up for the next master integration,
+      not changed here: origin/master is 183 commits past the merge base (now c1fcecc5).
+      A read-only merge-tree shows conflicts only in pm/project.yaml and in one hunk
+      of qa_loop_ui._resume_incomplete_qa, where master re-reads qa_status.json (refreshing
+      overall and keeping the daemon''s error) at the spot where this PR inserts the
+      "live on another server" skip. Keep both, with master''s re-read first, so needs_driving
+      sees the refreshed overall. The i16 and i18 residuals are unchanged. No live
+      session, server or shared host config touched.'
+    created_at: '2026-11-02T02:09:50Z'
+    last_edited: '2026-11-02T02:09:50Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
