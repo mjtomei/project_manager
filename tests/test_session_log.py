@@ -131,6 +131,29 @@ def test_missing_log_is_reported_not_substituted(home):
     assert "will not substitute another session" in msg
 
 
+def test_missing_suffix_only_for_a_missing_log(home):
+    rec = session_log.register(_launch(), _sid(), "/w")
+    assert session_log.missing_suffix(None) == ""
+    assert session_log.missing_suffix(rec).startswith("; native log of ")
+    Path(rec.log).parent.mkdir(parents=True)
+    Path(rec.log).write_text(_turn("hi"))
+    assert session_log.missing_suffix(rec) == ""
+
+
+def test_adopt_keeps_the_sessions_cwd_and_names_its_run():
+    sid = _sid()
+    session_log.register(_launch(run_id="autostart-a"), sid, "/wd")
+    rec = session_log.adopt(_launch(run_id="run-b", loop_id="l1",
+                                    iteration=1), sid, "/native/log.jsonl")
+    assert (rec.cwd, rec.adopted_from, rec.log, rec.run_id) == \
+        ("/wd", "autostart-a", "/native/log.jsonl", "run-b")
+    # A session pm never recorded (another driver's, no run) is named so.
+    other = session_log.adopt(_launch(run_id="run-b"), _sid(), "/x.jsonl")
+    assert (other.cwd, other.adopted_from) == ("", "unrecorded")
+    with pytest.raises(ValueError):
+        session_log.adopt(_launch(), "not-a-session", "/x.jsonl")
+
+
 def test_retention_is_read_never_written(home, monkeypatch):
     settings = home / ".claude" / "settings.json"
     settings.parent.mkdir(parents=True)

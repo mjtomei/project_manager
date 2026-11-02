@@ -157,7 +157,7 @@ class TestBaseWatcher:
             def generate_prompt(self, iteration):
                 return f"Test prompt iteration {iteration}"
 
-            def build_launch_cmd(self, iteration, transcript=None):
+            def build_launch_cmd(self, iteration, session_id=None, run_id=""):
                 return ["echo", "test"]
 
             def parse_verdict(self, output):
@@ -179,7 +179,7 @@ class TestBaseWatcher:
             DISPLAY_NAME = "Test"
             WINDOW_NAME = "test"
             def generate_prompt(self, iteration): return ""
-            def build_launch_cmd(self, iteration, transcript=None): return ["echo"]
+            def build_launch_cmd(self, iteration, session_id=None, run_id=""): return ["echo"]
             def parse_verdict(self, output):
                 from pm_core.loop_shared import match_verdict
                 for line in reversed(output.strip().splitlines()):
@@ -209,7 +209,7 @@ class TestBaseWatcher:
             DISPLAY_NAME = "Test"
             WINDOW_NAME = "test"
             def generate_prompt(self, iteration): return ""
-            def build_launch_cmd(self, iteration, transcript=None): return ["echo"]
+            def build_launch_cmd(self, iteration, session_id=None, run_id=""): return ["echo"]
             def parse_verdict(self, output):
                 from pm_core.loop_shared import match_verdict
                 for line in reversed(output.strip().splitlines()):
@@ -236,7 +236,7 @@ class TestBaseWatcher:
             DISPLAY_NAME = "Test"
             WINDOW_NAME = "test"
             def generate_prompt(self, iteration): return ""
-            def build_launch_cmd(self, iteration, transcript=None): return ["echo"]
+            def build_launch_cmd(self, iteration, session_id=None, run_id=""): return ["echo"]
             def parse_verdict(self, output):
                 from pm_core.loop_shared import match_verdict
                 for line in reversed(output.strip().splitlines()):
@@ -268,7 +268,7 @@ class TestWatcherManager:
             def generate_prompt(self, iteration):
                 return ""
 
-            def build_launch_cmd(self, iteration, transcript=None):
+            def build_launch_cmd(self, iteration, session_id=None, run_id=""):
                 return ["echo"]
 
             def parse_verdict(self, output):

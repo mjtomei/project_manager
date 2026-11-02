@@ -213,6 +213,21 @@ def register(launch: SessionLaunch, session_id: str, cwd: str, *,
     return _record(event)
 
 
+def adopt(launch: SessionLaunch, session_id: str,
+          log: str | Path) -> SessionRecord:
+    """Record an existing session *session_id* under *launch*'s identity.
+
+    No copy is made: the record names the session's native *log*.  It keeps
+    the cwd the session's own launch recorded, and ``adopted_from`` names
+    that launch's run (``unrecorded`` for a session pm never recorded, e.g.
+    one another driver launched without a run).
+    """
+    prior = by_session(launch.subject, session_id)
+    return register(launch, session_id, prior.cwd if prior else "", log=log,
+                    adopted_from=(prior.run_id if prior else "")
+                    or "unrecorded")
+
+
 def retire(subject: str, session_id: str, reason: str) -> None:
     """Mark *session_id* as no longer the current run of its phase."""
     if not is_session_id(session_id):
@@ -339,6 +354,17 @@ def retention_days() -> int | None:
         if isinstance(value, int) and not isinstance(value, bool):
             return value
     return None
+
+
+def missing_suffix(record: SessionRecord | None) -> str:
+    """``"; <missing_message>"`` when *record*'s log is missing, else ``""``.
+
+    For collectors giving up on a session (its pane is gone): the report
+    says whether the session left any log, never borrowing another's.
+    """
+    if record is None or log_state(record) == "present":
+        return ""
+    return f"; {missing_message(record)}"
 
 
 def missing_message(record: SessionRecord) -> str:
@@ -509,7 +535,8 @@ def format_records(recs: list[SessionRecord]) -> list[str]:
             ident.append(f"attempt={r.attempt}")
         if r.head:
             ident.append(f"head={r.head[:12]}")
-        state = log_state(r)
+        log = log_path(r)   # one lookup: a missing log globs project dirs
+        state = "present" if log.exists() else "missing"
         flags = []
         if r.retired:
             flags.append(f"retired: {r.retired}")
@@ -518,7 +545,7 @@ def format_records(recs: list[SessionRecord]) -> list[str]:
         elif r.adopted_from:
             flags.append(f"adopted from run {r.adopted_from}")
         line = (f"{r.at}  {' '.join(ident)}  session={r.session_id}  "
-                f"log[{state}]={log_path(r)}")
+                f"log[{state}]={log}")
         if flags:
             line += "  (" + "; ".join(flags) + ")"
         lines.append(line)
@@ -529,8 +556,9 @@ def records_as_json(recs: list[SessionRecord]) -> list[dict]:
     out = []
     for r in recs:
         d = dict(r.__dict__)
-        d["log"] = str(log_path(r))
-        d["log_state"] = log_state(r)
+        log = log_path(r)
+        d["log"] = str(log)
+        d["log_state"] = "present" if log.exists() else "missing"
         out.append(d)
     return out
 

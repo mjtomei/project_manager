@@ -22,6 +22,7 @@ import pytest
 from pm_core import review_loop
 from pm_core.review_loop import (
     AttemptDiscovery,
+    PaneKilledError,
     ReviewHoldError,
     ReviewIteration,
     ReviewLaunchError,
@@ -630,6 +631,38 @@ def test_window_not_found_and_unrecorded_session_are_retryable(tmp_path,
                                            iteration=1)
     assert ei.value.retryable is True
     assert ei.value.reason == "session"
+
+
+def test_pane_gone_reports_the_attempts_missing_log(tmp_path, monkeypatch):
+    """The attempt's pane dies before its session wrote a log: the KILLED
+    report names that exact session and its expected native path (pm keeps
+    no copy) — no other session's log stands in."""
+    from pm_core import session_log, tmux
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
+    monkeypatch.setattr(tmux, "session_exists", lambda _s: True)
+    monkeypatch.setattr(review_loop, "_find_review_claude_pane",
+                        lambda *a, **k: "%9")
+    monkeypatch.setattr(review_loop, "_WINDOW_WAIT", 0)
+
+    def child(pr_id, pm_root, *, session_id, run_id, **kw):
+        session_log.register(
+            session_log.SessionLaunch(subject=pr_id, phase="review",
+                                      run_id=run_id, iteration=1),
+            session_id, str(tmp_path / "wd"))
+        return []
+
+    info: dict = {}
+    with patch.object(review_loop, "_launch_review_window",
+                      side_effect=child), \
+            patch.object(review_loop, "_poll_for_verdict", return_value=None):
+        with pytest.raises(PaneKilledError) as ei:
+            review_loop._run_claude_review(
+                PR, str(tmp_path), _pr(tmp_path), iteration=1,
+                attempt_info=info)
+    msg = str(ei.value)
+    assert msg.startswith("Review pane disappeared")
+    assert f"session {info['session_id']}" in msg and "is missing at" in msg
 
 
 def test_healthy_unrelated_review_continues_during_retry(tmp_path):

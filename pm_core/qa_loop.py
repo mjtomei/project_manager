@@ -3642,6 +3642,9 @@ def _build_scenario_run_cmd(
 
     use_containers = bool(scenario.container_name)
     host_clone = scenario.worktree_path or workdir_path
+    # Where Claude runs — and so where its native log lands; the scenario's
+    # transcript_path is computed from the same helper.
+    wd_in = _scenario_claude_cwd(scenario, workdir_path)
 
     # Captures dir: container workers see the bind-mounted /pm-captures
     # path; host workers see the full host path under
@@ -3649,12 +3652,10 @@ def _build_scenario_run_cmd(
     # interpolates this as `{captures_root}/scenarios/<n>/...`.
     from pm_core.paths import captures_dir, CONTAINER_CAPTURES_MOUNT
     if use_containers:
-        wd_in = container_mod._CONTAINER_WORKDIR
         scratch = container_mod._CONTAINER_SCRATCH
         sess_for_prompt = None
         captures_root = CONTAINER_CAPTURES_MOUNT
     else:
-        wd_in = host_clone
         scratch = str(Path(state.qa_workdir) / f"s-{scenario.index}" / "scratch")
         sess_for_prompt = session
         host_captures = captures_dir(state.pr_id, session_tag=state.session_tag)

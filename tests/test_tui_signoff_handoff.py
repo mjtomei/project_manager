@@ -465,6 +465,26 @@ def test_restart_with_new_run_dir_retires_run_of_another_head(world_factory,
     assert any("stale (HEAD moved)" in m for m in app.logs)
 
 
+def test_cli_auto_sequence_router_is_not_adopted(world_factory, tmp_path):
+    """The router window a ``pm pr auto-sequence`` tick launched belongs to
+    that live driver: the TUI must not retire it there and take it over
+    (the pre-upgrade ``transcripts/auto-sequence/<pr>/`` layout kept it out
+    of the TUI's reach)."""
+    from pm_core import signoff as so
+    app, w = world_factory(wait=False)
+    _qa_pass(app)
+    _restart_into_new_run(app)
+    # Replace the TUI's router with one the CLI driver launched.
+    session_log.retire(PR, w.sid, "test: CLI driver relaunched")
+    w.record_launch(session_log.AUTO_SEQUENCE_RUN)
+    w.window = True
+    from pm_core.tui import signoff_ui
+    signoff_ui._adopt_orphaned_run(app, app.pr(), "run2", "pm-test")
+    cli = so.current_signoff_session(session_log.AUTO_SEQUENCE_RUN, PR)
+    assert cli is not None and cli.session_id == w.sid
+    assert so.current_signoff_session("run2", PR) is None
+
+
 def test_run_from_earlier_signoff_episode_is_not_adopted(world_factory,
                                                          tmp_path):
     """Only runs launched since the PR entered sign_off are adopted; an older

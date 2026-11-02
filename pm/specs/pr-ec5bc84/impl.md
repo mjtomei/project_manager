@@ -56,15 +56,20 @@ archived or deleted; native retention governs history.
     `claude_launcher.transcript_path_for(cwd, sid)`).
   - `records(subject)`, `find(subject, *, phase, run_id, loop_id, iteration,
     include_retired)`, `latest(...)`, `by_session(subject, sid)`.
-  - `retire(subject, sid, reason)`; `adopt(subject, sid, log, *, phase, run_id,
-    loop_id, iteration, adopted_from, head, base)` — append a launch event
-    naming an *existing* session under a new driver identity (no copy).
+  - `retire(subject, sid, reason)`; `adopt(launch, sid, log)` — append a
+    launch event naming an *existing* session under a new driver identity
+    (no copy), keeping the cwd its own launch recorded and naming that
+    launch's run in `adopted_from` (`unrecorded` when pm never recorded it).
+    Legacy and cross-run sign-off adoptions call `register(..., log=,
+    legacy=/adopted_from=)` directly.
   - `log_path(record)` → the recorded native path, else the session-id lookup
     `~/.claude/projects/*/<sid>.jsonl` (the existing pr-488b748 band-aid, keyed by
     the known id — never a history scan); `log_state(record)` →
     `present | missing`; `missing_message(record)` — an accurate report that
     names the session, the expected path and Claude's configured
-    `cleanupPeriodDays` (read-only from Claude settings; pm never changes it).
+    `cleanupPeriodDays` (read-only from Claude settings; pm never changes it);
+    `missing_suffix(record)` appends it to a collector's give-up message only
+    when the log is missing.
   - **Bounded read-only legacy reader** `legacy_session(root, run_id, name,
     subject)` for `pm/transcripts/<run>/<name>` (`auto-sequence` maps to
     `auto-sequence/<pr>/`): a symlink yields its target's session id + native
@@ -159,7 +164,9 @@ per-TUI `manual-<hex>`).
   `retire_signoff_run` kills the window and appends `retire` (logs kept), so a
   consumed verdict cannot be replayed and the earlier session stays
   discoverable. `signoff_ui._adopt_orphaned_run` adopts the live sign-off
-  pane's session from another auto-start run by appending an adopted record.
+  pane's session from another auto-start run by appending an adopted record
+  (never from a `manual-*` run or the CLI `auto-sequence` driver's run — a
+  live driver of its own, which the pre-upgrade layout kept out of reach).
 - **Auto-sequence** (`cli/pr.py`): `_check_review_verdict` reads the latest
   `review` record (by iteration) of run `auto-sequence`; numbering continues
   after the highest recorded (or legacy) iteration.
@@ -183,7 +190,9 @@ no log and no alias exists.
 A record whose log is absent reads as "no verdict yet" and never falls back
 to another session or a canonical file. Where a collector gives up (retry
 exhausted, verdict expected from a dead pane, history listing) the message is
-`missing_message(record)`. `pm pr sessions <pr>` / `pm watcher sessions
+`missing_message(record)`: the review loop's and watchers' "pane disappeared"
+(KILLED) reports append it via `missing_suffix` when the attempt's session
+left no log. `pm pr sessions <pr>` / `pm watcher sessions
 [type]` list ledger rows with `present`/`missing` status (read-only history
 reader; prompts that pointed agents at `transcripts/auto-sequence/...` and the
 watcher-review "Per-test transcripts" dir point at these commands instead).

@@ -1672,14 +1672,11 @@ def _adopt_return_review(app, pr: dict) -> bool:
     # its own attempt and polls it instead of launching over it.
     prior = session_log.by_session(pr_id, sid)
     try:
-        session_log.register(
+        session_log.adopt(
             session_log.SessionLaunch(subject=pr_id, phase="review",
                                       run_id=run_id, loop_id=state.loop_id,
                                       iteration=1),
-            sid, prior.cwd if prior else "",
-            log=session_log.log_path(prior) if prior else transcript,
-            adopted_from=(prior.run_id or "unrecorded") if prior
-            else "unrecorded")
+            sid, session_log.log_path(prior) if prior else transcript)
     except (OSError, ValueError) as e:
         _log.warning("auto_start: cannot adopt review window of %s: %s",
                      pr_id, e)

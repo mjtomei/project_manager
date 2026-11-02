@@ -153,6 +153,19 @@ class BaseWatcher(ABC):
         from pm_core.session_log import watcher_subject
         return watcher_subject(self.WATCHER_TYPE)
 
+    def _iteration_args(self, session_id: str | None,
+                        run_id: str) -> list[str]:
+        """``pm watcher --iteration`` identity flags shared by every type:
+        the loop, the iteration's pre-generated session and the driver run."""
+        args: list[str] = []
+        if self.state.loop_id:
+            args += ["--loop-id", self.state.loop_id]
+        if session_id:
+            args += ["--session-id", session_id]
+        if run_id:
+            args += ["--run-id", run_id]
+        return args
+
     def _launch_window(self, iteration: int,
                        session_id: str | None = None) -> None:
         """Launch the watcher tmux window via subprocess."""
@@ -239,8 +252,11 @@ class BaseWatcher(ABC):
         if content is None:
             if self.state.stop_requested:
                 raise PaneKilledError("Watcher stopped by user")
+            from pm_core import session_log
             raise PaneKilledError(
                 f"Pane disappeared (window: {self.WINDOW_NAME})"
+                + session_log.missing_suffix(session_log.by_session(
+                    self.ledger_subject, session_id))
             )
         return content
 

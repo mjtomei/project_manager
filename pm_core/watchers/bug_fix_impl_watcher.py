@@ -59,12 +59,7 @@ class BugFixImplWatcher(BaseWatcher):
             "watcher", "--watcher-type", self.WATCHER_TYPE,
             "--iteration", str(iteration),
         ]
-        if self.state.loop_id:
-            cmd.extend(["--loop-id", self.state.loop_id])
-        if session_id:
-            cmd.extend(["--session-id", session_id])
-        if run_id:
-            cmd.extend(["--run-id", run_id])
+        cmd.extend(self._iteration_args(session_id, run_id))
         if self.meta_pm_root:
             cmd.extend(["--meta-pm-root", self.meta_pm_root])
         return cmd

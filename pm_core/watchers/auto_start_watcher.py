@@ -71,12 +71,7 @@ class AutoStartWatcher(BaseWatcher):
             sys.executable, "-m", "pm_core.wrapper",
             "watcher", "--iteration", str(iteration),
         ]
-        if self.state.loop_id:
-            cmd.extend(["--loop-id", self.state.loop_id])
-        if session_id:
-            cmd.extend(["--session-id", session_id])
-        if run_id:
-            cmd.extend(["--run-id", run_id])
+        cmd.extend(self._iteration_args(session_id, run_id))
         for target in self.auto_start_targets:
             cmd.extend(["--auto-start-target", target])
         if self.meta_pm_root:

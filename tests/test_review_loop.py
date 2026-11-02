@@ -513,11 +513,11 @@ class TestAdoptWaitsForInFlightLaunch:
         assert clock.now == _LAUNCH_TIMEOUT
 
     def test_unrecorded_launch_waits_only_the_short_grace(self, tmp_path):
-        from pm_core.review_loop import _IN_FLIGHT_SYMLINK_GRACE
+        from pm_core.review_loop import _IN_FLIGHT_RECORD_GRACE
         state, tdir = self._setup(tmp_path, symlink=False)
         out, poll, find, clock = self._adopt(state, tdir, [None] * 500)
         assert out is None
-        assert clock.now == _IN_FLIGHT_SYMLINK_GRACE
+        assert clock.now == _IN_FLIGHT_RECORD_GRACE
 
     def test_failed_attempts_symlink_is_not_waited_on(self, tmp_path):
         """S133: after this iteration's last launch attempt failed (an

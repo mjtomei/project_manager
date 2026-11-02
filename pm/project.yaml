@@ -46258,11 +46258,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-27T23:16:14.111057+00:00'
-  updated_at: '2026-10-27T23:16:14.111057+00:00'
+  updated_at: '2026-11-02T06:15:11.751799+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-61e0201
+    text: 'From pr-ec5bc84 review (c71c i1): the TUI --transcript {tdir}/... interpolations
+      this bug names (pr_view.start_pr/review_pr, review_loop_ui merge command) are
+      gone; they now pass --run-id <run> (autostart-*/manual-<hex>, no path). Only
+      the unquoted workdir prompt-file path in claude_launcher.build_claude_shell_cmd
+      remains in scope here.'
+    created_at: '2026-11-02T06:15:11Z'
+    last_edited: '2026-11-02T06:15:11Z'
 - id: pr-a9803aa
   plan: bugs
   title: 'Bug: push proxy local-path origin rejection is bypassed by git push --repo=<path>'

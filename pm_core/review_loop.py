@@ -82,7 +82,7 @@ REVIEW_LAUNCH_CLAIM_WAIT = 15.0      # bounded wait for another owner to go
 _LAUNCH_TIMEOUT = 120
 # How long a resumed loop waits for a launch that has not recorded its
 # session yet (pm start-up before the launcher runs).
-_IN_FLIGHT_SYMLINK_GRACE = 15
+_IN_FLIGHT_RECORD_GRACE = 15
 _WINDOW_WAIT = 2.0                   # wait for the tmux window to appear
 _LEASE_REFRESH_SECONDS = 30.0        # keepalive while polling a review
 _DISCOVERY_GRACE = 2.0               # wait for a starting pane's session id
@@ -565,15 +565,12 @@ def _own_attempt(state: "ReviewLoopState", iteration: int, session_id: str,
                             loop_id=state.loop_id, iteration=iteration,
                             session_id=session_id, include_retired=True):
             return
-        prior = session_log.by_session(state.pr_id, session_id)
-        session_log.register(
+        session_log.adopt(
             session_log.SessionLaunch(subject=state.pr_id, phase="review",
                                       run_id=state.run_id,
                                       loop_id=state.loop_id,
                                       iteration=iteration),
-            session_id, prior.cwd if prior else "", log=log,
-            adopted_from=(prior.run_id or "unrecorded") if prior
-            else "unrecorded")
+            session_id, log)
     except (OSError, ValueError):
         _log.debug("review_loop: recording adopted session failed",
                    exc_info=True)
@@ -1014,7 +1011,9 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
     except WorkspaceTrustBlocked as e:
         raise ReviewHoldError(str(e)) from e
     if content is None:
-        raise PaneKilledError(f"Review pane disappeared (window: {window_name})")
+        raise PaneKilledError(
+            f"Review pane disappeared (window: {window_name})"
+            + session_log.missing_suffix(record))
     return content
 
 
@@ -1047,7 +1046,7 @@ def _wait_for_launching_window(session: str, window_name: str,
             if session_log.log_path(ours[-1]).exists() \
                     or elapsed >= _LAUNCH_TIMEOUT:
                 return None
-        elif elapsed >= _IN_FLIGHT_SYMLINK_GRACE:
+        elif elapsed >= _IN_FLIGHT_RECORD_GRACE:
             return None
         if not waited:
             _log.info("review_loop: no %s window yet; waiting for the "

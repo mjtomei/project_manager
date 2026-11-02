@@ -256,7 +256,8 @@ def _adopt_orphaned_run(app, pr: dict, run_id: str, session: str) -> None:
     recorded (pr-5410ae4).  When this run has no router session of its own,
     no launch is in flight and the PR's sign-off window is alive, the
     session that window runs is adopted if another auto-start run launched
-    it (``manual-*`` runs and runs that recorded no HEAD are never adopted)
+    it (``manual-*`` runs, the CLI ``auto-sequence`` driver's run and runs
+    that recorded no HEAD are never adopted)
     since the PR entered ``sign_off``: it is retired in its old run and
     recorded under this one with the HEAD/base its launch recorded, so a
     consumed verdict is not replayed by a later sign_off entry (a move, not
@@ -286,7 +287,11 @@ def _adopt_orphaned_run(app, pr: dict, run_id: str, session: str) -> None:
     since = _entered_signoff_epoch(pr)
 
     def _eligible_run(other: str) -> bool:
-        return bool(other) and other != run_id \
+        # Only another TUI run's router: never a manual-* run, and never the
+        # CLI auto-sequence driver's (a live driver of its own, whose run the
+        # pre-upgrade layout kept out of reach one level deeper).
+        return bool(other) and other not in (run_id,
+                                             session_log.AUTO_SEQUENCE_RUN) \
             and not other.startswith("manual-")
 
     def _recent(epoch: float | None) -> bool:
