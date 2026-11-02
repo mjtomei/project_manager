@@ -39215,7 +39215,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-11-02T00:30:48.965445+00:00'
+  updated_at: '2026-11-02T00:53:53.624573+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40070,6 +40070,37 @@ prs:
       post-fix repro still reports all three symptoms fixed.'
     created_at: '2026-11-02T00:30:48Z'
     last_edited: '2026-11-02T00:30:48Z'
+  - id: note-3cb3edf
+    text: 'Review-loop e757 i11 (2026-11-02): test-only, no behavioural change. Closed
+      four unit gaps for behaviour this PR documents but only QA had exercised: (a)
+      test_archive_of_a_dangling_outgoing_link — reusing a path whose link target
+      was never written still archives that attempt instead of dropping it; (b) test_launch_proceeds_when_archiving_fails
+      — build_claude_shell_cmd replaces the canonical and links the new session even
+      when archive_transcript returns None (R9; QA S14 drove this by hand with a 0555
+      archive/); (c) test_finalize_freezes_a_target_without_a_session_id — the ownership
+      check only compares two known ids, so an unidentifiable target is frozen as
+      usual; (d) test_retire_signoff_run_drops_a_consumed_link_when_archiving_fails
+      — the .head stamp always goes, a leftover symlink is dropped (content lives
+      at the native JSONL), a regular file (the only copy) is kept for the missing-.head
+      guard. Archive suite 36 -> 40. Verified at f5ac39236: full suite 5483 passed
+      / 1 skipped (7m12s, markdown installed); archive suite 40 passed 5/5 consecutive
+      runs; post-fix repro still reports all three symptoms fixed, and the pre-fix
+      repro on 3699f71a (temp worktree) still reports all three present — the before/after
+      evidence is genuine. No code defect found in this pass: archive-on-replace (no-clobber,
+      content/sid-keyed, never rename), ownership-checked finalize (readlink at entry,
+      guard after the copy before os.replace, archive copy first), loop-scoped iteration
+      names with allow_legacy only for a resumed in-flight iteration, iteration_sessions
+      breadcrumb round-trip, retire-archives-without-deleting, and the e757-i4 rule
+      (bulk sweeps never freeze a canonical) are consistent across every caller. Note:
+      origin/master has moved to c1fcecc58 (pr-e076433 worker_route->router_route
+      rename, which touches claude_launcher.py only in the provider block); a merge-tree
+      preview of origin/master into this branch is clean (no conflicts, no markers),
+      but the branch is one master commit behind and will need integration before
+      merge. Carried over unchanged: archive entry counts are minimums, and a canonical
+      (and a completed watcher iteration link) stays a live link until a new attempt
+      reuses its path.'
+    created_at: '2026-11-02T00:53:53Z'
+    last_edited: '2026-11-02T00:53:53Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
