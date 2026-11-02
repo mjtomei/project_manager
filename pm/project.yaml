@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T10:19:06.561040+00:00'
+  updated_at: '2026-11-02T10:50:28.098168+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7741,6 +7741,46 @@ prs:
       C-b x y cycle to see the removed= order.'
     created_at: '2026-11-02T10:19:06Z'
     last_edited: '2026-11-02T10:19:06Z'
+  - id: note-cae2798
+    text: 'QA S34 refiner (2026-11-02, c13abe72): all 5 stories smoke-run live on
+      tmux 3.2a. Stories 1-3 and 5 match the code. Story 4 reproduces the expected
+      finding: with /tmp/pm-sessions root-owned 1733, `pm session list` prints "No
+      pm sessions found." (rc 0, empty stderr) while A runs, because Path.glob swallows
+      the PermissionError on the unreadable dir (qa.md ambiguity 9 says that is a
+      failure); --print-connect, pm tui view and kill all work through the deterministic
+      path. Harness notes: start every tmux server under a PR_SET_CHILD_SUBREAPER
+      parent; never tmux kill-server (or SIGKILL) a server with a `pm session` client
+      attached unless you expect the pre-existing attach TmuxCommandError traceback
+      (master has the same check=True attach) - tear A down with kill-session =pm-<A>~1
+      instead. In the story-3 race the plain-shell kill won 4/4 rounds; the in-session
+      kill wrote nothing to its redirected stdout/stderr (SIGHUP before the teardown
+      guard), no traceback.'
+    created_at: '2026-11-02T10:26:23Z'
+    last_edited: '2026-11-02T10:26:23Z'
+  - id: note-1b8abec
+    text: 'QA S34 (pm session kill/list across socket states) NEEDS_WORK: one defect
+      found and fixed in 43b354456; full suite 5556 passed / 1 skipped (12 test_markdown_render
+      failures = markdown missing from the venv). Stories 1-3 and 5 PASS on eab379d2
+      with no source changes: (1) SIGKILLed C + base-killed A: list rc 0, empty stderr,
+      rows A(1)/B(1), no C; kill in C "No session ... found." rc 1 removes the stale
+      socket, kill in A same text but keeps the live ~1 server and its client, A TUI
+      still moves on l; C restarts on the same path. (2) non-pm scratch on B server:
+      kill prints Killed rc 0 and leaves scratch + socket; after scratch ends the
+      stale socket is removed by the next kill. (3) in-session vs plain kill race:
+      plain won (Killed, rc 0), kin.* empty, D socket/TUI/environ all gone, list loop
+      120 runs rc 0 D 1->0 monotonic, 261 tui sends rc 0, B pane/inode unchanged.
+      (5) regular file at /tmp/pm-sessions: list No pm sessions found (empty stderr),
+      pm session refuses with the exact Errno 17 message, file untouched. Story 4
+      FAILED pre-fix exactly as the refiner predicted: root 1733 dir -> pm session
+      list printed a bare "No pm sessions found." while A ran. Fix: list_pm_sessions
+      uses os.scandir (Path.glob swallows EACCES), reports read_errors, probes extra_sockets
+      inside the socket dir; pm session list passes the cwd project socket and warns
+      on stderr "Cannot read tmux socket directory ... (Permission denied): other
+      pm sessions may be running but cannot be listed; only this project''s session
+      was checked there." Re-driven live post-fix: A listed + warning, rc 0; story-1
+      list/kill re-checked post-fix. Captures /pm-captures/scenarios/34 (README.md).'
+    created_at: '2026-11-02T10:50:28Z'
+    last_edited: '2026-11-02T10:50:28Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
