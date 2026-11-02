@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T06:53:22.993616+00:00'
+  updated_at: '2026-11-02T07:01:29.895274+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25752,6 +25752,24 @@ prs:
       2nd TUI Enter. Helpers: /pm-captures/scenarios/19/refiner-helpers.'
     created_at: '2026-11-02T06:53:22Z'
     last_edited: '2026-11-02T06:53:22Z'
+  - id: note-93bfd17
+    text: 'QA S18 (2026-11-02): PASS at a3777520 (head 677702dd), live from /scratch/s18
+      with pm session --global (pm-proj-c2327f8c; plain tag proj-de7d7b9b). All 5
+      host-mode surfaces (TUI Enter, command bar, pm qa launch, pm qa regression,
+      prefix+M popup) gave the stand-in cwd = its own clone, PM_PROJECT/PM_SESSION/TMUX/TMUX_PANE/PM_POPUP_SESSION/PM_IN_TMUX_SESSION/PM_SHARE_MODE
+      unset and PM_TMUX_SOCKET=/tmp/pm-sessions/pm-proj-c2327f8c; headers and prompt.md
+      under ~/.pm/sessions/proj-c2327f8c/ (shared tag), one master commit, 5 distinct
+      ids, socket note on every prompt, Filing Findings (pm -C /scratch/s18/proj/pm)
+      only on the 3 --file-prs runs; panes/windows/registry back to the snapshot after
+      each run; popup closed ~0.2 s after Enter (stdin_tty=no, pr-a589f09). From a
+      run pane, zz-test pm session/name/tui view matched a PM_TMUX_SOCKET-only plain
+      shell (pm-zz-test-30918c17, own TUI %8; user tui-history sha unchanged; no grouped-session
+      reuse); PM_SHARE_MODE=global reproduces the old fallback to the user TUI. Trap:
+      after a command-bar submit from the QA view, focus stays on the hidden PR tree,
+      so the next Enter opens pr-edit (press q twice first); noted on pr-adfdce3.
+      Captures: /pm-captures/scenarios/18/.'
+    created_at: '2026-11-02T07:01:29Z'
+    last_edited: '2026-11-02T07:01:29Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
@@ -36886,11 +36904,25 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T05:08:39.944928+00:00'
-  updated_at: '2026-10-13T05:08:39.944928+00:00'
+  updated_at: '2026-11-02T07:01:20.034134+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-1451e3c
+    text: 'pr-7d5d036 QA S18 (2026-11-02): the same hidden-tree focus steal also follows
+      every command-bar submit made from the QA view, not only autostart. handle_command_submitted
+      (pm_core/tui/pr_view.py, the common tail after run_command/launch_regression_command)
+      focuses #plans-pane if _plans_visible, else #tech-tree, and ignores _qa_visible.
+      Live repro on a real TUI: q (QA view), / qa regression demo --file-prs Enter
+      (run launches), later Enter on the still-highlighted regression item launched
+      role=pr-edit for the hidden selected PR instead of a second run (~/.pm/debug
+      log: "launch_pane ... role=pr-edit", "Selected: pr-..."); q, q restored focus.
+      Fix together: refocus the visible view (QA pane when _qa_visible) in that tail
+      and in the guard early-return, and add a pilot test for a QA-view command-bar
+      submit.'
+    created_at: '2026-11-02T07:01:19Z'
+    last_edited: '2026-11-02T07:01:19Z'
 - id: pr-291ed27
   plan: bugs
   title: 'Bug: TUI cursor ignores external pm pr select of the previously followed
