@@ -51632,6 +51632,17 @@ prs:
       pending). Branch ready for a fresh sign-off.'
     created_at: '2026-11-02T08:57:49Z'
     last_edited: '2026-11-02T08:57:49Z'
+  - id: note-a70f631
+    text: 'QA S13 refiner rehearsal (2026-11-02): venv-only mirror PASS — fresh venv
+      + the Dockerfile pip3 list (click/pyyaml/textual/pyperclip/markdown) + PYTHONPATH=/workspace
+      renders body-only HTML and opens the project-view popup (alpha (default); route1
+      [UNAVAILABLE: router not reachable at 127.0.0.1:1] in full) with Esc closing
+      cleanly. Container build is feasible in the scenario container only with ''podman
+      build --uts=host'' (plain ''podman build'' dies ''sethostname: Operation not
+      permitted''); ''podman run'' also needs --uts=host, and the built image needs
+      the checkout bind-mounted at /opt/pm-src.'
+    created_at: '2026-11-02T09:59:05Z'
+    last_edited: '2026-11-02T09:59:05Z'
   - id: note-7b333a9
     text: 'QA scenario 12 (unreadable/malformed providers.yaml) PASS: all 7 stories
       matched their THENs exactly — add refusals are one Error: line (exit 1, empty
