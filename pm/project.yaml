@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-02T04:42:48.188240+00:00'
+  updated_at: '2026-11-02T05:23:34.362357+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48369,6 +48369,25 @@ prs:
       the user model switch in pm/project.yaml, the qa.md edits, verify-s51-followup.md.'
     created_at: '2026-11-02T04:42:48Z'
     last_edited: '2026-11-02T04:42:48Z'
+  - id: note-103374f
+    text: 'QA scenario 66 (two PRs integrating a mid-list-inserting base at once,
+      racing publication, loser re-sign-off) PASS at 62705458 — no code change; all
+      four triples held live in a real pm session with fake-claude (captures /pm-captures/scenarios/66/,
+      tui + cli per story). Observed: both launches + a concurrent integrate --apply
+      on P each print up to date/resolved by record id/applied with the same sha,
+      one merge per branch, M stays at index 1; merge race Q won, P printed Waiting…
+      then master moved since sign-off (rc=1), P unchanged vs snapshot; P --fresh
+      re-check resolved (added from base Qx) with a concurrent note add (kept once)
+      and TUI cursor moves; P re-approved and published, master has 8 unique ids.
+      Harness facts: (1) the scenario''s pm pr start lines need P/Q exported into
+      the command — a bare pm pr start starts the active PR; (2) at 200 cols the tree
+      is one row, use h/l; (3) the workdirs carry an untracked pm/project.yaml.lock
+      after pm pr add there (not ignored), so ''clean'' = no tracked changes. Incidental
+      bug filed: pr-cf8faf5 (pm pr merge stash-pop registry merge appends one-sided
+      records at the end of the live project.yaml, so its order drifts from committed
+      master).'
+    created_at: '2026-11-02T05:23:34Z'
+    last_edited: '2026-11-02T05:23:34Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
@@ -54876,3 +54895,36 @@ prs:
     signoff: provider:claude-work-xhigh-249
     merge: provider:deepseek-flash
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-049649a-remove-all-pr-autostart-and-fail-clo-registered-20261027
+- id: pr-cf8faf5
+  plan: bugs
+  title: 'Bug: pm pr merge''s stash-pop registry merge moves one-sided record additions
+    to the end of the live project.yaml'
+  branch: pm/pr-cf8faf5-bug-pm-pr-merge-s-stash-pop-registry-merge-moves-o
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/store.py merge_3way (id-keyed list branch), called
+    from pm_core/cli/pr.py _resolve_project_yaml_pop when pm pr merge restores the
+    stashed live pm/project.yaml after merging a branch. The id-list merge keeps *theirs*
+    (live state) order and appends every *ours*-only record (records the merged branch
+    or the base inserted) at the END via out.extend(...), so the main repo''s live
+    registry drifts from the committed master order. Repro (QA S66 of pr-5cee3d5,
+    local backend): master inserts record M at index 1 and appends N; PR Q appends
+    Qx; pm pr merge Q (main repo has a dirty pm/project.yaml, so it stashes) -> committed
+    master is [A,M,B,P,Q,Qx,N] but the live working-tree file becomes [A,M,B,P,Q,N,Qx];
+    a second pm pr merge P makes committed master [A,M,B,P,Q,Px,Qx,N] and the live
+    file [A,M,B,P,Q,N,Qx,Px]. git diff pm/project.yaml in the main repo then shows
+    a spurious record-reorder hunk, and the next commit of the live registry reorders
+    master records (other in-flight branches then see a base reorder). Each id is
+    still present once and the file parses, so no data is lost. Fix idea: place ours-only
+    additions after their nearest preceding anchor in *ours* (the same position-keeping
+    rule pr-5cee3d5 review-loop 48dd i9 added to the integration resolver, 6ed6c31f),
+    with a test that fails on the current append.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T05:22:12.954433+00:00'
+  updated_at: '2026-11-02T05:22:12.954433+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
