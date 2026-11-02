@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T19:01:31.235242+00:00'
+  updated_at: '2026-11-02T19:28:44.269338+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8423,6 +8423,40 @@ prs:
       q49h harness session attached under asciinema in a -L q49rec pane (scripts/h.sh).'
     created_at: '2026-11-02T19:01:31Z'
     last_edited: '2026-11-02T19:01:31Z'
+  - id: note-473eb68
+    text: 'QA S51 refiner (2026-11-02, code 7f5bcd51, tmux 3.2a): all 4 stories smoke-run
+      live, no code defect (fixture /scratch/q51-refiner). Window-close respawn: with
+      notes open beside the TUI, C-b & on main runs the notes pane''s EXIT trap, whose
+      deferred rebalance drops the gone window (TUI entry included) from the registry;
+      the next pm session then finds no TUI window, falls back to ''main'' else the
+      FIRST window (the user''s C-b c shell) and splits the TUI into it as that window''s
+      active pane (auto-renamed python3), so a client typing in that shell now types
+      into the TUI. Master has the same fallback (pre-existing, not a regression);
+      with the TUI alone in main the attach makes a new window instead (S45 path).
+      A pasted connect command with no unattached ~N attaches straight to the base
+      session. Session shell windows source ~/.bashrc (venv), which puts ~/.local/bin
+      (real claude) ahead of the stub; pm-launched panes keep the stub.'
+    created_at: '2026-11-02T19:14:38Z'
+    last_edited: '2026-11-02T19:14:38Z'
+  - id: note-36f788a
+    text: 'QA S51 (two-projects day: alpha + `beta it''s $HOME`, tmux 3.2a, real HOME)
+      PASS 4/4 on 9edfba4d6 (code b89aa9a40), no source changes. Captures /pm-captures/scenarios/51
+      (README.md; per-story tui/<terminal> + cli/D<n>, 27 mp4s; evidence/ has every
+      check). (1) 3 starts -> alpha base+~1+~2 (A1/A2 same @0 layout), beta base+~1;
+      all 4 lists identical, beta connect quoted and pasted into N attaches the base,
+      C-b d prints the detached line, CLIENTS 2->1; default server work untouched.
+      (2) l/n/C-b Left/C popup/mobile --force (main-Z, .mobile)/--no-force/prefix
+      focus all as specified; beta windows/panes/registry/pidfile cmp-identical, loop
+      146/146 rc 0 with exact send/view text. (3) kill-pane: hook respawn %5 beside
+      notes; kill -9 + pm session from src/deep: one TUI cwd alpha, ~3 on main, A1
+      not moved; C-b & with notes: registry {}, attach splits the TUI into the first
+      (shell) window renamed python3 (pre-existing fallback, reported not failed).
+      (4) Ctrl-Q detaches only A1; in-beta kill rc 0, no traceback, server+TUI zombies,
+      pidfile left; PA kill rc 0, A2 rc 0, /tmp/pm-sessions empty; stub claude never
+      ran. Harness trap: the scenario''s `cd /scratch/q51/beta*` also matches /scratch/q51/beta-loop.sh
+      (cd: too many arguments) -> use `cd /scratch/q51/beta\ it*`.'
+    created_at: '2026-11-02T19:28:44Z'
+    last_edited: '2026-11-02T19:28:44Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
