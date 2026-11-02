@@ -5173,7 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-11-02T20:58:17.502942+00:00'
+  updated_at: '2026-11-02T21:44:34.473429+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5547,6 +5547,29 @@ prs:
       rc 1 with no clone created.'
     created_at: '2026-11-02T20:58:17Z'
     last_edited: '2026-11-02T20:58:17Z'
+  - id: note-c7833d6
+    text: 'QA S25 run 2026-11-02 at 45c713a0: PASS 8/8 live (isolated HOME, private
+      tmux, local backend; captures /pm-captures/scenarios/25/{fixture,story1-8}).
+      (1) from B''s own clone, direct and via a symlink outside the workdirs dir:
+      "no workdir is recorded; using the existing clone ... (not recorded: pm is using
+      this clone''s own tracked <BC>/pm/project.yaml)", no re-link, BC clean, main
+      sha unchanged. (2) from C''s clone: same message with "tracked in the clone
+      <CC>"; B''s main record stays (missing), CC/BC clean, CC yaml sha unchanged;
+      integrate C --apply merges master and prints "Merged master@<sha> into the PR
+      branch as <sha>.". (3) pm -C main re-links into the main registry, the second
+      run is the fast path, PM_PROJECT=<CC>/pm writes nothing (both yamls same sha).
+      (4) held pm edit lock: 2.09 s, "could not write ... Could not acquire lock ...
+      within 2.0s", yaml byte-identical, then re-link records and user_edit: keep-me
+      survives. (5) nine actors behind a go-file (2 cd, start, review, signoff, 4
+      notes): all rc 0, exactly one "re-linked", one B-slug dir, no .tmp-<B>, single
+      B record naming the clone, all 4 note texts, review/signoff windows opened.
+      (6) concurrent G/H cd: two re-links, no cross-link. (7) duplicate pm pr merge
+      M: winner re-links+merges, loser only "already merged" on stderr rc 1, first-parent
+      4->5 once. (8) main repo checked out on B''s branch: "not recorded: pm is using
+      <main>/pm/project.yaml, tracked in the clone <main>", no write (porcelain -uno
+      empty, sha same); back on master it re-links. No code changes; no new bugs found.'
+    created_at: '2026-11-02T21:44:34Z'
+    last_edited: '2026-11-02T21:44:34Z'
   model: provider:claude-main-xhigh-pm
   effort: high
 - id: pr-0778fbe
