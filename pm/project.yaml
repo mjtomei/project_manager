@@ -51819,3 +51819,41 @@ prs:
   model: provider:claude-main-xhigh-pm
   effort: high
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ec5bc84-use-native-session-logs-and-remove-p-4d0c07a5
+- id: pr-573af1c
+  plan: bugs
+  title: 'Bug: TUI auto-start never advances its own sign-off IMPL rework impl; pm
+    pr start clears signoff_return.awaiting after the TUI last reloaded, so the TUI
+    idle check sees awaiting=impl forever'
+  branch: pm/pr-573af1c-bug-tui-auto-start-never-advances-its-own-sign-off
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/pr.py pr start (window branch ~L1294 and the
+    interactive fall-through ~L1307): trigger_tui_refresh() runs at ~L1204, BEFORE
+    clear_return_awaiting(root, pr_id, "impl", session_opened=True); nothing reloads
+    the TUI after the clear. pm_core/tui/review_loop_ui.py _poll_impl_idle (~L1374)
+    then reads the stale in-memory pr: return_awaiting(pr) == "impl" -> logs "impl_idle:
+    <pr> awaiting sign-off rework launch", mark_active, continue — every 5 s, forever.
+    Repro (isolated HOME, fake claude, local backend, skip-qa on): fake config {"_all":{},
+    "impl":{"delay":30}, "review":{"verdicts":{"PASS":100},"delay":5}, "signoff":{"verdicts":["SIGNOFF_IMPL","SIGNOFF_MERGE"]}};
+    pm autostart add <pr> --wait-for-merge with the TUI open and nothing else driving.
+    TUI: impl idle -> review PASS -> sign-off SIGNOFF_IMPL -> "Sign-off routed <pr>
+    back to implementation (SIGNOFF_IMPL)" -> pr start --background --fresh --run-id
+    autostart-... relaunches impl; the rework goes idle 30 s later but the TUI never
+    starts the review: 24 "awaiting sign-off rework launch" lines over 2 min, pm autostart
+    status stays "running/implementation — implementing", while pm/project.yaml already
+    has signoff_return.awaiting: null (last "[tui] action: reload" was at the relaunch
+    second, before the clear). Reproduced identically on origin/master 5b352d16 and
+    on pr-ec5bc84 @ 6cf1e4b1 (pre-existing). Evidence: QA S3 of pr-ec5bc84, /pm-captures/scenarios/3/incidental-tui-rework-stall/{master-5b352d16,branch-6cf1e4b1}/
+    (TUI + CLI casts, debug logs, project.yaml after). Likely fix: trigger_tui_refresh()
+    after clear_return_awaiting in pr start (or the TUI re-reads the PR from disk
+    before honouring awaiting=impl / reloads when its async pr start returns). A user
+    kill + pm pr auto-sequence relaunch, or any later reload, unsticks it.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T08:41:58.306660+00:00'
+  updated_at: '2026-11-02T08:41:58.306660+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
