@@ -6957,6 +6957,18 @@ prs:
       into a YAML anchor/alias of the newer copy; it was kept as is.'
     created_at: '2026-11-02T09:56:30Z'
     last_edited: '2026-11-02T09:56:30Z'
+  - id: note-5d883d8
+    text: 'QA S21 refiner (2026-11-02, 61b1c3d9): all 4 stories held live (12-PR/3-plan
+      fixture, 200x110, private socket). Story 2: two 60 s actors, 38 writes; every
+      add, note, effort, close and the new plan landed. A close under a retained pr-select
+      list was skipped (Match 4/12 -> 6/12). Story 4: when the key really moved the
+      cursor, the TUI pending save won 5/5 with ] and Down alike (pr-39f8040). A key
+      at a tree edge moves nothing, so the CLI wins; that is not a valid arrow control.
+      Pre-existing, not this PR: pm pr model set sends no TUI reload, so the tree
+      badge for an effort setting appears only at the next reload. Check effort with
+      pm pr model show.'
+    created_at: '2026-11-02T11:28:04Z'
+    last_edited: '2026-11-02T11:28:04Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-6aa74c6-fuzzy-select-for-pr-and-plan-command-ab512a43
 - id: pr-98bf8df
   plan: plan-qa
