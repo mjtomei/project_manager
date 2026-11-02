@@ -629,6 +629,22 @@ def handle_command_submitted(app, cmd: str) -> None:
     _log.info("command submitted: %s", cmd)
     cmd = cmd.strip()
 
+    # Parse before the in-flight guard below is taken.  An unbalanced
+    # quote ("pr note add pr-1 don't forget") raised ValueError out of this
+    # message handler, which exits the TUI — and, as the window's only
+    # pane, the pm session and its tmux server with it — and a queued
+    # command left the guard set.  Same class as run_command's guard.
+    try:
+        parts = shlex.split(cmd)
+    except ValueError as e:
+        _log.warning("command submitted: cannot parse %r: %s", cmd, e)
+        app.log_message(f"Error: cannot parse command: {escape(str(e))}")
+        if app._plans_visible:
+            app.query_one("#plans-pane", PlansPane).focus()
+        else:
+            app.query_one("#tech-tree", TechTree).focus()
+        return
+
     # Guard PR action commands from the command bar too
     action_key = None
     for prefix in PR_ACTION_PREFIXES:
@@ -648,7 +664,6 @@ def handle_command_submitted(app, cmd: str) -> None:
     # No subcommand or 'start' → always start a fresh loop, superseding
     # any running one for the same PR.  Cancelling a loop is via TUI
     # restart or Ctrl+C in the loop's pane, not via this command.
-    parts = shlex.split(cmd)
     _rl_base = cmd.replace("review loop", "review-loop")
     _rl_parts = _rl_base.split()
     if _rl_parts and _rl_parts[0] == "review-loop":

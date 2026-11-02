@@ -237,6 +237,27 @@ class TestTuiTranscriptArgQuoted:
         assert app._inflight_pr_action is None
         app.run_worker.assert_not_called()
 
+    @pytest.mark.parametrize("cmd", [
+        "pr note add pr-001 don't forget",   # plain command
+        "pr start 'pr-001",                  # takes the in-flight guard
+    ])
+    def test_unparsable_command_bar_line_is_logged_not_raised(self, cmd):
+        """A typed or queued line with an unbalanced quote.
+
+        It raised ValueError out of the command-bar handler (exiting the
+        TUI); for a PR action it did so after taking the in-flight guard.
+        """
+        from pm_core.tui import pr_view
+        app = MagicMock()
+        app._inflight_pr_action = None
+        app._plans_visible = False
+        pr_view.handle_command_submitted(app, cmd)
+        msg = app.log_message.call_args[0][0]
+        assert msg.startswith("Error: cannot parse command")
+        assert app._inflight_pr_action is None
+        app.run_worker.assert_not_called()
+        app.query_one.return_value.focus.assert_called_once()
+
 
 class TestAttachPrunesWindowsKilledOutsidePm:
     def test_registry_only_window_is_rebalanced(self):
