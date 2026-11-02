@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T13:42:19.986885+00:00'
+  updated_at: '2026-11-02T13:49:27.064688+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40091,6 +40091,27 @@ prs:
       the open `?`. Captures /pm-captures/scenarios/62 (README, pre-fix/, post-fix/).'
     created_at: '2026-11-02T11:24:23Z'
     last_edited: '2026-11-02T11:24:23Z'
+  - id: note-b59f987
+    text: 'QA S64 refiner (2026-11-02, fa5fb2e0): all 6 stories ran live in one env
+      -i sandbox (/scratch/s64; drivers /scratch/s64/scripts: setup.sh, story1-6.sh,
+      an.py poll analyzer, pagercmp.py; ~11 min). Draft fixes: (1) countdowns round
+      to the nearest second and only skip a unit boundary (92b59c3c: 60/3600/48h),
+      so a read within 0.5 s of the arm says "5s left" on the 5 s backoff and "10s
+      left" on the 10 s one (seen in text and JSON); the re-arm cooldown (due-armed
+      59.1-59.6 s) first reads 59s, never 1m00s. (2) The debug log is not Traceback-free:
+      master container.wrap_claude_cmd logs every failed podman run with exc_info
+      (14 here, each right after "ERROR [container] Failed to create container ...
+      aborting", ending in the shim CalledProcessError or ContainerError Image unauthorized:latest);
+      check that no other Traceback appears. (3) An auto-start target start row is
+      untracked from the loop start and never re-tracked (get_transcript_dir switches
+      to the autostart run dir, which has no impl-<pr>.jsonl), so P2 start reads untracked,
+      not "interrupted swept on tui-mount"; only the tracked starts (P, P3, P4) are
+      swept. (4) After the plain restart no impl pane is re-tracked (new manual-<token>
+      dir), so the closed P4 popup badge is [2 runs] with Waiting for: nothing and
+      start interrupted. P is not in P2 auto-start scope: no re-arm on P during story
+      3. All 1121 polls rc 0, parse OK, empty stderr.'
+    created_at: '2026-11-02T13:18:50Z'
+    last_edited: '2026-11-02T13:18:50Z'
   - id: note-cea3a0e
     text: 'S63 refiner (fa5fb2e0, 2026-11-02): all 3 stories live first try in /scratch/s63r
       (S56 drivers re-pointed; evidence + scripts /pm-captures/pr-8020495/s63-refiner).
@@ -40118,6 +40139,26 @@ prs:
       <=2 s; exec 22|24, agent 20|22) or pin the fake idle phase.'
     created_at: '2026-11-02T13:42:19Z'
     last_edited: '2026-11-02T13:42:19Z'
+  - id: note-999b575
+    text: 'QA S64 (2026-11-02): fixed f5d778bf3 (live pre/post in /pm-captures/scenarios/64:
+      pre-fix/story6, post-fix/story6; README has a per-Then table). A review HOLD
+      (workspace-trust prompt) history row was journaled as ("held at a permission/trust
+      prompt: " + str(e))[:300]. pm blocked_message names the workdir twice and ends
+      with what to run, so every HOLD row (text and JSON) stopped at "... To proceed:
+      " and dropped "run `pm trust add <workdir>` (or accept the prompt in the pane),
+      then restart this step." _hold_end_detail now journals the whole message (cap
+      1000, "..."). Tests test_hold_end_keeps_the_trust_instruction + test_hold_end_detail_is_bounded
+      fail on fa5fb2e0d; full suite 5598 passed, 1 skipped (post-fix/full-suite.log).
+      Every other S64 Then held live in one env -i sandbox (/scratch/r64, drivers
+      in /pm-captures/scenarios/64/scripts): 1121 polls clean, 14 Tracebacks, all
+      injected container failures, 0 reads of 1m00s. Story 3 timing notes: the re-arm
+      due is exactly the failure + 60.0 s, so due-armed was 59.67 / 59.07 s. The P2
+      start row went untracked 4.89 s after autostart add (5 s impl-idle tick phase;
+      1.6-4.8 s for the other loops) and was never re-tracked. Obs: the raw JSON runtime.review-loop.started_at
+      keeps the first loop start (master runtime_state setdefault); history rows are
+      right.'
+    created_at: '2026-11-02T13:49:26Z'
+    last_edited: '2026-11-02T13:49:26Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
