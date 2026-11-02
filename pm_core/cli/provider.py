@@ -1,5 +1,7 @@
 """Provider management CLI commands."""
 
+from contextlib import contextmanager
+
 import click
 
 from pm_core.cli import cli
@@ -116,6 +118,28 @@ def _load_for_edit() -> dict:
         return load_providers_for_edit()
     except ProvidersFileError as exc:
         click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+
+
+@contextmanager
+def _write_errors():
+    """Turn a providers.yaml write failure into one ``Error:`` line.
+
+    Covers an unwritable ``~/.pm`` (including ``pm_home()`` itself), a lock
+    that stays held past its timeout, and a failed atomic save.  A
+    ``SystemExit`` from the checks inside the block passes through, so a
+    refusal is never printed twice.
+    """
+    from pm_core.providers import ProvidersFileError
+    try:
+        yield
+    except ProvidersFileError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+    except OSError as exc:
+        target = getattr(exc, "filename", None) or "~/.pm"
+        click.echo(f"Error: cannot write {target}: {exc.strerror or exc}",
+                   err=True)
         raise SystemExit(1)
 
 
@@ -256,7 +280,8 @@ def provider_add(name: str, ptype: str, skip_check: bool, **opts):
     if ptype == "router":
         skip_check = True  # checked by 'pm provider test' instead
 
-    config = _load_for_edit()  # before the check, which may prompt
+    with _write_errors():
+        config = _load_for_edit()  # before the check, which may prompt
 
     if not skip_check:
         click.echo(f"Checking provider '{name}'...")
@@ -272,8 +297,8 @@ def provider_add(name: str, ptype: str, skip_check: bool, **opts):
                 click.echo("Aborted.")
                 raise SystemExit(1)
 
-    with providers_lock():  # re-read: another edit may have saved meanwhile
-        config = _load_for_edit()
+    with _write_errors(), providers_lock():  # re-read: another edit may have
+        config = _load_for_edit()            # saved meanwhile
         config["providers"][name] = entry
         save_providers(config)
     click.echo(f"Added provider '{name}' ({ptype}: {entry['api_base']})")
@@ -301,7 +326,7 @@ def provider_edit(name: str, ptype: str | None, clear: tuple, **opts):
     """
     from pm_core.providers import providers_lock, save_providers
 
-    with providers_lock():
+    with _write_errors(), providers_lock():
         config = _load_for_edit()
         entry = config["providers"].get(name)
         if not isinstance(entry, dict):
@@ -389,7 +414,7 @@ def provider_remove(name: str):
         click.echo("Cannot remove the built-in 'claude' provider.", err=True)
         raise SystemExit(1)
 
-    with providers_lock():
+    with _write_errors(), providers_lock():
         config = _load_for_edit()
         providers = config["providers"]
         if name not in providers:
@@ -414,16 +439,14 @@ def provider_default(name: str):
       pm provider default ollama
       pm provider default claude
     """
-    from pm_core.providers import set_default_provider
+    from pm_core.providers import ProviderNotFoundError, set_default_provider
 
-    config = _load_for_edit()
-    if name != "claude":
-        if name not in config["providers"]:
-            click.echo(f"Provider '{name}' not found. Add it first with 'pm provider add'.",
-                        err=True)
+    with _write_errors():
+        try:
+            set_default_provider(name)
+        except ProviderNotFoundError as exc:
+            click.echo(f"Error: {exc}", err=True)
             raise SystemExit(1)
-
-    set_default_provider(name)
     click.echo(f"Default provider set to '{name}'")
 
 

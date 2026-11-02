@@ -51,9 +51,12 @@ Provider resolution order:
   5. Falls back to "claude" (built-in, no config needed)
 """
 
+import errno
 import os
 import tempfile
+import time
 from contextlib import contextmanager
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -550,6 +553,27 @@ class ProvidersFileError(ValueError):
     """providers.yaml cannot be changed: pm cannot read it as a mapping."""
 
 
+class ProvidersWriteError(ProvidersFileError):
+    """providers.yaml cannot be written: ``~/.pm`` is unwritable (a bad
+    permission or a full disk) or its lock file cannot be created.  The
+    message names the path and the OS reason; the CLI prints it as one
+    ``Error:`` line instead of a traceback."""
+
+
+class ProvidersLockTimeout(ProvidersFileError):
+    """Another process held the providers.yaml edit lock past the timeout.
+
+    A stuck ``pm provider`` process used to block every later edit forever;
+    the wait is now bounded so the caller can report the lock path and let
+    the user retry or stop the holder."""
+
+
+# How long an edit waits for the providers.yaml lock before giving up.
+# Edits hold it only for a re-read plus a write (connectivity checks happen
+# outside it), so this is generous; it bounds a stuck holder.
+PROVIDERS_LOCK_TIMEOUT = 5.0
+
+
 def load_providers_for_edit() -> dict[str, Any]:
     """providers.yaml to change and save back, its ``providers`` block a
     mapping (a blank block, e.g. every entry commented out, reads as empty).
@@ -570,20 +594,61 @@ def load_providers_for_edit() -> dict[str, Any]:
 
 
 @contextmanager
-def providers_lock():
+def providers_lock(timeout: float | None = None):
     """Hold the providers.yaml edit lock (an flock on a sidecar
     ``providers.yaml.lock``) across a read-modify-write, so concurrent
     ``pm provider`` edits never lose one another's changes.  Readers need
-    no lock: :func:`save_providers` replaces the file atomically."""
+    no lock: :func:`save_providers` replaces the file atomically.
+
+    Waits at most *timeout* seconds (default
+    :data:`PROVIDERS_LOCK_TIMEOUT`) for the lock; a stuck holder then
+    raises :class:`ProvidersLockTimeout` instead of blocking every edit
+    forever.  An unwritable ``~/.pm`` raises :class:`ProvidersWriteError`.
+    The lock is not reentrant: a second :func:`providers_lock` in the same
+    process opens a new file description, which flocks against the first.
+    """
     import fcntl
-    path = _providers_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path.with_name(PROVIDERS_FILE + ".lock"), "a") as f:
-        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+
+    if timeout is None:
+        timeout = PROVIDERS_LOCK_TIMEOUT
+    try:
+        path = _providers_path()
+        lock_path = path.with_name(PROVIDERS_FILE + ".lock")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock_file = open(lock_path, "a")
+    except OSError as exc:
+        where = getattr(exc, "filename", None) or (Path.home() / ".pm")
+        raise ProvidersWriteError(
+            f"cannot write {where}: {exc.strerror or exc} (pm keeps "
+            "providers.yaml in ~/.pm; check that it is writable)"
+        ) from exc
+
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                if exc.errno not in (errno.EACCES, errno.EAGAIN):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise ProvidersLockTimeout(
+                        f"timed out after {timeout:g}s waiting for the "
+                        f"providers.yaml edit lock ({lock_path}); another "
+                        "'pm provider' command may still be running. Wait "
+                        "for it to finish, then retry."
+                    ) from None
+                time.sleep(0.05)
         try:
             yield
         finally:
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+    finally:
+        lock_file.close()
 
 
 def save_providers(data: dict[str, Any]) -> None:
@@ -599,22 +664,37 @@ def save_providers(data: dict[str, Any]) -> None:
     rather than written through — safer for a credentials file, and
     intentional.  Callers that read, change and save hold
     :func:`providers_lock`.
+
+    An ``OSError`` from the write is raised as :class:`ProvidersWriteError`
+    naming the target; the temp file is removed and the old file is left
+    untouched.
     """
     import yaml
 
     path = _providers_path()
     text = yaml.dump(data, default_flow_style=False, sort_keys=False)
-    fd, tmp = tempfile.mkstemp(prefix=".providers.yaml.pm-", dir=str(path.parent))
+    try:
+        fd, tmp = tempfile.mkstemp(prefix=".providers.yaml.pm-", dir=str(path.parent))
+    except OSError as exc:
+        raise ProvidersWriteError(
+            f"cannot write {path}: {exc.strerror or exc} (check that "
+            f"{path.parent} is writable)"
+        ) from exc
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(text)
         os.chmod(tmp, 0o600)
         os.replace(tmp, path)
-    except BaseException:
+    except BaseException as exc:
         try:
             os.unlink(tmp)
         except OSError:
             pass
+        if isinstance(exc, OSError):
+            raise ProvidersWriteError(
+                f"cannot write {path}: {exc.strerror or exc} (check that "
+                f"{path.parent} is writable)"
+            ) from exc
         raise
     _log.info("Saved provider config to %s", path)
 
@@ -722,10 +802,21 @@ def get_default_provider() -> str:
 def set_default_provider(name: str) -> None:
     """Set the default provider in providers.yaml.
 
-    Raises :class:`ProvidersFileError` when the file cannot be changed.
+    The name is re-checked against the config read *inside* the edit lock,
+    so a concurrent ``pm provider remove <name>`` cannot leave ``default``
+    pointing at a provider that no longer exists.  The built-in ``claude``
+    is always accepted.
+
+    Raises :class:`ProviderNotFoundError` for a name that is not
+    configured, and :class:`ProvidersFileError` when the file cannot be
+    read or written.
     """
     with providers_lock():
         config = load_providers_for_edit()
+        if name != BUILTIN_CLAUDE and name not in config["providers"]:
+            raise ProviderNotFoundError(
+                f"Provider '{name}' not found. Add it first with "
+                "'pm provider add'.")
         config["default"] = name
         save_providers(config)
 

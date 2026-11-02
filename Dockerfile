@@ -147,7 +147,7 @@ RUN npx playwright --version \
 # without a per-container install step.  Keep this list in sync with
 # ``[project.dependencies]`` in pyproject.toml.
 RUN pip3 install \
-    'click>=8.0' 'pyyaml>=6.0' 'textual>=0.40' 'pyperclip>=1.8'
+    'click>=8.0' 'pyyaml>=6.0' 'textual>=2.0' 'pyperclip>=1.8'
 
 # pm shim: invoke the wrapper with the system python, which finds pm_core
 # via PYTHONPATH.  No venv, no per-container install — the bind-mounted
