@@ -96,9 +96,12 @@ def verify_github_merge(pr_id: str, workdir: str, target_repo: str,
     """
     # The approval is hand-editable state: a revision that is not a string is
     # no revision to verify, and one interpolated into the ``git log`` range
-    # must be a real object name — both read as absent.
-    base_sha = integration.revision_of(base_sha)
-    head = integration.revision_of(head)
+    # must be a real object name — both read as absent.  A bare non-empty
+    # string is not enough: ``git log`` parses an argument that starts with
+    # ``-`` as an option, so a recorded ``base_sha`` of ``--output=<file>``
+    # made the verification write the log to a file instead of reading it.
+    base_sha = integration._sha_like(base_sha)
+    head = integration._sha_like(head)
     bound = bound if isinstance(bound, dict) else {}
     if not base_sha or not head:
         return MergeVerification()

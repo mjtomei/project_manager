@@ -5490,6 +5490,41 @@ def test_github_merge_verification_renders_a_malformed_candidate_safely(
     assert "approved ?" in stored["problem"]
 
 
+def test_github_merge_verification_only_passes_object_names_to_git(
+        w, monkeypatch):
+    """A recorded revision becomes a ``git log`` argument: only object names.
+
+    ``verify_github_merge`` builds ``<base_sha>..<tip>``.  A hand-edited
+    ``base_sha`` that is merely a non-empty string (``--output=<file>``) was
+    handed to git as an *option* — the log was written to a file — instead of
+    reading as no revision to verify.
+    """
+    from pm_core import merge_integrity
+
+    calls = []
+    monkeypatch.setattr(integration, "fetch_base",
+                        lambda *a, **k: ("c" * 40, None))
+    monkeypatch.setattr(
+        merge_integrity.git_ops, "run_git",
+        lambda *a, **k: calls.append(a) or SimpleNamespace(
+            returncode=0, stdout="", stderr=""))
+    target = w.tmp / "written-by-git-log"
+    for base, head in ((f"--output={target}", "a" * 40),
+                       ("b" * 40, "--all"),
+                       ("HEAD", "a" * 40)):
+        result = merge_integrity.verify_github_merge(
+            PR, str(w.wd), "repo", "master", base, head,
+            {"candidate_tree": "d" * 40})
+        assert result.ok and result.problem is None, (base, head)
+    assert calls == []
+    assert not list(w.tmp.glob("written-by-git-log*"))
+    # A real object name still reaches the log.
+    merge_integrity.verify_github_merge(
+        PR, str(w.wd), "repo", "master", "b" * 40, "a" * 40,
+        {"candidate_tree": "d" * 40})
+    assert calls and f"{'b' * 40}..{'c' * 40}" in calls[0]
+
+
 def test_recovery_skips_verification_for_a_malformed_approval(w, monkeypatch):
     """A non-string approved sha/base is not a revision to verify against."""
     calls = []

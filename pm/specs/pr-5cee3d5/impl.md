@@ -942,8 +942,10 @@ tests):
     publisher, the TUI sync paths and `pm pr sync` (see "Integration with
     master: merge_integrity" below): `approved_candidate` reads a scalar
     `signoff`/`integration` as absent and validates both revisions through
-    `integration.revision_of`, `verify_github_merge` validates the revisions
-    it interpolates into `git log` and reads a non-mapping `bound` as absent,
+    `integration.revision_of`, `verify_github_merge` passes only git object
+    names (`integration._sha_like`) into the `git log` range — a non-empty
+    string such as `--output=<file>` is an option to git, not a revision —
+    and reads a non-mapping `bound` as absent,
     and `apply_to_pr` collects note ids through `_notes_of`/`_note_id` so a
     hand-edited unhashable id cannot raise `TypeError` out of the set it
     builds for `generate_note_id`.
@@ -1236,9 +1238,13 @@ merge keeps master's structure and ports them into `merge_integrity`:
   and validates `sha`/`base_sha` through `integration.revision_of` — a
   revision that is not a string cannot name the signed-off candidate, so the
   recovery path skips verification instead of raising.
-- `verify_github_merge()` validates `base_sha`/`head` through `revision_of`
-  before interpolating them into the `git log` range and reads a non-mapping
-  `bound` as absent. Every displayed revision/tree goes through `_short`
+- `verify_github_merge()` validates `base_sha`/`head` as git object names
+  (`integration._sha_like`, the rule `contained_base` applies to every
+  revision it hands to a command) before interpolating them into the
+  `git log` range — `git log` parses an argument starting with `-` as an
+  option, so a hand-edited `base_sha` of `--output=<file>` wrote the log to a
+  file instead of reading as no revision — and reads a non-mapping `bound` as
+  absent. Every displayed revision/tree goes through `_short`
   (a hand-edited `candidate_tree` renders `?` and the mismatch is recorded
   rather than raising `TypeError`).
 - `apply_to_pr()` reads notes through `_notes_of`/`_note_id`, so a hand-edited
@@ -1256,7 +1262,9 @@ and `test_recovery_skips_verification_for_a_malformed_approval` (this branch's
 existing coverage) and the new
 `test_approved_candidate_reads_malformed_approvals_as_absent` /
 `test_apply_to_pr_tolerates_malformed_notes` all fail on master's
-`merge_integrity.py` and pass on the merged tree.
+`merge_integrity.py` and pass on the merged tree;
+`test_github_merge_verification_only_passes_object_names_to_git` (review-loop
+48dd i5) fails on the pre-fix `revision_of` guard.
 
 `pm/project.yaml` was reconciled by record id with this PR's own resolver
 (`integration.resolve_project_yaml`, base/ours/theirs from the merge index):
