@@ -53680,11 +53680,24 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-11-02T04:00:50.977706+00:00'
-  updated_at: '2026-11-02T04:00:50.977706+00:00'
+  updated_at: '2026-11-02T06:47:42.911457+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-9e55fd9
+    text: 'QA pr-6aa74c6 S8 (2026-11-02, 5dcf90dc): second symptom of the stale active_pr.
+      After x hides the group holding the active PR, the next reload through _update_display
+      -> _follow_active_pr (here the 300 s background sync, 12 s later, no keypress)
+      calls TechTree.select_pr(active_pr), which un-hides that group and moves the
+      cursor back onto the hidden PR. Repro: /pr select lockfile (pr-fe15681, Standalone),
+      press x (log "Hidden: Standalone"; cursor rests on the "Standalone (hidden,
+      2 PRs)" label, not on a PR); at TUI start + 300 s the Standalone row reappears
+      with pr-fe15681 double-bordered and the header flips to "up to date". Evidence:
+      /pm-captures/scenarios/8/tui (cast t=216.5 s, steps.log). Hiding the last group
+      leaves no PR under the cursor, so the fix needs a rule for that case too.'
+    created_at: '2026-11-02T06:47:42Z'
+    last_edited: '2026-11-02T06:47:42Z'
 - id: pr-dd3682f
   plan: bugs
   title: 'Bug: TUI periodic sync reloads project.yaml without flushing the pending
