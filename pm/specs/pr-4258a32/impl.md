@@ -117,6 +117,8 @@ identity; it also separates PRs whose 50-char-truncated slugs collide.
   still stands.
 - Two or more verified → `status="ambiguous"`, `path=None`, all candidates
   listed by `describe()`; nothing is written and callers must **not** clone.
+  More than `MAX_CANDIDATES` name matches are `ambiguous` without being
+  verified (`unverified=True`); `describe()` says they only match by name.
 - None verified → `status="missing"` with the rejected candidates and reasons;
   callers fall back to their existing behavior (clone).
 - `WorkdirResolution.reportable` (recovered, ambiguous, or any rejected
@@ -142,7 +144,10 @@ deadlock).
   clone); missing → `_clone_workdir` as before (skipped same-named clones
   are listed on stderr first).  This covers every existing
   consumer: `pm pr review` window (`cli/pr.py` review window), `pm pr done`,
-  merge window, `signoff.py` launch, `qa_loop.py` QA launch.
+  merge window, `signoff.py` launch, `qa_loop.py` QA launch.  The QA
+  launch runs in the TUI, where that stderr report is never shown, so
+  on failure it re-resolves (no persist) and its ERROR status line names
+  the ambiguity instead of "does not exist … could not be created".
 - `pm_core/cli/pr.py:pr_start` — when no `--workdir` is given and the recorded
   path is missing, resolve (with `project_dir=_workdirs_dir(data)`) before
   printing "workdir missing, creating a new one" / cloning.  Recovered → reuse

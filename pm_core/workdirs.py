@@ -64,6 +64,9 @@ class WorkdirResolution:
     project_dir: str | None = None
     candidates: list[str] = field(default_factory=list)
     rejected: list[tuple[str, str]] = field(default_factory=list)
+    # AMBIGUOUS because of too many name matches: *candidates* were never
+    # verified, only matched by name.
+    unverified: bool = False
 
     @property
     def reportable(self) -> bool:
@@ -81,6 +84,17 @@ class WorkdirResolution:
         if self.status == RECOVERED:
             return (f"Workdir for {self.pr_id}: {where}; re-linked the "
                     f"existing clone on {self.branch} at {self.path}")
+        if self.status == AMBIGUOUS and self.unverified:
+            lines = [f"Workdir for {self.pr_id}: {where} and "
+                     f"{len(self.candidates)} directories in "
+                     f"{self.project_dir} are named after branch "
+                     f"{self.branch} (more than {MAX_CANDIDATES}; none "
+                     "verified):"]
+            lines += [f"  - {c}" for c in self.candidates]
+            lines.append("Not choosing one. Move the clones that aren't "
+                         "this PR's out of that directory; the next use of "
+                         "this PR's workdir verifies the rest.")
+            return "\n".join(lines)
         if self.status == AMBIGUOUS:
             lines = [f"Workdir for {self.pr_id}: {where} and "
                      f"{len(self.candidates)} existing clones in "
@@ -327,7 +341,7 @@ def _resolve_matches(data: dict, pr_entry: dict, root: Path | None,
 
     matches = _name_matches(Path(res.project_dir), branch)
     if len(matches) > MAX_CANDIDATES:
-        res.status = AMBIGUOUS
+        res.status, res.unverified = AMBIGUOUS, True
         res.candidates = [str(p) for p in matches]
         _log.warning("workdir for %s: %d name matches in %s, not verifying",
                      pr_id, len(matches), res.project_dir)

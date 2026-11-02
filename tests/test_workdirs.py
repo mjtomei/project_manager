@@ -401,7 +401,10 @@ class TestRejectionAndAmbiguity:
         with mock.patch.object(workdirs, "verify_candidate",
                                side_effect=AssertionError("verified")):
             res = workdirs.resolve_workdir(data, pr, env.root)
-        assert res.status == workdirs.AMBIGUOUS
+        assert res.status == workdirs.AMBIGUOUS and res.unverified
+        # Name matches only: not claimed to be clones of the branch.
+        text = res.describe()
+        assert "none verified" in text and "match branch" not in text
 
 
 class TestEnsureWorkdir:
@@ -586,3 +589,37 @@ class TestPrCd:
         assert result.exit_code == 1
         assert "Not choosing" in result.output
         execvp.assert_not_called()
+
+
+class TestQaLaunch:
+    """The QA launch runs in the TUI, where ``_ensure_workdir``'s stderr
+    report is never seen: its status line must name the ambiguity."""
+
+    def _run(self, env):
+        from pm_core import qa_loop
+        data, pr = env.fresh()
+        pr["status"] = "qa"
+        store.save(data, env.root)
+        state = qa_loop.QALoopState(pr_id=PR_ID)
+        with mock.patch.object(qa_loop, "get_pm_session",
+                               return_value="pm-test"), \
+             mock.patch.object(qa_loop, "_resolve_qa_model"), \
+             mock.patch.object(qa_loop, "create_qa_workdir",
+                               side_effect=AssertionError("QA started")):
+            return qa_loop.run_qa_sync(state, env.root, pr)
+
+    def test_ambiguity_is_named_not_reported_as_missing(self, env):
+        env.clone(f"{SLUG}-10e74920")
+        env.clone(f"{SLUG}-ab512a43")
+        state = self._run(env)
+        assert state.latest_verdict == "ERROR"
+        assert "2 clones" in state.latest_output
+        assert "not choosing one" in state.latest_output
+        assert "does not exist" not in state.latest_output
+        assert env.fresh()[1]["workdir"] == env.stale
+
+    def test_failed_clone_still_reports_missing(self, env):
+        with mock.patch.object(helpers, "_clone_workdir", return_value=None):
+            state = self._run(env)
+        assert state.latest_verdict == "ERROR"
+        assert "does not exist on this machine" in state.latest_output
