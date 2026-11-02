@@ -25310,6 +25310,35 @@ prs:
       widened here.'
     created_at: '2026-11-01T21:57:43Z'
     last_edited: '2026-11-01T21:57:43Z'
+  - id: note-5dc2ab1
+    text: 'QA S3 refiner (container-mode regression): all 4 stories ran for real in
+      a pm QA container (nested podman 3.4.4). Traps for the next run: (1) pm container
+      set runtime accepts only docker|podman; use docker (not installed) for an unavailable
+      runtime, after pm container enable. (2) pm session opens a guide pane that runs
+      claude on the host, so a claude stand-in logs once at session start; truncate
+      its log before each When. (3) No pm-dev image is present. pm container build
+      is a Claude session, not a build. pm-dev auto-builds quietly with a 600 s timeout.
+      A slim image (python:3.12-slim + git + click/pyyaml/textual/pyperclip + /usr/local/bin/pm
+      shim + a uid-1000 pm user with home /home/pm + PATH starting /home/pm/.local/bin)
+      builds in about 20 s with podman build --uts host. Without the pm user the pane
+      prints "env: fake-claude: No such file or directory". (4) Keep the test project
+      outside /workspace, which is mounted at /opt/pm-src:ro in every pm container.
+      (5) A new top-level file in /pm-project is writable by design (registry_mounts
+      docstring).'
+    created_at: '2026-11-01T23:55:02Z'
+    last_edited: '2026-11-01T23:55:02Z'
+  - id: note-1f72b60
+    text: 'QA S3 (container-mode regression): found and fixed (9f81a0fc) qa_loop.create_scenario_workdir
+      cloning with an explicit `git clone --local`, which makes a failed hardlink
+      fatal ("failed to create link ... Invalid cross-device link"). A pm qa regression
+      (or pm qa debug) run of a project on a different filesystem than ~/.pm therefore
+      failed at the clone, before the container check. A plain path clone hardlinks
+      when it can and copies otherwise. Test: test_clone_does_not_force_hardlinks.
+      All 4 stories then held for real (nested podman, slim image). The push from
+      the S3 container failed: /run/pm-push-proxy is a deleted host bind mount ("git-proxy:
+      cannot connect"), so 9f81a0fc may be local-only in the S3 clone.'
+    created_at: '2026-11-02T00:10:11Z'
+    last_edited: '2026-11-02T00:10:11Z'
   - id: note-0ff919a
     text: 'QA S4 (TUI launch): with the disposable project in /scratch (a different
       filesystem from ~/.pm), TUI Enter on a regression item logged "Launched qa-item
