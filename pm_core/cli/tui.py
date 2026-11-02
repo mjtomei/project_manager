@@ -272,6 +272,10 @@ Navigation:
   Left/Right, h/l  Navigate tree columns
   J/K              Jump to next/prev plan
   Enter            Select/expand PR
+  x                Hide/show plan group
+  X                Toggle merged PRs
+  f                Cycle status filter
+  F                Cycle sort field
 
 PR Actions:
   s                Start selected PR           (z s: fresh, S: companion)
@@ -280,6 +284,8 @@ PR Actions:
   i                Sign-off (router)
   t                Start QA                    (z t: fresh, zz t: loop)
   e                Edit selected PR
+  v                View plan file
+  M                Move PR to another plan
   Y                Cleanup PR workdir
   y                Cleanup, then: ys start, yd review, yt QA
   V                Review oldest pending spec
@@ -289,10 +295,19 @@ Views:
   p                Toggle plans view
   q                Toggle QA library view
   n                Open notes
+  m                Meta: work on pm itself
   c                Launch Claude session
+  H                Launch guide (setup or assist)
   L                View TUI log
+  C                Show shared connect command
+  /                Open command bar
   w                Watcher prefix: ww list, wf focus, ws start/stop, wr review
   ?                Show help
+
+Tmux prefix bindings:
+  prefix P         PR action picker popup (q/Esc to quit)
+  prefix M         pm command runner popup (Ctrl+C to quit)
+  prefix R         Rebalance panes
 
 Auto-start (multiple targets; also `pm autostart --help`):
   O                Add selected PR as target, wait for merge (repeat: re-arm)
@@ -303,6 +318,7 @@ Auto-start (multiple targets; also `pm autostart --help`):
 Other:
   r                Refresh / sync
   b                Rebalance panes
+  ctrl+r           Restart TUI
   ctrl+b d         Detach from session
 
 """ + command_surface.command_bar_help_text() + """

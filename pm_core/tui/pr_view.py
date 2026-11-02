@@ -831,18 +831,32 @@ def handle_command_submitted(app, cmd: str) -> None:
         if not qa_pr_id:
             # Name the mode the user asked for: suggesting plain `pr qa`
             # after a fresh/loop request would start the wrong kind of run.
+            # The TUI key differs per mode too (`t`, `z t`, `zz t`), so read
+            # it from the shared table rather than always saying `t`.
             mode_hint = f" {qa_mode}" if qa_mode else ""
+            key = next((keys for mode, _form, keys, _desc
+                        in command_surface.QA_MODES
+                        if mode == (qa_mode or "run")), "t")
             app.log_message(f"No PR specified for QA — select one, or run "
-                            f"`pr qa{mode_hint} <id>` (TUI: t)")
+                            f"`pr qa{mode_hint} <id>` (TUI: {key})")
         else:
             qa_pr = _resolve_command_bar_pr(app, qa_pr_id)
             if qa_pr:
-                if qa_mode == "fresh":
-                    qa_loop_ui.fresh_start_qa(app, qa_pr["id"])
-                elif qa_mode == "loop":
-                    qa_loop_ui.start_or_stop_qa_loop(app, qa_pr["id"])
+                handlers = {
+                    None: qa_loop_ui.focus_or_start_qa,
+                    "fresh": qa_loop_ui.fresh_start_qa,
+                    "loop": qa_loop_ui.start_or_stop_qa_loop,
+                }
+                handler = handlers.get(qa_mode)
+                if handler is None:
+                    # A mode the parser accepts from the shared table but
+                    # this branch does not wire up must not silently fall
+                    # back to a plain run (which could be destructive).
+                    app.log_message(
+                        f"QA mode '{qa_mode}' is documented but not supported "
+                        f"here — run `pr qa <id>` instead")
                 else:
-                    qa_loop_ui.focus_or_start_qa(app, qa_pr["id"])
+                    handler(app, qa_pr["id"])
         # QA is handled directly (not via run_command), so clear the guard
         app._inflight_pr_action = None
         if app._plans_visible:

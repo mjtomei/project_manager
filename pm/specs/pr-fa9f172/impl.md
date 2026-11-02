@@ -395,3 +395,17 @@ the routed form and `--fresh` so help is complete.
   branch was previously untested), an unknown command-bar PR id names
   `pr list`, the CLI deliberately rejects `--fresh` on `qa`/`merge`, and
   `pm pr qa`'s own wrong-status refusal carries `pm pr start`.
+
+- Review-loop i8: two remaining accuracy gaps in the help surfaces.
+  (a) The command bar's "No PR specified for QA" remedy named the plain
+  `t` key even for a `fresh`/`loop` request; it now reads the matching key
+  (`z t` / `zz t`) from `command_surface.QA_MODES`, so the named TUI
+  equivalent matches the mode the operator asked for. (b) `pm tui keys`
+  was still a strict subset of the `?` screen: it omitted `x`, `X`, `f`,
+  `F`, `v`, `M`, `H`, `m`, `C`, `/`, `ctrl+r` and the tmux `prefix P`/
+  `prefix M`/`prefix R` bindings, which the `?` screen documents — the same
+  two-list drift this PR is about. Both lists now cover the same direct
+  bindings, and a test asserts `pm tui keys` names each of them. The QA
+  command-bar dispatch also refuses a mode the parser accepts but no
+  handler implements instead of silently starting a plain run, and the
+  unused `textual` parameter was dropped from `qa_mode_lines`.

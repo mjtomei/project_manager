@@ -96,13 +96,10 @@ def escape_markup(text: str) -> str:
     return text + " " if text.endswith("\\") else text
 
 
-def qa_mode_lines(*, textual: bool = False, indent: str = "  ") -> list[str]:
+def qa_mode_lines(*, indent: str = "  ") -> list[str]:
     """Render the QA modes as one line each (command bar + TUI key)."""
-    lines = []
-    for _mode, form, keys, desc in QA_MODES:
-        line = f"{indent}{form:<26} = TUI {keys:<5}  {desc}"
-        lines.append(escape_markup(line) if textual else line)
-    return lines
+    return [f"{indent}{form:<26} = TUI {keys:<5}  {desc}"
+            for _mode, form, keys, desc in QA_MODES]
 
 
 def command_bar_lines(*, textual: bool = False, indent: str = "  ") -> list[str]:

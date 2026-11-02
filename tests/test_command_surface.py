@@ -290,6 +290,20 @@ def test_tui_keys_matches_the_shared_table():
         assert token in out
 
 
+def test_tui_keys_lists_every_binding_the_help_screen_shows():
+    """`pm tui keys` was a strict subset of the `?` screen.
+
+    Both are help surfaces; a direct binding listed in one and missing from
+    the other is the drift this PR exists to stop.  (The `?` screen is
+    context-sensitive, so compare bindings, not layout.)
+    """
+    out = CliRunner().invoke(cli, ["tui", "keys"]).output
+    for binding in ("x", "X", "f", "F", "v", "M", "H", "m", "C", "/",
+                    "ctrl+r", "prefix P", "prefix M", "prefix R"):
+        assert re.search(rf"^\s*{re.escape(binding)}\s{{2,}}\S", out, re.M), (
+            f"{binding!r} missing from `pm tui keys`")
+
+
 def test_tui_keys_documents_prefix_keys_as_prefixes():
     """`w` and `y` are prefixes, not direct bindings.
 
@@ -502,6 +516,9 @@ def test_command_bar_qa_no_selection_names_the_requested_mode():
     pr_view.handle_command_submitted(app, "pr qa --fresh")
 
     assert "pr qa fresh <id>" in logs[-1]
+    # The TUI key must match the mode too: `t` is the plain run, `z t` is
+    # the fresh restart the user asked for.
+    assert "TUI: z t" in logs[-1]
 
 
 def _github_display_id_app(tmp_path, logs, tree):
