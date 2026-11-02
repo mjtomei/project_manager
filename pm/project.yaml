@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T09:13:28.970280+00:00'
+  updated_at: '2026-11-02T09:32:31.965131+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39896,6 +39896,45 @@ prs:
       (README).'
     created_at: '2026-11-02T09:07:13Z'
     last_edited: '2026-11-02T09:13:28Z'
+  - id: note-0d7ed85
+    text: 'QA S58 refiner (2026-11-02): all four stories ran live twice, at 12b3dc14
+      (/scratch/s58) and on the branch head e40fdb95 (/scratch/v58). Story-4 badge
+      branches were checked in /scratch/t58 and /scratch/u58. Every Then held, with
+      these corrections: (1) P is in_progress after the TUI start key. The first zz
+      d launch marks it in_review. (2) Story 3''s Recent timers still lists story
+      1''s cancelled backoff. The HOLD loop adds only `review verdict grace (iteration
+      1): elapsed`. (3) The closed-PR badge reads `[N runs]` + `Waiting for: nothing`
+      when a 5 s impl-idle tick lands inside the loop, or on the first 1 s tick after
+      the loop ends (t58: 0.86 s after). It reads `[start: turn done]` + `Waiting
+      for: start: agent turn finished …` only when the loop ends at least about 1
+      s before the next tick (u58: zz d 0.05 s after a tick, close 0.9 s into the
+      backoff). Both agree. (4) On the head, the pager''s q returns to the popup list
+      (e8073921), so send Esc to close it. Pager vs `| cat`: word-equal except two
+      path tokens (workdir, launch artifact), which the pager breaks at its 78-column
+      box. Every JSON poll was rc 0 and valid. '
+    created_at: '2026-11-02T09:21:57Z'
+    last_edited: '2026-11-02T09:21:57Z'
+  - id: note-1e41054
+    text: 'QA S58 (2026-11-02) PASS on e40fdb95, no edits: all four non-retry launch
+      endings held live in one env -i sandbox (/scratch/q58, P=pr-707a1bf). (1) z
+      d 1.7 s into the first backoff: loop+i1 cancelled KILLED, runtime failed KILLED,
+      timer cancelled 0.02 s after the stop and 3.25 s before due, one relauncher
+      attempt=1. Waiting for stayed on the start row: the 5 s impl-idle tick came
+      0.03 s after the loop. (2) unauthorized:latest: one launching phase, failed
+      LAUNCH_FAILED with the whole (artifact: ….log) path, Needs attention before
+      it can be retried., popup [failed] + [start: turn done]. (3) Trust stand-in:
+      failed HOLD 33.7 s after the key, 2 Enter presses 16 s apart, [launching 2s
+      · agent 31s], derived hold no countdown/due null, badge [hold: review HOLD at
+      a permission/t…], review [open] [failed]; only the grace elapsed row added.
+      (4) Close 1.1 s into the backoff: CLOSED 1.64 s later, timer cancelled +0.89
+      s / 3.00 s before due. Closed popup: q/Esc: quit  H=history, z/d inert. Badge
+      branch (a): a tick at 09:27:47.308 fell inside the loop, giving [5 runs] + Waiting
+      for: nothing. Pager == | cat word for word except the two path tokens; max pager
+      width 77; | cat > 80 cols only on the path lines. 280 polls rc 0, no stderr,
+      all JSON parse, nothing fired, no re-arm. Captures /pm-captures/scenarios/58
+      (README).'
+    created_at: '2026-11-02T09:32:31Z'
+    last_edited: '2026-11-02T09:32:31Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
