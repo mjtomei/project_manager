@@ -5173,11 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-<<<<<<< HEAD
-  updated_at: '2026-11-02T07:34:03.752173+00:00'
-=======
   updated_at: '2026-11-02T07:34:30.176359+00:00'
->>>>>>> 2c8f9a1a (qa: scenario 11 note (pm pr cd from another PR's clone writes the re-link into that clone's yaml))
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5251,7 +5247,6 @@ prs:
       default does. Captures /pm-captures/scenarios/9/story2.'
     created_at: '2026-11-02T07:05:21Z'
     last_edited: '2026-11-02T07:05:21Z'
-<<<<<<< HEAD
   - id: note-96f21bf
     text: 'QA S10 run 2026-11-02 at 700069de (code = 0d42e087): PASS 6/6 live (TUI
       d/t/i/i-after-move/zz d/zz d-after-move with two verified clones; captures /pm-captures/scenarios/10/{fixture,tui,cli,evidence}).
@@ -5270,7 +5265,6 @@ prs:
       clones, filed pr-5a6c061.'
     created_at: '2026-11-02T07:34:03Z'
     last_edited: '2026-11-02T07:34:03Z'
-=======
   - id: note-8fee005
     text: 'QA S11 story 3 finding (2026-11-02 at 700069de): a pm command run from
       inside ANOTHER PR''s clone writes the re-link into that clone''s tracked pm/project.yaml
@@ -5288,7 +5282,6 @@ prs:
       /pm-captures/scenarios/11/story3.'
     created_at: '2026-11-02T07:34:30Z'
     last_edited: '2026-11-02T07:34:30Z'
->>>>>>> 2c8f9a1a (qa: scenario 11 note (pm pr cd from another PR's clone writes the re-link into that clone's yaml))
 - id: pr-0778fbe
   plan: plan-003
   title: Add PR ownership tracking with workdir history
