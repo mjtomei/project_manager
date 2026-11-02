@@ -349,20 +349,21 @@ def log_state(record: SessionRecord) -> str:
 
 
 def retention_days() -> int | None:
-    """Claude's configured ``cleanupPeriodDays`` (read-only), or None."""
-    dirs = [os.environ.get("CLAUDE_CONFIG_DIR") or "",
-            str(Path.home() / ".claude")]
-    for d in dirs:
-        if not d:
-            continue
-        try:
-            data = json.loads((Path(d) / "settings.json").read_text())
-        except (OSError, ValueError):
-            continue
-        value = data.get("cleanupPeriodDays") if isinstance(data, dict) \
-            else None
-        if isinstance(value, int) and not isinstance(value, bool):
-            return value
+    """Claude's configured ``cleanupPeriodDays`` (read-only), or None.
+
+    Read from Claude's config dir: ``$CLAUDE_CONFIG_DIR`` when set (Claude
+    then never reads ``~/.claude/settings.json``, so falling back to it
+    would report a retention Claude does not apply), else ``~/.claude``.
+    """
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or \
+        str(Path.home() / ".claude")
+    try:
+        data = json.loads((Path(config_dir) / "settings.json").read_text())
+    except (OSError, ValueError):
+        return None
+    value = data.get("cleanupPeriodDays") if isinstance(data, dict) else None
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
     return None
 
 

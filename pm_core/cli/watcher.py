@@ -111,6 +111,7 @@ def watcher_cmd(ctx, iteration: int | None, loop_id: str | None,
       start [TYPE]   Start a watcher (default: auto-start)
       stop [TYPE]    Stop a running watcher
       list           List watcher types and status
+      sessions [TYPE]  List recorded watcher sessions and their native logs
 
     \b
     Options (blocking mode):

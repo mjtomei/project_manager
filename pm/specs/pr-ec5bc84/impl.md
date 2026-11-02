@@ -71,7 +71,8 @@ archived or deleted; native retention governs history.
     `log_state(record)` →
     `present | missing`; `missing_message(record)` — an accurate report that
     names the session, the expected path and Claude's configured
-    `cleanupPeriodDays` (read-only from Claude settings; pm never changes it);
+    `cleanupPeriodDays` (read-only from Claude's config dir — `$CLAUDE_CONFIG_DIR`
+    when set, else `~/.claude` — never both; pm never changes it);
     `missing_suffix(record)` appends it to a collector's give-up message only
     when the log is missing.
   - **Bounded read-only legacy reader** `legacy_session(root, run_id, name,

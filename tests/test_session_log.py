@@ -127,7 +127,7 @@ def test_log_of_reads_exactly_the_named_session(home):
     assert session_log.log_of(PR, None) is None
 
 
-def test_missing_log_is_reported_not_substituted(home):
+def test_missing_log_is_reported_not_substituted(home, monkeypatch):
     sid, other = _sid(), _sid()
     rec = session_log.register(_launch(), sid, "/w")
     # Another session's log exists; it must never stand in.
@@ -136,8 +136,10 @@ def test_missing_log_is_reported_not_substituted(home):
         _turn("PASS"))
     assert session_log.log_state(rec) == "missing"
     assert session_log.log_path(rec) == Path(rec.log)
-    (home / ".claude").mkdir(exist_ok=True)
-    (home / ".claude" / "settings.json").write_text(
+    # Claude's own config dir (conftest isolates it via CLAUDE_CONFIG_DIR).
+    cfg = Path(os.environ["CLAUDE_CONFIG_DIR"])
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "settings.json").write_text(
         json.dumps({"cleanupPeriodDays": 365000}))
     msg = session_log.missing_message(rec)
     assert sid in msg and "cleanupPeriodDays=365000" in msg
@@ -175,6 +177,24 @@ def test_retention_is_read_never_written(home, monkeypatch):
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     assert session_log.retention_days() == 30
     assert settings.read_bytes() == before
+
+
+def test_retention_follows_claude_config_dir_only(home, tmp_path,
+                                                  monkeypatch):
+    # With CLAUDE_CONFIG_DIR set Claude never reads ~/.claude/settings.json:
+    # reporting its value would name a retention Claude does not apply.
+    (home / ".claude").mkdir()
+    (home / ".claude" / "settings.json").write_text(
+        json.dumps({"cleanupPeriodDays": 365000}))
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cfg))
+    assert session_log.retention_days() is None
+    rec = session_log.register(_launch(), _sid(), str(tmp_path / "wd"))
+    assert "Claude's default cleanupPeriodDays" in \
+        session_log.missing_message(rec)
+    (cfg / "settings.json").write_text(json.dumps({"cleanupPeriodDays": 7}))
+    assert session_log.retention_days() == 7
 
 
 # --- launch boundary -----------------------------------------------------------
