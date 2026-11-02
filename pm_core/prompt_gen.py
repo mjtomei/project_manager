@@ -1,5 +1,7 @@
 """Claude prompt generation for PR work sessions."""
 
+import shlex
+
 from pm_core import store, notes
 from pm_core.backend import get_backend
 from pm_core.paths import get_global_setting
@@ -98,13 +100,18 @@ def tui_section(session_name: str) -> str:
     Used by prompt_gen internally and by other modules (guide, plan, meta)
     that construct prompts for Claude sessions running alongside the TUI.
     """
+    # The copyable commands below must survive a session name with a space
+    # (it comes from the repo directory): quote it as one shell word.
+    # shlex.quote leaves ordinary names bare, so the section is unchanged
+    # for them.
+    q_session = shlex.quote(session_name)
     return f"""
 ## Interacting with the TUI
 
-The base pm tmux session is `{session_name}`. Use `-s {session_name}` with pm tui \
+The base pm tmux session is `{session_name}`. Use `-s {q_session}` with pm tui \
 commands so they target the correct session even from workdir clones:
-- `pm tui view -s {session_name}` — capture and view the current TUI screen
-- `pm tui send <keys> -s {session_name}` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
+- `pm tui view -s {q_session}` — capture and view the current TUI screen
+- `pm tui send <keys> -s {q_session}` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
 
 **Do not** run commands that spawn new Claude sessions yourself (e.g. `pm pr start`, \
 `pm pr done`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be \

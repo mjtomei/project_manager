@@ -5,6 +5,8 @@ assembly out of the CLI surface so it lives next to the other session
 prompts instead of inline in `pm_core/cli/tui.py`.
 """
 
+import shlex
+
 
 _FILING_ADDENDUM = """
 
@@ -45,16 +47,22 @@ def build_regression_test_prompt(
     """
     pane_line = f"\nThe TUI pane ID is: {pane_id}" if pane_id else ""
     addendum = _FILING_ADDENDUM if file_findings else ""
+    # The session name is derived from the repo directory, so it may contain
+    # a space or a shell metacharacter; the examples below are commands the
+    # runner is meant to copy, so quote it as one shell word.  shlex.quote
+    # leaves ordinary names bare (the prompt is unchanged for them).  The
+    # ``~`` stays outside the quotes so the shell still expands it.
+    q_session = shlex.quote(session)
     return f"""\
 ## Session Context
 
 You are testing against tmux session: {session}{pane_line}
 
 To interact with this session, use commands like:
-- pm tui view -s {session}
-- pm tui send <keys> -s {session}
-- tmux list-panes -t {session} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
-- cat ~/.pm/pane-registry/{session}.json
+- pm tui view -s {q_session}
+- pm tui send <keys> -s {q_session}
+- tmux list-panes -t {q_session} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
+- cat ~/.pm/pane-registry/{q_session}.json
 
 ## Captures
 

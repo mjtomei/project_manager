@@ -543,3 +543,38 @@ class TestQAPaneActionHandler:
         params = list(sig.parameters.keys())
         assert "app" in params
         assert "item_id" in params
+
+
+def test_launch_qa_item_shell_quotes_an_awkward_session_name(monkeypatch):
+    """The QA prompt's copyable commands must quote a name with a space.
+
+    The TUI builds the same Session Context block as ``pm qa launch``; an
+    unquoted ``pm tui view -s pm-my repo`` is two arguments and Click
+    rejects it.  Ordinary names stay bare (``shlex.quote``), so the prompt
+    is unchanged for them.
+    """
+    from unittest.mock import patch
+
+    from pm_core.tui import pane_ops
+
+    app = MagicMock()
+    app._root = MagicMock()
+    app._session_name = "pm-my repo"
+    captured = {}
+    monkeypatch.delenv("TMUX_PANE", raising=False)
+
+    def _build(prompt=None, **_kwargs):
+        captured["prompt"] = prompt
+        return "claude --prompt ..."
+
+    with patch("pm_core.qa_instructions.get_instruction",
+               return_value={"title": "Login", "body": "body"}), \
+         patch("pm_core.claude_launcher.build_claude_shell_cmd",
+               side_effect=_build), \
+         patch.object(pane_ops, "launch_pane") as launch:
+        pane_ops.launch_qa_item(app, "instructions:login")
+
+    prompt = captured["prompt"]
+    assert "pm tui view -s 'pm-my repo'" in prompt
+    assert "pane-registry/'pm-my repo'.json" in prompt
+    launch.assert_called_once()

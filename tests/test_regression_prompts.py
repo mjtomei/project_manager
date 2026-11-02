@@ -57,3 +57,26 @@ def test_no_pane_omits_pane_line():
         file_findings=False,
     )
     assert "The TUI pane ID is" not in out
+
+
+def test_awkward_session_name_is_shell_quoted_in_the_examples():
+    """A session name with a space must be quoted in the copyable commands.
+
+    The name is derived from the repo directory, so an unquoted example
+    (``pm tui view -s pm-my repo``) is two arguments and Click rejects it.
+    Ordinary names stay bare, so the prompt is unchanged for them (pinned
+    by the tests above).
+    """
+    out = build_regression_test_prompt(
+        session="pm-my repo",
+        pane_id=None,
+        title="t",
+        body="b",
+        file_findings=False,
+    )
+    assert "pm tui view -s 'pm-my repo'" in out
+    assert "pm tui send <keys> -s 'pm-my repo'" in out
+    assert "tmux list-panes -t 'pm-my repo'" in out
+    assert "cat ~/.pm/pane-registry/'pm-my repo'.json" in out
+    # The prose line is a description, not a command: unchanged.
+    assert "You are testing against tmux session: pm-my repo" in out

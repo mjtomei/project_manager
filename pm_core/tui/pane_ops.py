@@ -595,16 +595,20 @@ def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
             file_findings=True,
         )
     else:
+        # Copyable example commands: the session name may contain a space
+        # (it comes from the repo directory), so quote it as one shell word.
+        # shlex.quote leaves ordinary names bare.
+        q_sess = shlex.quote(sess)
         full_prompt = f"""\
 ## Session Context
 
 You are running a QA instruction against tmux session: {sess}{pane_line}
 
 To interact with this session, use commands like:
-- pm tui view -s {sess}
-- pm tui send <keys> -s {sess}
-- tmux list-panes -t {sess} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
-- cat ~/.pm/pane-registry/{sess}.json
+- pm tui view -s {q_sess}
+- pm tui send <keys> -s {q_sess}
+- tmux list-panes -t {q_sess} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
+- cat ~/.pm/pane-registry/{q_sess}.json
 
 ## QA Instruction: {title}
 

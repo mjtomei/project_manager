@@ -1,6 +1,7 @@
 """QA instruction library CLI commands."""
 
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -683,16 +684,22 @@ def qa_launch(item_id: str, target_window: str | None):
             file_findings=True,
         )
     else:
+        # Same shell-quoting rule as the regression builder: the session
+        # name is derived from the repo directory, so the copyable example
+        # commands must quote it as one shell word (a space would otherwise
+        # split it into extra arguments).  shlex.quote leaves ordinary
+        # names bare; ``~`` stays outside the quotes.
+        q_session = shlex.quote(sess_label)
         full_prompt = f"""\
 ## Session Context
 
 You are running a QA instruction against tmux session: {sess_label}
 
 To interact with this session, use commands like:
-- pm tui view -s {sess_label}
-- pm tui send <keys> -s {sess_label}
-- tmux list-panes -t {sess_label} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
-- cat ~/.pm/pane-registry/{sess_label}.json
+- pm tui view -s {q_session}
+- pm tui send <keys> -s {q_session}
+- tmux list-panes -t {q_session} -F "#{{pane_id}} #{{pane_width}}x#{{pane_height}} #{{pane_current_command}}"
+- cat ~/.pm/pane-registry/{q_session}.json
 
 ## QA Instruction: {title}
 

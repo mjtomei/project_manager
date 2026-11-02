@@ -3776,3 +3776,72 @@ the full run were re-run green (`test_session_socket_isolation.py`, 17
 passed).  No live session, server or shared host configuration was
 touched — every fixture used a disposable socket directory, a temporary
 HOME or a mocked tmux.
+
+## Review iteration (2026-11-02, review-loop b48f i18)
+
+Verification pass over the head after the b48f i17 fixes; one dead-code
+removal, one test gap in the i17 change set, and one incidental
+prompt-quoting fix of the same "a name is a shell word" class.  No
+requirement changes.
+
+1. **`_session_start()` still carried a dead EXIT-trap wrapper.**  i17
+   pointed the local `_wrap()` at `tmux.wrap_with_exit_trap()` and its note
+   counted it as one of the three wrapper sites, but nothing calls it: the
+   notes pane is no longer auto-started, and every pane that needs a trap
+   is launched through `pane_ops` (`launch_pane` / `_wrap_pane_cmd`).
+   Removed, so the wrapper has exactly two live call sites (both in
+   `pane_ops`); the registry `generation` value it used is still written by
+   the same function.  (Correction to the i17 note's "three places": the
+   third was dead code, not a live site.)
+
+2. **The `after-split-window` hook had no quoting test.**  i17 requoted
+   three tmux commands with `#{q:...}`;
+   `TestTmuxCommandsQuoteAwkwardSessionNames` exercised the pane-switch
+   gate and the `window-resized` hook but not `pm _pane-opened` (which
+   passes the name plus the window and pane ids).  New
+   `test_the_pane_opened_hook_keeps_the_name_whole` registers the real
+   binding on a disposable server and runs tmux's own expansion against a
+   stub `pm` for the same space/backtick/quote/`;` names, asserting the
+   name arrives as one of four arguments.  Verified against the pre-fix
+   form (`run-shell 'pm _pane-opened "#{session_name}" …'`): the backtick
+   name executed `id` and the stub received `pm-auid=1000(pm) gid=…-abc`
+   instead of the name.
+
+3. **Incidental: prompt examples interpolated the session name
+   unquoted.**  `pm qa launch` (CLI and TUI), `pm qa regression`, the meta
+   prompt and `prompt_gen.tui_section` tell the agent to run
+   `pm tui view -s <session>`, `pm tui send … -s <session>` and
+   `cat ~/.pm/pane-registry/<session>.json`.  A session name derived from a
+   repo directory may contain a space, so the copyable example was two
+   arguments and Click rejected it — the same class i17 fixed for the
+   executable surfaces.  All now use `shlex.quote` (ordinary names stay
+   bare, so the prompts are unchanged for them; the `~` stays outside the
+   quotes so the shell still expands it).  Tests:
+   `tests/test_cli_qa.py::test_qa_launch_shell_quotes_an_awkward_session_name`,
+   `tests/test_regression_prompts.py::test_awkward_session_name_is_shell_quoted_in_the_examples`
+   and
+   `tests/test_qa_pane.py::test_launch_qa_item_shell_quotes_an_awkward_session_name`
+   (the TUI's copy of the block).
+
+Validation: full suite 5500 passed / 1 skipped (429.8 s, log
+`/pm-captures/review-b48f-i18/full-suite-final.log`; an earlier run in that
+directory had 12 `test_markdown_render` failures because this container has
+no `markdown` package — that environment trap is kept as
+`full-suite-markdown-missing.log`, and the final run installed `markdown`
+in the scratch venv; a superseded run started before the last test was
+added is kept as `full-suite-superseded.log`).  The preserved
+`session_start_smoke.py` re-ran clean on a disposable socket after the dead
+wrapper's removal (private server, session env, global env and hooks
+correct; default server untouched).  The i16 residual (other
+commands still passing a base name to prefix-matched tmux targets, e.g.
+`pm pr start`) is unchanged, as is a narrow rollout case noticed here: a
+legacy *shared* session created by a pre-PR pm whose tag was long enough to
+keep the unhashed socket path (repo directory name 72–78 characters) sits
+at `/tmp/pm-sessions/pm-<tag>` while the new deterministic lookup computes
+the md5 path (hashing starts at 101 bytes); `pm session list` still shows
+the session, but `pm session`/`kill`/`--print-connect` by name do not find
+it.  Not migrated automatically (R6), and not fixed here: probing a second
+path in the central resolver is a change to the security-sensitive
+resolution this iteration did not take.  No live session, server or shared
+host configuration was touched — every fixture used a disposable socket
+directory, a temporary HOME or a mocked tmux.

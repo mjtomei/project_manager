@@ -4218,7 +4218,8 @@ class TestTmuxCommandsQuoteAwkwardSessionNames:
             time.sleep(0.05)
         raise AssertionError(f"stub pm never ran for {template!r}")
 
-    def _check(self, short_sock_dir, tmp_path, monkeypatch, command_for):
+    def _check(self, short_sock_dir, tmp_path, monkeypatch, command_for,
+               nargs=3):
         sock = str(short_sock_dir / "pm-quote.sock")
         for name in self.CASES:
             r = _tmux(sock, "new-session", "-d", "-s", name, "sleep 60")
@@ -4231,7 +4232,7 @@ class TestTmuxCommandsQuoteAwkwardSessionNames:
                 argv = self._run_with_stub_pm(sock, pane, tmp_path, template)
                 # One argument, and it is the name itself: a split would
                 # give more arguments, a substitution a different value.
-                assert len(argv) == 3, (name, argv)
+                assert len(argv) == nargs, (name, argv)
                 assert argv[1] == name, (name, argv)
             finally:
                 _tmux(sock, "kill-server")
@@ -4254,6 +4255,21 @@ class TestTmuxCommandsQuoteAwkwardSessionNames:
             return cmd.removeprefix("run-shell '").removesuffix("'")
 
         self._check(short_sock_dir, tmp_path, monkeypatch, command_for)
+
+    def test_the_pane_opened_hook_keeps_the_name_whole(
+            self, short_sock_dir, tmp_path, monkeypatch):
+        """The other binding i17 requoted: after-split-window → _pane-opened.
+
+        It passes the name plus the window and pane ids, so the stub sees
+        four arguments; the name must still arrive as exactly one of them.
+        """
+        def command_for(calls, name):
+            cmd = next(c[c.index("after-split-window") + 1] for c in calls
+                       if "after-split-window" in c)
+            return cmd.removeprefix("run-shell '").removesuffix("'")
+
+        self._check(short_sock_dir, tmp_path, monkeypatch, command_for,
+                    nargs=4)
 
 
 class TestExitTrapQuoting:

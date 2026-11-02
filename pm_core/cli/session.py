@@ -885,15 +885,12 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # Register TUI pane in layout registry
     pane_registry.register_pane(session_name, window_id, tui_pane, "tui", "pm _tui")
 
-    def _wrap(cmd: str) -> str:
-        """Wrap a pane command in bash with an EXIT trap for rebalancing.
-
-        ``tmux.wrap_with_exit_trap`` escapes the session name and window
-        for the trap's double-quoted context (a repo directory may contain
-        a space or shell metacharacters; review-loop b48f i17).
-        """
-        return tmux_mod.wrap_with_exit_trap(cmd, session_name, window_id,
-                                            generation)
+    # The EXIT-trap wrapper lives in ``tmux.wrap_with_exit_trap``; every
+    # pane that needs one is launched through ``pane_ops``
+    # (``launch_pane`` / ``_wrap_pane_cmd``), so this path only registers
+    # the TUI pane.  The local wrapper that used to sit here was left over
+    # from the auto-started notes pane and was never called (review-loop
+    # b48f i18).
 
     # Notes pane is no longer auto-started — press `n` in the TUI to
     # open it on demand, or run `pm notes` in a pane manually.
