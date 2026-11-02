@@ -5173,7 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-11-02T05:18:45.025224+00:00'
+  updated_at: '2026-11-02T05:49:53.396850+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5215,6 +5215,25 @@ prs:
       to note-da12d23).'
     created_at: '2026-11-02T05:18:44Z'
     last_edited: '2026-11-02T05:18:44Z'
+  - id: note-608e416
+    text: 'QA S7 run 2026-11-02 at 154ad662: PASS 5/5 (pm pr merge with stale records,
+      captures /pm-captures/scenarios/7/{fixture,story1-5}/{cli,tui}). A merged from
+      the re-linked clone (rc 0, record -> clone, no 2nd clone); B re-linked then
+      refused "verdict ... is stale (HEAD moved since)" rc 1, master unchanged; C
+      listed 2 verified clones (0000000c first), gate refused rc 1, project.yaml sha/master/C
+      clones unchanged (only a 0-byte .workdir-<C>.lock appears in $WD). Follow-up
+      findings (outside this PR, per spec A3): (1) `pm pr signoff record <pr>` with
+      a stale record says "no workdir/HEAD to record the verdict against." rc 1 although
+      the intact clone exists; it does not run discovery/re-link. (2) `pm pr signoff
+      integrate <pr> --record` with a stale record prints "integration check failed:
+      no PR workdir" (head/base None) rc 1 and OVERWRITES the valid up_to_date integration
+      record with status: error / error: no PR workdir (head, base_sha, candidate_tree
+      dropped), so a later re-link needs a fresh integrate before sign-off can be
+      recorded. Wording: after C''s ambiguity listing the gate still says "workdir
+      not found ... Restore the workdir, then re-run sign-off", which points away
+      from the real fix (move the extra clone).'
+    created_at: '2026-11-02T05:49:53Z'
+    last_edited: '2026-11-02T05:49:53Z'
 - id: pr-0778fbe
   plan: plan-003
   title: Add PR ownership tracking with workdir history
