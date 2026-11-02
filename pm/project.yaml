@@ -5173,7 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-11-02T17:52:55.980457+00:00'
+  updated_at: '2026-11-02T18:31:21.385440+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5468,6 +5468,25 @@ prs:
       listing C''s committed yaml, all pending (existing pr-3f52b15, note added).'
     created_at: '2026-11-02T17:52:55Z'
     last_edited: '2026-11-02T17:52:55Z'
+  - id: note-1887e0e
+    text: 'QA S21 run 2026-11-02 at 7ccd9cdf6 (code = d911598b): PASS 5/5 live, isolated
+      HOME + private pm session with fake-claude (captures /pm-captures/scenarios/21/{fixture,story1-5,evidence}).
+      (1) close --remove kept the dirty clone; the re-add got the same id and branch;
+      the re-start printed "no workdir is recorded; re-linked ..." then "Workdir has
+      uncommitted changes — skipping git pull/checkout.", HEAD/porcelain intact, the
+      only WD change a 0-byte .workdir lock. (2) start of the closed PR: stderr refusal
+      only, rc 1, no re-link, lock, clone or window; yaml sha unchanged. (3) merged
+      PR with a stale record: cleanup "no workdir to clean up" while the clone exists;
+      --prune cleared it and the earlier closed PR (registry order); cd re-linked;
+      cleanup skipped the dirty clone; --force removed it; final cd "does not exist:
+      None" rc 1, no clone created. (4) cleanup --all removed the clean merged clone,
+      skipped the dirty in_progress one, and left a stale-record clone and its (missing)
+      record alone. (5) pm pr cd vs prune+cleanup --force, 5 rounds: cd won the store
+      lock each round and cleanup then removed the clone; record none, follow-up cd
+      rc 1, yaml parses, no .tmp-, empty stderr. Wording findings (1, 3: cleanup ignores
+      the discoverable clone; literal None) filed as pr-cd23997, outside this PR.'
+    created_at: '2026-11-02T18:31:21Z'
+    last_edited: '2026-11-02T18:31:21Z'
   model: provider:claude-main-xhigh-pm
   effort: high
 - id: pr-0778fbe
@@ -56279,6 +56298,39 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T17:52:31.779846+00:00'
   updated_at: '2026-11-02T17:52:31.779846+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-cd23997
+  plan: bugs
+  title: 'Bug: pm pr cleanup says "no workdir to clean up" (and --prune silently clears
+    the record) while a discoverable clone sits behind a stale workdir record; pm
+    pr cd with no record prints "does not exist: None"'
+  branch: pm/pr-cd23997-bug-pm-pr-cleanup-says-no-workdir-to-clean-up-and-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/pr.py (pr cleanup / --prune, pr cd). Seen in
+    QA S21 of pr-4258a32 (captures /pm-captures/scenarios/21/story3). Repro (local
+    backend): merge a PR, add an untracked file to its clean clone, mv the clone to
+    <slug>-0a11ce03 in the same project workdirs dir so the record is stale but discovery
+    would match it. (1) `pm pr cleanup <pr>` prints "  <pr>: no workdir to clean up"
+    rc 0 although the clone (with the untracked file) is still on disk; cleanup does
+    not run discovery, so the user is told nothing is left. (2) `pm pr cleanup --prune`
+    prints "  <pr>: cleared missing workdir <old path>" and sets the record to none
+    without mentioning the same-PR clone it could have found, so the clone is orphaned
+    from cleanup until `pm pr cd`/start re-links it. Suggest: for a stale record,
+    run the read-only discovery and either clean the verified clone (same dirty/--force
+    rules) or name it ("the recorded path is missing; a clone of <pr> exists at <path>:
+    re-link with pm pr cd, or remove it by hand"). (3) After the clone is removed
+    and the record is none, `pm pr cd <pr>` prints "Workdir for <pr> does not exist:
+    None" (literal None, same as master) rc 1; say "No workdir for <pr> (none recorded
+    and no clone found). Start the PR first: pm pr start <pr>" instead.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T18:30:59.584226+00:00'
+  updated_at: '2026-11-02T18:30:59.584226+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
