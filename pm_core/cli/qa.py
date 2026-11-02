@@ -304,7 +304,18 @@ def qa_edit(instruction_id: str, category: str | None):
 # session.  A regression session inheriting them (e.g. ``PM_PROJECT`` set by
 # the TUI command bar) would aim the disposable test project's ``pm`` commands
 # at the user's project, so they are dropped from its environment.
-_REGRESSION_SCRUBBED_ENV = ("PM_PROJECT", "PM_SESSION")
+#
+# The tmux ones matter for a run launched from a pane of the user's pm session
+# (TUI Enter, ``pm qa launch``, a pane shell): pm resolves "the current pm
+# session" from ``$TMUX_PANE`` before the cwd, so a ``pm session`` started in
+# the test's own project would reuse, rebalance and try to attach the user's
+# session instead of creating the test's (QA S12, R28).  ``PM_IN_TMUX_SESSION``
+# makes commands such as ``pm pr merge`` open windows in that session, and
+# ``PM_POPUP_SESSION`` names it when the run is started from a popup.  Host
+# mode still shares the user's tmux server (``PM_TMUX_SOCKET`` is kept); the
+# session's own pm commands just behave as they do outside tmux.
+_REGRESSION_SCRUBBED_ENV = ("PM_PROJECT", "PM_SESSION", "TMUX", "TMUX_PANE",
+                            "PM_POPUP_SESSION", "PM_IN_TMUX_SESSION")
 
 # Push URL given to a regression clone's ``origin``.  The QA scenario clone
 # helper points ``origin`` at the real upstream, and on the host (container

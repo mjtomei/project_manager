@@ -142,6 +142,13 @@ def test_host_run_is_isolated_and_needs_no_pm_session(project, home,
     never in the user's project, and without a pm session."""
     monkeypatch.setenv("PM_PROJECT", str(project.root))
     monkeypatch.setenv("PM_SESSION", "pm-live-session")
+    # Launched from a pane of the user's live pm session (TUI Enter, pm qa
+    # launch): pm in the run must not resolve that session (QA S12, R28).
+    monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,123,0")
+    monkeypatch.setenv("TMUX_PANE", "%7")
+    monkeypatch.setenv("PM_POPUP_SESSION", "pm-live-session")
+    monkeypatch.setenv("PM_IN_TMUX_SESSION", "1")
+    monkeypatch.setenv("PM_TMUX_SOCKET", "/tmp/shared.sock")
     result, spies = _run_regression(project, ["demo"],
                                     container_enabled=False)
     assert result.exit_code == 0, result.output
@@ -184,6 +191,11 @@ def test_host_run_is_isolated_and_needs_no_pm_session(project, home,
     args = spies.execvpe.call_args.args
     assert args[:2] == ("bash", ["bash", "-c", "CLAUDE-CMD"])
     assert "PM_PROJECT" not in args[2] and "PM_SESSION" not in args[2]
+    for var in ("TMUX", "TMUX_PANE", "PM_POPUP_SESSION",
+                "PM_IN_TMUX_SESSION"):
+        assert var not in args[2], var
+    # Host mode still shares the user's tmux server.
+    assert args[2]["PM_TMUX_SOCKET"] == "/tmp/shared.sock"
     spies.create.assert_not_called()
     # pm run from the clone uses this pm_core, as in QA scenarios.
     (override,) = _clone_overrides(home)
