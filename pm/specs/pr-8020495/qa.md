@@ -28,6 +28,30 @@ takes over before the first impl-idle tick is journaled once, E10; a
 journal line without an `action` field renders `?`, E3). R17's
 leave-qa timing corrected to the held run's 60 s status check.*
 
+*Re-synced 2026-11-02 (head fa5fb2e0) with the fixes from QA run
+S56-S62 and review 9aa8: e8073921 (pager `q` returns to the popup
+list, R8), c5547542 (an iteration journaled just before its launch
+phase reads `launching`, R3), 92b59c3c (a countdown never rounds up
+into the next unit: `59s`, `59m59s`, R3/R7/R16), 79de8949 (a read
+never shows more time left than the timer's duration, E6), d6a95eaf
+(E12, a dead TUI's tracked start), 75b777d9 (cleanup and `pm pr merge`
+end in-flight attempts before killing panes, E11), d78fe571 and
+fa5fb2e0 (journal lines of the wrong shape and owner pids out of range
+are skipped, E3), 975d5857 (a `?` row headlines `Waiting for` and the
+badge only when it is the only activity, E3).*
+
+*Re-synced 2026-11-02 (head 1f647355, app code f5d778bf3) with QA run
+S63-S69 and review e5eb (PASS, no code edits): f5d778bf3 (a review HOLD
+row keeps the whole trust-prompt instruction, R12). The reviewer ruled
+the two open QA items honest transient states to allow, not defects:
+the post-grace "no verdict accepted yet — waiting for the next turn"
+form (R3) and the read right after `pm pr merge` returns that still
+shows the open iteration as "parent run ended first" (E11). Also folded
+in: the grace/idle race decides whether an iteration's agent span is
+~20 s or ~22 s (R3); `pm pr close --remove` keeps history (E2); a
+resource cleanup does not stop a QA run (E11); damaged hook event files
+(E3, master bug pr-28b84d4 out of scope).*
+
 ## 1. Requirements
 
 ### Nominal history
@@ -55,7 +79,20 @@ leave-qa timing corrected to the held run's 60 s status check.*
   finished, in grace with N s left / processing verdict / launching next
   iteration) and "Timers and holds" lists the verdict-grace timer with armed
   time, due time, remaining time and expected transition; a second invocation
-  a few seconds later shows a smaller remaining time.
+  a few seconds later shows a smaller remaining time. An iteration that
+  has just opened reads `launching`, never "running for 0s" (c5547542).
+  A countdown never rounds up into the next unit: just under a minute
+  reads `59s`, never `1m00s` (92b59c3c).
+  Once the grace has ended and the loop is still open, the iteration may
+  read "agent turn finished at T (idle Ns); no verdict accepted yet —
+  waiting for the next turn" until the next idle event, up to ~2 s with
+  fake-claude (master `poll_for_verdict` skips an idle inside the grace
+  and reads the verdict at the next idle_prompt; review e5eb). This is
+  one of the loop-open `Waiting for:` forms. The grace is armed when the
+  agent phase starts, and which side of the grace/idle-repeat race an
+  iteration lands on is not user-controllable. So a fake iteration whose
+  `delay` is under the 20 s grace reads agent 20 s or 22 s (exec 22 s or
+  24 s with the 2 s launching phase), and either is correct.
 - **R4 — human hold has no countdown.** Given a review iteration returned
   INPUT_REQUIRED, when the user runs `pm pr history`, then a
   "review input required" hold is listed with no due time / no remaining
@@ -98,7 +135,8 @@ leave-qa timing corrected to the held run's 60 s status check.*
 - **R7 — planner deadline.** Given the QA planner is still running, when the
   user views history, then an active "QA planner deadline" timer is shown
   with a due time ~60 min after the planner pane launched and expected
-  transition "stop waiting for a plan → QA INPUT_REQUIRED"; once a plan is
+  transition "stop waiting for a plan → QA INPUT_REQUIRED" (its remaining
+  time reads `59mNNs` from the first read on, never `1h00m`); once a plan is
   found it moves to "Recent timers" as `cancelled`. (The timer is armed at
   pane launch, so it is absent for the first ~2 s of the planner child.)
 - **R8 — actions pane History row.** Given any PR, when the user opens the
@@ -178,7 +216,10 @@ leave-qa timing corrected to the held run's 60 s status check.*
   is live-inducible the way pr-e040aeb's QA spec does it: clear the fake
   config for review, put a `claude` stand-in on the session PATH that
   prints the workspace-trust dialog and blocks, and run
-  `pm set trust-prompt-grace-seconds 10`.
+  `pm set trust-prompt-grace-seconds 10`. The HOLD row's detail keeps
+  pm's whole message, through "To proceed: run `pm trust add <workdir>`
+  (or accept the prompt in the pane), then restart this step." in text
+  and JSON (f5d778bf3; capped at 1000 characters).
 
 ### Retries and holds added by master
 
@@ -267,6 +308,15 @@ leave-qa timing corrected to the held run's 60 s status check.*
   whose first child is `iN (adopted)` (adopted iterations arm no grace); a
   resumed QA run reads `qa (loop …) (resumed)` with plain `qa sN` children.
   No attempt id is reused and no pre-restart attempt is shown running.
+  Allowed restart transients (QA S63): reads in the ~0.1 s before the
+  TUI execs still show the old loop open; the ~0.4 s gap shows it
+  `interrupted` with a `(stale: owner exited)` runtime line, then no
+  review-loop runtime and `Waiting for: nothing`; a read within
+  ~0.4 s of the resume can show the resumed parent with no open
+  iteration yet ("loop running; next iteration launching"; the runtime
+  mirror and the loop thread write two separate appends ms apart); the
+  adopted iteration can read "running for 0s" for ~0.1 s before it ends.
+  Read counts in each transient vary from run to run.
   A restart within seconds of a scenario relaunch or dequeue resumes the
   live retry pane (no spurious `vanished` + duplicate worker in the resumed
   run; the cap still holds). A restart within seconds after a dequeued
@@ -336,7 +386,11 @@ leave-qa timing corrected to the held run's 60 s status check.*
 - **E2 — unknown PR.** Given an id that is neither in project.yaml nor has a
   journal, the command prints the standard not-found error and exits
   non-zero. Given a PR removed from project.yaml whose journal survives, the
-  command still shows its history. `#N` display ids resolve.
+  command still shows its history. `#N` display ids resolve. A PR
+  removed with `pm pr close --remove` keeps its history: the header is
+  `History — <pr>` with no status, title or milestones, the rows stay,
+  and an impl start still open turns `untracked` at the next impl-idle
+  tick; `--json` has `status`/`title` null (QA S68).
 - **E3 — corrupted journal.** Given a journal with a truncated last line or
   garbage lines, history still renders the valid events (no traceback).
   A non-UTF-8 byte spoils only its own line (c57cdda4): text, `--json`,
@@ -345,7 +399,24 @@ leave-qa timing corrected to the held run's 60 s status check.*
   time fields are not numbers (e.g. `"t": "abc"`) is skipped like a
   garbage line, never a traceback (78c6edcd). A parseable line with no
   `action` field renders as a `?` row, never a traceback in the CLI or
-  the popup badge (b0cfe591).
+  the popup badge (b0cfe591). That `?` row has no owner and never ends,
+  so it headlines `Waiting for:` and the badge only when nothing else is
+  open; while PM runs a real attempt, `Waiting for:` and the badge
+  follow that attempt (975d5857). A line that parses but has the wrong
+  shape is skipped like a garbage line (d78fe571, fa5fb2e0). Examples:
+  a time no date can show (`"t": 1e20`), a digit run past Python's
+  int-conversion limit, very deep nesting, an identity field of the
+  wrong type (a list `attempt`, a number `purpose`), and an owner whose
+  pid is a string, negative or beyond any pid (`1e30` written as an
+  integer). The CLI, `--json`, the popup and sign-off routing keep
+  working with any of them in the journal. History also reads the
+  tracked impl pane's hook event file (`~/.pm/hooks/<session id>.json`)
+  live: a damaged one never makes a history read fail. A timestamp no
+  date can show (`1e20`) reads `agent working`, and the restored file
+  reads `turn finished` again. A non-numeric timestamp or a non-object
+  event crashes master's TUI at its next impl-idle tick (master bug
+  pr-28b84d4, out of scope); history then reads the start `interrupted`
+  (owner exited) and stays rc 0.
 - **E4 — instrumentation must not change execution.** Given the history
   directory is unwritable (or the journal file is a directory), when the
   user runs a review loop / QA run, then the loop reaches the same verdicts
@@ -369,7 +440,9 @@ leave-qa timing corrected to the held run's 60 s status check.*
   plain `pm pr history | cat` stays within 80 columns and matches the
   TTY output word for word.
 - **E6 — overdue.** A `fires` timer past due whose owner is alive shows
-  `overdue by Xs`, never negative remaining.
+  `overdue by Xs`, never negative remaining. No read shows more time
+  left than the timer's duration, even one taken while the timer is
+  being armed (79de8949).
 - **E7 — concurrent writers.** Two or more processes (TUI loop threads, a
   `qa-run-bg` process, CLI-launched actions, two loops on the same PR or on
   different PRs) appending to journals at once never interleave/torn lines,
@@ -409,7 +482,25 @@ leave-qa timing corrected to the held run's 60 s status check.*
   --resources`, TUI `Y`, `pm pr merge` or merge detection tears down the
   PR's resources (plain `pm pr cleanup` only removes the workdir), then those attempts end
   `interrupted` with reason "PR resources cleaned up"; none is shown
-  running afterwards and the history survives.
+  running afterwards and the history survives. Cleanup and `pm pr merge`
+  end the attempts before they kill the panes (75b777d9), so a review
+  loop that notices its pane die within its 1 s check still reads
+  `interrupted` "PR resources cleaned up". Its open iteration ends
+  `vanished KILLED` and may read "parent run ended first" for up to
+  ~1 s first. A loop parent that reads `failed KILLED` with no reason is
+  a failure. For `pm pr merge` mid-loop the parent ends ~0.2 s and the
+  command returns ~0.3 s after it starts, while the TUI loop thread
+  journals the iteration's `vanished KILLED` at its next pane check, up
+  to ~1.2 s later. A read in that window shows the iteration
+  `interrupted` / "parent run ended first", its grace `cancelled (owner
+  ended)` and no runtime line. Review e5eb ruled this an honest
+  query-time transient (making the CLI wait on a TUI thread is not
+  worth it); later reads show `vanished KILLED`, the grace `cancelled`
+  and `review-loop=failed KILLED`, and stay that way. A resource
+  cleanup does not stop a QA run: QA attempts are journaled by the QA
+  loop, so killed scenario windows end `vanished` and are relaunched as
+  `qa sN retry 1` (5 s backoff, one at a time), queued scenarios still
+  run, and the run ends with its own verdict (QA S69).
 - **E12 — short-lived CLI openers.** Given an attempt opened by a
   short-lived CLI process (e.g. the start mirror registered by
   `pm pr auto-sequence`) that the runtime mirror still tracks in flight,
