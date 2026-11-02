@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T05:37:56.906611+00:00'
+  updated_at: '2026-11-02T05:48:32.254833+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25676,6 +25676,27 @@ prs:
       with /exit typed in the pane; Ctrl-C twice 1 s apart did not exit.'
     created_at: '2026-11-02T05:37:56Z'
     last_edited: '2026-11-02T05:37:56Z'
+  - id: note-7dd7dbf
+    text: 'QA S16 (2026-11-02): NEEDS_WORK, fixed in a7b2e4c4. A regression run launched
+      from a pm session --global session (TUI Enter) kept PM_SHARE_MODE=global. In
+      the run pane, `pm tui view` in the test project printed [Session: pm-proj-<gtag>,
+      Pane: %0] (the user QA view) and wrote a frame to the user tui-history, and
+      `pm session name` printed a nonexistent share-mode-hash session (R7/R34). Fix:
+      PM_SHARE_MODE added to _REGRESSION_SCRUBBED_ENV (cli/qa.py). test_host_run_is_isolated_and_needs_no_pm_session
+      now sets it and fails pre-fix. Full suite 5481 passed/1 skipped; the 12 failures
+      are all test_markdown_render (markdown dep missing in the container). Post-fix
+      live rerun at the same paths: the run pane matches the plain PM_TMUX_SOCKET-only
+      shell (own TUI, real session name, no user tui-history frame). The run captures
+      stay under the shared tag (computed before the exec). Popup stories held: the
+      prefix+M run from a /tmp pane targets the session project with a scrubbed env
+      and closed 5.1 s after the stand-in exited; nope and --branch no-such-branch
+      refuse, stay open until q/Esc and leave nothing. Popup stdin=/dev/null (E19,
+      tty=not a tty) filed as pr-a589f09. Out of scope, unchanged: the shared tmux
+      server global env still gives PM_SHARE_MODE to the zz sessions panes. Captures:
+      /pm-captures/scenarios/16/ (pre-fix/, post-fix/, s2-popup-run/, s3-popup-refusals/,
+      helpers/).'
+    created_at: '2026-11-02T05:48:32Z'
+    last_edited: '2026-11-02T05:48:32Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
@@ -52943,6 +52964,35 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T05:20:24.558509+00:00'
   updated_at: '2026-11-02T05:20:24.558509+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a589f09
+  plan: bugs
+  title: 'Bug: the prefix+M popup runs qa regression in the popup with stdin from
+    /dev/null, while the command bar opens a pane'
+  branch: pm/pr-a589f09-bug-the-prefix-m-popup-runs-qa-regression-in-the-p
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/session.py popup_cmd_cmd routes only ''pr qa''
+    and ''review-loop'' to the TUI command bar; every other command (including ''qa
+    regression <id>'') runs inside the 80-column popup via _run_with_abort_keys, which
+    spawns it with stdin=subprocess.DEVNULL (session.py:2681). Repro (QA S16 story
+    2, pr-7d5d036, 2026-11-02): pm session for a project with a regression test ''demo'';
+    press prefix+M, type ''qa regression demo'', Enter. The run header prints in the
+    popup and the regression session''s claude starts there with stdin not a tty (a
+    stand-in logging ''tty 2>&1'' records ''not a tty''), so an interactive Claude
+    session cannot take input, and the popup closes when it exits. The TUI command
+    bar (/ qa regression demo) and QA-pane Enter open a qa-item pane with a real tty
+    instead. Expected: route ''qa regression'' (and other session-launching commands)
+    from the popup to a pane like the command bar does, or refuse with a pointer to
+    the command bar. E19; master shares the behavior.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T05:38:48.530599+00:00'
+  updated_at: '2026-11-02T05:38:48.530599+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
