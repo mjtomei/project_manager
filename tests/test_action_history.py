@@ -1523,6 +1523,70 @@ class TestQAInputWaitAndHold:
         assert row["resolution"] == "cancelled"
         assert m["attempts"][0]["outcome"] == "cancelled"
 
+    def test_human_wait_is_not_execution_in_the_summary(self, clock):
+        # Cap 2: s1 asks for input at the grace end, which frees its slot
+        # for the queued s3. The waiting s1 is wait, not execution, so the
+        # run never reads "up to 3 at once" and its wall stops growing
+        # while the run is held on s1.
+        run = ah.start_attempt(PR, "qa", loop_id="L1", label="QA run")
+        obs = ah.ScenarioObserver(PR, run, "L1")
+        scs = [_sc(1), _sc(2), _sc(3)]
+        obs.observe(scs, pending={1, 2}, verifying=set(), queued={3},
+                    verdicts={})
+        clock.advance(30)
+        obs.observe(scs, pending={2}, verifying=set(), queued={3},
+                    verdicts={1: "INPUT_REQUIRED"}, waiting={1})
+        obs.launching(scs[2])
+        clock.advance(20)
+        obs.observe(scs, pending={2, 3}, verifying=set(), queued=set(),
+                    verdicts={1: "INPUT_REQUIRED"}, waiting={1})
+        clock.advance(40)
+        obs.observe(scs, pending=set(), verifying=set(), queued=set(),
+                    verdicts={1: "INPUT_REQUIRED", 2: "PASS", 3: "PASS"},
+                    waiting={1})
+        obs.finish(stopped=False, keep_waiting=True)
+        ah.phase(PR, run, "waiting_human", "held at INPUT_REQUIRED")
+        at_hold = hq.build_history(PR, now=clock.t, live=False)
+        clock.advance(600)
+        later = hq.build_history(PR, now=clock.t, live=False)
+        for m in (at_hold, later):
+            (r,) = m["attempts"]
+            sc = r["scenarios"]
+            assert sc["max_concurrency"] == 2
+            # s1 30 s + s2 90 s + s3 60 s; union = the 90 s s2 ran.
+            assert (round(sc["wall_s"]), round(sc["sum_s"])) == (90, 180)
+            assert "up to 2 at once" in "\n".join(hq.render_text(m))
+
+    def test_derived_hold_hidden_while_a_new_qa_run_is_open(self, clock):
+        # The runtime keeps the stopped run's INPUT_REQUIRED until the new
+        # run's scenarios launch; while the new run plans, PM waits on it,
+        # not on a human. Once that run ends the derived hold is back.
+        old = ah.start_attempt(PR, "qa", loop_id="L1", label="QA run")
+        ah.end_attempt(PR, old, "cancelled", verdict="INPUT_REQUIRED")
+        runtime = {"qa": {"state": "done", "verdict": "INPUT_REQUIRED",
+                          "updated_at": ah.iso(clock.t)}}
+
+        def _read():
+            with patch.object(hq, "_runtime_actions",
+                              return_value=runtime), \
+                    patch.object(hq, "_runtime_tracked_attempts",
+                                 return_value=set()):
+                return hq.build_history(PR, pr={"status": "qa"},
+                                        now=clock.t)
+
+        (hold,) = _read()["holds"]
+        assert hold["derived"] == "runtime qa verdict"
+        clock.advance(5)
+        new = ah.start_attempt(PR, "qa", loop_id="L2", label="QA run")
+        ah.phase(PR, new, "planning")
+        m = _read()
+        assert m["holds"] == []
+        assert not m["waiting_for"].startswith("human:")
+        clock.advance(60)
+        ah.end_attempt(PR, new, "cancelled", verdict="INPUT_REQUIRED")
+        (hold,) = _read()["holds"]
+        assert hold["derived"] == "runtime qa verdict"
+
     def test_derived_runtime_hold_not_doubled_while_journaled(self, clock):
         ah.arm_timer(PR, "qa-input-hold:L1", purpose="QA INPUT_REQUIRED "
                      "hold (scenario(s) 1)", owner_action="qa",

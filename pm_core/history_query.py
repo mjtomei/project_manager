@@ -122,7 +122,11 @@ def build_history(pr_id: str, *, pr: dict | None = None,
     holds = [t for t in timer_rows["active"] if t["due_at"] is None]
     holds += _derived_holds(pr_id, pr or {}, runtime,
                             journaled={t["timer"].split(":", 1)[0]
-                                       for t in holds})
+                                       for t in holds},
+                            qa_running=any(
+                                a["action"] == "qa" and a.get("open")
+                                and not a.get("_parent_obj")
+                                for a in attempts.values()))
     waiting_for = _waiting_for(holds, timer_rows, current, attempts)
 
     model: dict[str, Any] = {
@@ -449,19 +453,36 @@ def _compute_spans(a: dict, t_now: float) -> None:
     a["open"] = a["ended_t"] is None and a.get("inferred") is None
 
 
+def _exec_intervals(c: dict) -> list[tuple[float, float]]:
+    """A scenario attempt's execution intervals: its spans minus the waits.
+
+    Queued for a concurrency slot, a relaunch backoff and waiting on a human
+    (an INPUT_REQUIRED scenario held open while the run waits for its
+    answer) are not execution, wherever they fall in the attempt: the loop
+    frees a waiting scenario's slot, so counting that wait would read a run
+    under a cap of 2 as "up to 3 at once" and grow its wall figure through
+    the hold.
+    """
+    ivs: list[tuple[float, float]] = []
+    for sp in c.get("spans", []):
+        if sp["phase"] in _ah.WAIT_PHASES or sp["phase"] in _UNOBSERVED_PHASES:
+            continue
+        s, e = sp["start_t"], sp["end_t"]
+        if e <= s:
+            continue
+        if ivs and s <= ivs[-1][1]:
+            ivs[-1] = (ivs[-1][0], max(ivs[-1][1], e))
+        else:
+            ivs.append((s, e))
+    return ivs
+
+
 def _compute_concurrency(a: dict) -> None:
     kids = [c for c in a["children"] if c.get("scenario") is not None]
     if len(kids) < 2:
         return
-    # Execution intervals: a scenario queued for a concurrency slot is not
-    # running yet, so its leading wait does not count as overlap.
-    ivs = []
-    for c in kids:
-        end = c["started_t"] + (c.get("elapsed_s")
-                                or c.get("elapsed_lower_bound_s") or 0)
-        start = next((sp["start_t"] for sp in c.get("spans", [])
-                      if sp["phase"] not in _ah.WAIT_PHASES), end)
-        ivs.append((min(start, end), end))
+    # Execution intervals only: waits (see _exec_intervals) do not overlap.
+    ivs = [iv for c in kids for iv in _exec_intervals(c)]
     points = sorted([(s, 1) for s, _ in ivs] + [(e, -1) for _, e in ivs],
                     key=lambda p: (p[0], p[1]))
     depth = best = 0
@@ -766,12 +787,16 @@ def _derived_hold(timer: str, purpose: str, owner_action: str, armed,
 
 
 def _derived_holds(pr_id: str, pr: dict, runtime: dict,
-                   journaled: set[str] = frozenset()) -> list[dict]:
+                   journaled: set[str] = frozenset(),
+                   qa_running: bool = False) -> list[dict]:
     """Holds read from project.yaml / the runtime mirror.
 
     *journaled* names the kinds of hold already active in the journal
     (timer id prefixes): a live held QA run journals its own hold, so the
     runtime's INPUT_REQUIRED verdict must not add a second row for it.
+    *qa_running* says a QA run attempt is open: the runtime keeps the
+    previous run's ``done INPUT_REQUIRED`` until the new run's scenarios
+    launch, but the new run is what PM waits on, not a human.
     """
     holds = []
     sp = pr.get("spec_pending")
@@ -785,7 +810,7 @@ def _derived_holds(pr_id: str, pr: dict, runtime: dict,
             "pm pr spec-approve (or V in the TUI) resumes"))
     qa = runtime.get("qa") or {}
     if qa.get("state") == "done" and qa.get("verdict") == "INPUT_REQUIRED" \
-            and pr.get("status") == "qa" \
+            and pr.get("status") == "qa" and not qa_running \
             and "qa-input-hold" not in journaled:
         holds.append(_derived_hold(
             "qa-input-required",
