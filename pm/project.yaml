@@ -8332,6 +8332,25 @@ prs:
       C-b x, y, C-b t and poll #{pane_in_mode}.'
     created_at: '2026-11-02T17:19:24Z'
     last_edited: '2026-11-02T17:19:24Z'
+  - id: note-3eaf656
+    text: 'QA S48 refiner (2026-11-02, 8ea8a9a1, tmux 3.2a): all Thens held live.
+      Fixture: fake qa_planning writes no QA spec, so write it at `pm pr spec-path
+      <id> qa` and commit pm/ (`pm pr spec` runs claude -p). PRs go to in_review with
+      `pm pr edit` from a shell window inside each session (cd to the project first);
+      no `pm pr start` needed. Fake cfg: _all {}, qa_planning QA_PLAN body with 2
+      SCENARIO blocks, qa_concretize REFINED_STEPS, qa_scenario [{"verdict":"PASS","delay":100}],
+      qa_verification VERIFIED, qa_finalize FINALIZE_DONE. Run takes about 3.5 min:
+      workers ~20 s after t, PASS +100 s, verify +35 s, finalize +30 s; each run also
+      opens a qa-<pr>-s0 interactive window. The TUI is alone in window 0, so a kill
+      closes it: the hook opens a new window at index 0 (auto-named python3) in the
+      project dir and switches that session client to it. Hook lines land in B debug
+      log when the kill is typed from B dir (pr-3121cc8), naming A session, not A
+      PR. Resume shows ~1 s after mount (Resuming QA for <pr> after restart...). Double
+      kill: a 2nd kill at 0.17 s or 0.67 s gives one resume line; at 2 s the next
+      TUI logs a 2nd Resuming line (expected, one live owner). Real claude is on PATH
+      in session shells: put a stub claude first on PATH plus a guard.'
+    created_at: '2026-11-02T17:18:02Z'
+    last_edited: '2026-11-02T17:18:02Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
