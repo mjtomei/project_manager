@@ -1890,9 +1890,14 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
     if (data.get("project") or {}).get("skip_qa"):
         entry_statuses = ("qa", "in_review")
     if status not in entry_statuses + ("sign_off",):
+        # The expected list follows `skip_qa`: with it there is no QA stage
+        # (sign-off follows review), so naming only qa/sign_off would send
+        # the operator to a stage this project never runs.
+        expected = ", ".join(entry_statuses + ("sign_off",))
+        after = "review" if (data.get("project") or {}).get("skip_qa") else "QA"
         click.echo(
-            f"PR {pr_id} is {status} — sign-off runs after QA "
-            f"(expected qa or sign_off). "
+            f"PR {pr_id} is {status} — sign-off runs after {after} "
+            f"(expected {expected}). "
             f"{_next_step_for_status(pr_id, status)}", err=True)
         raise SystemExit(1)
 
@@ -3014,10 +3019,15 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     if pr_id is None:
         pr_id = _infer_pr_id(data, status_filter=("sign_off", "in_review"))
         if pr_id is None:
+            # Name the listing command, not a presumed next step: the missing
+            # PR may be pending (start first), in QA, or already merged, so
+            # "sign-off comes first" is only true of the *prerequisite*, not
+            # of the immediate action.  The status in `pm pr list` decides.
             click.echo(
                 "No sign_off/in_review PR to merge. Specify one — run "
-                "'pm pr list' to see every PR; sign-off comes first: "
-                "'pm pr signoff <id>' (TUI: i).", err=True)
+                "'pm pr list' to see every PR and its status. A PR must be "
+                "signed off before it can merge ('pm pr signoff <id>', "
+                "TUI: i).", err=True)
             raise SystemExit(1)
         click.echo(f"Auto-selected {pr_id}")
 

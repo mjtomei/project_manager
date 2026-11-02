@@ -962,6 +962,59 @@ def test_pr_qa_wrong_status_names_the_next_command(tmp_path):
     assert "pm pr start pr-001" in result.output
 
 
+def _lifecycle_refusal(tmp_path, args, *, status, skip_qa=False):
+    """Invoke a `pm pr …` lifecycle command over a one-PR fixture."""
+    from unittest import mock
+
+    from pm_core.cli import pr as pr_mod
+
+    project = {"base_branch": "master", "backend": "vanilla"}
+    if skip_qa:
+        project["skip_qa"] = True
+    data = {"project": project,
+            "prs": [{"id": "pr-001", "title": "T", "status": status}]}
+    with mock.patch.object(pr_mod, "state_root", return_value=tmp_path), \
+            mock.patch.object(pr_mod.store, "load", return_value=data):
+        return CliRunner().invoke(pr_mod.pr, args)
+
+
+def test_merge_no_candidate_names_the_listing_not_a_presumed_step(tmp_path):
+    """No candidate does not mean "sign-off is next".
+
+    The missing PR may be pending (start first), in QA, or already merged,
+    so the remedy must send the operator to `pm pr list` for the status
+    rather than asserting that sign-off is the immediate step.  (The i14
+    note claimed this was already fixed; the message still said "sign-off
+    comes first".)
+    """
+    result = _lifecycle_refusal(tmp_path, ["merge"], status="pending")
+    assert result.exit_code == 1, result.output
+    out = " ".join(result.output.split())
+    assert "pm pr list" in out
+    assert "sign-off comes first" not in out
+
+
+def test_signoff_refusal_expected_states_follow_skip_qa(tmp_path):
+    """With `skip_qa` there is no QA stage: sign-off follows review.
+
+    The refusal listed "qa or sign_off" and said "runs after QA" even on a
+    project that never runs QA, sending the operator to a stage that does
+    not exist there.
+    """
+    result = _lifecycle_refusal(tmp_path, ["signoff", "pr-001"],
+                                status="in_progress", skip_qa=True)
+    assert result.exit_code == 1, result.output
+    out = " ".join(result.output.split())
+    assert "sign-off runs after review" in out
+    assert "in_review" in out
+
+    # The default project keeps the QA wording its tests pin.
+    result = _lifecycle_refusal(tmp_path, ["signoff", "pr-001"],
+                                status="in_progress")
+    assert result.exit_code == 1, result.output
+    assert "sign-off runs after QA" in result.output
+
+
 @pytest.mark.parametrize("mode", command_surface.QA_MODIFIER_MODES)
 def test_pr_qa_cli_rejects_the_two_token_command_bar_form(tmp_path, mode):
     """`pm pr qa fresh pr-001` must reach the hint, not Click's usage error.

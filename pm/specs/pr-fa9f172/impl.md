@@ -523,3 +523,18 @@ the routed form and `--fresh` so help is complete.
   sign-off window launchers said only "no workdir for <id>. Start the PR
   first."; each now names `pm pr start <id>` (TUI: s), matching the
   adjacent tmux remedies this PR already rewrote. Tests cover all three.
+
+- Review-loop i15: two remedies whose *claims* did not match the code.
+  (a) Correction to i14(c): the merge no-candidate message still said
+  "sign-off comes first: `pm pr signoff <id>`" — the i14 note said the
+  presumption was gone, but only the listing command had been added. A
+  missing candidate may be pending (start first), in QA, or already
+  merged, so the message now names `pm pr list` for the status and states
+  sign-off as the *prerequisite* ("a PR must be signed off before it can
+  merge"), which is true in every state. A test pins that "sign-off comes
+  first" is gone. (b) The `pr signoff` wrong-status refusal said "sign-off
+  runs after QA (expected qa or sign_off)" even on a `skip_qa` project,
+  where there is no QA stage and `in_review` is a valid entry state: it
+  now derives the expected list from `entry_statuses` and says "runs
+  after review" under `skip_qa`. Tests cover both variants (the default
+  wording is unchanged, so `tests/test_signoff.py` still pins it).
