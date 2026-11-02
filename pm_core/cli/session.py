@@ -16,7 +16,6 @@ from pm_core import store, guide
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core import pane_registry
-from pm_core import paths
 from pm_core.claude_launcher import find_editor
 
 from pm_core.cli import cli
@@ -1900,8 +1899,14 @@ def _wait_dismiss(prompt: str = "\nPress q/Esc/Enter to close...") -> None:
         pass
 
 
-def _run_picker_command(cmd: str, session: str) -> None:
-    """Execute a picker command — either direct CLI or routed through TUI."""
+def _run_picker_command(cmd: str, session: str, wait_on_error: bool = True) -> bool:
+    """Execute a picker command — either direct CLI or routed through TUI.
+
+    Returns True when the command was handed to the TUI / exited 0.
+    *wait_on_error* keeps a one-shot popup open on failure so the message
+    can be read; the long-lived prefix+M popup passes False because its
+    next prompt already leaves the message on screen.
+    """
     route = "tui" if cmd.startswith("tui:") else "direct"
     _log.info("picker dispatch: cmd=%r route=%s", cmd, route)
     if cmd.startswith("tui:"):
@@ -1916,12 +1921,14 @@ def _run_picker_command(cmd: str, session: str) -> None:
         if not result.ok:
             _log.warning("picker dispatch failed: %s", result.message)
             click.echo(result.message or "Could not reach the TUI.")
-            _wait_dismiss()
-            return
+            if wait_on_error:
+                _wait_dismiss()
+            return False
         # Brief progress display: poll runtime_state for the action to
         # transition out of 'queued' / into 'running'.  Exits early on
         # state transition or when the target window appears.
         _wait_for_tui_command(base, tui_cmd)
+        return True
     else:
         # Run pm command directly. Capture stdout/stderr so we can re-emit
         # them ourselves — display-popup -E's raw-mode TTY mangles bytes
@@ -1935,11 +1942,14 @@ def _run_picker_command(cmd: str, session: str) -> None:
             err = (result.stderr or "").strip()
             if err:
                 click.echo(f"pm error: {err}", err=True)
-            _wait_dismiss()
-        elif result.stderr:
+            if wait_on_error:
+                _wait_dismiss()
+            return False
+        if result.stderr:
             # Even on success some commands print informational lines to
             # stderr; surface them so they don't vanish.
             click.echo(result.stderr, nl=False, err=True)
+        return True
 
 
 # Bootstrap for popup-dispatched pm commands (see _session_pm_argv).
@@ -2606,8 +2616,13 @@ def popup_picker_cmd(session: str, window_name: str):
 @cli.command("_popup-cmd", hidden=True)
 @click.argument("session")
 def popup_cmd_cmd(session: str):
-    """Internal: pm command prompt for tmux popup."""
-    import sys
+    """Internal: pm command popup (prefix+M).
+
+    A long-lived prompt: each line runs as a pm command until the user
+    dismisses the popup (Esc, Ctrl-D, ``exit``).  The loop, history
+    (shared with the TUI command bar), completion and scrollback live in
+    :mod:`pm_core.cli.popup_shell`; dispatch stays here.
+    """
     base = pane_registry.pm_session_name(session)
     rp = pane_registry.registry_path(base)
     _log.info("popup-cmd invoked: session=%r base=%r registry_path=%s exists=%s HOME=%r module=%s",
@@ -2627,85 +2642,67 @@ def popup_cmd_cmd(session: str):
     if saved_root is not None:
         os.environ["PM_PROJECT"] = str(saved_root)
 
-    # Resolve the session tag for shared-history persistence. The popup's
-    # cwd may not match the host session, so derive the tag from the
-    # saved root when available.
-    history_tag = None
-    if saved_root is not None:
-        history_tag = paths.get_session_tag(start_path=saved_root)
-    if history_tag is None:
-        history_tag = paths.get_session_tag()
-
-    # Wire readline + completer once per popup invocation.
-    completer = None
-    if sys.stdin.isatty():
+    # Completion data only: no state_root() here, whose override check
+    # may print a repo-mismatch warning into the popup.
+    completion_root = saved_root
+    if completion_root is None:
         try:
-            import readline  # noqa: F401
-            from pm_core.cli import completion as _completion
-            completer = _completion.install(saved_root)
-            hist_file = paths.command_history_file(history_tag)
-            if hist_file is not None and hist_file.exists():
-                try:
-                    readline.read_history_file(str(hist_file))
-                except OSError:
-                    pass
-        except ImportError:
-            completer = None
+            completion_root = store.find_project_root()
+        except (OSError, FileNotFoundError):
+            completion_root = None
 
-    click.echo("pm popup — Ctrl-D to dismiss, Esc/Ctrl-C aborts running command")
+    from pm_core.cli.popup_shell import PopupShell
+    PopupShell(
+        # Keyed by the tmux session, like pm_root above, never by the
+        # popup's cwd (often a PR workdir that hashes to another tag).
+        tag=_session_tag_from_name(base),
+        root=completion_root,
+        dispatch=lambda cmd, parts: _popup_dispatch(session, cmd, parts),
+    ).run()
 
-    while True:
-        try:
-            cmd = input("pm> ").strip()
-        except EOFError:
-            click.echo()
-            return
-        except KeyboardInterrupt:
-            click.echo("^C")
-            continue
 
-        if not cmd:
-            continue
+def _popup_dispatch(session: str, cmd: str, parts: list[str]):
+    """Run one popup command line; returns a ``popup_shell.DispatchResult``.
 
-        # Persist to shared history (popup + TUI bar share this file).
-        try:
-            paths.append_command_history(cmd, history_tag)
-        except Exception:
-            pass
+    ``pr qa`` and ``review-loop`` go through the TUI (their window
+    management lives there, see pr-438028c); everything else runs as the
+    session's pm with its output captured for the popup's scrollback.
+    """
+    from pm_core.cli.popup_shell import DispatchResult
 
-        try:
-            parts = shlex.split(cmd)
-        except ValueError as e:
-            click.echo(f"Invalid command syntax: {e}")
-            continue
+    cmd_norm = cmd.replace("review loop", "review-loop")
+    if cmd_norm.startswith("pr qa") or cmd_norm.startswith("review-loop"):
+        ok = _run_picker_command(f"tui:{cmd_norm}", session, wait_on_error=False)
+        return DispatchResult(status="sent to the TUI" if ok else "TUI not reached")
 
-        _cmd_norm = cmd.replace("review loop", "review-loop")
-        if (_cmd_norm.startswith("pr qa")
-                or _cmd_norm.startswith("review-loop")):
-            _run_picker_command(f"tui:{_cmd_norm}", session)
-            continue
-
-        full_cmd = _session_pm_argv(session, parts)
-        rc = _run_with_abort_keys(full_cmd)
-
-        if rc == _ABORTED_BY_USER:
-            click.echo("(aborted)")
-            continue
-        if rc != 0:
-            click.echo(f"(exit {rc})")
-        # On success, fall through to the next prompt.
+    captured: list[bytes] = []
+    rc = _run_with_abort_keys(_session_pm_argv(session, parts), capture=captured)
+    output = b"".join(captured).decode("utf-8", "replace")
+    if rc == _ABORTED_BY_USER:
+        status = "aborted"
+    elif rc != 0:
+        status = f"exit {rc}"
+    else:
+        status = None
+    return DispatchResult(status=status, output=output)
 
 
 _ABORTED_BY_USER = -999
 
 
-def _run_with_abort_keys(cmd: list[str]) -> int:
-    """Run *cmd* inheriting stdout/stderr, but watch the popup pty for
-    Esc / Ctrl+C and terminate the child when either is pressed.
+def _run_with_abort_keys(cmd: list[str], capture: list[bytes] | None = None) -> int:
+    """Run *cmd* with its output on the popup, aborting on Esc / Ctrl+C.
 
     The child is spawned in its own session with ``stdin=DEVNULL`` so the
-    parent owns the pty input.  Returns the child's exit code, or
-    ``_ABORTED_BY_USER`` if the user dismissed the popup mid-run.
+    parent owns the pty input; Esc or Ctrl+C terminates the child's
+    process group.  Returns the child's exit code, or ``_ABORTED_BY_USER``
+    if the user aborted it.
+
+    With *capture* (a list), the child writes to a private pty instead of
+    inheriting the popup's: it still sees a terminal (same size), every
+    chunk is relayed to the popup as it arrives, and the raw bytes are
+    appended to *capture* for the popup's scrollback.  Without a tty
+    (tests, non-interactive use) the child just inherits stdout/stderr.
     """
     import signal
     import sys
@@ -2716,13 +2713,60 @@ def _run_with_abort_keys(cmd: list[str]) -> int:
 
     import select
     import termios
+    import time
     import tty
 
-    proc = subprocess.Popen(
-        cmd, text=True,
-        stdin=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    sys.stdout.flush()
+    sys.stderr.flush()
+    master_fd = None
+    if capture is not None:
+        try:
+            master_fd, slave_fd = _open_output_pty()
+        except OSError as e:
+            _log.info("popup: no capture pty (%s); output not captured", e)
+            master_fd = None
+    if master_fd is not None:
+        try:
+            proc = subprocess.Popen(
+                cmd, stdin=subprocess.DEVNULL, stdout=slave_fd,
+                stderr=slave_fd, start_new_session=True,
+            )
+        except BaseException:
+            os.close(master_fd)
+            raise
+        finally:
+            os.close(slave_fd)
+    else:
+        proc = subprocess.Popen(
+            cmd, text=True,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+    out_fd = sys.stdout.fileno()
+
+    def _relay(timeout: float) -> bool:
+        """Copy one chunk of child output; False at EOF / nothing ready."""
+        nonlocal master_fd
+        if master_fd is None:
+            return False
+        try:
+            r, _, _ = select.select([master_fd], [], [], timeout)
+        except (InterruptedError, OSError):
+            return False
+        if not r:
+            return False
+        try:
+            data = os.read(master_fd, 65536)
+        except OSError:  # EIO: every writer closed the pty
+            data = b""
+        if not data:
+            os.close(master_fd)
+            master_fd = None
+            return False
+        capture.append(data)
+        _write_all(out_fd, data)
+        return True
 
     fd = sys.stdin.fileno()
     old_attrs = termios.tcgetattr(fd)
@@ -2737,11 +2781,14 @@ def _run_with_abort_keys(cmd: list[str]) -> int:
         while True:
             if proc.poll() is not None:
                 break
+            watch = [fd] if master_fd is None else [fd, master_fd]
             try:
-                r, _, _ = select.select([fd], [], [], 0.1)
+                r, _, _ = select.select(watch, [], [], 0.1)
             except (InterruptedError, OSError):
                 continue
-            if not r:
+            if master_fd is not None and master_fd in r:
+                _relay(0)
+            if fd not in r:
                 continue
             try:
                 ch = os.read(fd, 1)
@@ -2772,12 +2819,47 @@ def _run_with_abort_keys(cmd: list[str]) -> int:
                             pass
                         proc.wait()
                 break
+        # Drain what the child wrote before exiting.  Bounded: a
+        # background grandchild may keep the pty open indefinitely.
+        deadline = time.monotonic() + 1.0
+        while master_fd is not None and time.monotonic() < deadline:
+            if not _relay(0.05):
+                break
     finally:
+        if master_fd is not None:
+            os.close(master_fd)
         termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
 
     if aborted:
         return _ABORTED_BY_USER
     return proc.returncode if proc.returncode is not None else 0
+
+
+def _open_output_pty() -> tuple[int, int]:
+    """A pty pair for a popup child's output, sized like the popup."""
+    import fcntl
+    import pty
+    import sys
+    import termios
+
+    master_fd, slave_fd = pty.openpty()
+    try:
+        size = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, b"\0" * 8)
+        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, size)
+    except OSError:
+        pass
+    return master_fd, slave_fd
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    while data:
+        try:
+            n = os.write(fd, data)
+        except InterruptedError:
+            continue
+        except OSError:
+            return
+        data = data[n:]
 
 
 # --- Session registry commands ---
