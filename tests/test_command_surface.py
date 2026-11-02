@@ -921,8 +921,87 @@ def test_watcher_already_running_does_not_promise_watcher_stop():
         watcher_ui.start_watcher(app, watcher_type="auto-start")
 
     assert "already running" in logs[-1]
-    assert "see `pm watcher stop`" in logs[-1]
+    assert "see `pm watcher stop auto-start`" in logs[-1]
     assert "stop it with `pm watcher stop" not in logs[-1]
+
+
+def test_watcher_already_running_names_the_requested_type():
+    """The stop guidance must name the type that is actually running.
+
+    ``pm watcher stop`` answers for the type it is asked about (``ws`` only
+    toggles auto-start), so a bare ``pm watcher stop`` sent the operator of a
+    ``bug-fix-impl`` watcher to auto-start guidance.
+    """
+    from types import SimpleNamespace
+    from unittest import mock
+
+    from pm_core.tui import watcher_ui
+
+    logs = []
+    manager = mock.Mock()
+    manager.find_by_type.return_value = SimpleNamespace(
+        state=SimpleNamespace(running=True))
+    app = SimpleNamespace(_watcher_manager=manager,
+                          log_message=lambda msg, **kw: logs.append(msg))
+
+    with mock.patch("pm_core.tmux.in_tmux", return_value=True):
+        watcher_ui.start_watcher(app, watcher_type="bug-fix-impl")
+
+    assert "pm watcher stop bug-fix-impl" in logs[-1]
+
+
+def test_session_home_names_pm_session_outside_a_session():
+    """`pm session home` must name the command that creates a session.
+
+    It said only "Not inside a pm tmux session.", which is a dead end: the
+    corrective command is `pm session`, as every other must-be-in-the-TUI
+    refusal now says.
+    """
+    from unittest import mock
+
+    with mock.patch("pm_core.cli.helpers._get_pm_session", return_value=None):
+        result = CliRunner().invoke(cli, ["session", "home"])
+
+    assert result.exit_code == 1, result.output
+    assert "pm session" in result.output
+
+
+def test_rebalance_names_pm_session_outside_tmux():
+    """`pm rebalance` is another must-be-in-the-TUI refusal."""
+    from unittest import mock
+
+    from pm_core.cli import session as session_mod
+
+    with mock.patch.object(session_mod.tmux_mod, "in_tmux",
+                           return_value=False):
+        result = CliRunner().invoke(cli, ["rebalance"])
+
+    assert result.exit_code == 1, result.output
+    assert "pm session" in result.output
+
+
+def test_help_names_a_real_autostart_command():
+    """`pm tui keys` must not point at a command that does not exist.
+
+    The auto-start paragraph said `autostart target X`; the group has no
+    `target` subcommand (it is `autostart add`), so an operator copying the
+    form got "No such command 'target'".
+    """
+    out = CliRunner().invoke(cli, ["tui", "keys"]).output
+    assert "autostart add X" in out
+    assert "autostart target" not in out
+
+
+def test_prompt_texts_do_not_reference_removed_pr_done():
+    """The injected prompts list commands that launch sessions.
+
+    `pm pr done` no longer exists (the review step is `pm pr review`); a
+    driving session that reads the list as a menu would try a command that
+    answers "No such command".
+    """
+    root = Path(__file__).resolve().parents[1]
+    for rel in ("pm_core/prompt_gen.py", "pm_core/tui/pane_ops.py"):
+        assert "pm pr done" not in (root / rel).read_text(), rel
 
 
 def test_review_window_no_workdir_names_the_start_command(tmp_path, capsys):

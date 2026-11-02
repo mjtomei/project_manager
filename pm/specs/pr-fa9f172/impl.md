@@ -619,3 +619,21 @@ the routed form and `--fresh` so help is complete.
   Tests added: spinner id resolution, the reversed two-token CLI form, the
   type-aware watcher-stop message, the merge workdir remedy, and the
   bracketed-id remedy.
+
+- Review-loop i19: the last stale command reference in a help surface, and
+  the remaining must-be-in-the-TUI refusals. (a) `pm tui keys`' auto-start
+  paragraph said `autostart target X`; the group has no `target`
+  subcommand (it is `autostart add`), so an operator copying the form got
+  "No such command 'target'". It now says `autostart add X`, with a test.
+  (b) `pm session home` ("Not inside a pm tmux session.") and `pm
+  rebalance` ("Must be run from within a tmux session.") were the last
+  outside-the-TUI refusals without the corrective command; both now name
+  `pm session`, matching every other such error. Tests added. (c) The
+  watcher already-running remedy pointed at bare `pm watcher stop`, which
+  answers for the auto-start watcher; it now names the running type
+  (`pm watcher stop <type>`), since `ws` toggles only auto-start. (d) The
+  injected prompts (`prompt_gen.py` guidance block and watcher-review
+  prompt, `pane_ops.py`) still listed `pm pr done`, a command that no
+  longer exists (the step is `pm pr review`); the watcher-review key list
+  also said `d` "marks it as done". Both corrected, with a test that the
+  removed name cannot come back.

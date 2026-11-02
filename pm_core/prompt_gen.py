@@ -107,7 +107,7 @@ commands so they target the correct session even from workdir clones:
 - `pm tui send <keys> -s {session_name}` — send keystrokes to the TUI (e.g. `pm tui send j` to move down)
 
 **Do not** run commands that spawn new Claude sessions yourself (e.g. `pm pr start`, \
-`pm pr done`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be \
+`pm pr review`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be \
 triggered through the TUI so panes are managed correctly. Use `pm tui send` to press \
 the appropriate key in the TUI instead.
 """
@@ -2985,7 +2985,7 @@ for the human to say "yes" / "go ahead". Do **not** run write commands
 silently.
 
 Forbidden (must always be done via the TUI by the human):
-`pm pr start`, `pm pr done`, `pm plan add`, `pm plan breakdown`,
+`pm pr start`, `pm pr review`, `pm plan add`, `pm plan breakdown`,
 `pm plan review` — anything that spawns a new Claude session.
 
 ## Tone

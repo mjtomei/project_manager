@@ -376,11 +376,11 @@ These are safe to run directly — they only read state:
 ## Important: Use the TUI for actions that launch sessions
 
 Do NOT run commands that launch new Claude sessions yourself (e.g. `pm pr start`, \
-`pm pr done`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be \
+`pm pr review`, `pm plan add`, `pm plan breakdown`, `pm plan review`). These must be \
 triggered through the TUI so that panes are managed correctly. Instead, tell the \
 user which key to press in the TUI:
 - `s` on a PR — start working on it
-- `d` on a PR — mark it as done and start review
+- `d` on a PR — mark it in_review and start review
 - `p` — toggle plans view, then `a`/`w`/`c`/`l` for plan actions
 
 For plan management, recommend the user switch to the plans pane (`p` key) where \

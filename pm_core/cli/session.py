@@ -713,7 +713,8 @@ def session_home():
 
     session_name = _get_pm_session()
     if not session_name or not tmux_mod.session_exists(session_name):
-        click.echo("Not inside a pm tmux session.", err=True)
+        click.echo("Not inside a pm tmux session — start one with: pm session",
+                   err=True)
         raise SystemExit(1)
 
     provider = home_window.get_active_provider()
@@ -922,7 +923,8 @@ def rebalance_cmd():
     automatic layout management.
     """
     if not tmux_mod.in_tmux():
-        click.echo("Must be run from within a tmux session.", err=True)
+        click.echo("Must be run from within a tmux session — start one with: "
+                   "pm session", err=True)
         raise SystemExit(1)
 
     session = pane_registry.pm_session_name(tmux_mod.get_session_name())
