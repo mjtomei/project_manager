@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T04:24:02.800066+00:00'
+  updated_at: '2026-11-02T04:53:36.233388+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39552,6 +39552,22 @@ prs:
       Captures /pm-captures/scenarios/51.'
     created_at: '2026-11-02T04:24:02Z'
     last_edited: '2026-11-02T04:24:02Z'
+  - id: note-e41d396
+    text: 'QA S51 re-run (2026-11-02, after the verdict review flagged run 1 story
+      4 badge [5 runs]): fresh sandbox /scratch/r51, all 4 stories re-driven live,
+      every Then held literally. Story 4 closed-PR popup badge [start: turn done]
+      = Waiting for: start: agent turn finished, start still running 60 s later. For
+      spec owners: that badge (and story 1 "Waiting for: nothing" first) depends on
+      the TUI impl-idle tracker tick (_poll_impl_idle, every 5th tick of the 1 s loop
+      timer). It skips PRs with a running loop, so a tick inside the ~2 s loop ends
+      the start attempt untracked; a closed PR is never re-tracked, but after close
+      + loop done the timer stops, so a start that survived the loop stays tracked.
+      Both journals put every start track/untrack event within 9 ms of a 5 s grid.
+      Run 1: tick inside the story-4 loop -> [5 runs]. Re-run: zz d 0.06 s after a
+      tick (scripts/tickphase.py) -> [start: turn done]. Captures /pm-captures/scenarios/51
+      (README) and .../51/rerun.'
+    created_at: '2026-11-02T04:53:36Z'
+    last_edited: '2026-11-02T04:53:36Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
