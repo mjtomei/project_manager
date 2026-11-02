@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T04:21:09.909106+00:00'
+  updated_at: '2026-11-02T05:03:18.871020+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7150,6 +7150,66 @@ prs:
       index).'
     created_at: '2026-11-02T04:21:09Z'
     last_edited: '2026-11-02T04:21:09Z'
+  - id: note-4762517
+    text: 'QA S23 refiner (2026-11-02, head e372706b, live smoke in a disposable HOME).
+      Found three defects in S23''s own ''a session name is one shell word'' class.
+      (1) The pane-switch gate condition in _register_tmux_bindings (pm_core/cli/session.py,
+      registry_test: g=''#{session_group}''; s=''#{session_name}'') is not quoted
+      safely for a name containing a single quote. Repo qa''quote repo: prefix+o/arrows
+      silently fall back to plain select-pane (no zoom in forced mobile; tmux show-messages
+      logs ''key o: select-pane -t :.+''). Repo qa''`touch PWNED`''repo: every prefix+o
+      RUNS touch PWNED in the repo dir. The code comment calls the single-quote case
+      ''the safe direction''; it is not. Use #{q:...} (or pass the names as arguments)
+      for the condition too. (2) Pre-existing, also on master: build_claude_shell_cmd
+      (pm_core/claude_launcher.py, the ''"$(cat {_prompt_ref})"'' branch) leaves the
+      prompt-file path unquoted. pm meta from a space-named project hands Claude an
+      EMPTY prompt (the path ~/.pm/workdirs/meta-<tag>/... splits). With a backtick
+      in the tag, the backtick command executes (reproduced: build_claude_shell_cmd(cwd=<dir
+      containing `touch X`>) created X). The same line likely affects any launch whose
+      cwd contains the repo name. (3) The window-resized hook does not exist on tmux
+      3.2a: pm logs ''set-hook window-resized failed: invalid option: window-resized'',
+      so _window-resized never runs. S23 builds tmux 3.5a (sudo apt-get install libevent-dev
+      libncurses-dev bison pkg-config, then the 3.5a GitHub release tarball with ./configure
+      --prefix; builds in about 6 s) and puts it first on PATH. On 3.5a, _window-resized,
+      _pane-opened, _pane-exited and _pane-switch all received whole names for space,
+      backtick and ~ names. Traps: /usr/local/bin/claude is the REAL Claude CLI, so
+      a stand-in claude must be first on PATH before pm session. pm meta sets a session
+      override (pm which -> meta workdir) until the stand-in in the meta window exits
+      (C-c there), so run it last. pm qa add-regression writes to the cwd''s project,
+      so run it from the repo dir, not /workspace. zoom_pane is a toggle, so opening
+      a pane in mobile mode ends unzoomed (pre-existing; out of scope).'
+    created_at: '2026-11-02T04:29:11Z'
+    last_edited: '2026-11-02T04:29:11Z'
+  - id: note-fe6edd7
+    text: 'QA S23 (awkward names through bindings, hooks, EXIT traps, agent prompts)
+      NEEDS_WORK: two defects found and fixed in commit 87b2d1d1; full suite 5510
+      passed / 1 skipped (the 12 test_markdown_render failures are environment-only,
+      no markdown module). (1) The pane-switch gate condition in _register_tmux_bindings
+      was g=''#{session_group}''; s=''#{session_name}''. Reproduced live on tmux 3.5a
+      with real attached clients: repo qa''quote repo silently fell back to plain
+      select-pane (zoom=0 in forced mobile; show-messages logged key o: select-pane
+      -t :.+), and in repo qa''`touch PWNED`''repo every prefix+o created PWNED. The
+      condition now uses g=#{q:session_group}; s=#{q:session_name}. (2) Incidental,
+      pre-existing on master: build_claude_shell_cmd wrote claude "$(cat <prompt path>)"
+      with the path unquoted. pm meta from a space-named project handed Claude ONE
+      EMPTY argument, and a backtick in the meta workdir path executed (PWNED in ~/.pm/workdirs/meta-qa`touch
+      PWNED`repo-<hash>/). The base dir and file name are now shlex-quoted inside
+      the substitution, and container.wrap_claude_cmd matches the quoted prefix (unchanged
+      for ordinary paths). Post-fix, all three stories pass live. Story 1, all five
+      names: zoom=1 and run-shell pm _pane-switch for every key; _pane-opened, _window-resized
+      and _pane-exited get the full names; the registry returns to %0 tui; no PWNED.
+      Story 2, two clients: launches/opens/exits 5/5/5; B 45/45 via pm _pane-switch;
+      a simultaneous resize gives an identical 70x21 layout from ~1 and ~2. Story
+      3: qa launch, qa regression and meta prompts quote the space name and leave
+      qaplain bare; the meta stand-in receives the full ~5.5 KB prompt; pasted pm
+      tui view/send drive the right TUI. New tests: test_the_pane_switch_gate_condition_matches_the_registry
+      (real tmux if-shell) and test_shell_cmd_cat_path_survives_an_awkward_cwd; both
+      fail pre-fix. TestPaneSwitchBindingGate now emulates #{q:}. Next-run tips: tmux
+      3.5a show-messages lists newest first, each prefix key appears twice (the binding,
+      then the chosen branch), and loops need a higher message-limit. Captures: /pm-captures/scenarios/23
+      (README.md, pre-fix/ and post-fix/).'
+    created_at: '2026-11-02T05:03:18Z'
+    last_edited: '2026-11-02T05:03:18Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
