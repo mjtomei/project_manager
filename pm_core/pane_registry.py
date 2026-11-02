@@ -145,39 +145,36 @@ def tui_respawn_lock(session: str, *, timeout: float = 10.0):
     The lock is a sidecar of the registry, ``<registry>.respawn.lock``,
     separate from the read-modify-write lock (``locked_read_modify_write``
     takes that one for every write the holder makes).  Yields whether the
-    lock was taken.  If it cannot be taken within *timeout* seconds, or the
-    file cannot be opened, the caller goes ahead without it — the
-    behaviour before the lock existed — rather than leave the session
-    without a TUI.
+    lock was taken.  It waits only while another holder has it
+    (``store.bounded_flock``).  If it is still held after *timeout*
+    seconds, or the file cannot be opened or locked at all, the caller goes
+    ahead without it — the behaviour before the lock existed — rather than
+    leave the session without a TUI.
+
+    Like the registry, the lock lives in the user's own ``~/.pm``.  A user
+    who joined someone else's shared session takes their own lock, not
+    the owner's, so their ``pm session`` is not serialised with the
+    owner's hook.  That race falls back on the TUI pidfile guard against a
+    second TUI, as every race did before this lock.
     """
+    from pm_core.store import bounded_flock
+
     path = registry_path(session)
     lock_path = path.with_suffix(path.suffix + ".respawn.lock")
-    try:
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        lock_fd = open(lock_path, "w")
-    except OSError as e:
-        _logger.warning("tui_respawn_lock: cannot open %s (%s); going ahead "
-                        "without it", lock_path, e)
-        yield False
-        return
-    try:
-        deadline = time.monotonic() + timeout
-        while True:
-            try:
-                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                locked = True
-                break
-            except OSError:
-                if time.monotonic() >= deadline:
-                    _logger.warning("tui_respawn_lock: %s still held after "
-                                    "%.0fs; going ahead without it",
-                                    lock_path, timeout)
-                    locked = False
-                    break
-                time.sleep(0.01)
+    with contextlib.ExitStack() as stack:
+        try:
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            locked = stack.enter_context(bounded_flock(lock_path, timeout))
+        except OSError as e:
+            _logger.warning("tui_respawn_lock: cannot lock %s (%s); going "
+                            "ahead without it", lock_path, e)
+            locked = False
+        else:
+            if not locked:
+                _logger.warning("tui_respawn_lock: %s still held after "
+                                "%.0fs; going ahead without it",
+                                lock_path, timeout)
         yield locked
-    finally:
-        lock_fd.close()  # closing the fd releases the flock
 
 
 def get_window_data(data: dict, window: str) -> dict:

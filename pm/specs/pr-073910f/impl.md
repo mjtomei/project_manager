@@ -4100,8 +4100,12 @@ introduced.  `qa.md` has the per-scenario expectations.
    attach's check is `_ensure_tui_running` (registry, then adopt, then
    respawn).  The hook, after reconciling, leaves the session alone when
    `_find_running_tui_pane` (the adopt's definition, now in
-   `cli/helpers.py`) finds a live `pm _tui` pane.  A lock that cannot be
-   taken in 10 s is logged and skipped (the old behaviour).  (c) This
+   `cli/helpers.py`) finds a live `pm _tui` pane.  A lock still held
+   after 10 s, or one that cannot be opened or locked at all, is logged
+   and skipped (the old behaviour).  The lock is in the user's own
+   `~/.pm`, like the registry, so a joiner's attach to a shared session
+   is not serialised with the owner's hook.  That race keeps the pidfile
+   guard as its only protection (review ad65 i1).  (c) This
    branch only: the attach adopted the hook's new pane before the hook
    registered it, and the hook's `_insert_tui` then listed it twice.
    `_insert_tui` now skips a pane already listed.  Tests:
@@ -4126,3 +4130,8 @@ The review loops in between:
   best-effort, so a held lock no longer fails the attach.
 - **4c75 i1** corrected the `list_pm_sessions` docstrings.
 - **4c75 i2** brought this spec up to date.  It found no code defect.
+- **ad65 i1** made `tui_respawn_lock` use `store.bounded_flock` instead
+  of its own copy of the poll loop.  It now waits only while another
+  holder has the lock.  The copy retried every `OSError`, so a
+  filesystem that cannot lock (`ENOLCK`) held up the hook and the
+  attach for the full 10 s on every call.

@@ -260,6 +260,38 @@ class TestTuiRespawnLock:
         with pane_registry.tui_respawn_lock(SESSION) as locked:
             assert locked is False
 
+    def test_a_lock_error_that_is_not_contention_goes_ahead_at_once(
+            self, tmp_path, monkeypatch):
+        """Only another holder is worth waiting for.  A filesystem that
+        cannot lock at all (``ENOLCK``) would otherwise hold up the hook and
+        the attach for the whole timeout on every call."""
+        import errno
+        import fcntl
+        monkeypatch.setenv("HOME", str(tmp_path))
+        log = MagicMock()
+        monkeypatch.setattr(pane_registry, "_logger", log)
+
+        def no_locks(fd, op):
+            raise OSError(errno.ENOLCK, "No locks available")
+
+        monkeypatch.setattr(fcntl, "flock", no_locks)
+        start = time.monotonic()
+        with pane_registry.tui_respawn_lock(SESSION, timeout=2) as locked:
+            assert locked is False
+        assert time.monotonic() - start < 1
+        log.warning.assert_called_once()
+        assert "cannot lock" in log.warning.call_args.args[0]
+
+    def test_an_error_in_the_body_releases_the_lock(self, tmp_path,
+                                                    monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        with pytest.raises(RuntimeError):
+            with pane_registry.tui_respawn_lock(SESSION) as locked:
+                assert locked
+                raise RuntimeError("respawn failed")
+        with pane_registry.tui_respawn_lock(SESSION, timeout=0.2) as locked:
+            assert locked
+
 
 class TestSessionStartDecidesUnderTheLock:
 
