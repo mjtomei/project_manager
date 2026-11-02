@@ -40317,7 +40317,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T20:58:25.623046+00:00'
+  updated_at: '2026-11-02T21:17:18.901511+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42249,11 +42249,43 @@ prs:
       before it returns.'
     created_at: '2026-11-02T20:37:32Z'
     last_edited: '2026-11-02T20:37:32Z'
+  - id: note-c74c0ff
+    text: 'QA S78 refiner (2026-11-02, head 66640e350, code ad033bbb): all five stories
+      held live in /scratch/q78r (captures + scripts /pm-captures/pr-8020495/s78-refiner).
+      Plan corrections: (1) run the 80-col TZ/faketime reads on R BEFORE pm pr close
+      --remove, since a removed PR has no Milestones section; (2) the damaged-journal
+      PR must be started with CLI pm pr start: a TUI-s start is re-tracked ~4 s after
+      the loop ends and then headlines Waiting for/badge instead of the ? row; (3)
+      a review-loop-only history has no flagged (resumed/adopted/stale) rows, so flagged-row
+      wrapping is not observable here; (4) TTY vs | cat match line for line except
+      the open start row''s running counters ticking between the two reads; (5 ) qa.md
+      has no E19: pm pr history does exact-id/#N lookup only, so partial titles and
+      bare hashes print the standard not-found + Available PRs, rc 1. Arrow-key liveness
+      check: K sits in the top row, so Up does nothing; use Down then Up.'
+    created_at: '2026-11-02T20:54:50Z'
+    last_edited: '2026-11-02T20:54:50Z'
   - id: note-420e308
     text: 'QA S77 correction: the E18 fix commit on the branch is fd5bf53ac (note-d41f3e2
       names 3bbc5a819, its SHA before the rebase onto 66640e350; same patch).'
     created_at: '2026-11-02T20:58:25Z'
     last_edited: '2026-11-02T20:58:25Z'
+  - id: note-f1f1150
+    text: 'QA S78 (2026-11-02) PASS on 1aab3e8d5, no code edits: fail-safe sweep live
+      in env -i sandbox /scratch/q78 (torn down); captures + per-Then README in /pm-captures/scenarios/78
+      (scripts/). (1) N never-run text/JSON/popup exact; pr-deadbee, partial title
+      and bare hash all rc 1 with the Available PRs list; C CLI start + d: note "Actions
+      before <row start>" from the first row read, row 20s done NEEDS_WORK, popup
+      [1 run]. (2) R at 80 cols: TZ1/TZ2/faketime +365d forms all held, widest pm
+      line exactly 80 (TZ2 dated armed), TTY == | cat (run 1 differed only in the
+      open start row counters). (3) close --remove: header without status/title/Milestones,
+      start untracked 5 s later, JSON status/title null. (4) 9 damaged lines in i2:
+      bad ids never shown, events +1 only at line 4, one ? row, loop verdicts reached,
+      fragment followed by pm line, pager == CLI. (5) hook 1e20: agent working while
+      damaged, TUI keys live, restore gives the original T0. (6) baseline + 3 broken
+      stores: same loop/TUI log, broken stores read nothing recorded with the runtime
+      line, 0 tracebacks.'
+    created_at: '2026-11-02T21:17:18Z'
+    last_edited: '2026-11-02T21:17:18Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
