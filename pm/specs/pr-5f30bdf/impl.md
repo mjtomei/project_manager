@@ -8,9 +8,11 @@ settings, credentials, or `project.yaml`.
 Base: `origin/master` @ `c1fcecc5` (branch already contains it).  PR #283
 (`pr-5ec411c`) adds `supported_efforts` metadata to the same files; it was
 open at spec time and has since **merged** to master as `b8576981`.  Nothing
-here renames or removes anything it introduces.  The branch does not merge
-master itself (sign-off integrates the latest base); a merge preview is
-clean and the merged tree passes the provider/router/model tests (see A5).
+here renames or removes anything it introduces.  A merge preview is clean and
+the merged tree passes the provider/router/model tests (see A5); sign-off
+routed the integration back to implementation, which merged
+`master@5b352d16` in `44dbc92a` (registry resolved with `store.merge_3way`,
+no code change).
 
 ## Current state (grounded)
 
@@ -199,8 +201,8 @@ suite 5461 passed / 1 skipped) and at 8.2.7/8.2.8.
   `to_content` sizing are unchanged by it.  A merge preview of the branch
   onto `b8576981` is clean, and the merged tree passes
   `tests/test_providers.py tests/test_router_route.py
-  tests/test_model_settings.py` (418 passed), so sign-off can integrate the
-  base without rework.  This branch does not merge master itself.
+  tests/test_model_settings.py` (418 passed), so the base integrates
+  without rework.
   Sign-off (2026-11-02): master had moved to `5b352d16` (adds #293 /
   `pr-3d3b3ce`).  The integration check conflicts only in `pm/project.yaml`
   (registry; resolvable with `store.merge_3way(base, ours=master,
@@ -209,6 +211,13 @@ suite 5461 passed / 1 skipped) and at 8.2.7/8.2.8.
   textual 2.0.1 (5554 passed / 1 skipped) and 8.2.7 (5553 passed / 1
   skipped, plus one load-related `test_push_proxy` lifecycle flake that
   passes 3/3 when re-run alone).
+  Integration done (review-loop 1ba7 i1): merged `master@5b352d16` in
+  `44dbc92a`.  The registry conflict was resolved with
+  `store.merge_3way(base=c1fcecc5, ours=master, theirs=branch)` (586 unique
+  ids, all 10 of this PR's notes kept, master's new notes kept, no extra
+  entries) and every code file auto-merged.  Full suite on the merged tree
+  at textual 8.2.7: 5554 passed, 1 skipped; the popup/command-bar/provider
+  tests also pass at textual 2.0.1 (188 passed).
 
 No **[UNRESOLVED]** ambiguities.
 
@@ -255,7 +264,8 @@ No **[UNRESOLVED]** ambiguities.
   screen and is unaffected; master is worse at 2.x (any key in the popup
   crashes).  Out of this PR's scope -- a follow-up (raise the floor to
   `textual>=3.0` or make the reload's default-screen queries screen-aware)
-  was recommended at sign-off.
+  was recommended at sign-off and is filed as `pr-3199f44` (plan
+  improvements).
 
 ## Tests to add/update
 
