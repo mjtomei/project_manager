@@ -105,6 +105,8 @@ Change:
   `pm -C <root> qa regression <id> --file-prs` in their pane/window (the TUI
   already launches `pm qa debug --foreground <id>` the same way), so all three
   surfaces share one environment builder and produce identical runs.
+  Every such pane command, including the command bar's typed options below,
+  is built by `regression_prompts.regression_command` (review 596b i2).
 - `qa regression <args>` typed in the TUI command bar also runs in a pane
   (`pane_ops.launch_regression_command`, same pre-launch check). The command
   bar's default path is a captured subprocess with a 30 s timeout, which

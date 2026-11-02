@@ -175,14 +175,21 @@ def regression_launch_cmd(pm_root: Path, test_id: str,
 
     The TUI and ``pm qa launch regression:<id>`` launch through
     ``pm qa regression`` instead of building their own prompt, so the
-    isolated workdir/container setup lives in one place.  ``-C`` pins the
-    project regardless of the pane's cwd.
+    isolated workdir/container setup lives in one place.
     """
-    cmd = (f"pm -C {shlex.quote(str(Path(pm_root).resolve()))} qa regression "
-           f"{shlex.quote(test_id)}")
-    if file_findings:
-        cmd += " --file-prs"
-    return cmd
+    return regression_command(
+        pm_root, [test_id, "--file-prs"] if file_findings else [test_id])
+
+
+def regression_command(pm_root: Path, args: list[str]) -> str:
+    """``pm -C <pm_root> qa regression <args>``, shell-quoted.
+
+    Every pane that runs a regression test runs this command: the default
+    launch (:func:`regression_launch_cmd`) and the options typed in the TUI
+    command bar.  ``-C`` pins the project regardless of the pane's cwd.
+    """
+    return (f"pm -C {shlex.quote(str(Path(pm_root).resolve()))} "
+            f"qa regression {shlex.join(args)}")
 
 
 def empty_library_message() -> str:

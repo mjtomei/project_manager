@@ -550,6 +550,7 @@ def launch_regression_command(app, args: list[str]) -> None:
     """
     import click
     from pm_core.cli.qa import qa_regression
+    from pm_core.regression_prompts import regression_command
 
     if not app._root:
         app.log_message("No project root")
@@ -567,18 +568,16 @@ def launch_regression_command(app, args: list[str]) -> None:
             f"qa regression: {exc.format_message()} Usage: qa regression "
             "<test-id> [--file-prs] [--branch <b>]")
         return
-    test_id = ctx.params["test_id"]
-    cmd = (f"pm -C {shlex.quote(str(Path(app._root).resolve()))} "
-           f"qa regression {shlex.join(args)}")
-    app.run_worker(_launch_regression_item(app, test_id, None, cmd=cmd),
-                   exclusive=False)
+    app.run_worker(_launch_regression_item(
+        app, ctx.params["test_id"], None,
+        cmd=regression_command(app._root, list(args))), exclusive=False)
 
 
 def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
     """Launch Claude with a QA instruction prompt, or run a regression test.
 
     *item_id* has the form ``category:id`` (e.g. ``instructions:login-flow``
-    or ``regression:pane-layout``).  A regression item runs
+    or ``regression:auth-flow``).  A regression item runs
     ``pm qa regression <id> --file-prs`` in the pane (an isolated run, see
     :mod:`pm_core.regression_prompts`).
 

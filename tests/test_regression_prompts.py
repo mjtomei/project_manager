@@ -9,6 +9,7 @@ import pm_core.container as container_mod
 from pm_core.regression_prompts import (
     CONTAINER_REGISTRY_MOUNT,
     build_regression_test_prompt,
+    regression_command,
     regression_launch_cmd,
     regression_launch_problem,
 )
@@ -116,6 +117,13 @@ def test_launch_cmd_runs_pm_qa_regression_for_the_project(tmp_path):
     assert cmd == (f"pm -C '{root}' qa regression auth-flow --file-prs")
     assert regression_launch_cmd(root, "x", file_findings=False).endswith(
         "qa regression x")
+
+
+def test_regression_command_quotes_typed_args(tmp_path):
+    # The command bar's typed options go through the same command builder.
+    root = tmp_path / "pm"
+    assert regression_command(root, ["--branch", "my branch", "demo"]) == (
+        f"pm -C {root} qa regression --branch 'my branch' demo")
 
 
 def _library(tmp_path: Path, *ids: str) -> Path:

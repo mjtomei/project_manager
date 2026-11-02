@@ -39605,11 +39605,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T14:55:00.518596+00:00'
-  updated_at: '2026-10-22T14:55:00.518596+00:00'
+  updated_at: '2026-11-02T01:33:17.481060+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-13954b8
+    text: 'pr-7d5d036 (seen in its QA S4) adds another instance. The TUI''s regression
+      launches (QA pane Enter, and `qa regression <id>` typed in the command bar)
+      run `pm -C <root> qa regression <id> --file-prs` in a qa-item pane. The TUI
+      checks the library, the id and the container runtime before it opens the pane.
+      A failure after that, such as cloning a base branch that is missing locally
+      or a missing/unbuildable container image, prints its error and remedy into a
+      pane that closes at once. If the fix holds panes open on failure, it must not
+      apply to `pm qa launch regression:<id>` panes in the discovery window: the supervisor
+      treats an open pane as an in-flight test and would stop scheduling.'
+    created_at: '2026-11-02T01:33:17Z'
+    last_edited: '2026-11-02T01:33:17Z'
 - id: pr-ea4fffa
   plan: bugs
   title: 'Bug: claude launches from a PR-workdir cwd (prefix+P picker) read fake-claude
