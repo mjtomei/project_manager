@@ -99,6 +99,26 @@ def _nb(text: str) -> str:
     return text.replace(" ", NBSP)
 
 
+# Where a no-break phrase or a single label may still break when it alone
+# is wider than a line.
+_BREAKS = re.compile("[ " + NBSP + "]+")
+
+
+def _pack(words: list[str], room: int) -> list[str]:
+    """*words* greedily rejoined (by no-break spaces) into pieces of at most
+    *room* cells, in order; a word wider than *room* is a piece of its own
+    (hard-split when placed)."""
+    pieces: list[str] = []
+    for word in words:
+        if not word:
+            continue
+        if pieces and cell_len(pieces[-1]) + 1 + cell_len(word) <= room:
+            pieces[-1] += NBSP + word
+        else:
+            pieces.append(word)
+    return pieces
+
+
 _WS = str.maketrans("\t\n\r\v\f", "     ")
 # Terminal escape sequences (CSI, OSC, two-byte) and other C0/C1 control
 # characters in a title or reason (e.g. a QA error copied from coloured tool
@@ -208,18 +228,15 @@ def wrap(segs: list[Seg], width: int, indent: str) -> list[Line]:
     line_room = width - cell_len(indent)
     tokens: list[tuple[str, str, bool]] = []
     for text, role, space in _tokens(segs):
-        if not space and NBSP in text and cell_len(text) > line_room:
-            # A no-break phrase wider than a whole line: break it at its
-            # words like ordinary text rather than mid-word, keeping a
-            # leading symbol (↻, ⚠) with the word it marks.
-            words = text.split(NBSP)
-            if len(words) > 1 and len(words[0]) == 1 and not words[0].isalnum():
-                words[:2] = [words[0] + NBSP + words[1]]
-            for i, word in enumerate(words):
+        if not space and cell_len(text) > line_room and _BREAKS.search(text):
+            # A no-break phrase or a single label (``[wait-for-merge ← a, b,
+            # c]``, ``owner <session>``) wider than a whole line: break it
+            # between words into as few pieces as fit a line, never
+            # mid-word through an identifier.
+            for i, piece in enumerate(_pack(_BREAKS.split(text), line_room)):
                 if i:
                     tokens.append((" ", role, True))
-                if word:
-                    tokens.append((word, role, False))
+                tokens.append((piece, role, False))
             continue
         tokens.append((text, role, space))
     for text, role, space in tokens:

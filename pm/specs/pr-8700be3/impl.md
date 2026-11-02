@@ -113,9 +113,12 @@ R4 — Width and wrapping.
   24 cells for its content (deeper levels stay flat at the cap).
 - Short lead phrases (`blocked on`, `also needed by`, `↻ dependency cycle:
   needs`, `⚠ N need you:`) do not break internally unless they alone are
-  wider than a line; single secondary labels (`⧉ window`, `run X`, `owner
-  X`) wrap as a whole; a ` · ` separator at a break is dropped (no line
-  starts or ends with `·`).
+  wider than a line; single labels (`⧉ window`, `run X`, `owner X`,
+  policy labels, the phase/progress token) wrap as a whole.  A phrase or
+  label wider than a whole line breaks between its words into as few
+  pieces as fit, never mid-word through a PR id or session name (only a
+  single word wider than the line is hard-split).  A ` · ` separator at a
+  break is dropped (no line starts or ends with `·`).
 - CLI: width = `min(99, terminal columns)` (redirected output → 99);
   `--width N` overrides (clamped to 30..99).  TUI: popup container fits 99 +
   chrome (`width: 106; max-width: 95%`, stable 1-column scrollbar gutter);

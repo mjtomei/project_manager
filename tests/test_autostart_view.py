@@ -492,6 +492,38 @@ class TestWidth:
         assert "\x1b[1;33m" in next(
             r for r in status["runs"] if r["pr_id"] == "pr-2e3f4a5")["reason"]
 
+    @pytest.mark.parametrize("width", range(30, 100))
+    def test_labels_wider_than_a_line_break_between_words(self, width):
+        # A single label wider than the line (several wait holders, a long
+        # owner session, a launch-retry token) breaks at its inner spaces,
+        # never mid-word through a PR id or session name.
+        prs = [_pr("pr-aaaaaaa", "in_review", title="Shared base")] + [
+            _pr(p, deps=["pr-aaaaaaa"]) for p in
+            ("pr-bbbbbbb", "pr-ccccccc", "pr-ddddddd", "pr-eeeeeee")]
+        status = st.build_status({
+            "prs": prs, "enabled": True,
+            "targets": {"pr-bbbbbbb": {}, **{
+                p: {"wait_for_merge": True}
+                for p in ("pr-ccccccc", "pr-ddddddd", "pr-eeeeeee")}},
+            "review_loops": {"pr-aaaaaaa": {
+                "running": True, "iteration": 3, "attempts": 2,
+                "verdict": "LAUNCH_FAILED"}},
+            "owner": {"session": "pm-project_manager-c5a1006b"},
+        })
+        text = st.format_text(status, width=width)
+        assert "review #3 (launch retry 2)" in " ".join(text.split())
+        assert "[wait-for-merge ← pr-ccccccc, pr-ddddddd, pr-eeeeeee]" in \
+            " ".join(text.split())
+        for ln in text.splitlines():
+            assert cell_len(ln) <= width, ln
+            for word in ln.split():
+                assert not re.fullmatch(r"\[?pr-[a-e]{1,6}", word), ln
+                assert not word.startswith(("pm-project_manager-",
+                                            "manager-")) or \
+                    word == "pm-project_manager-c5a1006b", ln
+        # The lead word of a label stays with its value when both fit.
+        assert "[wait-for-merge ←" in text
+
     def test_overlong_token_is_split_not_overflowing(self):
         lines = view.wrap([("x" * 50, "id")], 30, "    ")
         assert all(cell_len(view.plain(ln)) <= 30 for ln in lines)
