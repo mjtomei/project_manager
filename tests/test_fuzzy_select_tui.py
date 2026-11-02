@@ -9,6 +9,7 @@ import asyncio
 import functools
 
 import pytest
+from textual import events
 from textual.app import App
 from textual.containers import Container
 from textual.widget import Widget
@@ -73,6 +74,13 @@ class Host(App):
     action_fuzzy_next = ProjectManagerApp.action_fuzzy_next
     action_fuzzy_prev = ProjectManagerApp.action_fuzzy_prev
     _command_bar_in_use = ProjectManagerApp._command_bar_in_use
+    # Key order behind a command-bar Enter (and the release after submit).
+    on_event = ProjectManagerApp.on_event
+    _dispatch_terminal_key = ProjectManagerApp._dispatch_terminal_key
+    _release_held_keys = ProjectManagerApp._release_held_keys
+    _command_bar_focused = ProjectManagerApp._command_bar_focused
+    on_command_submitted = ProjectManagerApp.on_command_submitted
+    HELD_KEYS_TIMEOUT = ProjectManagerApp.HELD_KEYS_TIMEOUT
 
     def __init__(self, root, data):
         super().__init__()
@@ -88,6 +96,8 @@ class Host(App):
         self._fuzzy_results = []
         self._fuzzy_index = 0
         self._fuzzy_kind = ""
+        self._held_keys = None
+        self._held_keys_timer = None
         self.messages = []
         self.normal_view_calls = 0
 
@@ -115,9 +125,6 @@ class Host(App):
 
     def _capture_frame(self, *args, **kwargs):
         pass
-
-    def on_command_submitted(self, message: CommandSubmitted) -> None:
-        pr_view.handle_command_submitted(self, message.command)
 
     # helpers
     @property
@@ -508,6 +515,54 @@ async def test_brackets_typed_in_command_bar_do_not_cycle(project):
         assert bar.value == "[]"
         assert app._fuzzy_index == idx
         assert app.tree.selected_pr_id == sel
+
+
+@async_test
+async def test_key_after_command_bar_enter_waits_for_the_command(project):
+    """QA repro (pr-6aa74c6 s7): under a stream of reloads the Enter's trip
+    back up to the App (Input's ``enter`` binding) outlasted the gap to the
+    next key, so ``]`` was forwarded to the still-focused bar and
+    ``pr select spec]`` was submitted ("No PR matches").  Posting both keys
+    back to back reproduces that ordering deterministically."""
+    app = _app(project)
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        bar = app.query_one("#command-bar", CommandBar)
+        bar.focus()
+        await pilot.pause()
+        await pilot.press(*"pr select watcher")
+        app.post_message(events.Key("enter", "\r"))
+        app.post_message(events.Key("right_square_bracket", "]"))
+        for _ in range(3):
+            await pilot.pause()
+        assert not any("No PR matches" in m for m in app.messages)
+        assert app.messages[-2].startswith("Selected:")
+        assert app.messages[-1].startswith("Match 2/")
+        assert app.tree.selected_pr_id == app._fuzzy_results[1]
+        assert bar.value == ""
+        assert isinstance(app.focused, TechTree)
+        assert app._held_keys is None
+
+
+@async_test
+async def test_keys_held_behind_empty_enter_are_replayed(project):
+    """An Enter on an empty bar submits nothing and keeps focus there; the
+    keys held behind it still arrive, in order, in the bar."""
+    app = _app(project)
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        bar = app.query_one("#command-bar", CommandBar)
+        bar.focus()
+        await pilot.pause()
+        app.post_message(events.Key("enter", "\r"))
+        for ch in "pr":
+            app.post_message(events.Key(ch, ch))
+        for _ in range(3):
+            await pilot.pause()
+        assert bar.value == "pr"
+        assert app.focused is bar
+        assert app._held_keys is None
+        assert app.messages == []
 
 
 # ---------------------------------------------------------------------------

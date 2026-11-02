@@ -20,6 +20,7 @@ _log = configure_logger("pm.tui")
 # a while with several targets.
 _STARTUP_QUEUE_MAX_AGE = 60
 
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Vertical
@@ -497,6 +498,11 @@ class ProjectManagerApp(App):
         # Command-input race condition fix: buffer keystrokes between / and focus
         self._command_pending: bool = False
         self._command_buffer: list[str] = []
+        # Terminal keys that arrived while a command-bar Enter was still being
+        # handled; replayed in order afterwards (see on_event).  None = not
+        # holding.
+        self._held_keys: list | None = None
+        self._held_keys_timer: Timer | None = None
         # Fuzzy select state: ranked result list and current index for ]/[
         # cycling (local pm ids: PR ids for "pr", plan ids for "plan").
         self._fuzzy_results: list[str] = []
@@ -1232,7 +1238,66 @@ class ProjectManagerApp(App):
         pr_view.handle_pr_selected(self, message.pr_id)
 
     def on_command_submitted(self, message: CommandSubmitted) -> None:
-        pr_view.handle_command_submitted(self, message.command)
+        try:
+            if message.command:
+                pr_view.handle_command_submitted(self, message.command)
+        finally:
+            # Queued behind the command's own ``focus()`` (also call_later),
+            # so held keys go to whatever the command left focused.
+            self.call_later(self._release_held_keys)
+
+    # --- Key order behind a command-bar Enter ---
+
+    # Fallback: release held keys even if no CommandSubmitted arrives.
+    HELD_KEYS_TIMEOUT = 3.0
+
+    async def on_event(self, event: events.Event) -> None:
+        """Keep terminal keys typed after a command-bar Enter behind it.
+
+        Textual submits an Input only once the Enter key has bubbled back up
+        to the App (Input's ``enter`` binding), and the command then moves
+        focus with ``call_later``.  Under a stream of reloads (an outside
+        ``pm pr edit`` loop) that round trip can outlast the gap to the
+        user's next key, which the App meanwhile forwards to the still
+        focused bar: ``/pr select spec`` Enter ``]`` submitted
+        ``pr select spec]`` (QA pr-6aa74c6 s7).  Keys arriving from the
+        terminal while such an Enter is in flight are held here and
+        replayed, in order, after the command has been handled.
+        """
+        if isinstance(event, events.Key) and not event.is_forwarded:
+            if self._held_keys is not None:
+                self._held_keys.append(event)
+                return
+            await self._dispatch_terminal_key(event)
+            return
+        await App.on_event(self, event)
+
+    async def _dispatch_terminal_key(self, event: events.Key) -> None:
+        if event.key == "enter" and self._command_bar_focused():
+            self._held_keys = []
+            self._held_keys_timer = self.set_timer(
+                self.HELD_KEYS_TIMEOUT, self._release_held_keys)
+        await App.on_event(self, event)
+
+    async def _release_held_keys(self) -> None:
+        """Replay keys held behind a command-bar Enter (see on_event)."""
+        if self._held_keys_timer is not None:
+            self._held_keys_timer.stop()
+            self._held_keys_timer = None
+        held, self._held_keys = self._held_keys or [], None
+        while held:
+            await self._dispatch_terminal_key(held.pop(0))
+            if self._held_keys is not None:
+                # A replayed Enter went to the command bar again: the rest
+                # of the keys wait behind that one.
+                self._held_keys = held + self._held_keys
+                return
+
+    def _command_bar_focused(self) -> bool:
+        try:
+            return self.focused is self.query_one("#command-bar", CommandBar)
+        except Exception:
+            return False
 
     # --- PR action delegates (see tui/pr_view.py) ---
 
