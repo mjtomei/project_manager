@@ -38638,7 +38638,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T14:05:49.183704+00:00'
-  updated_at: '2026-10-22T18:51:58.385854+00:00'
+  updated_at: '2026-11-02T01:56:42.208987+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38994,6 +38994,32 @@ prs:
       on integrated code.'
     created_at: '2026-10-22T14:17:25Z'
     last_edited: '2026-10-22T14:17:25Z'
+  - id: note-cb2e13f
+    text: 'Base integration 2f391761 (merge origin/master@c1fcecc5, 1363 commits incl.
+      #267 all-PR autostart removal, #282 routing names): 18 conflicts resolved, pm/project.yaml
+      identical to store.merge_3way. Adaptations: --review-specs composes with master''s
+      single wait/auto policy (stop-before-merge only an alias); review_specs is in
+      the breadcrumb _RECORD_TYPES (non-bool fails closed); impl idle registers the
+      newest impl symlink, then master''s S79 pane-session guard; picker pending-spec
+      nav moved into _build_nav_entries. Merge bug fixed: master''s planner merge
+      guard dropped `_live`, which the QA spec gate still used (NameError) — the gate
+      now loads the PR itself, the poll defers plans only under spec review/open pause
+      (plain runs keep master''s load sequence, master test_qa_load_failures passes),
+      and _wait_for_qa_spec_approval loads via _load_project_waiting (unloadable yaml
+      keeps holding; stop launches nothing). Suite 5523 passed / 1 skipped (env -u
+      PM_HOST_HOME PATH=/usr/bin:/bin, pytest<9 + markdown on PYTHONPATH). For review:
+      the merge hunks above and qa_loop gate changes. For QA: review-specs chain on
+      the integrated code with wait-for-merge default, QA spec pause in a plain vs
+      review run, restart with review_specs in the breadcrumb. Routing synced: model
+      provider:claude-main-xhigh-pm, effort high (written via model_settings; the
+      provider is not configured inside the impl container so `pm pr model set` refuses
+      it there). verify-s14/s23/s26-followup.md in the workdir are leftover QA verifier
+      prompts, left untracked. Still held: review/QA until #244 (pr-8700be3) merges
+      and is integrated.'
+    created_at: '2026-11-02T01:56:42Z'
+    last_edited: '2026-11-02T01:56:42Z'
+  model: provider:claude-main-xhigh-pm
+  effort: high
 - id: pr-2935ce2
   plan: bugs
   title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view
