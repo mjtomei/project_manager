@@ -84,6 +84,31 @@ containers, while `build_claude_shell_cmd(container=True)` with a router
 provider prefixes the in-container bridge step that needs that mount (R41).
 The other items are unchanged.
 
+Revised 2026-11-02 (round 7) at head `efab12ab`. Round 6 (S25–S28) ran on
+the merged code. S25, S26 and S27 passed with no fix. S28 failed R41: a
+container-mode run on a router default died at the in-container bridge
+step on the CLI and TUI Enter, because the regression container got no
+route mount. `ef4f5c19` fixed it: before creating the container, the run
+resolves the session's provider (`PM_PROVIDER`, the session provider file,
+`pm provider default`), checks a router's settings
+(`router_route.require_setup(container=True)`), starts or reuses the host
+bridge and mounts its socket dir at `/run/pm-route`
+(`router_route.container_mounts(strict=True)`), as a QA scenario container
+on the route gets it. A `qa_regression` fake gets no mount. Review f51f
+then made three user-visible changes. A provider refusal in container mode
+prints "Container mode is enabled, but the regression session's provider
+cannot launch it: <provider error with Remedy>" and "No session was
+launched on the host.", without the container retry advice (`c5a5dd14`).
+The container is named only once a create is attempted, so a provider
+refusal touches no container (`2d1d19fd`). A pre-create failure that is
+neither the runtime nor the provider says "Could not build the regression
+session: …" (`bc940b76`, test only). The inventory now calls `c1fcecc5`
+the revision the removal started from, and says every later master
+revision before the removal holds the same blobs. Master has not moved
+since `5b352d16`. The host-mode path is unchanged since round 6. R41 and
+R42 are amended. R44–R48, E26–E29 and A16 are added, and A7 is extended.
+The other items are unchanged.
+
 ## What changed, as a user sees it
 
 - The 20 old regression scenarios under `pm/qa/regression/` are gone. The
@@ -419,11 +444,13 @@ per-role settings (there is no `qa_regression` role) and passes no
   container starts with `ANTHROPIC_BASE_URL` at the in-container forwarder
   and a request to it reaches the host endpoint, as a QA scenario container
   on that route does. The provider's values reach the container only
-  through `-e NAME` on the runtime command line. If routes are not
-  supported in regression containers, the launch is refused before any
-  container, workdir, captures dir or pane exists, naming the provider and
-  a remedy. A run whose session dies at the bridge step, or one that falls
-  back to the host, fails this.
+  through `-e NAME` on the runtime command line. The container mounts the
+  route's host bridge dir (`~/.pm/route-bridge/<route>/`) at
+  `/run/pm-route`, and the run starts that host bridge first if it is not
+  running. A run whose session dies at the bridge step, or one that falls
+  back to the host, fails this. (Round 7: S28 failed this, `ef4f5c19`
+  fixed it. Check every launch surface: CLI, TUI Enter, the command bar and
+  `pm qa launch`.)
 - **R42** Given a default router provider whose settings cannot launch (no
   model, or an `api_base` with no port/host), when the user runs a
   regression test from the CLI (host and container mode), TUI Enter or
@@ -431,7 +458,14 @@ per-role settings (there is no `qa_regression` role) and passes no
   "provider '<name>': … Remedy: …" error and exit 1. No session starts on
   the host, and no container, workdir or captures dir is left behind. A TUI
   or `pm qa launch` pane that closes at once without showing it is
-  pr-089af69: cite it.
+  pr-089af69: cite it. Round 7: in container mode the CLI message is
+  "Container mode is enabled, but the regression session's provider cannot
+  launch it: provider '<name>': … Remedy: …" then "No session was launched
+  on the host.", with no "fix the container runtime/image" or
+  "pm container disable" advice. It comes before any container is created
+  or named: the runtime gets no create, run, rm or inspect call for it. In
+  host mode the message is "Could not build the regression session:
+  provider '<name>': … Remedy: …".
 - **R43** Given R41 works, when two container-mode regression runs on the
   same router provider start at the same moment and one ends first, then
   both sessions reach the host endpoint through the one host bridge, and
@@ -439,6 +473,50 @@ per-role settings (there is no `qa_regression` role) and passes no
   Two host-mode runs launched at once with different providers (one
   through `pm provider default`, one with `PM_PROVIDER` exported) each get
   only their own provider's variables and `--model`.
+
+### Added in the round-7 revision
+
+- **R44** Given container mode on and a router default whose host bridge
+  cannot be set up (a leftover regular file, or a symlink, where the
+  route's bridge dir `~/.pm/route-bridge/<route>` belongs), when the user
+  runs a regression test, then it is refused as R42 describes for container
+  mode, with "cannot set up the host route bridge: …" and the remedy to run
+  `pm provider test <route> --container`. No container, workdir or captures
+  dir exists afterwards, and the symlink's target is unchanged. Once the
+  leftover is removed, the next run starts the bridge and runs (R41).
+- **R45** Given container mode on, a router default and a `qa_regression`
+  fake config, when the user runs a regression test, then a router whose
+  settings can launch gets no `/run/pm-route` mount and the run starts no
+  host bridge, and a router with no model is still refused as in R42.
+- **R46** Given container mode on and no host bridge running for a router,
+  when two regression runs on that router and the user's
+  `pm provider test <route> --container` all start at the same moment, then
+  exactly one host bridge process serves the route, both containers mount
+  the same bridge dir, and each session's request reaches the endpoint.
+  If that host bridge is killed while a run's container is still up, the
+  next run on the route starts a new bridge, and the running container's
+  next request reaches the endpoint through it without a restart. Runs on
+  two different routers and on a non-router provider, started together
+  (different `PM_PROVIDER` values), each mount only their own route's
+  bridge dir (none for the non-router run) and reach only their own
+  endpoint.
+- **R47** Given container mode on with a QA image that has git, tmux and
+  pm, and a real Claude on the host PATH, when the user runs a short
+  `--file-prs` regression test from the TUI, then the session starts in the
+  container without a workspace-trust prompt, creates its disposable
+  project under `/scratch`, starts that project's pm session on the
+  container's own tmux server, drives and captures it, writes evidence to
+  `/pm-captures` (the run's host captures dir), and files a finding with
+  `pm -C /pm-project pr add` that lands in the host registry. The user's
+  session, windows and other registry content are unchanged, and the
+  container is removed after `/exit`. If no real Claude can reach its API
+  from a nested container, R47 is blocked.
+- **R48** Given the final branch, when the user reads
+  `pm/qa/retired-regressions.md` and follows its recovery commands at the
+  named revision `c1fcecc5` and at master@`5b352d16`, then both give the
+  same 20 blobs listed in the inventory. A retired id run with container
+  mode on and a router default is refused with the library message before
+  any host bridge or container starts.
 
 ## 2. Setup
 
@@ -561,6 +639,21 @@ per-role settings (there is no `qa_regression` role) and passes no
   scrubbed list: the run uses that provider, and `pm` commands inside the
   run (the test project's session) see it too. Record it; a provider
   variable leaking into the test project's own sessions is not a failure.
+- **E26** Container mode, a missing image and a router that can launch:
+  the host bridge starts before the create fails. The run reports the
+  container error with the container retry advice (not the provider
+  message), removes its container, workdir and captures dir, and leaves
+  the host bridge running. The bridge is shared by design, so that is not
+  a leftover.
+- **E27** Container mode with an unusable runtime and a router that cannot
+  launch: the runtime refusal (R13) comes first, and no bridge starts.
+- **E28** A hand-edited default provider entry that is not a provider (an
+  unknown `type`): in container mode it gets R42's provider message, and in
+  host mode "Could not build the regression session: provider '<name>' … is
+  not a valid entry …". Exit 1 both ways, and nothing is left behind.
+- **E29** A router whose host `launcher` is not executable: host mode
+  refuses it (launcher not executable, Remedy), and container mode ignores
+  the launcher and runs plain `claude` in the container through the bridge.
 
 ## 4. Pass/Fail criteria
 
@@ -593,6 +686,10 @@ Pass means every Then clause above can be observed on the user's surface
   writable from the container
 - concurrent runs share or clobber dirs, or concurrent filings lose a PR
 - the TUI freezes or prints into its own screen
+- a container-mode provider refusal gives container runtime advice, or
+  creates, names, inspects or removes a container (R42, R44)
+- two host bridges serve one route at once, or a restarted bridge does
+  not reach a container that was already running (R46)
 
 If the container-backed run (R15, R16, E9, E10) can't be exercised because
 no QA image can be built in the environment, record those items as
@@ -678,6 +775,21 @@ exercised.
   `build_claude_shell_cmd` drops the bridge prefix, so a `qa_regression`
   fake config hides R41. A host-local endpoint can be any small HTTP server
   that logs requests; nothing needs to answer like a real router.
+- **A16** Round 7. The evidence that a provider refusal touched no
+  container is the runtime's own call log: put a recording `podman`
+  wrapper earlier on PATH that logs its argv and then runs the real
+  podman. `podman events` does not show an `rm -f` or `inspect` of a
+  container that does not exist. A provider refusal may leave a host bridge
+  running from an earlier run, which is expected. The TUI and
+  `pm qa launch` have no provider preflight, so their panes close at once
+  on a provider refusal: that is pr-089af69. `pm qa debug`'s container path
+  lacks the route mount (pr-a016b21), and TUI Enter on an instruction or
+  artifact recipe with an unlaunchable default provider exits the TUI
+  (pr-659c098). Cite these and don't file them again. R47 uses a real
+  Claude because only a model shows whether the container-mode prompt
+  (no socket note, `/scratch`, `/pm-captures`, `/pm-project`) can be
+  followed, and whether the regression workdir is trusted. Stand-ins
+  cannot show either.
 
 - **A7** Bugs found in round 1 and filed elsewhere are not failures of this
   PR: pr-a571291 (`--file-prs` filings make the filed PR the user's active
