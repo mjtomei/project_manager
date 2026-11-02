@@ -51534,6 +51534,20 @@ prs:
       247 passed. Ready for PM to advance to review/QA.'
     created_at: '2026-11-02T02:21:30Z'
     last_edited: '2026-11-02T02:21:30Z'
+  - id: note-6eec9d6
+    text: 'QA S2 refiner (container --live, verified live 2026-11-02): pm provider
+      add --env ACME_EMPTY= works from the CLI (no providers.yaml hand edit). The
+      forwarder URL uses the router port, so api_base http://127.0.0.1:P gives the
+      SAME in-container ANTHROPIC_BASE_URL; use api_base http://localhost:P to tell
+      them apart. HOME inside podman exec is /workspace, so a stub claude must write
+      transcript/hook/records under /home/pm/.claude and /home/pm/.pm/hooks. Keep
+      the isolated HOME short (<= ~60 chars): otherwise the bridge falls back to /tmp/pm-route-<uid>-<sha(route)>
+      shared by every isolated HOME, and a bridge left over from an earlier run (old
+      port) gets reused. Teardown: kill only the bridge whose argv names the printed
+      socket (pgrep -f "[r]oute_bridge.py host <sock>"). A plain pgrep -f matches
+      the calling shell, and the agent route forwarder is also a route_bridge.py process.'
+    created_at: '2026-11-02T02:48:53Z'
+    last_edited: '2026-11-02T02:48:53Z'
   - id: note-5f3f571
     text: 'QA S5 refiner (live at 21bc398d): routed impl pane from TUI `s` held every
       Then. Recipe: private PM_TMUX_SOCKET, PYTHONPATH=/workspace, a `claude` stand-in
