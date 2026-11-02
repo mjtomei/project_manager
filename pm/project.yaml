@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T14:53:43.249590+00:00'
+  updated_at: '2026-11-02T14:57:55.813078+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8142,6 +8142,25 @@ prs:
       after the server exits (tmux behaviour, not a pm socket).'
     created_at: '2026-11-02T14:34:33Z'
     last_edited: '2026-11-02T14:34:33Z'
+  - id: note-7ebac23
+    text: 'QA S43 (two legacy default-server sessions L1/L2 from the master build
+      + private P with colliding %0; L1 TUI kill -9 + registry rm) PASS 3/3, driven
+      twice: on 24efdc86 and again on 698cbb97 (the S42 respawn-lock/-c fix landed
+      mid-run), fresh fixture each time, no source changes. (1) view/send from L1
+      dir: "No TUI pane found" rc 1; L2 + P frames and both notes panes unchanged;
+      in-L2 C-b c view (export PYTHONPATH first) shows L2 %3 rc 0; pm session prints
+      Note, "TUI pane missing — respawning...", Attaching <L1>~2; log legacy/roles_alive
+      set()/TUI missing/_respawn_tui created %7 in @0, no adopt; %7 cwd = L1 dir,
+      old build; no /tmp/pm-sessions/<L1>. (2) go-file race x2 per run: both attaches
+      adopt their own TUI (%7, %3), no respawn, registries list only own tui, sends
+      hit %7/%3 rc 0, P unchanged, list 2/2/1; 50 ms list-panes poll saw exactly one
+      pm _tui per legacy session at every tick. (3) kill L1 scoped: L2 panes/pids,
+      default + P server pids unchanged; teardown leaves /tmp/pm-sessions empty. Scenario
+      wording: L2 debug log gains 2 [wrapper] lines from the in-L2 pm which / pm tui
+      view the story itself runs; L1 recovery writes none. Captures /pm-captures/scenarios/43
+      (README.md; run1-24efdc86/, run2-698cbb97/).'
+    created_at: '2026-11-02T14:57:55Z'
+    last_edited: '2026-11-02T14:57:55Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
