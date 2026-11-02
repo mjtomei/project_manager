@@ -504,7 +504,7 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
     data = store.load(root)
     session = get_pm_session()
     if not session:
-        click.echo("No pm session found. Run inside a pm tmux session.", err=True)
+        click.echo("No pm session found. Start one with: pm session", err=True)
         raise SystemExit(1)
 
     # Container mode is an execution boundary.  Resolve it before creating

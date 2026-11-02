@@ -921,6 +921,98 @@ def test_provider_show_not_found_names_the_listing_command(tmp_path):
     assert "pm provider list" in result.output
 
 
+def test_no_tui_ipc_message_names_pm_session():
+    """A queued command with no TUI must name how to start one.
+
+    `pm autostart add …` surfaces this ``TuiIpcResult.message`` verbatim.
+    "No TUI is running" alone is a dead end (the fix is to start a session),
+    so it names `pm session` like every `pm tui *` refusal.
+    """
+    from unittest import mock
+
+    from pm_core.cli import helpers
+
+    with mock.patch.object(
+            helpers, "_read_tui_owner",
+            return_value=(Path("/nonexistent"), None, None, "no pidfile")):
+        _pid, _raw, _desc, err = helpers._validate_tui_owner("pm-proj-1234")
+
+    assert err is not None and err.reason == "no_pidfile"
+    assert "pm session" in err.message
+
+
+def test_qa_debug_no_session_names_pm_session(tmp_path, monkeypatch):
+    """`pm qa debug` outside a session must name `pm session`.
+
+    It said only "Run inside a pm tmux session", which does not tell the
+    operator the command that creates one.
+    """
+    import pm_core.loop_shared as loop_shared
+    import pm_core.qa_instructions as qa_instr
+    import pm_core.store as store_mod
+
+    from pm_core.cli import qa as qa_mod
+
+    monkeypatch.setattr(qa_mod, "state_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        qa_instr, "get_instruction",
+        lambda root, iid, category=None: {"id": iid, "title": "T"})
+    monkeypatch.setattr(store_mod, "load",
+                        lambda root: {"project": {}, "prs": []})
+    monkeypatch.setattr(loop_shared, "get_pm_session", lambda: None)
+
+    result = CliRunner().invoke(qa_mod.cli, ["qa", "debug", "instr-1"])
+    assert result.exit_code == 1, result.output
+    assert "pm session" in result.output
+
+
+def test_signoff_no_candidate_names_the_prerequisite(tmp_path):
+    """A missing sign-off candidate names the stage before it, not a guess.
+
+    The remedy used to say "run QA first" in every project; under `skip_qa`
+    sign-off follows review, so that sends the operator to a stage the
+    project never runs.
+    """
+    result = _lifecycle_refusal(tmp_path, ["signoff"], status="in_review")
+    assert result.exit_code == 1, result.output
+    out = " ".join(result.output.split())
+    assert "No PR is ready for sign-off" in out
+    assert "pass QA before sign-off" in out
+    assert "pm pr list" in out
+
+    result = _lifecycle_refusal(tmp_path, ["signoff"], status="pending",
+                                skip_qa=True)
+    assert result.exit_code == 1, result.output
+    out = " ".join(result.output.split())
+    assert "pass review before sign-off" in out
+
+
+def test_signoff_infers_in_review_under_skip_qa(tmp_path):
+    """`skip_qa` makes `in_review` a sign-off entry state; infer it.
+
+    The bare-command inference filtered on sign_off/qa only, so on a
+    `skip_qa` project it reported "nothing to do" while an `in_review` PR
+    was waiting for exactly this step (the status check below already
+    accepts it).
+    """
+    from unittest import mock
+
+    from pm_core import signoff as signoff_mod
+    from pm_core.cli import pr as pr_mod
+
+    data = {"project": {"base_branch": "master", "backend": "vanilla",
+                        "skip_qa": True},
+            "prs": [{"id": "pr-001", "title": "T", "status": "in_review"}]}
+    with mock.patch.object(pr_mod, "state_root", return_value=tmp_path), \
+            mock.patch.object(pr_mod.store, "load", return_value=data), \
+            mock.patch.object(pr_mod.store, "locked_update"), \
+            mock.patch.object(signoff_mod, "launch_signoff_window"):
+        result = CliRunner().invoke(pr_mod.pr, ["signoff"])
+
+    assert "No PR is ready for sign-off" not in result.output
+    assert "Auto-selected pr-001" in result.output
+
+
 def test_status_next_step_maps_lifecycle_order():
     from pm_core.cli.pr import _next_step_for_status
 
@@ -960,6 +1052,31 @@ def test_pr_qa_wrong_status_names_the_next_command(tmp_path):
 
     assert result.exit_code == 1, result.output
     assert "pm pr start pr-001" in result.output
+
+
+def test_pr_qa_valid_pr_prints_the_command_bar_form(tmp_path):
+    """The valid path is the motivating failure's fix, and still exits 1.
+
+    `pm pr qa` never starts QA: on a valid in_review PR it prints the
+    command-bar form (and the TUI keys) and exits 1.  Without this test the
+    documented behavior — and the fact that exit 1 is not a failure — was
+    only asserted in the help text.
+    """
+    from unittest import mock
+
+    from pm_core.cli import pr as pr_mod
+
+    (tmp_path / "project.yaml").write_text(
+        "project:\n  backend: vanilla\n  base_branch: master\n"
+        "prs:\n- id: pr-001\n  title: T\n  status: in_review\n")
+    with mock.patch.object(pr_mod, "state_root", return_value=tmp_path), \
+            mock.patch.object(pr_mod, "_get_pm_session", return_value=None):
+        result = CliRunner().invoke(pr_mod.pr, ["qa", "pr-001"])
+
+    assert result.exit_code == 1, result.output
+    assert "pr qa pr-001" in result.output
+    assert "z t" in result.output and "zz t" in result.output
+    assert "pm session" in result.output
 
 
 def _lifecycle_refusal(tmp_path, args, *, status, skip_qa=False):

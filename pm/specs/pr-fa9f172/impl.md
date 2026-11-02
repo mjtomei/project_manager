@@ -538,3 +538,24 @@ the routed form and `--fresh` so help is complete.
   now derives the expected list from `entry_statuses` and says "runs
   after review" under `skip_qa`. Tests cover both variants (the default
   wording is unchanged, so `tests/test_signoff.py` still pins it).
+
+- Review-loop i16: the sweep's remaining un-remediated state errors, and
+  the `skip_qa` sign-off inference they exposed.
+  (a) `helpers._validate_tui_owner`'s "No TUI is running for session X"
+  (surfaced verbatim by `pm autostart add …` outside a session) now names
+  `pm session`, like every `pm tui *` refusal. `helpers.py` is in B3's
+  enumerated file list; this path was missed. (b) `pm qa debug` outside a
+  session said only "Run inside a pm tmux session"; it now names
+  `pm session`. (c) `pr signoff`'s no-candidate message said "run QA
+  first" in every project — under `skip_qa` sign-off follows review — and
+  its bare-command inference filtered on sign_off/qa only, so a `skip_qa`
+  project with an `in_review` PR reported "nothing to do" even though the
+  status check already accepts `in_review` as an entry state. The filter
+  now includes `in_review` under `skip_qa` (no new transition: the check
+  below already allowed it) and the message names the real prerequisite
+  ("pass QA" / "pass review"). (d) B3 asked the no-tmux `pm pr qa` path to
+  name the TUI key `t`; it named only `pm session` and the command-bar
+  form. It now prints the same `t` / `z t` / `zz t` line as the in-session
+  path. Tests cover the no-TUI IPC message, the `qa debug` message, the
+  skip_qa inference, both prerequisite wordings, and the valid `pm pr qa`
+  path (command-bar form + TUI keys + exit 1).

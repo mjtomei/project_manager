@@ -651,7 +651,8 @@ def _validate_tui_owner(
     if problem == "no pidfile":
         return pidfile, None, None, TuiIpcResult(
             False, "no_pidfile",
-            f"No TUI is running for session {session}.")
+            f"No TUI is running for session {session} — start one with: "
+            f"pm session.")
     if problem == "empty pidfile":
         # A TUI is mid-claim (see ``_read_tui_owner``).  Leave the file
         # alone so the starting TUI keeps its claim.  It can also be

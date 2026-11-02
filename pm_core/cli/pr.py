@@ -1862,12 +1862,25 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
     data = store.load(root)
 
     if pr_id is None:
-        pr_id = _infer_pr_id(data, status_filter=("sign_off", "qa"))
+        # With `skip_qa` there is no QA stage: an `in_review` PR is already a
+        # valid sign-off entry state (see `entry_statuses` below), so the
+        # inference must consider it or a bare `pm pr signoff` reports
+        # nothing to do while a PR is waiting for exactly this step.
+        _skip_qa = bool((data.get("project") or {}).get("skip_qa"))
+        _entry_filter = (("sign_off", "qa", "in_review") if _skip_qa
+                         else ("sign_off", "qa"))
+        pr_id = _infer_pr_id(data, status_filter=_entry_filter)
         if pr_id is None:
+            # Name the prerequisite (true in every state), not a presumed
+            # immediate action: the PR may be pending, mid-QA, or merged.
+            _prereq = (
+                "a PR must pass review before sign-off "
+                "(TUI: d; command bar: 'pr review <id>')." if _skip_qa
+                else "a PR must pass QA before sign-off "
+                     "(TUI: t; command bar: 'pr qa <id>').")
             click.echo(
-                "No qa/sign_off PR to sign off. Specify one — run QA first "
-                "(TUI: select the PR and press t; command bar: "
-                "'pr qa <id>').", err=True)
+                f"No PR is ready for sign-off. Specify one — {_prereq} "
+                f"Run 'pm pr list' to see every PR.", err=True)
             raise SystemExit(1)
         click.echo(f"Auto-selected {pr_id}")
 
@@ -2947,6 +2960,7 @@ def pr_qa(pr_id: str | None):
         click.echo("Start a session first with: pm session", err=True)
         click.echo(f"Then open the TUI command bar (press /) and type: "
                    f"pr qa {_pr_display_id(pr_entry)}", err=True)
+        click.echo("Or press 't' on the PR in the TUI (z t = fresh restart, zz t = loop).", err=True)
         raise SystemExit(1)
 
     click.echo(f"Open the TUI command bar (press /) and type: "
