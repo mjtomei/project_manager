@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T06:18:08.901319+00:00'
+  updated_at: '2026-11-02T07:57:46.757047+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7318,6 +7318,27 @@ prs:
       (all go through tmux_mod), so nothing it adds bypasses the per-session socket.'
     created_at: '2026-11-02T06:18:08Z'
     last_edited: '2026-11-02T06:18:08Z'
+  - id: note-0d22262
+    text: 'QA S31 refiner (busy machine, 2026-11-02 at a7169e96): all 5 stories smoke-run
+      live, every corrected Then held. Draft corrections: (1) paired P3 starts usually
+      leave BOTH terminals on one ~1 (att=2); only round 1 of 4 gave ~1+~2; one terminal
+      may print the known pr-ea98f71 "TUI pane missing — respawning..." line (final
+      state still a single TUI pane %0). (2) An empty `pm session list` prints "No
+      pm sessions found.", not a bare header. (3) `pm session --global` from P2 gives
+      a DIFFERENT session name (shared tag hash, e.g. pm-beta-de4c084b vs pm-beta-23315f3f)
+      with a 0777 socket. Countable keys: command-bar rounds (`/`, sleep 0.5, 20x
+      digit 1-4, Enter), counted from "CommandBar submitted:" lines in ~/.pm/debug/<tag>.log
+      after a line-count baseline (same log line in /opt/pm-src). Without the 0.5
+      s pause after `/` the pre-existing CommandBar on_focus replay race (value =
+      buffered) dropped 1/300 keys in L (both builds, not this PR). Shells opened
+      with `tmux -S <sock> new-window` take the CLIENT cwd (/workspace makes the wrapper
+      pick /workspace pm_core); L shells carry PYTHONPATH=/opt/pm-src, so cd outside
+      the checkout and export PYTHONPATH there. Terminals = panes of a `tmux -L <h>`
+      harness with `env -u TMUX -u TMUX_PANE EDITOR=true`; the default server must
+      host only L. "Byte-identical" rows rely on L having the longest name (column
+      width = longest name). Killed servers stay as Zs <defunct> (PID 1 does not reap).'
+    created_at: '2026-11-02T07:57:46Z'
+    last_edited: '2026-11-02T07:57:46Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
