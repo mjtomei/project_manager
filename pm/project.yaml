@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-02T10:15:16.682120+00:00'
+  updated_at: '2026-11-02T10:31:20.180289+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48549,6 +48549,47 @@ prs:
       /pm-captures/scenarios/73.'
     created_at: '2026-11-02T10:15:06Z'
     last_edited: '2026-11-02T10:15:16Z'
+  - id: note-7f0929c
+    text: 'QA S74 refiner (c524c774, base main): story 1 (pm pr merge P racing pm
+      pr model set/note add Q and pm pr signoff integrate Q --record) failed in 4
+      of 5 rehearsal runs because of master _publish_local: the stash/ff/pop of the
+      live pm/project.yaml runs outside the store lock. Seen: "Warning: stash pop
+      had conflicts" plus a leaked stash; merged branch records missing from the live
+      registry (once even after a clean pop); stash -u sweeping a writer project.yaml.tmp
+      ("[Errno 2] ... project.yaml.tmp -> ... project.yaml", rc 1, in C or in the
+      merge itself); once NUL bytes left in the live file. Pre-existing; pr-ca6981c
+      fixes it (holds the lock across the sequence, never stashes project.yaml or
+      its lock). Report it there, not as a pr-5cee3d5 regression. Stories 2 and 3
+      matched every Then. Fixture trap: pm init in an unborn repo records base master;
+      commit first or pass --base-branch main.'
+    created_at: '2026-11-02T10:31:18Z'
+    last_edited: '2026-11-02T10:31:18Z'
+  - id: note-ad93957
+    text: 'QA scenario 74 (concurrent operators on registry/workdir/`main` during
+      publication) at b12d8075 (code = c524c774): INPUT_REQUIRED. Stories 2 and 3
+      PASS. Story 1 failed in 5 of 5 runs on master''s pre-existing publish stash
+      race (pr-ca6981c); this is not a pr-5cee3d5 regression. Run signatures: (1)
+      B note add `[Errno 2] ... project.yaml.tmp -> ... project.yaml` rc 1, and A
+      `Stashing 3 dirty file(s)`; (2) A itself `[Errno 2]` rc 1 after `Updated main
+      in repo.`, and B''s note lost despite rc 0; (3) logs clean, but the live registry
+      lacks Px and P''s branch note, which main has; (4) every bullet held except
+      A stashed/restored 3 files (Then: 2); (5) `stash pop had conflicts` plus a leaked
+      `pm: auto-stash for merge`, C `[Errno 2]` rc 1, Px, P note and B note lost.
+      _publish_local/_stash_for_merge/_unstash_after_merge are byte-identical to master@5b352d16.
+      pr-ca6981c (6bfcc556) is behind master and conflicts with this branch in 11
+      hunks (pr.py 7, prompt_gen.py 3, store.py 1), so no with-fix trial was run.
+      Re-run story 1 once pr-ca6981c lands. Wherever this PR''s surfaces completed
+      they were correct: C record main@7fe58dd7 1+1, B effort warning + `high *`,
+      single publish, active_pr = highlighted card. Story 2: one merge b3f810e3 `Integrate
+      main@28586f59 into ...`; launch and --apply report the same sha; read-only checks
+      straddled the apply; delta byte-identical; one signoff window. Story 3: R won;
+      TUI g on S refused `main moved since sign-off (28586f59314b -> 44bc65e93079)`
+      with Invalidated + sign_off; re-approve + merge publishes S; main and live hold
+      every id once. Harness trap: compute CAPROOT with cwd TEST_DIR. From /workspace,
+      `pm qa captures-path` fails and dirname gives `.`, which the restore''s find
+      -delete would wipe, so guard restore destinations. Captures /pm-captures/scenarios/74.'
+    created_at: '2026-11-02T10:31:20Z'
+    last_edited: '2026-11-02T10:31:20Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
