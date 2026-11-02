@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T10:10:56.470490+00:00'
+  updated_at: '2026-11-02T10:29:02.737854+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39990,6 +39990,23 @@ prs:
       whose midnight falls inside B qa attempt.'
     created_at: '2026-11-02T10:10:56Z'
     last_edited: '2026-11-02T10:10:56Z'
+  - id: note-a9ae19a
+    text: 'QA S61 refiner (12b3dc14): dry-ran the new parts live in /scratch/s61r;
+      scripts+evidence in /pm-captures/pr-8020495/s61-refiner. Same-id S started with
+      TUI s in both TUIs + /review-loop on window appearance: hit in both (start attempt_start
+      t > loop attempt_start t), one start row per project (own pane/session id),
+      untracked in loop, re-tracked as one running row with merged_ids after. Race
+      timing: warm PR started with TUI s per TUI (XD in X, an extra Y warm PR) = tick
+      grid ref; race.py fires s in a 2.5 s tick-free gap of both 5 s grids. /review-loop
+      selects its PR, so X types /review-loop XD after the S race. R1 sits in XD workdir
+      (S has none before WHEN). Round 2 kill only once X S start reads untracked again
+      (first tick of the loop) and grace >=5 s left; new TUI never re-tracks the pane,
+      so S keeps one untracked start row through respawn and a post-respawn loop.
+      XD start (open after round 1) reads interrupted/swept after the kill: expected.
+      XD one-start/one-end check must allow its open re-tracked start. pad_owners.py
+      = pad.py with one dead owner per pair (139 owners, read ~0.09 s).'
+    created_at: '2026-11-02T10:29:02Z'
+    last_edited: '2026-11-02T10:29:02Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
