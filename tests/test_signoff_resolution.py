@@ -3768,6 +3768,71 @@ def test_integrate_cli_never_calls_a_failed_resolution_resolved(w):
     assert "unresolved: pm/project.yaml" in r.output
 
 
+def test_resolution_path_states_is_the_one_labelling_rule():
+    """Every CLI/launch surface labels a path through one helper.
+
+    `pm pr show`, `pm pr signoff integrate` and the sign-off launch each kept
+    their own copy of the attempted / resolved-earlier / resolved rule and of
+    the id-list listing; the copies are where the surfaces drifted apart
+    (`integrate` called the merged *record* ids "merged fields").
+    """
+    entry = {"path": "pm/project.yaml", "added_ours": ["pr-1", "pr-2"],
+             "added_ours_total": 25, "merged_fields": ["pr-9"],
+             "removed": "not-a-list"}
+    resolved = {"status": integration.RESOLVED,
+                "resolution": {"paths": [entry, {"path": ["bad"]}]}}
+    assert integration.resolution_path_states(resolved) == [
+        ("pm/project.yaml", integration.PATH_RESOLVED, entry)]
+    attempted = {"status": integration.CONFLICT,
+                 "resolution": {"paths": [entry],
+                                "unresolved": [{"path": "pm/project.yaml"}]}}
+    assert [s for _, s, _ in integration.resolution_path_states(
+        attempted)] == [integration.PATH_ATTEMPTED]
+    earlier = {"status": integration.CONFLICT,
+               "resolution": {"paths": [entry],
+                              "applied_merge_sha": "a" * 40}}
+    assert [s for _, s, _ in integration.resolution_path_states(
+        earlier)] == [integration.PATH_EARLIER]
+    # A malformed record is no resolution, not an exception.
+    assert integration.resolution_path_states("garbage") == []
+    # Every surface words each state (a missing key would raise KeyError).
+    states = {integration.PATH_ATTEMPTED, integration.PATH_EARLIER,
+              integration.PATH_RESOLVED}
+    assert set(pr_mod._SHOW_PATH_LINE) == states
+    assert set(pr_mod._INTEGRATE_PATH_LINE) == states
+    assert set(signoff._LAUNCH_PATH_LINE) == states
+
+    assert integration.resolution_id_listing(entry, limit=1) == [
+        ("added from PR", ["pr-1"], 24),
+        ("merged records", ["pr-9"], 0)]
+    assert integration.resolution_id_listing(
+        entry, labels={"added_ours": "added from the PR"})[0][0] \
+        == "added from the PR"
+
+
+def test_integrate_and_show_name_merged_records_alike(w, capsys):
+    """Both CLI readers call the merged ids *records* (they are record ids)."""
+    _metadata_conflict(w)
+
+    def apply(d):
+        p = store.get_pr(d, PR)
+        p["integration"]["resolution"]["paths"][0]["merged_fields"] = [
+            "pr-200"]
+    store.locked_update(w.pm_dir, apply)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        shown = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert shown.exit_code == 0, shown.output
+    assert "  merged records: pr-200" in shown.output
+    # `integrate` prints its id lists through the same printer.
+    stored = store.get_pr(store.load(w.pm_dir), PR)["integration"]
+    (_, _, entry), = integration.resolution_path_states(stored)
+    pr_mod._echo_resolution_ids(entry, "    ")
+    out = capsys.readouterr().out
+    assert "    merged records: pr-200" in out
+    assert "merged fields" not in out
+
+
 def test_a_carried_applied_resolution_is_not_labelled_a_failed_attempt(w):
     """A resolution carried from an earlier applied merge is not an attempt.
 

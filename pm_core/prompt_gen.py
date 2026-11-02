@@ -842,6 +842,12 @@ def _diff_base(pr: dict) -> str | None:
     return integ.contained_base(pr)
 
 
+# The prompt words two of the resolution id-list labels as prose
+# (``integration.RESOLUTION_ID_LISTS`` holds the defaults).
+_PROMPT_ID_LABELS = {"added_ours": "added from the PR",
+                     "added_theirs": "added from the base"}
+
+
 def _signoff_integration_block(pr: dict, pr_id: str) -> str:
     """The integration check sign-off reviews (see pm_core.integration)."""
     from pm_core import integration as integ
@@ -991,22 +997,14 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
             if not (isinstance(path, str) and path):
                 path = "project.yaml"
             bits = [f"`{path}`"]
-            for key, label in (("added_ours", "added from the PR"),
-                               ("added_theirs", "added from the base"),
-                               ("merged_fields", "merged records"),
-                               ("removed", "removed")):
-                values = entry.get(key)
-                values = values if isinstance(values, list) else []
-                if values:
-                    shown = values[:10]
-                    # Never silent loss: name the ids the record holds but
-                    # this listing does not show (``compact`` keeps 20 and
-                    # records the real total).
-                    more = max(0, integ.resolution_id_total(entry, key)
-                               - len(shown))
-                    bits.append(f"{label}: "
-                                + ", ".join(f"`{v}`" for v in shown)
-                                + (f", … {more} more" if more else ""))
+            # Never silent loss: ``more`` names the ids the record holds but
+            # this listing does not show (``compact`` keeps 20 and records the
+            # real total).
+            for label, shown, more in integ.resolution_id_listing(
+                    entry, labels=_PROMPT_ID_LABELS):
+                bits.append(f"{label}: "
+                            + ", ".join(f"`{v}`" for v in shown)
+                            + (f", … {more} more" if more else ""))
             lines.append("- " + "; ".join(bits))
         resolved_from = resolution.get("resolved_from")
         resolved_from = resolved_from if isinstance(resolved_from, dict) else {}

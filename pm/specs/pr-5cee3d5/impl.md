@@ -581,7 +581,14 @@ invalidates and returns to sign-off.
   the record now reports is elsewhere, so they are not labelled "attempted —
   NOT resolved", and the per-path line says "resolved earlier … (already
   applied)" (the sign-off launch, the prompt and the return text say the same:
-  an earlier, already-applied resolution, with the current conflict separate);
+  an earlier, already-applied resolution, with the current conflict separate).
+  The per-path state is decided in one place,
+  `integration.resolution_path_states` (attempted / earlier / resolved), and
+  the id lists are listed through `integration.resolution_id_listing` (a
+  10-id prefix plus "… N more" from the record's total, labelled "added from
+  PR / added from base / merged records / removed" — `merged_fields` holds
+  record ids, not fields); `pm pr show`, `integrate`, the launch and the
+  prompt only word the result, so the surfaces cannot drift apart;
 - `--apply` applies a `CLEAN` or `RESOLVED` candidate (the existing clean
   behavior is preserved), including a `RESOLVED` check whose re-check in
   `prepare` comes back `CLEAN` because the base moved between the two checks.

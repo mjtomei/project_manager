@@ -704,10 +704,10 @@ def effective_verdict(verdict: str | None, integration: dict | None,
                 and verdict in (SIGNOFF_MERGE, SIGNOFF_REVIEW, SIGNOFF_REQA):
             # A malformed (non-list) value is still a refusal; the message is
             # built from the entries that can be described.
-            unresolved = _resolution_entries(resolution, "unresolved")
+            unresolved = integ.resolution_entries(resolution, "unresolved")
             reasons = "; ".join(
                 integ.resolution_conflicts_text(u) for u in unresolved[:3]) \
-                or "unresolved conflicts recorded without details"
+                or integ._UNRESOLVED_WITHOUT_DETAILS
             return SIGNOFF_IMPL, (
                 f"{verdict} coerced to {SIGNOFF_IMPL}: pm could not resolve "
                 f"the metadata conflict safely ({reasons})")
@@ -891,6 +891,17 @@ def merge_gate_refusal(pr: dict, current_sha: str | None,
     return None
 
 
+# How the sign-off launch labels a resolution's path for each
+# :func:`pm_core.integration.resolution_path_states` outcome.
+_LAUNCH_PATH_LINE = {
+    integration.PATH_ATTEMPTED:
+        "  attempted {path} by record id — NOT resolved",
+    integration.PATH_EARLIER:
+        "  resolved earlier {path} by record id (already applied)",
+    integration.PATH_RESOLVED: "  resolved {path} by record id",
+}
+
+
 def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
                           background: bool = False,
                           transcript: str | None = None,
@@ -982,27 +993,13 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             print(f"Integration: {integration.summary(rec)}")
             resolution = integration.resolution_of(rec)
             if resolution:
-                unresolved = integration.unresolved_paths(rec)
-                carried = integration.carried_applied_resolution(rec)
-                for entry in integration.resolution_entries(
-                        resolution, "paths"):
-                    path = entry.get("path")
-                    # Only a string is a path (and a set member): a
-                    # hand-edited non-string reads as absent rather than
-                    # raising out of the launch, and is not reported as a
-                    # path pm resolved.
-                    if not (isinstance(path, str) and path):
-                        continue
-                    if path in unresolved:
-                        print(f"  attempted {path} by record id "
-                              "— NOT resolved")
-                    elif carried:
-                        # An earlier merge applied this path; the conflict
-                        # this check reports is elsewhere.
-                        print(f"  resolved earlier {path} by record id "
-                              "(already applied)")
-                    else:
-                        print(f"  resolved {path} by record id")
+                # The CLI's labelling rule (``resolution_path_states``): a
+                # path a failed attempt could not reconcile is never
+                # "resolved", and an earlier merge's resolution is not this
+                # check's outcome.
+                for path, state, _entry in \
+                        integration.resolution_path_states(rec):
+                    print(_LAUNCH_PATH_LINE[state].format(path=path))
                 applied_merge = integration.revision_of(
                     resolution.get("applied_merge_sha"))
                 if applied_merge:
@@ -1253,7 +1250,7 @@ def build_return_record(pr: dict, verdict: str, hop: str, *,
     rec = _mapping(pr.get("integration"))
     integ = None
     if rec and (rec.get("head") == reviewed_head
-                or _resolution_of(rec).get("applied_merge_sha")):
+                or integration.resolution_of(rec).get("applied_merge_sha")):
         integ = {k: rec.get(k) for k in (
             "target_repo", "base_branch", "base_sha", "merge_base", "status",
             "conflicts", "overlap", "error", "resolution",
@@ -1502,30 +1499,6 @@ _mapping = integration._mapping
 _text = integration._text
 
 
-def _resolution_of(record) -> dict:
-    """See :func:`pm_core.integration.resolution_of`."""
-    from pm_core import integration as integ_mod
-    return integ_mod.resolution_of(record)
-
-
-def _resolution_entries(resolution, key: str) -> list[dict]:
-    """See :func:`pm_core.integration.resolution_entries`."""
-    from pm_core import integration as integ_mod
-    return integ_mod.resolution_entries(resolution, key)
-
-
-def _carried_applied_resolution(record: dict | None) -> bool:
-    """See :func:`pm_core.integration.carried_applied_resolution`."""
-    from pm_core import integration as integ_mod
-    return integ_mod.carried_applied_resolution(record)
-
-
-def _contained_base(pr: dict) -> str | None:
-    """See :func:`pm_core.integration.contained_base`."""
-    from pm_core import integration as integ_mod
-    return integ_mod.contained_base(pr)
-
-
 def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
     """Prompt block for a PR sign-off sent back (empty when there is none)."""
     rec = open_return(pr)
@@ -1604,18 +1577,20 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                 max_bytes=INTEGRATION_LIST_BUDGET, separator=", ",
                 omitted_note=_integ_note(overlap,
                                          integ.get("overlap_total"))))
-        resolution = _resolution_of(integ)
+        resolution = integration.resolution_of(integ)
         if resolution:
             # Hand-edited state: a path that is not a non-empty string is not
             # a path (the CLI, ``pm pr show`` and the launch read it as
             # absent).  Do not render it as a resolved path here either —
             # fall back to the file pm can only have resolved.
             paths = [p.get("path")
-                     for p in _resolution_entries(resolution, "paths")
+                     for p in integration.resolution_entries(resolution,
+                                                             "paths")
                      if isinstance(p.get("path"), str) and p.get("path")]
             paths_text = ", ".join(f"`{p}`" for p in paths or ["project.yaml"])
-            unresolved = _resolution_entries(resolution, "unresolved")
-            carried = _carried_applied_resolution(integ)
+            unresolved = integration.resolution_entries(resolution,
+                                                        "unresolved")
+            carried = integration.carried_applied_resolution(integ)
             # Truthiness of the recorded value, not the entry list: a
             # malformed (non-list) value is not evidence of a clean
             # resolution, so it keeps the "could not resolve" wording.
@@ -1701,8 +1676,8 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                 if not applied_block_hint:
                     # Object names only: the revision becomes a
                     # `git diff <rev> HEAD` command the routed step runs
-                    # (``_contained_base`` already refuses anything else).
-                    applied_base = _contained_base(pr) \
+                    # (``contained_base`` already refuses anything else).
+                    applied_base = integration.contained_base(pr) \
                         or integration._sha_like(resolved_from.get("base_sha")) \
                         or integration._sha_like(integ.get("base_sha"))
                     if applied_base:
@@ -1916,7 +1891,7 @@ def _record_applied_integration(root: Path, pr_id: str, rec: dict,
     # The apply that this call records succeeded: an earlier "could not apply"
     # (e.g. a dirty workdir at sign-off launch) no longer describes the record.
     updated.pop("apply_error", None)
-    resolution = _resolution_of(updated)
+    resolution = integration.resolution_of(updated)
     if resolution.get("resolved_from"):
         # Keep the revisions the resolution combined visible at the top
         # level, where the evidence block and the prompt read them.
@@ -1936,7 +1911,7 @@ def _record_applied_integration(root: Path, pr_id: str, rec: dict,
             bare_merge_check = (
                 cur["head"] == merge_sha
                 and cur.get("status") == integ.UP_TO_DATE
-                and not _resolution_of(cur))
+                and not integration.resolution_of(cur))
             if not bare_merge_check:
                 return
         p["integration"] = compact
@@ -1976,7 +1951,7 @@ def _prepare_bounce(root: Path, pr_id: str, verdict: str, hop: str,
             # The return record's integration snapshot must show the applied
             # resolution: the next stage is looking at the integrated branch.
             rec = dict(rec)
-            resolution = dict(_resolution_of(rec))
+            resolution = dict(integration.resolution_of(rec))
             if resolution:
                 if not integ.revision_of(resolution.get("applied_merge_sha")):
                     # Only the merge that actually applied the resolution may

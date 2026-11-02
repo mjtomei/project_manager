@@ -2607,6 +2607,71 @@ def carried_applied_resolution(record: dict | None) -> bool:
         and rec.get("status") in (CONFLICT, ERROR)
 
 
+# The id lists a resolved path records, with the label the CLI prints for
+# each.  ``merged_fields`` names the *records* both sides changed and pm merged
+# field by field (``_merge_id_list``'s "changed" action), not fields.
+RESOLUTION_ID_LISTS = (("added_ours", "added from PR"),
+                       ("added_theirs", "added from base"),
+                       ("merged_fields", "merged records"),
+                       ("removed", "removed"))
+
+# Per-path outcomes :func:`resolution_path_states` reports.
+PATH_ATTEMPTED = "attempted"     # a failed attempt could not reconcile it
+PATH_EARLIER = "earlier"         # an earlier, already-applied resolution
+PATH_RESOLVED = "resolved"       # this check's resolution
+
+
+def resolution_path_states(record: dict | None) -> list[tuple[str, str, dict]]:
+    """``(path, state, entry)`` for every resolved path a surface can name.
+
+    The one rule `pm pr show`, `pm pr signoff integrate` and the sign-off
+    launch label a resolution's paths by, so they agree with each other and
+    with the prompt and the return text: a path a failed attempt could not
+    reconcile is :data:`PATH_ATTEMPTED` (:func:`unresolved_paths`, never
+    "resolved"); a resolution an earlier merge applied is
+    :data:`PATH_EARLIER` (:func:`carried_applied_resolution` — the conflict
+    the record reports now is elsewhere); anything else is
+    :data:`PATH_RESOLVED`.  Only a non-empty string is a path: a hand-edited
+    value is skipped rather than reported as a path pm resolved.
+    """
+    rec = _mapping(record)
+    unresolved = unresolved_paths(rec)
+    carried = carried_applied_resolution(rec)
+    rows: list[tuple[str, str, dict]] = []
+    for entry in resolution_entries(resolution_of(rec), "paths"):
+        path = entry.get("path")
+        if not (isinstance(path, str) and path):
+            continue
+        state = (PATH_ATTEMPTED if path in unresolved
+                 else PATH_EARLIER if carried else PATH_RESOLVED)
+        rows.append((path, state, entry))
+    return rows
+
+
+def resolution_id_listing(entry, limit: int = 10,
+                          labels: dict | None = None
+                          ) -> list[tuple[str, list, int]]:
+    """``(label, shown, more)`` for each non-empty id list of a resolved path.
+
+    *shown* is the first *limit* ids; *more* is how many more the record
+    holds (from ``<key>_total`` — ``compact`` keeps a bounded prefix), so no
+    listing drops ids silently.  *labels* overrides the default label of a
+    key (the prompt words them as prose).  A list that is not a list
+    (hand-edited state) reads as empty.
+    """
+    entry = _mapping(entry)
+    out: list[tuple[str, list, int]] = []
+    for key, label in RESOLUTION_ID_LISTS:
+        values = entry.get(key)
+        values = values if isinstance(values, list) else []
+        if not values:
+            continue
+        shown = values[:limit]
+        more = max(0, resolution_id_total(entry, key) - len(shown))
+        out.append(((labels or {}).get(key, label), shown, more))
+    return out
+
+
 def _on_first_parent_chain(workdir: str, sha: str) -> bool:
     """Whether *sha* is on HEAD's first-parent chain.
 

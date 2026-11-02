@@ -964,6 +964,30 @@ def _signoff_evidence_lines(record) -> list[str]:
     return lines
 
 
+# How `pm pr show` and `pm pr signoff integrate` label a resolution's path for
+# each :func:`pm_core.integration.resolution_path_states` outcome (keyed by
+# ``integration.PATH_*``; the integration module is imported lazily here).  A
+# path a failed attempt could not reconcile is never labelled "resolved".
+_SHOW_PATH_LINE = {
+    "attempted": "Resolution attempted (NOT resolved): {path}",
+    "earlier": "Resolved earlier (already applied): {path}",
+    "resolved": "Resolved: {path}",
+}
+_INTEGRATE_PATH_LINE = {
+    "attempted": "  attempted: {path} (by record id — NOT resolved)",
+    "earlier": "  resolved earlier: {path} (by record id — already applied)",
+    "resolved": "  resolved: {path} (by record id)",
+}
+
+
+def _echo_resolution_ids(entry: dict, indent: str) -> None:
+    """Print a resolved path's id lists, naming the ids the record omits."""
+    from pm_core import integration
+    for label, shown, more in integration.resolution_id_listing(entry):
+        click.echo(f"{indent}{label}: {', '.join(map(str, shown))}"
+                   + (f", … {more} more" if more else ""))
+
+
 @pr.command("show")
 @click.argument("pr_id")
 def pr_show(pr_id: str):
@@ -1127,35 +1151,10 @@ def pr_show(pr_id: str):
             candidate = integration.revision_of(integ.get("candidate_tree"))
             if candidate:
                 click.echo(f"Candidate tree: {candidate}")
-            unresolved = integration.unresolved_paths(integ)
-            carried = integration.carried_applied_resolution(integ)
-            for entry in integration.resolution_entries(resolution, "paths"):
-                path = entry.get("path")
-                # Only a string is a path (and a set member): a hand-edited
-                # non-string reads as absent rather than raising, and is not
-                # reported as a resolved path pm cannot name.
-                if not (isinstance(path, str) and path):
-                    continue
-                if path in unresolved:
-                    click.echo(f"Resolution attempted (NOT resolved): {path}")
-                elif carried:
-                    click.echo(f"Resolved earlier (already applied): {path}")
-                else:
-                    click.echo(f"Resolved: {path}")
-                for key, label in (("added_ours", "added from PR"),
-                                   ("added_theirs", "added from base"),
-                                   ("merged_fields", "merged records"),
-                                   ("removed", "removed")):
-                    values = entry.get(key)
-                    values = values if isinstance(values, list) else []
-                    if not values:
-                        continue
-                    shown = values[:10]
-                    # The yaml copy keeps a prefix; name the ids it omits.
-                    more = max(0, integration.resolution_id_total(entry, key)
-                               - len(shown))
-                    click.echo(f"  {label}: {', '.join(map(str, shown))}"
-                               + (f", … {more} more" if more else ""))
+            for path, state, entry in integration.resolution_path_states(
+                    integ):
+                click.echo(_SHOW_PATH_LINE[state].format(path=path))
+                _echo_resolution_ids(entry, "  ")
             for entry in integration.resolution_entries(resolution,
                                                         "unresolved"):
                 # Hand-edited state: a non-string path is not a path, so name
@@ -2585,39 +2584,13 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
         if isinstance(values, list) and values:
             click.echo(f"  {label}: {', '.join(map(str, values))}")
     resolution = integration.resolution_of(rec)
-    # A failed attempt keeps its per-path details on the record; never label a
-    # path it could not reconcile as "resolved" (the unresolved line below is
-    # the authoritative one).
-    unresolved = integration.unresolved_paths(rec)
-    # A resolution an earlier merge applied is not this check's outcome: the
-    # conflict the record now reports is elsewhere (``_carry_forward``).
-    carried = integration.carried_applied_resolution(rec)
-    for entry in integration.resolution_entries(resolution, "paths"):
-        path = entry.get("path")
-        # Only a string is a path (and a set member): a hand-edited
-        # non-string reads as absent rather than raising out of the CLI.
-        if not (isinstance(path, str) and path):
-            continue
-        if path in unresolved:
-            click.echo(f"  attempted: {path} (by record id — NOT resolved)")
-        elif carried:
-            click.echo(f"  resolved earlier: {path} (by record id — "
-                       "already applied)")
-        else:
-            click.echo(f"  resolved: {path} (by record id)")
-        for key, label in (("added_ours", "added from PR"),
-                           ("added_theirs", "added from base"),
-                           ("merged_fields", "merged fields"),
-                           ("removed", "removed")):
-            values = entry.get(key)
-            values = values if isinstance(values, list) else []
-            if values:
-                shown = values[:10]
-                # Name the ids the record holds but this listing omits.
-                more = max(0, integration.resolution_id_total(entry, key)
-                           - len(shown))
-                click.echo(f"    {label}: {', '.join(map(str, shown))}"
-                           + (f", … {more} more" if more else ""))
+    # One labelling rule for every surface (``resolution_path_states``): a
+    # path a failed attempt could not reconcile is never "resolved" (the
+    # unresolved line below is the authoritative one), and a resolution an
+    # earlier merge applied is not this check's outcome.
+    for path, state, entry in integration.resolution_path_states(rec):
+        click.echo(_INTEGRATE_PATH_LINE[state].format(path=path))
+        _echo_resolution_ids(entry, "    ")
     for entry in integration.resolution_entries(resolution, "unresolved"):
         # Hand-edited state: a non-string path is not a path, so name the file
         # pm can only have attempted instead of printing the malformed value
