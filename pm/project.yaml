@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T10:50:28.098168+00:00'
+  updated_at: '2026-11-02T10:58:26.096139+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7781,6 +7781,43 @@ prs:
       list/kill re-checked post-fix. Captures /pm-captures/scenarios/34 (README.md).'
     created_at: '2026-11-02T10:50:28Z'
     last_edited: '2026-11-02T10:50:28Z'
+  - id: note-9968411
+    text: 'QA S35 refiner (2026-11-02, c13abe72): all 3 stories smoke-run live, PASS
+      as refined. Draft fixes: `pm session mobile --force` (a bare flag; `--force
+      on` = "Got unexpected extra argument (on)", rc 2); the mobile flag is ~/.pm/pane-registry/pm-<tag>.mobile,
+      not under ~/.pm/sessions/<tag>/ (that holds fake-claude + pm_root). Legacy story:
+      the old pm prints Creating ... pm-vue.app-<h> then the failure line, rc 1, and
+      leaves pm-vue_app-<h> (no ~1) whose TUI heals ~/.pm/pane-registry/pm-vue_app-<h>.json,
+      so the new pm attaches without "TUI pane missing". Its panes take PYTHONPATH
+      from the default server global env, so create `work` with PYTHONPATH=/opt/pm-src
+      to get a genuinely old TUI. Exporting TMUX_TMPDIR in the driver also moves `tmux
+      -L <harness>`: use env -u TMUX_TMPDIR for harness commands.'
+    created_at: '2026-11-02T10:41:24Z'
+    last_edited: '2026-11-02T10:41:24Z'
+  - id: note-394b978
+    text: 'QA S35 (2026-11-02, head eab379d2b = code c13abe72) INPUT_REQUIRED, no
+      source changes. Stories 1-3 and teardown all observed live except one literal
+      line. (1) Tags next.js -> next_js-b38b5e39, next_js -> next_js-3c04ca6f, my
+      $HOME repo -> my _HOME repo-11e2bb5b: the barrier-paired start gives two Creating
+      lines and two sockets, C a third (space in the name). Each server has base+~1+~2
+      and one %0 pm _tui. pm session list shows 3 rows x 2 clients. --print-connect
+      single-quotes the spaced socket; the pasted commands attach on those servers
+      only. pm tui send l moves only the targeted TUI''s card. mobile --force and
+      the fake-claude config land under next_js-b38b5e39 only, with no dotted or $
+      keys. TUI s opens pr-07af6a0 with fake-claude --verdict NONE on next.js''s server
+      only. (2) Old pm (/opt/pm-src) under TMUX_TMPDIR prints Creating pm-vue.app-24ec11db,
+      then Failed to detect, rc=1, and leaves pm-vue_app-24ec11db (old TUI %1, PYTHONPATH=/opt/pm-src).
+      The new pm prints the Note line and attaches ~1 (same TUI pid, no respawn);
+      list shows it as (default server); view/send hit Pane %1. Kill gives Killed,
+      rc=0, only work left. FAILED THEN: L3''s next pm session printed only Creating
+      tmux session ''pm-vue_app-24ec11db''... and attached ~1 silently (no Note),
+      but the Then also expects Attaching to session ''pm-vue_app-24ec11db~1''....
+      The create path in cli/session.py never prints that line (master too), and story
+      1''s A/B/C show the same, so either the Then is a drafting error or the create
+      path should also print it. User decision pending. Captures: /pm-captures/scenarios/35
+      (README.md).'
+    created_at: '2026-11-02T10:58:26Z'
+    last_edited: '2026-11-02T10:58:26Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
