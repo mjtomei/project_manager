@@ -51473,7 +51473,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/296
   gh_pr_number: 296
   created_at: '2026-10-28T02:46:55.100157+00:00'
-  updated_at: '2026-11-02T08:11:15.641569+00:00'
+  updated_at: '2026-11-02T08:57:49.353486+00:00'
   started_at: '2026-11-02T02:27:56.323149+00:00'
   reviewed_at: null
   merged_at: null
@@ -51621,6 +51621,17 @@ prs:
       No code change; the scenario-7 behavioral verdict is unchanged.'
     created_at: '2026-11-02T08:11:15Z'
     last_edited: '2026-11-02T08:11:15Z'
+  - id: note-ddf4fe6
+    text: 'Sign-off return (implementation): merged master@5b352d16 into the branch
+      with store.merge_3way(base=c1fcecc5, ours=master, theirs=branch) -- 586 unique
+      PR ids, all 10 notes kept, every other record identical to master; no code change
+      (all code files auto-merged). Full suite on the merged tree: 5554 passed, 1
+      skipped (textual 8.2.7, markdown installed). Committed the sign-off''s uncommitted
+      spec correction and filed the F1 follow-up as pr-3199f44 ("TUI at Textual 2.x:
+      background reloads/syncs are dropped while a modal is open", plan improvements,
+      pending). Branch ready for a fresh sign-off.'
+    created_at: '2026-11-02T08:57:49Z'
+    last_edited: '2026-11-02T08:57:49Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
