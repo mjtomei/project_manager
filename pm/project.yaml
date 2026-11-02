@@ -53338,3 +53338,36 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-50e6077
+  plan: bugs
+  title: 'Bug: a repo directory name near NAME_MAX makes pm session crash (per-session
+    registry/pidfile filename too long)'
+  branch: pm/pr-50e6077-bug-a-repo-directory-name-near-name-max-makes-pm-s
+  status: pending
+  depends_on: []
+  description: "pm_core/pane_registry.py::registry_path builds ~/.pm/pane-registry/<base>.json\
+    \ from the session name; pm_core/tui_pidfile.py::pidfile_path builds ~/.pm/tui-<base>.pid;\
+    \ paths.session_dir() uses ~/.pm/sessions/<tag>/. A repo directory name near the\
+    \ 255-byte NAME_MAX pushes the tag (repo_name + '-' + 8-hex hash) past NAME_MAX\
+    \ for those paths, and pm session dies with an uncaught OSError before it creates\
+    \ anything.\n\nRepro (isolated HOME, tmux 3.2a): D=$(python3 -c 'print(\"q\"*240)');\
+    \ mkdir $D; cd $D; git init; pm init --backend local; pm session\n  File \"pm_core/cli/session.py\"\
+    , line 931, in _session_start\n    pane_registry.locked_read_modify_write(\n \
+    \ File \"pm_core/pane_registry.py\", line 88, in locked_read_modify_write\n  \
+    \  lock_fd = open(lock_path, \"w\")\nOSError: [Errno 36] File name too long: '.../.pm/pane-registry/pm-<240\
+    \ qs>-<hash>.json.lock'\n\nSame crash on origin/master (session.py:423 / pane_registry.py:80),\
+    \ so pre-existing, not a regression of pr-073910f. pr-073910f hashed the long\
+    \ *socket* path (paths.session_socket_path, R7) but every other tag-derived artifact\
+    \ keeps the raw tag. Fix needs one long-name-safe per-session key (or a clear\
+    \ refusal naming the limit) shared by the pane registry, pidfile, command queue,\
+    \ TUI history, mobile flag and ~/.pm/sessions/<tag>/ together. Found during review-loop\
+    \ 1237 i3 of pr-073910f."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T21:34:11.414748+00:00'
+  updated_at: '2026-11-02T21:34:11.414748+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
