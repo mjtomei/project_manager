@@ -637,3 +637,35 @@ the routed form and `--fresh` so help is complete.
   longer exists (the step is `pm pr review`); the watcher-review key list
   also said `d` "marks it as done". Both corrected, with a test that the
   removed name cannot come back.
+
+- Review-loop i20: help claims contradicted by the code, and two stale
+  surfaces the sweep had not reached.
+  (a) `pm pr signoff --help` and `pm pr merge --help` said there is no TUI
+  key for a fresh sign-off ("CLI/command-bar only"). That is false: the PR
+  action picker (prefix P) maps `z i` to `pr signoff --fresh`, and its
+  header advertises "i=fresh signoff". Both helps now name the picker chord
+  (the main-tree `i` remains the router), the shared table's signoff row
+  reads "i / picker z i", and both `pm tui keys` and the `?` screen's
+  `prefix P` row document the picker's `z s/d/t/i` / `zz d/t` chords.
+  Tests pin the corrected text on both helps and the shared table.
+  (b) `pm tui keys` said "Bare `autostart` only turns auto-start off". Bare
+  `pm autostart` prints its help (it has no callback); disabling is `A` with
+  no PR selected or `autostart clear`. Corrected, with a test that also runs
+  the command to prove it does not disable anything.
+  (c) `pm qa debug`'s window-creation failure said "make sure the pm
+  session is running ('pm tui view')". `pm tui view` only reads an
+  already-running TUI and fails for the same reason; the remedy now names
+  `pm session`. (Its no-session refusal was fixed in i16; this is the
+  other, window-creation path.) Test extended in
+  `tests/test_container_fail_closed.py`.
+  (d) `pm tui send --help`'s examples were from the old guide flow: `g`
+  was labelled "launch guide" (it is Merge) and `x` "dismiss guide" (it is
+  hide/show plan group). The guide is `H`. Examples corrected, and the
+  block now uses `\b` so Click stops re-wrapping the list and examples
+  into one run-on paragraph. `pm tui keys` also gained a "Help screen"
+  section (Esc/? close, h discuss, j/k/J/K scroll) — the `?` screen's own
+  bindings were documented only in its footer.
+  (e) The tree's empty-state hints said "Press F to cycle filter", but `F`
+  cycles the sort field and `f` cycles the status filter. Both messages
+  (`No <status> PRs` and `No PRs to show`) now say `f`, and the existing
+  widget test asserts the letter.

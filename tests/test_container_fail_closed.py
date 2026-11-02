@@ -838,6 +838,11 @@ def test_qa_debug_fails_closed_when_the_window_cannot_be_created(
     assert "Launched debug session" not in result.output
     assert "could not create the qa debug window" in result.output.lower()
     assert "released" in result.output.lower()
+    # The remedy names the command that starts the session.  It used to say
+    # "make sure the pm session is running ('pm tui view')", but `pm tui
+    # view` only reads an already-running TUI and fails for the same reason
+    # this window creation did — a dead-end corrective command.
+    assert "pm session" in result.output
     # Only this attempt's own container is released.
     assert remove.call_count == 1
 

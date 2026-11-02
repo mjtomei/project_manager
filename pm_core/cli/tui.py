@@ -237,15 +237,18 @@ def tui_history(frames: int, show_all: bool, session: str | None):
 def tui_send(keys: str, session: str | None):
     """Send keys to the TUI.
 
+    \b
     KEYS can be single characters, key names, or sequences:
       - Single keys: g, x, r, q
       - Special keys: Enter, Escape, Up, Down, Left, Right, Tab
       - Ctrl combinations: C-c, C-d
       - Sequences: "gr" sends 'g' then 'r'
 
+    \b
     Examples:
-      pm tui send g          # Press 'g' (launch guide)
-      pm tui send x          # Press 'x' (dismiss guide)
+      pm tui send g          # Press 'g' (merge the selected PR)
+      pm tui send H          # Press 'H' (launch guide)
+      pm tui send x          # Press 'x' (hide/show plan group)
       pm tui send r          # Press 'r' (refresh)
       pm tui send Enter      # Press Enter
       pm tui send C-c        # Press Ctrl+C
@@ -326,6 +329,7 @@ QA view (q):
 
 Tmux prefix bindings:
   prefix P         PR action picker popup (q/Esc to quit)
+                   z s/d/t/i fresh   zz d/t loop
   prefix M         pm command runner popup (Ctrl+C to quit)
   prefix R         Rebalance panes
 
@@ -336,9 +340,9 @@ Auto-start (multiple targets; also `pm autostart --help`):
                    r refresh, Esc/q/a close)
 
 Targets are additive — A/O/`autostart add X` do not replace the previous
-target. Bare `autostart` only turns auto-start off. There is no all-PR
-mode: auto-start runs only the explicit targets you add and their
-dependency closures.
+target. `A` with no PR selected (or `autostart clear`) turns auto-start
+off. There is no all-PR mode: auto-start runs only the explicit targets
+you add and their dependency closures.
 
 Other:
   z                Prefix: restart the pane instead of focusing it
@@ -348,6 +352,11 @@ Other:
   b                Rebalance panes
   ctrl+r           Restart TUI
   ctrl+b d         Detach from session
+
+Help screen (?):
+  Esc/?            Close
+  h                Discuss pm
+  j/k, J/K         Scroll (also Up/Down)
 
 """ + command_surface.command_bar_help_text())
 

@@ -167,7 +167,10 @@ async def test_hide_closed_empty_state_renders():
         statics = list(tree.query(Static))
         assert statics, "hide-closed empty state should mount a message Static"
         msg = statics[0]
-        assert "Press F to cycle filter" in msg.render().plain
+        # `f` cycles the status filter; `F` cycles the sort field.  The
+        # hint used to name `F`, sending the operator to the wrong action.
+        assert "Press f to cycle filter" in msg.render().plain
+        assert "Press F" not in msg.render().plain
         assert msg.region.width > 0 and msg.region.height > 0, (
             f"empty-state message collapsed to {tuple(msg.region)}")
 

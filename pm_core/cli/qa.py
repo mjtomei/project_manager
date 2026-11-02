@@ -688,8 +688,9 @@ End with a summary of which steps work and which don't, then one of:
                 err=True,
             )
             click.echo(
-                "Remedy: make sure the pm session is running "
-                "('pm tui view'), then retry.", err=True)
+                "Remedy: start (or attach) the pm session with 'pm session', "
+                "then retry; 'pm tui view' only reads an already-running "
+                "TUI.", err=True)
             raise SystemExit(1)
         click.echo(f"Launched debug session")
         click.echo(f"  Instruction: {item['title']}")

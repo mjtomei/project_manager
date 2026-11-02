@@ -1831,8 +1831,9 @@ def pr_signoff_group(ctx):
       command bar: pr signoff [--fresh] [PR_ID]     = TUI i (router)
 
     `--fresh` is a fresh restart: it kills an existing sign-off window and
-    opens a new one.  There is no TUI key for it — `i` focuses or opens the
-    router — so a fresh restart is CLI/command-bar only.
+    opens a new one.  In the main tree `i` only focuses or opens the router;
+    a fresh restart is the PR action picker's `z i` chord (prefix P), or the
+    CLI / command bar `--fresh` above.
     """
     if ctx.invoked_subcommand is None:
         ctx.invoke(pr_signoff)
@@ -3028,8 +3029,9 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     re-evaluates the sign-off gate against the current PR HEAD.  A refusal
     invalidates the approval and returns the PR to sign-off — run a fresh
     sign-off (`pm pr signoff --fresh <id>`), then merge again.  `i` in the
-    TUI opens the router; there is no fresh-restart key.  If the merge is
-    already in the base, `--no-signoff-check` finalizes it.
+    main tree opens the router; a fresh sign-off is the PR action picker's
+    `z i` chord (prefix P).  If the merge is already in the base,
+    `--no-signoff-check` finalizes it.
     """
     if resolve_window is None:
         resolve_window = _resolve_window_default()

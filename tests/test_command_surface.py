@@ -112,10 +112,31 @@ def test_pr_signoff_help_names_routed_form_and_record():
     out = _help("pr", "signoff")
     assert "--fresh" in out
     assert "record" in out and "integrate" in out
-    # `i` is the router (focus-or-open); there is no z-modifier for a fresh
-    # sign-off, so the help must not imply the TUI can do one.
-    assert "no TUI key" in out
-    assert "fresh restart is CLI/command-bar only" in " ".join(out.split())
+    # The main-tree `i` is the router (focus-or-open).  A fresh sign-off is
+    # the PR action picker's `z i` chord — the picker header advertises
+    # "i=fresh signoff" — so the help must name that route, not claim the
+    # TUI cannot do one.
+    assert "no TUI key" not in out
+    assert "fresh restart is CLI/command-bar only" not in out
+    flat = " ".join(out.split())
+    assert "z i" in flat and "prefix P" in flat
+
+
+def test_pr_merge_help_names_the_picker_fresh_signoff_chord():
+    """A refused merge needs a fresh sign-off; the picker can do one.
+
+    The help used to say "there is no fresh-restart key", but the PR action
+    picker (prefix P) maps `z i` to `pr signoff --fresh`.  Sending the
+    operator to the CLI only hid a working TUI route.
+    """
+    flat = " ".join(_help("pr", "merge").split())
+    assert "z i" in flat and "prefix P" in flat
+    assert "no fresh-restart key" not in flat
+    # Pin the claim to the code it describes: the picker's z chord really
+    # maps the sign-off key to `--fresh`.
+    from pm_core.cli.session import _MODIFIED_ACTION_CMDS
+    assert _MODIFIED_ACTION_CMDS[("z", "signoff")] == \
+        "pr signoff --fresh {pr_id}"
 
 
 def test_cli_merge_and_qa_deliberately_reject_fresh():
@@ -457,9 +478,14 @@ def test_tui_keys_lists_every_binding_the_help_screen_shows():
     """
     out = CliRunner().invoke(cli, ["tui", "keys"]).output
     for binding in ("x", "X", "f", "F", "v", "M", "H", "m", "C", "/",
-                    "z", "R", "ctrl+r", "prefix P", "prefix M", "prefix R"):
+                    "z", "R", "ctrl+r", "prefix P", "prefix M", "prefix R",
+                    "h"):
         assert re.search(rf"^\s*{re.escape(binding)}\s{{2,}}\S", out, re.M), (
             f"{binding!r} missing from `pm tui keys`")
+    # The `?` screen's own bindings were documented only in its footer; the
+    # CLI reference now carries them too.
+    assert "Help screen (?):" in out
+    assert "Discuss pm" in out
 
 
 def test_tui_keys_documents_prefix_keys_as_prefixes():
@@ -990,6 +1016,38 @@ def test_help_names_a_real_autostart_command():
     out = CliRunner().invoke(cli, ["tui", "keys"]).output
     assert "autostart add X" in out
     assert "autostart target" not in out
+
+
+def test_help_does_not_claim_bare_autostart_disables_it():
+    """Bare `pm autostart` prints its help; it does not toggle auto-start off.
+
+    The auto-start paragraph said "Bare `autostart` only turns auto-start
+    off", but the group has no such behaviour: disabling is `A` with no PR
+    selected or `autostart clear`.  An operator relying on the old line
+    would type a command that does nothing.
+    """
+    out = CliRunner().invoke(cli, ["tui", "keys"]).output
+    flat = " ".join(out.split())
+    assert "Bare `autostart` only turns auto-start off" not in flat
+    assert "`A` with no PR selected (or `autostart clear`) turns auto-start off" in flat
+    # And the command really does print its help rather than disable
+    # anything (the exit code varies across Click versions).
+    result = CliRunner().invoke(cli, ["autostart"])
+    assert "Usage:" in result.output
+    assert "Manage auto-start targets" in result.output
+
+
+def test_tui_send_examples_match_the_current_bindings():
+    """`pm tui send`'s examples described the old guide keys.
+
+    `g` is Merge and `x` is hide/show plan group; the guide is `H`.  An
+    operator copying "g (launch guide)" would merge a PR instead.
+    """
+    out = " ".join(CliRunner().invoke(cli, ["tui", "send", "--help"]).output.split())
+    assert "(launch guide)" in out
+    assert "(merge the selected PR)" in out
+    assert "dismiss guide" not in out
+    assert "hide/show plan group" in out
 
 
 def test_prompt_texts_do_not_reference_removed_pr_done():
