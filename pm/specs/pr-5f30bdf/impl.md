@@ -122,6 +122,33 @@ says keep it in sync with `[project.dependencies]` — was also missing
 could not run `pm md-render` (sign-off report embedding) without an
 `ImportError`.  It is added there too.
 
+### R4 — The TUI must work at the declared floor (QA s5 follow-up)
+Declaring `textual>=2.0.1` (R3) makes 2.0.1 a *supported* install, and
+there `App.query_one` searches only the **active** screen's DOM.  With a
+modal screen pushed (the model popup, `o`), the default screen's
+`#command-bar` is unreachable, so `App.query_one("#command-bar", ...)`
+raised `NoMatches` from `App.on_key` — and a background reload could hit
+`_command_bar_in_use()` the same way.  QA s5: Esc in the model popup
+killed the TUI at 2.0.1.
+
+- `ProjectManagerApp._command_bar()` returns the bar, or `None` when the
+  query raises `NoMatches`, and every App-level lookup goes through it
+  (six sites: `on_key`, `check_action`, `_command_bar_in_use`,
+  `_drain_command_queue`'s refocus, `action_focus_command`,
+  `action_unfocus_command`).
+- "No command bar" means "not focused / not in use": App-level prefix keys
+  stay out of the way (the `len(screen_stack) > 1` guard already returns),
+  a background reload never crashes, and nothing silently refocuses the
+  bar under a modal.
+- Regression test `tests/test_view_focus_command_bar.py::
+  test_modal_on_top_treats_missing_command_bar_as_idle` pushes a
+  `ModalScreen` over a real command bar, asserts `_command_bar_in_use()`
+  is `False`, and calls `App.on_key` with a `z` event (the pre-fix crash)
+  asserting it neither raises nor swallows the key.
+
+Verified by QA at 2.0.1 (live TUI closes the popup cleanly on Esc; full
+suite 5461 passed / 1 skipped) and at 8.2.7/8.2.8.
+
 ## Implicit requirements
 
 - **No credential/settings mutation in tests.**  Every new test patches
@@ -207,6 +234,10 @@ No **[UNRESOLVED]** ambiguities.
   Docker image now prevent new installs from landing there.  A user on
   textual 2.0.0 gets the popup but with a clipped status column (R3), so
   the floor names 2.0.1.
+- A modal screen is on top of the default screen (the model popup): every
+  App-level command-bar lookup returns `None` instead of raising
+  `NoMatches`, so Esc, prefix keys and background reloads keep working at
+  the textual floor (R4).
 
 ## Tests to add/update
 
@@ -230,5 +261,11 @@ In `tests/test_providers.py`:
 5. Update the failed-`os.replace` test to expect `ProvidersWriteError`
    (original kept, temp cleaned); add the `mkstemp`-failure branch
    (typed error naming the target, file untouched, no temp left).
+
+In `tests/test_view_focus_command_bar.py`:
+
+6. A modal screen on top of the command bar: `_command_bar_in_use()` is
+   `False`, and `App.on_key` neither raises `NoMatches` nor handles the
+   key — the pre-fix crash QA s5 found at the textual floor (R4).
 
 Existing provider permission/roundtrip/CLI tests must keep passing.

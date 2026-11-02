@@ -159,6 +159,22 @@ def test_modal_on_top_treats_missing_command_bar_as_idle():
             yield TechTree(id="tech-tree")
             yield CommandBar(id="command-bar")
 
+    class Key:
+        """The parts of a textual key event ``on_key`` touches."""
+
+        key = "z"
+        character = "z"
+
+        def __init__(self):
+            self.prevented = False
+            self.stopped = False
+
+        def prevent_default(self):
+            self.prevented = True
+
+        def stop(self):
+            self.stopped = True
+
     async def body():
         app = Host()
         async with app.run_test(size=(80, 20)) as pilot:
@@ -167,12 +183,19 @@ def test_modal_on_top_treats_missing_command_bar_as_idle():
             app.push_screen(Popup())
             await pilot.pause()
             idle = app._command_bar_in_use()
+            # The pre-fix crash: on_key queried #command-bar directly and
+            # raised NoMatches while the modal was up.  A prefix key must
+            # also be left for the modal, not swallowed by the App.
+            event = Key()
+            app.on_key(event)
             await pilot.press("escape")
             await pilot.pause()
-            return idle, len(app.screen_stack)
+            return idle, event.prevented, event.stopped, len(app.screen_stack)
 
-    idle, stack = asyncio.run(body())
+    idle, prevented, stopped, stack = asyncio.run(body())
     assert idle is False
+    assert prevented is False
+    assert stopped is False
     assert stack == 1
 
 

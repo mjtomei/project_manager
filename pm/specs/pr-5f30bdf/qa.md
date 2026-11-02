@@ -131,6 +131,9 @@ switches it to the project view,
 - a router's route status renders in full — either `[OK]` or
   `[UNAVAILABLE: …]` with its closing bracket — and the box is wide enough
   that no column is clipped at the right edge;
+- pressing Esc closes the popup and leaves the TUI running (2.0.1's
+  `App.query_one` sees only the active screen, so App-level command-bar
+  lookups must not raise while the popup is up — QA s5);
 - the installed `textual` version satisfies `>=2.0.1`.
 
 ### R14 — The popup reflects a default changed elsewhere
