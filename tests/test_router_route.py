@@ -9,6 +9,7 @@ recovery (it fails like the default provider does).
 
 import json
 import re
+import shlex
 import os
 import shutil
 import socket
@@ -371,15 +372,30 @@ class TestBuildShellCmd:
         assert "route_bridge" not in cmd
 
 
+def _assignment_words(cmd: str) -> list[str]:
+    """``NAME=value`` words in *cmd*: values a process argument would carry."""
+    return [w for w in shlex.split(cmd)
+            if re.match(r"[A-Za-z_][A-Za-z0-9_]*=", w)]
+
+
 def _cmd_env(cmd: str) -> dict[str, str]:
-    """The values a built command sets for claude: its ``env_out`` (and any
-    ``NAME=value`` assignment in the string, e.g. a probe command)."""
-    import re
-    import shlex
-    env = dict(w.split("=", 1) for w in shlex.split(cmd)
-               if re.match(r"[A-Z_][A-Z0-9_]*=", w))
-    env.update(getattr(cmd, "env", None) or {})
-    return env
+    """The values a built command sets for claude: its ``env_out``.
+
+    The command string itself holds none (it becomes a process argument,
+    readable by every local user), so every caller also guards that.
+    """
+    assert not _assignment_words(cmd), "a value is inlined in the command"
+    return dict(getattr(cmd, "env", None) or {})
+
+
+def _probe_cmd(cfg: ProviderConfig, *, container: bool = False) -> Launch:
+    """The live probe's command with its ``env_out`` attached (as
+    :func:`_launch`), so ``_cmd_env`` / ``_sourced`` see what Claude gets."""
+    env: dict[str, str] = {}
+    cmd = Launch(router_route._probe_shell_cmd(cfg, "sid", container=container,
+                                               env_out=env))
+    cmd.env = env
+    return cmd
 
 
 class TestClassifierRoute:
@@ -434,7 +450,7 @@ class TestClassifierRoute:
     def test_live_probe_cmd_carries_it(self, pm_home_dir):
         _write_providers(pm_home_dir, classifier_model=self.CLASSIFIER)
         cfg = get_provider(ROUTE, strict=True)
-        cmd = router_route._probe_shell_cmd(cfg, "sid", container=False)
+        cmd = _probe_cmd(cfg)
         assert _cmd_env(cmd)["CLAUDE_CODE_AUTO_MODE_MODEL"] == self.CLASSIFIER
 
     def test_live_probe_cmd_unsets_what_launches_unset(self, pm_home_dir,
@@ -446,7 +462,7 @@ class TestClassifierRoute:
         monkeypatch.setenv("CLAUDE_CODE_AUTO_MODE_MODEL", self.CLASSIFIER)
         _write_providers(pm_home_dir, model="z-ai/glm-5.3-flash")
         cfg = get_provider(ROUTE, strict=True)
-        cmd = router_route._probe_shell_cmd(cfg, "sid", container=False)
+        cmd = _probe_cmd(cfg)
         for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
                     "CLAUDE_CODE_AUTO_MODE_MODEL"):
             assert self._shell_env(cmd, var) == "unset", var
@@ -1001,7 +1017,7 @@ class TestSubagentPin:
     def test_live_probe_cmd_is_pinned(self, pm_home_dir):
         _write_providers(pm_home_dir)
         cfg = get_provider(ROUTE, strict=True)
-        cmd = router_route._probe_shell_cmd(cfg, "sid", container=False)
+        cmd = _probe_cmd(cfg)
         assert self._pin(cmd) == (MODEL, "1")
 
 
@@ -2322,6 +2338,221 @@ def test_transcript_path_matches_claude_mangling():
     from pm_core.claude_launcher import transcript_path_for
     p = transcript_path_for("/tmp/pm-route-probe-020ea4s_/a.b c", "sid")
     assert p.parent.name == "-tmp-pm-route-probe-020ea4s--a-b-c"
+
+
+# A synthetic canary in a variable pm classifies as secret
+# (providers.is_secret_env_var): a router's ``env`` may carry a key or token,
+# e.g. a team header.
+_CANARY = "CANARY-not-a-real-secret-3d3b3ce"
+_HEADER = f"x-team-token: {_CANARY}"
+_TEAM = "blue-team-3d3b3ce"
+
+# Stand-in for claude -p that records the environment it was started with.
+_ENV_PROBE_CLAUDE = r"""#!/usr/bin/env python3
+import json, os, sys
+names = os.environ["PROBE_ENV_NAMES"].split(",")
+with open(os.environ["PROBE_ENV_OUT"], "w") as f:
+    json.dump({n: os.environ.get(n) for n in names}, f)
+model = sys.argv[sys.argv.index("--model") + 1]
+print(json.dumps({"result": "ok", "is_error": False,
+                  "modelUsage": {model: {}}}))
+"""
+
+
+class TestProbeEnvTransport:
+    """``pm provider test --live`` hands the route's environment to Claude
+    without putting a value in any process's arguments (pr-3d3b3ce).
+
+    Arguments are readable by every local user (/proc/<pid>/cmdline, ps)
+    and kept by execve auditing.  The probe used to inline every value
+    (``env NAME=value ... claude -p``) into its ``bash -c`` argument and,
+    for a container, into the host-side ``podman exec`` argv that lives as
+    long as the probe.  As in a pane launch, the command now names only the
+    variables it unsets; the values travel in the process environment and
+    the container runtime forwards each by name (``-e NAME``).
+    """
+
+    CONTAINER = "pm-route-test-3d3b3ce"
+
+    @pytest.fixture
+    def route(self, pm_home_dir):
+        _write_providers(pm_home_dir, env={
+            "ANTHROPIC_CUSTOM_HEADERS": _HEADER, "ACME_TEAM": _TEAM})
+        return get_provider(ROUTE, strict=True)
+
+    @staticmethod
+    def _expected(cfg, *, container):
+        """``(assign, unset)`` the probe's selection decides."""
+        _, env, _ = router_route.launch_parts(cfg, container=container)
+        return launch_env(cfg, env, cfg.model)
+
+    def _run_probe(self, monkeypatch, cfg, short_dir, *, container):
+        """live_probe with its subprocess captured: ``(argv, env)``."""
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen.update(argv=list(argv), env=kwargs.get("env"))
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(
+                {"result": "ok", "is_error": False,
+                 "modelUsage": {MODEL: {}}}), stderr="")
+
+        monkeypatch.setattr("pm_core.router_route.subprocess.run", fake_run)
+        monkeypatch.setattr("pm_core.router_route.time.sleep", lambda s: None)
+        monkeypatch.setattr("pm_core.container._get_runtime", lambda: "podman")
+        kw = ({"container_name": self.CONTAINER} if container
+              else {"cwd": str(short_dir)})
+        router_route.live_probe(cfg, **kw)
+        return seen["argv"], seen["env"]
+
+    @pytest.mark.parametrize("container", [False, True])
+    def test_no_value_in_the_probe_argv(self, route, short_dir, monkeypatch,
+                                        container):
+        argv, env = self._run_probe(monkeypatch, route, short_dir,
+                                    container=container)
+        assign, unset = self._expected(route, container=container)
+        joined = "\0".join(argv)
+        assert _CANARY not in joined
+        assert _TEAM not in joined
+        for var in assign:  # secret or not: no assignment at all
+            assert f"{var}=" not in joined, var
+        # The values reach the probe through its environment, on top of the
+        # caller's own (PATH, HOME, ...).
+        assert env is not None
+        assert {k: env.get(k) for k in assign} == assign
+        assert env["ANTHROPIC_CUSTOM_HEADERS"] == _HEADER
+        assert env["PATH"] == os.environ["PATH"]
+        # What the probe removes is still removed, by name.
+        for var in unset:
+            assert f"-u {var} " in argv[-1], var
+
+    def test_container_runtime_gets_names_only(self, route, short_dir,
+                                               monkeypatch):
+        argv, env = self._run_probe(monkeypatch, route, short_dir,
+                                    container=True)
+        assign, _ = self._expected(route, container=True)
+        cut = argv.index(self.CONTAINER)
+        opts, rest = argv[:cut], argv[cut + 1:]
+        assert opts[:4] == ["podman", "exec", "-w", "/workspace"]
+        names = [opts[i + 1] for i, a in enumerate(opts) if a == "-e"]
+        assert sorted(names) == sorted(assign)
+        assert len(opts) == 4 + 2 * len(names)  # nothing else forwarded
+        assert rest[:2] == ["bash", "-c"] and len(rest) == 3
+        assert rest[2].startswith(
+            router_route.container_ensure_cmd(route) + " && env -u ")
+        # The in-container forwarder's URL, not the host router's.
+        assert env["ANTHROPIC_BASE_URL"] == router_route.container_base_url(
+            route)
+
+    @pytest.mark.parametrize("container", [False, True])
+    def test_probe_cmd_hands_values_to_env_out(self, route, container):
+        env: dict[str, str] = {}
+        cmd = router_route._probe_shell_cmd(route, "sid", container=container,
+                                            env_out=env)
+        assert _CANARY not in cmd and _TEAM not in cmd
+        assert not _assignment_words(cmd)
+        assert env == self._expected(route, container=container)[0]
+        assert f" --model {MODEL} " in cmd
+
+    @pytest.mark.parametrize("container", [False, True])
+    def test_nothing_to_unset(self, pm_home_dir, container):
+        # unset_env: [] plus a classifier model assigns every routing
+        # variable, so the probe unsets nothing and runs claude directly.
+        _write_providers(pm_home_dir, unset_env=[],
+                         classifier_model="work/classifier",
+                         env={"ANTHROPIC_CUSTOM_HEADERS": _HEADER})
+        cfg = get_provider(ROUTE, strict=True)
+        assign, unset = self._expected(cfg, container=container)
+        assert unset == ()
+        env: dict[str, str] = {}
+        cmd = router_route._probe_shell_cmd(cfg, "sid", container=container,
+                                            env_out=env)
+        prefix = (router_route.container_ensure_cmd(cfg) + " && "
+                  if container else "")
+        assert cmd.startswith(f"{prefix}claude -p "), cmd
+        assert _CANARY not in cmd and not _assignment_words(cmd)
+        assert env == assign
+        assert env["ANTHROPIC_CUSTOM_HEADERS"] == _HEADER
+
+    def test_env_out_is_required(self, route):
+        # Without it the route's environment (ANTHROPIC_BASE_URL) could not
+        # reach Claude, and the probe would run on the caller's account.
+        with pytest.raises(TypeError):
+            router_route._probe_shell_cmd(route, "sid", container=False)
+
+    @staticmethod
+    def _argv_recorder(bindir: Path, name: str, log: Path) -> None:
+        """A *name* on PATH that logs its argv (one line, fields split by
+        \\x1f) and then runs the real *name* unchanged."""
+        real = shutil.which(name)
+        shim = bindir / name
+        log_q, real_q = shlex.quote(str(log)), shlex.quote(real)
+        shim.write_text("#!/bin/sh\n"
+                        f"printf '%s\\037' {name} \"$@\" >> {log_q}\n"
+                        f"echo >> {log_q}\nexec {real_q} \"$@\"\n")
+        shim.chmod(0o755)
+
+    def test_host_probe_end_to_end(self, route, short_dir, monkeypatch):
+        """Real processes: no argv the probe execs (bash, env, claude) holds
+        a value, and Claude still gets the route's environment over the
+        caller's, minus what the probe unsets."""
+        bindir = short_dir / "bin"
+        bindir.mkdir()
+        argv_log, env_out = short_dir / "argv.log", short_dir / "env.json"
+        for name in ("bash", "env"):
+            self._argv_recorder(bindir, name, argv_log)
+        claude = bindir / "claude"
+        claude.write_text(_ENV_PROBE_CLAUDE)
+        claude.chmod(0o755)
+        assign, unset = self._expected(route, container=False)
+        monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
+        monkeypatch.setenv("PROBE_ENV_OUT", str(env_out))
+        monkeypatch.setenv("PROBE_ENV_NAMES", ",".join([*assign, *unset]))
+        # What a caller's shell may carry: a stray key, its own endpoint,
+        # another route's subagent pin.
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-stray-not-real")
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:9")
+        monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", "other/model")
+        monkeypatch.setattr("pm_core.router_route.time.sleep", lambda s: None)
+        out = router_route.live_probe(route, cwd=str(short_dir))
+        assert out["exit"] == 0, out
+        execs = [line.split("\x1f")[:-1]
+                 for line in argv_log.read_text().splitlines()]
+        assert [a[0] for a in execs] == ["bash", "env"]
+        for argv in execs:
+            joined = "\0".join(argv)
+            assert _CANARY not in joined and _TEAM not in joined, argv
+            assert not [v for v in assign if f"{v}=" in joined], argv
+        got = json.loads(env_out.read_text())
+        assert {k: got[k] for k in assign} == assign
+        assert got["ANTHROPIC_CUSTOM_HEADERS"] == _HEADER
+        assert got["ANTHROPIC_BASE_URL"] == route.api_base
+        assert got["CLAUDE_CODE_SUBAGENT_MODEL"] == MODEL
+        assert {k: got[k] for k in unset} == dict.fromkeys(unset)
+        assert "ANTHROPIC_API_KEY" in unset
+
+    def test_container_runtime_end_to_end(self, route, short_dir,
+                                          monkeypatch):
+        """A real runtime process gets each value in its environment under
+        the name it is told to forward, and none in its argv."""
+        log = short_dir / "runtime.json"
+        runtime = short_dir / "fake-runtime"
+        runtime.write_text(
+            "#!/usr/bin/env python3\nimport json, os, sys\n"
+            "a = sys.argv\n"
+            "names = [a[i + 1] for i, x in enumerate(a) if x == '-e']\n"
+            f"json.dump({{'argv': a, 'env': {{n: os.environ.get(n) "
+            f"for n in names}}}}, open({str(log)!r}, 'w'))\n"
+            "print(json.dumps({'result': 'ok', 'is_error': False}))\n")
+        runtime.chmod(0o755)
+        monkeypatch.setattr("pm_core.container._get_runtime",
+                            lambda: str(runtime))
+        monkeypatch.setattr("pm_core.router_route.time.sleep", lambda s: None)
+        out = router_route.live_probe(route, container_name=self.CONTAINER)
+        assert out["exit"] == 0, out
+        rec = json.loads(log.read_text())
+        assert _CANARY not in "\0".join(rec["argv"])
+        assign, _ = self._expected(route, container=True)
+        assert rec["env"] == assign
 
 
 # ---------------------------------------------------------------------------
