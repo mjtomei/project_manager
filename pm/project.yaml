@@ -4397,7 +4397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T01:38:26.039714+00:00'
+  updated_at: '2026-11-02T01:54:44.526739+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -6982,6 +6982,29 @@ prs:
       directory, a temporary HOME or a mocked tmux.'
     created_at: '2026-11-02T01:38:25Z'
     last_edited: '2026-11-02T01:38:25Z'
+  - id: note-501316c
+    text: 'Review loop b48f i19 (commit defbb6e5; no requirement changes; full suite
+      5504 passed / 1 skipped, 452.9 s, log /pm-captures/review-b48f-i19/full-suite-final.log).
+      Verification pass over the head after the b48f i18 fixes; two items. (1) list_grouped_sessions()
+      still accepted another project''s grouped session: i13 limited it to pm''s <base>~<N>
+      names but tested only the part after the LAST "~", so pm-x-abc12345~foo-deadbeef~1
+      (the grouped session pm creates when attaching to a project whose session merely
+      starts with pm-x-abc12345~) counted as a pm-x-abc12345 grouped session. Verified
+      live on tmux 3.2a: find_unattached_grouped_session returned it (pm session would
+      attach the user to the other project), sessions_in_group returned it (pm session
+      kill, Ctrl-Q group fallback, --disconnect-others, layout sizing), and once that
+      project''s base was gone discovery adopted the default server via its surviving
+      ~1 (with both of its sessions running, tmux reports the bare prefix as ambiguous,
+      which is why i16''s live check missed it). The whole remainder after base~ must
+      now be ASCII digits, the rule qa_status._is_grouped_of already used. (2) The
+      discovery watcher prompt''s "tmux list-panes -t <session>:discovery" example
+      (missed by i18''s quoting sweep) now shlex-quotes the whole session:window target.
+      New tests (TestListGroupedSessions::test_another_projects_grouped_session_is_not_ours,
+      live TestAnotherProjectsGroupedSessionIsNotOurs x2, test_discovery_prompt_quotes_the_session_window_target)
+      all fail on the pre-fix head. i16/i18 residuals unchanged. No live session,
+      server or shared host config touched.'
+    created_at: '2026-11-02T01:54:44Z'
+    last_edited: '2026-11-02T01:54:44Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
