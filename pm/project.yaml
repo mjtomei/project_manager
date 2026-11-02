@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-11-02T00:38:30.139005+00:00'
+  updated_at: '2026-11-02T01:09:19.718674+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38928,6 +38928,33 @@ prs:
       helper/prompt/verifier work stays dropped.'
     created_at: '2026-11-02T00:38:30Z'
     last_edited: '2026-11-02T00:38:30Z'
+  - id: note-74c2fe9
+    text: 'Review loop 928f i45: one leftover in the kept tmux-recipe scope, the PR''s
+      own class (a completion check that reads the state a failed run left behind,
+      one branch short); no pm_core change. R111: every failure path writes the rejection
+      mark before it tears the recorder down (the driving step''s failed send sets
+      the session option, then recorder.rejected, then kills the session, stops the
+      pipe and releases the claim), so a worker or session torn down in that gap leaves
+      the mark with the recorder still attached. Step 5 read the marks only in its
+      recorder-gone branch, so that state took the detach path — the detach ended
+      the recorder cleanly (asciinema exits 0, the returning attach writes recorder.command-done),
+      and the cast/status/mark/transcript checks accepted a cast that stops before
+      the scenario step the failed send never ran. Verified with the stub harness
+      and live on tmux 3.2a + asciinema 2.1.0 (a real recorder attached to a real
+      target session, the mark set: pre-fix rc 0, post-fix rc 1 with the refusal).
+      Fix: the read and refusal are one capture_rejected function in step 5''s own
+      paste, called where the gone branch called the inline block and at the top of
+      the live branch before the detach; step 3''s restart now clears the session
+      half of the rejection as well as the file half it already cleared (step 5 reads
+      both in both recorder states, so the stale session mark would otherwise refuse
+      the restart''s own finished recording). Tests: test_a_live_recorder_does_not_hide_a_rejection_mark
+      (session and file handles) and test_step_three_restart_clears_a_previous_rejection;
+      each mutation fails exactly its case. Recipe file 396 passed (was 393); related
+      suites 210 passed; full suite 5593 passed, 1 skipped, 0 failed (503.10 s, once
+      on the final tree). Evidence: /pm-captures/review-928f-i45/. impl.md R111, qa.md.
+      The dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-11-02T01:09:19Z'
+    last_edited: '2026-11-02T01:09:19Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
