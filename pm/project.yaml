@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T03:23:36.960264+00:00'
+  updated_at: '2026-11-02T03:29:11.587952+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25524,6 +25524,21 @@ prs:
       balanced; with a client on ~1 it would create pm-<user tag>~2.'
     created_at: '2026-11-02T03:23:36Z'
     last_edited: '2026-11-02T03:23:36Z'
+  - id: note-e48c201
+    text: 'QA S11 (2026-11-02): PASS at a3b94a44 (code unchanged since; later commits
+      are notes), all 4 stories live from a /scratch project (device differs from
+      ~/.pm), real-Claude discovery watcher, no fix. Traps: (1) tmux 3.2a in the QA
+      container often does not reap a pane process that exits within about a second:
+      it stays a zombie of the tmux server until some other child exits, so a remain-on-exit
+      pane shows no "Pane is dead (status N, ...)" line and an empty pane_dead_status
+      until then. A plain python3 sys.exit(1) pane does the same, so it is not pm.
+      Read the pane text, and check the status after another pane exits. (2) A pm
+      session started from the QA agent shell copies CLAUDECODE, CLAUDE_CODE_SESSION_ID
+      and CLAUDE_CODE_MESSAGING_SOCKET/TOKEN into the tmux global env. Unset them
+      with tmux set-environment -g -u before starting a real-Claude watcher. (3) pm/transcripts/*.jsonl
+      are symlinks, so use grep -R, not -r. Captures: /pm-captures/scenarios/11/.'
+    created_at: '2026-11-02T03:29:11Z'
+    last_edited: '2026-11-02T03:29:11Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
