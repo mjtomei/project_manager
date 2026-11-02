@@ -5173,7 +5173,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-11-02T22:49:11.454898+00:00'
+  updated_at: '2026-11-02T23:25:59.784967+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5601,6 +5601,28 @@ prs:
       one E clone. No new issues in this PR scope.'
     created_at: '2026-11-02T22:49:11Z'
     last_edited: '2026-11-02T22:49:11Z'
+  - id: note-c847b69
+    text: 'QA S26 re-run 2026-11-02 at 2150a33d (after the review flag): re-executed
+      all eight stories live, with pipe-pane transcript.log; captures /pm-captures/scenarios/26/story1-8
+      updated and casts/mp4s re-rendered. Corrections to the earlier note: (a) story
+      2: `pm pr review pr-04b09dd` on a stale record with one clone prints "PR pr-04b09dd
+      is already in_review." then the re-link line and "Opened review window" (story2/cli-review2.txt);
+      the TUI d then says "Switched to review window". (b) story 1: qa-A main pane
+      cwd = A clone (story1/qa-A-panes.txt); the second pane is the planner at the
+      project root. (c) story 4: the external note-add reload under the modal IS dropped
+      - with the modal open, `pm pr edit pr-5bbc79d --status qa` left B card at in_review
+      after Esc, and only R showed qa (story4/reload-test-*.txt); the debug log NoMatches
+      traceback is from the modal own post-write reload ("model settings: tree reload
+      failed"), while the external reload logs only "action: reload (state only)".
+      (d) transcript.log is now present in stories 1-7 (story 8 keeps its CLI scrollback).
+      Remaining deviation: story 5 Then "the main registry debug log also has them"
+      does NOT hold - the popup [workdirs] re-link line is in the cwd-keyed popup
+      log (~/.pm/debug/pm-pr-88c7ea1-...-af700eeb.log) and the TUI session log has
+      0 [workdirs] lines (command_log_file keys on the process cwd); the re-link itself
+      IS written to the main registry (project.yaml). Needs a ruling: spec error vs.
+      product change.'
+    created_at: '2026-11-02T23:25:59Z'
+    last_edited: '2026-11-02T23:25:59Z'
   model: provider:claude-main-xhigh-pm
   effort: high
 - id: pr-0778fbe
