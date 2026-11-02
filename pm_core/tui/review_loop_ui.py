@@ -1398,6 +1398,52 @@ def _transcript_is_another_session(app, pane_id: str,
     return True
 
 
+def _note_impl_start_before_loop(app, session: str, pr: dict) -> None:
+    """Journal an impl session a review loop took over before PM tracked it.
+
+    The ``start`` attempt is derived from the impl tracker registering the
+    pane (runtime mirror), which happens on the impl-idle tick.  A review
+    loop started within the first tick after ``s`` made the tick skip the
+    PR before that, so the launched session had no attempt while the loop
+    ran, and its first registration after the loop opened a lone ``start``
+    row dated after the loop (QA S55).  Mirror the registration once and
+    clear it at once: the attempt opens and ends ``untracked`` (pane still
+    open), as when PM was already tracking it, and the re-registration when
+    the loop ends folds into it (E8).  Observational only: the pane is not
+    tracked or polled, so idle detection and auto-start are unchanged.
+    """
+    from pm_core.cli.helpers import _pr_display_id
+    from pm_core.tui import auto_start as _auto_start
+    from pm_core.claude_launcher import (
+        pane_runs_transcript, session_id_from_transcript)
+    from pm_core.pane_idle import (
+        _runtime_mirror_register, _runtime_mirror_clear)
+    from pm_core import runtime_state as _rs
+
+    pr_id = pr.get("id", "")
+    noted = app.__dict__.setdefault("_impl_start_noted", set())
+    pane_id = _find_impl_pane(session, _pr_display_id(pr))
+    if not pane_id or (pr_id, pane_id) in noted:
+        return
+    tdir = _auto_start.get_transcript_dir(app)
+    if not tdir:
+        return
+    impl_transcript = str(tdir / f"impl-{pr_id}.jsonl")
+    if not os.path.lexists(impl_transcript):
+        return  # not launched by this TUI with a transcript (e.g. CLI start)
+    noted.add((pr_id, pane_id))
+    if not pane_runs_transcript(pane_id, pr.get("workdir"), impl_transcript):
+        return  # another driver's pane (S79): not ours to journal
+    session_id = session_id_from_transcript(impl_transcript)
+    if not session_id:
+        return
+    cur = _rs.get_action_state(pr_id, "start") or {}
+    if cur.get("state") in _rs.IN_FLIGHT_STATES:
+        return  # already open (e.g. still mirrored by an earlier tick)
+    _runtime_mirror_register(pr_id, pane_id, session_id)
+    _runtime_mirror_clear(pr_id)
+
+
 def _poll_impl_idle(app) -> None:
     """Poll implementation panes for idle detection.
 
@@ -1431,6 +1477,12 @@ def _poll_impl_idle(app) -> None:
         # Skip PRs with running review loops (they manage their own state)
         loop = app._review_loops.get(pr_id)
         if loop and loop.running:
+            if not tracker.is_tracked(pr_id):
+                try:
+                    _note_impl_start_before_loop(app, session, pr)
+                except Exception:
+                    _log.debug("impl start note failed for %s", pr_id,
+                               exc_info=True)
             continue
 
         active_pr_ids.add(pr_id)
@@ -1466,6 +1518,10 @@ def _poll_impl_idle(app) -> None:
                 _watch_untracked_trust(app, pane_id, pr.get("workdir"),
                                        untracked_seen)
                 continue
+            # Its start is journaled now; a later review loop must not
+            # note it again (_note_impl_start_before_loop).
+            app.__dict__.setdefault("_impl_start_noted", set()).add(
+                (pr_id, pane_id))
 
         tracker.poll(pr_id)
 

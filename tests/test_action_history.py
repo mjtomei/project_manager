@@ -603,6 +603,65 @@ class TestRuntimeCapture:
         text = "\n".join(hq.render_text(m))
         assert "not tracked 10m00s" in text
 
+    def test_impl_start_taken_by_loop_before_first_tick(
+            self, clock, tmp_path, monkeypatch):
+        """``s`` then a review loop within the first impl-idle tick: the
+        tick skipped the PR before registering its impl pane, so the
+        launched session had no attempt during the loop and its first
+        registration after the loop opened a lone ``start`` row dated
+        after the loop (QA S55).  It is journaled once as ``untracked``
+        while the loop runs, and the post-loop re-registration folds in."""
+        from pm_core.pane_idle import PaneIdleTracker
+        from pm_core.tui import review_loop_ui
+        monkeypatch.setenv("HOME", str(tmp_path))
+        sid = "6ca0ccf2-e478-4bbd-bdc2-b90ad8e2af13"
+        tdir = tmp_path / "pm" / "transcripts" / "manual-abc"
+        tdir.mkdir(parents=True)
+        (tdir / f"impl-{PR}.jsonl").symlink_to(tmp_path / f"{sid}.jsonl")
+        monkeypatch.setattr("pm_core.tmux.pane_start_command",
+                            lambda pane: f"claude --session-id {sid}")
+        monkeypatch.setattr("pm_core.tmux.pane_exists", lambda pane: True)
+        monkeypatch.setattr(
+            review_loop_ui, "_find_impl_pane",
+            lambda session, name: "%3" if name == PR else None)
+        loop = SimpleNamespace(running=True)
+        app = SimpleNamespace(
+            _session_name="sess", _pane_idle_tracker=PaneIdleTracker(),
+            _data={"prs": [{"id": PR, "status": "in_review",
+                            "workdir": str(tmp_path)}]},
+            _review_loops={PR: loop}, _pending_merge_prs=set(),
+            _merge_propagation_phase=set(), _root=tmp_path / "pm",
+            _auto_start_run_id=None, _manual_transcript_run_id="manual-abc",
+            log_message=lambda *a, **k: None)
+        with patch("pm_core.tui.auto_start.is_enabled", return_value=False), \
+                patch.object(rs, "_pane_alive", return_value=True):
+            for _ in range(3):
+                review_loop_ui._poll_impl_idle(app)
+                clock.advance(5)
+            (first,) = [a for a, e in _attempts().items()
+                        if e["action"] == "start"]
+            assert _ends()[first]["outcome"] == "untracked"
+            assert _ends()[first]["detail"] == (
+                "pane still open; PM stopped tracking it")
+            assert not rs.get_action_state(PR, "start")
+            # Observational only: the pane is not tracked during the loop.
+            assert not app._pane_idle_tracker.is_tracked(PR)
+            loop.running = False
+            review_loop_ui._poll_impl_idle(app)
+            assert app._pane_idle_tracker.is_tracked(PR)
+            assert rs.get_action_state(PR, "start")["state"] == "running"
+            # A second loop on the same pane does not journal it again.
+            loop.running = True
+            for _ in range(2):
+                review_loop_ui._poll_impl_idle(app)
+                clock.advance(5)
+        starts = [a for a, e in _attempts().items() if e["action"] == "start"]
+        assert len(starts) == 2
+        (row,) = [a for a in hq.build_history(
+            PR, now=clock.t, live=False)["attempts"] if a["action"] == "start"]
+        assert row["id"] == first and row["merged_ids"] == [starts[1]]
+        assert row["outcome"] == "untracked"
+
     def test_pr_cleanup_ends_in_flight_attempts(self, clock):
         from pm_core import pr_cleanup
         rs.set_action_state(PR, "merge", "running", pane_id="%1",
