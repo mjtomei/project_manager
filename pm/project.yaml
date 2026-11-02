@@ -53768,3 +53768,46 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-45ffba0
+  plan: bugs
+  title: 'Bug: a SIGUSR2 queue drain right after a command-bar command refocuses the
+    command bar, so the next key is lost or typed into the bar'
+  branch: pm/pr-45ffba0-bug-a-sigusr2-queue-drain-right-after-a-command-ba
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/app.py _drain_command_queue (unchanged from
+    master): typing = self._command_bar_in_use() is read when a queued outside command
+    (pm autostart status/list, picker) is drained; if that drain lands after a command-bar
+    command was handled but before the command deferred tree focus (call_later) runs,
+    the bar still has focus, so the drain calls CommandBar.focus() and focus ends
+    on the empty bar after the command finished. A key typed right after the Enter
+    (] after /pr select q, arrows after a sync command) is then lost or typed into
+    the bar.
+
+
+    Repro (QA pr-6aa74c6 S15, 2026-11-02; local-backend scratch project, private tmux
+    socket, 200x120 TUI): in another pm-session window run `while :; do pm autostart
+    status; pm autostart list; done` (~5 queued commands/s, all rc 0). In the TUI
+    submit `/pr note add <pr> "drain probe n"` with no key after it and read the bar
+    2 s later: focused and empty ("Type command (e.g. pr start pr-001)...") in 14
+    of 20 rounds (refiner: 10/20 on pr-6aa74c6, 13/20 on origin/master 5b352d16).
+    With `/pr select q` Enter `]` the refiner saw 2 of 20 rounds lose the `]` or leave
+    `]` in the bar (0 of 20 in the S15 run). Debug-log signature: `log: Selected:
+    ...` / `log: Added note ...` immediately followed by `queue dispatch: cmd=autostart
+    ...`.
+
+
+    Related: pr-adfdce3 (plans/QA-view variant), note-08f2635 on pr-6aa74c6. Captures:
+    /pm-captures/scenarios/15/ (driver/steps-s6.jsonl, ev=drain). Fix direction: decide
+    "user is typing" from the bar state before the queued dispatch, ignoring a bar
+    whose command was just submitted (held keys / CommandSubmitted in flight), instead
+    of refocusing whenever the bar has focus.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T09:09:12.448622+00:00'
+  updated_at: '2026-11-02T09:09:12.448622+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
