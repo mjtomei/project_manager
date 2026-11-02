@@ -1396,7 +1396,9 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         root = state_root()
         workdir = _ensure_workdir(data, pr_entry, root)
         if not workdir:
-            click.echo(f"Review window: no workdir for {pr_entry['id']}. Start the PR first.")
+            click.echo(f"Review window: no workdir for {pr_entry['id']} — "
+                       f"start the PR first with 'pm pr start {pr_entry['id']}' "
+                       f"(TUI: s).")
             return
 
     # Review loop always forces a fresh window
@@ -2159,13 +2161,15 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
 
     workdir = cwd or pr_entry.get("workdir")
     if not workdir:
-        click.echo(f"Merge window: no workdir for {pr_entry['id']}.")
+        click.echo(f"Merge window: no workdir for {pr_entry['id']} — create "
+                   f"it with 'pm pr start {pr_entry['id']}' (TUI: s).")
         return
     if not Path(workdir).exists():
         root = state_root()
         workdir = _ensure_workdir(data, pr_entry, root)
         if not workdir:
-            click.echo(f"Merge window: no workdir for {pr_entry['id']}.")
+            click.echo(f"Merge window: no workdir for {pr_entry['id']} — "
+                       f"create it with 'pm pr start {pr_entry['id']}' (TUI: s).")
             return
 
     from pm_core.paths import get_global_setting
@@ -2853,7 +2857,27 @@ If PR_ID is omitted, infers from cwd (if inside a workdir) or
 auto-selects when there's exactly one in_review/qa PR."""
 
 
-@pr.command("qa", help=_QA_HELP,
+class _QaCommand(click.Command):
+    """``pr qa`` that tolerates the two-token command-bar mode on the CLI.
+
+    ``pm pr qa fresh pr-001`` is exactly the command-bar form an operator
+    (or a driving Claude session) pastes onto the CLI.  Click would answer
+    ``Got unexpected extra argument (pr-001)`` before ``pr_qa`` can name
+    the command-bar route and the TUI key — the same discoverability miss
+    this PR fixes, one surface over.  Keep only the mode token so
+    ``pr_qa`` prints its corrective hint; anything with an option (notably
+    ``--help``) is left to Click.
+    """
+
+    def parse_args(self, ctx, args):
+        if (args and args[0] in command_surface.QA_MODIFIER_MODES
+                and len(args) > 1
+                and not any(arg.startswith("-") for arg in args[1:])):
+            args = args[:1]
+        return super().parse_args(ctx, args)
+
+
+@pr.command("qa", cls=_QaCommand, help=_QA_HELP,
             short_help="Validate a PR for QA and print the exact command to start it.")
 @click.argument("pr_id", default=None, required=False)
 def pr_qa(pr_id: str | None):
@@ -2991,8 +3015,9 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
         pr_id = _infer_pr_id(data, status_filter=("sign_off", "in_review"))
         if pr_id is None:
             click.echo(
-                "No sign_off/in_review PR to merge. Specify one — sign it "
-                "off first with 'pm pr signoff <id>' (TUI: i).", err=True)
+                "No sign_off/in_review PR to merge. Specify one — run "
+                "'pm pr list' to see every PR; sign-off comes first: "
+                "'pm pr signoff <id>' (TUI: i).", err=True)
             raise SystemExit(1)
         click.echo(f"Auto-selected {pr_id}")
 

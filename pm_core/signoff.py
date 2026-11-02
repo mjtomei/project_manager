@@ -437,8 +437,8 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         root = state_root()
         workdir = _ensure_workdir(data, pr_entry, root)
         if not workdir:
-            print(f"Sign-off window: no workdir for {pr_entry['id']}. "
-                  "Start the PR first.")
+            print(f"Sign-off window: no workdir for {pr_entry['id']} — start "
+                  f"the PR first with 'pm pr start {pr_entry['id']}' (TUI: s).")
             return
 
     pr_id = pr_entry["id"]

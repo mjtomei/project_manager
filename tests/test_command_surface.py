@@ -342,6 +342,8 @@ def test_help_screen_renders_the_whole_command_bar_section():
         "Cleanup, then: ys start, yd review, yt QA",
         # z modifies every pane action, not just s/S/d/t
         "s S d t e v n L H c; zz d / zz t: loop",
+        # the one App binding neither surface listed before
+        "Reload state from disk (no sync)",
         # the PR-action rows now carry the same modifier keys as
         # `pm tui keys` (they had drifted: `d` named only `zz d`, `s`/`g`
         # named no modifier, and `Y` was missing)
@@ -443,7 +445,7 @@ def test_tui_keys_lists_every_binding_the_help_screen_shows():
     """
     out = CliRunner().invoke(cli, ["tui", "keys"]).output
     for binding in ("x", "X", "f", "F", "v", "M", "H", "m", "C", "/",
-                    "z", "ctrl+r", "prefix P", "prefix M", "prefix R"):
+                    "z", "R", "ctrl+r", "prefix P", "prefix M", "prefix R"):
         assert re.search(rf"^\s*{re.escape(binding)}\s{{2,}}\S", out, re.M), (
             f"{binding!r} missing from `pm tui keys`")
 
@@ -829,6 +831,69 @@ def test_watcher_already_running_does_not_promise_watcher_stop():
     assert "stop it with `pm watcher stop" not in logs[-1]
 
 
+def test_review_window_no_workdir_names_the_start_command(tmp_path, capsys):
+    """A window that cannot open for lack of a workdir names the way to make one."""
+    from unittest import mock
+
+    from pm_core.cli import pr as pr_mod
+
+    pr = {"id": "pr-001", "title": "T", "status": "in_progress"}
+    with mock.patch.object(pr_mod.tmux_mod, "has_tmux", return_value=True), \
+            mock.patch.object(pr_mod.tmux_mod, "in_tmux", return_value=True), \
+            mock.patch.object(pr_mod, "_get_pm_session",
+                              return_value="pm-proj-1234"), \
+            mock.patch.object(pr_mod.tmux_mod, "session_exists",
+                              return_value=True), \
+            mock.patch.object(pr_mod, "state_root", return_value=tmp_path), \
+            mock.patch.object(pr_mod, "_ensure_workdir", return_value=None):
+        pr_mod._launch_review_window({"project": {}}, dict(pr))
+
+    out = capsys.readouterr().out
+    assert "pm pr start pr-001" in out
+    assert "TUI: s" in out
+
+
+def test_merge_window_no_workdir_names_the_start_command(tmp_path, capsys):
+    from unittest import mock
+
+    from pm_core.cli import pr as pr_mod
+
+    pr = {"id": "pr-001", "title": "T", "status": "sign_off"}
+    with mock.patch.object(pr_mod.tmux_mod, "has_tmux", return_value=True), \
+            mock.patch.object(pr_mod.tmux_mod, "in_tmux", return_value=True), \
+            mock.patch.object(pr_mod, "_get_pm_session",
+                              return_value="pm-proj-1234"), \
+            mock.patch.object(pr_mod.tmux_mod, "session_exists",
+                              return_value=True):
+        pr_mod._launch_merge_window({"project": {}}, dict(pr), "err")
+
+    out = capsys.readouterr().out
+    assert "pm pr start pr-001" in out
+    assert "TUI: s" in out
+
+
+def test_signoff_window_no_workdir_names_the_start_command(tmp_path, capsys):
+    from unittest import mock
+
+    from pm_core import signoff
+    from pm_core.cli import helpers
+
+    pr = {"id": "pr-001", "title": "T", "status": "qa"}
+    with mock.patch.object(signoff.tmux_mod, "has_tmux", return_value=True), \
+            mock.patch.object(signoff.tmux_mod, "in_tmux", return_value=True), \
+            mock.patch.object(helpers, "_get_pm_session",
+                              return_value="pm-proj-1234"), \
+            mock.patch.object(signoff.tmux_mod, "session_exists",
+                              return_value=True), \
+            mock.patch.object(helpers, "state_root", return_value=tmp_path), \
+            mock.patch.object(helpers, "_ensure_workdir", return_value=None):
+        signoff.launch_signoff_window({"project": {}}, dict(pr))
+
+    out = capsys.readouterr().out
+    assert "pm pr start pr-001" in out
+    assert "TUI: s" in out
+
+
 def test_require_pr_names_the_listing_command(capsys):
     with pytest.raises(SystemExit):
         _require_pr({"prs": [{"id": "pr-001"}]}, "pr-999")
@@ -895,6 +960,38 @@ def test_pr_qa_wrong_status_names_the_next_command(tmp_path):
 
     assert result.exit_code == 1, result.output
     assert "pm pr start pr-001" in result.output
+
+
+@pytest.mark.parametrize("mode", command_surface.QA_MODIFIER_MODES)
+def test_pr_qa_cli_rejects_the_two_token_command_bar_form(tmp_path, mode):
+    """`pm pr qa fresh pr-001` must reach the hint, not Click's usage error.
+
+    This two-token form is exactly what the help tells the operator to type
+    in the command bar, and what a driving Claude session pastes onto the
+    CLI.  Click used to answer ``Got unexpected extra argument (pr-001)``
+    (exit 2) before ``pr_qa`` could name the command-bar route and the TUI
+    key — the motivating failure's other surface.
+    """
+    from unittest import mock
+
+    from pm_core.cli import pr as pr_mod
+
+    (tmp_path / "project.yaml").write_text(
+        "project:\n  backend: vanilla\n  base_branch: master\nprs: []\n")
+    with mock.patch.object(pr_mod, "state_root", return_value=tmp_path):
+        result = CliRunner().invoke(pr_mod.pr, ["qa", mode, "pr-001"])
+
+    assert result.exit_code == 1, result.output
+    assert "Got unexpected extra argument" not in result.output
+    assert "command bar" in result.output
+    assert f"pr qa {mode} <id>" in result.output
+    assert command_surface.QA_MODE_KEYS[mode] in result.output
+
+
+def test_pr_qa_mode_token_does_not_swallow_help():
+    """The CLI-tolerance rewrite must leave option handling to Click."""
+    out = _help("pr", "qa", "fresh")
+    assert "QA modes" in out
 
 
 @pytest.mark.parametrize("mode", command_surface.QA_MODIFIER_MODES)

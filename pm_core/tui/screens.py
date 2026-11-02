@@ -291,6 +291,7 @@ class HelpScreen(ModalScreen):
             yield Label("Other", classes="help-section")
             yield Label("  [bold]z[/]  Prefix: restart the pane instead of focusing it (s S d t e v n L H c; zz d / zz t: loop)", classes="help-row")
             yield Label("  [bold]r[/]  Refresh / sync with GitHub", classes="help-row")
+            yield Label("  [bold]R[/]  Reload state from disk (no sync)", classes="help-row")
             yield Label("  [bold]C[/]  Show shared connect command", classes="help-row")
             yield Label("  [bold]Ctrl+R[/]  Restart TUI", classes="help-row")
             yield Label("  [bold]?[/]  Show this help", classes="help-row")

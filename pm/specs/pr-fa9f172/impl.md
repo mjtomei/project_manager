@@ -496,3 +496,30 @@ the routed form and `--fresh` so help is complete.
   `tui/pr_view.py` to `command_surface.py` (pure, no TUI deps) and
   `_parse_tui_action` now uses it; `pr_view` calls the shared copy. Test
   pins both spellings (and the rejected-command fallback).
+
+- Review-loop i13: (a) `w` is a prefix, not a direct binding — both
+  `pm tui keys` and the `?` HelpScreen now say "Watcher prefix: ww list,
+  wf focus, ws start/stop, wr review" and list the undocumented `y`
+  cleanup-then prefix (`ys`/`yd`/`yt`). (b) The duplicated `O`/`A` rows in
+  `pm tui keys`' PR Actions block were dropped (the Auto-start block
+  documents them). (c) `pm pr sync-github` / `pm pr import-github` no
+  longer point at commands that cannot help on a non-GitHub backend; they
+  name `pm pr merge <pr-id>` / `pm pr add <title>`. (d) The shared table's
+  autostart TUI column says which key does which verb. (e) Dead assignment
+  removed from the command-bar QA error path.
+
+- Review-loop i14: (a) The *two-token* command-bar spelling
+  `pm pr qa fresh <id>` (exactly what the help tells the operator to type
+  in the command bar) still died on the CLI with Click's "Got unexpected
+  extra argument (pr-001)" (exit 2) — the motivating failure one surface
+  over. `_QaCommand.parse_args` keeps only the mode token when the rest
+  are plain positionals, so `pr_qa` prints its corrective hint (exit 1);
+  options (notably `--help`) are left to Click. Tests cover both modes and
+  that `pm pr qa fresh --help` still shows help. (b) `R` (reload state from
+  disk) was the one App binding neither help surface listed; both now do,
+  with the parity test extended. (c) `pm pr merge`'s no-candidate remedy
+  now names `pm pr list` instead of presuming the missing step is
+  sign-off (the PR may be pending or merged). (d) The review, merge and
+  sign-off window launchers said only "no workdir for <id>. Start the PR
+  first."; each now names `pm pr start <id>` (TUI: s), matching the
+  adjacent tmux remedies this PR already rewrote. Tests cover all three.
