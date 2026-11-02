@@ -137,7 +137,11 @@ switches it to the project view,
 - keys the popup does not use (app-level `r` refresh and `z`/`w`/`y`
   prefixes) and a background state reload while the popup is open must not
   crash the TUI or take the popup's focus (`_command_bar()` returns None
-  when the command bar is unreachable — QA s5 / ff85d13a);
+  when the command bar is unreachable — QA s5 / ff85d13a). At Textual 2.x a
+  background reload's default-screen queries are still dropped while a modal
+  is open, so the reload does not apply (Esc then `r` shows the change).
+  That gap is filed as **pr-3199f44** and is a follow-up, not a failure of
+  this PR: record it, do not fail the scenario for it;
 - the installed `textual` version satisfies `>=2.0.1`.
 
 ### R14 — The popup reflects a default changed elsewhere
@@ -156,6 +160,22 @@ the model popup there,
 popup opens, and the installed `textual` satisfies `>=2.0.1` — the
 Dockerfile pre-install list matches `[project.dependencies]`.
 
+### R16 — The merged #283 provider metadata still round-trips
+The branch merged master@5b352d16 (which brought #283's provider/model
+configuration surfaces). This PR does not own #283's semantics; this
+requirement only guards the integration:
+**Given** a hand-written `providers.yaml` in the shape master produces, an
+entry carrying `supported_efforts`, `supported_efforts_source`,
+`supported_efforts_checked_at`, an effort assignment in `env`, and the
+router fields,
+**When** the user runs `pm provider list`, `pm provider show <name>`,
+`pm provider edit <name> --model <new>`, and `pm provider edit <name>
+--supported-efforts … --supported-efforts-checked-at …`,
+**Then** the newer fields render in `list`/`show`, the other fields survive
+an edit, changing only the model prints the stale-metadata warning without
+dropping the declared list, and an invalid `--supported-efforts-checked-at`
+is refused with one `Error:` line and an unchanged file.
+
 ## Setup
 
 1. Use an **isolated HOME / `~/.pm`** for every scenario (e.g.
@@ -170,7 +190,9 @@ Dockerfile pre-install list matches `[project.dependencies]`.
    --skip-check` (or `--type router`, which skips the connectivity check
    automatically). No real LLM endpoint is needed. Current master already
    includes #283's router fields (`launcher`, `remedy`, `classifier_model`,
-   `unset_env`, `probe_models`); a hand-written `providers.yaml` from an
+   `unset_env`, `probe_models`, `supported_efforts`,
+   `supported_efforts_source`, `supported_efforts_checked_at`, and an
+   effort assignment in `env`); a hand-written `providers.yaml` from an
    older pm is a realistic starting state and those fields must survive.
 4. For concurrency, run the two actors as separate shells/panes (tmux or
    background jobs) against the same isolated HOME — that is the real
@@ -272,12 +294,22 @@ Dockerfile pre-install list matches `[project.dependencies]`.
 
 ## Run notes
 
-- Scenario 5's stored verdict still says NEEDS_WORK although ff85d13a fixed
-  the Esc crash and the fix was verified at textual 2.0.1 and 8.2.8; re-run
-  scenario 5 (or refresh its verdict) before sign-off (review-loop a9aa i1).
-- The merge preview against master (5b352d16, which merged #283 and
-  pr-3d3b3ce) is clean apart from the usual `pm/project.yaml` registry
-  conflict; #283's router provider interfaces are present on this branch.
+- Scenarios 1-9 have run and are locked. Their verdicts: S1-S4 PASS (S4
+  after a prompt indentation fix), S5 NEEDS_WORK (Esc crash at Textual
+  2.0.1, fixed in ff85d13a), S6 PASS, S7 PASS (the floor popup re-run,
+  including Esc, app-level keys and the background reload), S8 PASS
+  (a router provider from an earlier pm survives list/show/edit/test/
+  default/remove), S9 PASS (an interrupted/crashed edit leaves the next one
+  usable). Do not rewrite or re-emit those scenarios; new plans start at
+  scenario 10.
+- The merge is now done: master@5b352d16 was merged in commit 44dbc92a
+  (every code file auto-merged; only the `pm/project.yaml` registry needed
+  `store.merge_3way`). The merged tree is what QA now tests — #283's
+  provider metadata surfaces (`supported_efforts`, effort env, router
+  fields) are present alongside this PR's hardening (R16).
+- The Textual 2.x gap where a background reload is dropped while a modal is
+  open is filed as **pr-3199f44**; record it, do not fail this PR for it
+  (see R13).
 
 ## Ambiguities
 
