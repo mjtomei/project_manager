@@ -157,8 +157,15 @@ def _adopt_running_tui(session_name: str) -> str | None:
     ``pm tui view``/``send`` discovery (``_live_panes_and_tuis``, matched
     through the session group).  A dead pane, kept by a user's
     ``remain-on-exit``, is not adopted.  The entry is added under the
-    registry lock, and only if it is missing, so it does not duplicate the
+    registry lock, and only if it is missing
+    (``pane_registry.register_tui_pane``), so it does not duplicate the
     entry the TUI's own heal may write at the same moment.
+
+    The write is best-effort: when it fails (the registry lock is held
+    past its timeout, or the file cannot be written) the pane is still
+    returned.  The TUI is running either way, and it records itself once
+    it mounts.  Failing the attach on that, or respawning, would start
+    the second TUI this function exists to prevent.
     """
     _, live_tuis = _live_panes_and_tuis()
     for pane_id, tmux_session in live_tuis:
@@ -175,15 +182,17 @@ def _adopt_running_tui(session_name: str) -> str | None:
 
         def _add(raw, pane_id=pane_id, window=window):
             data = pane_registry._prepare_registry_data(raw, session_name)
-            wdata = pane_registry.get_window_data(data, window)
-            if any(p["id"] == pane_id for p in wdata["panes"]):
-                return None  # already recorded there: skip the write
-            wdata["panes"].insert(0, {"id": pane_id, "role": "tui",
-                                      "order": 0, "cmd": "tui"})
-            return data
+            if pane_registry.register_tui_pane(data, window, pane_id):
+                return data
+            return None  # already recorded there: skip the write
 
-        pane_registry.locked_read_modify_write(
-            pane_registry.registry_path(session_name), _add)
+        try:
+            pane_registry.locked_read_modify_write(
+                pane_registry.registry_path(session_name), _add)
+        except OSError:  # includes the lock wait's TimeoutError
+            _log.warning("could not record running TUI pane %s of %s in "
+                         "the pane registry; it registers itself once "
+                         "mounted", pane_id, session_name, exc_info=True)
         return pane_id
     return None
 

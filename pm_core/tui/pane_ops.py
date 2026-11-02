@@ -109,18 +109,12 @@ def heal_registry(session: str | None) -> None:
 
             # Ensure TUI pane is registered in the current window
             cur_live_ids = window_live_ids.get(window, set())
-            if tui_pane_id in cur_live_ids:
-                wdata = pane_registry.get_window_data(data, window)
-                if not any(p["id"] == tui_pane_id for p in wdata["panes"]):
-                    wdata["panes"].insert(0, {
-                        "id": tui_pane_id,
-                        "role": "tui",
-                        "order": 0,
-                        "cmd": "tui",
-                    })
-                    _log.info("heal_registry: re-registered TUI pane %s in window %s",
-                              tui_pane_id, window)
-                    changed = True
+            if (tui_pane_id in cur_live_ids
+                    and pane_registry.register_tui_pane(data, window,
+                                                        tui_pane_id)):
+                _log.info("heal_registry: re-registered TUI pane %s in window %s",
+                          tui_pane_id, window)
+                changed = True
 
             if changed:
                 _log.info("heal_registry: saved corrected registry")

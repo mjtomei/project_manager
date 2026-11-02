@@ -5428,6 +5428,61 @@ class TestSessionStartCreatesPrivateServer:
             Path(sock).unlink(missing_ok=True)
 
 
+class TestAdoptRunningTuiRegistryWrite:
+    """``_adopt_running_tui``'s registry write is best-effort (QA S35).
+
+    The real-tmux adopt/respawn cases are in
+    ``TestSessionStartAttachesToLegacySession``; this covers the write
+    failing, which needs no server.
+    """
+
+    def _adopt(self, monkeypatch, write):
+        from pm_core.cli import session as session_mod
+        from pm_core import pane_registry
+
+        monkeypatch.setattr(session_mod, "_live_panes_and_tuis",
+                            lambda: ({}, [("%7", "pm-x~1")]))
+        monkeypatch.setattr(session_mod, "_pm_session_of",
+                            lambda s: "pm-x")
+        monkeypatch.setattr(session_mod.tmux_mod, "_run",
+                            lambda *a, **k: MagicMock(returncode=0,
+                                                      stdout="0 @3\n"))
+        monkeypatch.setattr(pane_registry, "locked_read_modify_write", write)
+        return session_mod._adopt_running_tui("pm-x")
+
+    def test_a_lock_timeout_still_adopts_the_running_tui(self, monkeypatch):
+        """A held registry lock must not fail `pm session` or lead to a
+        second TUI: the running one records itself once mounted."""
+        from pm_core.cli import session as session_mod
+
+        def held(path, fn, **kwargs):
+            raise TimeoutError(f"Could not acquire lock on {path}.lock")
+
+        log = MagicMock()
+        monkeypatch.setattr(session_mod, "_log", log)
+        assert self._adopt(monkeypatch, held) == "%7"
+        log.warning.assert_called_once()
+        assert log.warning.call_args[0][1:] == ("%7", "pm-x")
+
+    def test_an_unwritable_registry_still_adopts_the_running_tui(
+            self, monkeypatch):
+        def unwritable(path, fn, **kwargs):
+            raise PermissionError(13, "Permission denied", str(path))
+
+        assert self._adopt(monkeypatch, unwritable) == "%7"
+
+    def test_the_entry_is_written_through_register_tui_pane(self,
+                                                            monkeypatch):
+        written = {}
+
+        def write(path, fn, **kwargs):
+            written["data"] = fn(None)
+
+        assert self._adopt(monkeypatch, write) == "%7"
+        assert written["data"]["windows"]["@3"]["panes"] == [
+            {"id": "%7", "role": "tui", "order": 0, "cmd": "tui"}]
+
+
 @pytest.mark.skipif(not tmux.has_tmux(), reason="tmux not installed")
 class TestSessionStartAttachesToLegacySession:
     """R6.1 / acceptance 4: a pre-isolation session is attached, not migrated.
@@ -5613,7 +5668,7 @@ class TestSessionStartAttachesToLegacySession:
 
     def _start_against_unregistered_legacy(self, short_sock_dir, tmp_path,
                                            monkeypatch, name, pane_cmd,
-                                           dead=False):
+                                           dead=False, private=False):
         """Run ``_session_start`` against a legacy session whose registry
         lists no TUI.
 
@@ -5622,7 +5677,9 @@ class TestSessionStartAttachesToLegacySession:
         disposable server is killed.
 
         *pane_cmd* is window 0's start command.  With *dead*, the pane has
-        exited and is kept by ``remain-on-exit``.
+        exited and is kept by ``remain-on-exit``.  With *private*, the
+        session runs on its own private socket instead of the default
+        server (the path QA S35 hit).
         """
         from pm_core.cli import session as session_mod
         from pm_core import hook_install, pane_layout, pane_registry
@@ -5654,28 +5711,28 @@ class TestSessionStartAttachesToLegacySession:
             tmux, "attach",
             lambda n, socket_path=None: attached.append((n, socket_path)))
 
-        r = _tmux(default_sock, "new-session", "-d", "-s", name, "-n",
+        server = short_sock_dir / name if private else default_sock
+        r = _tmux(server, "new-session", "-d", "-s", name, "-n",
                   "main", pane_cmd)
         assert r.returncode == 0, r.stderr
         if dead:
-            _tmux(default_sock, "set-option", "-t", name, "remain-on-exit",
-                  "on")
-            _tmux(default_sock, "send-keys", "-t", f"{name}:0", "q", "Enter")
+            _tmux(server, "set-option", "-t", name, "remain-on-exit", "on")
+            _tmux(server, "send-keys", "-t", f"{name}:0", "q", "Enter")
             deadline = time.monotonic() + 5
-            while _tmux_out(default_sock, "display-message", "-p", "-t",
+            while _tmux_out(server, "display-message", "-p", "-t",
                             f"{name}:0", "#{pane_dead}").strip() != "1":
                 assert time.monotonic() < deadline, "pane never exited"
                 time.sleep(0.05)
         try:
             session_mod._session_start()
             registry = pane_registry.load_registry(name)
-            tui_pane = _tmux_out(default_sock, "list-panes", "-t",
+            tui_pane = _tmux_out(server, "list-panes", "-t",
                                  f"{name}:0", "-F", "#{pane_id}").strip()
-            window_id = _tmux_out(default_sock, "display-message", "-p",
+            window_id = _tmux_out(server, "display-message", "-p",
                                   "-t", f"{name}:0", "#{window_id}").strip()
         finally:
-            _tmux(default_sock, "kill-server")
-            Path(default_sock).unlink(missing_ok=True)
+            _tmux(server, "kill-server")
+            Path(server).unlink(missing_ok=True)
         return (respawned, attached, registry, tui_pane, window_id)
 
     def test_a_running_unregistered_tui_is_adopted_not_respawned(
@@ -5701,6 +5758,28 @@ class TestSessionStartAttachesToLegacySession:
         assert "TUI pane missing" not in out
         assert respawned == []
         assert attached == [("pm-iso-unreg~1", None)]
+        panes = registry["windows"][window_id]["panes"]
+        assert [(p["id"], p["role"]) for p in panes] == [(tui_pane, "tui")]
+
+    def test_a_running_unregistered_tui_on_a_private_server_is_adopted(
+            self, short_sock_dir, tmp_path, monkeypatch, capsys):
+        """The same adoption on the session's own private server.
+
+        QA S35 hit this path (an older pm's half-started private session),
+        so it is covered directly rather than only through the legacy
+        default server.
+        """
+        name = "pm-iso-unregp"
+        respawned, attached, registry, tui_pane, window_id = \
+            self._start_against_unregistered_legacy(
+                short_sock_dir, tmp_path, monkeypatch, name,
+                "sleep 300; : pm _tui", private=True)
+
+        out = capsys.readouterr().out
+        assert "started before per-session tmux servers" not in out
+        assert "TUI pane missing" not in out
+        assert respawned == []
+        assert attached == [(f"{name}~1", str(short_sock_dir / name))]
         panes = registry["windows"][window_id]["panes"]
         assert [(p["id"], p["role"]) for p in panes] == [(tui_pane, "tui")]
 

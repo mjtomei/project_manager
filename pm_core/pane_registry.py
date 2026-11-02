@@ -134,6 +134,22 @@ def get_window_data(data: dict, window: str) -> dict:
     return windows[window]
 
 
+def register_tui_pane(data: dict, window: str, pane_id: str) -> bool:
+    """Record *pane_id* as the TUI of *window* unless it is listed there.
+
+    Returns whether *data* changed.  The entry sorts first (order 0), the
+    shape the TUI's own ``heal_registry`` writes; ``pm session`` adopting a
+    TUI the registry does not list yet writes the same one, so whichever
+    of the two runs second under the registry lock is a no-op.
+    """
+    wdata = get_window_data(data, window)
+    if any(p["id"] == pane_id for p in wdata["panes"]):
+        return False
+    wdata["panes"].insert(0, {"id": pane_id, "role": "tui", "order": 0,
+                              "cmd": "tui"})
+    return True
+
+
 def _iter_all_panes(data: dict):
     """Yield ``(window_id, pane_dict)`` across every window in the registry."""
     for window_id, wdata in data.get("windows", {}).items():

@@ -11,6 +11,7 @@ import pytest
 
 from pm_core.pane_registry import (
     get_window_data,
+    register_tui_pane,
     _iter_all_panes,
     load_registry,
     _save_registry,
@@ -172,6 +173,39 @@ class TestGetWindowData:
         assert "windows" in data
         assert "1" in data["windows"]
         assert wdata["panes"] == []
+
+
+class TestRegisterTuiPane:
+    """The TUI entry that heal_registry and `pm session`'s adopt both write."""
+
+    def test_inserts_tui_first_in_a_new_window(self):
+        data = {"windows": {}}
+        assert register_tui_pane(data, "@1", "%4") is True
+        assert data["windows"]["@1"]["panes"] == [
+            {"id": "%4", "role": "tui", "order": 0, "cmd": "tui"}]
+
+    def test_sorts_before_existing_panes(self):
+        data = {"windows": {"@1": {"panes": [
+            {"id": "%5", "role": "notes", "order": 1, "cmd": "notes"}],
+            "user_modified": False}}}
+        assert register_tui_pane(data, "@1", "%4") is True
+        assert [p["id"] for p in data["windows"]["@1"]["panes"]] == [
+            "%4", "%5"]
+
+    def test_already_listed_is_a_no_op(self):
+        entry = {"id": "%4", "role": "tui", "order": 0, "cmd": "pm _tui"}
+        data = {"windows": {"@1": {"panes": [entry],
+                                   "user_modified": False}}}
+        assert register_tui_pane(data, "@1", "%4") is False
+        assert data["windows"]["@1"]["panes"] == [entry]
+
+    def test_listed_in_another_window_is_still_added_here(self):
+        """Only *window*'s entries are checked: a pane id recorded under a
+        window that no longer holds it does not hide the live one."""
+        data = {"windows": {"@0": {"panes": [{"id": "%4", "role": "tui"}],
+                                   "user_modified": False}}}
+        assert register_tui_pane(data, "@1", "%4") is True
+        assert [p["id"] for p in data["windows"]["@1"]["panes"]] == ["%4"]
 
 
 class TestIterAllPanes:
