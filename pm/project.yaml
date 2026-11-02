@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-02T06:35:37.192922+00:00'
+  updated_at: '2026-11-02T07:10:55.444424+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48430,6 +48430,29 @@ prs:
       from serialising the two operators.'
     created_at: '2026-11-02T06:35:37Z'
     last_edited: '2026-11-02T06:35:37Z'
+  - id: note-1cfa4ed
+    text: 'QA scenario 70 (TUI journey at 62705458/bd456dc5) PASS — no code change.
+      All three stories held live on an isolated local-backend fixture with tmux +
+      fake-claude. (1) TUI t on P (two pm notes + a bare-string note + a list-id note):
+      QA PASS for P — press i to sign off, P stays qa, note list = 5 lines with one
+      fresh note-id, hand-written members untouched, 0 tracebacks. (2) pm autostart
+      add P --wait-for-merge: [integration] resolved and applied master@B as H; show
+      lists added from PR / added from base (mid-list + appended); Integrate commit
+      parents = tip + master; branch and merged master keep the mid-list record at
+      index 1, ids unique; record → signed off … press g, popup WAITING row, g merges
+      and closes windows. (3) stale approval with invalidated: {why, by} → exactly
+      one "is stale (reason not recorded) — re-running (hidden by sticky message)"
+      + launching router (stale=True); CLI Switched to existing + advanced: sign_off_relaunched;
+      one new sign-off window; report md5 unchanged; no None/{why/by: hand. Harness
+      facts: (a) the autostart CLI prints lowercase "added: <id> (wait-for-merge)"
+      (scenario says "Added:"; that is the long-standing master format); (b) the pm-home
+      window appears only when a session is on the retired sign-off window — with
+      a recorder pinned on window 0 no park happens; leave the session on signoff-R
+      (as pm pr signoff leaves it) to see it; (c) a "Switched to existing sign-off
+      window" re-signoff does not refresh the integration record — use pm pr signoff
+      integrate R --record before writing a second report. Captures: /pm-captures/scenarios/70/.'
+    created_at: '2026-11-02T07:10:55Z'
+    last_edited: '2026-11-02T07:10:55Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
