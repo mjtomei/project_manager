@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T05:03:18.871020+00:00'
+  updated_at: '2026-11-02T05:08:25.664644+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7210,6 +7210,39 @@ prs:
       (README.md, pre-fix/ and post-fix/).'
     created_at: '2026-11-02T05:03:18Z'
     last_edited: '2026-11-02T05:03:18Z'
+  - id: note-abc1341
+    text: 'QA S24 (driving a pm session through the user''s own tmux view) PASS 7/7,
+      no source changes. Full run on 1553ec559. Stories 2 and 4 were re-driven on
+      fa37d5f0a after QA S23''s 87b2d1d16 changed the prefix+o gate quoting (#{q:})
+      and the claude "$(cat ...)" prompt path; both still pass. Fixture: two private
+      sessions, A (pm-alpha-1fe83d10) and B; a user view myview (120x40) beside A~1
+      (200x50); B driven by an l/h pm tui send loop the whole time (132 rounds, every
+      send OK). B''s registry stayed byte-identical and its list-panes/list-clients
+      identical at every check. (1) n from myview: tmux reports myview as %0''s session.
+      The log shows Launched notes pane, then Focused existing notes pane after C-b
+      o + n. Exactly %0 + one notes pane; A.json has tui+notes and no myview.json
+      exists. The debug log shows launch_pane: session=<A> twice, rebalance 120x39
+      2 panes, find_live_pane_by_role returned %3, and already exists focusing. (2)
+      pm session mobile --force from a hidden sh window: rc 0, .mobile written, window
+      zoomed. C-b o from the view and from ~1 each moved the active pane and kept
+      window_zoomed_flag=1. pm session list shows one A row with CLIENTS 1 and no
+      myview. (3) pm session -d from a 220x55 terminal: Attaching to ~2, Disconnected
+      2 other client(s); the view showed [detached (from session myview)]; one client
+      left; window 220x54. (4) C-b c shell in the reattached view: the stand-in claude
+      was found and session_name was myview. pm qa launch instructions:smoke-check:
+      rc 0, and the saved prompt names <A> in all four commands with 0 myview. The
+      pasted pm tui view, send and cat all hit A''s %0. (5) kill --dir and --global
+      --print-connect --dir on a non-git dir both print Cannot determine session from
+      directory ... to stderr with rc 1; A untouched. (6) PATH=notmux pm session mobile:
+      tmux is not installed., rc 1, no traceback. (7) pm session kill from dT1: the
+      view shows [exited], the socket is gone, .mobile is removed, B unchanged. Observation,
+      not a Then and not fixed: the view''s prefix+o pm _pane-switch logs to ~/.pm/debug/default.log,
+      because the debug-log name follows the run-shell cwd and myview was created
+      from a non-repo dir. Harness: the per-story read-only recorders attach to the
+      DRIVER server, so no extra pm clients appear. Captures: /pm-captures/scenarios/24
+      (README.md; recheck-87b2d1d16/ for the post-fix recheck).'
+    created_at: '2026-11-02T05:08:25Z'
+    last_edited: '2026-11-02T05:08:25Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
