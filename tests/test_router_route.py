@@ -305,6 +305,7 @@ class TestBuildShellCmd:
                        "-u ANTHROPIC_DEFAULT_FABLE_MODEL "
                        "-u ANTHROPIC_SMALL_FAST_MODEL "
                        "-u CLAUDE_CODE_AUTO_MODE_MODEL -u PM_ROUTE_BASE_URL "
+                       "-u CLAUDE_CODE_EFFORT_LEVEL "
                        "claude --model claude-opus-5-5 --effort high")
         assert cmd.env == {"CLAUDE_CODE_SUBAGENT_MODEL": "claude-opus-5-5",
                            "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"}
