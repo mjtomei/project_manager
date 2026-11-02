@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T08:59:26.982275+00:00'
+  updated_at: '2026-11-02T09:07:13.875894+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39854,6 +39854,48 @@ prs:
       full Artifact: line). Captures: /pm-captures/scenarios/57 (README).'
     created_at: '2026-11-02T08:59:26Z'
     last_edited: '2026-11-02T08:59:26Z'
+  - id: note-70d2675
+    text: 'QA S56 refiner (2026-11-02, head 12b3dc14): all 3 stories dry-run live,
+      drivers in /scratch/s56/scripts (lib.sh, mkenv.sh, rd.sh, an.py, pcmp.py, s1/s2/s3b.sh).
+      (1) Story 1: the impl window appeared 0.27 s after s; zz d sent at once beat
+      the first impl-idle tick. Confirm the race hit from JSON: the start attempt
+      started_at is ~5 s later than the review-loop parent. If it is earlier, the
+      tick won; rebuild and redo. (2) z d is the only TUI stop and opens a fresh plain
+      review that takes the next fake review slot. Script slot 3 of story 2 as NEEDS_WORK,
+      which gives a `review done NEEDS_WORK` row. (3) Story 3: with the draft [NW
+      25s, PASS 8s] the adopted i1 already holds PASS and the resumed loop ends <1
+      s after the restart. [NW 25s, NW 8s, PASS 8s] gives a resumed loop of ~22 s
+      (i1 adopted NEEDS_WORK, i2 PASS) to probe keys. (4) After a restart the pre-restart
+      loop parent reads `interrupted` "swept on tui-mount" with a definite elapsed.
+      Only its iteration reads `→ unknown  >Ns` "owner process exited or restarted".
+      The restarted TUI never re-tracks the impl pane (new manual transcript dir),
+      so start stays `untracked`. (5) DEBUG lines only appear with ~/.pm/sessions/<tag>/debug
+      present (tag from `pm fake-claude config set`, not the pm-pr-… workdir dir).
+      It takes effect at the story-3 restart. (6) Popup pagers (H, and Enter after
+      6×Down) equal `| cat` token for token at 74 inner columns; `script` TTY at 80
+      == `| cat`.'
+    created_at: '2026-11-02T08:34:25Z'
+    last_edited: '2026-11-02T08:34:25Z'
+  - id: note-ba4d071
+    text: 'QA S56 (2026-11-02): NEEDS_WORK with 2 fixes; all Thens then held live
+      on 66b2309b. (1) 04c4c31b: q in the popup History pager (H, or Enter on the
+      history row) closed the whole popup, because the picker exits after any dispatch.
+      A view action now pages, then relaunches the fzf list with refreshed rows (test_history_view_returns_to_the_list).
+      (2) 66b2309b: a review-loop iteration is journaled ~0.1 s before its launching
+      phase, and a read in that gap said "review-loop i2: running for 0s" (badge "start").
+      The query now renders it as launching (test_iteration_before_its_launch_phase_reads_launching).
+      The loop beat the first impl-idle tick in all 3 runs (start dated +4.98 s after
+      the loop). A third back-to-back JSON reader around each grace due time caught
+      the <0.25 s "no verdict accepted yet" read in every iteration; the 0.8 s reader
+      misses it. Hold: in all 167 reads over 37 s, wait strictly rising per reader,
+      exec fixed. Pager == | cat token for token (H, Enter, final). TTY == | cat exactly.
+      ? help opens in 0.055-0.105 s and closes in 0.13-0.15 s. impl start note failed:
+      0. Observations: story 3 start row read running for the first 3.5 s of loop
+      A, until the impl-idle tick (E8). Sorting concurrent readers together gives
+      ms-scale remaining_s inversions; per reader it is strict. Captures: /pm-captures/scenarios/56
+      (README).'
+    created_at: '2026-11-02T09:07:13Z'
+    last_edited: '2026-11-02T09:07:13Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
