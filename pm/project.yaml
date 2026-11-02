@@ -39215,7 +39215,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-11-01T23:33:46.450835+00:00'
+  updated_at: '2026-11-02T00:30:48.965445+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40053,6 +40053,23 @@ prs:
       link) stays a live link until a new attempt reuses its path.'
     created_at: '2026-11-01T23:33:46Z'
     last_edited: '2026-11-01T23:33:46Z'
+  - id: note-5cf7a53
+    text: 'Review-loop e757 i10 — incidental fix (S79 adoption) + spec correction.
+      `_adopt_return_review` now sets `ReviewLoopState.iteration_attempted = True`.
+      Since the 2026-10-27 `allow_recovery` gate (review-loop 385e i1, already on
+      master), `_adopt_in_flight_review` used `allow_recovery=False` for the fresh
+      state, so `_discover_iteration` returned `launch`, `_adopt_in_flight_review`
+      returned None, and the loop relaunched `--fresh`, killing the tick review the
+      adoption exists to preserve (S79 nullified). Verified pre-existing on origin/master
+      too (2 launches, 0 adoptions). The link is created here from the return''s live
+      pane, so recovery is correct. Regression test: tests/test_return_driver_handoff.py::test_adopted_return_review_is_polled_not_relaunched
+      (fails without the flag). Also corrected the impl.md QA-transcript edge case:
+      a scenario worker DOES get a build_claude_shell_cmd(transcript=...) link (at
+      <qa-workdir>/transcript-s<N>.jsonl), so archive-on-replace writes to <qa-workdir>/archive/,
+      never the run archive under test. Verified: full suite 5479 passed / 1 skipped;
+      post-fix repro still reports all three symptoms fixed.'
+    created_at: '2026-11-02T00:30:48Z'
+    last_edited: '2026-11-02T00:30:48Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high

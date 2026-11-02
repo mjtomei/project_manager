@@ -374,8 +374,13 @@ No **[UNRESOLVED]** ambiguities.
   same helpers; its iteration numbering already continues after returns,
   and archive-on-replace protects any same-name relaunch (sign-off,
   impl).
-- **QA transcripts**: produced via native `transcript_path_for` paths,
-  not `build_claude_shell_cmd(transcript=...)`; unaffected.
+- **QA transcripts**: the QA loop's own verdict transcripts
+  (finalize / verify) are native `transcript_path_for` paths passed as
+  `session_id=`, so they never take the `transcript=` archive branch.  A
+  scenario worker *does* get a `transcript=` symlink, but at
+  `<qa-workdir>/transcript-s<N>.jsonl` — outside the run dir — so
+  archive-on-replace writes to `<qa-workdir>/archive/` there and never
+  touches the run archive under test.
 
 ## Verification
 
@@ -970,3 +975,46 @@ auto-start-finalize suites; full suite **5478 passed / 1 skipped**
 (`markdown` installed); the post-fix repro
 (`/pm-captures/impl/post-fix/transcript-archive/repro.py --expect fixed`)
 still reports all three symptoms fixed.
+
+## Review e757 i10 — the adopted REVIEW return is actually polled, not relaunched
+
+One behavioural fix in a path this PR touches, plus one spec correction.
+
+- **S79 adoption was silently broken** (pre-existing on master since the
+  2026-10-27 `allow_recovery` gate in review-loop 385e i1, not introduced
+  by this PR).  `auto_start._adopt_return_review` creates the loop-scoped
+  iteration link from the return's live pane and starts a loop with a
+  fresh `ReviewLoopState(iteration=1)`.  `run_review_loop_sync` treats
+  iteration 1 as an adopt candidate, but `_adopt_in_flight_review` gates
+  its recovery on `state.iteration_attempted or state.launch_attempts > 0`
+  — both false for that fresh state — so `_discover_iteration` returned
+  `launch`, `_adopt_in_flight_review` returned `None`, and the loop
+  relaunched `--fresh`, killing the very window the adoption exists to
+  preserve (two review launches for one return — the S79 bug).
+  `_adopt_return_review` now sets `state.iteration_attempted = True`: the
+  iteration *is* in flight (another driver launched it), and the link was
+  created a moment ago from the return's live pane, so the fabrication
+  guard (which protects against an *earlier run's* transcript for the same
+  iteration number) does not apply.  Verified end to end: with the link
+  and a live pane, the loop polls the adopted session (no
+  `_run_claude_review` call); with a verdict already in the transcript it
+  reads it directly.  Regression test
+  `test_adopted_return_review_is_polled_not_relaunched` in
+  `tests/test_return_driver_handoff.py` fails without the flag (it
+  observes `None` from `_adopt_in_flight_review`) and passes with it.
+- **Spec correction (QA transcripts edge case).** The line claimed QA
+  transcripts are "produced via native `transcript_path_for` paths, not
+  `build_claude_shell_cmd(transcript=...)`".  The QA loop's own verdict
+  transcripts are native, but a scenario worker *does* get a
+  `build_claude_shell_cmd(transcript=...)` symlink — at
+  `<qa-workdir>/transcript-s<N>.jsonl`, outside the run dir — so a
+  scenario relaunch archives its outgoing link under `<qa-workdir>/archive/`
+  and never touches the run archive under test.  Corrected to say that.
+
+Verified: 470 passed across the archive / auto-start-finalize / breadcrumb /
+review-loop / return-handoff / launch-retry / fail-closed / signoff suites;
+`tests/test_return_driver_handoff.py` 12 passed; the post-fix repro
+(`/pm-captures/impl/post-fix/transcript-archive/repro.py --expect fixed`)
+still reports all three symptoms fixed.  Full suite re-run after the
+change: **5479 passed / 1 skipped** (7m19s, `markdown` installed —
+5478 + the new regression test).

@@ -176,6 +176,51 @@ def test_tui_adopts_the_review_a_tick_launched_for_the_return(
     assert Path(os.readlink(link)) == transcript_path_for(str(wd), SID_NEW)
 
 
+def test_adopted_return_review_is_polled_not_relaunched(
+        home, tmp_path, monkeypatch):
+    """The loop started on the adopted window must recover it, not --fresh it.
+
+    Regression: ``_adopt_return_review`` created the loop-scoped link but
+    left ``iteration_attempted`` False, so the restart handoff's
+    fabrication guard (``allow_recovery=False`` for an iteration this loop
+    has not launched) made discovery ignore the link and relaunch
+    ``--fresh`` — killing the very window the adoption exists to preserve
+    (S79).  The guard protects against an *earlier run's* transcript for
+    the same iteration number; this link was created a moment ago from the
+    return's live pane, so the loop must treat the iteration as its own.
+    """
+    from pm_core import review_loop
+
+    wd = tmp_path / "wd"
+    run = tmp_path / "run"
+    pr = _review_return(wd)
+    app = _review_app(tmp_path, pr)
+    native = transcript_path_for(str(wd), SID_NEW)
+    native.parent.mkdir(parents=True, exist_ok=True)
+    native.write_text("{}\n")  # launched, no verdict yet
+    _pane_cmds(monkeypatch, {"%7": _launch_cmd(wd, SID_NEW)})
+    start = _run_review_pass(app, pr, run)
+    state = start.call_args.kwargs["resume_state"]
+    assert state.iteration_attempted is True
+
+    polled = []
+    with patch.object(review_loop, "_get_pm_session", return_value="sess"), \
+            patch.object(review_loop, "_find_review_claude_pane",
+                         return_value="%7"), \
+            patch.object(review_loop, "_other_loop_owner", return_value=None), \
+            patch("pm_core.claude_launcher.pane_transcript_path",
+                  return_value=native), \
+            patch("pm_core.claude_launcher.session_id_from_transcript",
+                  return_value=SID_NEW), \
+            patch.object(review_loop, "_poll_adopted_review",
+                         side_effect=lambda *a, **k:
+                         polled.append(a) or "**PASS**"):
+        out = review_loop._adopt_in_flight_review(state, pr, str(run))
+
+    assert out == "**PASS**"
+    assert polled, "the adopted window was not polled (a --fresh relaunch ran)"
+
+
 def test_tui_adopts_a_review_active_since_the_return(
         home, tmp_path, monkeypatch):
     """The 185 s re-check after a skipped claim: the tick's review has been

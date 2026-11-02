@@ -1732,6 +1732,18 @@ def _adopt_return_review(app, pr: dict) -> bool:
     from pm_core.tui.review_loop_ui import _start_loop
     state = ReviewLoopState(pr_id=pr_id, iteration=1,
                             _transcript_dir=str(tdir))
+    # The iteration is already in flight: another driver (a ``pm pr
+    # auto-sequence`` tick, or this TUI before a restart) launched it, and
+    # the link below names its live session.  ``run_review_loop_sync``
+    # treats the first iteration as an adopt candidate, but the restart
+    # handoff's fabrication guard (``allow_recovery=False`` for an
+    # iteration this loop has not launched) would make
+    # ``_adopt_in_flight_review`` ignore the link and relaunch ``--fresh``,
+    # killing the very window this adoption exists to preserve (S79).  The
+    # guard protects against an *earlier run's* transcript for the same
+    # iteration number; this link was created a moment ago from the
+    # return's live pane, so recovery is correct here.
+    state.iteration_attempted = True
     # Loop-scoped name: the adopted window is this loop's in-flight
     # iteration.  The legacy shared ``review-<pr>-i1.jsonl`` name could
     # collide with another loop's iteration for the same PR, which is the
