@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T09:07:13.875894+00:00'
+  updated_at: '2026-11-02T09:13:28.970280+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39876,12 +39876,12 @@ prs:
       == `| cat`.'
     created_at: '2026-11-02T08:34:25Z'
     last_edited: '2026-11-02T08:34:25Z'
-  - id: note-ba4d071
+  - id: note-45abbb4
     text: 'QA S56 (2026-11-02): NEEDS_WORK with 2 fixes; all Thens then held live
-      on 66b2309b. (1) 04c4c31b: q in the popup History pager (H, or Enter on the
+      on c5547542. (1) e8073921: q in the popup History pager (H, or Enter on the
       history row) closed the whole popup, because the picker exits after any dispatch.
       A view action now pages, then relaunches the fzf list with refreshed rows (test_history_view_returns_to_the_list).
-      (2) 66b2309b: a review-loop iteration is journaled ~0.1 s before its launching
+      (2) c5547542: a review-loop iteration is journaled ~0.1 s before its launching
       phase, and a read in that gap said "review-loop i2: running for 0s" (badge "start").
       The query now renders it as launching (test_iteration_before_its_launch_phase_reads_launching).
       The loop beat the first impl-idle tick in all 3 runs (start dated +4.98 s after
@@ -39895,7 +39895,7 @@ prs:
       ms-scale remaining_s inversions; per reader it is strict. Captures: /pm-captures/scenarios/56
       (README).'
     created_at: '2026-11-02T09:07:13Z'
-    last_edited: '2026-11-02T09:07:13Z'
+    last_edited: '2026-11-02T09:13:28Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
