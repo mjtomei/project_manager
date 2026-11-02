@@ -51778,7 +51778,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/297
   gh_pr_number: 297
   created_at: '2026-11-02T05:06:16.376330+00:00'
-  updated_at: '2026-11-02T06:10:47.296603+00:00'
+  updated_at: '2026-11-02T10:11:21.940768+00:00'
   started_at: '2026-11-02T05:06:42.121417+00:00'
   reviewed_at: null
   merged_at: null
@@ -51816,6 +51816,30 @@ prs:
       run_id/session_log instead of transcript_dir/finalize_transcript.'
     created_at: '2026-11-02T06:10:47Z'
     last_edited: '2026-11-02T06:10:47Z'
+  - id: note-67b9ac3
+    text: 'QA S7 refiner (6cf1e4b1, rehearsed live): killed-pane missing-log report
+      reaches only the L pane / ~/.pm/debug/<tag>.log (TUI line is just "Review loop
+      done: ☠ KILLED (1 iteration)", by design). CLAUDE_CONFIG_DIR change needs pm
+      session kill + fresh tmux server (check /proc/<TUI pid>/environ). Container
+      story: enable with podman, then `pm container set runtime docker` (absent);
+      error is raw "[Errno 2] No such file or directory: docker" from remove_container
+      (pre-existing, container.py untouched) and each failed attempt still gets a
+      log[missing] review row (recorded at command build). Reset runtime to podman
+      before `pm session kill`, else kill prints the same Errno 2.'
+    created_at: '2026-11-02T09:54:24Z'
+    last_edited: '2026-11-02T09:54:24Z'
+  - id: note-a2fc740
+    text: 'QA S7 run (bb54d8f2 = 6cf1e4b1 code, PASS, captures /pm-captures/scenarios/7):
+      all 5 stories observed. Killed-pane KILLED latency is 0-15 s by design (held
+      fake sends no hooks, so pane-gone is checked on the 15 s wait_for_event timeout):
+      9 s when the kill landed 6 s into the poll, 2.2 s when timed 13 s in (story2b).
+      `find $HOME -name <sid>*` also matches ~/.pm/hooks/<sid>.json (301-byte idle_prompt
+      hook event, pre-existing on master, no log content) for sessions that went idle.
+      Filed pr-2592e3d (pm hard-codes ~/.claude for logs/hooks while retention honours
+      CLAUDE_CONFIG_DIR) and pr-27ac16c (retry line err[:200] cuts the "(artifact:
+      ...)" path); both pre-existing on master.'
+    created_at: '2026-11-02T10:11:21Z'
+    last_edited: '2026-11-02T10:11:21Z'
   model: provider:claude-main-xhigh-pm
   effort: high
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ec5bc84-use-native-session-logs-and-remove-p-4d0c07a5
@@ -51853,6 +51877,67 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T08:41:58.306660+00:00'
   updated_at: '2026-11-02T08:41:58.306660+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-2592e3d
+  plan: bugs
+  title: 'Bug: pm reads native session logs and installs hooks only under ~/.claude,
+    ignoring CLAUDE_CONFIG_DIR (missing-log report cites $CLAUDE_CONFIG_DIR retention
+    but a ~/.claude path)'
+  branch: pm/pr-2592e3d-bug-pm-reads-native-session-logs-and-installs-hook
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/session_log.py find_native_log (Path.home()/.claude/projects),
+    claude_launcher._claude_project_dir/transcript_path_for (record.log), verdict_transcript,
+    router_route, hook_install/hook_events (~/.claude/settings.json) and fake_claude
+    all hard-code ~/.claude, while session_log.retention_days (pr-ec5bc84 review c71c
+    i4) and workspace_trust honour $CLAUDE_CONFIG_DIR. Claude Code keeps projects/<mangled>/<sid>.jsonl
+    and settings.json (hooks) under $CLAUDE_CONFIG_DIR when it is set, so with a non-default
+    config dir pm reports a log that exists as missing, never sees verdict/idle hooks,
+    and the missing-log report mixes sources. Repro (QA S7 pr-ec5bc84, 2026-11-02,
+    isolated HOME + fake claude): write $HOME/cfg7/settings.json = {"cleanupPeriodDays":
+    7}; `CLAUDE_CONFIG_DIR=$HOME/cfg7 pm session`; zz d on a PR with a held fake review;
+    tmux kill-window review-<pr>. The L pane says "native log of review session <sid>
+    is missing at $HOME/.claude/projects/<mangled>/<sid>.jsonl ... (cleanupPeriodDays=7)":
+    a ~/.claude path next to cfg7 retention; pm session wrote no hooks into cfg7/settings.json.
+    Pre-existing on master for the path/hooks (QA S2 note-b53cf82 of 2026-10-13 saw
+    real claude break transcript/hook verdict detection with a scratch CLAUDE_CONFIG_DIR).
+    Fix: one claude_config_dir() helper used by every reader/writer (keep the container/PM_HOST_HOME
+    mapping in mind).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T10:10:56.640567+00:00'
+  updated_at: '2026-11-02T10:10:56.640567+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-27ac16c
+  plan: bugs
+  title: 'Bug: TUI review launch-retry line cuts the launch error at 200 chars, truncating
+    its ''(artifact: ...)'' path mid-way'
+  branch: pm/pr-27ac16c-bug-tui-review-launch-retry-line-cuts-the-launch-e
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/review_loop_ui.py (~L518) builds ''Review launch
+    retry for <pr> (attempt N; attempt N-1 failed: {escape(err[:200])})'' where err
+    already ends with '' (artifact: <path>)'' (appended in pm_core/review_loop.py
+    ~L370/397/974/989), then adds ''\n  Artifact: <full path>''. Any real artifact
+    path pushes err past 200 chars, so the retry line shows a cut duplicate path.
+    Repro (QA S7 pr-ec5bc84, 2026-11-02): pm pr start <B>; pm container enable; pm
+    container set runtime docker (docker absent); zz d on B. The TUI shows "... No
+    such file or directory: ''docker'' (artifact: /tmp/.../.pm/runtime/pm-p)" followed
+    by the full Artifact: line. Same code on master. Fix: drop the '' (artifact: ...)''
+    suffix from err before truncating (the full path is on the next line) or truncate
+    only the error text.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T10:11:03.814517+00:00'
+  updated_at: '2026-11-02T10:11:03.814517+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
