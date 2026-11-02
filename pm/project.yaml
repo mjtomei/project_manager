@@ -40031,6 +40031,23 @@ prs:
       0s" (not agent working).'
     created_at: '2026-11-02T10:43:33Z'
     last_edited: '2026-11-02T10:43:33Z'
+  - id: note-5f47266
+    text: 'S62 refiner (9cc519e7c, dry run in /scratch/s62r): (1) E11 race: `pm pr
+      cleanup <R> --resources` ~8 s into i1 ended the loop parent `failed KILLED`
+      (no "PR resources cleaned up", no runtime line) in 2 of 3 runs. cleanup_pr_resources
+      kills the windows, then runs two `podman ps` (~0.17 s each) before end_in_flight_actions,
+      and poll_for_verdict checks the pane once a second, so the loop thread can record
+      failed KILLED first. Debug log order: "pane %N disappeared", then "to=failed
+      verdict=KILLED", then "cleanup_pr_resources(...)". The 1 run where cleanup won
+      matched E11. (2) E3: an action-less, ownerless attempt_start line reads `→ now  ?  running`
+      from then on. As the newest open leaf it also becomes `Waiting for: ?: running
+      for Ns` (even while i2 runs) and the popup badge `[?: start]`. The spec only
+      promises a `?` row with no traceback. (3) E10: when the loop beats the first
+      tick, R has no start row for up to 5 s after the loop opens, until the next
+      tick notes it. Typing `/review-loop` about 0.36 s after the window appears,
+      with the config re-applied before `s`, hit the race 3 of 3 times.'
+    created_at: '2026-11-02T10:58:14Z'
+    last_edited: '2026-11-02T10:58:14Z'
   - id: note-50cbbd2
     text: 'QA S61 (2026-11-02, two projects one HOME, same-id S started with TUI s
       in both TUIs + /review-loop before the first impl-idle tick): race hit in both
