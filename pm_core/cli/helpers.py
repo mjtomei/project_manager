@@ -1233,11 +1233,18 @@ def _clone_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
     base_hash = git_ops.run_git(
         "rev-parse", "--short=8", "HEAD", cwd=tmp_path, check=False
     ).stdout.strip()
-    from pm_core.workdirs import workdir_name
-    dir_name = workdir_name(branch, base_hash)
+    from pm_core.workdirs import clone_destination
     final_project_dir = _workdirs_dir(data)
     final_project_dir.mkdir(parents=True, exist_ok=True)
-    work_path = final_project_dir / dir_name
+    # Never the same-named directory discovery just skipped (listed above).
+    work_path = clone_destination(data, final_project_dir, branch,
+                                  base_hash, tmp_path)
+    if work_path is None:
+        shutil.rmtree(tmp_path, ignore_errors=True)
+        click.echo(f"Not cloning {pr_id}: its workdir names in "
+                   f"{final_project_dir} are taken by directories that "
+                   "aren't its clone; move them aside.", err=True)
+        return None
 
     if work_path.exists():
         shutil.rmtree(tmp_path)

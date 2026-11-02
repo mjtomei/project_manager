@@ -1111,12 +1111,20 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 "rev-parse", "--short=8", "HEAD", cwd=tmp_path, check=False
             ).stdout.strip()
 
-            # Final path: <project_dir>/<branch_slug>-<base_hash>
+            # Final path: <project_dir>/<branch_slug>-<base_hash>, never a
+            # same-named directory discovery skipped (clone_destination).
             # Re-resolve project_dir since _resolve_repo_id may have updated data
-            dir_name = workdirs_mod.workdir_name(branch, base_hash)
             final_project_dir = _workdirs_dir(data)
             final_project_dir.mkdir(parents=True, exist_ok=True)
-            work_path = final_project_dir / dir_name
+            work_path = workdirs_mod.clone_destination(
+                data, final_project_dir, branch, base_hash, tmp_path)
+            if work_path is None:
+                shutil.rmtree(tmp_path, ignore_errors=True)
+                click.echo(f"Not creating a workdir for {pr_id}: its workdir "
+                           f"names in {final_project_dir} are taken by "
+                           "directories that aren't its clone; move them "
+                           "aside.", err=True)
+                raise SystemExit(1)
 
             if work_path.exists():
                 shutil.rmtree(tmp_path)

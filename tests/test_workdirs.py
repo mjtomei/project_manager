@@ -407,6 +407,34 @@ class TestRejectionAndAmbiguity:
         assert "none verified" in text and "match branch" not in text
 
 
+class TestCloneDestination:
+    """Where a fresh clone is moved: never over a directory discovery
+    skipped."""
+
+    def _tmp_clone(self, env):
+        return env.clone(f".tmp-{PR_ID}", branch=None)
+
+    def test_free_name(self, env):
+        tmp = self._tmp_clone(env)
+        assert workdirs.clone_destination(
+            env.fresh()[0], env.project_dir, BRANCH, "10e74920", tmp
+        ) == env.project_dir / f"{SLUG}-10e74920"
+
+    def test_this_prs_clone_already_there_is_reused(self, env):
+        tmp = self._tmp_clone(env)
+        there = env.clone(f"{SLUG}-10e74920")
+        assert workdirs.clone_destination(
+            env.fresh()[0], env.project_dir, BRANCH, "10e74920", tmp) == there
+
+    def test_dangling_symlink_counts_as_taken(self, env):
+        tmp = self._tmp_clone(env)
+        full = git(tmp, "rev-parse", "HEAD")
+        (env.project_dir / f"{SLUG}-10e74920").symlink_to(env.base / "gone")
+        assert workdirs.clone_destination(
+            env.fresh()[0], env.project_dir, BRANCH, "10e74920", tmp
+        ) == env.project_dir / f"{SLUG}-{full}"
+
+
 class TestEnsureWorkdir:
     """``_ensure_workdir`` (review/QA/sign-off/done/merge launches)."""
 
@@ -461,6 +489,41 @@ class TestEnsureWorkdir:
                                side_effect=AssertionError("cloned")):
             assert helpers._ensure_workdir(data, pr, env.root) == made
         assert env.fresh()[1]["workdir"] == made
+
+    def test_clone_never_takes_over_a_skipped_same_named_dir(self, env,
+                                                             capsys):
+        """The fresh clone's name is held by the user's clone, skipped for
+        being on master: it is neither adopted nor checked out; the new
+        clone takes the full base hash and is the one recovered later."""
+        short = git(env.origin, "rev-parse", "--short=8", "HEAD")
+        full = git(env.origin, "rev-parse", "HEAD")
+        old = env.clone(f"{SLUG}-{short}", branch=None)
+        (old / "README").write_text("user edit\n")
+        before = _snapshot(old)
+        data, pr = env.fresh()
+        made = helpers._ensure_workdir(data, pr, env.root)
+        assert made == str(env.project_dir / f"{SLUG}-{full}")
+        assert git(made, "symbolic-ref", "-q", "HEAD") == f"refs/heads/{BRANCH}"
+        assert _snapshot(old) == before
+        assert f"on branch master, not {BRANCH}" in capsys.readouterr().err
+        assert env.fresh()[1]["workdir"] == made
+        store.locked_update(env.root, lambda d: store.get_pr(d, PR_ID)
+                            .update(workdir=env.stale))
+        res = workdirs.resolve_workdir(*env.fresh(), env.root)
+        assert (res.status, res.path) == (workdirs.RECOVERED, made)
+
+    def test_no_free_clone_name_clones_nothing(self, env, capsys):
+        short = git(env.origin, "rev-parse", "--short=8", "HEAD")
+        full = git(env.origin, "rev-parse", "HEAD")
+        old = env.clone(f"{SLUG}-{short}", branch=None)
+        (env.project_dir / f"{SLUG}-{full}").mkdir()
+        before = _snapshot(old)
+        data, pr = env.fresh()
+        assert helpers._ensure_workdir(data, pr, env.root) is None
+        assert "Not cloning" in capsys.readouterr().err
+        assert _snapshot(old) == before
+        assert not (env.project_dir / f".tmp-{PR_ID}").exists()
+        assert env.fresh()[1]["workdir"] == env.stale
 
     def test_lock_is_held_while_recovering(self, env):
         """Recovery runs inside the per-PR provisioning lock (not a second,
@@ -543,6 +606,23 @@ class TestPrStart:
         assert "Not creating another workdir" in result.output
         gm["clone"].assert_not_called()
         assert env.fresh()[1]["workdir"] == env.stale
+
+    def test_clone_does_not_take_over_a_skipped_same_named_dir(self, env):
+        # run_git is stubbed, so the fresh clone gets the bare slug — the
+        # name the user's clone (on master, skipped) already holds — and no
+        # full hash to fall back to.
+        old = env.clone(SLUG, branch=None)
+        before = _snapshot(old)
+        store.locked_update(env.root, lambda d: store.get_pr(d, PR_ID)
+                            .update(status="pending", workdir=None))
+        result, gm = self._invoke(env)
+        assert result.exit_code == 1, result.output
+        assert f"on branch master, not {BRANCH}" in result.output
+        assert "Not creating a workdir" in result.output
+        gm["checkout_branch"].assert_not_called()
+        gm["pull_rebase"].assert_not_called()
+        assert _snapshot(old) == before
+        assert env.fresh()[1]["workdir"] is None
 
     def test_explicit_workdir_skips_discovery(self, env, tmp_path):
         env.clone(f"{SLUG}-10e74920")

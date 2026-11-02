@@ -70,10 +70,10 @@ Only when the field is empty or its path does not exist, and the PR has a
 1. List **one directory**: `project_workdirs_dir(data)` (or the caller's
    `project_dir`), non-recursively.  A missing/unreadable dir → no candidates
    (no `mkdir`).
-2. Name filter: `^<slug>(-<7..40 hex>)?$` where
+2. Name filter: `^<slug>(-<7..64 hex>)?$` where
    `slug = branch_slug(branch)` — the naming `pr start` / `_clone_workdir`
    use via `workdir_name` (`<branch_slug>-<base_hash>`, or the bare
-   slug when no hash).  Dot entries (`.tmp-<pr>`, lock files) and non-dirs
+   slug when no hash; the full base hash when that name is taken, see R8).  Dot entries (`.tmp-<pr>`, lock files) and non-dirs
    are skipped.  Entries resolving to the same real path are deduplicated,
    keeping the real directory over a symlink alias (so the recorded path is
    the clone itself, whatever the alias's name sorts as).
@@ -170,6 +170,18 @@ deadlock).
 Nothing is added to `store.load`, the TUI tech tree, `pm pr list`, sync or
 other all-PR loops.
 
+### R8: A fresh clone never takes over a skipped directory
+
+`clone_destination(data, project_dir, branch, base_hash, clone)` picks where
+`_clone_workdir` and `pr start` move a fresh clone: `workdir_name(branch,
+base_hash)` when free; the existing dir there only when it verifies as this
+PR's clone (a concurrent start got there first — the fresh clone is
+discarded, as before); otherwise `workdir_name(branch, <full base hash>)`,
+still a name discovery matches; None when that is taken too —
+`_ensure_workdir` returns None and `pr start` exits 1, the temp clone
+removed, nothing recorded.  Taking over a rejected dir would check the PR
+branch out over its work.
+
 ## Implicit Requirements
 
 - Discovery never mutates a candidate: no checkout/pull/stash/clean/index
@@ -247,6 +259,9 @@ parent (it belongs to another HOME/machine), not `qa/`, not other projects.
   exists by then — never overwritten with the discovered clone.
 - **Workdirs dir absent** (fresh machine): no listing error, no `mkdir`,
   `missing`.
-- **Pre-existing `_clone_workdir` name collision** (an existing
-  `<slug>-<hash>` dir equal to the fresh clone's name): unchanged behavior;
-  a verified dir of that name is already adopted before cloning is reached.
+- **Fresh clone's name already taken** (an existing `<slug>-<hash>` dir
+  equal to the fresh clone's name, e.g. the user's old clone switched to
+  master while master hasn't moved): before this PR the clone was discarded
+  and that dir adopted and checked out on the PR branch.  Now a dir that
+  doesn't verify is never taken over (R8): the clone goes to
+  `<slug>-<full hash>`, or nothing is cloned when that is taken too.

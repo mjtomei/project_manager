@@ -48,8 +48,9 @@ _GIT_LOCATION_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR",
                       "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE",
                       "GIT_CEILING_DIRECTORIES")
 # ``<branch_slug>`` or ``<branch_slug>-<base hash>`` (``rev-parse --short=8``
-# may lengthen the hash when it is ambiguous).
-_HASH_SUFFIX = r"(?:-[0-9a-f]{7,40})?"
+# may lengthen the hash when it is ambiguous; :func:`clone_destination` falls
+# back to the full SHA-1/SHA-256 hash).
+_HASH_SUFFIX = r"(?:-[0-9a-f]{7,64})?"
 
 
 @dataclass
@@ -122,8 +123,9 @@ def workdir_name(branch: str, base_hash: str = "") -> str:
     """The directory name a PR's clone gets: ``<branch_slug>-<base_hash>``,
     or the bare slug without a hash.
 
-    ``pm pr start`` and ``_clone_workdir`` name clones with this, and
-    :func:`resolve_workdir` finds them by it, so the two cannot drift apart.
+    ``pm pr start`` and ``_clone_workdir`` name clones with this (through
+    :func:`clone_destination`), and :func:`resolve_workdir` finds them by
+    it, so the two cannot drift apart.
     """
     slug = branch_slug(branch)
     return f"{slug}-{base_hash}" if base_hash else slug
@@ -255,6 +257,37 @@ def verify_candidate(path: Path, data: dict, branch: str) -> str | None:
         return why
     if current != branch:
         return f"on branch {current}, not {branch}"
+    return None
+
+
+def clone_destination(data: dict, project_dir: Path, branch: str,
+                      base_hash: str, clone: Path) -> Path | None:
+    """Where a fresh clone of *branch*, still at its temporary path *clone*,
+    is moved to; None when there is nowhere safe.
+
+    Normally ``project_dir / workdir_name(branch, base_hash)``.  A directory
+    already at that name is returned only when it verifies as this PR's
+    clone (a concurrent start got there first; callers discard *clone* and
+    use it).  Any other occupant — a clone on another branch or detached, a
+    different repository, a plain directory — is one discovery did not
+    adopt: taking it over would check the PR branch out over its work.  The
+    clone then gets the full base hash, a name discovery still matches.
+    """
+    dest = project_dir / workdir_name(branch, base_hash)
+    if not os.path.lexists(dest):
+        return dest
+    why = verify_candidate(dest, data, branch)
+    if why is None:
+        return dest
+    rc, full, _ = _git(clone, "rev-parse", "HEAD")
+    if rc == 0 and full and full != base_hash:
+        alt = project_dir / workdir_name(branch, full)
+        if not os.path.lexists(alt):
+            _log.info("new clone of %s goes to %s: %s is taken (%s)",
+                      branch, alt, dest, why)
+            return alt
+    _log.warning("no free workdir name for %s in %s: %s is taken (%s)",
+                 branch, project_dir, dest, why)
     return None
 
 
