@@ -1774,11 +1774,16 @@ re-launch a still-running test or re-file a duplicate bug.
 ### 1. Inventory regression tests
 
 ```
-ls {meta_pm_root}/qa/regression/*.md
+ls {meta_pm_root}/qa/regression/*.md 2>/dev/null
 ```
 
 Each file is a regression test definition. Cross-reference with the work log
 to see when each was last run.
+
+If the listing is empty, the regression library is empty and there is no
+test to schedule. Write `regression library empty, nothing scheduled` in this
+tick's work-log entry and skip to step 5. Never record a test as run or
+passing unless it was launched and finished.
 
 ### 2. Detect in-flight tests from prior ticks
 
@@ -1787,8 +1792,12 @@ launched from this watcher run as additional panes in that same window. List
 panes:
 
 ```
-tmux list-panes -t {session_name or "<session>"}:discovery -F "#{{pane_id}} #{{pane_current_command}}"
+tmux list-panes -t {session_name or "<session>"}:discovery -F "#{{pane_id}} #{{pane_current_command}} #{{pane_start_command}}"
 ```
+
+A regression-test pane's start command contains `qa regression <id>`, naming
+the test. Its current command may be `claude`, `bash` or the container
+runtime (`podman`/`docker`), depending on container mode.
 
 If a regression-test pane is still running, do **not** launch a new test this tick. Note the in-flight
 state in your work-log entry and reconcile after it finishes (next tick or
@@ -1810,14 +1819,37 @@ Use the headless launcher:
 pm qa launch regression:<id> --target-window discovery
 ```
 
-This spawns a Claude pane in the discovery window running the regression test.
-The test session itself files any bugs / improvements into the `bugs` / `ux`
-plans (see the regression filing addendum baked into its prompt).
+This spawns a pane in the discovery window running
+`pm qa regression <id> --file-prs`. The test runs in its own isolated QA
+workdir (a QA container when container mode is enabled) against a disposable
+test project it creates, not against this session or project. Its captures
+land under the session's `captures/regression/<id>/<run-id>/` directory.
+The test session itself files any bugs / improvements into the project's
+registry (see the regression filing addendum baked into its prompt).
+
+If the launch command exits non-zero (for example, container mode is enabled
+but the runtime is unusable), nothing ran. Record the error in the work log
+and do not count it as a run.
+
+The run can also fail after its pane opens, while it is being set up (the
+clone, or building/creating its container). The runner writes the run's
+`prompt.md` into its run dir just before the session starts; list a test's
+started runs newest first with:
+
+```
+ls -t ~/.pm/sessions/*/captures/regression/<id>/*/prompt.md 2>/dev/null
+```
+
+Run ids (the dir names) start with their UTC start time. If a test's pane has
+exited and none of these is newer than the launch, setup failed and the test
+never ran: record it as not run, never as a run with no findings, and leave
+its cadence unchanged.
 
 ### 5. Reconcile recently-filed PRs
 
 For tests that completed since the last tick (visible in the work log or by a
-pane that has since exited), inspect any new PRs in the `bugs` and `ux` plans:
+pane that has since exited after its run started, see step 4), inspect any
+new PRs in the `bugs` and `ux` plans:
 
 ```
 pm pr list --plan bugs

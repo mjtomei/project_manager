@@ -56,7 +56,7 @@ class CommandBar(Input):
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         _log.info("CommandBar submitted: %r", event.value)
-        command = event.value.strip()
-        if command:
-            self.post_message(CommandSubmitted(command))
+        # Posted even when empty: the app releases the keys it held behind
+        # this Enter once the message has been handled.
+        self.post_message(CommandSubmitted(event.value.strip()))
         self.value = ""

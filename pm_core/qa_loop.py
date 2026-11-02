@@ -413,7 +413,7 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
     Everything for a single scenario lives under one directory::
 
         {qa_workdir}/s-{N}/
-            repo/       — ``git clone --local`` of the target repo
+            repo/       — local ``git clone`` of the target repo
             scratch/    — empty dir for throwaway test projects
 
     The clone checks out *branch* (the PR branch) so the scenario can
@@ -449,8 +449,13 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
         shutil.rmtree(clone_path, ignore_errors=True)
 
     # Create a local clone — fast (hardlinks objects) and standalone
-    # (proper .git directory, no worktree pointer issues).
-    clone_args = ["clone", "--local", str(repo_root), str(clone_path)]
+    # (proper .git directory, no worktree pointer issues).  A plain path
+    # source already gets git's local optimisation; spelling ``--local``
+    # out would make a failed hardlink fatal ("Invalid cross-device
+    # link") when the source repo (a regression/debug run's project
+    # checkout) is on another filesystem than ~/.pm, instead of falling
+    # back to copying the objects.
+    clone_args = ["clone", str(repo_root), str(clone_path)]
     if branch:
         clone_args.extend(["--branch", branch])
     git_ops.run_git(*clone_args)
@@ -533,7 +538,7 @@ def _remote_branch_sha(workdir: str | Path, url: str, branch: str,
 def _publish_planner_head(workdir_path: str, branch: str) -> str:
     """Make sure the planner's committed PR head is on the real upstream.
 
-    Scenario workdirs are ``git clone --local`` copies of the PR workdir
+    Scenario workdirs are local ``git clone`` copies of the PR workdir
     whose ``origin`` is then swapped to the real upstream.  If the planner
     committed (fixes, QA specs, instructions) without pushing, the clone
     starts at the unpublished head, and a worker's later ``git pull
