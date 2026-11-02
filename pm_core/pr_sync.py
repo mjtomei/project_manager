@@ -115,6 +115,25 @@ def should_sync(
     return True, None
 
 
+def _base_branch_of(data: dict) -> str:
+    """The project's base branch, or ``master`` for a malformed value.
+
+    ``project.yaml`` is hand-editable state: a non-mapping ``project`` (the
+    ``.get`` below would raise ``AttributeError``) and a ``base_branch`` that
+    is not a branch-name string are no configuration.  The value is passed to
+    git (``is_merged``) and to the merge-integrity verification, which
+    interpolates it into a ``git log`` range — a non-string either raised out
+    of the sync or turned a real verification into an ``error`` that finalized
+    the merge without checking it (the same fallback ``pm pr merge``, the
+    sign-off clone and the TUI gate apply).
+    """
+    project = data.get("project")
+    project = project if isinstance(project, dict) else {}
+    base_branch = project.get("base_branch")
+    return base_branch if isinstance(base_branch, str) and base_branch \
+        else "master"
+
+
 def find_workdir(data: dict) -> Optional[str]:
     """Find an existing workdir to use for merge checks.
 
@@ -219,7 +238,7 @@ def sync_prs(
         )
 
     prs = usable_prs(data.get("prs"))
-    base_branch = data.get("project", {}).get("base_branch", "master")
+    base_branch = _base_branch_of(data)
     backend_name = data.get("project", {}).get("backend", "vanilla")
     backend = get_backend(data)
 
@@ -355,7 +374,7 @@ def sync_from_github(
         )
 
     prs = usable_prs(data.get("prs"))
-    base_branch = data.get("project", {}).get("base_branch", "master")
+    base_branch = _base_branch_of(data)
     updated = 0
     merged_prs = []
     closed_prs = []

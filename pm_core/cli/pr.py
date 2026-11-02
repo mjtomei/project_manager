@@ -1602,7 +1602,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     backend_name = data["project"].get("backend", "vanilla")
     gh_pr_info = None
     if backend_name == "github" and not pr_entry.get("gh_pr_number"):
-        base_branch = data["project"].get("base_branch", "master")
+        # ``base_branch`` was already read (and a non-string value read as the
+        # default) above; re-reading it raw here passed a mapping straight to
+        # ``gh pr create --base`` (``subprocess`` rejects a non-string), so a
+        # hand-edited value crashed `pm pr start` on the GitHub backend.
         title = pr_entry.get("title", pr_id)
         desc = pr_entry.get("description", "")
 
@@ -3620,7 +3623,12 @@ def pr_sync():
     root = state_root()
     data = store.load(root)
     backend_name = data["project"].get("backend", "vanilla")
-    base_branch = data["project"].get("base_branch", "master")
+    # Hand-edited state: the value is passed to git (``is_merged``) and to the
+    # merge-integrity verification, which interpolates it into a ``git log``
+    # range — a non-string crashed `pm pr sync` (or finalized a merge without
+    # verifying it).  The shared reader applies the same fallback the module
+    # and `pm pr merge` use.
+    base_branch = pr_sync_mod._base_branch_of(data)
     prs = data.get("prs") or []
     updated = 0
 

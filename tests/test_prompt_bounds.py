@@ -1564,6 +1564,36 @@ class TestHandEditedPrText:
         assert "git diff develop...HEAD" in spec_gen._build_spec_prompt(
             data, pr, "qa")
 
+    def test_every_prompt_diff_names_a_real_base_branch(self):
+        """The review / sign-off / QA prompts hand the agent a diff command.
+
+        When the branch does not already contain a base, each falls back to
+        ``project.base_branch``.  That value is hand-edited state: a
+        non-string (an int, a list) or an empty one rendered into
+        ``git diff origin/<value>...HEAD`` — a command that cannot work.  It
+        now reads as the default, the same fallback the QA *spec* prompt and
+        the review window's diff pane already apply.
+        """
+        pr = _pr(workdir="/tmp/nowhere")
+        builders = (
+            lambda data: prompt_gen.generate_review_prompt(data, "pr-x"),
+            lambda data: prompt_gen.generate_signoff_prompt(data, "pr-x"),
+            lambda data: prompt_gen.generate_qa_planner_prompt(data, "pr-x"),
+            lambda data: prompt_gen.generate_qa_interactive_prompt(
+                data, "pr-x", "/tmp/nowhere"),
+        )
+        for bad in (5, ["master"], {"bad": True}, "", None):
+            data = _data(pr)
+            data["project"]["base_branch"] = bad
+            for build in builders:
+                prompt = build(data)
+                assert "git diff master...HEAD" in prompt \
+                    or "git diff origin/master...HEAD" in prompt, bad
+                assert "git diff 5..." not in prompt, bad
+                assert "git diff origin/5..." not in prompt, bad
+                assert "['master']" not in prompt, bad
+                assert "{'bad': True}" not in prompt, bad
+
     def test_a_non_string_note_text_does_not_crash_the_bounded_renderer(self):
         notes = [{"id": "note-a", "text": "x" * 20000,
                   "created_at": "2026-01-01T00:00:00Z"},

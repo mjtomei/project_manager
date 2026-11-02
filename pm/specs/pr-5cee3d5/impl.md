@@ -498,7 +498,17 @@ The QA *spec* prompt's own fallback is guarded the same way: a `base_branch`
 that is not a branch-name string (an int, a list, an empty string) reads as
 absent and falls back to `master`, so a hand-edited value is never
 interpolated into the `git diff <base>...HEAD` instruction it hands the
-agent — the same fallback the review window's diff pane applies.
+agent — the same fallback the review window's diff pane applies. The same
+guard covers every other prompt builder that falls back to the base branch
+for its diff command (`prompt_gen._base_branch`, used by the impl, review,
+sign-off, QA-planner and QA-interactive prompts): without it a hand-edited
+value rendered as `git diff origin/<repr>...HEAD`. The same fallback applies
+outside the prompts — `pm pr start`'s GitHub draft-PR path (`gh pr create
+--base` rejects a non-string, so the value crashed the command) and the
+`pm pr sync` merge-detection / merge-integrity paths (`is_merged` passes it
+to git; the verification interpolates it into a `git log` range, and a
+non-string there turned a real verification into an `error` that finalized
+the merge without checking it).
 
 **Why sign-off is running again.** When the merge gate refuses an approval
 because the base moved (`invalidate_signoff`), the driver clears

@@ -129,6 +129,13 @@ def set_workdir(w, value) -> None:
     store.locked_update(w.pm_dir, _apply)
 
 
+def set_base_branch(w, value) -> None:
+    """Hand-edit ``project.base_branch`` (project.yaml is hand-editable)."""
+    def _apply(d):
+        d["project"]["base_branch"] = value
+    store.locked_update(w.pm_dir, _apply)
+
+
 class _FakeApp:
     _qa_visible = False
     _plans_visible = False
@@ -566,6 +573,31 @@ def test_cli_pr_sync_malformed_workdir_does_not_crash(sync_github):
     pr = pr_entry(sync_github)
     assert pr["status"] == "merged"
     assert "merge_integrity" in pr
+    assert "WARNING:" in result.output
+
+
+def test_cli_pr_sync_malformed_base_branch_does_not_crash(sync_github):
+    """`pm pr sync` reads a non-string ``base_branch`` as the default.
+
+    The value is passed to git (``is_merged``) and interpolated into the
+    merge-integrity verification's ``git log`` range; a mapping raised out of
+    the command (or finalized the merge unverified).  It now reads as
+    ``master``, so the detection and verification run exactly as with a valid
+    base branch.
+    """
+    merge_on_remote(sync_github, extra=True)
+    set_base_branch(sync_github, {"bad": True})
+
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=sync_github.pm_dir), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"):
+        result = CliRunner().invoke(pr_mod.pr, ["sync"])
+
+    assert result.exit_code == 0, result.output
+    assert "{'bad': True}" not in result.output
+    pr = pr_entry(sync_github)
+    assert pr["status"] == "merged"
+    assert "not the approved head" in pr["merge_integrity"]["problem"]
     assert "WARNING:" in result.output
 
 
