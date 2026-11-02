@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T03:45:18.416162+00:00'
+  updated_at: '2026-11-02T03:46:19.242299+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25555,6 +25555,23 @@ prs:
       to the PR workdir.'
     created_at: '2026-11-02T03:45:18Z'
     last_edited: '2026-11-02T03:45:18Z'
+  - id: note-90cbd8a
+    text: 'QA S12 (2026-11-02): NEEDS_WORK, fixed in 634a4c05. Story 3 (R28) failed
+      at 0e12d832 as the refiner saw: a run launched from a pane of the user''s pm
+      session kept TMUX/TMUX_PANE, so a pm session the test started in its own project
+      reused pm-proj-<hash>~1, re-applied the user''s layout and died on attach (SESSION-rc=1).
+      Fix: _REGRESSION_SCRUBBED_ENV (cli/qa.py) also drops TMUX, TMUX_PANE, PM_POPUP_SESSION
+      and PM_IN_TMUX_SESSION; PM_TMUX_SOCKET is kept (host mode still shares the user''s
+      server, A2). Test: test_host_run_is_isolated_and_needs_no_pm_session; full suite
+      5487 passed/1 skipped. Post-fix the run-pane pm session creates pm-pm-test-<ts>-<hash>
+      (attached nested inside the run pane; send C-b d to the pane) and the user''s
+      windows/panes/registry sha stay identical. Stories 1, 2, 4, 5 held live from
+      /scratch/s12. Scenario wording to update: story 2''s ''TMUX_PANE = that run
+      pane'' and story 3''s ''TMUX and TMUX_PANE inherited'' are now ''unset''. Harness
+      trap: TUI launch_pane splits the session''s current window, so send C-b 0 through
+      a panning recorder before TUI Enter. Captures: /pm-captures/scenarios/12/.'
+    created_at: '2026-11-02T03:46:19Z'
+    last_edited: '2026-11-02T03:46:19Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
