@@ -154,6 +154,13 @@ deadlock).
   in_progress reuse of an *existing* recorded path is unchanged).
 - `pm_core/cli/pr.py:pr_cd` (`pm pr cd`) — use the resolver so a stale record
   is recovered instead of "Workdir … does not exist"; ambiguity is reported.
+- `pm_core/cli/pr.py:pr_merge` (`pm pr merge`) — under the per-PR merge
+  lock, before the sign-off gate and the `--no-signoff-check` /
+  `--propagation-only` recovery branch, resolve (never clone: the gate reads
+  the workdir HEAD only) so a stale record is re-linked instead of refused as
+  "workdir not found … Restore the workdir".  The gate still decides: a
+  re-linked HEAD that isn't the approved one refuses as usual; ambiguity is
+  reported and the gate refuses as it would for a missing workdir.
 
 Nothing is added to `store.load`, the TUI tech tree, `pm pr list`, sync or
 other all-PR loops.

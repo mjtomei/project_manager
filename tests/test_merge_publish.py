@@ -117,6 +117,28 @@ def test_local_publishes_the_approved_candidate(local):
     assert git(local.wd, "rev-parse", "HEAD") == local.head
 
 
+def test_stale_workdir_record_is_relinked_not_refused(local):
+    """The record points at a path from another HOME, but the PR's clone is
+    still in this project's workdirs dir: the gate re-links it (no clone) and
+    publishes the approved HEAD instead of "workdir not found"."""
+    rec = approve(local)
+    moved = local.wd.parent / "pm-pr-001-10e74920"   # how pm names clones
+    local.wd.rename(moved)
+    stale = "/home/someone-else/.pm/workdirs/proj/pm-pr-001-ab512a43"
+    store.locked_update(local.pm_dir, lambda d: store.get_pr(d, PR)
+                        .update(workdir=stale))
+    result, windows, finalized = merge(local)
+    assert result.exit_code == 0, result.output
+    assert "re-linked" in result.output
+    assert "workdir not found" not in result.output
+    assert finalized and windows == []
+    assert pr_entry(local)["workdir"] == str(moved)
+    # No second clone was made next to it.
+    assert [p.name for p in moved.parent.iterdir()
+            if not p.name.startswith(".")] == [moved.name]
+    assert git(local.repo, "rev-parse", "master^{tree}") == rec["candidate_tree"]
+
+
 def test_local_publish_does_not_rely_on_main_repo_fetch_head(local):
     """A concurrent fetch in the main repo rewrites its FETCH_HEAD; the
     merge commit is fetched into a private ref instead, removed after."""

@@ -2920,6 +2920,16 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
         click.echo(f"PR {pr_id} is already merged.", err=True)
         raise SystemExit(1)
 
+    # A stale workdir record (started under another HOME/machine, record
+    # rewritten) is re-linked to the PR's clone when it is still here —
+    # never cloned — so the gate below reads the PR's actual HEAD instead of
+    # refusing for a missing workdir (pm_core.workdirs).  The gate still
+    # decides: a re-linked HEAD that isn't the approved one refuses as usual.
+    found = workdirs_mod.resolve_workdir(data, pr_entry, root,
+                                         project_dir=_workdirs_dir(data))
+    if found.reportable:
+        click.echo(found.describe(), err=found.path is None)
+
     backend_name = data["project"].get("backend", "vanilla")
     base_branch = data["project"].get("base_branch", "master")
 
