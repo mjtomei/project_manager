@@ -40317,7 +40317,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T18:58:48.066401+00:00'
+  updated_at: '2026-11-02T19:44:05.339825+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42099,6 +42099,37 @@ prs:
       Ready for a fresh sign-off.'
     created_at: '2026-11-02T18:58:47Z'
     last_edited: '2026-11-02T18:58:47Z'
+  - id: note-f6843b0
+    text: 'S75 refiner (2026-11-02, ad033bbb): both stories held live, no code defects.
+      Fake config: qa_regression is a no-verdict type, so {"qa_regression": {"verdicts":
+      ["PASS"]}} is rejected; use "qa_regression": {} (output then stays open; close
+      its pane after). Pad the session journal to 4194304-8000 bytes (old ended review
+      attempts with a long transcript field, under flock) and the rotation lands mid-run,
+      at the s1 window death (~52 s in). Command-bar qa regression opens a qa-item
+      pane beside the TUI in window 0 (80 cols: split, not zoomed) and focuses it;
+      C-b Left back to the TUI (zooms it) before typing the malformed command. Queued
+      s3 and the s1 retry launch after the shared grace elapsed, so their turn-finished
+      read is the ~0.1 s "no verdict accepted yet" form. Run elapsed and summed cross
+      once ~80 s in; check elapsed = run start->end. Drivers + evidence: /pm-captures/pr-8020495/s75-refiner.'
+    created_at: '2026-11-02T19:26:10Z'
+    last_edited: '2026-11-02T19:26:10Z'
+  - id: note-235e76a
+    text: 'QA S75 (2026-11-02) PASS on ad033bbb, no code edits: refiner drivers re-run
+      live in env -i sandbox /scratch/q75/sb.o1ac (malformed qa regression and regression-pane
+      close now scripted); captures + per-Then README in /pm-captures/scenarios/75.
+      Story 1: deadline first read 59m59s (3599.98), cancelled at plan found, 0 1h00m
+      reads; s3 queued 1m25s -> launching 16s -> no-verdict-yet 0.19s -> verifying
+      -> done PASS; s1 vanished -> retry 1 backoff 4.9->0.1 then fired; ends match
+      TUI PASS (verified) to the second; run 4m05s, wall 2m57s < summed 4m33s, up
+      to 2; rotation .1.jsonl at s1 death (52 s in), 138 old review rows in every
+      read, 0 dips/invalid/tracebacks, 0 lines >80. Command-bar qa regression: qa-item
+      pane beside the TUI, clone ~/.pm/workdirs/qa/regression-smoke-check-<id>/s-0/repo
+      next to the QA dir, history dir only P files, regression-smoke-check not found
+      rc 1; malformed -> usage line, panes 13/13. Story 2: W=s5 hold 717 JSON + 614
+      text reads (due/remaining null, Waiting for human), popup badge, 0 derived,
+      released 2.6 s after close, retry backoff fired, run done PASS.'
+    created_at: '2026-11-02T19:44:05Z'
+    last_edited: '2026-11-02T19:44:05Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
