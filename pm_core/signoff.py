@@ -40,10 +40,14 @@ from pathlib import Path
 from pm_core import store
 from pm_core import tmux as tmux_mod
 from pm_core import prompt_gen
+from pm_core import integration
 from pm_core.cli.helpers import (
     _log,
     _pr_display_id,
     _record_status_timestamp,
+)
+from pm_core.prompt_bounds import (
+    INTEGRATION_LIST_BUDGET, INTEGRATION_MAX_PATHS, bounded_join,
 )
 
 # --- Routing verdicts ------------------------------------------------------
@@ -412,10 +416,12 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
     from pm_core.claude_launcher import build_claude_shell_cmd
     from pm_core import pane_registry, home_window
     from pm_core.model_config import (
-        resolve_model_and_provider, get_pr_model_override,
+        resolve_model_and_provider,
     )
 
-    if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
+    # Background (auto-sequence) launches switch no client: see
+    # _launch_review_window.
+    if not tmux_mod.has_tmux() or not (background or tmux_mod.in_tmux()):
         print("Sign-off window requires tmux.")
         return
 
@@ -487,7 +493,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
 
         _resolution = resolve_model_and_provider(
             "signoff",
-            pr_model=get_pr_model_override(pr_entry),
+            pr_entry=pr_entry,
             project_data=data,
         )
 
@@ -499,7 +505,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         # mounted host path via write_dir.
         from pm_core.container import (
             is_container_mode_enabled, _CONTAINER_WORKDIR,
-            wrap_claude_cmd, ContainerError, remove_container, _make_container_name,
+            wrap_claude_cmd, remove_container, _make_container_name,
         )
         if is_container_mode_enabled():
             _claude_cwd = _CONTAINER_WORKDIR
@@ -508,6 +514,8 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             _claude_cwd = workdir
             _claude_write_dir = None
 
+        _stag = pm_session.removeprefix("pm-") if pm_session else None
+        env: dict[str, str] = {}
         claude_cmd = build_claude_shell_cmd(
             prompt=signoff_prompt,
             transcript=transcript,
@@ -516,21 +524,25 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             model=_resolution.model,
             provider=_resolution.provider,
             effort=_resolution.effort,
-            session_type="signoff")
+            session_type="signoff",
+            session_tag=_stag,
+            container=is_container_mode_enabled(),
+            env_out=env)
 
         branch = pr_entry.get("branch", "")
         if is_container_mode_enabled():
-            remove_container(_make_container_name(f"signoff-{pr_id}"))
-            _stag = pm_session.removeprefix("pm-") if pm_session else None
-            try:
-                claude_cmd, _cname = wrap_claude_cmd(
-                    claude_cmd, workdir, label=f"signoff-{pr_id}",
-                    allowed_push_branch=branch,
-                    session_tag=_stag,
-                    pr_id=pr_id)
-            except ContainerError as e:
-                print(str(e))
-                return
+            remove_container(_make_container_name(f"signoff-{pr_id}",
+                                                  session_tag=_stag))
+        # A ContainerError (e.g. a route bridge or container that cannot
+        # be set up) propagates: `pm pr signoff` reports it on stderr
+        # with rc 1.
+        claude_cmd, _cname = wrap_claude_cmd(
+            claude_cmd, workdir, label=f"signoff-{pr_id}",
+            allowed_push_branch=branch,
+            session_tag=_stag,
+            pr_id=pr_id,
+            provider=_resolution.provider,
+            env=env)
 
         # background -> don't steal focus (auto-sequence); explicit switch below
         # moves exactly the sessions that were watching the old window.
@@ -541,7 +553,8 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             # report.html directly; the report carries the diff inline and
             # the dashboard surfaces it. No separate evidence pane needed.
             claude_pane = tmux_mod.new_window_get_pane(
-                pm_session, window_name, claude_cmd, workdir, switch=switch)
+                pm_session, window_name, claude_cmd, workdir, switch=switch,
+                env=env)
             if not claude_pane:
                 print(f"Sign-off window: failed to create tmux window '{window_name}'.")
                 return
@@ -707,6 +720,14 @@ def build_return_record(pr: dict, verdict: str, hop: str, *,
         integ = {k: rec.get(k) for k in (
             "target_repo", "base_branch", "base_sha", "merge_base", "status",
             "conflicts", "overlap", "error")}
+        # ``compact`` caps each list at _YAML_LIST_LIMIT and records the real
+        # length separately; the return block's omission marker reports how
+        # many paths of the record are not shown, so carry the totals too.
+        # Absent on a legacy/hand-written record — the marker then falls back
+        # to its list-relative count.
+        for key in ("conflicts_total", "overlap_total"):
+            if rec.get(key) is not None:
+                integ[key] = rec[key]
     now = datetime.now(timezone.utc).isoformat()
     out = {
         "verdict": verdict, "hop": hop,
@@ -754,43 +775,80 @@ def parse_ts(value):
 
 RETURN_LAUNCH_CLAIM_SECONDS = 180
 # Hops whose relaunch is ``--fresh`` (kills the window it finds) and so
-# needs one launcher; a QA return is guarded by the QA loop's running check.
+# needs one launcher.  The claim is written in the same locked update as the
+# transition (:func:`build_return_record`), so only catch-up paths call
+# :func:`claim_return_launch` for them.
+#
+# ``qa`` is deliberately NOT here.  Its claim is taken by every *starter*
+# (qa_loop_ui.start_owed_reqa, the auto-sequence QA hop, auto-start), never
+# by the sign-off hop that performs the transition: that hop may have to
+# defer behind a live ``pm qa run``, and holding the claim would block the
+# owed start for the whole RETURN_LAUNCH_CLAIM_SECONDS after that run ends.
+# ``pm pr auto-sequence`` claims only after its provider check passes (a
+# refused launch must leave it unclaimed for the tick after a fix).
 _CLAIMED_RETURN_HOPS = ("impl", "review")
+# How long a launcher whose session opened keeps waiting for project.yaml's
+# lock to clear ``awaiting`` (S77: a holder past the 2 s timeout left it set).
+RETURN_CLEAR_WAIT_SECONDS = RETURN_LAUNCH_CLAIM_SECONDS
 
 
-def claim_return_launch(root: Path, pr_id: str, hop: str) -> bool:
+def claim_return_launch(root: Path, pr_id: str, hop: str,
+                        require_status: str | None = None) -> bool:
     """Take the launch of the routed *hop*'s fresh session (one winner).
 
     Several drivers act on ``awaiting`` (the TUI routing a verdict or
     catching up after a restart, every ``pm pr auto-sequence`` tick).  The
     impl and review relaunches are ``--fresh`` — each kills the window it
     finds — so two concurrent launchers kill each other's session and leave
-    duplicates behind.  The first caller records a claim
-    and launches; later callers see it and leave the launch alone.  The
-    driver that performs the hop holds the claim from the transition on
+    duplicates behind.  A QA return's relaunch starts a whole loop (windows,
+    verifier, finalizer), so it needs the same single-owner gate.  The first
+    caller records a claim and launches; later callers see it and leave the
+    launch alone.
+
+    For the hops in :data:`_CLAIMED_RETURN_HOPS` the driver that performs
+    the hop holds the claim from the transition on
     (:func:`build_return_record`), so only catch-up paths (restart, an
-    ``awaiting`` tick) call this.
+    ``awaiting`` tick) call this.  A ``qa`` claim is taken by every starter
+    instead, because the hop that defers behind a live QA run must not hold
+    one — see that constant.
+
     ``awaiting`` itself stays set until the session opens, and a claim
     whose launcher died expires after RETURN_LAUNCH_CLAIM_SECONDS.
+
+    *require_status* additionally requires the PR to still be in that
+    status, in the same locked update: a return that an out-of-band
+    transition superseded must not be launched off a stale read.
     """
     from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
     won = {"ok": False}
 
+    # Cheap snapshot pre-check before the locked update.  ``locked_update``
+    # rewrites the whole file even when its callback declines, and the TUI's
+    # owed-REQA reconciler retries every ~5 s while another driver's fresh
+    # claim is outstanding (up to RETURN_LAUNCH_CLAIM_SECONDS) — a fsynced
+    # rewrite of a large project.yaml on the event loop per tick.  A snapshot
+    # that already shows the claim unwinnable (awaiting cleared, status moved
+    # on, a fresh claim) is safe to trust: a stale snapshot only falls through
+    # to the atomic path below, which decides for real.
+    try:
+        snapshot = store.get_pr(store.load(root), pr_id)
+    except Exception:
+        snapshot = None       # unreadable: let the locked update decide/report
+    else:
+        if not _launch_claimable(snapshot, hop, require_status,
+                                 datetime.now(timezone.utc)):
+            return False
+
     def _apply(data):
+        # Read the clock under the lock: a claimant that waited on it would
+        # otherwise date its check before a claim written while it waited,
+        # see that claim as from the future (not fresh), and launch too.
+        now = datetime.now(timezone.utc)
         pr = store.get_pr(data, pr_id)
-        rec = (pr or {}).get("signoff_return")
-        if not isinstance(rec, dict) or rec.get("awaiting") != hop:
+        if not _launch_claimable(pr, hop, require_status, now):
             return
-        claim = rec.get("launch_claim") or {}
-        try:
-            age = (now - parse_ts(claim.get("at"))).total_seconds()
-        except (TypeError, ValueError):
-            age = None
-        if claim.get("hop") == hop and age is not None \
-                and 0 <= age < RETURN_LAUNCH_CLAIM_SECONDS:
-            return
-        rec["launch_claim"] = {"hop": hop, "at": now.isoformat()}
+        pr["signoff_return"]["launch_claim"] = {
+            "hop": hop, "at": now.isoformat()}
         won["ok"] = True
 
     try:
@@ -801,22 +859,96 @@ def claim_return_launch(root: Path, pr_id: str, hop: str) -> bool:
     return won["ok"]
 
 
-def clear_return_awaiting(root: Path, pr_id: str, hop: str) -> None:
-    """The routed *hop* launched a fresh session: stop forcing a relaunch."""
+def _claim_fresh(rec: dict, hop: str, now) -> bool:
+    """*rec* holds a *hop* launch claim younger than the expiry."""
+    claim = rec.get("launch_claim") or {}
+    try:
+        age = (now - parse_ts(claim.get("at"))).total_seconds()
+    except (TypeError, ValueError):
+        return False
+    return claim.get("hop") == hop and 0 <= age < RETURN_LAUNCH_CLAIM_SECONDS
+
+
+def _launch_claimable(pr: dict | None, hop: str, require_status: str | None,
+                      now) -> bool:
+    """Whether *pr*'s return record can still be claimed for *hop* now.
+
+    False when there is nothing to launch (no open return awaiting *hop*, or
+    the PR left *require_status*) and when another driver's claim is still
+    fresh — the three cases where a claim attempt would be a no-op.
+    """
+    rec = (pr or {}).get("signoff_return")
+    if not isinstance(rec, dict) or rec.get("awaiting") != hop:
+        return False
+    if require_status is not None \
+            and (pr or {}).get("status") != require_status:
+        return False
+    return not _claim_fresh(rec, hop, now)
+
+
+def return_launch_claimed(pr: dict | None, hop: str) -> bool:
+    """A driver claimed the *hop* re-run less than the expiry ago.
+
+    The QA driver clears ``awaiting`` as it starts, then replaces the judged
+    run's qa window; until its own window and status exist, only the claim
+    (kept for the qa hop, see :func:`clear_return_awaiting`) says it runs.
+    """
+    from datetime import datetime, timezone
+    rec = (pr or {}).get("signoff_return")
+    return isinstance(rec, dict) and _claim_fresh(
+        rec, hop, datetime.now(timezone.utc))
+
+
+def clear_return_awaiting(root: Path, pr_id: str, hop: str,
+                          timeout: float = store.LOCK_TIMEOUT_SECONDS,
+                          *, session_opened: bool = False,
+                          ts: str | None = None) -> bool | None:
+    """The routed *hop* launched a fresh session: stop forcing a relaunch.
+
+    False when the lock was not acquired within *timeout* (a caller that
+    must not wait passes ``store.NO_WAIT`` and retries), else True.  A
+    *session_opened* caller (a CLI launch or detached driver whose session
+    runs regardless) keeps waiting past *timeout*, up to
+    RETURN_CLEAR_WAIT_SECONDS, rather than leave ``awaiting`` and the hop's
+    claim behind that session (the first driver after the claim expired
+    would launch a second --fresh session over it).  Other callers (the
+    TUI's start_qa, on its main thread) give up after *timeout*: None, and
+    the caller retries with ``store.NO_WAIT``.  With *ts*, only the return
+    recorded at *ts* is cleared (a retry must not clear a later return).
+    """
+    def _waiting(pr):
+        rec = (pr or {}).get("signoff_return")
+        return (isinstance(rec, dict) and rec.get("awaiting") == hop
+                and (ts is None or rec.get("ts") == ts))
     def _apply(data):
         pr = store.get_pr(data, pr_id)
-        rec = (pr or {}).get("signoff_return")
-        if isinstance(rec, dict) and rec.get("awaiting") == hop:
+        if _waiting(pr):
+            rec = pr["signoff_return"]
             rec["awaiting"] = None
-            rec.pop("launch_claim", None)
+            if hop != "qa":
+                # A qa claim outlives ``awaiting``: the new run has no qa
+                # window yet (return_launch_claimed).  It expires by itself.
+                rec.pop("launch_claim", None)
 
     try:
         data = store.load(root)
-        if return_awaiting(store.get_pr(data, pr_id)) != hop:
-            return
-        store.locked_update(root, _apply)
+        if not _waiting(store.get_pr(data, pr_id)):
+            return True
+        try:
+            store.locked_update(root, _apply, timeout=timeout)
+        except store.StoreLockTimeout as e:
+            if timeout == store.NO_WAIT:
+                return False
+            if not session_opened:
+                _log.warning("clear sign-off return for %s: %s", pr_id, e)
+                return None
+            _log.warning("clear sign-off return for %s: %s; waiting up to "
+                         "%ss more", pr_id, e, RETURN_CLEAR_WAIT_SECONDS)
+            store.locked_update(root, _apply,
+                                timeout=RETURN_CLEAR_WAIT_SECONDS)
     except Exception as e:
         _log.warning("clear sign-off return for %s: %s", pr_id, e)
+    return True
 
 
 def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
@@ -843,12 +975,40 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                 f"`{(integ.get('base_sha') or '?')[:12]}` from "
                 f"`{integ.get('target_repo')}`")
         lines.append(f"Integration with {base}: **{integ.get('status')}**.")
+        # Built lazily: the marker is only needed when a list is actually
+        # abbreviated.  (The pointer is runtime-resolved — it names
+        # `pm qa captures-path` / `pm pr show` rather than resolving a path —
+        # so this no longer touches the filesystem, but the note is still
+        # only useful when something was dropped.)
+        # No leading space in the marker: bounded_join appends it after
+        # ``separator`` (", "), so one here would render as a double space.
+        # The count is the *record's* remainder: project.yaml stores at most
+        # _YAML_LIST_LIMIT paths and keeps the real total beside them, so a
+        # 200-path record must not read as "(+20 more)".
+        def _integ_note(vals: list, total):
+            def note(n: int) -> str:
+                omitted = integration.omitted_path_count(vals, total, n)
+                return (f"(+{omitted} more; "
+                        f"{integration.integration_pointer(pr.get('id', '???'))})")
+            return note
+
+        # Byte-bounded as well as count-capped: the lines are filesystem
+        # paths, so 20 long ones blow the argv budget on their own (this
+        # block feeds the impl / review / QA-planner prompts).
         if integ.get("conflicts"):
-            lines.append("Conflicting paths: "
-                         + ", ".join(f"`{c}`" for c in integ["conflicts"]))
+            vals = integ["conflicts"]
+            lines.append("Conflicting paths: " + bounded_join(
+                vals, lambda c: f"`{c}`",
+                max_items=INTEGRATION_MAX_PATHS,
+                max_bytes=INTEGRATION_LIST_BUDGET, separator=", ",
+                omitted_note=_integ_note(vals, integ.get("conflicts_total"))))
         if integ.get("overlap"):
-            lines.append("Changed on both sides: "
-                         + ", ".join(f"`{c}`" for c in integ["overlap"]))
+            vals = integ["overlap"]
+            lines.append("Changed on both sides: " + bounded_join(
+                vals, lambda c: f"`{c}`",
+                max_items=INTEGRATION_MAX_PATHS,
+                max_bytes=INTEGRATION_LIST_BUDGET, separator=", ",
+                omitted_note=_integ_note(vals, integ.get("overlap_total"))))
     applied = rec.get("applied") or {}
     if applied.get("merge_sha"):
         lines.append(

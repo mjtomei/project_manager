@@ -495,7 +495,7 @@ Total files: 117.
     - *Consumed by StreamTranscript / CaptureService / TmuxHostRuntime.*
 - **STAYS**: `layout + hooks (apply_layout, set_hook, refresh_client, set_shared_window_size)` → `/home/matt/claude-work/project-manager/pm_core/tmux.py`
     - *Consumed by tui/pane_layout.py (also listed as stays).*
-- **STAYS**: `grouped-session / multi-client coordination (grant_server_access, current_or_base_session, create_grouped_session, list_grouped_sessions, find_unattached_grouped_session, next_grouped_session_name, attached_active_window, sessions_on_window, switch_sessions_to_window, list_clients_in_group, detach_client, get_session_name)` → `/home/matt/claude-work/project-manager/pm_core/tmux.py`
+- **STAYS**: `grouped-session / multi-client coordination (grant_server_access, current_or_base_session, create_grouped_session, list_grouped_sessions, find_unattached_grouped_session, next_grouped_session_name, attached_group_active_windows, sessions_on_window, switch_sessions_to_window, list_clients_in_group, detach_client, get_session_name)` → `/home/matt/claude-work/project-manager/pm_core/tmux.py`
     - *Multi-client/shared-session substrate. Likely consumed by collaboration/transport/tmux_socket.py for same-host cross-mind tmux; consumer is new, but provider stays here.*
 
   *Cross-cutting:* v2 explicitly lists `pm_core/tmux.py + tui/pane_layout.py + tui/pane_registry.py` under "Stays (not refactored) — foundational substrate consumed by all Tmux* runtimes." This file is a dependency of: runtime/tmux_host.py (new), runtime/tmux_container.py (new), runtime/tmux_sandbox.py (new), claude_launcher.py (stays), tui/* (stays), and likely collaboration/transport/tmux_socket.py (new). No migration blockers — this file is leaf-level and unblocks its consumers rather than being blocked by them. Grouped-session helpers are a natural fit for collaboration/transport/tmux_socket.py's needs; that transport should import from here rather than reimplementing.
@@ -1294,7 +1294,7 @@ Total files: 117.
 - **MOVES**: `pr cleanup + _cleanup_pr + _clear_workdir` → `pm_core/supervisors/pr_stream.py`
     - *pr_cleanup.py is deleted in v2; fans out to PRStreamSupervisor.teardown + ResourceLease release + WorkdirRegistry*
 - **MOVES**: `pr close` → `pm_core/supervisors/pr_stream.py`
-    - *Becomes PRStreamSupervisor.close (state transition + gh_ops + branch cleanup)*
+    - *Becomes PRStreamSupervisor.close (state transition + gh_ops). No branch or workdir cleanup: as of pr-62ad13d close retains the registry entry, the branch and the workdir — cleanup stays a separate, explicit operation*
 - **STAYS**: `pr sync / pr sync-github / pr import-github` → `pm_core/cli/pr.py`
     - *Delegates to pr_sync.py and gh_ops.py which stay*
 - **MOVES**: `pr note group (add/edit/list/delete)` → `pm_core/sensorium/artifact/notes.py`
@@ -3690,7 +3690,7 @@ Every NEW file in the proposed structure, with the existing code that contribute
 - from `pm_core/cli/pr.py` — **pr cleanup + _cleanup_pr + _clear_workdir**
     - *pr_cleanup.py is deleted in v2; fans out to PRStreamSupervisor.teardown + ResourceLease release + WorkdirRegistry*
 - from `pm_core/cli/pr.py` — **pr close**
-    - *Becomes PRStreamSupervisor.close (state transition + gh_ops + branch cleanup)*
+    - *Becomes PRStreamSupervisor.close (state transition + gh_ops). No branch or workdir cleanup: as of pr-62ad13d close retains the registry entry, the branch and the workdir — cleanup stays a separate, explicit operation*
 - from `pm_core/cli/pr.py` — **pr auto-sequence + _impl_window_pane + _review_window_pane + _signoff_window_pane + _check_review_verdict + _check_signoff_verdict + _check_impl_idle + _qa_status_for + _retire_signoff_window + _auto_seq_transcript_dir**
     - *Auto-sequencing impl->review->qa->signoff->merge is PRStreamSupervisor's job; verdict polling becomes CallbackRegistry.wait_for at pm_core/agent/callbacks.py; idle detection becomes runtime capability*
 - from `pm_core/tui/app.py` — **Stale merge-lock cleanup on startup**

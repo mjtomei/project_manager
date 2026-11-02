@@ -1,8 +1,9 @@
 """Compact, highlighted auto-start status (pr-8700be3).
 
 Shared layout (``pm_core.autostart_view``) used by ``pm autostart status``
-and the TUI runs popup: duplicate suppression, width/wrapping, red
-human-action labels, plain/JSON output, and CLI/TUI agreement.
+and the TUI runs popup: one dependency forest with one row per PR,
+duplicate suppression, width/wrapping, red human-action labels, plain/JSON
+output, and CLI/TUI agreement.
 """
 
 import asyncio
@@ -17,7 +18,7 @@ from rich.cells import cell_len
 from pm_core import autostart_state as st
 from pm_core import autostart_view as view
 
-from autostart_mixed_fixture import mixed_inputs, mixed_status
+from autostart_mixed_fixture import edge_status, mixed_inputs, mixed_status
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 NEED_YOU = {"pr-0a1b2c3", "pr-5b6c7d8", "pr-9f0a1b2", "pr-7d8e9f0",
@@ -58,7 +59,7 @@ class TestStructured:
             ["pr-1c2d3e4", "pr-0a1b2c3"]
         assert docs["blockers"][1] == {
             "pr_id": "pr-0a1b2c3", "display_id": "#231", "status": "sign_off",
-            "explicit_hold": False, "held_by": ["pr-4a5b6c7"]}
+            "held_by": ["pr-4a5b6c7"]}
         rv = runs["pr-1c2d3e4"]
         assert rv["reason"] == "review iteration 3 (last NEEDS_WORK)"
         assert rv["short_reason"] == "last NEEDS_WORK"
@@ -120,35 +121,36 @@ class TestStructured:
 # ---------------------------------------------------------------------------
 
 class TestDedupe:
-    def test_wait_policy_stated_once_per_group(self):
+    def test_wait_policy_stated_once_per_tree(self):
         text = _text()
-        wait_group = text.split("◎ #238")[0]
-        assert wait_group.count("wait-for-merge") == 2  # header + title word
+        wait_tree = text.split("◎ #240")[1].split("◎ #239")[0]
+        # The label once, plus the title's own "wait-for-merge chains".
+        assert wait_tree.count("wait-for-merge") == 2
         assert "[wait-for-merge]" in _row_block(text, "◎ #240")
-        assert "← #240" not in wait_group
+        assert "← #240" not in wait_tree
         # Blockers name PRs and status only — no hold cause per blocker.
-        assert "blocked on #233 (in_review), #231 (sign_off)" in wait_group
+        assert "blocked on #233 (in_review), #231 (sign_off)" in wait_tree
 
     def test_meaningful_exceptions_kept(self):
         text = _text()
-        # Shared dep of an auto-merge target held by the wait chain.
-        auto_group = text.split("◎ #238")[1].split("◎ #239")[0]
-        assert "[wait-for-merge ← #240]" in auto_group
-        assert "also needed by #240" in auto_group
-        # Explicit stop mark on a dep under a stop-before-merge target.
-        assert "[stop-before-merge]" in _row_block(text, "└ #241")
+        # A dependency shared with the wait chain but placed under the
+        # auto-merge target that reached it first: the hold is not implied
+        # by its tree, so it is named, with the other dependent.
+        shared = _row_block(text, "└ #235")
+        assert "[wait-for-merge ← #240]" in shared
+        assert "also needed by #240" in shared
+        # An auto-merge target that a wait target's closure holds.
+        nested = " ".join(_row_block(text, "◎ #241").split())
+        assert "[auto-merge] [wait-for-merge ← #239]" in nested
 
-    def test_flat_mode_keeps_blocker_hold_causes(self):
+    def test_blockers_name_prs_and_status_only(self):
         status = mixed_status()
         run = next(r for r in status["runs"] if r["pr_id"] == "pr-3f4a5b6")
         names = view.display_names(status)
-        assert view.reason_text(run, grouped=True, names=names) == \
+        assert view.reason_text(run, names=names) == \
             "blocked on #233 (in_review), #231 (sign_off)"
-        # Without a group no row explains the hold, so the cause stays;
-        # the holding target is named by its display id, like its row.
-        assert view.reason_text(run, grouped=False, names=names) == (
-            "blocked on #233 (in_review, wait-for-merge ← #240), "
-            "#231 (sign_off, wait-for-merge ← #240)")
+        # The full reason (``--json``) keeps the hold causes.
+        assert "wait-for-merge ← pr-4a5b6c7" in run["reason"]
 
     def test_phase_and_progress_once(self):
         text = _text()
@@ -191,6 +193,177 @@ class TestDedupe:
         text = st.format_text(s)
         assert "review iteration 3 (last NEEDS_WORK)" in text
         assert "⚠" not in text
+
+
+# ---------------------------------------------------------------------------
+# One dependency forest: one canonical row per local PR id
+# ---------------------------------------------------------------------------
+
+def _heads(text: str) -> list[str]:
+    """First lines of every row (``◎`` target / ``└`` dependency)."""
+    return [ln for ln in text.splitlines() if ln.lstrip()[:1] in ("◎", "└")]
+
+
+def _shape(status) -> list[tuple]:
+    return [(r["pr_id"], r["depth"], r["kind"], r["parent"])
+            for r in st.status_rows(status)]
+
+
+def _graph(prs, targets, **inp):
+    return st.build_status({"prs": prs, "targets": targets, **inp})
+
+
+def _p(pid, status="pending", deps=(), **kw):
+    return {"id": pid, "title": f"T {pid}", "status": status,
+            "depends_on": list(deps), **kw}
+
+
+class TestForest:
+    def test_every_pr_has_exactly_one_row(self):
+        status = mixed_status()
+        rows = st.status_rows(status)
+        ids = [r["pr_id"] for r in rows]
+        assert sorted(ids) == sorted(r["pr_id"] for r in status["runs"])
+        assert len(ids) == len(set(ids))
+        heads = _heads(_text())
+        assert len(heads) == len(ids)
+        for r in status["runs"]:
+            assert sum(r["pr_id"] in h for h in heads) == 1, r["pr_id"]
+
+    def test_mixed_tree_shape(self):
+        assert _shape(mixed_status()) == [
+            ("pr-6c7d8e9", 0, "target", None),        # #238 auto
+            ("pr-2e3f4a5", 1, "dep", "pr-6c7d8e9"),   # #235 shared
+            ("pr-5b6c7d8", 1, "dep", "pr-6c7d8e9"),   # #236
+            ("pr-4a5b6c7", 0, "target", None),        # #240 wait chain
+            ("pr-3f4a5b6", 1, "dep", "pr-4a5b6c7"),   # #234
+            ("pr-1c2d3e4", 2, "dep", "pr-3f4a5b6"),   # #233
+            ("pr-0a1b2c3", 2, "dep", "pr-3f4a5b6"),   # #231 (diamond)
+            ("pr-9f0a1b2", 0, "target", None),        # #239 wait
+            ("pr-7d8e9f0", 1, "dep", "pr-9f0a1b2"),   # #237
+            ("pr-8e9f0a1", 1, "target", "pr-9f0a1b2"),  # #241 nested target
+            ("pr-aa1b2c3", 0, "target", None),        # #242
+        ]
+
+    def test_relationships_kept_as_references(self):
+        rows = {r["pr_id"]: r for r in st.status_rows(mixed_status())}
+        # Shared across trees, and a diamond inside one tree: the other
+        # dependent is named once on the canonical row.
+        assert rows["pr-2e3f4a5"]["also"] == ["pr-4a5b6c7"]
+        assert rows["pr-0a1b2c3"]["also"] == ["pr-4a5b6c7"]
+        # The tree parent is not repeated as a reference.
+        assert rows["pr-1c2d3e4"]["also"] == []
+        text = _text()
+        assert "also needed by #240" in _row_block(text, "└ #231")
+        # The nested target keeps its target marker and own policy.
+        assert _row_block(text, "◎ #241").startswith("  ◎ #241")
+
+    def test_target_also_dependency_is_not_a_second_root(self):
+        prs = [_p("t1", deps=["t2"]), _p("t2", "in_progress")]
+        # Whichever order the targets were added in.
+        for order in (["t1", "t2"], ["t2", "t1"]):
+            status = _graph(prs, {t: {} for t in order})
+            assert _shape(status) == [("t1", 0, "target", None),
+                                      ("t2", 1, "target", "t1")]
+
+    def test_diamond_and_shared_dependency(self):
+        prs = [_p("a", "in_progress"), _p("b", deps=["a"]),
+               _p("c", deps=["a"]), _p("t", deps=["b", "c"]),
+               _p("u", deps=["a"])]
+        status = _graph(prs, {"t": {}, "u": {"wait_for_merge": True}})
+        assert _shape(status) == [
+            ("t", 0, "target", None), ("b", 1, "dep", "t"),
+            ("a", 2, "dep", "b"), ("c", 1, "dep", "t"),
+            ("u", 0, "target", None)]
+        rows = {r["pr_id"]: r for r in st.status_rows(status)}
+        assert rows["a"]["also"] == ["c", "u"]
+        # u holds a (wait-for-merge) but is not its ancestor here.
+        assert st.policy_labels(rows["a"]) == [("wait-for-merge ← u",
+                                                "exception")]
+        text = st.format_text(status)
+        assert [h.lstrip()[:4] for h in _heads(text)].count("└ a ") == 1
+        assert "also needed by c, u" in text
+
+    def test_multiple_roots_follow_target_order(self):
+        prs = [_p("x", "in_progress"), _p("y", "in_progress"),
+               _p("z", "in_progress")]
+        status = _graph(prs, {"z": {}, "x": {}, "y": {}})
+        assert [r["pr_id"] for r in st.status_rows(status)] == ["z", "x", "y"]
+
+    def test_cycles_are_shown_once_and_named(self):
+        text = st.format_text(edge_status())
+        rows = {r["pr_id"]: r for r in st.status_rows(edge_status())}
+        assert rows["pr-c1c1c1c"]["depth"] == 0
+        assert rows["pr-c2c2c2c"]["parent"] == "pr-c1c1c1c"
+        assert rows["pr-c2c2c2c"]["cycle"] == ["pr-c1c1c1c"]
+        assert rows["pr-c1c1c1c"]["also"] == []  # the back edge is the cycle
+        assert "↻ dependency cycle: needs #301" in " ".join(
+            _row_block(text, "◎ #302").split())
+        assert sum("#301" in h for h in _heads(text)) == 1
+
+    def test_cycle_below_a_target(self):
+        prs = [_p("t", deps=["a"]), _p("a", "in_progress", deps=["b"]),
+               _p("b", "in_progress", deps=["a"])]
+        status = _graph(prs, {"t": {}})
+        assert _shape(status) == [("t", 0, "target", None),
+                                  ("a", 1, "dep", "t"), ("b", 2, "dep", "a")]
+        rows = {r["pr_id"]: r for r in st.status_rows(status)}
+        assert rows["b"]["cycle"] == ["a"] and rows["a"]["also"] == []
+
+    def test_self_dependency_does_not_loop(self):
+        status = _graph([_p("s", "in_progress", deps=["s"])], {"s": {}})
+        (row,) = st.status_rows(status)
+        assert row["cycle"] == ["s"]
+
+    def test_missing_and_closed_references(self):
+        text = st.format_text(edge_status())
+        assert "blocked on pr-gone000 (missing), #304 (closed)" in text
+        gone = _row_block(text, "◎ pr-gone999")
+        assert "FAILED" in gone and "PR not found" in gone
+        assert "done" not in gone.splitlines()[0]
+        # Neither the closed nor the missing PR gets a row of its own.
+        assert not any("#304" in h or "pr-gone000" in h
+                       for h in _heads(text))
+
+    def test_dependency_behind_a_merged_pr_hangs_under_its_target(self):
+        rows = {r["pr_id"]: r for r in st.status_rows(edge_status())}
+        assert rows["pr-e0e0e0e"]["parent"] == "pr-d0d0d0d"
+        assert rows["pr-e0e0e0e"]["also"] == []
+
+    def test_same_github_number_stays_two_rows(self):
+        status = edge_status()
+        text = st.format_text(status)
+        twins = [h for h in _heads(text) if "#310" in h]
+        assert len(twins) == 2
+        assert "pr-f1f1f1f" in twins[0] and "pr-f2f2f2f" in twins[1]
+        # References use the unique pm id where the display id is shared.
+        names = view.display_names(status)
+        assert names["pr-f1f1f1f"] == "pr-f1f1f1f"
+        assert names["pr-f0f0f0f"] == "#311"
+        assert "blocked on pr-f1f1f1f (in_progress), pr-f2f2f2f " \
+            "(in_progress)" in " ".join(text.split())
+        assert "⚠ 2 need you: pr-f1f1f1f, pr-f2f2f2f" in text
+
+    def test_order_is_deterministic(self):
+        assert _text() == _text()
+        a = st.format_text(edge_status())
+        # The same graph, runs listed in another order by an older owner.
+        s = edge_status()
+        s["runs"] = list(reversed(s["runs"]))
+        assert [r["pr_id"] for r in st.status_rows(s)] == \
+            [r["pr_id"] for r in st.status_rows(edge_status())]
+        assert st.format_text(s) == a
+
+    def test_deep_chain_indent_is_capped_to_the_width(self):
+        prs = [_p(f"c{i}", "in_progress", deps=[f"c{i + 1}"])
+               for i in range(20)] + [_p("c20", "in_progress")]
+        status = _graph(prs, {"c0": {}})
+        for width in (30, 45, 99):
+            text = st.format_text(status, width=width)
+            assert all(cell_len(ln) <= width for ln in text.splitlines())
+            assert len(_heads(text)) == 21
+        # Wide enough: every level indents.
+        assert "  " * 20 + "└ c20" in st.format_text(status, width=99)
 
 
 # ---------------------------------------------------------------------------
@@ -243,17 +416,17 @@ class TestWidth:
 
     def test_metadata_labels_are_not_split(self):
         # "run X" / "owner X" / "⧉ window" wrap as a whole, not mid-label.
-        text = _text(40)
-        assert "  run 20261022-0915" in text
-        assert "owner pm-project_manager-c5a1006b" in text
-        assert "⧉ review-#233" in text
+        lines = _text(40).splitlines()
+        for label in ("run 20261022-0915", "owner pm-project_manager-c5a1006b",
+                      "⧉ review-#233"):
+            assert any(label in ln for ln in lines), label
 
     @pytest.mark.parametrize("width", range(30, 100))
     def test_separators_never_start_or_end_a_line(self, width):
         # A " · " at a break is swallowed: the break itself separates.
-        inp = mixed_inputs()
-        inp["targets"], inp["all_mode"] = {}, True  # header wraps at 99
-        for status in (mixed_status(), st.build_status(inp)):
+        off = mixed_inputs()
+        off["targets"] = {}  # an off header with run + owner
+        for status in (mixed_status(), edge_status(), st.build_status(off)):
             for ln in st.format_text(status, width=width).splitlines():
                 assert not ln.strip().startswith("·"), ln
                 assert not ln.rstrip().endswith("·"), ln
@@ -310,7 +483,7 @@ class TestHighlight:
     def test_popup_colours_round_to_the_cli_colours(self):
         # Textual swaps named ANSI colours for theme RGB, which a 16-colour
         # pane (TERM=screen) showed as magenta labels and red WAITING.
-        from rich.color import Color, ColorSystem
+        from rich.color import ColorSystem
         from rich.style import Style
 
         def ansi(style, attr):
@@ -329,7 +502,9 @@ class TestHighlight:
         need = view.needs_human(mixed_status())
         assert {r["pr_id"] for r in need} == NEED_YOU
         head = _text().split("◎")[0]
-        assert "⚠ 5 need you: #231, #236, #239, #237, #241" in \
+        # Report order (one forest row each), so the list reads like the
+        # rows below it.
+        assert "⚠ 5 need you: #236, #231, #239, #237, #241" in \
             " ".join(head.split())
 
 
@@ -383,6 +558,7 @@ class TestCLI:
         res = _cli_status("--json", "--color")
         assert "\x1b" not in res.output
         data = json.loads(res.output)
+        assert data.pop("ok") is True
         assert data == json.loads(json.dumps(mixed_status(), default=sorted))
         assert data["schema"] == st.SCHEMA
 
@@ -508,8 +684,18 @@ class TestPopup:
             assert viewport.y <= y0 and y1 <= footer.y
 
     def test_navigation_moves_over_wrapped_rows(self):
-        out = _popup((80, 70), keys=["j", "j"])
-        assert out["selected"] == ("pr-4a5b6c7", "pr-1c2d3e4")
+        # #238, #235, #236, #240, #234, #233: one stop per PR.
+        out = _popup((80, 70), keys=["j"] * 5)
+        assert out["selected"] == "pr-1c2d3e4"
         sel = [ln for ln in out["body"].plain.splitlines()
                if ln.startswith("▶")]
         assert len(sel) == 1 and "#233" in sel[0]
+
+    def test_rows_are_one_per_pr_like_the_cli(self):
+        out = _popup((160, 70), keys=["j"] * 40)
+        heads = [ln for ln in out["body"].plain.splitlines()
+                 if ln[2:].lstrip()[:1] in ("◎", "└")]
+        ids = [re.findall(r"pr-[0-9a-f]{7}", ln)[0] for ln in heads]
+        assert len(ids) == len(set(ids)) == len(mixed_status()["runs"])
+        # j past the end stays on the last row.
+        assert out["selected"] == ids[-1] == "pr-aa1b2c3"

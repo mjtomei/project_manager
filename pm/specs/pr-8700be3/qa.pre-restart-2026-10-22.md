@@ -1,3 +1,9 @@
+> **Archived 2026-11-02 (restart).** This QA spec predates the merge of
+> current master: it tests the removed `stop-before-merge` policy and
+> `autostart all` (backlog) mode, and the per-target grouped layout that
+> the unified dependency forest replaced. Kept as historical QA input only;
+> fresh QA generates a new `qa.md`. See `impl.md` §0.
+
 # pr-8700be3 — QA spec: compact, highlighted autostart status
 
 Surfaces under test: `pm autostart status` (text, `--width`, `--color/--no-color`,

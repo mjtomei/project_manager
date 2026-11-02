@@ -141,7 +141,6 @@ class TestAutoStartHelpers:
         from pm_core.tui.auto_start import get_targets, in_scope
         app = MagicMock()
         app._auto_start = True
-        app._auto_start_all = False
         app._data = {"prs": [{"id": "pr-001"}]}
         assert get_targets(app) == []
         assert in_scope(app, "pr-001") is False
@@ -158,8 +157,10 @@ class TestAutoStartQALoops:
         """Create a mock app with auto-start enabled."""
         app = MagicMock()
         app._auto_start = True
-        app._auto_start_targets = {target: {}} if target else {}
-        app._auto_start_all = not target
+        # Explicit targets only (no all-PR mode).  With no target argument,
+        # every listed PR is an explicit target for these fixture tests.
+        app._auto_start_targets = ({target: {}} if target
+                                   else {p["id"]: {} for p in prs})
         app._data = {"prs": prs}
         app._qa_loops = {}
         return app
@@ -271,8 +272,8 @@ class TestAutoStartQALoops:
             _auto_start_qa_loops(app, prs=prs)
         mock_start.assert_not_called()
 
-    def test_no_target_starts_all_qa_prs(self):
-        """Without a target, all qa-status PRs get QA started."""
+    def test_all_prs_as_explicit_targets_start(self):
+        """Every explicitly targeted qa-status PR gets QA started."""
         from pm_core.tui.auto_start import _auto_start_qa_loops
         prs = [
             {"id": "pr-a", "status": "qa", "workdir": "/tmp/a", "depends_on": []},
@@ -744,28 +745,34 @@ class TestPrStartCommittedGate:
 
 
 class TestGitHubCloseResilience:
-    """`pm pr close` must still clean up local state when gh is unavailable."""
+    """`pm pr close` must still record the closure when gh is unavailable."""
 
     @mock.patch("pm_core.gh_ops.close_pr", side_effect=SystemExit(1))
-    def test_close_continues_local_cleanup_on_gh_systemexit(
+    def test_close_retains_local_state_on_gh_systemexit(
         self, _mock_close, tmp_github_merge_project,
     ):
         """gh missing/unauthed (SystemExit from _check_gh via run_gh) must not
-        abort close: warn, then still remove the workdir and the PR entry."""
+        abort close: warn, then still mark the PR closed while keeping the
+        entry, the branch reference, and the whole workdir (pr-62ad13d)."""
         pm_dir = tmp_github_merge_project["pm_dir"]
         workdir = tmp_github_merge_project["workdir"]
         assert workdir.exists()
 
         runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root", return_value=pm_dir):
+        with mock.patch.object(pr_mod, "state_root", return_value=pm_dir), \
+             mock.patch.object(pr_mod, "trigger_tui_refresh"):
             result = runner.invoke(pr_mod.pr, ["close", "pr-001"])
 
         assert result.exit_code == 0, result.output
         assert "Warning: Could not close GitHub PR" in result.output
-        # Local cleanup still happened despite the gh failure.
-        assert not workdir.exists()
+        # Nothing local was destroyed despite the gh failure.
+        assert workdir.exists()
         data = store.load(pm_dir)
-        assert all(p["id"] != "pr-001" for p in data.get("prs", []))
+        entry = store.get_pr(data, "pr-001")
+        assert entry is not None
+        assert entry["status"] == "closed"
+        assert entry["workdir"] == str(workdir)
+        assert entry["branch"] == "pm/pr-001"
 
 
 class TestFinalizeMergeOutput:
@@ -807,3 +814,46 @@ class TestFinalizeMergeOutput:
             {"id": "pr-x", "title": "X", "status": "pending"},
         ])
         assert lines[-1] == "PR pr-a marked as merged."
+
+
+# ---------------------------------------------------------------------------
+# pr start fast path: printed session names the grouped session it switched
+# ---------------------------------------------------------------------------
+
+class TestPrStartFastPathSessionMessage:
+    """`pr start` on an existing window reports the session it targeted.
+
+    select_window targets the calling client's grouped session
+    (<base>~N), not the base session, so the message must name that one
+    — QA S24 observed the popup print the base name while the grouped
+    client switched.
+    """
+
+    def _invoke(self, tmp_path, grouped_session):
+        pm_dir = tmp_path / "pm"
+        pm_dir.mkdir()
+        workdir = tmp_path / "work"
+        workdir.mkdir()
+        store.save({
+            "project": {"name": "test", "repo": str(tmp_path),
+                        "base_branch": "master"},
+            "prs": [{"id": "pr-001", "title": "Test", "branch": "pm/pr-001",
+                     "status": "in_progress", "workdir": str(workdir)}],
+        }, pm_dir)
+
+        with patch.object(pr_mod, "tmux_mod") as mock_tmux, \
+             patch.object(pr_mod, "state_root", return_value=pm_dir), \
+             patch.object(pr_mod, "_get_pm_session", return_value="pm-sess"):
+            mock_tmux.session_exists.return_value = True
+            mock_tmux.find_window_by_name.return_value = {
+                "id": "@1", "index": "1", "name": "pr-001"}
+            mock_tmux.current_or_base_session.return_value = grouped_session
+            result = CliRunner().invoke(pr_mod.pr, ["start", "pr-001"])
+        return result
+
+    def test_names_grouped_session_not_base(self, tmp_path):
+        result = self._invoke(tmp_path, "pm-sess~2")
+        assert result.exit_code == 0, result.output
+        assert ("Switched to existing window 'pr-001' (session: pm-sess~2)"
+                in result.output)
+        assert "(session: pm-sess)" not in result.output

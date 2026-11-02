@@ -249,10 +249,11 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]e[/] / [bold]Enter[/]  Edit selected PR", classes="help-row")
                 yield Label("  [bold]v[/]  View plan file", classes="help-row")
                 yield Label("  [bold]M[/]  Move to plan", classes="help-row")
-                yield Label("  [bold]O[/]  Auto-start target (stop before merge)", classes="help-row")
+                yield Label("  [bold]O[/]  Auto-start target (wait for merge)", classes="help-row")
                 yield Label("  [bold]A[/]  Toggle auto-merge target", classes="help-row")
                 yield Label("  [bold]a[/]  Auto-start runs popup", classes="help-row")
                 yield Label("  [bold]V[/]  Review oldest pending spec", classes="help-row")
+                yield Label("  [bold]o[/]  Models: PR/project model, effort, command (⇄ = PR has its own)", classes="help-row")
                 yield Label("  [bold]w[/]  Focus watcher window", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
             if not self._in_plans:
@@ -624,10 +625,10 @@ class AutoRunsScreen(ModalScreen):
 
     Renders ``auto_start.build_status(app)`` — the same
     ``pm.autostart.status/1`` dict that ``pm autostart status --json``
-    returns — with the CLI report's layout (``autostart_view``: rows from
-    ``autostart_state.status_rows``, wrapped to at most 99 columns, human
-    waits in red).  Refreshes every 2s while open; Enter/f focuses the
-    selected run's tmux window.
+    returns — with the CLI report's layout (``autostart_view``: one
+    dependency forest from ``autostart_state.status_rows``, one row per PR,
+    wrapped to at most 99 columns, human waits in red).  Refreshes every 2s
+    while open; Enter/f focuses the selected run's tmux window.
     """
 
     REFRESH_SECONDS = 2.0
@@ -685,7 +686,7 @@ class AutoRunsScreen(ModalScreen):
         self._rows: list[dict] = []
         self._status: dict = {}
         self._selected = 0
-        self._selected_key: tuple | None = None
+        self._selected_key: str | None = None
         self._timer = None
         # (row key, message) shown on the selected row's detail line.
         self._notice: tuple | None = None
@@ -718,15 +719,13 @@ class AutoRunsScreen(ModalScreen):
             self._render_rows()
 
     @staticmethod
-    def _row_key(rows: list[dict], idx: int) -> tuple | None:
-        """(owning target, pr_id) — a shared dep appears once per target."""
+    def _row_key(rows: list[dict], idx: int) -> str | None:
+        """The row's pm PR id: the forest has one row per PR, so the id
+        alone keeps a selection across refreshes (even when the PR moves
+        to another place in the tree)."""
         if not (0 <= idx < len(rows)):
             return None
-        owner = None
-        for r in rows[:idx + 1]:
-            if r["kind"] in ("target", "run"):
-                owner = r["pr_id"]
-        return (owner, rows[idx]["pr_id"])
+        return rows[idx]["pr_id"]
 
     def action_refresh_runs(self) -> None:
         from pm_core.tui import auto_start as _auto_start
@@ -786,11 +785,10 @@ class AutoRunsScreen(ModalScreen):
                 body.append("No auto-start targets (auto-start off).\n", style="bold")
             else:
                 body.append("No active runs.\n", style="bold")
-            body.append("Add a target with O (stop before merge) or A on a PR,\n"
+            body.append("Add a target with O (wait for merge) or A on a PR,\n"
                         "or `pm autostart add PR_ID`.", style="dim")
             body_widget.update(body)
             return
-        grouped = mode == "targets"
         names = view.display_names(st)
         for i, row in enumerate(self._rows):
             r = row["run"]
@@ -803,8 +801,8 @@ class AutoRunsScreen(ModalScreen):
                 else:
                     notice = self._notice[1]
             texts = []
-            for n, ln in enumerate(view.row_lines(row, width, grouped=grouped,
-                                                   notice=notice, names=names)):
+            for n, ln in enumerate(view.row_lines(row, width, notice=notice,
+                                                   names=names)):
                 # A gray bar, not reverse: reverse would invert the red
                 # attention label and reason on the selected row.
                 line = Text("▶ " if sel and n == 0 else "  ",

@@ -11,14 +11,18 @@ segments.  Roles name what a piece of text is (``id``, ``phase``,
 styling.  Widths are measured on the plain text in terminal cells
 (``rich.cells.cell_len``), so styling never counts and wide characters do.
 
-Per row::
+Rows form one dependency forest (``autostart_state.status_rows``): every
+PR appears once, indented under the first PR that needs it, with any other
+PR that needs it named on its row ("also needed by").  Per row::
 
     ◎ #229 pr-0b87a97 RUNNING review #3 [wait-for-merge] Support multiple
         autostart targets with CLI controls and a live TUI runs popup
         last NEEDS_WORK · ⧉ review-#229
+      └ #12 pr-1a2b3c4 MANUAL MERGE sign-off Shared base
+          signed off — press g to merge · also needed by #240
 
 Line 1 carries identity, state (or the human-action label), one
-phase/progress token, policy labels the group does not imply, and the
+phase/progress token, policy labels the tree does not imply, and the
 title; the second part carries the compact reason and secondary details.
 Both wrap onto continuation lines indented under the row.
 """
@@ -58,6 +62,8 @@ ROLE_STYLES = {
     "phase": "cyan",
     "policy": "magenta",
     "exception": "bold magenta",
+    # A dependency cycle reference: wraps like prose, styled as a warning.
+    "cycle": "bold magenta",
     "title": "",
     "reason": "",
     "notice": "bold red",
@@ -73,10 +79,22 @@ _PHASE_TOKENS = {"pending": "pending", "implementation": "impl",
                  "review": "review", "qa": "qa", "sign_off": "sign-off",
                  "merge": "merge", "done": "done"}
 
+# Each tree level indents two cells, but never so far that a row has fewer
+# than this many cells left for its content (deeper levels stay flat).
+_MIN_CONTENT = 24
+
 Seg = tuple[str, str]
 Line = list[Seg]
 
 SEP: Seg = (" · ", "sep")
+
+# A no-break space keeps a short lead phrase ("also needed by", "⚠ 2 need
+# you:") on one line; :func:`wrap` prints it as a plain space.
+NBSP = "\u00a0"
+
+
+def _nb(text: str) -> str:
+    return text.replace(" ", NBSP)
 
 _WS = str.maketrans("\t\n\r\v\f", "     ")
 
@@ -170,7 +188,24 @@ def wrap(segs: list[Seg], width: int, indent: str) -> list[Line]:
 
     started = False  # anything but leading space placed yet
     must_break = False  # a separator did not fit: the next item wraps
+    line_room = width - cell_len(indent)
+    tokens: list[tuple[str, str, bool]] = []
     for text, role, space in _tokens(segs):
+        if not space and NBSP in text and cell_len(text) > line_room:
+            # A no-break phrase wider than a whole line: break it at its
+            # words like ordinary text rather than mid-word, keeping a
+            # leading symbol (↻, ⚠) with the word it marks.
+            words = text.split(NBSP)
+            if len(words) > 1 and len(words[0]) == 1 and not words[0].isalnum():
+                words[:2] = [words[0] + NBSP + words[1]]
+            for i, word in enumerate(words):
+                if i:
+                    tokens.append((" ", role, True))
+                if word:
+                    tokens.append((word, role, False))
+            continue
+        tokens.append((text, role, space))
+    for text, role, space in tokens:
         if space:
             if not started or used + cell_len(text) <= width:
                 put(text, role)
@@ -195,7 +230,8 @@ def wrap(segs: list[Seg], width: int, indent: str) -> list[Line]:
             put(text, role)
         started = True
     trim(lines[-1])
-    return [ln for ln in lines if ln]
+    return [[(text.replace(NBSP, " "), role) for text, role in ln]
+            for ln in lines if ln]
 
 
 # ---------------------------------------------------------------------------
@@ -203,8 +239,9 @@ def wrap(segs: list[Seg], width: int, indent: str) -> list[Line]:
 # ---------------------------------------------------------------------------
 
 def needs_human(status: dict) -> list[dict]:
-    """Runs that need a human now (``attention`` set), each PR once —
-    a shared dependency is one run however many targets list it."""
+    """Runs that need a human now (``attention`` set), each PR once, in
+    report order — a shared dependency is one run however many targets
+    need it."""
     out, seen = [], set()
     for row in status_rows(status):
         run = row["run"]
@@ -227,7 +264,7 @@ def state_label(run: dict) -> tuple[str, str]:
 
 def phase_text(row: dict) -> str:
     """One phase/progress token: progress when the phase has it, else the
-    phase (omitted for completed rows, whose reason says merged/closed)."""
+    phase (omitted for finished rows, whose reason says merged/closed)."""
     run = row["run"]
     progress = row.get("progress") or ""
     phase = run.get("phase") or ""
@@ -243,47 +280,64 @@ def phase_text(row: dict) -> str:
             progress = progress[:-len(label) - 1]
     if progress:
         return progress
-    if run.get("state") == "completed":
+    # ``done`` adds nothing to COMPLETED / FAILED (the reason says merged,
+    # closed or not found).
+    if run.get("state") == "completed" or phase == "done":
         return ""
     return token
 
 
 def display_names(status: dict) -> dict[str, str]:
-    """PR id → display id for every run: how the report names a target
-    holding or sharing a dependency, matching its own row (``#240``)."""
-    return {r["pr_id"]: str(r.get("display_id") or r["pr_id"])
-            for r in status.get("runs") or []}
+    """PR id → the name the report uses for it in references (holders,
+    "also needed by", blockers, the need-you list): its display id
+    (``#240``), as on its own row — unless several local PRs share that
+    display id, in which case each is named by its unique pm id."""
+    disp = {}
+    for r in status.get("runs") or []:
+        disp[r["pr_id"]] = str(r.get("display_id") or r["pr_id"])
+    for t in status.get("targets") or []:
+        disp.setdefault(t["pr_id"], t["pr_id"])
+    count: dict[str, int] = {}
+    for d in disp.values():
+        count[d] = count.get(d, 0) + 1
+    return {p: (d if count[d] == 1 else p) for p, d in disp.items()}
 
 
-def reason_text(run: dict, grouped: bool,
-                names: dict[str, str] | None = None) -> str:
-    """Compact reason.  Blockers name the blocking PRs and their status;
-    inside a target group each blocker has its own row (with its hold
-    labels), so hold causes are only spelled out in flat ``all`` mode."""
+def reason_text(run: dict, names: dict[str, str] | None = None) -> str:
+    """Compact reason.  Blockers name the blocking PRs and their status
+    only: each unmerged blocker the report lists has its own row (with any
+    hold labels it needs), and one it does not list is merged-away, closed
+    or missing, which its status says."""
     blockers = run.get("blockers")
     if blockers:
         names = names or {}
         disp = {b["pr_id"]: b.get("display_id") or b["pr_id"]
                 for b in blockers}
         return "blocked on " + blockers_text(
-            blockers, holds=not grouped,
-            name=lambda p: disp.get(p) or names.get(p, p))
+            blockers, holds=False,
+            name=lambda p: names.get(p) or disp.get(p) or p)
     short = run.get("short_reason")
     return (run.get("reason") or "") if short is None else short
 
 
-def row_lines(row: dict, width: int, *, grouped: bool = True,
-              notice: str | None = None,
+def tree_indent(depth: int, width: int) -> str:
+    """Indent for a row at *depth*: two cells per level, capped so the
+    row keeps at least ``_MIN_CONTENT`` cells for its content."""
+    levels = max(1, (width - _MIN_CONTENT) // 2)
+    return "  " * min(max(depth, 0), levels)
+
+
+def row_lines(row: dict, width: int, *, notice: str | None = None,
               names: dict[str, str] | None = None) -> list[Line]:
     """Wrapped lines for one status row (see module docstring).  *names*
-    is :func:`display_names` of the report, for referenced targets."""
+    is :func:`display_names` of the report, for referenced PRs."""
     run = row["run"]
     names = names or {}
 
     def name(pr_id: str) -> str:
         return names.get(pr_id, pr_id)
 
-    indent = "  " * row["depth"]
+    indent = tree_indent(row.get("depth") or 0, width)
     cont = indent + "    "
     head: list[Seg] = [(indent, "")]
     if row["kind"] == "target":
@@ -313,14 +367,19 @@ def row_lines(row: dict, width: int, *, grouped: bool = True,
             detail.append(SEP)
         detail.append((text, role))
 
-    reason = reason_text(run, grouped, names)
+    reason = reason_text(run, names)
+    if reason.startswith("blocked on "):
+        reason = _nb("blocked on ") + reason[len("blocked on "):]
     if reason:
         add(reason, "attention_text" if run.get("attention") else "reason")
     win = run.get("window")
     if win:
         add(f"⧉ {win['name']}", "meta")
+    if row.get("cycle"):
+        add(_nb("↻ dependency cycle: needs ")
+            + ", ".join(map(name, row["cycle"])), "cycle")
     if row.get("also"):
-        add("also needed by " + ", ".join(map(name, row["also"])),
+        add(_nb("also needed by ") + ", ".join(map(name, row["also"])),
             "secondary")
     if notice:
         add(f"⚠ {notice}", "notice")
@@ -337,16 +396,15 @@ def header_lines(status: dict, width: int,
     if mode == "targets":
         n = len(status.get("targets") or [])
         segs.append((f"{n} target{'s' if n != 1 else ''}", "header"))
-    elif mode == "all":
-        segs.append(("all ready PRs (backlog mode)", "header"))
     else:
         segs.append(("off", "header"))
     need = needs_human(status) if mode != "off" else []
     if need:
-        ids = ", ".join(str(r.get("display_id") or r["pr_id"]) for r in need)
+        names = display_names(status)
+        ids = ", ".join(names.get(r["pr_id"], r["pr_id"]) for r in need)
         segs += [SEP,
-                 (f"⚠ {len(need)} need{'s' if len(need) == 1 else ''} you: "
-                  f"{ids}", "attention_text")]
+                 (_nb(f"⚠ {len(need)} need{'s' if len(need) == 1 else ''} "
+                      "you: ") + ids, "attention_text")]
     if status.get("run_id"):
         segs += [SEP, (f"run {status['run_id']}", "meta")]
     owner = (status.get("owner") or {}).get("session")
@@ -373,10 +431,9 @@ def report_lines(status: dict, width: int = MAX_WIDTH) -> list[Line]:
     if (status.get("mode") or "off") == "off":
         lines.append([("No auto-start targets (auto-start off).", "")])
         return lines
-    grouped = status.get("mode") == "targets"
     names = display_names(status)
     for row in status_rows(status):
-        lines += row_lines(row, width, grouped=grouped, names=names)
+        lines += row_lines(row, width, names=names)
     return lines
 
 

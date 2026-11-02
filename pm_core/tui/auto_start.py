@@ -8,17 +8,17 @@ dependencies once), starts review/QA loops for in-scope PRs, and removes
 targets that have merged/closed — without touching the other targets.
 
 Adding a target is additive and idempotent; an empty collection means
-auto-start is OFF (never "all pending PRs").  The whole-backlog mode is a
-separate explicit switch (``autostart all``, ``app._auto_start_all``).
+auto-start is OFF.  There is no whole-backlog/all-PR mode: authority is
+always the explicit, validated, non-empty target collection, and a saved
+state that is malformed, empty, targetless or all-mode restores nothing.
 
-Merge holds: ``app._stop_before_merge`` holds explicit per-PR stop marks;
-a ``wait_for_merge`` target (record flag) additionally holds itself and its
-whole dependency closure for a manual merge.  Every merge decision and the
-status resolve the effective hold through :func:`merge_hold` /
-:func:`policy_for` (``autostart_state.merge_holds``) — absent means
-auto-merge.
+Merge holds: there is one manual policy.  A ``wait_for_merge`` target
+(record flag) holds itself and its whole unmerged dependency closure for an
+explicit user merge.  Every merge decision and the status resolve the
+effective hold through :func:`merge_hold` / :func:`policy_for`
+(``autostart_state.merge_holds``) — absent means auto-merge.
 
-Controls: ``O`` (add selected, stop-before-merge), ``A`` (toggle selected as
+Controls: ``O`` (add selected, wait-for-merge), ``A`` (toggle selected as
 an auto-merge target), the command bar ``autostart …`` verbs, and the CLI
 ``pm autostart add/remove/clear/list/status`` which reaches this module via
 the session command queue (``--reply`` writes a JSON reply file).  State is
@@ -35,18 +35,19 @@ from pathlib import Path
 
 from pm_core.paths import configure_logger, pm_home
 from pm_core import store, graph
+from pm_core import tui_pidfile
 from pm_core import autostart_state
+from pm_core.pr_utils import usable_prs
 from pm_core.autostart_state import (
-    POLICY_AUTO, POLICY_STOP, POLICY_WAIT, REPLY_DIR, WAIT_KEY,
+    POLICY_AUTO, POLICY_WAIT, REPLY_DIR, WAIT_KEY,
 )
 from pm_core.tui._shell import _run_shell_async
 
 _log = configure_logger("pm.tui.auto_start")
 
-_MERGE_RESTART_MARKER = "merge-restart"
 _BREADCRUMB_FILE = "autostart-resume.json"
 _REPLY_MAX_AGE = 600  # seconds
-# How long a "targets +=" / "ON (all …)" confirmation holds the log line
+# How long a "targets +=" / target-removed confirmation holds the log line
 # against the scheduler messages it triggers, so it stays readable.
 CONFIRM_HOLD_SECONDS = 3.0
 
@@ -67,47 +68,35 @@ def get_targets(app) -> list[str]:
     return list(_targets(app))
 
 
-def is_all_mode(app) -> bool:
-    """True only in the explicit whole-backlog mode (``autostart all``)."""
-    return getattr(app, "_auto_start_all", False) is True
-
-
-def managed_ids(app, prs: list[dict] | None = None) -> set[str] | None:
+def managed_ids(app, prs: list[dict] | None = None) -> set[str]:
     """PR ids auto-start may act on: the union of target closures.
 
-    Returns None only in explicit all-mode (everything), and an empty set
-    when auto-start is off or has no targets.
+    Always a concrete set.  Empty when auto-start is off or has no targets;
+    there is no wildcard sentinel, so no caller can mistake "off" for
+    "everything".
     """
     if not is_enabled(app):
         return set()
-    if is_all_mode(app):
-        return None
     if prs is None:
-        prs = (app._data or {}).get("prs") or []
+        prs = usable_prs((app._data or {}).get("prs"))
     return autostart_state.managed_ids(prs, get_targets(app))
 
 
 def in_scope(app, pr_id: str, prs: list[dict] | None = None) -> bool:
     """Whether auto-start should drive *pr_id* right now."""
-    m = managed_ids(app, prs)
-    return m is None or pr_id in m
-
-
-def _stop_set(app) -> set:
-    sbm = getattr(app, "_stop_before_merge", None)
-    return sbm if isinstance(sbm, set) else set()
+    return pr_id in managed_ids(app, prs)
 
 
 def merge_holds(app, prs: list[dict] | None = None) -> dict[str, dict]:
-    """``{pr_id: {explicit, targets}}`` for every PR held for a manual merge.
+    """``{pr_id: {targets}}`` for every PR held for a manual merge.
 
-    Explicit per-PR marks always count; ``wait_for_merge`` targets hold
-    their closures only while auto-start is enabled (they are active).
+    Only active ``wait_for_merge`` targets hold their closures; auto-merge
+    targets never do.
     """
     if prs is None:
-        prs = (app._data or {}).get("prs") or []
+        prs = usable_prs((app._data or {}).get("prs"))
     targets = _targets(app) if is_enabled(app) else {}
-    return autostart_state.merge_holds(prs, targets, _stop_set(app))
+    return autostart_state.merge_holds(prs, targets)
 
 
 def merge_hold(app, pr_id: str, prs: list[dict] | None = None) -> dict | None:
@@ -122,10 +111,8 @@ def policy_for(app, pr_id: str, prs: list[dict] | None = None) -> str:
 
 
 def target_policy(app, pr_id: str) -> str:
-    """A target's own configured policy (``wait_for_merge`` /
-    ``stop_before_merge`` / ``auto_merge``)."""
-    return autostart_state.target_policy(
-        pr_id, _targets(app).get(pr_id), _stop_set(app))
+    """A target's own configured policy (``wait_for_merge`` / ``auto_merge``)."""
+    return autostart_state.target_policy(_targets(app).get(pr_id))
 
 
 def _launching(app) -> set:
@@ -161,41 +148,91 @@ def get_transcript_dir(app) -> Path:
     return root / "transcripts" / run_id
 
 
-def has_merge_restart_marker() -> bool:
-    """Check if the merge-restart marker file exists."""
-    return (pm_home() / _MERGE_RESTART_MARKER).exists()
+def has_merge_restart_marker(session: str | None = None) -> bool:
+    """Is there a merge-restart marker this *session* should act on?
+
+    See :func:`pm_core.tui_pidfile.has_merge_restart_marker`: the marker is
+    shared by every session, so one written by another session's restart is
+    not ours to consume.
+    """
+    return tui_pidfile.has_merge_restart_marker(session)
+
+
+def _app_session(app) -> str | None:
+    """The app's tmux session name, or None when it has no real one.
+
+    ``_session_name`` is only meaningful once the app has claimed its
+    pidfile; tests build stub apps whose attribute is not a string.
+    """
+    name = getattr(app, "_session_name", None)
+    return name if isinstance(name, str) and name else None
+
+
+def discard_merge_restart_marker(session: str | None = None) -> bool:
+    """Remove an orphaned merge-restart marker; return True if one was there.
+
+    The marker's only consumer is :func:`save_breadcrumb`, which unlinks it
+    before the restarting process re-execs.  A marker still present when a
+    *new* TUI mounts was therefore never consumed: its restart request lost
+    a race, most often because a plain ``pm tui restart`` reached the old
+    TUI before a concurrent ``--breadcrumb`` caller had written the marker,
+    so the TUI restarted as ``reason=user`` and the marker was left behind.
+    Keeping it would make the next start — even a plain Ctrl+R days later —
+    behave as a merge restart and preserve state the user asked to drop.
+
+    Only this session's marker (or an unscoped legacy one) is removed; see
+    :func:`pm_core.tui_pidfile.clear_merge_restart_marker`.
+    """
+    if not tui_pidfile.clear_merge_restart_marker(session):
+        return False
+    _log.info("discard_merge_restart_marker: removed orphaned %s",
+              tui_pidfile.merge_restart_marker_path())
+    return True
+
+
+def resolve_mount_trigger(session: str | None = None) -> str:
+    """Label a TUI mount and drop any orphaned merge-restart marker.
+
+    Returns ``"merge_restart"`` when the mount followed a merge-restart
+    marker, ``"initial"`` otherwise.  Because :func:`save_breadcrumb`
+    always unlinks the marker before the old process re-execs, a marker
+    still present at mount was never consumed — see
+    :func:`discard_merge_restart_marker` — so it is removed here rather
+    than left to turn a later, unrelated start into a merge restart.
+    """
+    if not has_merge_restart_marker(session):
+        return "initial"
+    discard_merge_restart_marker(session)
+    return "merge_restart"
 
 
 def save_breadcrumb(app) -> None:
     """Save state to a breadcrumb file for resumption after restart.
 
     Called from action_restart when a merge-restart marker is present.
-    Always deletes the marker.  Persists auto-start state (if active),
+    Deletes this session's marker.  Persists auto-start state (if active),
     running review loops, and watcher state.  Writes a breadcrumb whenever
     there is *anything* worth preserving — even a manually-started review
     loop without auto-start.
     """
-    marker = pm_home() / _MERGE_RESTART_MARKER
-    marker.unlink(missing_ok=True)
-
+    # This is the marker's normal consumption path, so drop it without the
+    # "orphaned" wording used by resolve_mount_trigger.
+    tui_pidfile.clear_merge_restart_marker(_app_session(app))
     data: dict = {}
 
     # Persist auto-start state if active: the full target collection
-    # (records, in order), explicit all-mode, and the shared run id.
-    # A target's wait-for-merge flag rides on its record; explicit stop
-    # marks ride on ``stop_before_merge`` below.
-    if is_enabled(app):
+    # (records, in order) and the shared run id.  A target's
+    # wait-for-merge flag rides on its record.  Never persist an empty or
+    # all-PR state: there is no mode flag that could broaden authority on
+    # restore.
+    targets = _targets(app)
+    if is_enabled(app) and targets:
         data["auto_start"] = True
-        data["targets"] = autostart_state.targets_to_breadcrumb(_targets(app))
-        data["all_mode"] = is_all_mode(app)
+        data["targets"] = autostart_state.targets_to_breadcrumb(targets)
         data["run_id"] = app._auto_start_run_id
-
-    # Persist auto-sequence stop-before-merge set even when auto-start is
-    # off — a TUI restart between QA finish and merge shouldn't re-arm
-    # auto-merge for an auto-sequence PR.
-    stop_before_merge = getattr(app, "_stop_before_merge", None)
-    if isinstance(stop_before_merge, set) and stop_before_merge:
-        data["stop_before_merge"] = sorted(stop_before_merge)
+    elif is_enabled(app):
+        _log.warning("save_breadcrumb: auto-start enabled with no targets; "
+                     "not persisting autostart state")
 
     # Persist review loop state for running loops
     review_loops = {}
@@ -208,6 +245,24 @@ def save_breadcrumb(app) -> None:
             "loop_id": rstate.loop_id,
             "input_required": rstate.input_required,
             "_transcript_dir": rstate._transcript_dir,
+            # Failed-launch retry episode: a restart mid-backoff must
+            # continue the same bounded budget and deadline.
+            "retry_iteration": rstate.retry_iteration,
+            "launch_attempts": rstate.launch_attempts,
+            "next_retry_at": rstate.next_retry_at,
+            "last_launch_error": rstate.last_launch_error,
+            "last_launch_artifact": rstate.last_launch_artifact,
+            "launch_retryable": rstate.launch_retryable,
+            "retry_episodes": rstate.retry_episodes,
+            "retry_ready_at": rstate.retry_ready_at,
+            "last_session_id": rstate.last_session_id,
+            "iteration_attempted": rstate.iteration_attempted,
+            "last_attempt_failed": rstate.last_attempt_failed,
+            "stale_session_id": rstate.stale_session_id,
+            "stale_pane_session_id": rstate.stale_pane_session_id,
+            # Which retry attempt the user has already been told about: a
+            # restart mid-episode must not re-announce it.
+            "_ui_notified_retry": rstate._ui_notified_retry,
             "history": [
                 {
                     "iteration": h.iteration,
@@ -243,15 +298,220 @@ def save_breadcrumb(app) -> None:
         return
 
     breadcrumb = pm_home() / _BREADCRUMB_FILE
+    # Record which session wrote it: the breadcrumb file is shared by every
+    # pm session under the same PM home, so two sessions restarting at once
+    # would otherwise restore each other's targets (see consume_breadcrumb).
+    session = _app_session(app)
+    if session:
+        data["session"] = session
     breadcrumb.write_text(json.dumps(data))
     _log.info("save_breadcrumb: wrote %s", data)
+
+
+def _saved_stop_marks(data: dict) -> bool:
+    """Whether validated saved state carried per-PR merge-gate marks.
+
+    ``consume_breadcrumb`` calls this only after a successful parse, so a
+    non-empty list here is a *valid* ``stop_before_merge`` set.  When no
+    target was restored (auto-start off, or an explicit ``auto_start:
+    false``) the marks cannot be folded into wait targets — with no
+    scheduler there is no merge path to gate — but the bytes are the only
+    record of the holds, so they must be preserved rather than deleted with
+    the breadcrumb.
+    """
+    raw = data.get("stop_before_merge")
+    return isinstance(raw, list) and bool(raw)
+
+
+def _reset_autostart_state(app) -> None:
+    """Clear the in-memory auto-start scope (fail-closed reset).
+
+    Used when a saved restore is rejected: a rejected restore must never
+    leave a previous or wildcard scope live.
+    """
+    app._auto_start = False
+    app._auto_start_targets = {}
+    app._auto_start_run_id = None
+
+
+def _quarantine_breadcrumb(path: Path, reason: str = "rejected") -> Path | None:
+    """Preserve a rejected/corrupt saved-state file instead of deleting it.
+
+    Malformed evidence may explain an incident or carry merge-gate intent;
+    it is renamed aside (never parsed again) so the next startup is not
+    blocked by it and the bytes remain available for diagnosis.  If the
+    rename fails the file is deliberately left in place: deleting it would
+    destroy the evidence, and re-rejecting it on the next startup is safe
+    (auto-start stays off either way).
+    """
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    dest = path.with_name(f"{path.stem}.rejected-{stamp}{path.suffix}")
+    n = 0
+    while dest.exists():
+        n += 1
+        dest = path.with_name(
+            f"{path.stem}.rejected-{stamp}-{n}{path.suffix}")
+    try:
+        os.replace(path, dest)
+        _log.warning("consume_breadcrumb: preserved %s saved state at %s",
+                     reason, dest)
+        return dest
+    except OSError:
+        _log.warning("consume_breadcrumb: could not move rejected saved "
+                     "state aside; leaving it in place", exc_info=True)
+        return None
+
+
+def _is_int(value) -> bool:
+    """An ``int`` that is not a ``bool`` (bool is an int subclass)."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_number(value) -> bool:
+    return (isinstance(value, (int, float))
+            and not isinstance(value, bool))
+
+
+def _loop_record_fields(loop_data: dict) -> dict | None:
+    """Validate a saved review-loop record's scalar fields.
+
+    Returns the kwargs for ``ReviewLoopState``, or ``None`` when a field has
+    the wrong type.  Restoring is fail-soft but not blind: a record with,
+    say, a string ``iteration`` would be adopted at startup and only raise
+    later inside a review-loop worker, so a wrong-typed record counts as
+    malformed saved state and is skipped like a non-object one.  The
+    failed-launch retry fields are validated the same way so a corrupt
+    record cannot raise on restore.
+    """
+    iteration = loop_data.get("iteration", 0)
+    if not _is_int(iteration):
+        return None
+    latest_verdict = loop_data.get("latest_verdict", "")
+    if not isinstance(latest_verdict, str):
+        return None
+    loop_id = loop_data.get("loop_id")
+    if loop_id is not None and not isinstance(loop_id, str):
+        return None
+    input_required = loop_data.get("input_required", False)
+    if not isinstance(input_required, bool):
+        return None
+    transcript_dir = loop_data.get("_transcript_dir")
+    if transcript_dir is not None and not isinstance(transcript_dir, str):
+        return None
+
+    retry_iteration = loop_data.get("retry_iteration", 0)
+    launch_attempts = loop_data.get("launch_attempts", 0)
+    retry_episodes = loop_data.get("retry_episodes", 0)
+    ui_notified_retry = loop_data.get("_ui_notified_retry", 0)
+    if not all(_is_int(v) for v in (retry_iteration, launch_attempts,
+                                    retry_episodes, ui_notified_retry)):
+        return None
+    next_retry_at = loop_data.get("next_retry_at", 0.0)
+    retry_ready_at = loop_data.get("retry_ready_at", 0.0)
+    if not all(_is_number(v) for v in (next_retry_at, retry_ready_at)):
+        return None
+    last_launch_error = loop_data.get("last_launch_error", "")
+    last_session_id = loop_data.get("last_session_id", "")
+    stale_session_id = loop_data.get("stale_session_id", "")
+    stale_pane_session_id = loop_data.get("stale_pane_session_id", "")
+    if not all(isinstance(v, str) for v in (last_launch_error,
+                                            last_session_id,
+                                            stale_session_id,
+                                            stale_pane_session_id)):
+        return None
+    last_launch_artifact = loop_data.get("last_launch_artifact")
+    if (last_launch_artifact is not None
+            and not isinstance(last_launch_artifact, str)):
+        return None
+    launch_retryable = loop_data.get("launch_retryable", False)
+    iteration_attempted = loop_data.get("iteration_attempted", False)
+    last_attempt_failed = loop_data.get("last_attempt_failed", False)
+    if not isinstance(launch_retryable, bool):
+        return None
+    if not isinstance(iteration_attempted, bool):
+        return None
+    if not isinstance(last_attempt_failed, bool):
+        return None
+
+    return {"iteration": iteration,
+            "latest_verdict": latest_verdict,
+            "loop_id": loop_id or secrets.token_hex(2),
+            "input_required": input_required,
+            "_transcript_dir": transcript_dir,
+            "retry_iteration": retry_iteration,
+            "launch_attempts": launch_attempts,
+            "next_retry_at": next_retry_at,
+            "last_launch_error": last_launch_error,
+            "last_launch_artifact": last_launch_artifact,
+            "launch_retryable": launch_retryable,
+            "retry_episodes": retry_episodes,
+            "retry_ready_at": retry_ready_at,
+            "last_session_id": last_session_id,
+            "iteration_attempted": iteration_attempted,
+            "last_attempt_failed": last_attempt_failed,
+            "stale_session_id": stale_session_id,
+            "stale_pane_session_id": stale_pane_session_id,
+            "_ui_notified_retry": ui_notified_retry}
+
+
+def _valid_history_entry(entry) -> bool:
+    """Whether a saved review-loop history entry has well-typed fields.
+
+    ``iteration``/``verdict`` are required; ``timestamp`` is optional but
+    must be a string when present.
+    """
+    if not isinstance(entry, dict):
+        return False
+    if "iteration" not in entry or "verdict" not in entry:
+        return False
+    iteration = entry["iteration"]
+    if not isinstance(iteration, int) or isinstance(iteration, bool):
+        return False
+    if not isinstance(entry["verdict"], str):
+        return False
+    return isinstance(entry.get("timestamp", ""), str)
+
+
+def _validate_restored_targets(app, targets: dict[str, dict],
+                               migrated: bool) -> str | None:
+    """Reject saved targets that do not resolve in the loaded project.
+
+    Unknown ids can never grant authority (they would be no-ops), but a
+    restore containing them is malformed saved state: fail the whole
+    restore with a diagnostic instead of acting on a partial set.  Terminal
+    (merged/closed) targets are kept; the normal scheduler prune removes
+    them.
+    """
+    if not targets:
+        return None
+    prs = (app._data or {}).get("prs") or []
+    pr_map = {p.get("id") for p in prs
+              if isinstance(p, dict) and p.get("id")}
+    if not pr_map:
+        return ("saved auto-start state names targets but no project PRs "
+                "are loaded")
+    missing = [t for t in targets if t not in pr_map]
+    if missing:
+        label = "legacy target" if migrated else "target"
+        return (f"saved auto-start {label}(s) not found in project: "
+                f"{', '.join(missing)}")
+    return None
 
 
 async def consume_breadcrumb(app) -> None:
     """Restore auto-start state from a breadcrumb file on startup.
 
-    If the breadcrumb exists, reads it, deletes it (always, even on error),
-    restores auto-start fields, and calls check_and_start.
+    If the breadcrumb exists and belongs to this session (or carries no
+    session, as legacy breadcrumbs do), reads it, restores any safe state,
+    and consumes or quarantines the file.  Parsing is fail-closed: only a
+    validated, non-empty explicit target collection is restored.  Malformed,
+    empty, targetless, all-mode or unreadable state leaves auto-start OFF,
+    emits an actionable diagnostic and preserves the evidence (quarantined
+    file); a valid ``stop_before_merge`` set migrates to wait targets when
+    auto-start resumes, so a merge hold is never silently dropped.  When
+    nothing is restored but the file carried such marks (auto-start off),
+    the file is quarantined as evidence instead of being deleted.  A
+    breadcrumb owned by another session is left untouched for its own mount.
     """
     breadcrumb = pm_home() / _BREADCRUMB_FILE
     if not breadcrumb.exists():
@@ -261,24 +521,100 @@ async def consume_breadcrumb(app) -> None:
         data = json.loads(breadcrumb.read_text())
     except Exception as e:
         _log.warning("consume_breadcrumb: failed to read breadcrumb: %s", e)
+        # Fail closed exactly like a rejected parse: a corrupt file must not
+        # leave any pre-existing in-memory scope active.
+        _reset_autostart_state(app)
+        _quarantine_breadcrumb(breadcrumb)
+        app.log_message(
+            "Auto-start: saved state is unreadable "
+            f"({type(e).__name__}); auto-start remains off. Re-add targets "
+            "with `pm autostart add PR_ID...`.", force=True, sticky=10)
+        app._update_display()
         return
-    finally:
+
+    if not isinstance(data, dict):
+        # Valid JSON but not a breadcrumb object (``[]``, ``null``, a bare
+        # string): malformed saved state.  Reject it like any other corrupt
+        # file — fail closed, diagnose, preserve the evidence — rather than
+        # raising out of the mount.
+        _log.warning("consume_breadcrumb: ignoring non-object breadcrumb "
+                     "(%s)", type(data).__name__)
+        _reset_autostart_state(app)
+        _quarantine_breadcrumb(breadcrumb)
+        app.log_message(
+            "Auto-start: saved state is not a JSON object; auto-start "
+            "remains off. Re-add targets with `pm autostart add PR_ID...`.",
+            force=True, sticky=10)
+        app._update_display()
+        return
+
+    # The breadcrumb file is shared by every pm session under this PM home.
+    # A breadcrumb written by a *different* session's restart belongs to that
+    # session's next mount: consuming it here would apply another project's
+    # targets (then drop them as "missing") and leave the owning session
+    # with nothing to restore.  Leave it in place for its owner.  A mount
+    # with no session name (``mine is None``) can never own a scoped
+    # breadcrumb, so it leaves those alone too.
+    #
+    # Only a non-empty *string* is a session name.  A wrong-typed value is
+    # corruption, not another session's request: treating it as an owner
+    # would strand the file forever (no mount could ever match it) and
+    # re-log it on every start, so it reads as unscoped — the same rule
+    # ``tui_pidfile._marker_owner`` applies.
+    owner = data.get("session")
+    if "session" in data and not isinstance(owner, str):
+        _log.warning("consume_breadcrumb: ignoring non-string session (%s)",
+                     type(owner).__name__)
+    owner = owner.split("~")[0] if isinstance(owner, str) else ""
+    mine = _app_session(app)
+    if owner and owner != mine:
+        _log.info("consume_breadcrumb: leaving breadcrumb for session %s "
+                  "(this session is %s)", owner, mine)
+        return
+
+    parsed = autostart_state.targets_from_breadcrumb(
+        data, (app._data or {}).get("prs") or [])
+    targets = dict(parsed.targets)
+    migrated = parsed.migrated
+    diagnostic = parsed.error
+
+    if not diagnostic:
+        diagnostic = _validate_restored_targets(app, targets, migrated)
+        if diagnostic:
+            targets = {}
+
+    if diagnostic:
+        _log.warning("consume_breadcrumb: rejected saved state: %s",
+                     diagnostic)
+        # Fail closed even if this app somehow had autostart state already:
+        # a rejected restore never leaves a previous/wildcard scope active.
+        _reset_autostart_state(app)
+        _quarantine_breadcrumb(breadcrumb)
+        app.log_message(f"Auto-start: {diagnostic}; auto-start remains off. "
+                        "Re-add targets with `pm autostart add PR_ID...`.",
+                        force=True, sticky=10)
+        targets = {}
+    elif not targets and _saved_stop_marks(data):
+        # Nothing to restore, but the file records valid merge-gate marks
+        # that cannot be applied (auto-start off).  Quarantine it instead of
+        # deleting it: the saved holds are evidence, and "never silently
+        # drop a merge gate" does not stop being true just because there is
+        # no scheduler this time.
+        _log.info("consume_breadcrumb: saved merge-gate marks not applied "
+                  "(auto-start remains off); preserving the saved state")
+        _quarantine_breadcrumb(breadcrumb, reason="unapplied merge-gate")
+    else:
         breadcrumb.unlink(missing_ok=True)
 
-    # Restore auto-start state only if it was active before the restart.
-    # Current breadcrumbs carry ``targets`` + ``all_mode``; a legacy
-    # single-target breadcrumb (``target: X``) migrates to ``[X]`` and a
-    # legacy targetless one to the explicit all-mode it represented.
-    targets, all_mode, migrated = autostart_state.targets_from_breadcrumb(data)
-    had_auto_start = bool(targets) or all_mode
-    run_id = data.get("run_id")
-    _log.info("consume_breadcrumb: restoring targets=%s all_mode=%s run_id=%s "
-              "migrated_legacy=%s", list(targets), all_mode, run_id, migrated)
+    had_auto_start = bool(targets)
+    run_id = data.get("run_id") if isinstance(data.get("run_id"), str) else None
+    _log.info("consume_breadcrumb: restoring targets=%s run_id=%s "
+              "migrated_legacy=%s rejected=%s", list(targets), run_id,
+              migrated, bool(diagnostic))
 
     if had_auto_start:
         app._auto_start = True
         app._auto_start_targets = dict(targets)
-        app._auto_start_all = all_mode
         app._auto_start_run_id = run_id
 
         # Recreate transcript directory if needed
@@ -288,45 +624,56 @@ async def consume_breadcrumb(app) -> None:
         elif not run_id:
             _ensure_run(app)
 
-    # Restore auto-sequence stop-before-merge set
-    sbm = data.get("stop_before_merge")
-    if sbm:
-        app._stop_before_merge.update(sbm)
-        _log.info("consume_breadcrumb: restored stop_before_merge=%s", sbm)
-
-    # Restore review loop state before check_and_start so it sees existing loops
-    review_loops_data = data.get("review_loops", {})
+    # Restore review loop state before check_and_start so it sees existing
+    # loops.  Parsing is fail-soft here: a malformed record/history entry is
+    # skipped with a warning and must never raise out of the mount.
+    review_loops_data = data.get("review_loops") or {}
+    if not isinstance(review_loops_data, dict):
+        _log.warning("consume_breadcrumb: ignoring malformed review_loops")
+        review_loops_data = {}
+    restored_loops = 0
     if review_loops_data:
         from pm_core.review_loop import ReviewLoopState, ReviewIteration
         for pr_id, loop_data in review_loops_data.items():
-            rstate = ReviewLoopState(
-                pr_id=pr_id,
-                iteration=loop_data.get("iteration", 0),
-                latest_verdict=loop_data.get("latest_verdict", ""),
-                loop_id=loop_data.get("loop_id", secrets.token_hex(2)),
-                input_required=loop_data.get("input_required", False),
-                _transcript_dir=loop_data.get("_transcript_dir"),
-            )
-            for h in loop_data.get("history", []):
+            fields = (_loop_record_fields(loop_data)
+                      if isinstance(loop_data, dict) else None)
+            if fields is None:
+                _log.warning("consume_breadcrumb: ignoring malformed review "
+                             "loop record for %s", pr_id)
+                continue
+            rstate = ReviewLoopState(pr_id=pr_id, **fields)
+            history = loop_data.get("history") or []
+            if not isinstance(history, list):
+                _log.warning("consume_breadcrumb: ignoring malformed review "
+                             "loop history for %s", pr_id)
+                history = []
+            for h in history:
+                # Saved-state parsing is fail-soft here: a malformed history
+                # entry must not abort the whole startup restore.
+                if not _valid_history_entry(h):
+                    _log.warning("consume_breadcrumb: ignoring malformed "
+                                 "review-loop history entry for %s", pr_id)
+                    continue
                 rstate.history.append(ReviewIteration(
-                    iteration=h["iteration"],
-                    verdict=h["verdict"],
+                    iteration=h.get("iteration", 0),
+                    verdict=h.get("verdict", ""),
                     output="",  # not stored in breadcrumb
                     timestamp=h.get("timestamp", ""),
                 ))
             app._review_loops[pr_id] = rstate
-        _log.info("consume_breadcrumb: restored %d review loop state(s)", len(review_loops_data))
+            restored_loops += 1
+        # Count what was actually restored: every record in the file may be
+        # malformed, in which case no loop state was adopted.
+        _log.info("consume_breadcrumb: restored %d review loop state(s)",
+                  restored_loops)
 
     app._update_display()
 
-    if had_auto_start:
-        # Adopt in-flight QA runs (qa_resume.json) into app._qa_loops before
-        # the scheduler pass — otherwise _auto_start_qa_loops would see no
-        # loop and launch a duplicate before the poll-timer resume scan.
-        _adopt_live_qa(app)
-        await check_and_start(app)
-
-    # Restart review loops that were running before the restart
+    # Restart review loops that were running before the restart *before* the
+    # scheduler pass.  `_start_loop` marks the loop running synchronously, so
+    # the pass sees it as live; a restored loop is otherwise indistinguishable
+    # from a completed retryable failure, and re-arming it here would reset
+    # its saved retry budget and burn one of the bounded episodes.
     if review_loops_data:
         from pm_core.tui.review_loop_ui import _start_loop
         for pr_id in review_loops_data:
@@ -340,43 +687,104 @@ async def consume_breadcrumb(app) -> None:
                     # adopted INPUT_REQUIRED follow-up (and finalize)
                     # would look in the wrong place.
                     tdir = rstate._transcript_dir or get_transcript_dir(app)
-                    _start_loop(
-                        app, pr_id, pr,
-                        transcript_dir=str(tdir),
-                        resume_state=rstate,
-                    )
+                    try:
+                        started = _start_loop(
+                            app, pr_id, pr,
+                            transcript_dir=str(tdir),
+                            resume_state=rstate,
+                        )
+                    except Exception:
+                        # A raising starter must not take the TUI mount down
+                        # either; treat it like a refusal (the re-arm path
+                        # does the same).
+                        _log.exception(
+                            "consume_breadcrumb: resuming the review loop for "
+                            "%s raised", pr_id)
+                        started = False
+                    if not started:
+                        # The loop could not be started (missing workdir, no
+                        # tmux, unusable transcript dir); _start_loop already
+                        # said why.  Drop the restored entry: a non-running
+                        # loop entry makes `_auto_start_review_loops` skip this
+                        # PR forever, so keeping it would strand the target
+                        # this resume exists to keep alive.  Dropping it lets
+                        # the scheduler pass below start a fresh loop.
+                        app._review_loops.pop(pr_id, None)
+                        _log.warning(
+                            "consume_breadcrumb: could not resume the review "
+                            "loop for %s; dropping the restored state so the "
+                            "scheduler can restart it", pr_id)
+                        continue
                     msg = (f"Review loop resumed for {pr_id} "
                            f"at iteration {rstate.iteration}")
                     _log.info("consume_breadcrumb: %s", msg)
                     app.log_message(msg)
 
-    # Resume watchers (list format, or legacy single-watcher dict)
+    if had_auto_start:
+        # Adopt in-flight QA runs (qa_resume.json) into app._qa_loops before
+        # the scheduler pass — otherwise _auto_start_qa_loops would see no
+        # loop and launch a duplicate before the poll-timer resume scan.
+        _adopt_live_qa(app)
+        await check_and_start(app)
+
+    # Resume watchers (list format, or legacy single-watcher dict).  Wrong
+    # shapes are dropped, not raised: see the review-loop guard above.
     watchers_data = data.get("watchers", [])
     watcher_data = data.get("watcher")  # legacy single-watcher breadcrumb
+    if not isinstance(watchers_data, list):
+        _log.warning("consume_breadcrumb: ignoring non-list watchers (%s)",
+                     type(watchers_data).__name__)
+        watchers_data = []
+    if not isinstance(watcher_data, dict):
+        watcher_data = None
     if not watchers_data and watcher_data:
-        watchers_data = [{"type": "auto-start", "meta_pm_root": watcher_data.get("meta_pm_root")}]
+        watchers_data = [{"type": "auto-start",
+                          "meta_pm_root": watcher_data.get("meta_pm_root")}]
     if watchers_data:
         from pm_core.tui import watcher_ui
         tdir = get_transcript_dir(app)
+        resumed = 0
         for wd in watchers_data:
+            if not isinstance(wd, dict):
+                _log.warning("consume_breadcrumb: ignoring malformed watcher "
+                             "record")
+                continue
             watcher_ui.start_watcher(
                 app,
                 transcript_dir=str(tdir),
                 meta_pm_root=wd.get("meta_pm_root"),
                 watcher_type=wd.get("type", "auto-start"),
             )
-        _log.info("consume_breadcrumb: resumed %d watcher(s)", len(watchers_data))
+            resumed += 1
+        # Count what was actually handed to the watcher manager: a malformed
+        # record is skipped above, so a bare len() would overstate the resume.
+        _log.info("consume_breadcrumb: resumed %d watcher(s)", resumed)
 
     # Summarise last: the per-loop resume messages above (one of them
     # sticky) would otherwise overwrite this before it is ever painted.
     if had_auto_start:
-        desc = "all" if all_mode else ", ".join(targets)
-        note = " (migrated legacy breadcrumb)" if migrated else ""
-        msg = f"Auto-start: resumed after merge restart → {desc}{note}"
-        _log.info("consume_breadcrumb: %s", msg)
-        app.log_message(msg, sticky=5)
-    elif review_loops_data:
-        app.log_message("Resumed review loop state after restart", sticky=5)
+        # Report what is actually still active.  A restored target that
+        # completed during downtime was pruned by the scheduler pass above
+        # (which already logged the "auto-start OFF" line); painting a stale
+        # "resumed → <target>" over that would claim a scope that is gone.
+        remaining = get_targets(app)
+        if remaining:
+            desc = ", ".join(remaining)
+            note = " (migrated legacy breadcrumb)" if migrated else ""
+            msg = f"Auto-start: resumed after merge restart → {desc}{note}"
+            _log.info("consume_breadcrumb: %s", msg)
+            app.log_message(msg, sticky=5)
+        else:
+            _log.info("consume_breadcrumb: restored targets all completed "
+                      "during downtime; auto-start remains off")
+    elif restored_loops:
+        # Only claim a resume when loop state was actually adopted; every
+        # record in the file may have been malformed.  A rejected restore's
+        # diagnostic is the message the user must see, so do not paint this
+        # informational summary over it.  (It is still recorded in the ``L``
+        # command log.)
+        app.log_message("Resumed review loop state after restart",
+                        sticky=0 if diagnostic else 5)
 
 
 def _adopt_live_qa(app) -> None:
@@ -388,14 +796,66 @@ def _adopt_live_qa(app) -> None:
         _log.warning("auto_start: QA adoption scan failed", exc_info=True)
 
 
+# Transcripts the TUI's idle polling (_poll_impl_idle) keeps reading after
+# auto-start is disabled; it registers them lazily on a later poll.
+_LAZY_TRACKED_RE = re.compile(r"^(?:impl|merge|review)-(?!.*-i\d+\.jsonl$).+\.jsonl$")
+
+
+def _live_read_transcripts(app, tdir: Path) -> set[str]:
+    """Paths in *tdir* that a reader still polls after auto-start is off.
+
+    - live idle-tracker entries (impl / merge / non-loop review panes);
+    - a running review loop's current iteration transcript (the loop polls
+      it itself; ``_poll_impl_idle`` skips PRs with running loops);
+    - impl / merge / review windows not registered yet: a live pane of the
+      pm session runs that session (its ``--session-id`` / ``--resume``).
+    Sign-off transcripts are not among them: the sign-off driver only
+    steps auto-start-driven PRs.
+    """
+    from pm_core import tmux as tmux_mod
+    from pm_core.claude_launcher import _PANE_SESSION_RE, session_id_from_transcript
+    live: set[str] = set()
+    tracker = getattr(app, "_pane_idle_tracker", None)
+    if tracker is not None:
+        for key in tracker.tracked_keys():
+            path = tracker.get_transcript_path(key)
+            if path and not tracker.is_gone(key):
+                live.add(os.path.abspath(path))
+    for pr_id, state in (getattr(app, "_review_loops", None) or {}).items():
+        if state.running and getattr(state, "_transcript_dir", None):
+            live.add(os.path.abspath(os.path.join(
+                state._transcript_dir, f"review-{pr_id}-i{state.iteration}.jsonl")))
+    session = getattr(app, "_session_name", None)
+    if session:
+        ids: set[str] = set()
+        for cmd in tmux_mod.live_pane_start_commands(session):
+            ids.update(_PANE_SESSION_RE.findall(cmd))
+        for p in tdir.iterdir():
+            if (_LAZY_TRACKED_RE.match(p.name) and p.is_symlink()
+                    and session_id_from_transcript(p) in ids):
+                live.add(os.path.abspath(p))
+    return live
+
+
 def _finalize_all_transcripts(app) -> None:
-    """Finalize all transcript symlinks in the current run directory."""
+    """Finalize all transcript symlinks in the current run directory.
+
+    Skips transcripts a reader still polls: a copy freezes them, so e.g. a
+    repo-update (merge) window waiting on INPUT_REQUIRED would never have
+    its later MERGED detected, and a running review loop would never see
+    its verdict.  Those stay symlinks to Claude's own transcript (as in a
+    run that is never disabled).
+    """
     tdir = get_transcript_dir(app)
     if not tdir or not tdir.is_dir():
         return
     from pm_core.claude_launcher import finalize_transcript
+    live = _live_read_transcripts(app, tdir)
     for p in tdir.iterdir():
         if p.is_symlink() and p.suffix == ".jsonl":
+            if os.path.abspath(p) in live:
+                _log.info("transcript: %s is still read live — not finalized", p)
+                continue
             finalize_transcript(p)
 
 
@@ -408,7 +868,6 @@ def _disable(app) -> None:
         watcher_ui.stop_watcher(app)
     app._auto_start = False
     app._auto_start_targets = {}
-    app._auto_start_all = False
     app._auto_start_run_id = None
     app._update_display()
 
@@ -418,7 +877,7 @@ def _ensure_run(app) -> None:
     if app._auto_start_run_id:
         return
     targets = get_targets(app)
-    tag = "all" if is_all_mode(app) else (targets[0] if targets else "all")
+    tag = targets[0] if targets else "none"
     run_id = f"autostart-{tag}-{secrets.token_hex(4)}"
     app._auto_start_run_id = run_id
     if app._root:
@@ -430,11 +889,11 @@ def _ensure_run(app) -> None:
 def _sync_enabled(app) -> None:
     """Recompute the derived ``_auto_start`` flag after a target mutation.
 
-    Enabled iff there is at least one target or explicit all-mode.  Going
-    from enabled → empty disables auto-start; it never falls back to
-    all-mode.  Also keeps a running auto-start watcher's scope current.
+    Enabled iff there is at least one explicit target.  Going from
+    enabled → empty disables auto-start; there is no targetless/all-PR
+    fallback.  Also keeps a running auto-start watcher's scope current.
     """
-    enabled = bool(_targets(app)) or is_all_mode(app)
+    enabled = bool(_targets(app))
     if enabled:
         app._auto_start = True
         _ensure_run(app)
@@ -482,18 +941,19 @@ def _resolve_ids(app, ids: list[str]) -> tuple[list[dict], list[str]]:
 
 
 def add_targets(app, ids: list[str], policy: str | None = None,
-                default_policy: str | None = POLICY_STOP,
+                default_policy: str | None = POLICY_WAIT,
                 source: str = "command", confirm: str | None = None) -> dict:
     """Add targets (additive, idempotent, all-or-nothing validation).
 
-    *policy*: ``stop_before_merge`` / ``auto_merge`` / ``wait_for_merge``
-    to set explicitly, or None to keep an existing target's policy; a *new*
-    target then gets *default_policy* (None = leave the stop set untouched,
-    i.e. the ``A``-key semantics).  Setting a policy replaces that target's
-    own previous one (its stop mark / wait flag); marks on other PRs are
-    never touched.  The policy is in place before the scheduler pass this
-    queues, so a wait target's dependencies are held before any starts.
-    Never touches other targets and never enables all-mode.
+    *policy*: ``auto_merge`` / ``wait_for_merge`` to set explicitly, or None
+    to keep an existing target's policy; a *new* target then gets
+    *default_policy* (None = plain auto-merge record, i.e. the ``A``-key
+    semantics).  The removed ``stop_before_merge`` value is accepted as an
+    alias for ``wait_for_merge``.  Setting a policy replaces that target's
+    own previous one (its wait flag); other targets are never touched.  The
+    policy is in place before the scheduler pass this queues, so a wait
+    target's dependencies are held before any starts.  Never touches other
+    targets and never enables all-mode.
 
     *confirm* replaces the "targets +=" log-line confirmation (e.g. the
     ``O`` key's "Auto-sequence armed …"); it gets the same hold.
@@ -513,14 +973,21 @@ def add_targets(app, ids: list[str], policy: str | None = None,
                 "message": f"already merged/closed: {', '.join(closed)}",
                 "invalid": closed, "changes": []}
 
-    if policy is not None and policy not in autostart_state.POLICIES:
-        return {"ok": False, "error": "usage",
-                "message": f"unknown merge policy {policy!r}", "changes": []}
+    # Both policy inputs go through the same alias mapping and validation:
+    # an unknown/legacy *default* must not silently fall through to the
+    # no-flag branch and turn a manual gate into an auto-merge.
+    policy = autostart_state.LEGACY_POLICIES.get(policy, policy)
+    default_policy = autostart_state.LEGACY_POLICIES.get(default_policy,
+                                                        default_policy)
+    for value in (policy, default_policy):
+        if value is not None and value not in autostart_state.POLICIES:
+            return {"ok": False, "error": "usage",
+                    "message": f"unknown merge policy {value!r}",
+                    "changes": []}
 
     targets = _targets(app)
     if not isinstance(getattr(app, "_auto_start_targets", None), dict):
         app._auto_start_targets = targets
-    sbm = app._stop_before_merge
     held_before = set(merge_holds(app))
     changes = []
     for pr in found:
@@ -533,13 +1000,8 @@ def add_targets(app, ids: list[str], policy: str | None = None,
         rec = targets[pr_id]
         if effective == POLICY_WAIT:
             rec[WAIT_KEY] = True
-            sbm.discard(pr_id)
-        elif effective == POLICY_STOP:
-            rec.pop(WAIT_KEY, None)
-            sbm.add(pr_id)
         elif effective == POLICY_AUTO:
             rec.pop(WAIT_KEY, None)
-            sbm.discard(pr_id)
         current = target_policy(app, pr_id)
         if is_new:
             action = "added"
@@ -556,6 +1018,12 @@ def add_targets(app, ids: list[str], policy: str | None = None,
         _log.info("auto_start: target %s %s policy=%s source=%s", pr_id,
                   "added" if is_new else "re-armed", current, source)
     _sync_enabled(app)
+    # An explicit (re-)add asks for a scheduler pass now, which retries
+    # every in-scope start, the targets' dependencies included: a start
+    # failure already shown is said again, or a retry that fails the same
+    # way (a provider still misconfigured) would leave only the targets
+    # line.
+    _start_failures_shown(app).clear()
     released = sorted(held_before - set(merge_holds(app)))
     if released:
         _log.info("auto_start: released merge holds on %s", released)
@@ -563,8 +1031,7 @@ def add_targets(app, ids: list[str], policy: str | None = None,
     def _label(c: dict) -> str:
         if c["action"] == "policy_changed":
             return f"{c['pr_id']} (now {c['policy'].replace('_', '-')})"
-        pol = {POLICY_STOP: " (stop)",
-               POLICY_WAIT: " (wait-for-merge + deps)"}.get(c["policy"], "")
+        pol = {POLICY_WAIT: " (wait-for-merge + deps)"}.get(c["policy"], "")
         already = " (already a target)" if c["action"] == "unchanged" else ""
         return f"{c['pr_id']}{pol}{already}"
     summary = ", ".join(_label(c) for c in changes)
@@ -583,14 +1050,14 @@ def add_targets(app, ids: list[str], policy: str | None = None,
 
 
 def remove_targets(app, ids: list[str]) -> dict:
-    """Remove targets.  Never kills windows/loops; keeps stop marks.
+    """Remove targets.  Never kills windows/loops.
 
     Unknown ids reject the whole command; a valid PR that isn't a target
     is reported as ``not_target``.  PRs still needed by another target
     stay in scope (scope is the union of the remaining closures).  A
     removed ``wait_for_merge`` target releases only the holds it caused:
-    explicit marks and holds from other wait targets remain (``released``
-    in the result lists PRs no longer held).
+    holds from other wait targets remain (``released`` in the result lists
+    PRs no longer held).
     """
     if not ids:
         return {"ok": False, "error": "usage", "message": "no PR ids given",
@@ -634,14 +1101,13 @@ def remove_targets(app, ids: list[str]) -> dict:
 
 
 def clear_targets(app) -> dict:
-    """Remove every target and leave all-mode → auto-start OFF."""
+    """Remove every target → auto-start OFF."""
     removed = get_targets(app)
     was = is_enabled(app)
     if was:
         _disable(app)
     else:
         app._auto_start_targets = {}
-        app._auto_start_all = False
     app.log_message("Auto-start: OFF" if was else "Auto-start: already off",
                     force=True, hold=CONFIRM_HOLD_SECONDS)
     _log.info("auto_start: cleared targets=%s", removed)
@@ -649,33 +1115,21 @@ def clear_targets(app) -> dict:
             "changes": [{"pr_id": r, "action": "removed"} for r in removed]}
 
 
-def enable_all(app) -> dict:
-    """Explicit whole-backlog mode (the legacy targetless auto-start)."""
-    app._auto_start_all = True
-    _sync_enabled(app)
-    app.log_message("Auto-start: ON (all ready PRs — explicit backlog mode)",
-                    force=True, hold=CONFIRM_HOLD_SECONDS)
-    _log.info("auto_start: all-mode enabled")
-    app.run_worker(check_and_start(app))
-    return {"ok": True, "changes": [{"pr_id": None, "action": "all_mode"}]}
-
-
 async def toggle(app, selected_pr_id: str | None = None) -> None:
     """``A`` key: toggle the selected PR as an auto-merge target.
 
     - Selected PR not a target → add it (additive; other targets kept).
-      New targets get no stop-before-merge mark (explicit ``A`` keeps the
-      existing auto-merge semantics); an existing stop mark is kept.
+      New targets get the plain auto-merge policy (explicit ``A``).
     - Selected PR already a target → remove it (others keep running).
     - No PR selected → turn auto-start off if on, else "No PR selected"
-      (no implicit whole-backlog mode — use ``autostart all``).
+      (there is no implicit whole-backlog mode).
     """
     if not selected_pr_id:
         if is_enabled(app):
             clear_targets(app)
         else:
-            app.log_message("No PR selected (use 'autostart all' for the "
-                            "whole backlog)", force=True)
+            app.log_message("No PR selected (add explicit targets with "
+                            "`pm autostart add PR_ID...`)", force=True)
         return
     if selected_pr_id in _targets(app):
         remove_targets(app, [selected_pr_id])
@@ -687,18 +1141,20 @@ async def toggle(app, selected_pr_id: str | None = None) -> None:
 
 
 async def auto_sequence_for_pr(app, pr_id: str) -> None:
-    """``O`` key: add *pr_id* as a stop-before-merge target and nudge.
+    """``O`` key: add *pr_id* as a wait-for-merge target and nudge.
 
     Additive: other targets (and their policies) are untouched.  Repeating
-    ``O`` on the same PR re-arms the stop mark and re-runs the scheduler.
+    ``O`` on the same PR re-arms the wait policy and re-runs the scheduler.
+    The target and every unmerged transitive prerequisite run through to a
+    fresh sign-off, then wait for an explicit merge.
     """
     # The armed line is the held confirmation itself: logged separately
     # after "targets +=" (forced, unheld) it only lasted as long as some
     # earlier hold, so a second O inside the first O's hold had it
     # replaced by its own deferred "starting <pr>" ~0.1s later.
     result = add_targets(
-        app, [pr_id], policy=POLICY_STOP, source="key:O",
-        confirm=f"Auto-sequence armed for {pr_id} (will stop before merge)")
+        app, [pr_id], policy=POLICY_WAIT, source="key:O",
+        confirm=f"Auto-sequence armed for {pr_id} (will wait for merge)")
     if not result["ok"]:
         app.log_message(f"Auto-sequence: {result['message']}")
 
@@ -717,7 +1173,7 @@ def on_state_loaded(app, old_statuses: dict,
     """
     if not old_statuses or not is_enabled(app):
         return
-    prs = (app._data or {}).get("prs") or []
+    prs = usable_prs((app._data or {}).get("prs"))
     terminal = autostart_state.TERMINAL_STATUSES
     newly = [p["id"] for p in prs
              if p.get("id") in old_statuses
@@ -730,8 +1186,7 @@ def on_state_loaded(app, old_statuses: dict,
     if not newly and not regraphed:
         return
     managed = managed_ids(app, prs)
-    if managed is not None and not any(i in managed
-                                       for i in newly + regraphed):
+    if not any(i in managed for i in newly + regraphed):
         return
     _log.info("auto_start: reload saw %s merged/closed, %s deps changed, "
               "scheduling pass", newly, regraphed)
@@ -757,7 +1212,7 @@ def _prune_completed_targets(app, prs: list[dict]) -> None:
     for t, status in done:
         _log.info("auto_start: target %s %s, removed (%d remaining)",
                   t, status, len(targets))
-    turn_off = not targets and not is_all_mode(app)
+    turn_off = not targets
     rest = ("all targets complete — auto-start OFF" if turn_off
             else f"{len(targets)} remaining")
     # One line, held: a TUI ``g`` merge prunes here from the reload its own
@@ -776,34 +1231,25 @@ def _prune_completed_targets(app, prs: list[dict]) -> None:
 async def check_and_start(app) -> None:
     """Advance every in-scope PR one scheduler step.
 
-    Scope is the union of the target closures (or everything in explicit
-    all-mode).  Launches ready PRs (pending with deps merged, plus
-    restartable in_progress PRs — ``pm pr start --background`` no-ops when
-    the window exists), each at most once even across concurrent passes
-    (``_auto_start_launching``), then starts review/QA loops.  Scope is
-    re-checked after every ``await`` so a removal that lands mid-pass takes
-    effect.  Completed targets are removed individually.
+    Scope is the union of the target closures; an empty target set is OFF
+    (there is no all-PR mode).  Launches ready PRs (pending with deps
+    merged, plus restartable in_progress PRs — ``pm pr start --background``
+    no-ops when the window exists), each at most once even across
+    concurrent passes (``_auto_start_launching``), then starts review/QA
+    loops.  Scope is re-checked after every ``await`` so a removal that
+    lands mid-pass takes effect.  Completed targets are removed
+    individually.
     """
     if not is_enabled(app):
         return
     if not app._root:
         return
 
-    prs = app._data.get("prs") or []
+    prs = usable_prs(app._data.get("prs"))
 
     _prune_completed_targets(app, prs)
     if not is_enabled(app):
         return
-
-    # Drop merged PRs from stop_before_merge — once merged, the entry
-    # has done its job and shouldn't linger across future auto-start runs.
-    sbm = getattr(app, "_stop_before_merge", set())
-    if sbm:
-        merged = {pr["id"] for pr in (app._data.get("prs") or [])
-                  if pr.get("status") == "merged"}
-        sbm.intersection_update(
-            {pr["id"] for pr in (app._data.get("prs") or [])} - merged
-        )
 
     # Collect PRs that should be started: pending with all deps merged,
     # plus in_progress PRs (whose window may have been killed).
@@ -835,9 +1281,17 @@ async def check_and_start(app) -> None:
         if pr.get("status") == "pending":
             _log.info("auto_start: starting ready PR %s", pr_id)
             # Forced past sticky messages, but not past the "targets +="
-            # confirmation's hold: then it's deferred until the hold ends.
-            held = time.monotonic() < getattr(app, "_log_hold_until", 0.0)
-            app.log_message(f"Auto-start: starting {pr_id}", force=not held)
+            # confirmation's hold (nor its queued confirmations waiting
+            # for their flush): then it's queued behind them with a hold
+            # of its own.  Merely deferred, it was dropped unseen when a
+            # start that failed within the hold queued its (newer) failure
+            # line (S53).
+            from pm_core.tui.app import log_line_held
+            if log_line_held(app):
+                app.log_message(f"Auto-start: starting {pr_id}",
+                                force=True, hold=CONFIRM_HOLD_SECONDS)
+            else:
+                app.log_message(f"Auto-start: starting {pr_id}", force=True)
         else:
             # ``pm pr start --background`` no-ops when the window exists.
             _log.info("auto_start: ensuring impl window for in_progress PR %s",
@@ -873,7 +1327,7 @@ async def check_and_start(app) -> None:
     if started:
         # Reload state after starting PRs
         app._load_state()
-        prs = app._data.get("prs") or []
+        prs = usable_prs(app._data.get("prs"))
 
     if not is_enabled(app):
         return
@@ -888,24 +1342,170 @@ async def check_and_start(app) -> None:
     signoff_ui.advance_all(app, prs)
 
 
+# Bounded auto-start recovery after a retryable review-launch failure: the
+# in-loop retry budget has already been spent, so each scheduler re-arm is a
+# fresh bounded episode.  After this many, the explicit failure stays for a
+# human (the artifact and error name it) instead of hammering the host.
+MAX_REVIEW_LAUNCH_RETRY_EPISODES = 5
+
+
+def _retryable_launch_failure(loop) -> bool:
+    """Whether *loop* ended in a retryable failed review launch."""
+    from pm_core.review_loop import VERDICT_LAUNCH_FAILED
+    return (getattr(loop, "latest_verdict", "") == VERDICT_LAUNCH_FAILED
+            and bool(getattr(loop, "launch_retryable", False)))
+
+
+def _retry_rearm_blocked(loop) -> bool:
+    """Whether a retryable failure must wait (cooldown) or stop (cap)."""
+    episodes = int(getattr(loop, "retry_episodes", 0) or 0)
+    if episodes >= MAX_REVIEW_LAUNCH_RETRY_EPISODES:
+        _log.info("auto_start: %s review launch retries exhausted "
+                  "(%d episodes); manual retry required",
+                  getattr(loop, "pr_id", "?"), episodes)
+        return True
+    ready_at = float(getattr(loop, "retry_ready_at", 0.0) or 0.0)
+    if ready_at and time.time() < ready_at:
+        return True
+    return False
+
+
+def _yield_to_pending_review_return(app, pr_id: str) -> bool:
+    """Whether a pending sign-off REVIEW return owns the next review launch.
+
+    A sign-off REVIEW return's relaunch is ``--fresh`` (it kills the review
+    window it finds), and so is a review loop's own launch, so two
+    concurrent launchers kill each other's session.  The first driver takes
+    the return's launch claim (as the impl catch-up does) and performs the
+    launch; later drivers leave it alone.  Returns True when another driver
+    already owns that launch — this pass must then neither start nor re-arm
+    a loop.  A claim whose launcher died expires, and
+    :func:`_recheck_after_claim` runs one more pass for it.
+    """
+    if not _awaiting_on_disk(app, pr_id, "review"):
+        return False
+    from pm_core.signoff import claim_return_launch
+    if claim_return_launch(app._root, pr_id, "review"):
+        return False
+    _log.info("auto_start: %s review return launch already claimed, "
+              "skipping", pr_id)
+    _recheck_after_claim(app)
+    return True
+
+
 def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
-    """Start review loops for in-scope in_review PRs without one."""
+    """Start review loops for in-scope in_review PRs without one.
+
+    Also re-arms a loop whose last outcome was a *retryable* failed launch
+    (the stranded target this recovery exists for), resuming its history and
+    un-completed iteration once the cooldown has passed.
+    """
     if not is_enabled(app):
         return
 
     if prs is None:
-        prs = app._data.get("prs") or []
+        prs = usable_prs(app._data.get("prs"))
 
+    from pm_core.tui.review_loop_ui import _schedule_retry_rearm, _start_loop
     for pr in prs:
         if pr.get("status") != "in_review":
             continue
         pr_id = pr["id"]
         if not in_scope(app, pr_id, prs):
             continue
-        # Skip if a review loop is already running or completed for this PR
+        # Skip if a review loop is already running or completed for this PR —
+        # except a retryable launch failure: that is exactly the stranded
+        # target this fix must recover, so re-arm it (resuming history and
+        # the un-completed iteration) once the backoff cooldown has passed.
         loop = app._review_loops.get(pr_id)
         if loop:
-            continue
+            if loop.running:
+                continue
+            if _retryable_launch_failure(loop):
+                # _start_loop would bail on these; clearing the failure
+                # flags first would then strand the target, so check them
+                # up front.
+                if not pr.get("workdir"):
+                    continue
+                from pm_core import tmux as _tmux
+                if not _tmux.in_tmux():
+                    continue
+                if _retry_rearm_blocked(loop):
+                    # Still cooling down: keep a timer armed so the re-arm
+                    # does not depend on an unrelated TUI event landing
+                    # after the cooldown (the episode cap schedules nothing
+                    # — it is final).
+                    ready_at = float(getattr(loop, "retry_ready_at", 0.0)
+                                     or 0.0)
+                    if ready_at > time.time():
+                        _schedule_retry_rearm(app, loop)
+                    continue
+                # A sign-off REVIEW return still waiting for its launch is a
+                # second ``--fresh`` launcher for the same window; take its
+                # claim first (exactly like the fresh-loop path below) so
+                # the re-armed loop and the return cannot kill each other's
+                # session.
+                if _yield_to_pending_review_return(app, pr_id):
+                    continue
+                _log.info("auto_start: re-arming retryable review launch for "
+                          "%s (episode %d)", pr_id,
+                          getattr(loop, "retry_episodes", 0) + 1)
+                # Held like the "targets +=" confirmation: _start_loop logs
+                # "Review loop resumed …" in the same tick, so the
+                # single-line log would otherwise show only that later
+                # message — the re-arm announcement would be logged but
+                # never visible.
+                app.log_message(
+                    f"Auto-start: retrying review launch for {pr_id}",
+                    hold=CONFIRM_HOLD_SECONDS)
+                # Cleared before the thread starts (it must not resume the
+                # spent budget), restored if _start_loop bails so the
+                # failure stays retryable instead of being silently
+                # disarmed.  This is a new episode, so the per-episode retry
+                # notice key is cleared too: its attempt 2 must be announced
+                # even though the previous episode already announced an
+                # attempt with that number.
+                saved = (loop.retry_episodes, loop.launch_attempts,
+                         loop.next_retry_at, loop.launch_retryable,
+                         loop.retry_ready_at, loop._ui_notified_retry)
+                loop.retry_episodes = getattr(loop, "retry_episodes", 0) + 1
+                loop.launch_attempts = 0
+                loop.next_retry_at = 0.0
+                loop.launch_retryable = False
+                loop.retry_ready_at = 0.0
+                loop._ui_notified_retry = 0
+                tdir = loop._transcript_dir or str(get_transcript_dir(app))
+                try:
+                    started = _start_loop(app, pr_id, pr,
+                                          transcript_dir=str(tdir),
+                                          resume_state=loop)
+                except Exception:
+                    # A raising starter must not silently disarm the failure
+                    # either; restore the episode exactly as for a False
+                    # return.
+                    _log.exception("auto_start: re-arm for %s raised", pr_id)
+                    started = False
+                if not started:
+                    (loop.retry_episodes, loop.launch_attempts,
+                     loop.next_retry_at, loop.launch_retryable,
+                     loop.retry_ready_at, loop._ui_notified_retry) = saved
+                    _log.warning("auto_start: re-arm for %s did not start; "
+                                 "keeping the retryable failure", pr_id)
+                continue
+            from pm_core.tui.review_loop_ui import _pending_auto_qa
+            if (not loop._ui_notified_done
+                    or pr_id in _pending_auto_qa(app)
+                    or not _awaiting_on_disk(app, pr_id, "review")):
+                continue
+            # A sign-off REVIEW return written behind this TUI (`pm edit`,
+            # another clone's sign-off) owes the PR a fresh review that this
+            # finished loop never ran; the TUI's own REVIEW hop drops the
+            # loop the same way.  Kept, it left the return waiting for good
+            # (S83).  Not before the poll tick has announced the loop and
+            # handed its PASS to QA: dropped sooner, that hand-off was lost,
+            # and a pending one (project.yaml busy) moved the PR to qa under
+            # the new review.
+            app._review_loops.pop(pr_id, None)
         # Skip if no workdir (shouldn't happen for in_review, but guard)
         if not pr.get("workdir"):
             continue
@@ -914,15 +1514,12 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
         # a concurrent `pm pr auto-sequence` tick is starting, so take the
         # return's launch claim first (as the impl catch-up does).
         if _awaiting_on_disk(app, pr_id, "review"):
-            from pm_core.signoff import claim_return_launch
-            if not claim_return_launch(app._root, pr_id, "review"):
-                _log.info("auto_start: %s review return launch already "
-                          "claimed, skipping", pr_id)
-                _recheck_after_claim(app)
+            if _yield_to_pending_review_return(app, pr_id):
                 continue
+        elif _adopt_return_review(app, pr):
+            continue
         _log.info("auto_start: starting review loop for %s", pr_id)
         app.log_message(f"Auto-start: review loop for {pr_id}")
-        from pm_core.tui.review_loop_ui import _start_loop
         tdir = get_transcript_dir(app)
         _start_loop(app, pr_id, pr, transcript_dir=str(tdir))
 
@@ -973,7 +1570,7 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         return
 
     if prs is None:
-        prs = app._data.get("prs") or []
+        prs = usable_prs(app._data.get("prs"))
 
     for pr in prs:
         if pr.get("status") != "qa":
@@ -996,17 +1593,43 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         # Any real QA start (review→qa, ``t``) overwrites this record.
         recorded = recorded_qa_verdict(pr_id, pr)
         from pm_core.signoff import return_awaiting
-        if recorded in QA_HOLD_VERDICTS and return_awaiting(pr) != "qa":
+        # (The tree's copy keeps ``awaiting: qa`` after the re-run's start
+        # cleared it on disk; only the file says the return still waits.)
+        if recorded in QA_HOLD_VERDICTS and (
+                return_awaiting(pr) != "qa"
+                or not _awaiting_on_disk(app, pr_id, "qa")):
             _log.debug("auto_start: %s QA already ended %s, not relaunching",
                        pr_id, recorded)
+            continue
+        # A run another live process drives (a ``pm qa run``, an
+        # auto-sequence QA child, another TUI) is not ours to start: a new
+        # loop retires its windows as stale and runs QA a second time
+        # (S117).  The return record keeps the obligation, so a later pass
+        # starts it once that run ends.
+        from pm_core.qa_loop import run_driven_elsewhere
+        if run_driven_elsewhere(pr_id):
+            _log.debug("auto_start: %s QA driven elsewhere, not starting",
+                       pr_id)
+            # A ``pm qa run`` instruction run ends without a PR verdict:
+            # look again once it may be over (S111).
+            _recheck_after_driver(app)
             continue
         # Skip if no workdir
         if not pr.get("workdir"):
             continue
-        _log.info("auto_start: starting QA loop for %s", pr_id)
-        app.log_message(f"Auto-start: QA for {pr_id}")
         from pm_core.tui import qa_loop_ui
-        qa_loop_ui.start_qa(app, pr_id)
+        if return_awaiting(pr) == "qa":
+            # A sign-off REQA's re-run: one claim-guarded starter, so this
+            # pass and a TUI tick / auto-sequence tick can't both run it.
+            # Announce only when this pass actually won the launch.
+            if not qa_loop_ui.start_owed_reqa(app, pr_id):
+                continue
+            _log.info("auto_start: starting the owed QA re-run for %s", pr_id)
+            app.log_message(f"Auto-start: QA for {pr_id}")
+        else:
+            _log.info("auto_start: starting QA loop for %s", pr_id)
+            app.log_message(f"Auto-start: QA for {pr_id}")
+            qa_loop_ui.start_qa(app, pr_id)
 
 
 def _recheck_after_claim(app) -> None:
@@ -1029,6 +1652,94 @@ def _recheck_after_claim(app) -> None:
 
     app._return_claim_recheck = True
     set_timer(RETURN_LAUNCH_CLAIM_SECONDS + 5, _fire)
+
+
+# How often a pass is re-run while another process drives a run auto-start
+# left alone (see _recheck_after_driver).
+DRIVER_RECHECK_SECONDS = 30
+
+
+def _recheck_after_driver(app) -> None:
+    """Run another scheduler pass once a run driven elsewhere may be over.
+
+    A ``pm qa run`` instruction run ends without a PR verdict, so full QA
+    is still due once it exits; the TUI has no periodic auto-start pass, so
+    without this the PR would sit in qa until some unrelated event (S111).
+    A ``qa-run-bg`` driver records its verdict and the re-run pass then
+    finds the run ended.  The pass re-arms this while the run lives; one
+    pending re-check covers every PR.
+    """
+    set_timer = getattr(app, "set_timer", None)
+    if set_timer is None or getattr(app, "_driver_recheck", False):
+        return
+
+    def _fire():
+        app._driver_recheck = False
+        app.run_worker(check_and_start(app))
+
+    app._driver_recheck = True
+    set_timer(DRIVER_RECHECK_SECONDS, _fire)
+
+
+def _adopt_return_review(app, pr: dict) -> bool:
+    """Adopt the live review window of an already-launched REVIEW return.
+
+    Once a sign-off REVIEW return has launched (``awaiting`` cleared), its
+    review window may belong to another driver: a ``pm pr auto-sequence``
+    tick, or this TUI before a restart dropped its in-memory loop.  A new
+    loop's ``--fresh`` launch would kill that window and review again (S79),
+    so poll it as the loop's in-flight iteration instead.  Only a session
+    active since the return is adopted: an older window reviewed the code
+    sign-off sent back.  Returns True when a loop was started on it.
+    """
+    from pm_core.claude_launcher import pane_transcript_path
+    from pm_core.review_loop import (
+        ReviewLoopState, _compute_review_window_name, _find_claude_pane,
+    )
+    from pm_core.signoff import open_return, parse_ts
+
+    pr_id = pr["id"]
+    try:
+        disk_pr = store.get_pr(store.load(app._root), pr_id) or {}
+    except Exception:
+        _log.debug("auto_start: reload for %s failed", pr_id, exc_info=True)
+        return False
+    rec = open_return(disk_pr)
+    session = getattr(app, "_session_name", None)
+    if not rec or rec.get("hop") != "review" or rec.get("awaiting") \
+            or not session:
+        return False
+    pane_id = _find_claude_pane(session, _compute_review_window_name(disk_pr))
+    if not pane_id:
+        return False
+    transcript = pane_transcript_path(pane_id, disk_pr.get("workdir"))
+    if transcript is None:
+        return False
+    try:
+        # Not written yet: the session was launched moments ago.
+        if transcript.exists() and \
+                transcript.stat().st_mtime < parse_ts(rec.get("ts")).timestamp():
+            return False
+    except (OSError, TypeError, ValueError):
+        return False
+    tdir = get_transcript_dir(app)
+    link = tdir / f"review-{pr_id}-i1.jsonl"
+    try:
+        tdir.mkdir(parents=True, exist_ok=True)
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to(transcript)
+    except OSError as e:
+        _log.warning("auto_start: cannot adopt review window of %s: %s",
+                     pr_id, e)
+        return False
+    _log.info("auto_start: adopting the open review window of %s "
+              "(pane %s, session transcript %s)", pr_id, pane_id, transcript)
+    from pm_core.tui.review_loop_ui import _start_loop
+    state = ReviewLoopState(pr_id=pr_id, iteration=1,
+                            _transcript_dir=str(tdir))
+    _start_loop(app, pr_id, pr, transcript_dir=str(tdir), resume_state=state)
+    return True
 
 
 def _awaiting_on_disk(app, pr_id: str, hop: str) -> bool:
@@ -1077,12 +1788,37 @@ async def _start_pr_quiet(app, pr_id: str, fresh: bool = False) -> None:
     stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
 
     if proc.returncode != 0:
-        stderr_text = stderr.decode() if stderr else ""
+        stderr_text = (stderr.decode(errors="replace") if stderr else "").strip()
         _log.warning("auto_start: pm pr start %s failed: %s", pr_id, stderr_text[:200])
         if isinstance(quiet, dict):
             quiet.pop(pr_id, None)
+        # The reason is the last stderr line, as for a failed sign-off
+        # launch (e.g. an impl whose provider is not set up, with its
+        # remedy).  No periodic pass retries this start, so it is shown
+        # like the other one-shot errors: forced and held.  Every later
+        # scheduler pass starts the PR again (an in_progress PR whose spec
+        # awaits approval fails each time), so a reason is said once per
+        # PR until a start goes through.
+        reason = (stderr_text.splitlines()[-1] if stderr_text
+                  else f"exit {proc.returncode}")
+        if _start_failures_shown(app).get(pr_id) != reason:
+            _start_failures_shown(app)[pr_id] = reason
+            from rich.markup import escape
+            app.log_message(f"[red]Auto-start: pm pr start {pr_id} "
+                            f"failed[/]: {escape(reason)}",
+                            force=True, hold=CONFIRM_HOLD_SECONDS)
     else:
+        _start_failures_shown(app).pop(pr_id, None)
         _log.info("auto_start: pm pr start %s succeeded", pr_id)
+
+
+def _start_failures_shown(app) -> dict:
+    """PR id -> the ``pm pr start`` failure reason last shown for it."""
+    d = getattr(app, "_auto_start_failures_shown", None)
+    if not isinstance(d, dict):
+        d = {}
+        app._auto_start_failures_shown = d
+    return d
 
 
 # ---------------------------------------------------------------------------
@@ -1098,12 +1834,12 @@ def collect_status_inputs(app) -> dict:
     """
     from pm_core import tmux as tmux_mod
 
-    prs = (app._data or {}).get("prs") or []
+    prs = usable_prs((app._data or {}).get("prs"))
     enabled = is_enabled(app)
     managed = managed_ids(app, prs)
 
     def scoped(pr_id: str) -> bool:
-        return managed is None or pr_id in managed
+        return pr_id in managed
 
     windows: dict[str, str] = {}
     session = getattr(app, "_session_name", None)
@@ -1165,11 +1901,9 @@ def collect_status_inputs(app) -> dict:
     return {
         "prs": prs,
         "targets": dict(_targets(app)) if enabled else {},
-        "all_mode": is_all_mode(app),
         "enabled": enabled,
         "run_id": app._auto_start_run_id,
         "owner": {"session": session, "pid": os.getpid()},
-        "stop_before_merge": set(getattr(app, "_stop_before_merge", set()) or ()),
         "review_loops": review_loops,
         "qa_loops": qa_loops,
         "pending_merge": pending_merge,
@@ -1191,11 +1925,13 @@ def build_status(app) -> dict:
 # Command handling (command bar + ``pm autostart`` CLI via the cmd queue)
 # ---------------------------------------------------------------------------
 
-USAGE = ("autostart add PR_ID... [--stop-before-merge|--auto-merge|"
-         "--wait-for-merge] | remove PR_ID... | list | status | clear | all")
+USAGE = ("autostart add PR_ID... [--wait-for-merge|--auto-merge] | "
+         "remove PR_ID... | list | status | clear")
 
-# Flag → policy (the inverse of ``autostart_state.POLICY_FLAGS``).
+# Flag → policy (the inverse of ``autostart_state.POLICY_FLAGS`` plus the
+# deprecated ``--stop-before-merge`` alias, which maps to wait-for-merge).
 _FLAG_POLICIES = {flag: p for p, flag in autostart_state.POLICY_FLAGS.items()}
+_FLAG_POLICIES.update(autostart_state.LEGACY_POLICY_FLAGS)
 
 
 def reply_dir() -> Path:
@@ -1227,12 +1963,14 @@ def handle_command(app, args: list[str]) -> dict:
     """Dispatch ``autostart <verb> …`` (tokens after ``autostart``).
 
     Verbs: ``add``/``target`` IDS, ``remove``/``rm`` IDS, ``clear``/``off``,
-    ``all``, ``list``, ``status``; bare ``autostart`` turns auto-start off
-    when on and prints usage when off (it no longer enables the whole
-    backlog).  Flags: ``--stop-before-merge`` / ``--auto-merge`` /
-    ``--wait-for-merge`` (``add`` only; at most one distinct policy — a
-    contradiction rejects the whole command before any change),
-    ``--reply ID`` (CLI: write the JSON reply file).  Returns the result.
+    ``list``, ``status``; bare ``autostart`` turns auto-start off when on
+    and prints usage when off.  The removed ``all`` verb is rejected with
+    an actionable error (it never enables a whole-backlog scope).  Flags:
+    ``--wait-for-merge`` / ``--auto-merge`` (``add`` only; at most one
+    distinct policy — a contradiction rejects the whole command before any
+    change).  The removed ``--stop-before-merge`` is accepted as a
+    deprecated alias for ``--wait-for-merge``.  ``--reply ID`` (CLI: write
+    the JSON reply file).  Returns the result.
     """
     reply_id = None
     policies: list[str] = []
@@ -1315,7 +2053,10 @@ def _dispatch(app, verb: str, ids: list[str], policy: str | None,
     elif verb in ("clear", "off"):
         result = clear_targets(app)
     elif verb == "all":
-        result = enable_all(app)
+        result = {"ok": False, "error": "all_mode_removed",
+                  "message": "all-PR autostart has been removed; add explicit "
+                             "targets with `autostart add PR_ID...`",
+                  "changes": []}
     elif verb in ("list", "status"):
         result = {"ok": True, "changes": []}
         if not has_reply:
@@ -1334,9 +2075,7 @@ def _list_summary(app) -> str:
     """One log line for command-bar ``autostart list``."""
     if not is_enabled(app):
         return "Auto-start: off (no targets)"
-    if is_all_mode(app):
-        return "Auto-start: all ready PRs (backlog mode)"
-    marks = {POLICY_STOP: " (stop)", POLICY_WAIT: " (wait-for-merge)"}
+    marks = {POLICY_WAIT: " (wait-for-merge)"}
     parts = [f"{t}{marks.get(target_policy(app, t), '')}"
              for t in get_targets(app)]
     return f"Auto-start targets: {', '.join(parts)}"
