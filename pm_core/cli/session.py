@@ -1177,17 +1177,39 @@ def session_list():
     # (a root-owned 1733 /tmp/pm-sessions); the scan reports that case in
     # ``read_errors`` and it is said out loud below, never answered with a
     # bare "No pm sessions found." while sessions run (QA S34).
+    #
+    # So is the socket of the pm session this command runs in (a pane,
+    # popup or hook: ``$PM_TMUX_SOCKET``, else the socket ``$TMUX`` names
+    # under the socket directory).  A shell window of a session whose cwd
+    # is $HOME or a PR workdir clone otherwise names no socket of that
+    # session, and the list run there left out the very session the pane
+    # belongs to (QA S40, qa.md ambiguity 12).  The scan takes only entries
+    # of the socket directory, so a legacy session's default-server
+    # socket is not an extra one (the default server is always listed).
     tag = get_session_tag()
-    own_socket = [session_socket_path(tag)] if tag else []
+    own_socket = session_socket_path(tag) if tag else None
+    ambient = tmux_mod.resolve_ambient_socket()
+    ambient_socket = (Path(ambient) if ambient
+                      and Path(ambient).parent == SHARED_SOCKET_DIR
+                      and Path(ambient) != own_socket else None)
+    extra_sockets = [s for s in (own_socket, ambient_socket) if s]
     read_errors: list[OSError] = []
-    rows = tmux_mod.list_pm_sessions(extra_sockets=own_socket,
+    rows = tmux_mod.list_pm_sessions(extra_sockets=extra_sockets,
                                      read_errors=read_errors)
     if read_errors:
         reason = read_errors[0].strerror or str(read_errors[0])
-        checked = ("only this project's session was checked there"
-                   if own_socket else
-                   "run this from a project directory to check that "
-                   "project's session")
+        hint = ("run this from a project directory to check that "
+                "project's session")
+        if own_socket and ambient_socket:
+            checked = ("only this project's session and the session this "
+                       "command runs in were checked there")
+        elif own_socket:
+            checked = "only this project's session was checked there"
+        elif ambient_socket:
+            checked = ("only the session this command runs in was checked "
+                       f"there; {hint}")
+        else:
+            checked = hint
         click.echo(
             f"Cannot read tmux socket directory '{SHARED_SOCKET_DIR}' "
             f"({reason}): other pm sessions may be running but cannot be "

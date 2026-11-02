@@ -4986,6 +4986,17 @@ class TestPrintConnect:
 # ---------------------------------------------------------------------------
 
 class TestSessionListCommand:
+    @pytest.fixture(autouse=True)
+    def _plain_shell(self, monkeypatch):
+        """Run as from a plain shell; a test that means a pane sets $TMUX.
+
+        `pm session list` also probes the socket of the session it runs in,
+        so a suite run from inside a pm pane would otherwise change which
+        sockets these tests see.
+        """
+        monkeypatch.delenv("TMUX", raising=False)
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+
     def _invoke(self, monkeypatch, rows):
         from click.testing import CliRunner
         from pm_core.cli import session as session_mod
@@ -5053,6 +5064,137 @@ class TestSessionListCommand:
         assert "Cannot read tmux socket directory" in result.stderr
         assert "run this from a project directory" in result.stderr
         assert result.stdout == "No pm sessions found.\n"
+
+    def _list_unreadable(self, monkeypatch, tag):
+        """Run `pm session list` on an unreadable socket dir with the cwd
+        project tag *tag*; return the CLI result and the probed sockets."""
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+
+        seen = {}
+
+        def fake_list(*, extra_sockets=(), read_errors=None):
+            seen["extra"] = list(extra_sockets)
+            read_errors.append(PermissionError(13, "Permission denied"))
+            return []
+
+        monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: True)
+        monkeypatch.setattr(session_mod.tmux_mod, "list_pm_sessions",
+                            fake_list)
+        monkeypatch.setattr(paths, "get_session_tag", lambda: tag)
+        result = CliRunner().invoke(session_mod.session, ["list"])
+        assert result.exit_code == 0, result.output
+        return result, seen["extra"]
+
+    @pytest.mark.parametrize("var", ["TMUX", "PM_TMUX_SOCKET"])
+    def test_unreadable_dir_probes_the_session_a_pane_belongs_to(
+            self, monkeypatch, var):
+        """A pane of session A whose cwd is $HOME names no project, yet the
+        listing must still show A (QA S40, qa.md ambiguity 12): the socket
+        the pane runs on — ``$PM_TMUX_SOCKET``, else the one ``$TMUX``
+        names — is probed too, and the warning says what was checked."""
+        sock = paths.SHARED_SOCKET_DIR / "pm-alpha-f85ee837"
+        monkeypatch.setenv(var, f"{sock},6851,1" if var == "TMUX"
+                           else str(sock))
+
+        result, extra = self._list_unreadable(monkeypatch, None)
+
+        assert extra == [sock]
+        assert result.stderr.endswith(
+            "cannot be listed; only the session this command runs in was "
+            "checked there; run this from a project directory to check "
+            "that project's session.\n")
+
+    def test_unreadable_dir_in_another_project_probes_both(self,
+                                                           monkeypatch):
+        """A pane of A cd'd into a PR workdir clone (its own project and
+        tag) probes the clone's socket *and* A's: the clone's tag alone
+        left A out while the warning said this project was checked."""
+        sock = paths.SHARED_SOCKET_DIR / "pm-alpha-f85ee837"
+        monkeypatch.setenv("TMUX", f"{sock},6851,1")
+
+        result, extra = self._list_unreadable(monkeypatch, "clone-0b42cd88")
+
+        assert extra == [paths.session_socket_path("clone-0b42cd88"), sock]
+        assert result.stderr.endswith(
+            "cannot be listed; only this project's session and the session "
+            "this command runs in were checked there.\n")
+
+    def test_unreadable_dir_in_the_panes_own_project_probes_once(
+            self, monkeypatch):
+        """In the project's own root the pane's socket *is* the project's:
+        probed once, and the warning reads as from a plain shell there."""
+        sock = paths.session_socket_path("alpha-f85ee837")
+        monkeypatch.setenv("PM_TMUX_SOCKET", str(sock))
+
+        result, extra = self._list_unreadable(monkeypatch, "alpha-f85ee837")
+
+        assert extra == [sock]
+        assert result.stderr.endswith(
+            "cannot be listed; only this project's session was checked "
+            "there.\n")
+
+    @pytest.mark.parametrize("env", [
+        {"TMUX": "/tmp/tmux-1000/default,123,0"},
+        {"PM_TMUX_SOCKET": "/tmp/tmux-1000/default"},
+    ])
+    def test_unreadable_dir_ignores_a_socket_outside_the_dir(
+            self, monkeypatch, env):
+        """A legacy session's pane runs on the default server, which is
+        always listed; its socket is not an extra one to probe."""
+        for var, value in env.items():
+            monkeypatch.setenv(var, value)
+
+        result, extra = self._list_unreadable(monkeypatch, None)
+
+        assert extra == []
+        assert result.stderr.endswith(
+            "cannot be listed; run this from a project directory to check "
+            "that project's session.\n")
+
+    @pytest.mark.skipif(os.geteuid() == 0,
+                        reason="root reads a directory whatever its mode")
+    @patch("pm_core.tmux.subprocess.run")
+    def test_unreadable_dir_lists_the_panes_session_end_to_end(
+            self, mock_run, monkeypatch, tmp_path):
+        """$TMUX through the real scan: the pane's session gets its row."""
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+
+        sock_dir = tmp_path / "pm-sessions"
+        sock_dir.mkdir()
+        sock = sock_dir / "pm-alpha-f85ee837"
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            s.bind(str(sock))
+        finally:
+            s.close()
+        sock.chmod(0o600)
+
+        def fake_run(cmd, **kwargs):
+            if str(sock) in cmd:
+                return MagicMock(
+                    returncode=0, stderr="",
+                    stdout="pm-alpha-f85ee837:pm-alpha-f85ee837:1\n"
+                           "pm-alpha-f85ee837~1:pm-alpha-f85ee837:0\n")
+            return MagicMock(returncode=1, stdout="", stderr="no server")
+
+        mock_run.side_effect = fake_run
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", sock_dir)
+        monkeypatch.setattr(paths, "get_session_tag", lambda: None)
+        monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: True)
+        monkeypatch.setenv("TMUX", f"{sock},6851,1")
+        sock_dir.chmod(0o333)  # write + search, no read: like 1733 to us
+        try:
+            result = CliRunner().invoke(session_mod.session, ["list"])
+        finally:
+            sock_dir.chmod(0o755)
+
+        assert result.exit_code == 0, result.output
+        assert "Permission denied" in result.stderr
+        rows = result.stdout.splitlines()[1:]
+        assert [r.split() for r in rows] == [
+            ["pm-alpha-f85ee837", "1", str(sock)]]
 
     def test_renders_private_legacy_and_shared_rows(self, monkeypatch):
         result = self._invoke(monkeypatch, [
