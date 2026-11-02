@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T12:57:00.323522+00:00'
+  updated_at: '2026-11-02T13:18:29.786114+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7992,6 +7992,43 @@ prs:
       /pm-captures/scenarios/39 (README.md).'
     created_at: '2026-11-02T12:57:00Z'
     last_edited: '2026-11-02T12:57:00Z'
+  - id: note-f1f17cc
+    text: 'QA S40 refiner (2026-11-02, 6f24e3a1, tmux 3.2a): all three stories driven
+      live on a root 1733 /tmp/pm-sessions. Story 1 (plain-shell list from A root/subdir,
+      B, long-name C with hashed socket pm-<md5>, /tmp) and story 3 (two 60 s listers,
+      421 runs: rc 0, warning, L row every run; A 1->2 clients; B gone from its kill;
+      B kill + C stale-socket kill both unlink) PASS at this head. Story 2 FAILS as
+      predicted by qa.md ambiguity 12: from a pane of A whose cwd is $HOME or the
+      PR workdir clone, pm session list shows only the legacy L row (A missing) although
+      $TMUX/PM_TMUX_SOCKET name A socket; the clone run even says "only this project''s
+      session was checked there". The shared-session pane (PM_SHARE_MODE=global inherited)
+      lists the shared row with (shared). Fixture gotchas: commit pm/ on master before
+      TUI s (pm push fails on an unborn branch); no-tty pm session prints the attach
+      traceback, so start sessions that need a client from a terminal window.'
+    created_at: '2026-11-02T12:55:32Z'
+    last_edited: '2026-11-02T12:55:32Z'
+  - id: note-2829068
+    text: 'QA S40 (pm session list on a root 1733 /tmp/pm-sessions from every cwd,
+      in-pane, and under racing starts/kills) NEEDS_WORK: one defect found and fixed
+      in 99deef53e; full suite 5589 passed / 1 skipped (12 test_markdown_render =
+      container lacks markdown). Story 1 PASS before and after the fix: plain-shell
+      list from A root, A/sub/deeper, B, long-name C (hashed socket pm-<md5 of tag>,
+      full 102-char session name), /tmp; rc 0, stderr warning, L default-server row,
+      never "No pm sessions found."; --global/plain --print-connect correct. Story
+      2 FAILED pre-fix exactly as qa.md ambiguity 12 predicted: in a C-b c shell of
+      A cd''d to $HOME or the PR workdir clone, the list showed only L (A missing
+      although $TMUX/PM_TMUX_SOCKET named A''s socket); A-root and shared panes were
+      fine. Fix: session_list also probes the ambient session socket ($PM_TMUX_SOCKET,
+      else $TMUX) when it is an entry of the socket dir, once if it equals the cwd
+      project socket; the warning now names what was checked (this project, the session
+      this command runs in, or both). Post-fix all four panes list the right rows.
+      Story 3 PASS on the fix: listers 211/213 runs all rc 0 + warning + L row; A
+      clients 1->2 0.32 s after the 2nd attach (~2); B gone 0.095 s after its kill;
+      C SIGKILL leaves the socket, kill = No session found rc 1 + unlink; D start
+      + list OK; teardown clean. Captures /pm-captures/scenarios/40 (README.md; pre-fix/
+      and post-fix/).'
+    created_at: '2026-11-02T13:18:29Z'
+    last_edited: '2026-11-02T13:18:29Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
