@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-02T08:20:22.258188+00:00'
+  updated_at: '2026-11-02T09:23:04.408322+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48469,6 +48469,30 @@ prs:
       next sign-off only binds to the merged head.'
     created_at: '2026-11-02T08:20:22Z'
     last_edited: '2026-11-02T08:20:22Z'
+  - id: note-a708e6d
+    text: 'QA scenario 72 (#283 effort warning x behavioural sign-off) PASS at c524c774
+      — no code change; all five stories held live on throwaway local-backend projects
+      A/B/C with tmux + fake-claude. (1) `pm pr model set P --effort high --role impl`
+      on a low/medium route: rc 0, stdout set+Running lines, exactly one stderr Warning
+      (impl) line; `pm pr model show` impl row `high *` + `!` note, other roles plain;
+      `pm model show` Routes `effort=high (unsupported)`, Problems finding once. (2)
+      branch note + base session_effort = CLEAN with base behaviour only in integrate/integration.json;
+      plain record refused (evidence/checks), merge refused; with pm-signoff-checks
+      recorded, merged, master keeps note+effort+route. (3) two-sided impl effort
+      low/high: integrate --record rc 1, "added on both sides with different content",
+      NOT resolved, W untouched. (4) manual MERGE refused (no conflict-free check);
+      auto-sequence tick 1 launches sign-off, tick 2 coerces MERGE->IMPL with the
+      conflict reason; Reason = leftover report. (5) base changed only unrelated U
+      effort: clean, base_behavior_changes [], plain approval accepted, merged, U
+      absent from P show. Harness facts: (a) a typed multi-line heredoc fires one
+      PROMPT_COMMAND per line, so an rc-file driver must wait on the highest rc index;
+      (b) the first auto-sequence tick does not switch the session to the sign-off
+      window (pm pr signoff does); (c) pyte has no CSI S, so it drops lines from tmux-attach
+      casts — verify on rendered frames/transcript.log; (d) pm pr merge after a manual
+      record prints "Stashing 1 dirty file(s)" (the record registry write) — expected.
+      Captures: /pm-captures/scenarios/72/.'
+    created_at: '2026-11-02T09:23:04Z'
+    last_edited: '2026-11-02T09:23:04Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
