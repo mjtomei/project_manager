@@ -803,6 +803,7 @@ SHARED_SOCKET_DIR = Path("/tmp/pm-sessions")
 
 # Unix domain sockets are limited to ~108 bytes including the NUL.  Keep a
 # little headroom for callers that append nothing but tmux internals.
+# Compared against the *encoded* length (see ``session_socket_path``).
 _SOCKET_PATH_MAX = 100
 
 
@@ -888,9 +889,16 @@ def session_socket_path(session_tag: str) -> Path:
     Very long repo names would exceed the Unix socket path limit, so those
     fall back to a deterministic hash of the tag.  Discovery never depends
     on the filename: session names are read from the server itself.
+
+    The limit is in *bytes* (``sun_path``), so the length is measured on
+    the encoded path.  A repo directory named in a non-ASCII script takes
+    two to four bytes per character: counting characters left a
+    30-character Japanese name unhashed at 119 bytes, and tmux refused the
+    socket ("File name too long"), so `pm session` could not start that
+    project at all (review-loop b48f i21).
     """
     path = SHARED_SOCKET_DIR / f"pm-{session_tag}"
-    if len(str(path)) > _SOCKET_PATH_MAX:
+    if len(os.fsencode(path)) > _SOCKET_PATH_MAX:
         digest = hashlib.md5(session_tag.encode()).hexdigest()
         path = SHARED_SOCKET_DIR / f"pm-{digest}"
     return path

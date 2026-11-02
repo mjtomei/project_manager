@@ -81,6 +81,30 @@ class TestSessionSocketPath:
         # Deterministic even when hashed
         assert p == paths.session_socket_path("x" * 200)
 
+    def test_a_non_ascii_tag_is_measured_in_bytes(self):
+        """The socket limit counts bytes, so a long non-ASCII name is hashed.
+
+        A repo directory named in Japanese takes three bytes per
+        character.  Counting characters left this path unhashed at 59
+        characters / 119 bytes, past the 108-byte ``sun_path`` limit, and
+        tmux refused to bind it ("File name too long"), so `pm session`
+        could not start the project (review-loop b48f i21; verified live
+        on tmux 3.2a with a socket directory of the same length).
+        """
+        tag = "プロジェクト管理ツールの開発用リポジトリです二十九文字目まで-abcd1234"
+        unhashed = paths.SHARED_SOCKET_DIR / f"pm-{tag}"
+        assert len(str(unhashed)) <= 100 < len(os.fsencode(unhashed))
+        p = paths.session_socket_path(tag)
+        assert p != unhashed
+        assert p.parent == paths.SHARED_SOCKET_DIR
+        assert len(os.fsencode(p)) <= 100
+        assert p == paths.session_socket_path(tag)
+
+    def test_a_short_non_ascii_tag_keeps_its_readable_name(self):
+        """Only an over-long path is hashed, whatever script the name uses."""
+        p = paths.session_socket_path("プロジェクト-abcd1234")
+        assert p.name == "pm-プロジェクト-abcd1234"
+
     def test_ensure_socket_dir_alias(self, tmp_path):
         fake = tmp_path / "pm-sessions"
         with patch.object(paths, "SHARED_SOCKET_DIR", fake):
@@ -4973,7 +4997,7 @@ def short_sock_dir(tmp_path):
     that under a deep pytest root or a long user name, so fall back to a
     short disposable directory under /tmp.
     """
-    if len(str(tmp_path / "pm-iso-test.sock")) <= 100:
+    if len(os.fsencode(tmp_path / "pm-iso-test.sock")) <= 100:
         yield tmp_path
         return
     short = Path(tempfile.mkdtemp(prefix="pmiso-", dir="/tmp"))

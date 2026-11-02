@@ -272,7 +272,9 @@ must be left untouched:
    `/tmp/pm-sessions/pm-<tag>` is too long, `session_socket_path()` falls back
    to `/tmp/pm-sessions/pm-<md5(tag)>` (deterministic, 35 chars). Discovery is
    unaffected because session names are read from the server, not the
-   filename.
+   filename.  "Too long" is measured in **bytes** of the encoded path, not
+   characters: a repo directory named in a non-ASCII script takes several
+   bytes per character (review-loop b48f i21).
 2. A stale socket file (server SIGKILLed) is left on disk; `has-session`
    returns non-zero and tmux reuses the path on the next `new-session`
    (verified). `session_exists()` therefore remains the liveness check.
@@ -3947,3 +3949,48 @@ tmux targets) and the i18 residual (a legacy shared session whose
 72–78-character tag kept the unhashed socket path) are unchanged.  No live
 session, server or shared host configuration was touched.  Every fixture
 used a disposable socket, a temporary HOME or a mocked tmux.
+
+## Review iteration (2026-11-02, review-loop b48f i21)
+
+Verification pass over the head after the b48f i20 fix.  One regression in
+the long-path fallback (R7.1).  No requirement changes; R7.1 now says the
+limit is counted in bytes.
+
+1. **`paths.session_socket_path()` measured the socket path in
+   characters.**  The Unix socket limit (`sun_path`, ~108 bytes) counts
+   bytes, but the hash fallback compared `len(str(path))` with the
+   100-byte budget.  A tag is the repo directory name plus a hash, and a
+   directory named in a non-ASCII script takes two to four bytes per
+   character.  So a project whose directory has about 27 or more Japanese
+   characters kept the unhashed path (under 100 characters but over 108
+   bytes), and tmux refused to bind it: `error connecting to … (File name
+   too long)`.  `pm session` could not start that project at all.  Before
+   this PR, a private session used the default server and this path was
+   never computed for it, so this is a regression this PR introduced.  A
+   shared session hit the same failure before the PR too, because the old
+   shared path had no length handling.  The comparison now uses
+   `os.fsencode(path)`.  A short non-ASCII name keeps its readable socket
+   name.  Paths of 101–107 bytes and up to 100 characters used to bind and
+   are now hashed.  The only sessions that could be running at such a path
+   are pre-PR *shared* sessions, which is the same class as the i18
+   residual and is not migrated (R6).  Verified on tmux 3.2a through
+   `_session_start` itself, with a variant of the preserved smoke script:
+   disposable socket directory, temporary HOME, a repo directory named with
+   25 Japanese characters.  On the pre-fix head, tmux failed with "File name
+   too long" and no session was created.  With the fix, the session started
+   on the hashed private socket, with the session and global env and the
+   hooks correct and the default server untouched.  Logs:
+   `/pm-captures/review-b48f-i21/smoke-nonascii-{prefix,fixed}.log`.
+   Tests:
+   `tests/test_session_socket_isolation.py::TestSessionSocketPath::test_a_non_ascii_tag_is_measured_in_bytes`
+   fails on the pre-fix code, because it returned the unhashed 119-byte
+   path.
+   `::test_a_short_non_ascii_tag_keeps_its_readable_name` pins that only
+   an over-long path is hashed.  The `short_sock_dir` fixture's own length
+   check now counts bytes too.
+
+The i16 residual (other commands passing a base name to prefix-matched
+tmux targets) and the i18 residual (a legacy shared session whose
+72–78-character tag kept the unhashed socket path) are unchanged.  No live
+session, server or shared host configuration was touched.  Every fixture
+used a disposable socket directory, a temporary HOME or a mocked tmux.
