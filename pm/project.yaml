@@ -5163,21 +5163,49 @@ prs:
   branch: pm/pr-4258a32-add-get-workdir-helper-that-recovers-missing-workd
   status: pending
   depends_on: []
-  description: Add a helper function (e.g. store.get_workdir or similar) that returns
-    a PR's workdir path. If the workdir field is present in the yaml and the path
-    exists, return it directly. If the field is missing or the path doesn't exist,
-    scan the workdirs directory for a matching branch slug and return that instead.
-    This avoids needing to scan all PRs on every load — the recovery only runs when
-    a specific PR's workdir is actually needed.
+  description: Add a helper function (e.g. store.get_workdir or similar) that returns a PR's
+    workdir path. If the workdir field is present in the yaml and the path exists, return
+    it directly. If the field is missing or the path doesn't exist, scan the workdirs directory
+    for a matching branch slug and return that instead. This avoids needing to scan all PRs
+    on every load — the recovery only runs when a specific PR's workdir is actually needed.
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-03-07T15:19:59.399251+00:00'
+  updated_at: '2026-11-02T01:59:14.222401+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-02a1196
+    text: 'User authorized starting this existing improvement on 2026-11-02, MAIN-account
+      Opus 5.5/xhigh for implementation, review, QA, helpers and sign-off. Concrete recent
+      case: #136/pr-6aa74c6 still pointed to /home/mjtomei/.../pm-pr-6aa74c6-fuzzy-select-for-pr-and-plan-command-ab512a43,
+      but its original workdir was intact at /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-6aa74c6-fuzzy-select-for-pr-and-plan-command-10e74920
+      with the exact remote PR head. The shepherd had to find and re-link it manually.
+
+
+      Implement bounded on-demand discovery/reuse when a recorded path is missing or stale;
+      keep the existing fast path. Reuse shared current workdir provisioning helpers and locking.
+      Verify repository and branch/PR identity, preserve dirty/index/untracked/stash/evidence
+      state, and report ambiguity instead of picking the first slug match or a QA fixture.
+      Avoid broad scans on every registry load and avoid recreating a second workdir when
+      the correct one exists. This PR is workdir identity/recovery only, not container cleanup
+      or scheduling. No additional review/QA scheduling prerequisite was identified. Complete
+      genuine implementation and let PM advance to fresh review/QA under manual wait-for-merge.
+
+
+      Begin from current master and keep the implementation scoped to this PR. Use isolated
+      containers/test projects/tmux servers; do not drive the user''s live PM session, alter
+      shared host PM settings or affect unrelated work. Preserve existing source, records,
+      evidence and drafts. Leave lifecycle handoff to PM; do not launch your own review/QA
+      or send TUI keys to advance. No force-push, master/other-branch reset/deletion, automatic
+      spec approval or PR merge is authorized. Current main-account routing supersedes older
+      account notes.'
+    created_at: '2026-11-02T01:59:14Z'
+    last_edited: '2026-11-02T01:59:14Z'
+  model: provider:claude-main-xhigh-pm
+  effort: high
 - id: pr-0778fbe
   plan: plan-003
   title: Add PR ownership tracking with workdir history
@@ -53607,3 +53635,67 @@ prs:
   effort: high
   session_models:
     signoff: provider:claude-work-xhigh-249
+- id: pr-3d3b3ce
+  plan: bugs
+  title: 'Bug: pm provider test --live inlines a router provider''s secret env values in the
+    probe''s bash -c / podman exec argv'
+  branch: pm/pr-3d3b3ce-bug-pm-provider-test-live-inlines-a-router-provide
+  status: pending
+  depends_on: []
+  description: 'Found at #249 (pr-592e4bd) sign-off 2026-10-29 on HEAD 1987cb9c. worker_route._probe_shell_cmd
+    builds ''env -u ... NAME=value ... claude -p ...'' and live_probe passes it as a bash
+    -c argument (host) or inside ''podman exec ... bash -c'' (container). Every value of the
+    router provider''s env_vars() is inlined, including values pm itself classifies as secret
+    (providers.is_secret_env_var: KEY/TOKEN/SECRET/PASSWORD/CREDENTIAL/AUTH/HEADER), e.g.
+    a router entry with env: {ANTHROPIC_CUSTOM_HEADERS: ''x-team-token: ...''} (R10 allows
+    env on every provider type). The value is not logged or written to disk, but it is readable
+    in /proc/<pid>/cmdline (ps) by other users on the host for the probe''s lifetime (up to
+    180 s). Every pane launch already avoids this (#268 private env file; container -e NAME
+    by name). Repro: providers.yaml with that entry, then python -c ''from pm_core import
+    worker_route; from pm_core.providers import get_provider; print(worker_route._probe_shell_cmd(get_provider("acme",
+    strict=True), "sid", container=False))'' prints the header value. Evidence: /pm-captures/signoff/2026-10-29/probe-inline.txt.
+    Fix: pass the assignments through subprocess env= (host) and ''podman exec -e NAME'' with
+    the value in the runtime''s env (as container._run_runtime(env=...) does), keep only env
+    -u names in the argv; add a regression next to tests/test_worker_route.py::_probe_shell_cmd
+    tests.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T14:01:10.973333+00:00'
+  updated_at: '2026-11-02T01:59:10.010658+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-a6d3aaa
+    text: 'User authorized starting this existing security bug on 2026-11-02, MAIN-account
+      Opus 5.5/xhigh for implementation, review, QA, helpers and sign-off. Its source was
+      renamed by merged #282: use pm_core/router_route.py and tests/test_router_route.py,
+      not obsolete worker_route names. Confirm the current live-probe path still embeds provider
+      env values in bash -c / podman exec argv, then keep those values out of process arguments
+      through the existing protected environment transport. Cover host and container probes,
+      inherited/unset variables, model/effort routing and failure cleanup without widening
+      credentials or permissions. Use synthetic canary secrets in isolated fixtures; never
+      print, copy into logs, or expose real credentials. Ordinary launches already use protected
+      transport; reuse appropriate abstractions without rewriting launch lifecycle or relaxing
+      fail-closed behavior.
+
+
+      #283 changes reasoning/bridge configuration, not these probe functions; coordinate with
+      its current interfaces and integrate newly merged master changes as needed. No additional
+      review/QA scheduling prerequisite was identified. Complete genuine implementation and
+      let PM advance to fresh review/QA. Preserve the manual wait-for-merge gate; starting
+      this PR does not authorize a merge.
+
+
+      Begin from current master and keep the implementation scoped to this PR. Use isolated
+      containers/test projects/tmux servers; do not drive the user''s live PM session, alter
+      shared host PM settings or affect unrelated work. Preserve existing source, records,
+      evidence and drafts. Leave lifecycle handoff to PM; do not launch your own review/QA
+      or send TUI keys to advance. No force-push, master/other-branch reset/deletion, automatic
+      spec approval or PR merge is authorized. Current main-account routing supersedes older
+      account notes.'
+    created_at: '2026-11-02T01:59:09Z'
+    last_edited: '2026-11-02T01:59:09Z'
+  model: provider:claude-main-xhigh-pm
+  effort: high
