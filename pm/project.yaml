@@ -51537,3 +51537,33 @@ prs:
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3d3b3ce-bug-pm-provider-test-live-inlines-a--0eb88069
   model: provider:claude-main-xhigh-pm
   effort: high
+- id: pr-0ebbc91
+  plan: bugs
+  title: 'Bug: pm provider test --live crashes with a raw ValueError traceback when
+    a provider env name contains "="'
+  branch: pm/pr-0ebbc91-bug-pm-provider-test-live-crashes-with-a-raw-value
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/router_route.py live_probe (subprocess.run with
+    env=, ~line 575) and provider config loading in pm_core/cli/provider.py. Repro
+    (QA S3 of pr-3d3b3ce, branch 21bc398d, isolated HOME): hand-edit ~/.pm/providers.yaml
+    so a router provider env has an entry whose name contains "=" (e.g. "BAD=TOKEN:
+    <value>"). pm provider show lists it as BAD=TOKEN=<redacted> and status OK; pm
+    provider test <name> --live prints "Preflight (host): OK" and then a full Python
+    traceback ending in subprocess._execute_child ValueError: illegal environment
+    variable name, exit 1. No process starts and no value leaks (verified with a /proc
+    observer), but the user gets a traceback rather than a fail-closed "Preflight:
+    FAILED - env name ... is not a valid variable name" line. Expected: reject or
+    flag invalid env names at load/preflight (provider show/test) with a clean message
+    naming the variable but not its value; check the container probe and ordinary
+    router launches for the same name. Capture: /pm-captures/scenarios/3/story7-bad-env-name
+    in that session.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T03:23:55.443880+00:00'
+  updated_at: '2026-11-02T03:23:55.443880+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
