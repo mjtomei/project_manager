@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T07:02:48.641306+00:00'
+  updated_at: '2026-11-02T07:32:43.138317+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39800,6 +39800,19 @@ prs:
       records a plain review verdict. Captures /pm-captures/scenarios/55.'
     created_at: '2026-11-02T07:02:48Z'
     last_edited: '2026-11-02T07:02:48Z'
+  - id: note-ecedb17
+    text: 'Review 935d i2 (b0cfe591, PASS): integration hazard with pr-ec5bc84 (native
+      session logs; not in master registry yet, so noted here). It stops creating
+      pm/transcripts symlinks and launches d/s with --run-id. Four pieces of this
+      PR read those symlinks and would become silent no-ops after both land: review_loop_ui._note_impl_start_before_loop
+      (lexists impl-<pr>.jsonl; S55 fix 439b5927) and the noted-set add after tracker.register
+      in _poll_impl_idle; _transcript_is_another_session (review-<pr>.jsonl; E11 c4e3f5b0);
+      pr_view._with_review_transcript (E10 76742637; should pass --run-id like d).
+      Whichever PR lands second ports them to session_log.driver_pane_session. test_impl_start_taken_by_loop_before_first_tick
+      builds its own symlink, so it keeps passing either way: switch its fixture to
+      a session_log record.'
+    created_at: '2026-11-02T07:32:43Z'
+    last_edited: '2026-11-02T07:32:43Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
