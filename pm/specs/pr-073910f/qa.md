@@ -566,11 +566,15 @@ pane unless stated otherwise.
   i1; QA S28).
 - **GIVEN** a session window killed outside pm (`C-b &`, `tmux
   kill-window`), which fires no pm hook,
-  **WHEN** the session next rebalances (a pane opens or closes, a client
-  attaches),
+  **WHEN** a client next attaches to the session through `pm session`
+  (the attach rebalances every window, including the ones the registry
+  still lists but tmux no longer has) — also when that `pm session` runs
+  from a pane of a *different* pm session, whose server may still have a
+  live window with the same `@N` id —
   **THEN** the killed window's entry is dropped from the session's pane
-  registry, and later pane launches and layouts in the surviving windows
-  are unaffected (QA S28).
+  registry (judged against the session's own server), the other
+  session's registry is untouched, and later pane launches and layouts
+  in the surviving windows are unaffected (QA S28).
 
 ### R12 — The socket directory fails closed
 
@@ -740,6 +744,8 @@ them.
   time; plain `pm` commands in each resolve their own override.
 - `pm session kill` typed inside the session it kills; a non-pm session
   hand-made on a pm session's private server.
+- A window killed outside pm whose `@N` id is still live on another pm
+  session's server.
 - Command-bar and popup lines with unbalanced quotes.
 
 ## Pass / fail criteria
