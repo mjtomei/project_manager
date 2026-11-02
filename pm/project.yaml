@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T10:29:02.737854+00:00'
+  updated_at: '2026-11-02T10:43:33.625842+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40007,6 +40007,30 @@ prs:
       = pad.py with one dead owner per pair (139 owners, read ~0.09 s).'
     created_at: '2026-11-02T10:29:02Z'
     last_edited: '2026-11-02T10:29:02Z'
+  - id: note-3e02745
+    text: 'QA S60 (2026-11-02): fixed 92b59c3c + 79de8949, both live pre/post in /pm-captures/scenarios/60
+      (README, pre-fix/, post-fix/). Fix (1): story 1 tA read 0.24 s after the router
+      armed its 60 s throttle showed "armed …, due …, 1m00s left" (remaining 59.73
+      s), not NNs left. history_query._dur rounded to the nearest second, the same
+      rule behind S59 "1h00m" first read (note-ec3c420). _dur now never rounds a value
+      just below 60 s / 1 h / 48 h up into the next unit; whole values round as before.
+      Fix (2): a back-to-back reader read "QA planner deadline — 1h00m left" (>3600
+      s on a 1 h timer) because build_history took now before read_events and the
+      arm landed in between; now is taken after the read. Post-fix D run on the fixed
+      head: 2001 burst JSON reads with no remaining_s above duration, 2053 text reads
+      with no 1m00s/1h00m; first reads 59s / 59m59s. Tests test_countdown_never_rounds_up_into_the_next_unit
+      + test_live_read_takes_now_after_reading_the_journal (fail on c0426c20); full
+      suite 5590 passed, 1 skipped. All other S60 Thens held live: restart 1 at router
+      +8.38 s, interrupted +0.76 s, adopted SIGNOFF_MERGE 34 s after launch with the
+      hold in the same read; restart 2 re-armed +0.54 s (one lost-only read at +0.38
+      s); add A/remove B/remove A outputs literal, released 0.46 s; --auto-merge A
+      merged 0.15 s, B never held; merged reads today/TZ/+365d/OFF2 ALL OK (max 77
+      cols, TTY==cat, JSON equal); merged popup + z/s/d/t inert + pager word-equal
+      + q/Esc; C REVIEW→released, BLOCKED→cancelled + derived hold, paused/sign_off,
+      badges. Obs: the first ~0.2 s of a router reads "signoff router: launching for
+      0s" (not agent working).'
+    created_at: '2026-11-02T10:43:33Z'
+    last_edited: '2026-11-02T10:43:33Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
