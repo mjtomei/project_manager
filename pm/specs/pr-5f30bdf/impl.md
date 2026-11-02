@@ -6,9 +6,11 @@ model popup.  No behaviour changes to provider resolution, routing, model
 settings, credentials, or `project.yaml`.
 
 Base: `origin/master` @ `c1fcecc5` (branch already contains it).  PR #283
-(`refs/pull/283/head` @ `21da65cd`) is **open, not merged**; it adds
-`supported_efforts` metadata to the same files.  Nothing here renames or
-removes anything it introduces, and it is not integrated (see A5).
+(`pr-5ec411c`) adds `supported_efforts` metadata to the same files; it was
+open at spec time and has since **merged** to master as `b8576981`.  Nothing
+here renames or removes anything it introduces.  The branch does not merge
+master itself (sign-off integrates the latest base); a merge preview is
+clean and the merged tree passes the provider/router/model tests (see A5).
 
 ## Current state (grounded)
 
@@ -95,6 +97,10 @@ In `pm_core/cli/provider.py`:
 - Use it around the write sections of `add`, `edit`, `remove`, and around
   `set_default_provider` in `default`.  `SystemExit` raised by existing
   checks/`_load_for_edit` passes through untouched (no double printing).
+  In `add`, also wrap the early `_load_for_edit()` (the fail-before-prompt
+  read): `load_providers_for_edit()` reaches `pm_home()`, whose `mkdir` can
+  raise a raw `OSError` before the lock is ever taken, and that read is the
+  reachable path for the CLI's `pm_home` failure test.
 - Preserve the current success messages and exit codes.
 
 ### R3 — Declare the Textual floor the code actually needs
@@ -109,6 +115,12 @@ two cells short, the box is sized too narrow and the column is clipped —
 fails at `2.0.0` and passes at `2.0.1`.  Keep the lazy import in
 `model_screen.py` (it is only needed when sizing the popup); no
 compatibility shim is needed once the floor is honest.
+
+Incidental (review-loop i2): the Dockerfile pre-install list — whose comment
+says keep it in sync with `[project.dependencies]` — was also missing
+`markdown>=3.5` (added to `pyproject.toml` by `fb988d1f`), so containers
+could not run `pm md-render` (sign-off report embedding) without an
+`ImportError`.  It is added there too.
 
 ## Implicit requirements
 
@@ -152,9 +164,16 @@ compatibility shim is needed once the floor is honest.
 - **A4 — validate entry contents in `set_default_provider`?**  Resolved:
   no.  The stated bug is the existence race; adding validation would change
   behaviour for hand-edited invalid entries and is out of scope.
-- **A5 — PR #283.**  Open/unmerged at spec time; not integrated.  Its
-  additions (`supported_efforts` fields/options) do not overlap with the
-  names or interfaces touched here, so both can land independently.
+- **A5 — PR #283.**  Merged to master as `b8576981` while this PR was in
+  review.  Its additions (`supported_efforts` fields/options, and the
+  `model_screen` effort cycle/legend changes) do not overlap with the names
+  or interfaces touched here: master's `set_default_provider`,
+  `provider_default`, `providers_lock`, `save_providers`, and the popup's
+  `to_content` sizing are unchanged by it.  A merge preview of the branch
+  onto `b8576981` is clean, and the merged tree passes
+  `tests/test_providers.py tests/test_router_route.py
+  tests/test_model_settings.py` (418 passed), so sign-off can integrate the
+  base without rework.  This branch does not merge master itself.
 
 No **[UNRESOLVED]** ambiguities.
 
@@ -194,16 +213,22 @@ No **[UNRESOLVED]** ambiguities.
 In `tests/test_providers.py`:
 
 1. `set_default_provider` rejects a missing name and leaves the file
-   unchanged; accepts `claude`.
+   unchanged; accepts `claude`; accepts a configured provider and writes
+   `default: <name>` (library and `pm provider default` CLI success paths).
 2. The existence check runs under the lock (assert the lock is held while
    `load_providers_for_edit` is called) and a concurrent removal between
    CLI pre-check and locked update cannot resurrect `default: X`.
 3. `providers_lock` times out with `ProvidersLockTimeout` when another fd
-   holds the flock, and releases/closes its own fd.
+   holds the flock, releases the lock after an exception in the body, and
+   closes its own lock fd on the timeout path (a spy on `open` asserts
+   `closed`).
 4. An unwritable `pm_home` makes `providers_lock` raise
    `ProvidersWriteError` with the path, and `pm provider default claude`
-   prints one `Error:` line with exit 1 (no traceback).
+   prints one `Error:` line with exit 1 (no traceback).  A `pm_home()`
+   failure on `pm provider add` and a held lock on `pm provider default`
+   are covered the same way.
 5. Update the failed-`os.replace` test to expect `ProvidersWriteError`
-   (original kept, temp cleaned).
+   (original kept, temp cleaned); add the `mkstemp`-failure branch
+   (typed error naming the target, file untouched, no temp left).
 
 Existing provider permission/roundtrip/CLI tests must keep passing.

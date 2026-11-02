@@ -348,6 +348,38 @@ class TestProvidersLock:
             with providers_lock(timeout=0.1):
                 pass
 
+    def test_timeout_closes_its_lock_file(self, tmp_path):
+        """A timed-out attempt never took the lock, but it must still close
+        its descriptor: otherwise the lock file stays open for the life of
+        the process (one leaked fd per timeout).  ``excinfo`` keeps the
+        traceback (and the context manager's frame) alive, so the assertion
+        does not depend on garbage collection."""
+        import builtins
+        import fcntl
+        lock_path = tmp_path / "providers.yaml.lock"
+        opened = []
+        real_open = builtins.open
+
+        def spy_open(*args, **kwargs):
+            fh = real_open(*args, **kwargs)
+            if args and str(args[0]) == str(lock_path):
+                opened.append(fh)
+            return fh
+
+        with patch("pm_core.providers.pm_home", return_value=tmp_path), \
+                patch("pm_core.providers.open", spy_open, create=True):
+            holder = real_open(lock_path, "a")
+            try:
+                fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with pytest.raises(ProvidersLockTimeout) as excinfo:
+                    with providers_lock(timeout=0.05):
+                        pass
+            finally:
+                holder.close()
+        assert "timed out" in str(excinfo.value)
+        assert len(opened) == 1
+        assert opened[0].closed
+
     def test_save_reports_an_uncreatable_pm_home_as_a_write_error(self, tmp_path):
         """``save_providers`` called without the lock (a library caller)
         names the path instead of leaking ``pm_home()``'s raw OSError."""
