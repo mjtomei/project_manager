@@ -208,6 +208,39 @@ def test_signoff_integrate_record_relinks_instead_of_clobbering(local):
     assert entry["integration"]["head"] == local.head
 
 
+def test_signoff_integrate_with_two_clones_keeps_the_recorded_check(local):
+    """Two verified clones of the PR branch: there is no single HEAD to
+    check, so every mode refuses and `--record` / `--apply` leave the
+    recorded check alone — it used to be overwritten with "error: no PR
+    workdir" (QA S9 story 2)."""
+    integration.check_integration(local.pm_dir, PR)
+    moved = _make_stale(local)
+    extra = moved.parent / "pm-pr-001"     # a second clone of the branch
+    git(local.tmp, "clone", "-q", str(moved), str(extra))
+    git(extra, "checkout", "-q", BRANCH)
+    git(extra, "remote", "set-url", "origin", str(local.repo))
+    before = pr_entry(local)
+    assert before["integration"]["status"] in integration.MERGEABLE
+    ijson = integration.integration_json_path(PR)
+    saved = ijson.read_text()
+    for flags in ([], ["--record"], ["--apply"]):
+        with mock.patch.object(pr_mod, "state_root",
+                               return_value=local.pm_dir):
+            result = CliRunner().invoke(
+                pr_mod.pr, ["signoff", "integrate", PR, *flags])
+        assert result.exit_code == 1, result.output
+        assert "2 existing clones" in result.output
+        assert "not checking" in result.output
+        assert (f"re-run `pm pr signoff integrate {PR}"
+                f"{''.join(' ' + f for f in flags)}`") in result.output
+        assert ("left as it was" in result.output) == bool(flags)
+        assert "no PR workdir" not in result.output
+        assert pr_entry(local) == before
+        assert ijson.read_text() == saved
+    assert git(moved, "status", "--porcelain") == ""
+    assert git(extra, "status", "--porcelain") == ""
+
+
 def test_local_publish_does_not_rely_on_main_repo_fetch_head(local):
     """A concurrent fetch in the main repo rewrites its FETCH_HEAD; the
     merge commit is fetched into a private ref instead, removed after."""

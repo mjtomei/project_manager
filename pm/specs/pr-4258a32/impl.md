@@ -118,10 +118,19 @@ identity; it also separates PRs whose 50-char-truncated slugs collide.
   record is still empty or still points at a non-existent path; if another
   writer recorded an existing path meanwhile, that path is adopted instead).
   A persistence failure (lock timeout etc.) is logged; the in-memory result
-  still stands.  Nothing is written when `root` lies inside the recovered
-  clone itself (pm run from a shell in the PR worktree resolves that
-  clone's own tracked `pm/project.yaml`): the write would only dirty the
-  PR's tree, which e.g. sign-off's clean-base integration refuses.
+  still stands.  Nothing is written when `root` is the tracked
+  `project.yaml` of **any** PR clone (`workdirs.registry_clone`): pm run
+  from a shell in a PR worktree — this PR's or another's — resolves that
+  clone's own tracked `pm/project.yaml`, and the write would only dirty
+  that PR's tree, which e.g. sign-off's clean-base integration and
+  `integrate --apply` refuse (QA S11 story 3, note-8fee005).  A clone is
+  recognised by location (inside the recovered clone, or inside this
+  project's workdirs dir) or by its checked-out branch being some PR's
+  branch in that registry (a clone mounted elsewhere, e.g. a container's
+  `/workspace`); the main repository is neither.  Whenever the re-link
+  isn't written (read-only lookup, PR-clone registry, failed write)
+  `WorkdirResolution.not_recorded` says why and `describe()` reports
+  "using the existing clone … (not recorded: …)" instead of "re-linked".
 - Two or more verified → `status="ambiguous"`, `path=None`, all candidates
   listed by `describe()`; nothing is written and callers must **not** clone.
   More than `MAX_CANDIDATES` name matches are `ambiguous` without being
@@ -188,7 +197,14 @@ deadlock).
   workdir/HEAD to record the verdict against") or, with `--record`,
   recorded as `status: error / no PR workdir` over the valid check (QA S7
   follow-ups).  The default `integrate` check stays read-only: it uses the
-  clone without persisting the re-link.
+  clone without persisting the re-link.  With an ambiguity there is no
+  HEAD to check: every `integrate` mode prints the listing, refuses
+  ("not checking: the PR HEAD is in one of the clones listed above …
+  Move the extra clone(s) aside, then re-run `pm pr signoff integrate
+  <pr> [flags]`"), exits 1, and `--record` / `--apply` leave the recorded
+  integration check (and `integration.json`) as they were instead of
+  overwriting them with `status: error / no PR workdir` (QA S9 story 2,
+  note-d152fcb).
 
 The CLI call sites share `cli/pr.py:_resolve_workdir` (resolve + report
 via `describe()`).
@@ -283,9 +299,11 @@ parent (it belongs to another HOME/machine), not `qa/`, not other projects.
 - **Stale path reappears** (a remount) after the fast-path check: the
   under-lock re-read and the compare-and-set both keep any record that
   exists by then — never overwritten with the discovered clone.
-- **pm run from inside the PR worktree** (`state_root()` is the clone's
-  tracked `pm/project.yaml`): the clone is used; the re-link is not
-  written into its own project.yaml.
+- **pm run from inside a PR worktree** — the PR's own or another PR's
+  (`state_root()` is that clone's tracked `pm/project.yaml`): the clone is
+  used; the re-link is written into neither clone's project.yaml, and the
+  message says "using", not "re-linked" (it repeats on every run, since
+  nothing is recorded).
 - **Workdirs dir absent** (fresh machine): no listing error, no `mkdir`,
   `missing`.
 - **Fresh clone's name already taken** (an existing `<slug>-<hash>` dir

@@ -70,6 +70,10 @@ class WorkdirResolution:
     # AMBIGUOUS because of too many name matches: *candidates* were never
     # verified, only matched by name.
     unverified: bool = False
+    # RECOVERED but the re-link was not written to project.yaml: why (a
+    # read-only lookup, a registry tracked inside a PR clone, a failed
+    # write).  None when it was written.
+    not_recorded: str | None = None
 
     @property
     def reportable(self) -> bool:
@@ -84,6 +88,10 @@ class WorkdirResolution:
                  if self.recorded else "no workdir is recorded")
         if self.status == RECORDED:
             return f"Workdir for {self.pr_id}: {self.path}"
+        if self.status == RECOVERED and self.not_recorded:
+            return (f"Workdir for {self.pr_id}: {where}; using the existing "
+                    f"clone on {self.branch} at {self.path} (not recorded: "
+                    f"{self.not_recorded})")
         if self.status == RECOVERED:
             return (f"Workdir for {self.pr_id}: {where}; re-linked the "
                     f"existing clone on {self.branch} at {self.path}")
@@ -338,7 +346,9 @@ def resolve_workdir(data: dict, pr_entry: dict, root: Path | None = None, *,
     branch-slug-named clones in this project's workdirs dir are verified
     (:func:`verify_candidate`); exactly one verified clone is adopted —
     ``pr_entry["workdir"]`` is updated and, with *root* and *persist*, the
-    record is compare-and-set in project.yaml.  Several verified clones are
+    record is compare-and-set in project.yaml, unless *root* is a PR
+    clone's tracked registry (:func:`registry_clone`).  When it isn't
+    written, ``not_recorded`` says why.  Several verified clones are
     ``AMBIGUOUS`` (nothing adopted or written; do not clone another).
 
     *project_dir* overrides :func:`project_workdirs_dir`.  *locked* says the
@@ -405,22 +415,60 @@ def _resolve_matches(data: dict, pr_entry: dict, root: Path | None,
         return res
 
     found = res.candidates[0]
-    if persist and root is not None and _is_within(root, found):
-        # Run from inside the clone itself (an agent's or user's shell in
-        # the PR worktree): *root* is that clone's tracked project.yaml.
-        # Writing there would only dirty the PR's tree (which blocks e.g.
-        # sign-off's clean-base integration); the registry pm runs from is
-        # elsewhere.  The in-memory adoption still stands.
-        _log.info("workdir for %s: not recording %s in its own "
-                  "project.yaml (%s)", pr_id, found, root)
-    elif persist and root is not None:
-        found = _persist(root, pr_id, found)
+    if not persist or root is None:
+        res.not_recorded = "read-only lookup"
+    elif (clone := registry_clone(root, data, Path(res.project_dir),
+                                  found)) is not None:
+        # Run from a shell inside a PR clone (an agent's or user's): *root*
+        # is that clone's tracked project.yaml, not the registry the record
+        # belongs in.  Writing there would only dirty that PR's tree (which
+        # blocks e.g. its sign-off's clean-base integration).  The in-memory
+        # adoption still stands.
+        res.not_recorded = (
+            f"pm is using this clone's own tracked {root}/project.yaml"
+            if _is_within(root, found) else
+            f"pm is using {root}/project.yaml, tracked in the clone {clone}")
+        _log.info("workdir for %s: not recording %s in %s (inside the "
+                  "clone %s)", pr_id, found, root, clone)
+    else:
+        found, err = _persist(root, pr_id, found)
+        if err:
+            res.not_recorded = f"could not write {root}/project.yaml: {err}"
     pr_entry["workdir"] = found
     res.path = found
     res.status = RECOVERED if found == res.candidates[0] else RECORDED
-    _log.info("workdir for %s: recorded %s missing; re-linked %s",
-              pr_id, recorded, found)
+    _log.info("workdir for %s: recorded %s missing; %s %s", pr_id, recorded,
+              "using" if res.not_recorded else "re-linked", found)
     return res
+
+
+def registry_clone(root: Path, data: dict, project_dir: Path,
+                   found: str | None = None) -> str | None:
+    """The PR clone whose tracked ``project.yaml`` *root* is, or None when
+    *root* is the main registry.
+
+    pm run from a shell in a PR clone resolves that clone's own tracked
+    ``pm/project.yaml`` as its root — the PR's own clone or any other's.  A
+    clone is recognised by where it lives (inside *found*, the clone being
+    adopted, or inside this project's workdirs dir *project_dir*) or by
+    what it has checked out (some PR's branch: a clone mounted elsewhere,
+    e.g. at a container's ``/workspace``).  The main repository is neither.
+    Read-only, like :func:`verify_candidate`.
+    """
+    if found is not None and _is_within(root, found):
+        return found
+    try:
+        rel = Path(root).resolve().relative_to(Path(project_dir).resolve())
+    except (OSError, ValueError):
+        rel = None
+    if rel is not None and rel.parts:
+        return str(Path(project_dir) / rel.parts[0])
+    current, _ = _checked_out_branch(Path(root))
+    if current and any(pr.get("branch") == current
+                       for pr in data.get("prs") or []):
+        rc, top, _ = _git(Path(root), "rev-parse", "--show-toplevel")
+        return top if rc == 0 and top else str(root)
+    return None
 
 
 def _is_within(path: Path, parent: str) -> bool:
@@ -443,8 +491,9 @@ def stored_workdir(root: Path, pr_id: str) -> str | None:
     return (pr or {}).get("workdir") or None
 
 
-def _persist(root: Path, pr_id: str, found: str) -> str:
-    """Compare-and-set the recovered path; return the path now in effect.
+def _persist(root: Path, pr_id: str, found: str) -> tuple[str, str | None]:
+    """Compare-and-set the recovered path; return the path now in effect
+    and the write error, if any.
 
     Written only while the on-disk record is still empty or still points at
     a missing path; a record that exists by now — another writer's, or the
@@ -468,7 +517,8 @@ def _persist(root: Path, pr_id: str, found: str) -> str:
     except Exception as e:  # the in-memory adoption still stands
         _log.warning("workdir for %s: could not record %s: %s",
                      pr_id, found, e)
-    return winner
+        return winner, str(e) or type(e).__name__
+    return winner, None
 
 
 def ambiguity(data: dict, pr_entry: dict) -> WorkdirResolution | None:

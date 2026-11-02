@@ -2066,7 +2066,20 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool):
     # replaces a valid check with "no PR workdir" while the clone is still
     # here.  The default check stays read-only: the clone is used but the
     # re-link isn't written.
-    _resolve_workdir(data, pr_entry, root, persist=record or apply_)
+    found = _resolve_workdir(data, pr_entry, root, persist=record or apply_)
+    if found.status == workdirs_mod.AMBIGUOUS:
+        # The PR's HEAD is in one of the listed clones, so there is nothing
+        # to check — and recording that as "no PR workdir" would replace
+        # the existing check (which a sign-off verdict may be bound to).
+        flags = "".join(f for f, on in ((" --record", record),
+                                        (" --apply", apply_)) if on)
+        kept = (" The recorded integration check is left as it was."
+                if record or apply_ else "")
+        click.echo(
+            f"PR {pr_id}: not checking: the PR HEAD is in one of the clones "
+            f"listed above.{kept} Move the extra clone(s) aside, then "
+            f"re-run `pm pr signoff integrate {pr_id}{flags}`.", err=True)
+        raise SystemExit(1)
     if record or apply_:
         rec = integration.check_integration(root, pr_id, data=data)
     else:

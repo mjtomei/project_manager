@@ -264,7 +264,8 @@ class TestRecovery:
     def test_persist_is_compare_and_set(self, env, tmp_path):
         clone = env.clone(f"{SLUG}-10e74920")
         # On-disk record still the stale path: the recovered path is written.
-        assert workdirs._persist(env.root, PR_ID, str(clone)) == str(clone)
+        assert workdirs._persist(env.root, PR_ID, str(clone)) == (
+            str(clone), None)
         assert env.fresh()[1]["workdir"] == str(clone)
         # Another writer recorded an existing path meanwhile: it wins and is
         # not overwritten.
@@ -272,7 +273,8 @@ class TestRecovery:
         other.mkdir()
         store.locked_update(env.root, lambda d: store.get_pr(d, PR_ID)
                             .__setitem__("workdir", str(other)))
-        assert workdirs._persist(env.root, PR_ID, str(clone)) == str(other)
+        assert workdirs._persist(env.root, PR_ID, str(clone)) == (
+            str(other), None)
         assert env.fresh()[1]["workdir"] == str(other)
 
     def test_run_from_inside_the_clone_does_not_write_its_project_yaml(
@@ -292,6 +294,92 @@ class TestRecovery:
         assert pr["workdir"] == str(clone)
         assert store.get_pr(store.load(inner), PR_ID)["workdir"] == env.stale
         assert git(clone, "status", "--porcelain") == ""
+        # Nothing was recorded, so it says "using", not "re-linked".
+        text = res.describe()
+        assert "using the existing clone" in text, text
+        assert "re-linked" not in text
+        assert "this clone's own tracked" in text
+
+    def _other_pr_registry(self, env, other: Path, other_branch: str):
+        """Give *other* (a clone of another PR) a tracked pm/project.yaml
+        listing that PR, committed, as a PR clone's registry is."""
+        inner = other / "pm"
+        inner.mkdir()
+        data, _ = env.fresh()
+        data["prs"].append({"id": "pr-c000001", "title": "Other",
+                            "branch": other_branch, "status": "in_progress"})
+        store.save(data, inner)
+        git(other, "add", "pm")
+        git(other, "commit", "-q", "-m", "registry")
+        data = store.load(inner)
+        return inner, data, store.get_pr(data, PR_ID)
+
+    def test_run_from_another_prs_clone_does_not_write_its_project_yaml(
+            self, env):
+        """pm run from a shell in ANOTHER PR's clone (QA S11 story 3):
+        that clone's tracked pm/project.yaml is the root.  The clone found
+        is used, but the re-link is written into neither clone — it would
+        dirty the other PR's tree and block its integrate --apply."""
+        clone = env.clone(f"{SLUG}-10e74920")
+        other_branch = "pm/pr-c000001-other"
+        other = env.clone("pm-pr-c000001-other-10e74920", branch=other_branch)
+        inner, data, pr = self._other_pr_registry(env, other, other_branch)
+        res = workdirs.resolve_workdir(data, pr, inner)
+        assert (res.status, res.path) == (workdirs.RECOVERED, str(clone))
+        assert pr["workdir"] == str(clone)
+        text = res.describe()
+        assert "using the existing clone" in text, text
+        assert "re-linked" not in text
+        assert f"tracked in the clone {other}" in text
+        assert store.get_pr(store.load(inner), PR_ID)["workdir"] == env.stale
+        assert git(other, "status", "--porcelain") == ""
+        assert git(clone, "status", "--porcelain") == ""
+
+    def test_pr_clone_outside_the_workdirs_dir_is_recognised_by_branch(
+            self, env, tmp_path):
+        """A PR clone mounted elsewhere (a container's /workspace) is not
+        under the workdirs dir; its checked-out PR branch gives it away."""
+        clone = env.clone(f"{SLUG}-10e74920")
+        other_branch = "pm/pr-c000001-other"
+        ws = tmp_path / "workspace"
+        subprocess.run(["git", "clone", "-q", str(env.origin), str(ws)],
+                       check=True, capture_output=True)
+        git(ws, "checkout", "-q", "-b", other_branch)
+        inner, data, pr = self._other_pr_registry(env, ws, other_branch)
+        res = workdirs.resolve_workdir(data, pr, inner)
+        assert (res.status, res.path) == (workdirs.RECOVERED, str(clone))
+        assert os.path.realpath(ws) in res.not_recorded
+        assert store.get_pr(store.load(inner), PR_ID)["workdir"] == env.stale
+        assert git(ws, "status", "--porcelain") == ""
+
+    def test_main_registry_inside_a_git_repo_is_written(self, env, tmp_path):
+        """The main repository (on its base branch, outside the workdirs
+        dir) is not a PR clone: the re-link is recorded there."""
+        clone = env.clone(f"{SLUG}-10e74920")
+        main = tmp_path / "main"
+        subprocess.run(["git", "clone", "-q", str(env.origin), str(main)],
+                       check=True, capture_output=True)
+        inner = main / "pm"
+        inner.mkdir()
+        data, _ = env.fresh()
+        store.save(data, inner)
+        data = store.load(inner)
+        pr = store.get_pr(data, PR_ID)
+        res = workdirs.resolve_workdir(data, pr, inner)
+        assert (res.status, res.not_recorded) == (workdirs.RECOVERED, None)
+        assert "re-linked" in res.describe()
+        assert store.get_pr(store.load(inner), PR_ID)["workdir"] == str(clone)
+
+    def test_failed_write_says_using_not_re_linked(self, env):
+        clone = env.clone(f"{SLUG}-10e74920")
+        data, pr = env.fresh()
+        with mock.patch.object(workdirs.store, "locked_update",
+                               side_effect=store.StoreLockTimeout("busy")):
+            res = workdirs.resolve_workdir(data, pr, env.root)
+        assert (res.status, res.path) == (workdirs.RECOVERED, str(clone))
+        assert "could not write" in res.not_recorded
+        assert "using the existing clone" in res.describe()
+        assert env.fresh()[1]["workdir"] == env.stale
 
     def test_stale_path_reappearing_before_the_write_wins(self, env,
                                                           tmp_path):
@@ -304,7 +392,8 @@ class TestRecovery:
                             .__setitem__("workdir", str(gone)))
         data, pr = env.fresh()
         gone.mkdir(parents=True)
-        assert workdirs._persist(env.root, PR_ID, str(clone)) == str(gone)
+        assert workdirs._persist(env.root, PR_ID, str(clone)) == (
+            str(gone), None)
         assert env.fresh()[1]["workdir"] == str(gone)
         with mock.patch.object(workdirs, "_persist") as persist:
             res = workdirs._resolve_matches(
@@ -698,6 +787,33 @@ class TestPrCd:
         assert f"recorded path {env.stale} is missing" in result.output
         assert f"on branch master, not {BRANCH}" in result.output
         execvp.assert_not_called()
+
+    def test_cd_from_another_prs_clone_leaves_its_registry_clean(self, env):
+        """`pm pr cd <B>` run inside PR C's clone enters B's clone and says
+        "using" — the re-link isn't written into C's tracked yaml (QA S11
+        story 3, which then refused C's integrate --apply as dirty)."""
+        clone = env.clone(f"{SLUG}-10e74920")
+        other_branch = "pm/pr-c000001-other"
+        other = env.clone("pm-pr-c000001-other-10e74920", branch=other_branch)
+        inner = other / "pm"
+        inner.mkdir()
+        data, _ = env.fresh()
+        data["prs"].append({"id": "pr-c000001", "title": "Other",
+                            "branch": other_branch, "status": "in_progress"})
+        store.save(data, inner)
+        git(other, "add", "pm")
+        git(other, "commit", "-q", "-m", "registry")
+        runner = CliRunner()
+        with mock.patch.object(pr_mod, "state_root", return_value=inner), \
+             mock.patch.object(pr_mod.os, "chdir") as chdir, \
+             mock.patch.object(pr_mod.os, "execvp") as execvp:
+            result = runner.invoke(pr_mod.pr, ["cd", PR_ID])
+        assert result.exit_code == 0, result.output
+        assert "using the existing clone" in result.output
+        assert "re-linked" not in result.output
+        chdir.assert_called_once_with(str(clone))
+        execvp.assert_called_once()
+        assert git(other, "status", "--porcelain") == ""
 
     def test_cd_reports_ambiguity(self, env):
         env.clone(f"{SLUG}-10e74920")
