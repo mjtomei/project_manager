@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T09:32:31.965131+00:00'
+  updated_at: '2026-11-02T10:08:10.109927+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39935,6 +39935,45 @@ prs:
       (README).'
     created_at: '2026-11-02T09:32:31Z'
     last_edited: '2026-11-02T09:32:31Z'
+  - id: note-df218af
+    text: 'QA S59 refiner (2026-11-02, e40fdb95): all 6 stories dry-run live, every
+      Then held (W = whichever first-batch scenario drew slot 2: s1, then s5, s7).
+      Corrections folded into the steps: the queued s3 never gets a grace of its own
+      (it launches after the shared grace elapsed: queued -> launching -> agent working
+      -> verifying -> done PASS); the run elapsed time crosses the summed scenario
+      time twice per run (about 73 s in and about 12 s into the hold), so check "summed
+      stays fixed while elapsed grows", not elapsed != sum; a single-scenario resumed
+      run reads wall = summed, up to 1 at once; after closing W the old attempt reads
+      agent "waiting attempt handed back to the retry path" for about 5 s before vanished;
+      the restart gap was 3 reads (about 1.7 s): lost + nothing, then one read of
+      "qa sW: waiting on a human", then re-armed; History pager q returns to the popup
+      list (e8073921), Esc closes. S52 drivers in /pm-captures/scenarios/52/scripts
+      are reusable; when copying them, set SCRIPTS to the copy (the camera loop sources
+      lib.sh from it, else C-b 0 never fires and t lands in the impl pane).'
+    created_at: '2026-11-02T09:42:49Z'
+    last_edited: '2026-11-02T09:42:49Z'
+  - id: note-ec3c420
+    text: 'QA S59 (2026-11-02) on 3a3dc599 (code = e40fdb95), no code edits; all 6
+      stories live in /scratch/s59.bijV, captures /pm-captures/scenarios/59 (README).
+      Every Then held but one literal text: story 1 says Waiting for reads "QA planner
+      deadline — 59mNNs left" while the planner runs, but in each of the 3 runs exactly
+      one R1 JSON read taken 0.08-0.3 s after the arm (remaining 3599.6-3599.9 s)
+      reads "1h00m left": history_query._dur rounds to the nearest second (the same
+      rule makes the 5 s backoff first read "5s"). The other 89 R1 planner reads,
+      all R2 text reads and every CLI read show 59mNNs. qa.md R7 does not fix the
+      format. Verdict INPUT_REQUIRED: spec owner picks (a) accept 1h00m in the first
+      0.5 s and amend the Then, or (b) countdowns never round up into the next unit
+      at the arm. Other results: hold 2m45s after t; W = s1/s4/s7; wall 1m36s and
+      sum 2m58s fixed over 107 hold reads; restart re-adopted 1.2 s later, 3 lost-gap
+      reads (1.2 s), then re-armed; close -> released in 3 s, W agent "handed back"
+      4.7 s then vanished, retry 1 backoff 5 s fired, run PASS 1m51s after the close,
+      [3 runs], H pager word-equal, q -> list; z z t -> QA complete 4.9 s later (dry
+      run 0.6 s), derived hold 0.64 s after the end; story 5: 0 stale derived / human:
+      reads in 278; leave-qa released exactly 60 s after the arm (edit at +10.9 s).
+      Readers: 1529 R1 reads parse, 319 R2 agree, err.log and tui-stderr empty, no
+      Traceback.'
+    created_at: '2026-11-02T10:08:09Z'
+    last_edited: '2026-11-02T10:08:09Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
