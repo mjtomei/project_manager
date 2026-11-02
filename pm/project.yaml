@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T08:53:00.725321+00:00'
+  updated_at: '2026-11-02T09:08:15.777045+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7628,6 +7628,26 @@ prs:
       question, sanitize-at-derivation is what S28 chose.'
     created_at: '2026-11-02T08:53:00Z'
     last_edited: '2026-11-02T08:53:00Z'
+  - id: note-248e68c
+    text: 'Review loop 68bd i2 (commit d4067870; no requirement changes; full suite
+      5564 passed / 1 skipped, 447 s, log /pm-captures/review-68bd-i2/full-suite.log).
+      Checked i1''s two fixes, and both hold: the command-bar parse guard, and the
+      wrapper share-mode tag. I also re-read the S28/S30 code myself. format_literal
+      covers every format-expanded -s/-c/-d path argument, and the SIGHUP ignore spans
+      the whole kill teardown. Two cleanups. (1) wrapper._get_session_tag was a hand
+      copy of paths.get_session_tag plus an inline tmux_safe_name, justified as "runs
+      before the chosen pm_core is imported". It already imported pm_core.git_ops,
+      which imports pm_core.paths from the same copy, and _run_cli purges both when
+      another pm_core is chosen. The copy had already drifted once: the i1 PM_SHARE_MODE
+      bug. It now delegates to paths.get_session_tag, and _ipc_session_tag uses paths.base_session_name
+      (main has imported paths by then). _PM_SOCKET_DIR stays inline, because _mark_tmux_socket
+      really does run before any pm_core import. End-to-end check: python -m pm_core.wrapper
+      in a scratch git repo named next.js, with a scratch HOME, picks the share-mode
+      override with PM_SHARE_MODE=global and does not pick it without. (2) i1 made
+      the line parse before the guard, so the autostart branch''s own shlex ValueError
+      handler could no longer run. It is removed.'
+    created_at: '2026-11-02T09:08:15Z'
+    last_edited: '2026-11-02T09:08:15Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
