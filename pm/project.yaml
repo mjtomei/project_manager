@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T10:16:21.712521+00:00'
+  updated_at: '2026-11-02T10:19:22.758463+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25951,6 +25951,27 @@ prs:
       Helpers: /pm-captures/scenarios/26/refiner-helpers.'
     created_at: '2026-11-02T10:16:21Z'
     last_edited: '2026-11-02T10:16:21Z'
+  - id: note-437bf0e
+    text: 'QA S25 refiner (2026-11-02, live at 4126cee0 = 7518aa8a merged code; helpers
+      + rehearsal evidence: /pm-captures/scenarios/25/refiner-helpers): all 4 stories
+      held from /scratch with no fix. Draft corrections, not bugs: (1) the path-like
+      id ../instructions/tui-manual-test is refused only by pm qa regression and pm
+      qa launch regression: (empty-library message on the empty pm repo, "Unknown
+      regression test" once a test exists); show -c regression prints the instruction
+      (rc 0, pre-existing get_instruction lookup, note-812c8b2); never pass it to
+      standalone/run/debug. (2) pm qa list has no mocks section and pm/qa/mocks never
+      existed: pm qa mocks list says "No mock definitions found". (3) pm help has
+      only the one-line "isolated QA run" entry; the full description is pm qa docs.
+      (4) The socket note names the socket twice (backticked path, then tmux -S).
+      (5) With PM_SHARE_MODE=global exported in the launching shell, captures go under
+      ~/.pm/sessions/<proj>-<share-mode hash>/, not the user plain session tag. (6)
+      The project needs an instruction and an artifact for Recipes to list paths.
+      (7) A plain pm pr add from the clone also logs a second "action: reload (state
+      only)" in the user TUI (first-TUI fallback, harmless). (8) Two runs in one second
+      sort by random hex: take each run id from its header, not ls | tail -1. (9)
+      A pm session on a /scratch project ran no guide pane here.'
+    created_at: '2026-11-02T10:19:22Z'
+    last_edited: '2026-11-02T10:19:22Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
