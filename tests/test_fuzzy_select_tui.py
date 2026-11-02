@@ -71,6 +71,7 @@ class Host(App):
                 if b.action in ("fuzzy_next", "fuzzy_prev")]
 
     check_action = ProjectManagerApp.check_action
+    _command_bar = ProjectManagerApp._command_bar
     action_fuzzy_next = ProjectManagerApp.action_fuzzy_next
     action_fuzzy_prev = ProjectManagerApp.action_fuzzy_prev
     _command_bar_in_use = ProjectManagerApp._command_bar_in_use
