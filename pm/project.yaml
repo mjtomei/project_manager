@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T08:13:29.243057+00:00'
+  updated_at: '2026-11-02T08:53:00.725321+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7602,6 +7602,32 @@ prs:
       starts. Captures: /pm-captures/scenarios/31 (README.md, 31 casts+mp4, evidence/).'
     created_at: '2026-11-02T08:13:29Z'
     last_edited: '2026-11-02T08:13:29Z'
+  - id: note-ca89826
+    text: 'Review loop 68bd i1 (commits e1c5bc95 + cfccf55c; no requirement changes;
+      full suite 5565 passed / 1 skipped, 433 s, log /pm-captures/review-68bd-i1/full-suite-final.log).
+      Verification pass over the two code commits since 54bf i1, 78b7b2fa (QA S28)
+      and 7deab88e (QA S30); both hold. tmux_safe_name matches tmux 3.2a session_check_name
+      + utf8_strvis (the "$" rule uses isalpha in tmux''s forced UTF-8 locale, so
+      it is ASCII-only, as the frozenset has it). Every -s/-c/-d site that takes a
+      path or computed name is escaped. rebalance() on a registry-only window just
+      drops its entry. The SIGHUP ignore covers the whole teardown, and none of the
+      cleanup helpers write to the terminal. Two incidental fixes. (1) The TUI command
+      bar (pr_view.handle_command_submitted) ran shlex.split unguarded, after taking
+      the in-flight guard: a typed or queued line with an unbalanced quote ("pr note
+      add pr-1 don''t forget") raised ValueError out of the Textual handler, and a
+      queued pr start/review/qa/merge line also left _inflight_pr_action set. The
+      line is now parsed first and "Error: cannot parse command" is logged; this is
+      the same guard S28 added to run_command (2 tests). (2) wrapper._get_session_tag
+      left PM_SHARE_MODE out of its hash, unlike paths.get_session_tag. In a --global/--group
+      session, whose panes carry PM_SHARE_MODE, plain pm commands therefore missed
+      the session''s pm_root and any pm meta override (both are written under the
+      share-mode tag). They fell through to the cwd walk or the installed pm. The
+      share mode is now mixed in the same way (4 parametrized tests; the pre-fix wrapper
+      gives next_js-eda38cb3 vs paths next_js-a15f821c). Cross-PR notes on pr-bebe64b
+      and pr-e847a7a say this branch fixes both. For pr-bebe64b''s open naming-policy
+      question, sanitize-at-derivation is what S28 chose.'
+    created_at: '2026-11-02T08:53:00Z'
+    last_edited: '2026-11-02T08:53:00Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
@@ -48181,11 +48207,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-27T23:16:14.111057+00:00'
-  updated_at: '2026-10-27T23:16:14.111057+00:00'
+  updated_at: '2026-11-02T08:53:03.752357+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-3eb5b25
+    text: pr-073910f fixes both halves on its branch. (1) The prompt-file path inside
+      "$(cat ...)" is shell-quoted in claude_launcher.build_claude_shell_cmd (QA S23,
+      commit 87b2d1d1). (2) The TUI start/review/auto-merge --transcript paths are
+      shlex.quote'd (QA S28, commit 78b7b2fa), and run_command plus the command bar
+      now log a parse error instead of raising on an unbalanced quote (S28, plus review-loop
+      68bd i1 for the command bar). Once pr-073910f merges, re-check with a workdir/project
+      path containing a space and an apostrophe, and close this PR if nothing is left.
+    created_at: '2026-11-02T08:53:03Z'
+    last_edited: '2026-11-02T08:53:03Z'
 - id: pr-a9803aa
   plan: bugs
   title: 'Bug: push proxy local-path origin rejection is bypassed by git push --repo=<path>'
@@ -52100,11 +52136,25 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-11-01T19:51:29.990480+00:00'
-  updated_at: '2026-11-01T19:51:29.990480+00:00'
+  updated_at: '2026-11-02T08:53:02.270646+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-6328ce5
+    text: 'pr-073910f fixes this on its branch (QA S28, commit 78b7b2fa) by sanitizing
+      at derivation: pm_core/paths.py::tmux_safe_name turns every character tmux rewrites
+      in a session name into "_" (".", ":", "#", "\", control characters, invalid
+      UTF-8, and a "$" before an ASCII letter, "_" or "{"), so the tag pm computes
+      is the name tmux stores. It is applied in get_session_tag, the wrapper''s inline
+      tag copy (pm_core/wrapper.py) and the non-git fallback in cli/helpers._get_session_name_for_cwd;
+      tests/test_awkward_repo_paths.py round-trips every awkward name through a real
+      tmux server. Once pr-073910f merges, re-run this PR''s repro (my.repo: pm session
+      twice, list, kill) and close it if the repro holds. Side effect: a repo whose
+      name has one of those characters gets a new tag, so ~/.pm/sessions/<old tag>/
+      state for it is no longer found (such sessions never worked before).'
+    created_at: '2026-11-02T08:53:02Z'
+    last_edited: '2026-11-02T08:53:02Z'
 - id: pr-d22a090
   plan: bugs
   title: 'Bug: container.wrap_claude_cmd prompt-path rewrite is dead code with a stale
