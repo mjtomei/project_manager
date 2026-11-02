@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T14:57:55.813078+00:00'
+  updated_at: '2026-11-02T15:29:33.000033+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8161,6 +8161,45 @@ prs:
       (README.md; run1-24efdc86/, run2-698cbb97/).'
     created_at: '2026-11-02T14:57:55Z'
     last_edited: '2026-11-02T14:57:55Z'
+  - id: note-54de1b6
+    text: 'QA S44 refiner (2026-11-02, 24efdc86, tmux 3.2a): all 3 stories held live.
+      (1) A window userb opens with C-b c in shared S runs as the OWNER (tmux forks
+      every pane from the server process: id -un = pm, HOME=/home/pm), so "userb pane"
+      lists are owner-uid runs; userb own-uid check = userb plain shell `pm session
+      --global list` in the shared dir -> S (shared) CLIENTS 2 and NO L row (L is
+      on pm default server); `pm session list --global` is rc 2 (no such option);
+      userb list from /tmp = "No pm sessions found." (correct, nothing reachable).
+      (2) Story 3 listers never list C anyway (dir unreadable), so check C from a
+      plain shell in C dir before/after SIGKILL; detach C client first (SIGKILL under
+      an attached client = pre-existing attach traceback). (3) Shell globs on /tmp/pm-sessions/*
+      never expand (dir unreadable): use exact socket paths (pm session tag). (4)
+      pm session list runs ~0.09 s, so a 60 s loop gives ~650 runs; A CLIENTS 1->2
+      within 0.15 s of attach. (5) prefix+M success output only visible in the A client
+      terminal recording/pipe-pane of the harness terminal, warning prints before
+      the table.'
+    created_at: '2026-11-02T15:04:06Z'
+    last_edited: '2026-11-02T15:04:06Z'
+  - id: note-19b0d05
+    text: 'QA S44 (pm session list on a root 1733 /tmp/pm-sessions from every kind
+      of pane) PASS 3/3 on 15eb25b55, no source changes. (1) In A C-b c window: ~
+      and /tmp = A+L with "only the session this command runs in…; run this from a
+      project directory…"; A root/src/deep = "only this project''s session"; PR clone
+      = "this project''s session and the session this command runs in"; $TMUX-only
+      (PM_TMUX_SOCKET unset) = runs-in; prefix+M popup = warning first then A+L rows,
+      closes itself (output frame lasts ~43 ms: the recipe agg render drops it, see
+      recording-fps100.mp4). C hashed socket listed under full name; both S windows
+      (owner + userb client; id -un = pm in both) S CLIENTS 2 (shared); userb own
+      shell `pm session --global list` = only S, no L row; L window = only L, project
+      ending; N = L row + hint only. (2) P1/P2 stale exports outside tmux = runs-in
+      ending, only L; stale D kill rc 1 + unlink. (3) 60 s listers 714/715/706 runs
+      all rc 0 + warning + L; A CLIENTS 1->2->1 on cue; E listed only in its 3 up
+      periods (49 runs each); C never; final C SIGKILL/kill/list as specified; teardown
+      kills rc 0. Incidental pre-existing bug filed: pr-e8408b4 (get_git_root PermissionError
+      when cwd unreadable to the user, e.g. sudo -u userb from a 0700 dir). Trap:
+      never type ahead across sudo (it swallowed the queued prerequisite commands).
+      Captures /pm-captures/scenarios/44 (README.md).'
+    created_at: '2026-11-02T15:29:32Z'
+    last_edited: '2026-11-02T15:29:32Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
@@ -52770,6 +52809,36 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T07:34:43.481544+00:00'
   updated_at: '2026-11-02T07:34:43.481544+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e8408b4
+  plan: bugs
+  title: 'Bug: any pm command crashes with a PermissionError traceback when run from
+    a directory the user cannot stat (get_git_root)'
+  branch: pm/pr-e8408b4-bug-any-pm-command-crashes-with-a-permissionerror-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/git_ops.py get_git_root (same code on origin/master
+    and pr-073910f): the walk up from cwd calls (path / ".git").exists(), and on Python
+    3.10 Path.exists() raises PermissionError when a parent directory is not searchable.
+    Repro (found in QA S44 on pr-073910f, 2026-11-02): as user pm, mkdir -p /scratch/q
+    && chmod 700 /scratch (pm-owned 0700), cd /scratch/q, then `sudo -u userb env
+    HOME=/home/userb PYTHONPATH=<pm src readable by userb> bash` (the shell inherits
+    cwd /scratch/q) and run `pm which` (or any pm command): the wrapper prints a Traceback
+    ending in "PermissionError: [Errno 13] Permission denied: /scratch/q/.git" from
+    wrapper._find_active_override -> paths.get_session_tag -> git_ops.get_git_root,
+    rc 1. Expected: pm treats an unreadable cwd as "not in a git repo" (or says the
+    cwd cannot be read) instead of crashing; after `cd /tmp/<project>` the same commands
+    work. Decide whether a PermissionError should stop the walk (return None) or skip
+    that level; stopping is the conservative choice (skipping could pick up an unrelated
+    ancestor repo). Add a unit test with a chmod-000 parent dir.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T15:27:09.952166+00:00'
+  updated_at: '2026-11-02T15:27:09.952166+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
