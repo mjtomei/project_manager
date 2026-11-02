@@ -1384,6 +1384,18 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   `termedboth` modes reproduce it (review loop 928f i42, R108). S21/S22/S23
   re-check that a finished capture still passes and that a stopped one does
   not.
+- The completion mark's *write* (tmux) and its *clear* (both recipes) → a
+  finished tmux capture still passes step 5, and a stopped recorder is still
+  refused when the previous attempt's mark is on disk. The mark the pane
+  command writes is the file step 5 reads (driven through the recipe's own
+  `new-session` statement with a stub asciinema that runs its `-c` value),
+  both recipes' first block and scaffold clear it, and the
+  `termed`/`termedboth` modes seeded with a stale mark fail with "…did not
+  return" instead of exiting 0 — as does step 5 alone on the target-alive
+  state the in-progress refusal's remedy produces (recorder gone, TUI
+  alive, status 0, claim and marks clear), where the mark is the only
+  handle left (review loop 928f i43, R109). S21/S22/S23
+  re-check that a finished capture still passes.
 
 ## Pass / Fail criteria
 

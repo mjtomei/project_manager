@@ -686,6 +686,34 @@ class TestRecipes:
             f"{name}: the scaffold's own cleanup keeps an earlier run's "
             "manifest.md, so a scaffold-only paste has the same hole")
 
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_capture_section_clears_the_previous_completion_mark(self, name):
+        """The mark must not survive into the next capture.
+
+        The mark is the handle that tells a finished recording from one whose
+        recorder was *stopped* (asciinema catches SIGTERM/SIGHUP, finalizes
+        the cast and exits 0, so the status check passes either way), which
+        makes a leftover one worse than a leftover cast: with the earlier
+        attempt's mark still on disk, a recorder this run stops is accepted on
+        it and the truncated cast is reported as a finished recording —
+        verified in this container with the CLI's preamble and scaffold clears
+        removed: the `termed` case exits 0 with the seeded mark in place, and
+        no pre-existing case here caught it. The step-0/preamble clear is the one a
+        top-down paste runs first, and the scaffold's own clear covers a
+        scaffold-only paste; step 3's restart clear is pinned separately.
+        """
+        text = _recipe_text(name)
+        section = text.split("## Capture", 1)[1].split("## Render to video", 1)[0]
+        first_block = re.findall(r"```[a-z]*\n(.*?)```", section, re.S)[0]
+        assert "recorder.command-done" in _statement(first_block, "rm -f "), (
+            f"{name}: the first capture block keeps an earlier run's "
+            "recorder.command-done, so a recorder this run stops passes on the "
+            "earlier attempt's completion mark")
+        assert "recorder.command-done" in _statement(
+            _scaffold_block(text), "rm -f "), (
+            f"{name}: the scaffold's own cleanup keeps an earlier run's "
+            "recorder.command-done, so a scaffold-only paste has the same hole")
+
     def test_cli_capture_section_clears_a_stale_transcript(self):
         """The `tee` fallback's transcript must not survive into a later run.
 
@@ -1428,6 +1456,62 @@ class TestRecipes:
         assert (cap / "recorder.status").read_text().strip() == "7", (
             "tmux-screen-recording: asciinema's exit status does not reach the "
             "file step 5 reads")
+
+    def test_tmux_scaffold_writes_the_completion_mark(self, tmp_path):
+        """The tmux pane command must write the mark step 5 requires.
+
+        Step 5 refuses a recording whose command did not return, and the mark
+        can only be written by the pane command's ``-c`` value: the pane's
+        shell writes the status *after* asciinema exits, and a recorder that
+        is stopped still exits 0, so nothing else can tell the two apart. The
+        CLI's write is pinned by its own quoting cases; the tmux one had no
+        case at all — dropping the ``printf done > …`` from the ``-c`` value
+        left this whole file green (386 passed, verified), while the recipe
+        then refuses *every* finished recording at step 5. Reproduced live in
+        this container on tmux 3.2a + asciinema 2.1.0: a nominal detach left a
+        complete cast, ``recorder.status`` 0 and no mark, and step 5 exited 1
+        with "the recorder's command did not return".
+
+        Drive the recipe's own statement with ``$TARGET`` set (it is expanded
+        by this shell, as the recipe intends), then run the captured pane
+        command the way tmux runs it — ``sh -c`` — against a stub asciinema
+        that runs its ``-c`` value as the real one does. The mark has to land
+        on disk, and the ``-c`` value has to name the expanded target and the
+        file step 5 reads.
+        """
+        block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+        cap = tmp_path / "cap"
+        cap.mkdir()
+        stmt = (_statement(block, "tmux new-session -d -s pm-recorder")
+                .replace("<capture-dir>", str(cap)))
+        mark = cap / "recorder.command-done"
+        argv_path = tmp_path / "asciinema-argv"
+        # A stub that behaves like asciinema where it matters here: it runs
+        # the `-c` value in a shell, and logs its own argv so the case can
+        # read the value the pane's shell handed it.
+        asci_body = (
+            f'printf "%s\\n" "$@" > "{argv_path}"\n'
+            'cmd=""; prev=""\n'
+            'for a in "$@"; do\n'
+            '  [ "$prev" = -c ] && cmd=$a\n'
+            '  prev=$a\n'
+            'done\n'
+            'sh -c "$cmd"\n'
+            'exit 7\n')
+        _drive_recorder_statement(
+            stmt, tmp_path, {"TARGET": "pm-test"}, asci_body=asci_body)
+        argv = argv_path.read_text().splitlines()
+        recorded = argv[argv.index("-c") + 1]
+        assert recorded.startswith("(tmux attach -t =pm-test); printf done > "), (
+            "tmux-screen-recording: the pane command does not wrap the attach "
+            "in the completion mark step 5 requires (asciinema got "
+            f"{recorded!r})")
+        assert recorded.endswith(str(mark)), (
+            "tmux-screen-recording: the completion mark the pane command "
+            f"writes is not the file step 5 reads (asciinema got {recorded!r})")
+        assert mark.exists(), (
+            "tmux-screen-recording: the completion mark the pane command "
+            "writes never landed, so step 5 refuses every finished recording")
 
     def test_tmux_scaffold_saves_asciinemas_own_stderr(self, tmp_path):
         """The recorder's own error has to survive the pane it was printed in.
@@ -6619,6 +6703,41 @@ class TestCaptureFlowExecution:
             "the stub wrote the completion mark for a stopped recorder, so "
             "the case cannot see the check")
 
+    @pytest.mark.parametrize("name,mode,message", [
+        ("cli-recording.md", "termed", "the recorded command did not return"),
+        ("tmux-screen-recording.md", "termedboth",
+         "the recorder's command did not return"),
+    ])
+    def test_a_stale_completion_mark_is_not_read_as_this_runs(self, name, mode,
+                                                              message,
+                                                              tmp_path):
+        """A previous attempt's mark must not stand in for this run's.
+
+        The mark is the handle that tells a finished recording from one whose
+        recorder was *stopped*, so a leftover one makes the check lie in the
+        one direction that matters: a recorder this run stops leaves a clean
+        status and a non-empty cast, and with the earlier attempt's mark still
+        on disk both stop steps accept the truncated cast as finished.
+        Verified in this container with the CLI's preamble and scaffold clears
+        removed: the ``termed`` case below exits 0 with the seeded mark in
+        place, and no pre-existing case here caught it (the clears were
+        pinned only as text, and not at all for the CLI).
+
+        Seeded with a mark and forced to stop at the recorder, the run has to
+        refuse with the mark message — and the clear has to have removed the
+        file, so a later paste cannot read it either.
+        """
+        raw = _scaffold_block(_recipe_text(name))
+        r, cast = _run_block(raw, mode, tmp_path, target=True,
+                             files={"recorder.command-done": "done\n"})
+        assert r.returncode != 0, (
+            f"{name}: a stopped recorder passed on the previous attempt's "
+            "completion mark: " + r.stderr)
+        assert message in r.stderr, r.stderr
+        assert not (cast.parent / "recorder.command-done").exists(), (
+            f"{name}: the capture did not clear the previous attempt's "
+            "completion mark, so it was read as this run's")
+
     def test_tmux_recording_completes(self, tmp_path):
         r, cast = _run_capture_block(
             "tmux-screen-recording.md", "ok", tmp_path, target=True)
@@ -8326,6 +8445,33 @@ class TestCaptureFlowExecution:
             "a finished recording was reported incomplete because step 5 was "
             "pasted twice: " + r.stderr)
         assert "incomplete" not in r.stderr, r.stderr
+
+    def test_tmux_stop_step_with_a_cleared_claim_still_needs_the_mark(
+            self, tmp_path):
+        """The completion mark decides in the target-alive branch too.
+
+        Step 5's in-progress refusal tells the worker that a claim left by a
+        step 5 killed after its checks is the one state it cannot tell apart,
+        and names the clears that make a re-run the worker's call. That re-run
+        reads the target-alive branch (the TUI is up, the recorder is gone,
+        ``recorder.status`` holds ``0``, the claim is clear), so the mark has
+        to be required *there*, not only in the both-gone branch: a recorder
+        that was stopped leaves a clean status and a non-empty cast, and with
+        no claim and no mark left nothing else in that branch can refuse it.
+        Moving the check into the detach ``else`` (which this state does not
+        reach) leaves it exiting 0 — the truncated cast the refusal was about
+        is accepted on the second paste, and only this case sees it.
+        """
+        r, _cast = _run_block(
+            _stop_block("tmux-screen-recording.md"), "ok", tmp_path,
+            target=True,
+            files={"recording.cast": '{"version": 2}\n',
+                   "transcript.log": "pane output\n",
+                   "recorder.status": "0\n"})
+        assert r.returncode != 0, (
+            "a stopped recorder passed on a clear claim in the target-alive "
+            "branch, where no other handle is left: " + r.stderr)
+        assert "the recorder's command did not return" in r.stderr, r.stderr
 
     def test_tmux_recorder_detached_from_outside_is_not_a_finished_recording(
             self, tmp_path):
