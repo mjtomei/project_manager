@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T11:58:32.316004+00:00'
+  updated_at: '2026-11-02T12:10:51.838563+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -26141,6 +26141,18 @@ prs:
       launch inside the container. Full suite 5593 passed/1 skipped.'
     created_at: '2026-11-02T11:58:32Z'
     last_edited: '2026-11-02T11:58:32Z'
+  - id: note-cfff31a
+    text: 'Review f51f i3 (2026-11-02, bc940b76): NEEDS_WORK, test + doc only, no
+      pm_core change. The route-mount code (ef4f5c19) and the i1/i2 fixes (c5a5dd14,
+      2d1d19fd) are sound. Added test_container_setup_failure_before_create_is_not_a_runtime_problem:
+      the i2 message for a pre-create failure that is neither runtime nor provider
+      (registry_mounts error) is "Could not build the regression session", with no
+      container advice and no create/remove (fails on c5a5dd14). pm/qa/retired-regressions.md
+      no longer calls c1fcecc5 "the last revision with the files present" (master@5b352d16
+      still has them unchanged); it is the revision the removal started from. Full
+      suite 5594 passed/1 skipped.'
+    created_at: '2026-11-02T12:10:51Z'
+    last_edited: '2026-11-02T12:10:51Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
