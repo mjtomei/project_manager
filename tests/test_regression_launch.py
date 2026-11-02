@@ -426,6 +426,29 @@ def test_recipe_copy_failure_leaves_no_run(project, home):
     spies.execvpe.assert_not_called()
 
 
+def test_container_setup_failure_before_create_is_not_a_runtime_problem(
+        project, home):
+    """A failure before any container exists that is neither the runtime
+    nor the provider (here the registry mount listing) reports the error
+    without the container retry advice, releases no container and leaves
+    nothing behind."""
+    result, spies = _run_regression(
+        project, ["demo", "--file-prs"], container_enabled=True,
+        extra_patches=[patch("pm_core.regression_prompts.registry_mounts",
+                             side_effect=PermissionError("pm dir denied"))])
+    assert result.exit_code == 1
+    assert "Could not build the regression session: pm dir denied" \
+        in result.output
+    assert "pm container status" not in result.output
+    assert "pm container disable" not in result.output
+    spies.create.assert_not_called()
+    spies.remove.assert_not_called()
+    spies.execvpe.assert_not_called()
+    assert _qa_workdirs(home) == []
+    assert _run_captures(home) == []
+    assert _clone_overrides(home) == []
+
+
 def test_container_run_fails_closed_when_runtime_unavailable(project, home):
     result, spies = _run_regression(project, ["demo"],
                                     container_enabled=True, runtime_ok=False)

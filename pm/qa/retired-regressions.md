@@ -25,8 +25,10 @@ historical QA evidence and captures are kept.
 
 Every definition is recoverable from revision
 `c1fcecc58b09695602043094b44c8d96ca66bfe0` (master, "Merge pull request #282",
-2026-11-01), the last revision with the files present. The branch that removed
-them had not changed any of them.
+2026-11-01), the master revision the removal started from. Neither the branch
+that removed them nor master changed any of them after that revision (a master
+change would conflict with the removal when it merges), so every later master
+revision before the removal holds the same blobs.
 
 ```
 # one file
