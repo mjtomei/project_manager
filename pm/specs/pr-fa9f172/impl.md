@@ -409,3 +409,12 @@ the routed form and `--fresh` so help is complete.
   command-bar dispatch also refuses a mode the parser accepts but no
   handler implements instead of silently starting a plain run, and the
   unused `textual` parameter was dropped from `qa_mode_lines`.
+
+- Review-loop i9: the motivating failure's other surface. `pm pr qa fresh`
+  (or `loop`) typed on the CLI used to answer `PR 'fresh' not found` — the
+  same discoverability miss one surface over, now that the help documents
+  the mode. `pr_qa` recognises a positional mode and names the command-bar
+  form and TUI key instead of treating it as an id. The `--fresh` option
+  help on `start`/`review`/`signoff` now opens with "Fresh restart:", the
+  wording `command_surface` and the docstring tables already use (C3). A
+  test asserts the positional-mode hint for both modes.

@@ -665,6 +665,29 @@ def test_pr_qa_wrong_status_names_the_next_command(tmp_path):
     assert "pm pr start pr-001" in result.output
 
 
+@pytest.mark.parametrize("mode,key", [("fresh", "z t"), ("loop", "zz t")])
+def test_pr_qa_cli_rejects_a_command_bar_mode_with_a_hint(tmp_path, mode, key):
+    """`pm pr qa fresh` must say the mode is command-bar only.
+
+    The CLI form is diagnostic and has no modes.  Without this hint the mode
+    reads as a missing PR id ("PR 'fresh' not found") — the same
+    discoverability failure this PR fixes, one surface over.
+    """
+    from unittest import mock
+
+    from pm_core.cli import pr as pr_mod
+
+    (tmp_path / "project.yaml").write_text(
+        "project:\n  backend: vanilla\n  base_branch: master\nprs: []\n")
+    with mock.patch.object(pr_mod, "state_root", return_value=tmp_path):
+        result = CliRunner().invoke(pr_mod.pr, ["qa", mode])
+
+    assert result.exit_code == 1, result.output
+    assert "command bar" in result.output
+    assert f"pr qa {mode} <id>" in result.output
+    assert key in result.output
+
+
 # ---------------------------------------------------------------------------
 # Plan-name reconciliation
 # ---------------------------------------------------------------------------

@@ -888,7 +888,8 @@ def pr_spec_approve(pr_id: str):
 @pr.command("start")
 @click.argument("pr_id", default=None, required=False)
 @click.option("--workdir", default=None, help="Custom work directory")
-@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+@click.option("--fresh", is_flag=True, default=False,
+              help="Fresh restart: kill the existing window and start over")
 @click.option("--background", is_flag=True, default=False, hidden=True,
               help="Create tmux window without switching focus (used by auto-start)")
 @click.option("--transcript", default=None, hidden=True,
@@ -1639,7 +1640,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
 
 @pr.command("review")
 @click.argument("pr_id", default=None, required=False)
-@click.option("--fresh", is_flag=True, default=False, help="Kill existing review window and create a new one")
+@click.option("--fresh", is_flag=True, default=False,
+              help="Fresh restart: kill the existing review window and start over")
 @click.option("--background", is_flag=True, default=False, hidden=True,
               help="Create review window without switching focus (used by auto-start)")
 @click.option("--review-loop", is_flag=True, default=False, help="Use review loop prompt (fix/commit/push)")
@@ -1826,7 +1828,8 @@ def pr_signoff_group(ctx):
       pm pr signoff integrate PR_ID     check integration with the latest base
       command bar: pr signoff [--fresh] [PR_ID]     = TUI i
 
-    `--fresh` kills an existing sign-off window and opens a new one.
+    `--fresh` is a fresh restart: it kills an existing sign-off window and
+    opens a new one.
     """
     if ctx.invoked_subcommand is None:
         ctx.invoke(pr_signoff)
@@ -1835,7 +1838,7 @@ def pr_signoff_group(ctx):
 @pr_signoff_group.command("run", hidden=True)
 @click.argument("pr_id", default=None, required=False)
 @click.option("--fresh", is_flag=True, default=False,
-              help="Kill existing sign-off window and create a new one")
+              help="Fresh restart: kill the existing sign-off window and start over")
 @click.option("--background", is_flag=True, default=False, hidden=True,
               help="Create sign-off window without switching focus (auto-sequence)")
 @click.option("--transcript", default=None, hidden=True,
@@ -2869,6 +2872,19 @@ def pr_qa(pr_id: str | None):
                     click.echo(f"  {_pr_display_id(p)}: {p.get('title', '???')}", err=True)
             raise SystemExit(1)
         click.echo(f"Auto-selected {pr_id}")
+
+    if pr_id in ("fresh", "loop"):
+        # `pr qa fresh <id>` is the command-bar spelling; this CLI is
+        # diagnostic only.  Without this, a mode typed on the CLI reads as a
+        # missing PR id ("PR 'fresh' not found") — the discoverability miss
+        # this PR exists to fix, one surface over.
+        key = {"fresh": "z t", "loop": "zz t"}[pr_id]
+        click.echo(
+            f"'{pr_id}' is a QA mode in the TUI command bar, not a CLI "
+            f"argument — the CLI form is diagnostic only and has no modes. "
+            f"Open the TUI command bar (press /) and type "
+            f"'pr qa {pr_id} <id>' (TUI: {key}).", err=True)
+        raise SystemExit(1)
 
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
