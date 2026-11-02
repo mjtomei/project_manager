@@ -39226,7 +39226,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-11-02T03:23:41.740898+00:00'
+  updated_at: '2026-11-02T03:32:49.010014+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40243,6 +40243,46 @@ prs:
       total about 11 min).'
     created_at: '2026-11-02T03:23:41Z'
     last_edited: '2026-11-02T03:23:41Z'
+  - id: note-7985c5f
+    text: 'QA S22 refiner (58b3ece2b): two CLI `pm watcher` runs in one project share
+      the single `watcher` tmux window (pre-existing, same on master): each launch
+      kills the other run''s window. Started in the same second, the first run ends
+      "1 iteration(s), last verdict: KILLED". Its session was killed before writing
+      anything, so its auto-start-i1.jsonl stays a dangling link (finalize skips missing
+      targets). The refined story starts the second watcher about 3 s after the first
+      one''s i1 link resolves (test -e). The first then ends KILLED after 1 iteration
+      with its dir frozen, and the second does 2 READY. The auto-sequence story (IMPL
+      + REVIEW returns) needs a qa.md under pm/specs/<pr>/ and a feature commit on
+      the PR branch; it took ~6 min with 5 s ticks.'
+    created_at: '2026-11-02T03:19:05Z'
+    last_edited: '2026-11-02T03:19:05Z'
+  - id: note-bdb7c86
+    text: 'QA S22 (2026-11-02) PASS, both stories, at f98268a79 (product code = 58b3ece2b),
+      fake-claude, each story its own HOME/TMUX_TMPDIR/PM_TMUX_SOCKET under /scratch/s22,
+      every pm command typed into an asciinema-recorded shell window of the pm session.
+      Captures: /pm-captures/scenarios/22/{story1-auto-sequence/{setup,drive},story2-two-watchers/{setup,w1,w2}}/
+      (cast+mp4+manifest each, checks.txt per story). (1) pm pr auto-sequence, 71
+      ticks 5 s apart: started -> in_review -> qa -> sign_off -> "sign_off: returning
+      to impl" (same tick: Killed existing window / Launched Claude) -> in_review
+      -> qa (incl. "driven elsewhere") -> sign_off -> "sign_off: returning to review
+      (iteration 3)" -> qa -> sign_off -> ready_to_merge, extra tick ready_to_merge;
+      each return exactly once, each sign-off entry a fresh router (3 distinct signoff
+      sids). Run dir: one impl archive entry (pre-return sid) with the canonical on
+      the rework sid; archive/signoff.<sid1> = SIGNOFF_IMPL, archive/signoff.<sid2>
+      = SIGNOFF_REVIEW, canonical signoff -> third sid with SIGNOFF_MERGE + fresh
+      .head; all archive entries links into ~/.claude/projects resolving to 2-line
+      JSONL; review-<pr>-i1/i2/i3 three distinct sids, one PASS each; exactly 3 "transcript:
+      archived" debug-log lines (2 at the IMPL return, 1 at the REVIEW return); pm
+      pr show [sign_off ▲], Integration up_to_date. 37/37 checks. (2) Two pm watcher
+      --max-iterations 2 --wait 0 runs, w2 started 3 s after w1 i1 resolved: shared
+      watcher window (pre-existing) -> "killing old window @4", w1 WARNING pane killed
+      + "1 iteration(s), last verdict: KILLED", w2 2x READY; at w1 exit only watcher-<A>
+      frozen (B i1 still a live link); after both: zero symlinks, A = i1 + archive
+      twin, B = i1, i2 + archive twins, all regular 2-line READY JSONL, sha256 top
+      == archive == native, 1 vs 2 disjoint sessionIds, finalize lines 1 for A at
+      w1 exit and 2 for B at w2 exit. 28/28 checks. No product change.'
+    created_at: '2026-11-02T03:32:48Z'
+    last_edited: '2026-11-02T03:32:48Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
