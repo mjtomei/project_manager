@@ -258,6 +258,13 @@ def test_help_screen_renders_the_whole_command_bar_section():
         # rows this PR lengthened in the keybinding list
         "Watcher prefix: ww list, wf focus, ws start/stop, wr review",
         "Cleanup, then: ys start, yd review, yt QA",
+        # the PR-action rows now carry the same modifier keys as
+        # `pm tui keys` (they had drifted: `d` named only `zz d`, `s`/`g`
+        # named no modifier, and `Y` was missing)
+        "Start selected PR (z s: fresh, S: companion)",
+        "Review (z d: fresh, zz d: loop)",
+        "Merge PR (G: companion pane)",
+        "Cleanup PR workdir",
     ):
         assert tail in text, f"{tail!r} clipped from the ? screen"
 
@@ -415,6 +422,51 @@ def test_command_bar_qa_resolves_a_github_display_id(tmp_path):
         pr_view.handle_command_submitted(app, "pr qa #42")
 
     focus.assert_called_once_with(app, "pr-001")
+    assert not logs, logs
+
+
+def _github_display_id_app(tmp_path, logs, tree):
+    """An app double over a GitHub-backed PR whose display id is `#42`."""
+    from types import SimpleNamespace
+
+    (tmp_path / "project.yaml").write_text(
+        "project:\n  backend: github\n  base_branch: master\n"
+        "prs:\n- id: pr-001\n  title: T\n  status: in_review\n"
+        "  gh_pr_number: 42\n")
+    return SimpleNamespace(
+        _root=tmp_path, _inflight_pr_action=None, _plans_visible=False,
+        log_message=lambda msg, **kw: logs.append(msg),
+        query_one=lambda *a, **k: tree)
+
+
+def test_command_bar_edit_and_review_loop_resolve_a_github_display_id(
+        tmp_path):
+    """Every command-bar branch resolves ids the way the CLI does.
+
+    `pr qa #42` was fixed to accept the display id `pm pr qa` prints for a
+    GitHub PR; `edit` and `review-loop` kept using ``store.get_pr``
+    (internal id only), so the same command failed there.  They now share
+    ``_resolve_command_bar_pr`` and select the resolved internal id.
+    """
+    from unittest import mock
+
+    from pm_core.tui import pane_ops, pr_view, review_loop_ui
+
+    logs = []
+    tree = mock.Mock()
+    app = _github_display_id_app(tmp_path, logs, tree)
+
+    with mock.patch.object(pane_ops, "edit_plan") as edit:
+        pr_view.handle_command_submitted(app, "edit #42")
+    tree.select_pr.assert_called_once_with("pr-001")
+    edit.assert_called_once_with(app)
+    assert not logs, logs
+
+    tree.reset_mock()
+    with mock.patch.object(review_loop_ui, "start_or_stop_loop") as start:
+        pr_view.handle_command_submitted(app, "review-loop #42")
+    tree.select_pr.assert_called_once_with("pr-001")
+    start.assert_called_once_with(app)
     assert not logs, logs
 
 

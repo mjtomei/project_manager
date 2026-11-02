@@ -371,3 +371,13 @@ the routed form and `--fresh` so help is complete.
   itself name `ws` — it points at `pm watcher stop`, which names `ws` —
   because the `ws` chord toggles only the auto-start watcher while
   `start_watcher` accepts any type.
+
+- Review-loop i6: applied the i4 display-id fix to the rest of the command
+  bar. `edit #42` and `review-loop #42` still used `store.get_pr` (internal
+  id only), so the same identifier the CLI accepts (`pr-001`, `42`, `#42`)
+  failed there; all three branches now share `_resolve_command_bar_pr` and
+  select the resolved internal id. The `?` HelpScreen's PR-action rows were
+  brought in line with `pm tui keys`: `s`/`d`/`g` name their `z s`/`z d`/
+  `zz d`/`G` modifiers and `Y` (cleanup workdir) is listed — they had
+  drifted exactly where the two surfaces overlap. The Textual render test
+  asserts those rows.

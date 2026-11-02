@@ -661,6 +661,31 @@ def cleanup_then_action(app, key: str) -> None:
 # Command execution
 # ---------------------------------------------------------------------------
 
+def _resolve_command_bar_pr(app, identifier: str) -> dict | None:
+    """Resolve a command-bar PR identifier to its registry entry.
+
+    Accepts the identifiers the CLI accepts (``pr-001``, ``42``, ``#42``) so
+    a command the CLI prints for a GitHub-backed PR — its display id is
+    ``#N`` — works when pasted into the command bar.  ``store.get_pr``
+    matches only the internal id.  Logs the not-found remedy and returns
+    ``None`` (as it does on a state-load error).
+    """
+    if not app._root:
+        app.log_message("No project root")
+        return None
+    try:
+        data = store.load(app._root)
+    except store.ProjectYamlParseError as e:
+        app.log_message(f"Error: {e}")
+        return None
+    from pm_core.cli.helpers import _resolve_pr_id
+    pr = _resolve_pr_id(data, identifier)
+    if pr is None:
+        app.log_message(f"PR not found: {identifier} — see `pr list` "
+                        f"(TUI: r to refresh)")
+    return pr
+
+
 def handle_command_submitted(app, cmd: str) -> None:
     """Handle commands typed in the command bar."""
     from pm_core.tui.tech_tree import TechTree
@@ -713,16 +738,13 @@ def handle_command_submitted(app, cmd: str) -> None:
         if _rl_pr_id:
             # Resolve the id before retargeting the tree selection so a
             # typo doesn't silently start a loop on the previously
-            # selected PR.  Mirrors the QA branch below.
+            # selected PR, and so `#N` works like the CLI.  Mirrors the QA
+            # branch below.
             if app._root:
-                try:
-                    _rl_data = store.load(app._root)
-                except store.ProjectYamlParseError as e:
-                    app.log_message(f"Error: {e}")
+                _rl_pr = _resolve_command_bar_pr(app, _rl_pr_id)
+                if not _rl_pr:
                     return
-                if not store.get_pr(_rl_data, _rl_pr_id):
-                    app.log_message(f"PR not found: {_rl_pr_id} — see `pr list` (TUI: r to refresh)")
-                    return
+                _rl_pr_id = _rl_pr["id"]
             tree.select_pr(_rl_pr_id)
 
         review_loop_ui.start_or_stop_loop(app)
@@ -743,14 +765,10 @@ def handle_command_submitted(app, cmd: str) -> None:
         if len(parts) >= 2:
             edit_pr_id = parts[1]
             if app._root:
-                try:
-                    edit_data = store.load(app._root)
-                except store.ProjectYamlParseError as e:
-                    app.log_message(f"Error: {e}")
+                edit_pr = _resolve_command_bar_pr(app, edit_pr_id)
+                if not edit_pr:
                     return
-                if not store.get_pr(edit_data, edit_pr_id):
-                    app.log_message(f"PR not found: {edit_pr_id} — see `pr list` (TUI: r to refresh)")
-                    return
+                edit_pr_id = edit_pr["id"]
             tree = app.query_one("#tech-tree", TechTree)
             tree.select_pr(edit_pr_id)
         pane_ops.edit_plan(app)
@@ -794,7 +812,6 @@ def handle_command_submitted(app, cmd: str) -> None:
     #   pr qa [PR_ID] --loop        — same as `pr qa loop`
     if len(parts) >= 2 and parts[0] == "pr" and parts[1] == "qa":
         from pm_core.tui import qa_loop_ui
-        from pm_core import store as _store
         try:
             qa_mode, qa_pr_id = parse_qa_command(parts[2:])
         except ValueError as e:
@@ -815,32 +832,14 @@ def handle_command_submitted(app, cmd: str) -> None:
             app.log_message("No PR specified for QA — select one, or run "
                             "`pr qa <id>` (TUI: t)")
         else:
-            if app._root:
-                try:
-                    qa_data = _store.load(app._root)
-                except _store.ProjectYamlParseError as e:
-                    app.log_message(f"Error: {e}")
-                    qa_data = None
-                if qa_data is not None:
-                    # Resolve the same identifiers the CLI accepts (`pr-001`,
-                    # `42`, `#42`): `pm pr qa` prints the display id, which is
-                    # `#N` for a GitHub-backed PR, and `store.get_pr` matches
-                    # only the internal id.
-                    from pm_core.cli.helpers import _resolve_pr_id
-                    qa_pr = _resolve_pr_id(qa_data, qa_pr_id)
-                    if qa_pr:
-                        if qa_mode == "fresh":
-                            qa_loop_ui.fresh_start_qa(app, qa_pr["id"])
-                        elif qa_mode == "loop":
-                            qa_loop_ui.start_or_stop_qa_loop(app, qa_pr["id"])
-                        else:
-                            qa_loop_ui.focus_or_start_qa(app, qa_pr["id"])
-                    else:
-                        app.log_message(
-                            f"PR not found: {qa_pr_id} — see `pr list` "
-                            f"(TUI: r to refresh)")
-            else:
-                app.log_message("No project root")
+            qa_pr = _resolve_command_bar_pr(app, qa_pr_id)
+            if qa_pr:
+                if qa_mode == "fresh":
+                    qa_loop_ui.fresh_start_qa(app, qa_pr["id"])
+                elif qa_mode == "loop":
+                    qa_loop_ui.start_or_stop_qa_loop(app, qa_pr["id"])
+                else:
+                    qa_loop_ui.focus_or_start_qa(app, qa_pr["id"])
         # QA is handled directly (not via run_command), so clear the guard
         app._inflight_pr_action = None
         if app._plans_visible:
