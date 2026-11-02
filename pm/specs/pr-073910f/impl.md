@@ -4248,3 +4248,33 @@ through `pane_registry._iter_all_panes`, the iterator
 `_respawn_unlisted_tui` already uses.  Residual: a *legacy* session (or a
 user's own view) created before this change with such a character in its
 name still cannot be parsed back; it is not renamed (R6).
+
+**Review loop 1237 i3** (no requirement changes; no code changes; full
+suite 5637 passed / 1 skipped, 435.3 s, log
+`/pm-captures/review-1237-i3/full-suite.log`; the twelve PR-affected test
+files also pass twice in one HOME, 996 each).  Verification pass over i1
+and i2: both hold.  `pane_layout.tui_respawn_window` is the one rule for
+"where a missing TUI goes back" and both callers (the attach's
+`_ensure_tui_running` and the hook's `_respawn_unlisted_tui`) use it;
+`tmux_safe_name` now makes a tag survive `str.splitlines()` (the three
+Unicode line separators) as well as tmux's own rewrites.  The S50 fix's
+lock discipline is sound: the hook takes `tui_respawn_lock` once per
+event, decides the unlisted respawn only while it really holds it, and
+the registry-lock/respawn-lock ordering matches the attach path (respawn
+lock, then registry lock).  No defect found in the reviewed head.
+
+One incidental, pre-existing bug was found and filed as `pr-50e6077`
+(no code change here; it needs one long-name-safe per-session key across
+the registry, pidfile, command queue, TUI history, mobile flag and
+`~/.pm/sessions/<tag>/` together).  A repo directory name near the
+255-byte `NAME_MAX` makes the tag push
+`~/.pm/pane-registry/pm-<tag>.json` past `NAME_MAX`, so `pm session` dies
+with an uncaught `OSError: [Errno 36] File name too long` from
+`pane_registry.locked_read_modify_write` before it creates anything
+(`session.py:931` -> `pane_registry.py:88`).  Reproduced end to end with
+a 240-character directory name in an isolated HOME, and the same crash
+exists on `origin/master` (`session.py:423` -> `pane_registry.py:80`), so
+it is not a regression of this PR: R7 hashes the long *socket* path but
+the other tag-derived artifacts still use the raw tag.
+
+Residual notes unchanged (see 1237 i2).
