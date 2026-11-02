@@ -495,13 +495,26 @@ PROBE_PROMPT = "Reply with exactly: ok"
 
 
 def _probe_shell_cmd(cfg: ProviderConfig, session_id: str, *,
-                     container: bool) -> str:
-    """Tools-disabled one-shot claude call through the route."""
+                     container: bool, env_out: dict[str, str]) -> str:
+    """Tools-disabled one-shot claude call through the route.
+
+    The probe's environment (the route's ``env_vars()`` -- which may carry
+    a key or token, e.g. ANTHROPIC_CUSTOM_HEADERS -- plus launch_env's
+    pins) goes to *env_out*, never into the returned command: that string
+    becomes process arguments (``bash -c``, and for a container the host
+    ``podman exec`` that lasts as long as the probe), which every local
+    user can read (/proc/<pid>/cmdline, ps) and execve auditing records.
+    Like a pane launch's (claude_launcher.build_claude_shell_cmd), it names
+    only the variables the probe unsets.  The caller runs it with
+    *env_out* in the process environment (:func:`live_probe`).
+    """
     prefix, env, exe = launch_parts(cfg, container=container)
     env, unset_vars = launch_env(cfg, env, cfg.model)
-    unset = "".join(f"-u {v} " for v in unset_vars)
-    assigns = " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items())
-    return (f"{prefix}env {unset}{assigns} {exe} -p {shlex.quote(PROBE_PROMPT)}"
+    env_out.update(env)
+    # Only names: unsetting carries no value.
+    unset = ("env " + "".join(f"-u {v} " for v in unset_vars)
+             if unset_vars else "")
+    return (f"{prefix}{unset}{exe} -p {shlex.quote(PROBE_PROMPT)}"
             f" --model {shlex.quote(cfg.model)} --tools '' --output-format json"
             f" --session-id {session_id}")
 
@@ -539,22 +552,30 @@ def live_probe(cfg: ProviderConfig, *, container_name: str | None = None,
     from pm_core.claude_launcher import transcript_path_for
 
     sid = str(uuid.uuid4())
+    # Values reach the probe only through process environments, never an
+    # argv (see _probe_shell_cmd): on the host bash inherits them; for a
+    # container the runtime reads each ``-e NAME`` from its own environment
+    # (as container._run_runtime(env=...) and a pane's build_exec_cmd).
+    env: dict[str, str] = {}
     if container_name:
         from pm_core.container import _CONTAINER_WORKDIR, _get_runtime
         run_cwd = _CONTAINER_WORKDIR
-        inner = _probe_shell_cmd(cfg, sid, container=True)
-        argv = [_get_runtime(), "exec", "-w", run_cwd, container_name,
-                "bash", "-c", inner]
+        inner = _probe_shell_cmd(cfg, sid, container=True, env_out=env)
+        argv = [_get_runtime(), "exec", "-w", run_cwd,
+                *(arg for name in env for arg in ("-e", name)),
+                container_name, "bash", "-c", inner]
         popen_cwd = None
     else:
         run_cwd = cwd or tempfile.mkdtemp(prefix="pm-route-probe-")
-        argv = ["bash", "-c", _probe_shell_cmd(cfg, sid, container=False)]
+        argv = ["bash", "-c",
+                _probe_shell_cmd(cfg, sid, container=False, env_out=env)]
         popen_cwd = run_cwd
     out: dict = {"session_id": sid}
     try:
         r = subprocess.run(argv, cwd=popen_cwd, capture_output=True,
                            text=True, timeout=timeout,
-                           stdin=subprocess.DEVNULL)
+                           stdin=subprocess.DEVNULL,
+                           env={**os.environ, **env})
     except subprocess.TimeoutExpired:
         out.update(ok=False, exit=None, error=f"timed out after {timeout:.0f}s")
         return out
