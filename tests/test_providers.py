@@ -359,6 +359,19 @@ class TestSetDefaultProvider:
             set_default_provider(BUILTIN_CLAUDE)
             assert get_default_provider() == BUILTIN_CLAUDE
 
+    def test_configured_provider_is_accepted_and_saved(self, tmp_path):
+        """The locked existence check must not reject a provider that is
+        there: the success path still writes ``default: <name>``."""
+        path = tmp_path / "providers.yaml"
+        path.write_text("providers:\n"
+                        "  x:\n"
+                        "    type: local\n"
+                        "    api_base: http://localhost:1\n")
+        with patch("pm_core.providers.pm_home", return_value=tmp_path):
+            set_default_provider("x")
+            assert get_default_provider() == "x"
+        assert "default: x" in path.read_text()
+
     def test_existence_check_uses_the_locked_read(self, tmp_path):
         """The re-check must run while the edit lock is held: a name that
         disappears between the CLI's old pre-check and the locked update

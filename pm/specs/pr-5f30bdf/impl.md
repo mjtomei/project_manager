@@ -160,8 +160,12 @@ No **[UNRESOLVED]** ambiguities.
   timeout behaves the same.
 - Lock file exists but is unwritable (e.g. owned by another user) → one
   `Error:` line naming the path, not a traceback.
-- `~/.pm` cannot be created at all (`pm_home()` raises) → `_write_errors`
-  catches the `OSError` even before `providers_lock()` runs.
+- `~/.pm` exists but its lock file or temp file cannot be written → one
+  `Error:` line naming the path, not a traceback.  A *wholly* unwritable
+  `~/.pm` still tracebacks earlier, at import time, in
+  `configure_logger`/`debug_dir` (`pm_core/paths.py`) before any provider
+  code runs: a pre-existing, command-wide defect outside this PR's scope,
+  filed as `pr-78e8ebe`.
 - `save_providers` fails mid-write (disk full, `os.replace` failure) →
   temp is removed, the old file is untouched, `ProvidersWriteError` is
   raised and surfaced as one line.
