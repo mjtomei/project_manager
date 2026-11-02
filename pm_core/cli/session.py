@@ -12,6 +12,7 @@ from pathlib import Path
 
 import click
 
+from pm_core import command_surface
 from pm_core import store, guide
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
@@ -1464,10 +1465,11 @@ def _parse_tui_action(tui_cmd: str) -> tuple[str | None, str | None, bool]:
     """Best-effort: extract (pr_id, picker_action, fresh) from a tui: cmd.
 
     ``fresh`` indicates the action will kill+recreate its target window
-    (review-loop iteration, ``pr qa fresh``, ``pr qa loop``).  The
-    spinner uses this to wait for a window-id transition rather than
-    just window appearance, so a stale-window snapshot doesn't trigger
-    an immediate switch to the about-to-be-killed window.
+    (review-loop iteration; ``pr qa fresh``/``pr qa loop`` in either the
+    positional or the flag spelling).  The spinner uses this to wait for a
+    window-id transition rather than just window appearance, so a
+    stale-window snapshot doesn't trigger an immediate switch to the
+    about-to-be-killed window.
     """
     parts = shlex.split(tui_cmd) if tui_cmd else []
     if not parts:
@@ -1477,12 +1479,16 @@ def _parse_tui_action(tui_cmd: str) -> tuple[str | None, str | None, bool]:
         # Every review-loop iteration recreates the review window.
         return (rest[0] if rest else None), "review-loop", True
     if len(parts) >= 2 and parts[0] == "pr" and parts[1] == "qa":
-        rest = parts[2:]
-        mode = None
-        if rest and rest[0] in ("fresh", "loop"):
-            mode = rest[0]
-            rest = rest[1:]
-        return (rest[0] if rest else None), "qa", mode in ("fresh", "loop")
+        # The command bar accepts the positional and the flag spellings
+        # (`pr qa fresh <id>` / `pr qa <id> --fresh`); parse both so the
+        # spinner waits for the rebuilt window instead of switching to the
+        # stale one that is about to be killed.  Best-effort: a malformed
+        # command is rejected by the TUI, so there is no window to await.
+        try:
+            mode, pr_id = command_surface.parse_qa_command(parts[2:])
+        except ValueError:
+            return None, None, False
+        return pr_id, "qa", mode in command_surface.QA_MODIFIER_MODES
     if parts[0] == "edit":
         return (parts[1] if len(parts) >= 2 else None), "edit", False
     return None, None, False

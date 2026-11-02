@@ -460,3 +460,39 @@ the routed form and `--fresh` so help is complete.
   block; it now sits with that block.
   (f) Two shared-table rows exceeded the ~78-column budget (93 and 87);
   trimmed to 79 and 79 so narrow terminals wrap cleanly.
+
+- Review-loop i12: accuracy of the sweep's own text, and the last of C3.
+  (a) Correction to i11(d): `_consume_z` is *not* limited to `s`/`S`/`d`/`t`
+  — `edit_plan`, `view_plan`, `launch_notes`, `view_log`, `launch_guide`
+  and `launch_claude` read it too (and `launch_meta` consumes it without
+  supporting fresh). The narrowed row hid working chords (`z e`, `z v`,
+  `z n`, `z L`, `z H`, `z c`) and misstated the prefix. Both the `?` screen
+  and `pm tui keys` now say "Prefix: restart the pane instead of focusing
+  it (s S d t e v n L H c; zz d / zz t: loop)", and `pm tui keys` gained
+  the `z` row it never had. Tests assert the row on both surfaces and that
+  the old narrowed wording is gone.
+  (b) `pm pr qa` exits 1 even when the PR is valid (it performs no action).
+  That is the exact signal a driving Claude session reads as failure — the
+  motivating failure mode — so the help now says so, with a test.
+  (c) C3 said the `--fresh` help should say "fresh restart" consistently;
+  `plan add`, `plan breakdown`, `plan review`, `guide` and `cluster
+  explore` still said "Start a fresh session (don't resume)". All five now
+  open with "Fresh restart: start a new session instead of resuming".
+  (d) The CLI's positional-mode hint (`pm pr qa fresh`) and the
+  command-bar's TUI-key lookup hardcoded `("fresh", "loop")` and their
+  keys, duplicating the shared table. Both now derive from
+  `command_surface.QA_MODIFIER_MODES` / `QA_MODE_KEYS` (added there), and
+  the parametrized test reads the table too.
+  (e) The stale-`ux` test only scanned `pm_core/**/*.py`; section D also
+  lists `pm/plans/plan-regression.md` and `pm/docs/literature-review.md`.
+  A second test scans both (allowing the explanatory line that names
+  `plan=ux` *and* `improvements`).
+  (f) C1's flag spellings reached the command bar but not the popup
+  spinner: `pm _popup-cmd` routes any `pr qa …` through the TUI, and
+  `_parse_tui_action` (session.py) only recognised the positional form.
+  So `pr qa <id> --fresh` looked like a plain run and the spinner switched
+  to the stale window the restart was about to kill — the race the
+  `fresh` flag exists to prevent. `parse_qa_command` moved from
+  `tui/pr_view.py` to `command_surface.py` (pure, no TUI deps) and
+  `_parse_tui_action` now uses it; `pr_view` calls the shared copy. Test
+  pins both spellings (and the rejected-command fallback).

@@ -321,6 +321,8 @@ mode: auto-start runs only the explicit targets you add and their
 dependency closures.
 
 Other:
+  z                Prefix: restart the pane instead of focusing it
+                   (s S d t e v n L H c; zz d / zz t: loop)
   r                Refresh / sync
   b                Rebalance panes
   ctrl+r           Restart TUI

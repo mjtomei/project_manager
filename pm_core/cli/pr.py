@@ -2829,6 +2829,9 @@ form to use.  If no pm session is running, start one with `pm session`.
 This CLI command has no --fresh or --loop flag: both are command-bar
 spellings (see the examples below), not CLI options.
 
+It exits 1 even when the PR is valid: it performs no action.  The
+command-bar form it prints is the action.
+
 \b
 QA modes (command bar, and the TUI key that does the same):
 {command_surface.qa_help_table()}
@@ -2874,12 +2877,13 @@ def pr_qa(pr_id: str | None):
             raise SystemExit(1)
         click.echo(f"Auto-selected {pr_id}")
 
-    if pr_id in ("fresh", "loop"):
+    if pr_id in command_surface.QA_MODIFIER_MODES:
         # `pr qa fresh <id>` is the command-bar spelling; this CLI is
         # diagnostic only.  Without this, a mode typed on the CLI reads as a
         # missing PR id ("PR 'fresh' not found") — the discoverability miss
-        # this PR exists to fix, one surface over.
-        key = {"fresh": "z t", "loop": "zz t"}[pr_id]
+        # this PR exists to fix, one surface over.  The mode set and the TUI
+        # key come from the shared table so a new mode is not missed here.
+        key = command_surface.QA_MODE_KEYS[pr_id]
         click.echo(
             f"'{pr_id}' is a QA mode in the TUI command bar, not a CLI "
             f"argument — the CLI form is diagnostic only and has no modes. "

@@ -16,55 +16,10 @@ _log = configure_logger("pm.tui.pr_view")
 # PR command prefixes that require in-flight action guarding
 PR_ACTION_PREFIXES = ("pr start", "pr review", "pr qa", "pr merge")
 
-# QA command-bar modes: positional (`pr qa fresh <id>`) and flag
-# (`pr qa <id> --fresh`) spellings are equivalent.  Kept here (not in the
-# CLI) because `pm pr qa` is diagnostic-only; the command bar is where QA
-# actually starts.  Derived from the shared table so a mode documented in
-# `pm pr qa --help` / `pm tui keys` / the `?` screen is always accepted
-# here (the "run" entry is the plain form, not a modifier).
-_QA_MODES = tuple(
-    mode for mode, *_rest in command_surface.QA_MODES if mode != "run")
-_QA_FLAGS = {f"--{mode}": mode for mode in _QA_MODES}
-
-
-def parse_qa_command(args: list[str]) -> tuple[str | None, str | None]:
-    """Parse ``pr qa`` arguments into ``(mode, pr_id)``.
-
-    Accepts both spellings, anywhere in the argument list::
-
-        pr qa fresh pr-001
-        pr qa pr-001 --fresh
-        pr qa --loop pr-001
-
-    ``mode`` is ``None`` (plain one-shot run), ``"fresh"`` or ``"loop"``.
-    Raises :class:`ValueError` with a corrective message for a conflicting
-    mode or an unknown option — a typo must not silently start the wrong
-    kind of run.
-    """
-    mode: str | None = None
-    pr_id: str | None = None
-    for tok in args:
-        if tok in _QA_FLAGS:
-            candidate = _QA_FLAGS[tok]
-        elif tok in _QA_MODES:
-            candidate = tok
-        elif tok.startswith("-"):
-            raise ValueError(
-                f"unknown QA option {tok!r} — use --fresh or --loop "
-                f"(or the positional forms `fresh` / `loop`)")
-        elif pr_id is None:
-            pr_id = tok
-            continue
-        else:
-            raise ValueError(
-                f"unexpected extra argument {tok!r} — usage: "
-                f"pr qa [fresh|loop] [PR_ID]")
-        if mode is not None and mode != candidate:
-            raise ValueError(
-                f"conflicting QA modes {mode!r} and {candidate!r} — pick "
-                f"one of `fresh` or `loop`")
-        mode = candidate
-    return mode, pr_id
+# QA command-bar modes are parsed by ``command_surface.parse_qa_command``:
+# positional (`pr qa fresh <id>`) and flag (`pr qa <id> --fresh`) spellings
+# are equivalent, and the CLI popup spinner parses the same queued command,
+# so the parser lives in the shared module rather than here.
 
 
 # ---------------------------------------------------------------------------
@@ -818,7 +773,7 @@ def handle_command_submitted(app, cmd: str) -> None:
     if len(parts) >= 2 and parts[0] == "pr" and parts[1] == "qa":
         from pm_core.tui import qa_loop_ui
         try:
-            qa_mode, qa_pr_id = parse_qa_command(parts[2:])
+            qa_mode, qa_pr_id = command_surface.parse_qa_command(parts[2:])
         except ValueError as e:
             # The usage text and any user-supplied token may contain
             # brackets; escape them all or Textual eats them as markup and
@@ -839,9 +794,7 @@ def handle_command_submitted(app, cmd: str) -> None:
             # The TUI key differs per mode too (`t`, `z t`, `zz t`), so read
             # it from the shared table rather than always saying `t`.
             mode_hint = f" {qa_mode}" if qa_mode else ""
-            key = next((keys for mode, _form, keys, _desc
-                        in command_surface.QA_MODES
-                        if mode == (qa_mode or "run")), "t")
+            key = command_surface.QA_MODE_KEYS.get(qa_mode or "run", "t")
             app.log_message(f"No PR specified for QA — select one, or run "
                             f"`pr qa{mode_hint} <id>` (TUI: {key})")
         else:

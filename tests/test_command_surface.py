@@ -25,7 +25,7 @@ from click.testing import CliRunner
 from pm_core import command_surface
 from pm_core.cli import HELP_TEXT, cli
 from pm_core.cli.helpers import _require_plan, _require_pr
-from pm_core.tui.pr_view import parse_qa_command
+from pm_core.command_surface import parse_qa_command
 
 
 # ---------------------------------------------------------------------------
@@ -50,6 +50,17 @@ def test_pr_qa_help_lists_every_command_bar_mode():
 def test_pr_qa_help_points_at_the_single_instruction_interface():
     out = _help("pr", "qa")
     assert "pm qa run" in out
+
+
+def test_pr_qa_help_states_the_always_nonzero_exit():
+    """`pm pr qa` exits 1 even on the valid path — it performs no action.
+
+    A driving Claude session that reads the exit status as failure will
+    retry or work around the command, which is exactly the failure this PR
+    fixes.  The help must say so.
+    """
+    out = " ".join(_help("pr", "qa").split())
+    assert "exits 1 even when the PR is valid" in out
 
 
 def test_pr_qa_help_states_the_cli_has_no_fresh_flag():
@@ -324,6 +335,8 @@ def test_help_screen_renders_the_whole_command_bar_section():
         # rows this PR lengthened in the keybinding list
         "Watcher prefix: ww list, wf focus, ws start/stop, wr review",
         "Cleanup, then: ys start, yd review, yt QA",
+        # z modifies every pane action, not just s/S/d/t
+        "s S d t e v n L H c; zz d / zz t: loop",
         # the PR-action rows now carry the same modifier keys as
         # `pm tui keys` (they had drifted: `d` named only `zz d`, `s`/`g`
         # named no modifier, and `Y` was missing)
@@ -352,7 +365,7 @@ def test_tui_keys_lists_every_binding_the_help_screen_shows():
     """
     out = CliRunner().invoke(cli, ["tui", "keys"]).output
     for binding in ("x", "X", "f", "F", "v", "M", "H", "m", "C", "/",
-                    "ctrl+r", "prefix P", "prefix M", "prefix R"):
+                    "z", "ctrl+r", "prefix P", "prefix M", "prefix R"):
         assert re.search(rf"^\s*{re.escape(binding)}\s{{2,}}\S", out, re.M), (
             f"{binding!r} missing from `pm tui keys`")
 
@@ -369,6 +382,20 @@ def test_tui_keys_documents_prefix_keys_as_prefixes():
     for token in ("Watcher prefix:", "wf focus", "ww list", "wr review"):
         assert token in out
     assert "ys start" in out and "yd review" in out and "yt QA" in out
+
+
+def test_z_prefix_names_every_action_it_modifies():
+    """`z` is not limited to s/S/d/t.
+
+    ``_consume_z`` is also read by ``edit_plan``, ``view_plan``,
+    ``launch_notes``, ``view_log``, ``launch_guide`` and ``launch_claude``,
+    so a row naming only s/S/d/t (as this sweep first wrote it) both hides
+    working chords and misstates the prefix.  ``m`` consumes ``z`` but does
+    not support a fresh restart, so it must not be named.
+    """
+    out = CliRunner().invoke(cli, ["tui", "keys"]).output
+    assert "(s S d t e v n L H c; zz d / zz t: loop)" in out
+    assert "Prefix before s/S/d/t:" not in out
 
 
 def test_tui_keys_documents_enter_as_edit():
@@ -463,6 +490,31 @@ def test_non_github_backend_remedies_name_a_working_command(tmp_path,
 ])
 def test_parse_qa_command_accepts_both_spellings(args, expected):
     assert parse_qa_command(args) == expected
+
+
+@pytest.mark.parametrize("cmd,expected", [
+    ("pr qa fresh pr-001", ("pr-001", "qa", True)),
+    ("pr qa pr-001 --fresh", ("pr-001", "qa", True)),
+    ("pr qa --fresh pr-001", ("pr-001", "qa", True)),
+    ("pr qa loop pr-001", ("pr-001", "qa", True)),
+    ("pr qa pr-001 --loop", ("pr-001", "qa", True)),
+    ("pr qa pr-001", ("pr-001", "qa", False)),
+    # Rejected by the command bar, so there is no window to wait for.
+    ("pr qa --bogus pr-001", (None, None, False)),
+])
+def test_popup_spinner_parses_both_qa_spellings(cmd, expected):
+    """The popup spinner must see the flag spellings as a fresh restart.
+
+    ``pm _popup-cmd`` routes any ``pr qa …`` through the TUI command bar,
+    then ``_wait_for_tui_command`` parses the same text to decide whether
+    to wait for a rebuilt window.  When only the positional spelling was
+    recognised, ``pr qa <id> --fresh`` (which the command bar now accepts)
+    looked like a plain run, so the spinner switched to the stale window
+    the restart was about to kill.
+    """
+    from pm_core.cli.session import _parse_tui_action
+
+    assert _parse_tui_action(cmd) == expected
 
 
 def test_parser_accepts_every_documented_qa_mode():
@@ -752,13 +804,15 @@ def test_pr_qa_wrong_status_names_the_next_command(tmp_path):
     assert "pm pr start pr-001" in result.output
 
 
-@pytest.mark.parametrize("mode,key", [("fresh", "z t"), ("loop", "zz t")])
-def test_pr_qa_cli_rejects_a_command_bar_mode_with_a_hint(tmp_path, mode, key):
+@pytest.mark.parametrize("mode", command_surface.QA_MODIFIER_MODES)
+def test_pr_qa_cli_rejects_a_command_bar_mode_with_a_hint(tmp_path, mode):
     """`pm pr qa fresh` must say the mode is command-bar only.
 
     The CLI form is diagnostic and has no modes.  Without this hint the mode
     reads as a missing PR id ("PR 'fresh' not found") — the same
-    discoverability failure this PR fixes, one surface over.
+    discoverability failure this PR fixes, one surface over.  The mode set
+    and its TUI key are read from the shared table, so a new mode cannot be
+    accepted in the command bar and un-hinted on the CLI.
     """
     from unittest import mock
 
@@ -772,7 +826,7 @@ def test_pr_qa_cli_rejects_a_command_bar_mode_with_a_hint(tmp_path, mode, key):
     assert result.exit_code == 1, result.output
     assert "command bar" in result.output
     assert f"pr qa {mode} <id>" in result.output
-    assert key in result.output
+    assert command_surface.QA_MODE_KEYS[mode] in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -790,6 +844,32 @@ def test_no_stale_ux_plan_name_in_code():
             if "tui-ux" in context:
                 continue
             offenders.append(f"{path.relative_to(root)}:{line}: {context.strip()}")
+    assert not offenders, "stale plan=ux references:\n" + "\n".join(offenders)
+
+
+def test_no_stale_ux_plan_name_in_docs():
+    """The plan rename reaches the docs too, not only the code.
+
+    The spec's section D lists ``pm/plans/plan-regression.md`` and
+    ``pm/docs/literature-review.md`` alongside the prompt/watcher modules;
+    the code-only scan above would not catch a regression in either.  A
+    line that also names ``improvements`` is the explanatory pairing ("the
+    stale id is ``plan=ux``, the real plan is ``improvements``") and is
+    allowed.  Historical records (``pm/specs/**``, adversarial reviews) are
+    deliberately out of scope.
+    """
+    root = Path(__file__).resolve().parents[1]
+    paths = [root / "pm" / "plans" / "plan-regression.md",
+             root / "pm" / "docs" / "literature-review.md"]
+    offenders = []
+    for path in paths:
+        for lineno, line in enumerate(
+                path.read_text(errors="ignore").splitlines(), 1):
+            if "tui-ux" in line or "improvements" in line:
+                continue
+            if re.search(r"\bux\b", line):
+                offenders.append(f"{path.relative_to(root)}:{lineno}: "
+                                 f"{line.strip()}")
     assert not offenders, "stale plan=ux references:\n" + "\n".join(offenders)
 
 

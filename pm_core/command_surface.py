@@ -29,6 +29,63 @@ QA_MODES: tuple[tuple[str, str, str, str], ...] = (
      "start or stop the repeating QA loop"),
 )
 
+# ``run`` is the plain form, not a modifier: the command bar does not accept
+# a ``run`` token (nor ``--run``).  Both views are derived from ``QA_MODES``
+# so a new mode reaches the command-bar parser, the CLI's positional-mode
+# hint and the TUI-key lookup without a second list to drift.
+QA_MODIFIER_MODES: tuple[str, ...] = tuple(
+    mode for mode, *_rest in QA_MODES if mode != "run")
+QA_MODE_KEYS: dict[str, str] = {
+    mode: keys for mode, _form, keys, _desc in QA_MODES}
+_QA_FLAGS: dict[str, str] = {
+    f"--{mode}": mode for mode in QA_MODIFIER_MODES}
+
+
+def parse_qa_command(args: list[str]) -> tuple[str | None, str | None]:
+    """Parse ``pr qa`` arguments into ``(mode, pr_id)``.
+
+    Accepts both spellings, anywhere in the argument list::
+
+        pr qa fresh pr-001
+        pr qa pr-001 --fresh
+        pr qa --loop pr-001
+
+    ``mode`` is ``None`` (plain one-shot run), ``"fresh"`` or ``"loop"``.
+    Raises :class:`ValueError` with a corrective message for a conflicting
+    mode or an unknown option — a typo must not silently start the wrong
+    kind of run.
+
+    Lives here, not in the TUI, because the CLI's popup spinner parses the
+    same queued command to decide whether to wait for a rebuilt window
+    (``fresh``/``loop`` kill and recreate it).  Both surfaces therefore
+    accept exactly the modes the shared table documents.
+    """
+    mode: str | None = None
+    pr_id: str | None = None
+    for tok in args:
+        if tok in _QA_FLAGS:
+            candidate = _QA_FLAGS[tok]
+        elif tok in QA_MODIFIER_MODES:
+            candidate = tok
+        elif tok.startswith("-"):
+            raise ValueError(
+                f"unknown QA option {tok!r} — use --fresh or --loop "
+                f"(or the positional forms `fresh` / `loop`)")
+        elif pr_id is None:
+            pr_id = tok
+            continue
+        else:
+            raise ValueError(
+                f"unexpected extra argument {tok!r} — usage: "
+                f"pr qa [fresh|loop] [PR_ID]")
+        if mode is not None and mode != candidate:
+            raise ValueError(
+                f"conflicting QA modes {mode!r} and {candidate!r} — pick "
+                f"one of `fresh` or `loop`")
+        mode = candidate
+    return mode, pr_id
+
+
 # The command bar accepts either spelling for a QA mode, anywhere in the
 # argument list.  Rendered next to the QA rows so `pm pr qa --help`,
 # `pm tui keys` and the `?` HelpScreen all document the flag forms (the

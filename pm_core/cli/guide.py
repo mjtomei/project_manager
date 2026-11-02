@@ -33,7 +33,7 @@ def _in_pm_tmux_session() -> bool:
 
 
 @cli.command("guide")
-@click.option("--fresh", is_flag=True, default=False, help="Start a fresh session (don't resume)")
+@click.option("--fresh", is_flag=True, default=False, help="Fresh restart: start a new session instead of resuming")
 def guide(fresh):
     """Guided workflow — launches setup or assist depending on project state."""
     _run_guide(fresh=fresh)
