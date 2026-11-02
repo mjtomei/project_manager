@@ -3021,8 +3021,9 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
 
     There is no --fresh option: there is no session to restart, so each run
     re-evaluates the sign-off gate against the current PR HEAD.  A refusal
-    invalidates the approval and returns the PR to sign-off — re-run sign-off
-    (`pm pr signoff --fresh <id>`, TUI: i), then merge again.  If the merge is
+    invalidates the approval and returns the PR to sign-off — run a fresh
+    sign-off (`pm pr signoff --fresh <id>`), then merge again.  `i` in the
+    TUI opens the router; there is no fresh-restart key.  If the merge is
     already in the base, `--no-signoff-check` finalizes it.
     """
     if resolve_window is None:

@@ -13,6 +13,14 @@ absent from ``pm pr qa --help``):
 blocks (their prose differs), and the same forms appear in their docstrings
 — update those next to this table.
 
+It also hosts :func:`escape_markup`, the shared Textual markup escaper.
+It lives here because the command-bar remedies and the log lines they
+render are part of this surface, and several TUI modules already import
+this module; it has no dependencies, so it costs nothing (rich's and
+textual's own ``escape`` only escape a bracket that opens a *recognised*
+tag, which swallowed ``[PR_ID]`` in exactly the corrective text added
+here).
+
 This module must not import from :mod:`pm_core.cli` or :mod:`pm_core.tui`:
 both sides import it.
 """

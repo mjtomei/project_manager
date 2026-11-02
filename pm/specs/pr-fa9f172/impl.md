@@ -559,3 +559,36 @@ the routed form and `--fresh` so help is complete.
   path. Tests cover the no-TUI IPC message, the `qa debug` message, the
   skip_qa inference, both prerequisite wordings, and the valid `pm pr qa`
   path (command-bar form + TUI keys + exit 1).
+
+- Review-loop i17: the last context-sensitive help rows, and the guard
+  that was supposed to catch this class of drift. (a) The `?` screen's
+  "Review Loop" / "QA Loop" sections (`zz d` / `zz t`) and its `z` prefix
+  row were rendered in the plans and QA views, where `check_action` blocks
+  the underlying tree actions (`review_pr` / `start_qa_on_pr`) — and in the
+  QA view `d` is intercepted by `QAPane` as "debug item", so `zz d` there
+  did the *wrong* thing, not nothing. Both are now tree-view only, like
+  the other tree-only rows, with the negative-render test extended.
+  (b) `pm pr merge --help` attached "(TUI: i)" to `pm pr signoff --fresh`,
+  implying `i` performs a fresh restart; the sign-off group help says
+  explicitly that no TUI key does. The sentence now names `i` as the
+  router and says there is no fresh-restart key. (c) The stale-help guard
+  in `test_help_text_only_names_real_commands` treated a token as a
+  command name only when `isalpha()` — so every hyphenated command
+  (`auto-sequence`, `fake-claude`, `spec-approve`, `build-base`, …) was
+  silently skipped, and a rename would have passed. Any token that is not
+  a placeholder (`<x>` / `[x]`), a flag (`--x`) or the capitalized
+  description must now resolve. (d) Added a dispatch test for the command
+  bar's QA branch: `pr qa fresh <id>`, `pr qa <id> --fresh` and
+  `pr qa --fresh <id>` must all reach `fresh_start_qa`, and the `loop`
+  spellings `start_or_stop_qa_loop`; the parser-equivalence tests alone
+  did not pin the handler table.
+
+  Observed while checking the `z` row, deliberately *not* changed here:
+  the `z` prefix has no cancel timer (unlike `w` and `y`, which clear
+  after 2 s), so a `z` that no action consumes stays armed across
+  navigation and turns a later `s`/`d`/`t`/`e`/… into a destructive fresh
+  restart; `i` (sign-off) does not consume `z` at all. That is pre-existing
+  interaction behaviour, not part of this help/error sweep, and changing
+  it (adding a timer, or clearing `z` on unrelated keys) is a UX decision
+  with its own QA — worth a separate bug PR rather than a drive-by change
+  in a docs-focused review.

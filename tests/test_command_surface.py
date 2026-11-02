@@ -226,15 +226,17 @@ def test_help_text_only_names_real_commands():
                     f"{stripped!r}")
                 resolved.extend(parts)
                 cmd = cmd.commands[parts[0]]
-            else:
-                # The path may stop at an argument placeholder, a flag, or
-                # the capitalized description.  A lowercase word is a command
-                # name that does not exist.
-                is_stale = (parts[0][0] not in "<[-" and parts[0].isalpha()
-                            and parts[0].islower())
-                assert not is_stale, \
-                    f"HELP_TEXT names an unknown command: {stripped!r}"
+                continue
+            # The path may stop at an argument placeholder (`<x>`, `[x]`), a
+            # flag (`--x`), or the capitalized description.  Anything else is
+            # a command name and must have resolved above.  Checking the
+            # first character (not ``isalpha()``) covers hyphenated names
+            # such as ``auto-sequence`` / ``fake-claude`` / ``spec-approve``,
+            # which a lowercase-only test silently skipped.
+            if parts[0][0] in "<[-" or parts[0][0].isupper():
                 break
+            raise AssertionError(
+                f"HELP_TEXT names an unknown command: {stripped!r}")
         assert resolved, f"HELP_TEXT names an unknown command: {stripped!r}"
 
 
@@ -360,6 +362,14 @@ _TREE_ONLY_HELP_ROWS = (
     "Launch Claude session",
     "Start PR with companion pane",
     "Merge with companion pane",
+    # The loop chords run the same tree-view actions (`review_pr` /
+    # `start_qa_on_pr`).  In the QA view `d` is intercepted as "debug item",
+    # so `zz d` there debugs instead of starting a loop.
+    "Start loop",
+    "Start QA loop",
+    # `z` modifies those same pane actions; in the alternate views most are
+    # blocked or intercepted by the focused pane.
+    "Prefix: restart the pane",
 )
 
 
@@ -378,9 +388,11 @@ def test_help_screen_omits_actions_blocked_in_that_view(kwargs, kept):
 
     `check_action` blocks `t` (start_qa_on_pr), `S`/`G`
     (start/merge companion) and `c` (launch_claude) in both the plans and
-    QA views, so a context-sensitive help screen that still lists them
-    sends the operator to a key that does nothing.  Only `c` was guarded
-    before (and only for the plans view).
+    QA views, and the loop chords (`zz d` / `zz t`) drive the same blocked
+    tree actions — in the QA view `d` is even intercepted as "debug item".
+    A context-sensitive help screen that still lists them sends the
+    operator to a key that does nothing (or, for `zz d` in QA, the wrong
+    thing).  Only `c` was guarded before (and only for the plans view).
     """
     text = _render_help_screen(**kwargs)
     for blocked in _TREE_ONLY_HELP_ROWS:
@@ -738,6 +750,46 @@ def test_command_bar_qa_no_selection_names_the_requested_mode():
     # The TUI key must match the mode too: `t` is the plain run, `z t` is
     # the fresh restart the user asked for.
     assert "TUI: z t" in logs[-1]
+
+
+@pytest.mark.parametrize("cmd,handler", [
+    ("pr qa pr-001", "focus_or_start_qa"),
+    ("pr qa fresh pr-001", "fresh_start_qa"),
+    ("pr qa pr-001 --fresh", "fresh_start_qa"),
+    ("pr qa --fresh pr-001", "fresh_start_qa"),
+    ("pr qa loop pr-001", "start_or_stop_qa_loop"),
+    ("pr qa pr-001 --loop", "start_or_stop_qa_loop"),
+])
+def test_command_bar_qa_dispatches_each_mode(cmd, handler):
+    """The two spellings must reach the same handler, not only the parser.
+
+    ``parse_qa_command`` equivalence is asserted above; this pins the
+    dispatch table, so a new spelling cannot be accepted and then fall
+    through to a plain run (which would leave a stale window for `fresh`).
+    """
+    from types import SimpleNamespace
+    from unittest import mock
+
+    from pm_core.tui import pr_view, qa_loop_ui
+
+    logs = []
+    tree = mock.Mock()
+    tree.selected_pr_id = None
+    app = SimpleNamespace(
+        _root=Path("/nonexistent"), _inflight_pr_action=None,
+        _plans_visible=False,
+        log_message=lambda msg, **kw: logs.append(msg),
+        query_one=lambda *a, **k: tree)
+
+    with mock.patch.object(pr_view, "_resolve_command_bar_pr",
+                           return_value={"id": "pr-001"}), \
+            mock.patch.object(qa_loop_ui, handler) as dispatched:
+        pr_view.handle_command_submitted(app, cmd)
+
+    dispatched.assert_called_once_with(app, "pr-001")
+    assert not logs, logs
+    # QA is handled directly, so the in-flight guard must be released.
+    assert app._inflight_pr_action is None
 
 
 def _github_display_id_app(tmp_path, logs, tree):

@@ -289,7 +289,12 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]S[/]  Start PR with companion pane", classes="help-row")
                 yield Label("  [bold]G[/]  Merge with companion pane", classes="help-row")
             yield Label("Other", classes="help-section")
-            yield Label("  [bold]z[/]  Prefix: restart the pane instead of focusing it (s S d t e v n L H c; zz d / zz t: loop)", classes="help-row")
+            # `z` modifies the tree-view pane actions; in the plans and QA
+            # views `e`/`d` are intercepted by the focused pane (edit item,
+            # debug item) and the rest are blocked by `check_action`, so the
+            # chord would not restart the pane it names.
+            if not (self._in_plans or self._in_qa):
+                yield Label("  [bold]z[/]  Prefix: restart the pane instead of focusing it (s S d t e v n L H c; zz d / zz t: loop)", classes="help-row")
             yield Label("  [bold]r[/]  Refresh / sync with GitHub", classes="help-row")
             yield Label("  [bold]R[/]  Reload state from disk (no sync)", classes="help-row")
             yield Label("  [bold]C[/]  Show shared connect command", classes="help-row")
@@ -300,12 +305,17 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]prefix P[/]  PR action picker popup (q/Esc to quit)", classes="help-row")
             yield Label("  [bold]prefix M[/]  pm command runner popup (Ctrl+C to quit)", classes="help-row")
             yield Label("  [bold]prefix R[/]  Rebalance panes", classes="help-row")
-            yield Label("Review Loop", classes="help-section")
-            yield Label("  [bold]zz d[/]  Start loop", classes="help-row")
-            yield Label("  [bold]z d[/]   Kill loop, fresh review", classes="help-row")
-            yield Label("QA Loop", classes="help-section")
-            yield Label("  [bold]zz t[/]  Start QA loop", classes="help-row")
-            yield Label("  [bold]z t[/]   Fresh start QA", classes="help-row")
+            # The loop keys run the tree-view PR actions (`review_pr` /
+            # `start_qa_on_pr`), which `check_action` blocks in the plans and
+            # QA views; in the QA view `d` is even intercepted as "debug
+            # item", so `zz d` would debug instead of starting a loop.
+            if not (self._in_plans or self._in_qa):
+                yield Label("Review Loop", classes="help-section")
+                yield Label("  [bold]zz d[/]  Start loop", classes="help-row")
+                yield Label("  [bold]z d[/]   Kill loop, fresh review", classes="help-row")
+                yield Label("QA Loop", classes="help-section")
+                yield Label("  [bold]zz t[/]  Start QA loop", classes="help-row")
+                yield Label("  [bold]z t[/]   Fresh start QA", classes="help-row")
             yield Label("Command Bar", classes="help-section")
             yield Label("  [bold]/[/]  Open the command bar (type help there for this screen)",
                         classes="help-row")
