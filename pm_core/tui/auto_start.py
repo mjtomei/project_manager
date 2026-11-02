@@ -1670,13 +1670,12 @@ def _adopt_return_review(app, pr: dict) -> bool:
     # The adopted session becomes the new loop's iteration 1 in the session
     # ledger (no link, no copy): the loop's restart handoff then finds it as
     # its own attempt and polls it instead of launching over it.
-    prior = session_log.by_session(pr_id, sid)
     try:
         session_log.adopt(
             session_log.SessionLaunch(subject=pr_id, phase="review",
                                       run_id=run_id, loop_id=state.loop_id,
                                       iteration=1),
-            sid, session_log.log_path(prior) if prior else transcript)
+            sid, session_log.log_of(pr_id, sid) or transcript)
     except (OSError, ValueError) as e:
         _log.warning("auto_start: cannot adopt review window of %s: %s",
                      pr_id, e)

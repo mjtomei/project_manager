@@ -129,11 +129,10 @@ def watcher_cmd(ctx, iteration: int | None, loop_id: str | None,
 
     if iteration is not None:
         # Internal mode: create a single tmux window for this iteration
-        from pm_core.session_log import run_id_from_legacy_path
+        from pm_core.session_log import launch_run_id
         _create_watcher_window(iteration, loop_id or "",
                                session_id=session_id,
-                               run_id=(run_id or (run_id_from_legacy_path(
-                                   transcript) if transcript else "")),
+                               run_id=launch_run_id(run_id, transcript),
                                auto_start_targets=list(auto_start_targets),
                                meta_pm_root=meta_pm_root,
                                watcher_type=watcher_type)

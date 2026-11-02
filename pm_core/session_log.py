@@ -408,6 +408,19 @@ def run_id_from_legacy_path(path: str | Path) -> str:
     return p.parent.name
 
 
+def launch_run_id(run_id: str | None, legacy_transcript: str | None) -> str:
+    """The driver run of a CLI launch: ``--run-id``, else the run a
+    deprecated ``--transcript`` path names (an old-code parent mid-upgrade).
+    Nothing is ever written at that path."""
+    if run_id:
+        return run_id
+    if legacy_transcript:
+        _log.info("deprecated --transcript %s: run id only, no file written",
+                  legacy_transcript)
+        return run_id_from_legacy_path(legacy_transcript)
+    return ""
+
+
 def legacy_dir(root: Path, run_id: str, subject: str) -> Path | None:
     from pm_core.autostart_state import valid_run_id
     if root is None or not valid_run_id(run_id):

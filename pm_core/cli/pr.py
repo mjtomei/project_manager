@@ -32,7 +32,7 @@ from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_s
 # The CLI auto-sequence driver's run id in the session ledger (its own
 # driver scope, distinct from the TUI's runs).
 from pm_core.session_log import (
-    AUTO_SEQUENCE_RUN as _AUTO_SEQ_RUN, SessionLaunch, run_id_from_legacy_path,
+    AUTO_SEQUENCE_RUN as _AUTO_SEQ_RUN, SessionLaunch, launch_run_id,
 )
 
 from pm_core.cli import cli
@@ -1250,7 +1250,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool,
             cmd = build_claude_shell_cmd(prompt=prompt,
                                          launch=SessionLaunch(
                                              subject=pr_id, phase="impl",
-                                             run_id=_launch_run_id(
+                                             run_id=launch_run_id(
                                                  run_id, transcript)),
                                          cwd=_claude_cwd,
                                          write_dir=_claude_write_dir,
@@ -1825,21 +1825,8 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
                               review_attempt))
 
 
-def _launch_run_id(run_id: str | None, transcript: str | None) -> str:
-    """The driver run of a launch: ``--run-id``, else the run a deprecated
-    ``--transcript`` path names (an old-code parent mid-upgrade).  Nothing is
-    ever written at that path."""
-    if run_id:
-        return run_id
-    if transcript:
-        _log.info("deprecated --transcript %s: run id only, no file written",
-                  transcript)
-        return run_id_from_legacy_path(transcript)
-    return ""
-
-
 def _review_launch_identity(run_id, transcript, session_id, attempt) -> dict:
-    return {"run_id": _launch_run_id(run_id, transcript),
+    return {"run_id": launch_run_id(run_id, transcript),
             "session_id": session_id or None, "attempt": attempt}
 
 
@@ -1955,7 +1942,7 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
     try:
         signoff_mod.launch_signoff_window(
             data, pr_entry, fresh=fresh, background=background,
-            run_id=_launch_run_id(run_id, transcript))
+            run_id=launch_run_id(run_id, transcript))
     except ContainerError as e:
         # Like impl/review: the TUI's sign-off driver discards stdout and
         # shows a failed launch's last stderr line, so a setup remedy
@@ -2109,8 +2096,7 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool):
         raise SystemExit(1)
 
 
-def _finalize_merge(root, pr_entry: dict, pr_id: str,
-                    run_id: str | None = None) -> None:
+def _finalize_merge(root, pr_entry: dict, pr_id: str) -> None:
     """Mark PR as merged, kill tmux windows, and show newly ready PRs."""
     def apply(data):
         pr = store.get_pr(data, pr_id)
@@ -2192,6 +2178,20 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
 
     pr_id = pr_entry["id"]
     display_id = _pr_display_id(pr_entry)
+    window_name = f"merge-{display_id}"
+
+    # No-op if a merge window is already running for this PR.  Checked
+    # before the command is built: building records the launch's session,
+    # and a session that never runs would then be this run's current merge
+    # session, so the live window's pane would no longer be tracked.
+    existing = tmux_mod.find_window_by_name(pm_session, window_name)
+    if existing:
+        if background:
+            click.echo(f"Merge window '{window_name}' already exists (background mode, no-op)")
+            return
+        tmux_mod.select_window(pm_session, existing["id"])
+        click.echo(f"Switched to existing merge window '{window_name}'")
+        return
 
     # Resolve model/provider for merge session
     from pm_core.model_config import resolve_model_and_provider
@@ -2204,6 +2204,8 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     merge_prompt = prompt_gen.generate_merge_prompt(
         data, pr_id, error_output, session_name=pm_session)
     env: dict[str, str] = {}
+    # Runs on the host — it updates the main repo checkout, which the
+    # branch-scoped container push proxy is not set up for.
     claude_cmd = build_claude_shell_cmd(prompt=merge_prompt,
                                          launch=SessionLaunch(
                                              subject=pr_id, phase="merge",
@@ -2215,19 +2217,6 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
                                          session_tag=pm_session.removeprefix("pm-"),
                                          session_type="merge",
                                          env_out=env)
-    # Runs on the host — it updates the main repo checkout, which the
-    # branch-scoped container push proxy is not set up for.
-    window_name = f"merge-{display_id}"
-
-    # No-op if a merge window is already running for this PR
-    existing = tmux_mod.find_window_by_name(pm_session, window_name)
-    if existing:
-        if background:
-            click.echo(f"Merge window '{window_name}' already exists (background mode, no-op)")
-            return
-        tmux_mod.select_window(pm_session, existing["id"])
-        click.echo(f"Switched to existing merge window '{window_name}'")
-        return
 
     try:
         if use_companion:
@@ -2380,8 +2369,8 @@ def _ref(cwd, ref: str) -> str | None:
     return (r.stdout.strip() or None) if r.returncode == 0 else None
 
 
-def _after_publish(root: Path, data: dict, pr_entry: dict, run_id) -> None:
-    _finalize_merge(root, pr_entry, pr_entry["id"], run_id=run_id)
+def _after_publish(root: Path, data: dict, pr_entry: dict) -> None:
+    _finalize_merge(root, pr_entry, pr_entry["id"])
     # Restart TUI when managing the project_manager repo itself, so it
     # picks up the latest pm code.
     repo = data.get("project", {}).get("repo", "")
@@ -2437,7 +2426,7 @@ def _publish_approved(data: dict, root: Path, pr_entry: dict,
             resolve_window=resolve_window, background=background,
             run_id=run_id, companion=companion)
     elif backend_name == "local":
-        _after_publish(root, data, pr_entry, run_id)
+        _after_publish(root, data, pr_entry)
     else:
         _sync_main_repo_and_finalize(data, root, pr_entry, base_branch,
                                      resolve_window=resolve_window,
@@ -2500,7 +2489,7 @@ def _sync_main_repo_and_finalize(data: dict, root: Path, pr_entry: dict,
     if _pull_after_merge(data, pr_entry, repo_dir, base_branch,
                          resolve_window=resolve_window, background=background,
                          run_id=run_id, companion=companion):
-        _after_publish(root, data, pr_entry, run_id)
+        _after_publish(root, data, pr_entry)
     elif not resolve_window:
         raise SystemExit(1)
 
@@ -2795,7 +2784,7 @@ def _recover_completed_merge(data: dict, root: Path, pr_entry: dict,
         raise SystemExit(1)
     click.echo(f"PR {pr_id} is already in {base_branch}; recovering.")
     if backend_name == "local":
-        _after_publish(root, data, pr_entry, run_id)
+        _after_publish(root, data, pr_entry)
         return
     if backend_name == "github":
         # A merge done on GitHub (by someone else) is checked against the
@@ -2918,7 +2907,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     """
     if resolve_window is None:
         resolve_window = _resolve_window_default()
-    run_id = _launch_run_id(run_id, transcript)
+    run_id = launch_run_id(run_id, transcript)
     root = state_root()
     data = store.load(root)
 

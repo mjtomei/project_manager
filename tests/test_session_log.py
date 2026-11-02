@@ -300,8 +300,9 @@ def test_deprecated_transcript_option_only_names_the_run(tmp_path):
     child derives the run from it and writes nothing there."""
     from pm_core.cli import pr as pr_mod
     legacy = tmp_path / "pm" / "transcripts" / "autostart-a" / "impl-x.jsonl"
-    assert pr_mod._launch_run_id("", str(legacy)) == "autostart-a"
-    assert pr_mod._launch_run_id("explicit", str(legacy)) == "explicit"
+    assert session_log.launch_run_id("", str(legacy)) == "autostart-a"
+    assert session_log.launch_run_id("explicit", str(legacy)) == "explicit"
+    assert session_log.launch_run_id("", None) == ""
     assert pr_mod._review_launch_identity("", str(legacy), None, 2) == \
         {"run_id": "autostart-a", "session_id": None, "attempt": 2}
     assert not legacy.parent.exists()

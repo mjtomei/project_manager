@@ -525,7 +525,7 @@ class TestPullAfterMerge:
         data = {"project": {"repo": repo}}
         with mock.patch.object(pr_mod, "_finalize_merge") as fin, \
              mock.patch.object(pr_mod, "trigger_tui_restart") as rs:
-            pr_mod._after_publish(tmp_path, data, {"id": "pr-001"}, None)
+            pr_mod._after_publish(tmp_path, data, {"id": "pr-001"})
         fin.assert_called_once()
         assert rs.called is restarts
 

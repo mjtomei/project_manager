@@ -110,8 +110,9 @@ archived or deleted; native retention governs history.
 - Hidden legacy `--transcript PATH` stays accepted for one transition (an
   old-code TUI that has not re-exec'd yet may still spawn a new-code child):
   it is only parsed to derive the run id (`<run>` = parent dir name;
-  `.../auto-sequence/<pr>/...` → `auto-sequence`). **Nothing is written at
-  PATH.** The old parent then fails to read a symlink and treats the attempt
+  `.../auto-sequence/<pr>/...` → `auto-sequence`; one helper,
+  `session_log.launch_run_id`, shared by `pm pr` and `pm watcher`). **Nothing
+  is written at PATH.** The old parent then fails to read a symlink and treats the attempt
   like any failed/unknown launch; after the merge restart the new TUI finds
   the launch in the ledger (see restart adoption below).
 
@@ -226,7 +227,11 @@ watcher-review "Per-test transcripts" dir point at these commands instead).
 2. A record is registered when the command is built (before the window
    exists). A launch that fails afterwards leaves a record whose log never
    appears: `missing`, never a verdict. Collectors that pre-generate a sid
-   only trust records with *their* sid.
+   only trust records with *their* sid. Producers take their existing-window
+   fast path *before* building the command (impl, review, sign-off, merge),
+   so a no-op launch records nothing — an unlaunched session would otherwise
+   become the run's current session of that phase and the live window's pane
+   would stop being tracked (`tests/test_session_launch_producers.py`).
 3. Appends are atomic per line (single `write` under `LOCK_EX`); readers
    tolerate a torn/garbled last line by skipping unparsable lines.
 4. Exact-session reads re-read the native file every poll (appended turns
