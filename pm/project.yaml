@@ -51473,7 +51473,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-28T02:46:55.100157+00:00'
-  updated_at: '2026-11-02T02:24:48.894904+00:00'
+  updated_at: '2026-11-02T05:17:28.631004+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -51503,6 +51503,18 @@ prs:
       wait-for-merge remains required.'
     created_at: '2026-11-02T02:24:48Z'
     last_edited: '2026-11-02T02:24:48Z'
+  - id: note-72f0a2b
+    text: 'QA S4 (write-failure/credential-protection scenario) PASS, no code change.
+      Spec note for future runs: part 5''s hand-written providers.yaml block lost
+      its indentation in prompt.md — a literal column-0 `providers:`/`alpha:` file
+      is a null providers block (list shows only claude; `pm provider default bad`
+      -> Provider not found). The THEN is reproducible only with the indented form
+      (`providers:` -> nested `alpha:`/`bad:`), which was tested and matches exactly.
+      Also observed part 6 both variants: fresh ~/.pm with no debug/ tracebacks in
+      paths.py debug_dir (pr-78e8ebe, out of scope); a used HOME with debug/ gives
+      the single providers Error line.'
+    created_at: '2026-11-02T05:17:28Z'
+    last_edited: '2026-11-02T05:17:28Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
