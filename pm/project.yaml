@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T06:18:08.901319+00:00'
+  updated_at: '2026-11-02T06:38:51.384787+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7318,6 +7318,23 @@ prs:
       (all go through tmux_mod), so nothing it adds bypasses the per-session socket.'
     created_at: '2026-11-02T06:18:08Z'
     last_edited: '2026-11-02T06:18:08Z'
+  - id: note-dbf5634
+    text: 'QA S27 refiner (2026-11-02, head a7169e96): all 7 stories smoke-run live,
+      refined not rejected. Draft corrections: (1) Ctrl+R re-execs the TUI in place,
+      so pidfile keeps the same pid AND starttime, only started_at changes (not a
+      new process); (2) Ctrl-Q with no alpha client shows NO on-screen message; the
+      only signal is the debug-log line "quit_app: no attached client to detach" (impl.md:
+      the TUI logs and continues); (3) a private session keeps tmux window-size latest,
+      so the window follows the last-attached client (A2 at 120x40 made @0 120x39),
+      not "smallest"; (4) pm session terminals never show tmux [detached]/[exited]
+      lines (pm captures attach output), they just return to the prompt rc 0; (5)
+      the container has no vi, so set EDITOR=true before the first pm session or the
+      notes pane closes with an editor error; (6) pm session home switches the first
+      attached ~N client (A1) to pm-home, so press C-b 0 before the Ctrl-Q story;
+      (7) killed tmux servers stay as <defunct> zombies (PID 1 is sleep infinity),
+      so stray-server checks must ignore Z state.'
+    created_at: '2026-11-02T06:38:51Z'
+    last_edited: '2026-11-02T06:38:51Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
