@@ -30637,6 +30637,20 @@ prs:
       `pm pr spec $P qa` (fake planner writes none). Captures /pm-captures/scenarios/30.'
     created_at: '2026-10-22T18:51:58Z'
     last_edited: '2026-10-22T18:51:58Z'
+  - id: note-badcf0a
+    text: 'Base reconcile 48bc4016 (merge master@337d1266): _poll_impl_idle keeps
+      BOTH the in-scope managed guard and return_awaiting("impl")→mark_active; tree
+      status row keeps the sign-off return icon before the S marker ("in_progress
+      ⇤ S impl", "qa ↻ S qa", own styles; new widget test test_return_marker_kept_next_to_pending_spec_marker);
+      _spec_phase_due passes pr to recorded_qa_verdict. check_and_start skips spec_pending
+      PRs before the return-launch claim, so no claim is held while paused; approval
+      → on_state_loaded → check_and_start → --fresh rework launch. Suite: 3407 pass;
+      tests/test_markdown_render.py needs the markdown package (new master dep, absent
+      from the pm venv: pip install --target <scratch> markdown and add to PYTHONPATH).
+      For review: the merged hunks. For QA: tree marker S next to a return icon, impl-idle→review
+      on integrated code.'
+    created_at: '2026-10-22T14:17:25Z'
+    last_edited: '2026-10-22T14:17:25Z'
 - id: pr-2935ce2
   plan: bugs
   title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view

@@ -71,6 +71,24 @@
 - **R18** Given default auto-start (no `--review-specs`, spec-mode prompt), then PRs start, go idle
   → review → QA exactly as before, with no S markers and no `review_specs` labels in status.
 
+### Integration with sign-off returns (base merge 48bc4016, master@337d1266 / pr-ac10f03)
+- **R19** Given a review-specs PR whose sign-off routes it back (SIGNOFF_IMPL ⇤, SIGNOFF_REVIEW ↩, SIGNOFF_REQA ↻)
+  with both specs already approved, then the return proceeds as on master. There is no second impl or QA spec pause
+  (approval is per phase). A ⇤ return relaunches a fresh rework impl session, and that session's idle moves the PR to
+  review. A ↻ return re-runs QA even though a PASS verdict was recorded before the return.
+- **R20** Given a PR with an open sign-off return whose spec for the current phase is pending (for example
+  `pm pr spec <id> --regenerate` after a ⇤ or ↻ return under `--review-specs`), then the tree shows both markers in
+  their own styles (`in_progress ⇤ S impl`, `qa ↻ S qa`). Status and the PR Actions popup show the spec pause.
+  The idle agent is not moved to review, and no QA scenarios launch.
+- **R21** Given a ⇤ return still awaiting its rework launch while the impl spec is pending (for example across a
+  `pm tui restart --breadcrumb`), then no rework session is launched and no launch claim is held while paused.
+  After approval, exactly one fresh rework session launches (no duplicate, no claim stall), and its idle moves the PR
+  to review. "No claim stall" means the launch follows the approval within a scheduler pass or two (seconds). It must not
+  wait for the 180 s return-launch claim that the hop wrote when its own refused `--fresh` start never released it.
+  The TUI driver and the `pm pr auto-sequence` driver both count. With no other scheduler event, an approval made
+  shortly after the hop that launches only on the ~185 s claim re-check is a NEEDS_WORK finding (S29 observation).
+  The tree row keeps its box border at every marker combination (26603a96 drops the status icon when the row overflows).
+
 ## 2. Setup
 - Install pm from this branch (`./install.sh --local` or venv + `PYTHONPATH` per `tui-manual-test.md`).
   Create a throwaway git project with `pm init --backend local --no-import`, add a dependency chain
