@@ -4174,3 +4174,57 @@ The review loops in between:
 - **f905 i1** reviewed the S45 and S47 fixes and found no code defect.
   It added items 9 and 10 above, which no earlier pass had recorded.
   Reverting either fix in a copy of the tree fails its new tests.
+
+## QA scenarios 49–51 and review loop 1237 i1 (2026-11-02)
+
+**S49 — getting back into a session whose TUI is gone moves only your own
+terminal to the TUI.**  Stories 1, 2, 3 and 5 passed on `7f5bcd51` with no
+source changes: the attach's respawn selects the TUI's window only in the
+grouped session it attaches (`select_window_in_session: target=<A>~N:@W`),
+the hook's split-back respawn selects nothing, and 14 racing rounds
+produced exactly one respawner each.  Story 4 exposed a pre-existing
+master limitation, not a regression: the `after-kill-pane` hook cannot
+identify the client that ran the kill (on tmux 3.2a `#{hook_client}` and
+`#{hook_session_name}` expand empty), and its new-window fallback selects
+through `current_or_base_session`, which picks the latest-active client
+and can move a bystander.  Filed as `pr-939ea27` — a fix needs a design
+choice.  The `kill-server` traceback seen at teardown is `pr-07541e7`.
+
+**S51 — two projects on one day.**  Passed 4/4 on `9edfba4d6` (code
+`b89aa9a4`), no source changes.  It noted one pre-existing fallback:
+after `C-b &` closes the TUI's window, the notes pane's EXIT trap
+reconciles the window (TUI entry included) away, and the next
+`pm session` splits the TUI into the first surviving window — the user's
+own shell — because `main` is gone.  Filed as `pr-48f359f`; choosing
+between a new window and a remembered window needs a design decision.
+
+**S50 — concurrent pane closes across pm windows.**  Found one defect,
+fixed in `664df245`.  Every `rebalance()` reconciles the registry
+*without* the TUI-respawn lock: the background rebalance a `pm session`
+attach schedules (about 0.6 s after its Enter), the `window-resized`
+hook, a pane's EXIT trap.  One of them could drop the killed TUI's dead
+entry before the `after-kill-pane` hook ran, and the hook respawned only
+a TUI its own reconcile removed, so the session was left with no TUI
+(2 of 4 rounds with the attach 0.60–0.65 s before the kill; the entry
+was often gone before any hook even read the registry).  Under the lock,
+after its reconciles, the hook now starts a TUI when the registry lists
+none and no `pm _tui` pane runs — whoever removed the entry — in the
+window its snapshot listed the TUI in, else `main`, else the first
+window.  It does so only when it really holds the lock, so two hooks past
+a stuck holder cannot both start one.  A TUI pane kept dead by
+`remain-on-exit` is still listed and is left alone, as `pm session`
+leaves it.  New log line: `handle_any_pane_closed: no TUI is running and
+none is registered (its entry was already reconciled); respawning in
+window @W`.  Tests: `TestAnotherReconcileTookTheDeadTuiEntry` and
+`TestUnlistedTuiRespawnNeedsTheLock` in `tests/test_tui_respawn_race.py`;
+the S124 fixture in `tests/test_tui_own_session_name.py` now registers
+its kept pane as the TUI, because a session whose registry lists none
+gets one on a pane close (every real pm session has a TUI).
+
+**Review loop 1237 i1** (no requirement changes) made one cleanup: the
+"where does a missing TUI go back" rule — the registry-listed window,
+else `main`, else the first window — is now
+`pane_layout.tui_respawn_window`, used by both `_ensure_tui_running`
+(`pm session`'s attach) and `_respawn_unlisted_tui` (the hook), so the
+two cannot start a respawned TUI in different places.  Tests:
+`TestTuiRespawnWindow`.

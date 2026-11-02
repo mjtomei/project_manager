@@ -53307,3 +53307,34 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-48f359f
+  plan: bugs
+  title: 'Bug: a missing TUI is respawned into the first window (often a user''s shell)
+    when the TUI''s own window was closed'
+  branch: pm/pr-48f359f-bug-a-missing-tui-is-respawned-into-the-first-wind
+  status: pending
+  depends_on: []
+  description: 'pm_core/pane_layout.py tui_respawn_window + pm_core/cli/session.py
+    _ensure_tui_running. When the TUI''s window is closed with C-b & while other windows
+    remain (e.g. notes open beside the TUI in main), the notes pane''s EXIT trap runs
+    the deferred rebalance, whose reconcile drops the now-gone window — TUI entry
+    included — from the pane registry. The next `pm session` then finds no registered
+    TUI window, `find_window_by_name(session, ''main'')` returns None (main was the
+    closed window), and the fallback picks `list_windows()[0]` — in QA S51 that was
+    the user''s own C-b c shell window. The TUI is split into it as that window''s
+    active pane (auto-renamed python3), so a client typing in its shell now types
+    into the TUI. Pre-existing on master (same fallback; not a regression from pr-073910f),
+    reported not failed by QA S51 on 9edfba4d6 (code b89aa9a40). Distinct from pr-3951487
+    (that is the new-window path when the registry still names a gone window). Expected:
+    a TUI whose window was closed goes into a new window, or the last TUI window is
+    remembered across the reconcile, rather than into an arbitrary surviving window;
+    choosing needs a design decision (a renamed ''main'' window must still be reused).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T20:01:00.592673+00:00'
+  updated_at: '2026-11-02T20:01:00.592673+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

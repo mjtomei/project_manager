@@ -222,25 +222,14 @@ def _ensure_tui_running(session_name: str) -> str | None:
     # The TUI is missing: respawn it rather than killing the session
     _log.info("TUI missing, respawning in existing session")
     click.echo("TUI pane missing — respawning...")
-    # Find the window where TUI was registered (or fall back to first window)
-    tui_window = None
-    for wid, wdata in registry.get("windows", {}).items():
-        for p in wdata.get("panes", []):
-            if p.get("role") == "tui":
-                tui_window = wid
-                break
-        if tui_window:
-            break
-    if not tui_window:
-        # Fall back to window named 'main' (or first window) rather
-        # than the active window, which may be a QA/work window.
-        main_win = tmux_mod.find_window_by_name(session_name, "main")
-        if main_win:
-            tui_window = main_win["id"]
-        else:
-            all_wins = tmux_mod.list_windows(session_name)
-            if all_wins:
-                tui_window = all_wins[0]["id"]
+    # Find the window where TUI was registered; ``tui_respawn_window`` falls
+    # back to ``main``, else the first window (the same rule the
+    # after-kill-pane hook applies).
+    tui_window = next(
+        (wid for wid, wdata in registry.get("windows", {}).items()
+         if any(p.get("role") == "tui" for p in wdata.get("panes", []))),
+        None)
+    tui_window = pane_layout.tui_respawn_window(session_name, tui_window)
     if not tui_window:
         _log.warning("TUI respawn failed — no windows found in session")
         click.echo("Could not respawn TUI (no windows). "

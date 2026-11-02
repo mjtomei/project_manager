@@ -832,3 +832,42 @@ class TestHealRegistryOwnWindow:
         data = load_registry("pm-test")
         assert active_window in data["windows"]
         assert [p["id"] for p in data["windows"][active_window]["panes"]] == [tui_pane]
+
+
+class TestTuiRespawnWindow:
+    """The one "where does a missing TUI go back" rule (``pm session``'s
+    attach and the after-kill-pane hook both use it)."""
+
+    def test_preferred_window_wins(self):
+        from pm_core.pane_layout import tui_respawn_window
+
+        with patch("pm_core.tmux.find_window_by_name") as find, \
+                patch("pm_core.tmux.list_windows") as listing:
+            assert tui_respawn_window("pm-x", "@7") == "@7"
+        find.assert_not_called()
+        listing.assert_not_called()
+
+    def test_main_before_the_first_window(self):
+        from pm_core.pane_layout import tui_respawn_window
+
+        with patch("pm_core.tmux.find_window_by_name",
+                   return_value={"id": "@2", "index": "0", "name": "main"}), \
+                patch("pm_core.tmux.list_windows") as listing:
+            assert tui_respawn_window("pm-x") == "@2"
+        listing.assert_not_called()
+
+    def test_first_window_when_there_is_no_main(self):
+        from pm_core.pane_layout import tui_respawn_window
+
+        with patch("pm_core.tmux.find_window_by_name", return_value=None), \
+                patch("pm_core.tmux.list_windows",
+                      return_value=[{"id": "@5", "index": "0", "name": "x"},
+                                    {"id": "@6", "index": "1", "name": "y"}]):
+            assert tui_respawn_window("pm-x") == "@5"
+
+    def test_no_windows(self):
+        from pm_core.pane_layout import tui_respawn_window
+
+        with patch("pm_core.tmux.find_window_by_name", return_value=None), \
+                patch("pm_core.tmux.list_windows", return_value=[]):
+            assert tui_respawn_window("pm-x") is None

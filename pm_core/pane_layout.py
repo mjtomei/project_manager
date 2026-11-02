@@ -610,6 +610,31 @@ def handle_pane_exited(session: str, window: str, generation: str,
     )
 
 
+def tui_respawn_window(session: str, preferred: str | None = None) -> str | None:
+    """Return the window a missing TUI of *session* is started in.
+
+    *preferred* is the window the registry (or the hook's snapshot of it)
+    listed the TUI in, and is used when given.  Otherwise the window named
+    ``main`` — deliberately not the active window, which may be a QA or
+    work window — and failing that the first window.  ``None`` when the
+    session has no windows at all.
+
+    The one definition of "where the TUI goes back", shared by
+    ``pm session``'s attach (``cli.session._ensure_tui_running``) and the
+    ``after-kill-pane`` hook (``_respawn_unlisted_tui``), so the two cannot
+    start a respawned TUI in different places.
+    """
+    from pm_core import tmux as tmux_mod
+
+    if preferred:
+        return preferred
+    main = tmux_mod.find_window_by_name(session, "main")
+    if main:
+        return main["id"]
+    windows = tmux_mod.list_windows(session)
+    return windows[0]["id"] if windows else None
+
+
 def _respawn_tui(session: str, window: str, *, select: bool = True) -> str:
     """Respawn the TUI pane in *window* after it was killed.
 
@@ -774,30 +799,21 @@ def _respawn_unlisted_tui(session: str, tui_windows: list[str]) -> str | None:
     ``pm session`` leaves it alone too, so this does not start one beside
     it.  The TUI goes back into the window the registry listed it in when
     this event was read (*tui_windows*); with no such window it goes into
-    ``main``, else the first window, as ``pm session``'s respawn does.
+    ``main``, else the first window (``tui_respawn_window``, the same rule
+    ``pm session``'s attach uses).
 
     Called only while this hook holds the lock: two hooks that both went
     ahead past a stuck holder would otherwise both find no TUI and both
     start one, where only the one whose reconcile removed the entry did.
     Returns the window the TUI was started in, or ``None``.
     """
-    from pm_core import tmux as tmux_mod
-
     registry = load_registry(session)
-    if any(p.get("role") == "tui"
-           for wdata in registry.get("windows", {}).values()
-           for p in wdata.get("panes", [])):
+    if any(p.get("role") == "tui" for _, p in _iter_all_panes(registry)):
         return None
     if _running_tui_pane(session):
         return None
-    window = tui_windows[0] if tui_windows else None
-    if window is None:
-        main = tmux_mod.find_window_by_name(session, "main")
-        if main:
-            window = main["id"]
-        else:
-            windows = tmux_mod.list_windows(session)
-            window = windows[0]["id"] if windows else None
+    window = tui_respawn_window(session,
+                                tui_windows[0] if tui_windows else None)
     if window is None:
         _logger.warning("handle_any_pane_closed: no TUI is running and "
                         "session %s has no windows; not respawning", session)
