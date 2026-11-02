@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T05:34:53.728112+00:00'
+  updated_at: '2026-11-02T05:54:26.855491+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7280,6 +7280,24 @@ prs:
       the socket is gone before B plants.'
     created_at: '2026-11-02T05:34:53Z'
     last_edited: '2026-11-02T05:34:53Z'
+  - id: note-194417f
+    text: 'QA S26 (cross-clone QA resume, b48f i15 item 3 + i20) PASS 5/5 on 52413deaa,
+      no source changes. Two clones P/C of one throwaway project on private servers,
+      verdict-less fake workers. (1) Run live on C: P restart logs TUI mount, no Resuming/leaving,
+      no qa windows; C untouched. (2) C TUI killed (Z zombie): P logs "QA resume:
+      leaving <A>''s run to session pm-<tagC> (another tmux server)" 3.3 s after the
+      kill (idle scan), right after the restart mount, then every 5 s; no Resuming/Re-adopting/Relaunched;
+      owner_pid stays the dead pid. (3) C `pm session` respawn concurrent with P restart:
+      only C resumes (owner_pid -> new TUI), C gains only window 0, P stops logging
+      leaving after the claim. (4) C `pm session kill`: P idle scan adopts within
+      5 s (retry 1/10 + Relaunched s1/s2, owner -> P), restart resumes once more without
+      duplicates. (5) qa26b plants a 0777 server at pm-<tagC>: P resumes both runs
+      with zero leaving lines; planted server untouched (planted window only, 0 clients).
+      Harness: a recorded plain shell has a pty, so run `pm session </dev/null` to
+      keep the no-tty attach failure. Captures: /pm-captures/scenarios/26/ (16 casts+mp4,
+      manifests, debug-log excerpts in evidence/).'
+    created_at: '2026-11-02T05:54:26Z'
+    last_edited: '2026-11-02T05:54:26Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
