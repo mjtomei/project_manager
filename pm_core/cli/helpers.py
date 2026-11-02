@@ -1228,9 +1228,7 @@ def _clone_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
     project = project if isinstance(project, dict) else {}
     repo_url = project.get("repo", "")
     repo_url = repo_url if isinstance(repo_url, str) else ""
-    base_branch = project.get("base_branch", "master")
-    if not (isinstance(base_branch, str) and base_branch):
-        base_branch = "master"
+    base_branch = store.base_branch(data)
     pr_id = pr_entry["id"]
 
     project_dir = _workdirs_dir(data)

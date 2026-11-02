@@ -512,7 +512,7 @@ absent and falls back to `master`, so a hand-edited value is never
 interpolated into the `git diff <base>...HEAD` instruction it hands the
 agent — the same fallback the review window's diff pane applies. The same
 guard covers every other prompt builder that falls back to the base branch
-for its diff command (`prompt_gen._base_branch`, used by the impl, review,
+for its diff command (`store.base_branch`, used by the impl, review,
 sign-off, QA-planner and QA-interactive prompts): without it a hand-edited
 value rendered as `git diff origin/<repr>...HEAD`. The same fallback applies
 outside the prompts — `pm pr start`'s GitHub draft-PR path (`gh pr create
@@ -520,7 +520,12 @@ outside the prompts — `pm pr start`'s GitHub draft-PR path (`gh pr create
 `pm pr sync` merge-detection / merge-integrity paths (`is_merged` passes it
 to git; the verification interpolates it into a `git log` range, and a
 non-string there turned a real verification into an `error` that finalized
-the merge without checking it).
+the merge without checking it). Every one of those readers goes through one
+helper, `store.base_branch(data)` (a non-mapping `project` or a `base_branch`
+that is not a non-empty string reads as `master`), rather than repeating the
+rule inline: review-loop d18f i1 replaced the two identical private copies
+(`prompt_gen._base_branch`, `pr_sync._base_branch_of`) and eight inline
+copies with it (the QA concretization step's unguarded read uses it too).
 
 **Why sign-off is running again.** When the merge gate refuses an approval
 because the base moved (`invalidate_signoff`), the driver clears

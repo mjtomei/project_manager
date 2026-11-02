@@ -844,7 +844,9 @@ class TestSyncIgnoresUnusablePrEntries:
 class TestBaseBranchOf:
     """``project.base_branch`` is hand-edited state (R9-14).
 
-    The value reaches git (``is_merged``) and the merge-integrity
+    The sync reads it through ``store.base_branch`` (the one reader every
+    prompt builder, launch and merge path shares).  The value reaches git
+    (``is_merged``) and the merge-integrity
     verification, which interpolates it into a ``git log`` range.  A
     non-string either raised out of the sync or turned a real verification
     into an ``error`` that finalized the merge without checking it, so it
@@ -856,7 +858,7 @@ class TestBaseBranchOf:
         {"base_branch": "release/1.0"},
     ])
     def test_a_real_branch_is_kept(self, project):
-        assert pr_sync._base_branch_of({"project": project}) \
+        assert store.base_branch({"project": project}) \
             == project["base_branch"]
 
     @pytest.mark.parametrize("project", [
@@ -868,10 +870,10 @@ class TestBaseBranchOf:
         {},
     ])
     def test_a_malformed_branch_reads_as_master(self, project):
-        assert pr_sync._base_branch_of({"project": project}) == "master"
+        assert store.base_branch({"project": project}) == "master"
 
     @pytest.mark.parametrize("data", [{}, {"project": None},
                                       {"project": "nope"},
                                       {"project": [1, 2]}])
     def test_a_malformed_project_reads_as_master(self, data):
-        assert pr_sync._base_branch_of(data) == "master"
+        assert store.base_branch(data) == "master"

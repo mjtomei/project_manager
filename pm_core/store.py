@@ -671,6 +671,23 @@ def note_id(n) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def base_branch(data) -> str:
+    """The project's base branch, or ``master`` when unset or malformed.
+
+    ``project.yaml`` is hand-editable state: a ``project`` that is not a
+    mapping, or a ``base_branch`` that is not a non-empty string, is no
+    configuration.  The value is passed to git as a ref (``git show``,
+    ``is_merged``, the integration fetch), quoted into the review window's
+    diff pane, interpolated into the ``git log`` range of the merge-integrity
+    verification and into the diff instructions every prompt hands an agent —
+    so every reader falls back to the default instead of raising or rendering
+    a repr.  This is the one implementation of that rule.
+    """
+    project = data.get("project") if isinstance(data, dict) else None
+    value = project.get("base_branch") if isinstance(project, dict) else None
+    return value if isinstance(value, str) and value else "master"
+
+
 def get_pr(data: dict, pr_id: str) -> Optional[dict]:
     """Get a PR entry by id.
 

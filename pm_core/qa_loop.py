@@ -2605,11 +2605,12 @@ def _build_concretize_cmd(
     *env_out* receives the provider environment variables; the caller must
     pass them to the tmux pane (``env=``) so they never enter the command.
     """
+    from pm_core import store
     from pm_core.claude_launcher import build_claude_shell_cmd
 
     resolution = _resolve_qa_model(pr_data, project_data,
                                    session_type="qa_concretize")
-    base_branch = project_data.get("project", {}).get("base_branch", "master")
+    base_branch = store.base_branch(project_data)
     pr_branch = pr_data.get("branch", "")
 
     prompt = _build_concretization_prompt(

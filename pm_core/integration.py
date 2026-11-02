@@ -163,9 +163,7 @@ def target_for(data: dict, pr: dict, root: Path | None = None) -> tuple[str, str
     """
     project = data.get("project")
     project = project if isinstance(project, dict) else {}
-    base_branch = project.get("base_branch")
-    if not (isinstance(base_branch, str) and base_branch):
-        base_branch = "master"
+    base_branch = store.base_branch(data)
     if project.get("backend") == "local":
         from pm_core.cli.helpers import _resolve_repo_dir, state_root
         from pm_core.paths import workdirs_base
@@ -1627,11 +1625,7 @@ def run_check(data: dict, pr: dict, root: Path | None = None,
         # ``project`` that is not a mapping (or a non-string ``base_branch``)
         # must not raise out of a check that promises a ``status: error``
         # record — the fallback itself must not re-raise.
-        project = data.get("project")
-        project = project if isinstance(project, dict) else {}
-        base_branch = project.get("base_branch")
-        if not (isinstance(base_branch, str) and base_branch):
-            base_branch = "master"
+        base_branch = store.base_branch(data)
         target_repo = ""
         _log.warning("integration target for %s: %s", pr.get("id"), e)
     record.update(target_repo=target_repo, base_branch=base_branch)

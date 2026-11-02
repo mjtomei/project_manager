@@ -1489,14 +1489,9 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                     return
 
     repo_url = data["project"]["repo"]
-    base_branch = data["project"].get("base_branch", "master")
-    # Hand-edited state: a ``base_branch`` that is not a branch name is not a
-    # ref to read the committed registry from.  It reached ``git show`` as an
-    # argument and was interpolated into "not committed on {'bad': True}",
-    # so it falls back to the default the other readers assume (the same rule
-    # ``pm pr merge`` and the sign-off clone apply).
-    if not (isinstance(base_branch, str) and base_branch):
-        base_branch = "master"
+    # Read from the committed registry on this ref (``git show``) and named
+    # in the refusal below: a hand-edited value reads as the default.
+    base_branch = store.base_branch(data)
     branch = pr_entry.get("branch") or f"pm/{pr_id}"
 
     # Verify the PR exists in the committed project.yaml on base_branch.
@@ -1879,7 +1874,6 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     pr_id = pr_entry["id"]
     display_id = _pr_display_id(pr_entry)
     title = pr_entry.get("title", "")
-    base_branch = data.get("project", {}).get("base_branch", "master")
 
     window_name = f"review-{display_id}"
 
@@ -1909,13 +1903,9 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             return
 
     title = pr_entry.get("title", "")
-    base_branch = data.get("project", {}).get("base_branch", "master")
-    # Hand-edited state: a ``base_branch`` that is not a branch name is not a
-    # ref to quote (``shell_quote(5)`` raised ``TypeError`` out of the launch
-    # on the local backend, before the window was created), so it falls back
-    # to the default the other readers assume.
-    if not (isinstance(base_branch, str) and base_branch):
-        base_branch = "master"
+    # Quoted into the diff pane's command (``shell_quote(5)`` raised): a
+    # hand-edited value reads as the default.
+    base_branch = store.base_branch(data)
 
     # Resolve model/provider for review session
     from pm_core.model_config import resolve_model_and_provider
@@ -3515,14 +3505,10 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     project = data.get("project")
     project = project if isinstance(project, dict) else {}
     backend_name = project.get("backend", "vanilla")
-    base_branch = project.get("base_branch", "master")
-    # Hand-edited state: a ``base_branch`` that is not a branch name is not a
-    # ref to compare, fetch or publish against (the gate interpolated its repr
-    # into "the project merges into {'bad': True}", refusing every merge with
-    # a nonsensical reason), so it falls back to the default the other readers
-    # assume.
-    if not (isinstance(base_branch, str) and base_branch):
-        base_branch = "master"
+    # The ref the merge compares, fetches and publishes against: a hand-edited
+    # value reads as the default rather than refusing every merge with
+    # "the project merges into {'bad': True}".
+    base_branch = store.base_branch(data)
 
     # --no-signoff-check / --propagation-only only RECOVER a merge that is
     # already published (finalize state, update the main repo checkout);
@@ -3596,7 +3582,7 @@ def pr_sync():
     # range — a non-string crashed `pm pr sync` (or finalized a merge without
     # verifying it).  The shared reader applies the same fallback the module
     # and `pm pr merge` use.
-    base_branch = pr_sync_mod._base_branch_of(data)
+    base_branch = store.base_branch(data)
     prs = data.get("prs") or []
     updated = 0
 

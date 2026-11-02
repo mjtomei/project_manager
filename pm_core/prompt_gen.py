@@ -41,22 +41,6 @@ _MERGE_ERROR_MAX_LINES = MERGE_ERROR_MAX_LINES
 _DEPS_MAX = DEPS_MAX
 
 
-def _base_branch(data: dict) -> str:
-    """The project's base branch, or ``master`` for a malformed value.
-
-    ``project.yaml`` is hand-edited state.  A ``base_branch`` that is not a
-    branch-name string was interpolated into the ``git diff <base>...HEAD``
-    instruction the prompt hands the agent (the fallback the QA *spec* prompt
-    and the review window's diff pane already guard), so a hand-edited value
-    must read as absent here too.  The same fallback the rest of pm assumes.
-    """
-    project = data.get("project")
-    project = project if isinstance(project, dict) else {}
-    base_branch = project.get("base_branch")
-    return base_branch if isinstance(base_branch, str) and base_branch \
-        else "master"
-
-
 _OUT_OF_SCOPE_BUGS_BLOCK = """
 ## Incidental Bugs
 
@@ -415,7 +399,7 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     branch = pr.get("branch", f"pm/{pr_id}")
     title = pr.get("title", "")
     description = _pr_text(pr, "description").strip()
-    base_branch = _base_branch(data)
+    base_branch = store.base_branch(data)
 
     backend = get_backend(data)
     gh_pr_url = pr.get("gh_pr")  # URL of draft PR if created
@@ -527,7 +511,7 @@ def generate_review_prompt(data: dict, pr_id: str, session_name: str | None = No
 
     title = pr.get("title", "")
     description = _pr_text(pr, "description").strip()
-    base_branch = _base_branch(data)
+    base_branch = store.base_branch(data)
 
     # Build plan and sibling PR context for architectural review
     plan_ref = pr.get("plan")
@@ -1231,7 +1215,7 @@ def generate_signoff_prompt(data: dict, pr_id: str,
 
     title = pr.get("title", "")
     description = _pr_text(pr, "description").strip()
-    base_branch = _base_branch(data)
+    base_branch = store.base_branch(data)
     backend_name = data.get("project", {}).get("backend", "vanilla")
     if backend_name == "local":
         diff_cmd = f"git diff {base_branch}...HEAD"
@@ -1806,7 +1790,7 @@ def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
 
     branch = pr.get("branch", f"pm/{pr_id}")
     title = pr.get("title", "")
-    base_branch = _base_branch(data)
+    base_branch = store.base_branch(data)
     repo_url = data.get("project", {}).get("repo", "")
 
     tui_block = tui_section(session_name) if session_name else ""
@@ -1906,7 +1890,7 @@ def generate_watcher_prompt(data: dict, session_name: str | None = None,
         meta_pm_root = "pm"  # fallback to relative path
 
     all_prs = data.get("prs") or []
-    base_branch = _base_branch(data)
+    base_branch = store.base_branch(data)
     project_name = data.get("project", {}).get("name", "unknown")
 
     tui_block = tui_section(session_name) if session_name else ""
@@ -2177,7 +2161,7 @@ def generate_discovery_supervisor_prompt(data: dict, session_name: str | None = 
         meta_pm_root = "pm"
 
     project_name = data.get("project", {}).get("name", "unknown")
-    base_branch = _base_branch(data)
+    base_branch = store.base_branch(data)
 
     tui_block = tui_section(session_name) if session_name else ""
 
@@ -2321,7 +2305,7 @@ def generate_bug_fix_impl_prompt(data: dict, session_name: str | None = None,
         meta_pm_root = "pm"
 
     project_name = data.get("project", {}).get("name", "unknown")
-    base_branch = _base_branch(data)
+    base_branch = store.base_branch(data)
 
     tui_block = tui_section(session_name) if session_name else ""
 
@@ -2490,7 +2474,7 @@ def generate_improvement_fix_impl_prompt(data: dict, session_name: str | None = 
         meta_pm_root = "pm"
 
     project_name = data.get("project", {}).get("name", "unknown")
-    base_branch = _base_branch(data)
+    base_branch = store.base_branch(data)
 
     tui_block = tui_section(session_name) if session_name else ""
 
@@ -2661,7 +2645,7 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     description = _pr_text(pr, "description").strip()
     branch = pr.get("branch", f"pm/{pr_id}")
     workdir = pr.get("workdir", "")
-    base_branch = _base_branch(data)
+    base_branch = store.base_branch(data)
     # The branch may already contain the base (a resolved metadata conflict or
     # a clean base merged by a bounce); diff against that exact revision so
     # the merged base commits are not read as the PR's own changes.
@@ -2915,7 +2899,7 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
     title = pr.get("title", "")
     branch = pr.get("branch", f"pm/{pr_id}")
     pr_workdir = pr.get("workdir", "")
-    base_branch = _base_branch(data)
+    base_branch = store.base_branch(data)
     branch_base = _diff_base(pr)
     diff_cmd = (f"git diff {branch_base[:12]}...HEAD" if branch_base
                 else f"git diff {base_branch}...HEAD")
@@ -3029,7 +3013,7 @@ def generate_qa_child_prompt(data: dict, pr_id: str,
     title = pr.get("title", "")
     branch = pr.get("branch", f"pm/{pr_id}")
     pr_workdir = pr.get("workdir", "")
-    base_branch = _base_branch(data)
+    base_branch = store.base_branch(data)
 
     instruction_block = ""
     if scenario.instruction_path:
@@ -3276,7 +3260,7 @@ def generate_standalone_qa_prompt(data: dict, instruction_id: str,
     """
     from pm_core import qa_instructions
 
-    base_branch = _base_branch(data)
+    base_branch = store.base_branch(data)
 
     try:
         root = store.find_project_root()
