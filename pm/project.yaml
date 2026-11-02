@@ -6969,6 +6969,25 @@ prs:
       pm pr model show.'
     created_at: '2026-11-02T11:28:04Z'
     last_edited: '2026-11-02T11:28:04Z'
+  - id: note-7109e0d
+    text: 'QA S22 refiner (2026-11-02, 6 stories live at 61b1c3d9, S15 fixture, 200x120).
+      (1) Second command typed behind a first Enter: if the text follows `/` within
+      ~0.15 s, the second command garbles 7/10 under a pm pr edit loop. With NO first
+      command, the same `/` + 0.15 s + text garbles 4/8 under the loop and 1/5 idle,
+      so this is pre-existing pr-6412997: the held `/` and text are replayed as one
+      burst. With about 1 s between `/` and the text (`/` sent with, or 0.1 s after,
+      the first Enter; `]` sent with the second Enter): 10/10 clean. (2) Rare and
+      pre-existing, not filed: under a `pm autostart status/list` loop the bar lost
+      focus mid-typing once in 38 slow-typing rounds, with no Enter pressed, so the
+      key hold was not involved. The next letters acted as tree hotkeys (e = pr-edit
+      pane, c = "Claude CLI not found"), and the text stayed in the unfocused bar
+      (clear it with `/` + Escape). _drain_command_queue, _command_bar_in_use and
+      the autostart focus branch are identical to master 4d0c07a5. If a run sees it
+      again, file it separately. (3) An outside `pm pr select <id>` while the bar
+      holds text moves the cursor box and logs no TUI line; the bar keeps its text
+      and focus.'
+    created_at: '2026-11-02T12:03:23Z'
+    last_edited: '2026-11-02T12:03:23Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-6aa74c6-fuzzy-select-for-pr-and-plan-command-ab512a43
 - id: pr-98bf8df
   plan: plan-qa
