@@ -98,6 +98,23 @@ class WorkdirResolution:
         return "\n".join(lines)
 
 
+def branch_slug(branch: str) -> str:
+    """*branch* as a directory-name slug (``pm/pr-x-title`` → ``pm-pr-x-title``,
+    truncated by :func:`pm_core.store.slugify`)."""
+    return store.slugify(branch.replace("/", "-"))
+
+
+def workdir_name(branch: str, base_hash: str = "") -> str:
+    """The directory name a PR's clone gets: ``<branch_slug>-<base_hash>``,
+    or the bare slug without a hash.
+
+    ``pm pr start`` and ``_clone_workdir`` name clones with this, and
+    :func:`resolve_workdir` finds them by it, so the two cannot drift apart.
+    """
+    slug = branch_slug(branch)
+    return f"{slug}-{base_hash}" if base_hash else slug
+
+
 def project_workdirs_dir(data: dict) -> Path:
     """This project's workdirs directory (not created).
 
@@ -233,7 +250,7 @@ def _name_matches(project_dir: Path, branch: str) -> list[Path]:
     Entries that resolve to the same directory count once; the real
     directory is kept over a symlink alias, so that is the path recorded.
     """
-    slug = store.slugify(branch.replace("/", "-"))
+    slug = branch_slug(branch)
     if not slug:
         return []
     pattern = re.compile(re.escape(slug) + _HASH_SUFFIX)
@@ -302,7 +319,7 @@ def _resolve_matches(data: dict, pr_entry: dict, root: Path | None,
     if reread and root is not None:
         # Double-checked: a concurrent caller may have re-linked or cloned
         # and persisted while we waited for the lock.
-        fresh = _fresh_workdir(root, pr_id)
+        fresh = stored_workdir(root, pr_id)
         if fresh and fresh != recorded and Path(fresh).exists():
             pr_entry["workdir"] = fresh
             res.status, res.path = RECORDED, fresh
@@ -343,7 +360,10 @@ def _resolve_matches(data: dict, pr_entry: dict, root: Path | None,
     return res
 
 
-def _fresh_workdir(root: Path, pr_id: str) -> str | None:
+def stored_workdir(root: Path, pr_id: str) -> str | None:
+    """The workdir currently recorded on disk for *pr_id* (re-read, not the
+    caller's in-memory copy); None when unset or project.yaml can't be read.
+    The double-check after taking :func:`workdir_lock`."""
     try:
         pr = store.get_pr(store.load(root), pr_id)
     except Exception:

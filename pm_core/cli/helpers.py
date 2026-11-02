@@ -1154,11 +1154,7 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
         # Double-checked: another caller may have created and persisted the
         # workdir while we waited for the lock.  Re-read the authoritative
         # on-disk record and adopt it if it now exists.
-        try:
-            fresh_pr = store.get_pr(store.load(root), pr_id)
-            fresh_wd = (fresh_pr or {}).get("workdir")
-        except Exception:
-            fresh_wd = None
+        fresh_wd = workdirs.stored_workdir(root, pr_id)
         if fresh_wd and Path(fresh_wd).exists():
             pr_entry["workdir"] = fresh_wd
             return fresh_wd
@@ -1237,8 +1233,8 @@ def _clone_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
     base_hash = git_ops.run_git(
         "rev-parse", "--short=8", "HEAD", cwd=tmp_path, check=False
     ).stdout.strip()
-    branch_slug = store.slugify(branch.replace("/", "-"))
-    dir_name = f"{branch_slug}-{base_hash}" if base_hash else branch_slug
+    from pm_core.workdirs import workdir_name
+    dir_name = workdir_name(branch, base_hash)
     final_project_dir = _workdirs_dir(data)
     final_project_dir.mkdir(parents=True, exist_ok=True)
     work_path = final_project_dir / dir_name

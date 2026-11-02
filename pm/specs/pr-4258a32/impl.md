@@ -39,6 +39,12 @@ New module (low-level: imports `store`, `paths`; never `pm_core.cli`).
   blocking `fcntl.flock`), exactly the lock `_ensure_workdir` takes today.
   `_ensure_workdir` is switched to use it so recovery and cloning share one
   lock.
+- `branch_slug(branch)` / `workdir_name(branch, base_hash="")` — the clone
+  naming (`<branch_slug>-<base_hash>`, or the bare slug).  `pr start` and
+  `_clone_workdir` name new clones with `workdir_name` and discovery matches
+  `branch_slug`, so naming and recovery share one definition.
+- `stored_workdir(root, pr_id)` — the on-disk record re-read after taking the
+  lock (the double-check); `_ensure_workdir` and the resolver both use it.
 - `resolve_workdir(data, pr_entry, root=None, *, project_dir=None,
   persist=True, locked=False) -> WorkdirResolution`.
 - `get_workdir(data, pr_entry, root=None, **kw) -> str | None` — the public
@@ -64,8 +70,8 @@ Only when the field is empty or its path does not exist, and the PR has a
    `project_dir`), non-recursively.  A missing/unreadable dir → no candidates
    (no `mkdir`).
 2. Name filter: `^<slug>(-<7..40 hex>)?$` where
-   `slug = store.slugify(branch.replace("/", "-"))` — the exact naming
-   `pr start` / `_clone_workdir` use (`<branch_slug>-<base_hash>`, or the bare
+   `slug = branch_slug(branch)` — the naming `pr start` / `_clone_workdir`
+   use via `workdir_name` (`<branch_slug>-<base_hash>`, or the bare
    slug when no hash).  Dot entries (`.tmp-<pr>`, lock files) and non-dirs
    are skipped.  Entries resolving to the same real path are deduplicated,
    keeping the real directory over a symlink alias (so the recorded path is
@@ -142,7 +148,8 @@ deadlock).
   it (existing dirty-tree guard then skips pull/checkout on a dirty tree);
   ambiguous → warn, and if a clone would be needed exit 1 without cloning (an
   already-open PR window is still switched to, as today); missing → clone as
-  before.  An explicit `--workdir` skips discovery (the existing
+  before.  An explicit `--workdir` skips discovery and is used as given
+  (no "workdir missing, creating a new one" message; the existing
   in_progress reuse of an *existing* recorded path is unchanged).
 - `pm_core/cli/pr.py:pr_cd` (`pm pr cd`) — use the resolver so a stale record
   is recovered instead of "Workdir … does not exist"; ambiguity is reported.

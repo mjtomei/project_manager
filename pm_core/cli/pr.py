@@ -978,8 +978,9 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             click.echo(f"PR {pr_id} is already in_progress, reusing its "
                        f"recovered workdir.")
             workdir = recovery.path
-        elif recovery is None or recovery.status != workdirs_mod.AMBIGUOUS:
-            # Workdir was deleted — fall through to create a new one
+        elif not workdir and recovery.status != workdirs_mod.AMBIGUOUS:
+            # Workdir was deleted — fall through to create a new one (an
+            # explicit --workdir is used as given, nothing is created)
             click.echo(f"PR {pr_id} workdir missing, creating a new one.")
 
     if pr_entry.get("status") == "merged":
@@ -1112,8 +1113,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
 
             # Final path: <project_dir>/<branch_slug>-<base_hash>
             # Re-resolve project_dir since _resolve_repo_id may have updated data
-            branch_slug = store.slugify(branch.replace("/", "-"))
-            dir_name = f"{branch_slug}-{base_hash}" if base_hash else branch_slug
+            dir_name = workdirs_mod.workdir_name(branch, base_hash)
             final_project_dir = _workdirs_dir(data)
             final_project_dir.mkdir(parents=True, exist_ok=True)
             work_path = final_project_dir / dir_name

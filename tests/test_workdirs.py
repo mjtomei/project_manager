@@ -147,6 +147,18 @@ class TestRecovery:
         data, pr = env.fresh()
         assert workdirs.get_workdir(data, pr, env.root) == str(clone)
 
+    def test_truncated_slug_ending_in_hyphen(self, env):
+        """slugify truncates to 50 chars after stripping, so a slug can end
+        in '-' and the clone name has '--' before the hash."""
+        branch = "pm/pr-1234567-" + "a" * 35 + "-tail"
+        assert workdirs.branch_slug(branch).endswith("-")
+        clone = env.clone(workdirs.workdir_name(branch, "10e74920"),
+                          branch=branch)
+        assert "--10e74920" in clone.name
+        data, pr = env.fresh()
+        pr["branch"] = branch
+        assert workdirs.get_workdir(data, pr) == str(clone)
+
     def test_dirty_index_untracked_stash_and_evidence_untouched(self, env):
         clone = env.clone(f"{SLUG}-10e74920")
         (clone / "clean.txt").write_text("clean\n")
@@ -410,6 +422,21 @@ class TestEnsureWorkdir:
         assert f"skipped {env.project_dir / f'{SLUG}-10e74920'}" in err
         assert f"on branch master, not {BRANCH}" in err
 
+    def test_clone_made_by_pm_is_recovered_later(self, env, capsys):
+        """Round trip: the clone ``_clone_workdir`` names and checks out is
+        the one recovery finds once the record goes stale again."""
+        data, pr = env.fresh()
+        made = helpers._ensure_workdir(data, pr, env.root)
+        assert made and Path(made).parent == env.project_dir
+        assert "cloning" in capsys.readouterr().out
+        store.locked_update(env.root, lambda d: store.get_pr(d, PR_ID)
+                            .update(workdir=env.stale))
+        data, pr = env.fresh()
+        with mock.patch.object(helpers, "_clone_workdir",
+                               side_effect=AssertionError("cloned")):
+            assert helpers._ensure_workdir(data, pr, env.root) == made
+        assert env.fresh()[1]["workdir"] == made
+
     def test_lock_is_held_while_recovering(self, env):
         """Recovery runs inside the per-PR provisioning lock (not a second,
         re-entrant acquisition, which would deadlock on flock)."""
@@ -500,6 +527,7 @@ class TestPrStart:
                                side_effect=AssertionError("discovered")):
             result, _ = self._invoke(env, "--workdir", str(explicit))
         assert result.exit_code == 0, result.output
+        assert "creating a new one" not in result.output
         assert env.fresh()[1]["workdir"] == str(explicit)
 
 
