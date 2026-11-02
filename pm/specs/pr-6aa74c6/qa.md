@@ -1,17 +1,29 @@
 # QA Spec — Fuzzy select for `pr select` and `plan select` (pr-6aa74c6, #136)
 
-Branch `pm/pr-6aa74c6-fuzzy-select-for-pr-and-plan-commands` at `a7602942`
-(implementation `32a6bfb8` plus review-loop 8e9c i1/i2), based on
-`origin/master@81e5d7f4`. The two newer master commits only touch the
-registry. Implementation spec: `pm/specs/pr-6aa74c6/impl.md`.
+Branch `pm/pr-6aa74c6-fuzzy-select-for-pr-and-plan-commands` at `5dcf90dc`:
+implementation `32a6bfb8`, review-loop 8e9c i1/i2, the QA S7 incidental fix
+`d6b2c29e` (key order behind a command-bar Enter) and review-loop 0402 i1–i3
+(shared `_focus_current_view`, more tests, registry notes). Based on
+`origin/master@81e5d7f4`. Current `origin/master` (`4d0c07a5`) adds model
+and provider settings code that does not touch the files below; the
+branch's code merges into it cleanly, and only `pm/project.yaml` conflicts.
+Implementation spec: `pm/specs/pr-6aa74c6/impl.md`.
 
 Code under test:
 - `pm_core/tui/fuzzy_select.py` (scoring and ranking).
 - `pm_core/tui/fuzzy_select_cmd.py` (command handlers and `]`/`[` cycling).
 - `pm_core/tui/pr_view.py`: `pr select` / `plan select` are taken from the
   command bar before generic dispatch, and `persist_active_pr` is extracted.
-- `pm_core/tui/app.py`: `]` / `[` bindings, which are blocked while the
-  command bar has focus.
+- `pm_core/tui/app.py`:
+  - the `]` / `[` bindings, blocked while the command bar has focus;
+  - the key hold behind a command-bar Enter (`on_event`,
+    `_release_held_keys`, the 3 s `HELD_KEYS_TIMEOUT` fallback), which
+    applies to **every** command-bar command, not only the select commands
+    (impl I9);
+  - `_focus_current_view`, used after a select command and by Esc in the
+    command bar (impl I7).
+- `pm_core/tui/command_bar.py`: posts `CommandSubmitted` for an empty Enter
+  too, so the hold is always released.
 - `pm_core/tui/tech_tree.py` (navigation positions, plan first-PR, filter
   checks).
 - `pm_core/tui/tree_layout.py` (the shared status-filter predicate).
@@ -45,7 +57,8 @@ Code under test:
 | `pm/project.yaml` → `prs[]`, `plans[]` | CLI `pm pr add/edit/close`, `pm plan add`. The TUI reloads them. The retained result list refers to these ids. |
 | Project store lock (`locked_update`) | Contended by the TUI write queue and concurrent CLI writers. |
 | TUI in-memory result list (one per TUI) | Shared by `pr select`, `plan select`, `]`, `[`. |
-| TUI command bar + SIGUSR2 command queue (`tui-<session>.cmd-queue`) | Users type in the bar. External `pm autostart …`, the picker and popup routes inject commands through the same handler. |
+| TUI command bar + SIGUSR2 command queue (`tui-<session>.cmd-queue`) | Users type in the bar. External `pm autostart …`, the picker and popup routes inject commands through the same handler. Queued commands call the handler directly; they do not post `CommandSubmitted`, so they do not release a hold. |
+| TUI key stream (held-key buffer) | Every terminal key passes through `ProjectManagerApp.on_event`. Keys typed after a command-bar Enter are held until that command has been handled, then replayed in order. This includes `/`, a second command and its Enter, `]`, and navigation keys. Reload signals (SIGUSR1 from CLI writers) and queued commands compete with it for the event loop. |
 | TUI tree view state | Collapsed plans (`x`), status filter (`f`), hide-merged (`X`, persisted as `project.hide_merged`), sort (`F`). These decide what select and cycling can reach. |
 | TUI log line | Fuzzy messages compete with background and auto-start messages. |
 | tmux session / TUI pane | Driven by `pm tui send` and `pm tui view`. |
@@ -288,12 +301,45 @@ Fixture used by most scenarios. Build it with pm CLI commands (`pm plan add`,
   - When another actor runs `pm pr select <exact other id>`.
   - Then the TUI cursor follows to that PR. The fuzzy list is not replaced, so
     `]` continues through the old matches.
+  - Pick a target that is not the PR the TUI last followed from outside. An
+    external select of that previously followed PR, after the user moved
+    away, is ignored by the TUI. That is pre-existing pr-291ed27, and it
+    happens with arrow keys too.
 - **R31 Queued external commands during typing.**
   - Given the user is part-way through typing `/pr select …`.
   - When external read-only queue commands arrive (`pm autostart status`,
     `pm autostart list`).
   - Then the typed text is intact, the command bar keeps focus, and pressing
     Enter runs the select correctly.
+  - When the queued commands land right as the user presses Enter and then
+    `]`, the select runs, focus ends on the tree, and `]` cycles. It must
+    not be typed into a refocused command bar.
+- **R32 Key order behind a command-bar Enter (impl I9).**
+  - Given a reload stream from an outside CLI writer (for example a
+    `pm pr edit` loop), so that command handling is slow.
+  - When the user submits a command and keeps typing straight away:
+    - `/pr select spec`, Enter, then `]`;
+    - `/pr select spec`, Enter, then `/plan select watch`, Enter, then `]`;
+    - a non-select command that runs synchronously (for example
+      `/pr note add <id> 'x'`), Enter, then `j` / `k`;
+    - an empty Enter in the bar, then text.
+  - Then every key acts as if it had been typed after the command finished:
+    - `]` cycles the list of the command just run and never joins its query;
+    - a second command typed behind the first runs, in order, with its own
+      text intact and its own Enter delivered;
+    - navigation keys move the cursor in the current view, not into the
+      bar;
+    - after an empty Enter, the text goes into the bar.
+
+    No key is lost or reordered, and the TUI does not freeze.
+  - If a second command typed behind the first loses its Enter or text, send
+    the same burst (`/`, command, Enter at once) to an idle TUI with no first
+    command. If it is also garbled there, it is pre-existing `/`-buffer
+    behaviour: file it separately. If it only happens when the keys were held
+    behind a first Enter, it is this PR.
+- **R33 Esc in the command bar (impl I7).** Esc clears the bar and returns
+  focus to the visible view's widget: the tree, the plans pane, or the QA
+  pane. The next j/k acts in that view.
 
 ## Edge cases
 
@@ -339,8 +385,26 @@ Fixture used by most scenarios. Build it with pm CLI commands (`pm plan add`,
     the cycle keys;
   - the help row renders with stray `[/]` or wrong bolding;
   - lost writes or cursor snap-back under concurrent CLI writers.
+  - a key typed after a command-bar Enter lands in the submitted command, is
+    lost, or is replayed out of order (R32).
 - Behaviour that is pre-existing and unrelated to this PR (also present on
   master) is reported as a separate bug, not as a failure of this PR.
+
+## Known pre-existing issues (filed; do not fail this PR on them)
+
+- **pr-dd3682f.** The TUI's periodic background sync (first tick at TUI
+  start + 300 s, then every 300 s) reloads `project.yaml` without flushing
+  the 1.5 s `active_pr` write queue. A select, a `]` / `[` step or an arrow
+  key in the second before a tick can snap the cursor back while disk keeps
+  the new PR. If a cursor jumps back with no keypress at about start + 300·k s,
+  re-run the step away from the tick.
+- **pr-291ed27.** The TUI ignores an external `pm pr select` of the PR it
+  last followed from outside, after the user navigated away (see R30).
+- **pr-bda8833.** Collapsing the cursor's plan with `x` moves the cursor box
+  but leaves `active_pr` on the hidden PR.
+- **pr-adfdce3.** `pm autostart …` queue commands focus the hidden tree while
+  the plans or QA view is shown. Other command-bar branches return focus to
+  the plans pane or tree, never the QA pane.
 
 ## Ambiguities (resolved)
 
@@ -368,5 +432,18 @@ Fixture used by most scenarios. Build it with pm CLI commands (`pm plan add`,
 8. **`pm tui keys`.** This curated CLI summary is not part of R28. It already
    leaves out several tree keys (`x`, `X`, `f`, `F`). Whether `]` / `[` appear
    there is recorded as an observation, not a failure.
+9. **The command-bar key hold is in scope.** It came in as a QA incidental
+   fix (`d6b2c29e`), but it is in this PR's diff and changes how every
+   command-bar command treats the keys typed after it. Problems in the hold
+   or its replay are failures of this PR. Problems that also happen with no
+   hold involved (see R32's comparison) are pre-existing.
+10. **Concurrent CLI select during the TUI's 1.5 s write debounce.** A
+    `pm pr select Y` that lands while a TUI select, `]` step or arrow move
+    (`X`) is still queued can be overwritten when the TUI flushes `X` on the
+    reload. Arrow keys on master behave the same way: last flush wins. The
+    invariant QA checks is that, at rest, the cursor and `active_pr` agree.
+    If the CLI's `Y` is overwritten and plain arrow keys do the same, record
+    it as pre-existing and file it if it is not already filed. Do not fail
+    this PR on it.
 
 No **[UNRESOLVED]** items.
