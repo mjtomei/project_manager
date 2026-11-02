@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T02:14:16.674890+00:00'
+  updated_at: '2026-11-02T02:31:44.614887+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25419,6 +25419,15 @@ prs:
       A missing binary returns at once.'
     created_at: '2026-11-02T02:14:16Z'
     last_edited: '2026-11-02T02:14:16Z'
+  - id: note-556553d
+    text: 'QA S8 (2026-11-02): all 12 TUI stories held live at 01680d54 with the project
+      in /scratch (different device from ~/.pm). The TUI regression pane stays alive,
+      the clone copies objects (link count 1), d (qa debug) clones across filesystems,
+      the command bar quotes --branch "side''q" and a registry path with a space and
+      apostrophe. The pre-existing unbalanced-quote command-bar crash (pr_view.py:644)
+      is now filed as pr-f51600e; do not refile. Captures: /pm-captures/scenarios/8/.'
+    created_at: '2026-11-02T02:31:44Z'
+    last_edited: '2026-11-02T02:31:44Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
