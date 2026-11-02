@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T13:03:51.552073+00:00'
+  updated_at: '2026-11-02T13:19:14.122732+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -26220,6 +26220,22 @@ prs:
       copy used PATH podman, which logs ps -a to podman.log). Captures: /pm-captures/scenarios/30/.'
     created_at: '2026-11-02T13:03:51Z'
     last_edited: '2026-11-02T13:03:51Z'
+  - id: note-0253105
+    text: 'QA S31 refiner (2026-11-02, live at 7b66d161 = pm_core bc940b76): all 4
+      stories held with no fix (cold-start trio on one bridge, same-second filings,
+      bridge kill + restart, three providers at once). KEY TRAP for every container
+      route story: this QA image sets netns = "host" in /etc/containers/containers.conf,
+      so nested pm containers share the QA container network, the in-container ensure
+      step finds the router port already answering and starts no forwarder, and no
+      request goes through the host bridge (a killed bridge changes nothing). So S28-S30
+      "through the bridge" evidence never exercised it. Before any run, write ~/.config/containers/containers.conf
+      with [containers] netns = "slirp4netns" and check podman inspect -f {{.HostConfig.NetworkMode}}
+      = slirp4netns. Under slirp4netns R41/R43/R46 held: after kill, the GET fails
+      with ConnectionResetError(104) in 0.01 s, the next run starts a new bridge (new
+      pid), and the running container reaches the router through it without a restart.
+      p-env needs --api-base (claude type). Helpers: /pm-captures/scenarios/31/refiner-helpers.'
+    created_at: '2026-11-02T13:19:14Z'
+    last_edited: '2026-11-02T13:19:14Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
