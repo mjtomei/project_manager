@@ -51473,7 +51473,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/296
   gh_pr_number: 296
   created_at: '2026-10-28T02:46:55.100157+00:00'
-  updated_at: '2026-11-02T07:28:40.914158+00:00'
+  updated_at: '2026-11-02T07:57:32.528423+00:00'
   started_at: '2026-11-02T02:27:56.323149+00:00'
   reviewed_at: null
   merged_at: null
@@ -51586,6 +51586,27 @@ prs:
       (the popup itself still renders and Esc still closes it).'
     created_at: '2026-11-02T07:28:40Z'
     last_edited: '2026-11-02T07:28:40Z'
+  - id: note-5c3a4db
+    text: 'QA scenario 7 (model popup at the textual floor, project view): PASS, no
+      code change. All seven stories verified live at textual 2.0.1 in an isolated
+      HOME/venv/project: title/providers block/`(default)` placement, literal `[UNAVAILABLE:
+      router not reachable at 127.0.0.1:19001]` with closing bracket and unclipped
+      border, `[OK]` only after close+reopen with a listener up (toggling `p` keeps
+      the cached status), `pm provider default beta`, add gamma/edit alpha/remove
+      beta, app-level `r z w y` (no crash, no watcher, popup keeps focus; `p`+Down
+      still work), and the command bar (`/` -> "Type command (e.g. pr start pr-001)...",
+      Esc -> "press / to type a command · a Runs"). The background-reload finding
+      is confirmed exactly as the scenario describes: `pm pr add "Third PR"` (SIGUSR1)
+      under the open popup does not crash and does not lose focus, but the reload
+      does not apply — header stays 2 PRs after Esc and only `r` then shows the third
+      PR; `grep -rn "NoMatches\|Traceback" ~/.pm/debug/` is empty. Nav note: at the
+      200x50 pane the scenario requires, the tech tree is a single horizontal row
+      so Down/Up are layout no-ops; the command-bar THEN was additionally verified
+      at 80x24 where Down/Up move the highlight between rows. Captures: /pm-captures/scenarios/7/
+      (checks/*.txt per story, recording.cast/.mp4, and story-g-nav/ for the clean
+      80x24 nav cut).'
+    created_at: '2026-11-02T07:57:32Z'
+    last_edited: '2026-11-02T07:57:32Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
