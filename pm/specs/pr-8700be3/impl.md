@@ -69,7 +69,12 @@ R2 — Phase/progress once per PR.
   `LAUNCH_FAILED`); QA running / planning → no reason; QA PASS → `awaiting
   sign-off…`; review launch failure → `launch failed (retryable): …`;
   INPUT_REQUIRED rows → `answer in the review/QA/merge window` (held QA:
-  `answer in the scenario worker pane`).
+  `answer in the scenario worker pane`); queued / launching / idle rows
+  drop the phase word the token shows (`QUEUED qa` → `starts on next
+  scheduler pass`, not `QA starts …`; `RUNNING impl` → `launching`, `idle;
+  review transition pending`; `review` → `loop starts on next scheduler
+  pass`, `window open (no loop)`; `sign-off` / `impl` without a window →
+  `no window…`).
 - `_derive()` returns `(phase, state, reason, info)`; info carries
   `attention`, the short reason and `blockers`.  The JSON `reason` keeps its
   full text (machine-readable data unchanged); `short_reason`, `attention`,

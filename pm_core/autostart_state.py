@@ -687,7 +687,8 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
                     "blocked on " + blockers_text(blockers),
                     _info(blockers=blockers))
         if pr_id in (inp.get("launching") or set()):
-            return "implementation", "running", "launching implementation", plain
+            return ("implementation", "running", "launching implementation",
+                    _info(short="launching"))
         return "pending", "queued", "ready; starts on next scheduler pass", plain
 
     # A spec awaiting review blocks whichever phase generated it (an impl
@@ -703,9 +704,11 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
 
     if status == "in_progress":
         if pr_id in (inp.get("launching") or set()):
-            return phase, "running", "launching implementation", plain
+            return (phase, "running", "launching implementation",
+                    _info(short="launching"))
         if not win_live("implementation"):
-            return phase, "paused", "no implementation window", plain
+            return (phase, "paused", "no implementation window",
+                    _info(short="no window"))
         idle = (inp.get("impl_idle") or {}).get(pr_id)
         if idle == "waiting":
             return (phase, "waiting",
@@ -714,7 +717,7 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
                           "answer the prompt in the implementation window"))
         if idle == "idle":
             return (phase, "running", "impl idle; review transition pending",
-                    plain)
+                    _info(short="idle; review transition pending"))
         return phase, "running", "implementing", _info(short="")
 
     if status == "in_review":
@@ -778,8 +781,10 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
                 return (phase, "paused", f"review loop stopped (last {last})",
                         _info(short=f"loop stopped (last {last})"))
         if win_live("review"):
-            return phase, "running", "review window open (no loop)", plain
-        return phase, "queued", "review loop starts on next scheduler pass", plain
+            return (phase, "running", "review window open (no loop)",
+                    _info(short="window open (no loop)"))
+        return (phase, "queued", "review loop starts on next scheduler pass",
+                _info(short="loop starts on next scheduler pass"))
 
     if status == "qa":
         if qa:
@@ -826,7 +831,8 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
         if inp.get("skip_qa"):
             return (phase, "waiting",
                     "skip_qa set; sign-off follows the review PASS", plain)
-        return phase, "queued", "QA starts on next scheduler pass", plain
+        return (phase, "queued", "QA starts on next scheduler pass",
+                _info(short="starts on next scheduler pass"))
 
     if status == "sign_off":
         signoff = (inp.get("signoff") or {}).get(pr_id) or {}
@@ -835,7 +841,8 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
             if win_live("sign_off"):
                 return phase, "running", "sign-off review running", _info(short="")
             return (phase, "queued", "no sign-off window; relaunches on next "
-                    "scheduler pass", plain)
+                    "scheduler pass",
+                    _info(short="no window; relaunches on next scheduler pass"))
         if not signoff.get("fresh"):
             why = signoff.get("stale_reason") or "HEAD moved"
             if why == "HEAD moved":

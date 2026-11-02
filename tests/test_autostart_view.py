@@ -191,6 +191,34 @@ class TestDedupe:
         qa_spec = _row_block(text, "└ #237").splitlines()[0]
         assert "QA SPEC REVIEW" in qa_spec and "REVIEW qa" not in qa_spec
 
+    @pytest.mark.parametrize("status,extra,token,short", [
+        ("pending", {"launching": {"pr-x"}}, "impl", "launching"),
+        ("in_progress", {"launching": {"pr-x"}}, "impl", "launching"),
+        ("in_progress", {}, "impl", "no window"),
+        ("in_progress", {"windows": {"#9": "@1"},
+                         "impl_idle": {"pr-x": "idle"}},
+         "impl", "idle; review transition pending"),
+        ("in_review", {"windows": {"review-#9": "@1"}}, "review",
+         "window open (no loop)"),
+        ("in_review", {}, "review", "loop starts on next scheduler pass"),
+        ("qa", {}, "qa", "starts on next scheduler pass"),
+        ("sign_off", {}, "sign-off",
+         "no window; relaunches on next scheduler pass"),
+    ])
+    def test_reason_does_not_repeat_the_phase_token(self, status, extra,
+                                                    token, short):
+        # ``QUEUED qa — QA starts on next scheduler pass`` names the phase
+        # twice; the token says it once, the JSON reason keeps the full text.
+        s = st.build_status({"prs": [_pr("pr-x", status, gh=9)],
+                             "targets": {"pr-x": {}}, **extra})
+        run = s["runs"][0]
+        assert run["short_reason"] == short
+        assert run["reason"] != short
+        first, detail = st.format_text(s).splitlines()[1:3]
+        assert f" {token} [auto-merge]" in first
+        assert detail.strip() == short + (" · ⧉ " + run["window"]["name"]
+                                          if run["window"] else "")
+
     def test_spec_review_label_hides_held_phase_progress(self):
         # The live path to a QA spec review: QA ended INPUT_REQUIRED for the
         # missing spec, then the spec was flagged.  The recorded verdict's
