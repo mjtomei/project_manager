@@ -5173,7 +5173,11 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
+<<<<<<< HEAD
   updated_at: '2026-11-02T07:34:03.752173+00:00'
+=======
+  updated_at: '2026-11-02T07:34:30.176359+00:00'
+>>>>>>> 2c8f9a1a (qa: scenario 11 note (pm pr cd from another PR's clone writes the re-link into that clone's yaml))
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5247,6 +5251,7 @@ prs:
       default does. Captures /pm-captures/scenarios/9/story2.'
     created_at: '2026-11-02T07:05:21Z'
     last_edited: '2026-11-02T07:05:21Z'
+<<<<<<< HEAD
   - id: note-96f21bf
     text: 'QA S10 run 2026-11-02 at 700069de (code = 0d42e087): PASS 6/6 live (TUI
       d/t/i/i-after-move/zz d/zz d-after-move with two verified clones; captures /pm-captures/scenarios/10/{fixture,tui,cli,evidence}).
@@ -5265,6 +5270,25 @@ prs:
       clones, filed pr-5a6c061.'
     created_at: '2026-11-02T07:34:03Z'
     last_edited: '2026-11-02T07:34:03Z'
+=======
+  - id: note-8fee005
+    text: 'QA S11 story 3 finding (2026-11-02 at 700069de): a pm command run from
+      inside ANOTHER PR''s clone writes the re-link into that clone''s tracked pm/project.yaml
+      and blocks its integrate --apply. Repro (local backend, no pm session): PRs
+      B and C started (clones BC, CC; CC''s committed yaml lists B pending with no
+      workdir key). In CC, `pm pr cd <B>` prints ''no workdir is recorded; re-linked
+      the existing clone ... at <BC>'' and enters BC (BC stays clean, main project.yaml
+      sha unchanged), but CC now shows '' M pm/project.yaml'' (+ ''workdir: <BC>''
+      under B). From the main repo, `pm pr list --workdirs` marks C ''(dirty)'' and
+      `pm pr signoff integrate <C> --apply` prints ''merges cleanly with master@...''
+      then ''Not applied: workdir has uncommitted changes'' on stderr, rc 1. The 532f3ea1
+      guard (workdirs.resolve_workdir: _is_within(root, found)) only skips the write
+      when the cwd is the PR''s OWN clone; it should also skip it when the registry
+      being written is any PR clone''s tracked yaml rather than the main one. Captures
+      /pm-captures/scenarios/11/story3.'
+    created_at: '2026-11-02T07:34:30Z'
+    last_edited: '2026-11-02T07:34:30Z'
+>>>>>>> 2c8f9a1a (qa: scenario 11 note (pm pr cd from another PR's clone writes the re-link into that clone's yaml))
 - id: pr-0778fbe
   plan: plan-003
   title: Add PR ownership tracking with workdir history
