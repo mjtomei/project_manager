@@ -26170,6 +26170,25 @@ prs:
       + rehearsal: /pm-captures/scenarios/30/refiner-helpers.'
     created_at: '2026-11-02T12:49:11Z'
     last_edited: '2026-11-02T12:49:11Z'
+  - id: note-db8c5fe
+    text: 'QA S29 refiner (2026-11-02, live at 7b66d161, pm_core with ef4f5c19): container-mode
+      regression on router default r-ctr (127.0.0.1:18429 HTTP log, --env PM_QA_RTOKEN
+      token) held 5/5 with no fix: CLI --file-prs, TUI Enter, command bar --branch
+      alt, pm qa launch --target-window discovery, host mode. One host bridge (route_bridge.py
+      host ~/.pm/route-bridge/r-ctr/router.sock 127.0.0.1 18429) shared by all container
+      runs, same pid; podman exec carries bare -e names only; token only in ~/.pm/providers.yaml
+      (0 hits in ps dumps, podman inspect CreateCommand, debug logs, prompt.md, panes).
+      Draft fixes: one q leaves the QA view (q toggles, twice re-opens it); the TUI
+      pane start command is wrapped (bash -c trap pm _pane-exited ...; pm -C <proj>/pm
+      qa regression demo --file-prs), qa launch is exact; pm init makes no project.yaml.lock
+      until the first write (seed PR); pm does not log the create argv, read it with
+      podman inspect -f {{.Config.CreateCommand}}; in-container ANTHROPIC_BASE_URL
+      equals the api_base string (forwarder on the router port), so the bridge proof
+      is the mount + host bridge + HTTP log; on the host the stand-in sees /run/pm-route
+      from the agent container itself; TUI cards truncate titles, grep the PR id;
+      rm router.sock stops the bridge at once. Helpers + rehearsal: /pm-captures/scenarios/29/refiner-helpers.'
+    created_at: '2026-11-02T12:48:41Z'
+    last_edited: '2026-11-02T12:48:41Z'
   - id: note-ece185b
     text: 'QA S29 (2026-11-02): PASS at de47f015 (pm_core with route-mount fix ef4f5c19
       + review f51f i1-i3), all 5 stories live from /scratch/s29 (device differs from
