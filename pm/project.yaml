@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T13:31:39.243999+00:00'
+  updated_at: '2026-11-02T13:49:22.597885+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -26260,6 +26260,34 @@ prs:
       prompt waits match old prompts after a cast roll. Captures: /pm-captures/scenarios/31/.'
     created_at: '2026-11-02T13:31:39Z'
     last_edited: '2026-11-02T13:31:39Z'
+  - id: note-11756c0
+    text: 'QA S32 refiner (2026-11-02, live at 7b66d161 = pm_core bc940b76): R47 held
+      end to end with real Claude 2.1.316 in a nested QA container. TUI Enter on `smoke`
+      reached PASS in 1m31s, with no trust prompt ("workspace trust: seeded /workspace
+      trust for container ..." in ~/.pm/debug/<tag>.log). The session used plain `tmux`
+      on its own server, ran the aaa-smoke session under /scratch, and wrote tui.txt
+      + manifest.md beside prompt.md in the host captures dir. Its `pm -C /pm-project
+      pr add` exit 0 added only that PR (+active_pr, pr-a571291). Socket sessions/windows/panes
+      were unchanged and the default server never existed. /exit closed the pane in
+      ~11 s, the container went at the same moment, and podman ps -a was empty. Fixture
+      fix this environment needs (pre-existing master create_container, nested pm
+      only, not this PR): pm gives a nested container PM_HOST_HOME=$HOME and mounts
+      the hook receiver only from $HOME/.pm, while the shared ~/.claude/settings.json
+      names $PM_HOST_HOME/.pm/hook_receiver.py. With a stock image, the first prompt
+      is blocked ("UserPromptSubmit operation blocked by hook: python3: cannot open
+      file /home/matt/.pm/hook_receiver.py"), and in-container `pm session` refuses
+      ("Refusing to install pm''s Claude Code hooks"). Bake the receiver at $PM_HOST_HOME/.pm/hook_receiver.py
+      into the QA image and make its pm shim export that PM_HOST_HOME. Never edit
+      the shared settings.json. Keep ANTHROPIC_BASE_URL in the session env (agent
+      forwarder; nested podman is netns=host). Use a fresh registry: a pre-existing
+      "S32 smoke finding" makes the session add a note instead of filing. The in-container
+      Claude shares and appends to the agent auto-memory (~/.claude/projects/-workspace/memory).
+      Helpers: /pm-captures/scenarios/32/refiner-helpers. Nested podman networking:
+      the API path is 127.0.0.1:8790 inside the container, so keep netns=host. A ~/.config/containers/containers.conf
+      netns=slirp4netns override (the S31 route-bridge fix) cuts it; remove it for
+      S32.'
+    created_at: '2026-11-02T13:49:22Z'
+    last_edited: '2026-11-02T13:49:22Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
