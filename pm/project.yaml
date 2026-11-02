@@ -38667,11 +38667,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-21T21:40:00.306182+00:00'
+  updated_at: '2026-11-02T06:10:48.842062+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-9623a19
+    text: 'From pr-ec5bc84 (native session logs, replaces pm/transcripts): run dirs
+      are gone - transcript_dir/_transcript_dir/get_transcript_dir become run ids
+      (auto_start.get_run_id, ReviewLoopState.run_id, run_review_loop_sync(..., run_id));
+      pane_runs_transcript/finalize_transcript are removed. Every collected launch
+      records its session in pm_core/session_log (per-PR ledger; session_log.by_session(pr,
+      sid) gives the native JSONL log). Action history should key on session_id and
+      take the log path from the ledger (or pm pr sessions) rather than session_id_from_transcript(<run-dir
+      link>). No history feature was added by pr-ec5bc84.'
+    created_at: '2026-11-02T06:10:48Z'
+    last_edited: '2026-11-02T06:10:48Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
@@ -51595,3 +51606,114 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-ec5bc84
+  plan: bugs
+  title: Use native session logs and remove pm/transcripts indirection
+  branch: pm/pr-ec5bc84-use-native-session-logs-and-remove-pm-transcripts-
+  status: in_progress
+  depends_on: []
+  description: 'Replace the PM-owned transcript symlink/copy/archive tree with direct
+    references to harness-native session history. Supersedes closed #275 / pr-9ee4d64
+    by eliminating the mutable indirection that caused the bug, rather than adding
+    another archive layer. User explicitly approved closing #275 and starting this
+    simpler design on 2026-11-02.
+
+
+    Why: Claude already retains the original JSONL; the current installation has cleanupPeriodDays=365000.
+    PM currently reuses phase/iteration paths and sometimes freezes a live symlink
+    into a copy. A real #241 incident let an obsolete review completion freeze the
+    next loop''s live file and hide its eventual NEEDS_WORK. Earlier sign-off return
+    history was also lost from PM''s run directory even though native sessions survived.
+
+
+    Desired design: keep the smallest durable mapping needed to associate project/PR,
+    phase and exact run/loop/attempt with native session ID and native log location,
+    reusing existing session/runtime metadata. Launches register their own identity;
+    collectors and history readers read that session directly. Do not derive identity
+    from a mutable alias, scan the entire history when a known session ID suffices,
+    or replace this with a new copy/archive service. Use native retention; do not
+    silently change global retention or promise history beyond the configured harness
+    retention. A missing/pruned native log must be reported accurately, never treated
+    as a verdict or another session.
+
+
+    Retire all new writes and runtime dependence on pm/transcripts, including implementation,
+    reviews, QA roles, sign-off, watchers and CLI flows that use it. Keep genuine
+    execution stdout/stderr, recordings and non-native artifacts in their existing
+    appropriate capture/state locations; do not throw away evidence merely because
+    it is called a transcript. Reuse launch/session plumbing and one small common
+    resolver rather than adding parallel role-specific machinery. Review any proposed
+    compatibility code against the simplification goal.
+
+
+    Upgrade safely: existing in-flight sessions and saved runtime records must remain
+    identifiable, and earlier evidence/unsent drafts must not be deleted. Preserve
+    legacy copies that are the only remaining evidence. A bounded read-only compatibility/adoption
+    path is acceptable; new runs must not recreate the old tree. Do not delete the
+    live installation''s pm/transcripts or alter the running host during implementation/QA.
+
+
+    Acceptance: exact-session verdict collection across sign-off returns, fresh review
+    loops restarting at iteration one, concurrent PRs, late completion from an obsolete
+    loop, TUI restart/adoption and human follow-up in the existing pane. Reproduce
+    #241''s stale-finalizer failure and show it cannot freeze or retarget a newer
+    native log. Verify newly appended outcomes remain readable and prior session identities
+    remain discoverable. Include representative coverage of every affected producer/consumer;
+    use isolated test projects, HOME/PM state and tmux servers inside the configured
+    containers. Preserve manual merge/spec gates and the existing verdict policy.
+    No broad workflow rewrite, new archive retention subsystem or unrelated recipe
+    hardening.
+
+
+    Coordination: #248 INPUT_REQUIRED adoption, #260 fresh implementation handoff
+    and #274 integration-return gate currently depend on #275''s session ownership
+    fixes. The approved scheduling holds now target this replacement for downstream
+    review/QA; their existing implementation/evidence remain preserved. Coordinate
+    with #237 action history without expanding into that feature. Start fresh from
+    current master, not from #275''s unmerged archive implementation; use its incident
+    evidence and focused regression intent where useful.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/297
+  gh_pr_number: 297
+  created_at: '2026-11-02T05:06:16.376330+00:00'
+  updated_at: '2026-11-02T06:10:47.296603+00:00'
+  started_at: '2026-11-02T05:06:42.121417+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-dcc1cd1
+    text: 'User authorized this replacement to start immediately. Use main-account
+      Opus 5.5/xhigh for all roles/helpers/sign-off, matching the superseded PR current
+      routing. The provider pins the effective xhigh setting. Keep wait_for_merge.
+      No spec-approval pause requested for this code simplification; do not expand
+      into prompt redesign. No live host PM/tmux/settings mutation in tests. Preserve
+      old #275 source and evidence; it is closed by user choice despite its historical
+      passing sign-off.'
+    created_at: '2026-11-02T05:06:19Z'
+    last_edited: '2026-11-02T05:06:19Z'
+  - id: note-b97d085
+    text: 'Impl done at 9d8ad1c9 (spec 6760e349). Design: pm_core/session_log.py append-only
+      ledger <runtime>/sessions/<pr>.jsonl (watchers: watcher-<type>); build_claude_shell_cmd(launch=SessionLaunch)
+      registers each launch with native session id + log path; review/watcher loops
+      pre-generate per-attempt --session-id, other launches pass --run-id; hidden
+      --transcript is write-free (run id only, for an old-code parent mid-upgrade).
+      All finalize/copy code removed (#241 finalizer included); sign-off .head stamp
+      -> record head/base, bounce = ledger retire event (logs kept). Legacy pm/transcripts
+      adopted once, read-only (breadcrumb _transcript_dir, run-dir links/frozen copies/.head,
+      auto-sequence dir, orphan sign-off by pane sid); never written or deleted. Review
+      loop ids widened to 8 hex (ledger key). Launch-failure artifacts -> <runtime>/launch-artifacts.
+      New read-only CLI: pm pr sessions <pr> [--phase] [--json], pm watcher sessions
+      [type]. Captures: $CAP/impl/pre-fix/stale-finalizer (bug on master 5b352d16),
+      $CAP/impl/post-fix/{stale-finalizer,review-loop-e2e} (real pm pr review children
+      on a private tmux server + fake Claude: NEEDS_WORK->PASS, each iteration its
+      own recorded session, no pm/transcripts), suite logs in $CAP/impl/test-runs.
+      Full suite 5554 passed / 12 failed, failure set identical to master (5526/12,
+      all markdown_render env). Tests: tests/test_session_log.py, tests/test_native_session_lifecycle.py,
+      sign-off returns test in test_tui_signoff_handoff.py + adapted suites. Coordination:
+      #248/#260/#274 records are not in this clone registry; they integrate against
+      run_id/session_log instead of transcript_dir/finalize_transcript.'
+    created_at: '2026-11-02T06:10:47Z'
+    last_edited: '2026-11-02T06:10:47Z'
+  model: provider:claude-main-xhigh-pm
+  effort: high
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-ec5bc84-use-native-session-logs-and-remove-p-4d0c07a5
