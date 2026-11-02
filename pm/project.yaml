@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T02:01:25.784391+00:00'
+  updated_at: '2026-11-02T04:02:57.598766+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39509,6 +39509,26 @@ prs:
       model/effort) and verify-s12/s6-followup.md.'
     created_at: '2026-11-02T02:01:25Z'
     last_edited: '2026-11-02T02:01:25Z'
+  - id: note-f96d58e
+    text: 'QA S50 (2026-11-02, R16 review launch retries): fixed 2d8a84f7. A LAUNCH_FAILED
+      review iteration journaled str(e)[:300]; the concise launch error ends with
+      " (artifact: <path>)", so the history row was cut at "...review-<pr>-i1-attemp"
+      and named no file (pm autostart status printed it in full). review_loop._history_end_detail
+      now clips only the body and keeps the artifact suffix whole. Tests: test_launch_failed_end_keeps_the_artifact_path,
+      test_end_detail_without_artifact_is_clipped. All four stories held live on 815d6bfe
+      in an env -i sandbox with the podman shim: (1) repaired in the 5 s backoff ->
+      one i1 [launching 0s . backoff Ns], fires timer with fixed armed/due, badge
+      [review-loop i1: backoff, 4s left], i1 exec 23s wait 5s NW, loop PASS; (2) manual
+      loop LAUNCH_FAILED after 5 s + 10 s backoffs, no re-arm cooldown, popup [failed;
+      retryable] / [start: turn done]; (3) autostart add re-armed the exhausted loop
+      (adopted vanished + failed i1), cooldown 59.94 s with falling remaining, popup
+      [4 runs], H == CLI, re-armed loop PASS, no row overwritten; (4) plain pm tui
+      restart -> all 126 post-mount polls read the cooldown lost (owner process exited),
+      no P2 loop at the old due, auto-start off. Post-fix live run: the row names
+      ...-i1-attempt3-<ts>.log, which exists. Suite 5570 passed; 12 test_markdown_render
+      fails = missing markdown module in the container. Captures /pm-captures/scenarios/50.'
+    created_at: '2026-11-02T04:02:57Z'
+    last_edited: '2026-11-02T04:02:57Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
