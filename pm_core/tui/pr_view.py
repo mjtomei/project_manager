@@ -46,7 +46,16 @@ def handle_pr_selected(app, pr_id: str) -> None:
     _log.debug("PR selected: %s", pr_id)
     app.log_message(f"Selected: {pr_id}")
     app.call_after_refresh(app._capture_frame, f"pr_selected:{pr_id}")
+    persist_active_pr(app, pr_id)
 
+
+def persist_active_pr(app, pr_id: str) -> None:
+    """Record *pr_id* as ``project.active_pr`` (cursor selection).
+
+    Shared by keyboard navigation and programmatic selection (fuzzy
+    ``pr select`` / ``plan select`` and match cycling) so every way of
+    moving the cursor persists it the same way.
+    """
     # Persist selection so TUI restarts on this PR.  Update in-memory state
     # immediately (source of truth for the running TUI), then enqueue the
     # disk write so rapid navigation doesn't block the event loop on a full
@@ -636,12 +645,24 @@ def handle_command_submitted(app, cmd: str) -> None:
             app._inflight_pr_action = action_key
             break
 
+    # Fuzzy ``pr select`` / ``plan select``: handled in-process (cursor move
+    # + active_pr), parsed before the generic shlex split so a query such as
+    # ``user's`` cannot raise on an unbalanced quote.
+    from pm_core.tui import fuzzy_select_cmd
+    select_cmd = fuzzy_select_cmd.parse_select_command(cmd)
+    if select_cmd is not None:
+        kind, query = select_cmd
+        fuzzy_select_cmd.handle_select_command(app, kind, query)
+        app._focus_current_view()
+        return
+
+    parts = shlex.split(cmd)
+
     # Handle review loop commands
     # Accepts: review-loop [start] [PR_ID]
     # No subcommand or 'start' → always start a fresh loop, superseding
     # any running one for the same PR.  Cancelling a loop is via TUI
     # restart or Ctrl+C in the loop's pane, not via this command.
-    parts = shlex.split(cmd)
     _rl_base = cmd.replace("review loop", "review-loop")
     _rl_parts = _rl_base.split()
     if _rl_parts and _rl_parts[0] == "review-loop":
