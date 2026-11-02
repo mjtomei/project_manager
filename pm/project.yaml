@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T06:55:12.082638+00:00'
+  updated_at: '2026-11-02T07:22:28.576330+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7366,6 +7366,81 @@ prs:
       (README.md, 22 casts+mp4, screens/, sh-windows/, scripts/).'
     created_at: '2026-11-02T06:55:11Z'
     last_edited: '2026-11-02T06:55:11Z'
+  - id: note-ff7fe2a
+    text: 'QA S28 refiner (2026-11-02, head a7169e96). I ran a live smoke in a disposable
+      HOME on stock tmux 3.2a, with a stand-in claude first on PATH. It found two
+      pre-existing defects that block the drafted steps; both also reproduce on master
+      (/opt/pm-src).
+
+      (1) A repo dir containing $HOME cannot get a pm session. tmux rewrites a $ followed
+      by a letter, _ or { to \$ in session names (new-session -s ''a$HOME'' gives
+      a\$HOME; $$, $( and ''$ '' are kept). So pm session prints ''Failed to detect
+      TUI pane after session creation.'' (rc 1). It leaves a server running whose
+      session and registry file carry the \$ name, and a second pm session dies with
+      a TmuxCommandError ''duplicate session'' traceback.
+
+      (2) TUI s and d crash for a repo path containing a single quote. pm_core/tui/pr_view.py
+      start_pr/review_pr append an unquoted ''--transcript <root>/transcripts/manual-<hex>/...''
+      to a string that run_command shlex.splits, which raises ValueError: No closing
+      quotation. When the TUI is the window''s only pane, the session and its server
+      die. A space alone would split the path into extra args.
+
+      Surface map: only s, d, CLI pm pr start and pm meta use the claude "$(cat <cwd>/pm/prompts/pm_prompt_<id>.txt)"
+      form (cwd = PR workdir or meta workdir). c, H and pm qa launch pass the prompt
+      inline, single-quoted. pm qa regression and pm plan add run claude in the foreground
+      with the prompt as an argv entry, so no prompt file and no new window.
+
+      With the fallback name it''s my `touch PWNED` $$ repo, every other check passed:
+      c, H, pm pr start, qa launch, qa regression, plan add and meta (whole prompt
+      in one argument, literal cwd, own PM_TMUX_SOCKET, prompt file removed, override
+      cleared), concurrent TUI s plus CLI starts in two sessions, and prefix+o/arrows
+      on 3.2a (zoom kept 56/56).
+
+      Traps: on 3.2a, show-messages is newest first and logs each key twice (the if-shell
+      binding, then run-shell pm _pane-switch); pm''s own client-NNNN select-pane
+      lines are not the fallback. pm pr start impl windows are never pane-registry
+      entries. An arrow with no neighbour that way does not move. pm qa add-* runs
+      $EDITOR as argv[0] only, so use a script. Identical PR titles give identical
+      PR ids in both projects, so use distinct titles.'
+    created_at: '2026-11-02T06:46:53Z'
+    last_edited: '2026-11-02T06:46:53Z'
+  - id: note-86719bd
+    text: 'QA S28 (every Claude launch surface, plain + awkward project, tmux 3.2a)
+      NEEDS_WORK: four defects found, fixed in this run, and re-driven live; all five
+      stories pass on the fix. (1) Pre-existing, also on master: a repo dir with $HOME
+      (or ., :, \, control chars, #) in its name could not get a pm session. tmux
+      rewrites session names ($HOME -> \$HOME, . and : -> _, # expanded as a format),
+      so pm printed ''Failed to detect TUI pane after session creation.'' and a second
+      pm session died with a ''duplicate session'' traceback. Fix: paths.tmux_safe_name
+      is applied to the session tag at its source, with an inline mirror in wrapper.py
+      for the meta override lookup. The S28 session is now pm-it''s my `touch PWNED`
+      _HOME repo-<hash>; paths and cwd keep the literal $HOME. (2) Found while mapping
+      (1): tmux format-expands new-session -s, every -c <cwd> and display-popup -d,
+      so a repo path containing #(cmd) RAN cmd on each session and window start, and
+      the pane opened in the wrong dir. Fix: tmux.format_literal (# -> ##) on those
+      arguments. (3) Pre-existing: TUI s/d crashed the TUI, and with it the session''s
+      server, for a repo path containing a single quote: the unquoted --transcript
+      hit shlex.split (ValueError: No closing quotation). Fix: shlex.quote the transcript
+      path in start_pr, review_pr and auto-merge; run_command now logs an unparsable
+      line instead of raising. (4) Pre-existing: a window killed outside pm (kill-window,
+      C-b &) stayed in the pane registry until a TUI restart. Fix: _schedule_rebalance
+      also visits registry windows tmux no longer has, so the attach reconciles them
+      away. Re-checked live with a re-attach. Results on the fix: s, d, c and H in
+      both projects, and CLI pr start, qa launch, qa regression, plan add and meta
+      in both, each pass the whole prompt as the last argument. s, d, pr start and
+      meta prompt files were cmp-identical to the argument and removed afterwards.
+      Every sock was the launching session''s own socket. Awkward prompts quote the
+      session name as one shell word; after normalising names, paths and ids they
+      equal the plain prompts. No PWNED anywhere and no default server. A concurrent
+      burst of 4 launches across 2 sessions landed each launch in its own session.
+      28/28 prefix+o/arrow presses on 3.2a stayed zoomed with the run-shell gate branch
+      and no fallback. Filed pr-da4ac96 (pre-existing: the H assist prompt names the
+      guide pane as the TUI pane ID). New tests: tests/test_awkward_repo_paths.py
+      (34; the transcript/registry tests fail on a fix-1-only tree, the -c test fails
+      with format_literal as identity). Captures: /pm-captures/scenarios/28 (README.md;
+      pre-fix/ and post-fix/s1..s5).'
+    created_at: '2026-11-02T07:22:28Z'
+    last_edited: '2026-11-02T07:22:28Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
@@ -51894,6 +51969,30 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T06:11:04.638705+00:00'
   updated_at: '2026-11-02T06:11:04.638705+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-da4ac96
+  plan: bugs
+  title: Assist prompt (H) names the guide pane as the TUI pane ID
+  branch: pm/pr-da4ac96-assist-prompt-h-names-the-guide-pane-as-the-tui-pa
+  status: pending
+  depends_on: []
+  description: 'pm_core/guide.py (assist prompt builder, around line 361) sets ''TUI
+    pane ID: {pane_id}'' from os.environ[''TMUX_PANE'']. The prompt is built by ''pm
+    guide'' running inside the newly split guide pane, so TMUX_PANE is the guide pane
+    itself, not the TUI. Repro (QA S28 on pr-073910f, 2026-11-02, also on master):
+    in a pm session press H in the TUI; the stand-in claude received ''TUI pane ID:
+    %6'' while the TUI was %0 and %6 was the guide pane (registry: tui %0, guide %6).
+    The c prompt (and qa launch/regression) correctly say %0. Fix idea: resolve the
+    TUI pane from the pane registry (role tui) or pass it from the TUI, instead of
+    reading TMUX_PANE.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T07:14:50.211853+00:00'
+  updated_at: '2026-11-02T07:14:50.211853+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
