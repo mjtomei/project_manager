@@ -371,15 +371,20 @@ class TestBuildShellCmd:
         assert "route_bridge" not in cmd
 
 
+def _assignment_words(cmd: str) -> list[str]:
+    """``NAME=value`` words in *cmd*: values a process argument would carry."""
+    return [w for w in shlex.split(cmd)
+            if re.match(r"[A-Za-z_][A-Za-z0-9_]*=", w)]
+
+
 def _cmd_env(cmd: str) -> dict[str, str]:
-    """The values a built command sets for claude: its ``env_out`` (and any
-    ``NAME=value`` assignment in the string, which none should hold)."""
-    import re
-    import shlex
-    env = dict(w.split("=", 1) for w in shlex.split(cmd)
-               if re.match(r"[A-Z_][A-Z0-9_]*=", w))
-    env.update(getattr(cmd, "env", None) or {})
-    return env
+    """The values a built command sets for claude: its ``env_out``.
+
+    The command string itself holds none (it becomes a process argument,
+    readable by every local user), so every caller also guards that.
+    """
+    assert not _assignment_words(cmd), "a value is inlined in the command"
+    return dict(getattr(cmd, "env", None) or {})
 
 
 def _probe_cmd(cfg: ProviderConfig, *, container: bool = False) -> Launch:
@@ -2443,10 +2448,29 @@ class TestProbeEnvTransport:
         cmd = router_route._probe_shell_cmd(route, "sid", container=container,
                                             env_out=env)
         assert _CANARY not in cmd and _TEAM not in cmd
-        assert not [w for w in shlex.split(cmd)
-                    if re.match(r"[A-Za-z_][A-Za-z0-9_]*=", w)]
+        assert not _assignment_words(cmd)
         assert env == self._expected(route, container=container)[0]
         assert f" --model {MODEL} " in cmd
+
+    @pytest.mark.parametrize("container", [False, True])
+    def test_nothing_to_unset(self, pm_home_dir, container):
+        # unset_env: [] plus a classifier model assigns every routing
+        # variable, so the probe unsets nothing and runs claude directly.
+        _write_providers(pm_home_dir, unset_env=[],
+                         classifier_model="work/classifier",
+                         env={"ANTHROPIC_CUSTOM_HEADERS": _HEADER})
+        cfg = get_provider(ROUTE, strict=True)
+        assign, unset = self._expected(cfg, container=container)
+        assert unset == ()
+        env: dict[str, str] = {}
+        cmd = router_route._probe_shell_cmd(cfg, "sid", container=container,
+                                            env_out=env)
+        prefix = (router_route.container_ensure_cmd(cfg) + " && "
+                  if container else "")
+        assert cmd.startswith(f"{prefix}claude -p "), cmd
+        assert _CANARY not in cmd and not _assignment_words(cmd)
+        assert env == assign
+        assert env["ANTHROPIC_CUSTOM_HEADERS"] == _HEADER
 
     def test_env_out_is_required(self, route):
         # Without it the route's environment (ANTHROPIC_BASE_URL) could not
@@ -2460,8 +2484,10 @@ class TestProbeEnvTransport:
         \\x1f) and then runs the real *name* unchanged."""
         real = shutil.which(name)
         shim = bindir / name
-        shim.write_text(f"#!/bin/sh\nprintf '%s\\037' {name} \"$@\" >> {log}\n"
-                        f"echo >> {log}\nexec {real} \"$@\"\n")
+        log_q, real_q = shlex.quote(str(log)), shlex.quote(real)
+        shim.write_text("#!/bin/sh\n"
+                        f"printf '%s\\037' {name} \"$@\" >> {log_q}\n"
+                        f"echo >> {log_q}\nexec {real_q} \"$@\"\n")
         shim.chmod(0o755)
 
     def test_host_probe_end_to_end(self, route, short_dir, monkeypatch):
