@@ -5173,11 +5173,27 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-07T15:19:59.399251+00:00'
-  updated_at: '2026-03-07T15:19:59.399251+00:00'
+  updated_at: '2026-11-02T02:18:12.681826+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-c8ec642
+    text: 'Impl done at 20280c56 (spec pm/specs/pr-4258a32/impl.md). New pm_core/workdirs.py:
+      resolve_workdir/get_workdir keep the fast path (recorded path exists -> returned,
+      no git/scan/lock); a missing/absent record scans ONLY this project workdirs
+      dir (one level) for <branch_slug>[-<7..40 hex>] names, verifies read-only (own
+      git toplevel, repo_id root commit or origin URL, HEAD on PR branch or rebase
+      head-name; GIT_OPTIONAL_LOCKS=0, never status/checkout), re-links a unique match
+      via compare-and-set under the store lock, reports >=2 verified as AMBIGUOUS
+      (no adopt, no clone). Shares the per-PR .workdir-<pr>.lock with cloning. Wired
+      into _ensure_workdir (review/done/merge window/sign-off/QA), pm pr start (before
+      cloning; --workdir skips discovery) and pm pr cd; nothing on registry load.
+      Tests: tests/test_workdirs.py (30, real git repos, temp workdirs_base). Full
+      suite in impl container: 5462 passed / 13 failed, failure set identical to origin/master
+      (markdown dep missing + push_proxy socket path = environment).'
+    created_at: '2026-11-02T02:18:12Z'
+    last_edited: '2026-11-02T02:18:12Z'
 - id: pr-0778fbe
   plan: plan-003
   title: Add PR ownership tracking with workdir history
