@@ -42166,6 +42166,49 @@ prs:
       the command-bar submit (spec: about 2 s).'
     created_at: '2026-11-02T19:49:58Z'
     last_edited: '2026-11-02T19:49:58Z'
+  - id: note-6724b63
+    text: 'QA S76 refiner (2026-11-02, ad033bbb): all 3 stories held live, evidence
+      /pm-captures/pr-8020495/s76-refiner (README). Draft fixes: (1) story 2 E12 start
+      must belong to a PR started with TUI `s` in the TUI that gets killed (used M),
+      not P: P start ends `untracked` at its loop first 5 s impl-idle tick, and a
+      restarted TUI never re-tracks a start an earlier TUI launched (new manual-<token>
+      transcript dir). (2) merge = `pm pr merge <M> --no-signoff-check` (plain refuses:
+      no sign-off verdict); give loop 2 i2 a 15 s fake delay or the mid-i2 trigger
+      misses (delay 8 = ~6 s agent phase). (3) merged-PR popup header also shows `h/l:
+      prev/next PR  0: home` when other PRs have windows; z/d are ignored. (4) restart
+      within ~1.4 s of `Relaunched scenario 1`: one read may show runtime `qa=running`
+      with no stale mark (qa mirror entry has no attempt_id) while every attempt reads
+      interrupted - allowed gap transient. (5) the review i2 grace stays `lost` after
+      the resume (adopted arms none); only the qa-grace entry reads re-armed. M arms
+      no hold, so the R9 `released (PR merged)` check is vacuous here.'
+    created_at: '2026-11-02T20:17:33Z'
+    last_edited: '2026-11-02T20:17:33Z'
+  - id: note-e590f99
+    text: 'QA S76 (2026-11-02) INPUT_REQUIRED on 19cbda244 (app ad033bbb), no code
+      edits. All 3 stories live in env -i sandbox /scratch/q76 (torn down); captures
+      + per-Then README in /pm-captures/scenarios/76 (scripts/ = refiner drivers re-pointed
+      + s1setup.sh, rdchk.py). Every substantive Then held: restart 1 (i2 grace 14.1
+      s left): old loop swept on tui-mount, i2 end unknown >9s, its grace lost for
+      good, resumed loop = new id, same (loop 07b2), i2 (adopted) done NW 0s, i3 PASS;
+      restart 2 1.4 s after Relaunched scenario 1: old run/s2/s3/s1 retry 1 end unknown,
+      grace lost then re-armed, resumed run s1-s3 done PASS once, up to 2 at once,
+      QA PASS; chk.py BAD 0 on 4900+ JSON reads. SIGKILL: 210 gap reads per reader
+      never open, sweep at mount +20.4 s, M start swept, latency medians 0.096/0.097/0.102
+      s with 4 owners. Cleanup/merge/popup literal (pager EQUAL). Not literal: two
+      restart-1 transients outside the Then list, both inside the 0.5 s settle (the
+      hard rule held). (1) Reads started +0.041/+0.120 s (JSON) and +0.11 s (text)
+      AFTER pm tui restart --breadcrumb returned still showed the old loop running
+      with the i2 grace active. The command returns ~0.15 s before the TUI re-execs
+      (the old image keeps its owner lock; new mount sweep journaled at +0.345 s),
+      but the list only allows reads started before the return (refiner: last open
+      read -0.04 s). (2) pb +0.391 s read the resumed parent with the adopted i2 open
+      (processing verdict for 0s, adopted true, no grace, 23 ms life), not the parent-only
+      "next iteration launching" form. Plan fix: allow old-loop-open reads until the
+      TUI re-execs (~0.3 s after the return) and the adopted iteration briefly open
+      in verdict processing; or make pm tui restart wait for the new owner instance
+      before it returns.'
+    created_at: '2026-11-02T20:37:32Z'
+    last_edited: '2026-11-02T20:37:32Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
