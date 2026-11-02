@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T05:20:36.377232+00:00'
+  updated_at: '2026-11-02T05:26:32.025701+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25632,6 +25632,35 @@ prs:
       during a debug-log-diff story.'
     created_at: '2026-11-02T05:20:36Z'
     last_edited: '2026-11-02T05:20:36Z'
+  - id: note-16936d8
+    text: 'QA S16 refiner (2026-11-02, live at 44f6e5fc, /scratch/s16r): story 1 FAILS
+      as the draft anticipated (R7/R34). A TUI-Enter run from a `pm session --global`
+      session keeps PM_SHARE_MODE=global; the stand-in record shows PM_PROJECT/PM_SESSION/TMUX/TMUX_PANE/PM_POPUP_SESSION/PM_IN_TMUX_SESSION
+      unset and PM_TMUX_SOCKET=/tmp/pm-sessions/pm-<user tag>. In the run pane, `pm
+      session` in a zz-test-a project under the run scratch still creates the non-shared
+      pm-zz-test-a-<md5(root)> on the shared server (_session_start pops PM_SHARE_MODE)
+      with no reuse/rebalance of the user session. But `pm tui view` with no -s prints
+      [Session: pm-proj-<user tag>, Pane: %0] (the user TUI) and appends a frame to
+      ~/.pm/pane-registry/tui-history/pm-proj-<user tag>.json. get_session_tag mixes
+      PM_SHARE_MODE into the hash, so the cwd lookup misses and _find_tui_pane falls
+      back to the first pm- session with a TUI. Same leak: `pm session name` there
+      prints a nonexistent share-mode name, and its pm commands log to ~/.pm/debug/zz-test-a-<share-mode
+      hash>.log. A plain shell with only PM_TMUX_SOCKET sees its own TUI; adding PM_SHARE_MODE=global
+      there reproduces it. Likely fix: add PM_SHARE_MODE to _REGRESSION_SCRUBBED_ENV.
+      Incidental, out of scope: pm session --global starts the tmux server with PM_SHARE_MODE
+      in its environ, so the server global env gives it to every pane of every session
+      on that server (the zz guide panes logged it). Stories 2-3 (prefix+M popup,
+      private socket, active pane cwd /tmp) held: the header names proj master/commit
+      and ~/.pm/sessions/<proj tag>/captures/regression/demo/<run>/; the record has
+      cwd=clone, the private socket and all 6 vars unset; tty printed "not a tty"
+      (E19; no matching bugs-plan entry seen here); nope/--branch errors keep the
+      popup on "Press q/Esc/Enter to close..." and leave no workdir or captures. Traps:
+      no `pm pr add` in zz projects (it triggers a reload of the user TUI via the
+      cwd fallback); each zz session starts a guide pane running the stand-in, so
+      the stand-in should exec bash only in the regression clone; with no client attached,
+      resize the shared window to 200x50 before Enter.'
+    created_at: '2026-11-02T05:26:31Z'
+    last_edited: '2026-11-02T05:26:31Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
