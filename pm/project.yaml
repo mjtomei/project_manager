@@ -39586,7 +39586,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T15:01:50.214450+00:00'
-  updated_at: '2026-10-22T18:43:23.697882+00:00'
+  updated_at: '2026-11-02T04:01:01.239703+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39742,6 +39742,21 @@ prs:
       min via /pm-captures/scenarios/6/scripts/{setup,stages}.'
     created_at: '2026-10-22T18:41:04Z'
     last_edited: '2026-10-22T18:41:04Z'
+  - id: note-d6bc1ce
+    text: 'QA S11 (2026-11-02) NEEDS_WORK -> fixed 68118cf92: runs popup kept the
+      docked footer at its old 2-3 row height (blank rows, frame too tall) for up
+      to 2 s after a widening resize (50x50->140x20, 70x50->160x50), because on_resize
+      rendered at the stale pre-layout width; it now renders after the refresh (regression
+      test test_footer_height_follows_a_resize). All other S11 Thens held live on
+      both builds: popup rows == CLI --width 99/59/40, 1;37;41 labels / 1;31 reasons
+      / 33 WAITING / 32 RUNNING in TERM=screen, gray 100 bar, one PR per j/k/Down/Up,
+      Enter -> review-#233 (select_window rc=0), f notice survives refresh/r and wraps
+      at 70, Esc/q/a close. Incidental 520435e00: test_adopted_review_polls_with_pr_workdir
+      read a real pane %5 when a live pm session ran on the default tmux server. Trap:
+      plain pm tui restart clears auto-start targets (use --breadcrumb or restage).
+      Captures /pm-captures/scenarios/11 (pre-fix/, post-fix/).'
+    created_at: '2026-11-02T04:01:01Z'
+    last_edited: '2026-11-02T04:01:01Z'
 - id: pr-c8482a8
   plan: bugs
   title: 'fake-claude cannot hold a review INPUT_REQUIRED: 2 s idle_prompt refresh
