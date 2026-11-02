@@ -2965,9 +2965,13 @@ def _publish_approved(data: dict, root: Path, pr_entry: dict,
     target_repo, _ = integration.target_for(data, pr_entry, root)
     if bound.get("target_repo") and not integration.same_target(
             target_repo, bound["target_repo"]):
+        # Hand-edited state: a non-string value cannot name the same
+        # repository (``same_target`` refuses it), so it must not be rendered
+        # as one in the refusal either — the placeholder stands in.
         _return_to_signoff(
             root, pr_entry, f"target repository changed "
-            f"({bound['target_repo']} -> {target_repo})")
+            f"({integration._text(bound.get('target_repo'), '?')} -> "
+            f"{target_repo})")
 
     published = False
     with _publish_lock(data):

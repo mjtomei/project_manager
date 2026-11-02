@@ -6967,3 +6967,103 @@ def test_pr_show_renders_a_malformed_signoff_return_as_placeholders(w):
     for fragment in ("{'why': True}", "{'v': 1}", "['h']", "{'r': 1}",
                      "{'e': 1}", "{'m': 1}"):
         assert fragment not in r.output
+
+
+def test_a_hand_edited_reason_is_a_placeholder_in_the_gate_and_router():
+    """The refusal/coercion messages embed hand-editable record members.
+
+    ``pm pr merge`` and the router print a message that names the recorded
+    reason, status and branch.  Those are project.yaml state, and rendering a
+    non-string value printed its repr — the same "a reader must not print a
+    value the record does not hold" contract ``pm pr show`` and the prompt
+    follow (the message is also stored as ``coerced_reason`` and printed by
+    ``pm pr show``).
+    """
+    # A malformed invalidation reason, as `pm pr merge` reports it.
+    refusal = signoff.merge_gate_refusal(
+        {"id": PR, "signoff": {"verdict": SIGNOFF_MERGE, "sha": "a" * 40,
+                               "invalidated": {"why": True}}},
+        "a" * 40, "master")
+    assert "reason not recorded" in refusal, refusal
+    assert "{'why': True}" not in refusal
+
+    # A malformed bound status.
+    refusal = signoff.merge_gate_refusal(
+        {"id": PR, "signoff": {"verdict": SIGNOFF_MERGE, "sha": "a" * 40,
+                               "integration": {"status": {"s": 1}}}},
+        "a" * 40, "master")
+    assert "no check" in refusal, refusal
+    assert "{'s': 1}" not in refusal
+
+    # A malformed bound base branch.
+    refusal = signoff.merge_gate_refusal(
+        {"id": PR, "signoff": {
+            "verdict": SIGNOFF_MERGE, "sha": "a" * 40,
+            "integration": {"status": "clean", "base_sha": "b" * 40,
+                            "candidate_tree": "c" * 40,
+                            "base_branch": {"b": 1}}}},
+        "a" * 40, "master")
+    assert "targets '?'" in refusal, refusal
+    assert "{'b': 1}" not in refusal
+
+    # A malformed apply error inside the router's coercion reason.
+    rec = {"status": integration.RESOLVED, "head": "a" * 40,
+           "base_sha": "b" * 40, "candidate_tree": "c" * 40,
+           "resolution": {"paths": [{"path": "pm/project.yaml"}],
+                          "unresolved": []},
+           "apply_error": {"why": True}}
+    verdict, reason = signoff.effective_verdict(SIGNOFF_MERGE, rec, "a" * 40)
+    assert verdict == SIGNOFF_BLOCKED
+    assert "the workdir could not take the merge" in reason, reason
+    assert "{'why': True}" not in reason
+
+    # A malformed summary error in the justification refusal.
+    with patch.object(signoff, "report_meta",
+                      return_value={"head": "a" * 7, "base": "b" * 7}):
+        problem = signoff.approval_justification_problem(
+            PR, {"status": "clean", "base_sha": "b" * 40,
+                 "candidate_tree": "c" * 40,
+                 "base_behavior_error": {"why": True}}, "a" * 40)
+    assert "unknown error" in problem, problem
+    assert "{'why': True}" not in problem
+
+    # The stale-record reason shown by the runs popup / driver log.
+    assert signoff.stale_reason(
+        {"verdict": SIGNOFF_MERGE, "invalidated": {"why": True}}
+    ) == "reason not recorded"
+    assert signoff.stale_reason(
+        {"verdict": SIGNOFF_MERGE, "invalidated": "master moved"}
+    ) == "master moved"
+
+    # The sign-off prompt's Result line.
+    block = prompt_gen._signoff_integration_block(
+        {"id": PR, "integration": {"status": {"s": 1},
+                                   "base_sha": "b" * 40,
+                                   "base_branch": "master",
+                                   "target_repo": "repo"}}, PR)
+    assert "**?**" in block, block
+    assert "{'s': 1}" not in block
+
+
+def test_publish_refusal_renders_a_malformed_target_as_a_placeholder(w, capsys):
+    """``pm pr merge``'s "target repository changed" names the bound value.
+
+    ``same_target`` refuses a non-string target (it cannot name the same
+    repository), and the refusal used to print the value's repr beside it.
+    """
+    entry = dict(pr_entry(w), signoff={
+        "verdict": SIGNOFF_MERGE, "sha": w.head,
+        "integration": {"status": "clean", "base_sha": "b" * 40,
+                        "candidate_tree": "c" * 40,
+                        "target_repo": {"t": 1}}})
+    with patch.object(pr_mod, "trigger_tui_refresh"):
+        with pytest.raises(SystemExit) as exc:
+            pr_mod._publish_approved(
+                store.load(w.pm_dir), w.pm_dir, entry, "local", "master",
+                str(w.wd), resolve_window=False, background=False,
+                transcript=None, companion=False)
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "target repository changed" in err, err
+    assert "changed (? ->" in err, err
+    assert "{'t': 1}" not in err

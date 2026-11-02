@@ -654,11 +654,14 @@ def approval_justification_problem(pr_id: str, integration: dict | None,
     checks = (meta.get("checks") or "").strip()
     if not checks and not (reused and reason):
         if error:
+            # Hand-edited state: a non-string summary error is not text to
+            # print (the literal None or a mapping's repr names nothing the
+            # record holds).
             return ("pm could not summarise the base's behaviour-relevant "
-                    f"changes ({error}); report.html must state which existing "
-                    "evidence is reused and why (pm-signoff-evidence + "
-                    "pm-signoff-evidence-reason) or which targeted checks were "
-                    "run (pm-signoff-checks)")
+                    f"changes ({_text(error, 'unknown error')}); report.html "
+                    "must state which existing evidence is reused and why "
+                    "(pm-signoff-evidence + pm-signoff-evidence-reason) or "
+                    "which targeted checks were run (pm-signoff-checks)")
         return ("report.html must state which existing evidence is reused "
                 "and why (pm-signoff-evidence + pm-signoff-evidence-reason) "
                 "or which targeted checks were run (pm-signoff-checks)")
@@ -710,7 +713,11 @@ def effective_verdict(verdict: str | None, integration: dict | None,
                 f"the metadata conflict safely ({reasons})")
         if verdict == SIGNOFF_MERGE \
                 and not integ.revision_of(resolution.get("applied_merge_sha")):
-            why = rec.get("apply_error") or "the workdir could not take the merge"
+            # Hand-edited state: a non-string reason is not a reason to embed
+            # in the coercion message (`pm pr show` and the return text print
+            # the message as text, so a mapping's repr would ride along).
+            why = _text(rec.get("apply_error"),
+                        "the workdir could not take the merge")
             return SIGNOFF_BLOCKED, (
                 f"{SIGNOFF_MERGE} coerced to {SIGNOFF_BLOCKED}: the "
                 f"metadata-only conflict was resolved in the isolated "
@@ -748,10 +755,15 @@ def merge_gate_refusal(pr: dict, current_sha: str | None,
     pr_id = pr.get("id")
     record = _mapping(pr.get("signoff"))
     if record.get("invalidated"):
+        # Hand-edited state: a non-string reason is not a reason to print
+        # (the literal None or a mapping's repr names nothing the record
+        # holds) — the same placeholder the prompt, `pm pr show` and the
+        # return text use.
         return (f"PR {pr_id}: the sign-off approval is no longer valid "
-                f"({record['invalidated']}). Sign-off must re-run against "
-                f"the current base: `pm pr signoff --fresh {pr_id}` (the "
-                f"auto-start / auto-sequence driver re-runs it itself).")
+                f"({_text(record.get('invalidated'), 'reason not recorded')}). "
+                f"Sign-off must re-run against the current base: `pm pr "
+                f"signoff --fresh {pr_id}` (the auto-start / auto-sequence "
+                f"driver re-runs it itself).")
     if is_legacy_approval(record):
         return (f"PR {pr_id}: the recorded {SIGNOFF_MERGE} predates "
                 f"integration-aware sign-off (bound to HEAD only). Run a "
@@ -776,13 +788,16 @@ def merge_gate_refusal(pr: dict, current_sha: str | None,
     if bound.get("status") not in integ.MERGEABLE \
             or not integ.revision_of(bound.get("base_sha")) \
             or not integ.revision_of(bound.get("candidate_tree")):
+        # Hand-edited state: a non-string status is not a status to print.
         return (f"PR {pr_id}: the approval is not bound to a conflict-free "
-                f"integration ({bound.get('status') or 'no check'}). Re-run "
-                f"`pm pr signoff --fresh {pr_id}`.")
+                f"integration ({_text(bound.get('status'), 'no check')}). "
+                f"Re-run `pm pr signoff --fresh {pr_id}`.")
     if base_branch and bound.get("base_branch") != base_branch:
+        # Same rule for the branch the approval targets.
         return (f"PR {pr_id}: the approval targets "
-                f"{bound.get('base_branch')!r}, but the project merges into "
-                f"{base_branch!r}. Re-run `pm pr signoff --fresh {pr_id}`.")
+                f"{_text(bound.get('base_branch'), '?')!r}, but the project "
+                f"merges into {base_branch!r}. Re-run `pm pr signoff --fresh "
+                f"{pr_id}`.")
     # The approval names the exact head/candidate it reviewed.  A re-check
     # that produced another candidate (a moved base, a changed resolution)
     # makes the approval stale even before the merge re-fetches anything.
@@ -1888,7 +1903,8 @@ class SignoffStep:
 def stale_reason(record: dict) -> str:
     """Why a recorded sign-off verdict is not fresh (display / logs)."""
     if record.get("invalidated"):
-        return str(record["invalidated"])
+        # Hand-edited state: a non-string reason is not a reason to show.
+        return _text(record.get("invalidated"), "reason not recorded")
     if is_legacy_approval(record):
         return "legacy HEAD-only approval"
     return "HEAD moved"

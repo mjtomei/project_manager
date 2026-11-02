@@ -869,7 +869,10 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
         f"- Base revision: `{base_sha or '?'}`",
         f"- PR HEAD checked: `{_text(rec.get('head'))}`",
         f"- Candidate tree: `{_short(rec.get('candidate_tree'))}`",
-        f"- Result: **{rec.get('status')}** — {integ.summary(rec)}",
+        # Hand-edited state: only a status string is a status to print (a
+        # mapping/list would render its repr here, beside the placeholder the
+        # rest of the block uses).
+        f"- Result: **{_text(rec.get('status'))}** — {integ.summary(rec)}",
     ]
     if integ._sha_like(rec.get("merge_base")) and base_sha:
         # An applied resolution (and a clean base merged by a bounce) puts the

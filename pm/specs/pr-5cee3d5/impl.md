@@ -829,9 +829,18 @@ tests):
     verdicts, `applied.merge_sha`), render a placeholder ("an unknown error",
     "reason not recorded") rather than the literal `None` or a mapping's repr
     — on the sign-off prompt, the return text, the sign-off launch and both
-    CLI listings. A merge-tree/worktree disagreement about which paths
-    conflict records the paths the *attempt* saw (the in-memory list could
-    name a resolvable `project.yaml` while the attempt failed elsewhere).
+    CLI listings. The same rule holds for the pm-generated messages that
+    *embed* one of those members: the merge gate's refusal
+    (`invalidated`, the bound `status`/`base_branch`), the router's coercion
+    reason (`apply_error`), the approval-justification refusal
+    (`base_behavior_error`), `stale_reason` (`invalidated`) and
+    `pm pr merge`'s "target repository changed" (`target_repo`) all render the
+    placeholder instead of the repr (the coercion reason is itself stored and
+    printed by `pm pr show`). The sign-off prompt's `Result:` line reads a
+    non-string `status` as `?` too. A merge-tree/worktree disagreement about
+    which paths conflict records the paths the *attempt* saw (the in-memory
+    list could name a resolvable `project.yaml` while the attempt failed
+    elsewhere).
     An unhashable `base_behavior_changes` member is carried, not dropped: the
     carry-forward
     de-duplicates order-preservingly and skips only the de-duplication for a
