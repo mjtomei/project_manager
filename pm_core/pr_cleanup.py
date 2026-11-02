@@ -66,6 +66,14 @@ def cleanup_pr_resources(session: str | None, pr: dict) -> dict:
     summary = {"windows": [], "containers": [], "registry_windows": [],
                "sockets": [], "runtime_state": False}
 
+    # End in-flight actions *before* killing their panes.  A driver that
+    # watches its pane (the TUI review loop checks once a second) would
+    # otherwise see it vanish and record its own failed/KILLED end first,
+    # so the attempt would read as a crash instead of "PR resources
+    # cleaned up".  The pass after the teardown below still ends anything
+    # that went in flight in between.
+    end_in_flight_actions(pr_id)
+
     if session:
         try:
             summary["windows"] = kill_pr_windows(session, pr)
@@ -103,9 +111,10 @@ def cleanup_pr_resources(session: str | None, pr: dict) -> dict:
     # (qa, review-loop, review, start, merge);
     # leaving it behind makes the picker think those loops are still
     # running after we've torn their panes/containers down.
-    # End in-flight actions first so their action-history attempts are
-    # closed; unlinking alone would leave them open (and shown running
-    # after merge) because later clears find no entry to end.
+    # End in-flight actions (again) before unlinking so their
+    # action-history attempts are closed; unlinking alone would leave them
+    # open (and shown running after merge) because later clears find no
+    # entry to end.
     end_in_flight_actions(pr_id)
     try:
         runtime_state.runtime_path(pr_id).unlink(missing_ok=True)

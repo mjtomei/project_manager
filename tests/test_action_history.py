@@ -734,6 +734,40 @@ class TestRuntimeCapture:
         assert "cleaned up" in _ends()[aid]["detail"]
         assert not rs.runtime_path(PR).exists()
 
+    def test_pr_cleanup_beats_a_loop_that_sees_its_pane_killed(self, clock):
+        """E11 (QA S62): the TUI review loop checks its pane once a second
+        and records its own failed/KILLED end when the pane vanishes.  If
+        that landed between the window kill and the runtime clear, the loop
+        read "failed KILLED" with no reason.  Cleanup ends in-flight entries
+        before it kills the panes, so the loop reads interrupted "PR
+        resources cleaned up" whichever way the race goes."""
+        from pm_core import pr_cleanup
+        rs.set_action_state(PR, "review-loop", "running", iteration=1,
+                            loop_id="loop-1")
+        aid = rs.get_action_state(PR, "review-loop")["attempt_id"]
+
+        def kill_windows(session, pr):
+            # The loop thread notices the pane gone right after the kill
+            # (review_loop_ui._on_complete_from_thread).
+            rs.set_action_state(PR, "review-loop", "failed", iteration=1,
+                                verdict="KILLED")
+            return ["review-pr-001"]
+
+        with patch.object(pr_cleanup, "kill_pr_windows",
+                          side_effect=kill_windows), \
+                patch.object(pr_cleanup.container_mod,
+                             "cleanup_pr_containers", return_value=[]), \
+                patch.object(pr_cleanup.pane_registry, "unregister_windows",
+                             return_value=[]), \
+                patch.object(pr_cleanup, "_candidate_window_names",
+                             return_value=[]):
+            summary = pr_cleanup.cleanup_pr_resources("pm-sess", {"id": PR})
+        assert summary["windows"] == ["review-pr-001"]
+        end = _ends()[aid]
+        assert end["outcome"] == "interrupted", end
+        assert end["detail"] == "PR resources cleaned up"
+        assert end.get("verdict") is None
+
     def test_finalize_merge_ends_in_flight_attempts(self, clock, tmp_path):
         """pm pr merge kills the PR's panes; an in-flight entry opened by a
         process that has since exited (a CLI auto-sequence's start) would

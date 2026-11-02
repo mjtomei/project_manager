@@ -2038,6 +2038,14 @@ def _finalize_merge(root, pr_entry: dict, pr_id: str,
     data = store.locked_update(root, apply)
     trigger_tui_refresh()
 
+    # The killed panes' in-flight runtime entries would otherwise keep
+    # their history attempts shown running after the merge.  End them
+    # before the kill as well as after it: a driver watching its pane
+    # (the TUI review loop) would otherwise record its own KILLED end
+    # first (see pr_cleanup.cleanup_pr_resources).
+    from pm_core import pr_cleanup as pr_cleanup_mod
+    pr_cleanup_mod.end_in_flight_actions(pr_id)
+
     # Kill tmux windows for the merged PR (they're inaccessible from the TUI)
     try:
         from pm_core.cli.helpers import _find_tui_pane
@@ -2046,9 +2054,6 @@ def _finalize_merge(root, pr_entry: dict, pr_id: str,
             kill_pr_windows(session, pr_entry)
     except Exception:
         pass
-    # The killed panes' in-flight runtime entries would otherwise keep
-    # their history attempts shown running after the merge.
-    from pm_core import pr_cleanup as pr_cleanup_mod
     pr_cleanup_mod.end_in_flight_actions(pr_id)
 
     # Finalize merge transcript if provided
