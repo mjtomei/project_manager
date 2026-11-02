@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T08:50:54.264970+00:00'
+  updated_at: '2026-11-02T09:23:30.266191+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25926,6 +25926,17 @@ prs:
       capture-pane -S - before ending a run. Captures: /pm-captures/scenarios/23/.'
     created_at: '2026-11-02T08:50:54Z'
     last_edited: '2026-11-02T08:50:54Z'
+  - id: note-9b365bc
+    text: 'Master integration (2026-11-02, after SIGNOFF_IMPL): merged master@5b352d16
+      as 7518aa8a. Only pm/project.yaml conflicted. It was resolved with store.merge_3way(base,
+      ours=master, theirs=branch): 599 unique PR ids, all 46 pr-7d5d036 notes kept,
+      and the branch-only stale duplicate pr-049649a record (ac21fd89, old SIGNOFF_MERGE)
+      dropped. The tree equals the sign-off trial candidate d0a08db6 minus those 275
+      registry lines, so the code is unchanged from review 0140 i3 / QA. Full suite
+      on 7518aa8a: 5588 passed/1 skipped. The user model switch (provider:claude-main-xhigh-pm)
+      stays uncommitted in the workdir. Ready for a fresh sign-off.'
+    created_at: '2026-11-02T09:23:30Z'
+    last_edited: '2026-11-02T09:23:30Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
