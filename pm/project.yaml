@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T07:22:28.576330+00:00'
+  updated_at: '2026-11-02T07:30:31.701200+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7459,6 +7459,42 @@ prs:
       pm TUI (A); default-server prefix+M is tmux select-pane -M, P unbound.'
     created_at: '2026-11-02T07:12:36Z'
     last_edited: '2026-11-02T07:12:36Z'
+  - id: note-b75c553
+    text: 'QA S29 (popups, queued TUI commands and pane hooks fired concurrently in
+      two private sessions, plus a plain default-server session) PASS 5/5 at a333789e2
+      (code unchanged since 87b2d1d16), no source changes, stock tmux 3.2a, no fzf.
+      (1) prefix+M from Aw (A~1, 200 wide) and Bn (B~2, 70 wide) at the same moment,
+      4 rounds: popups only on the pressers, 80 cols vs 66 (95%), _popup-show window_width=200
+      -> width=80 / window_width=70 -> width=95% with each client tty, one popup-cmd
+      invoked per popup; session name drew each own base name; tui send n opened a
+      notes pane only in its own session (Sent keys n to TUI pane %0 (session: own));
+      session list = the two private rows, no (default server) row; pr show pr-nope
+      listed only A PRs; pr show "x -> No closing quotation, then pm popup failed
+      (exit 1) after the first q. (2) prefix+P from Aw (main) and Bw (PR window) at
+      once: numbered fallback pickers each showing only their own PR (Bw with ●);
+      t -> one queue dispatch pr qa <own id> result=ok per <tag>.log, qa-<id>/-s0
+      windows only on the own server, spinner exit window_open, QA INPUT_REQUIRED
+      in each tui view. (3) review loop from An and Bn at once: review-<own id> only
+      in own server and registry, one queue dispatch each, ~2 clients switched, both
+      PASS iteration 1; two A clients popups at once both 95%. (4) 2 min of concurrent
+      n/x, c/C-d, C-b %/exit cycles with 150<->200 resizes: A 39 cycles = 117 opened/78
+      exited, B 40 = 120/80, 0 lines naming the other session, 156/160 rebalances
+      all matching the own terminal width at that second; extra check with Aw 150
+      and Bw 200 gave A 150x49 and B 200x49; bare resizes add no rebalance on 3.2a;
+      registries settle on (%0, tui), user_modified true until prefix+R (Layout rebalanced.
+      view mode). (5) inside a plain work session: session list has only the two pm
+      rows, tui view scans to A, session name pm-plain-00000000, prefix+P nothing,
+      prefix+M = key M: select-pane -M, default server hooks/keys byte-identical (pm
+      only ran read-only list-sessions/display-message/has-session there). Harness
+      tips: tui send n FOCUSES the new notes pane, so the cleanup is just x (C-b o
+      first moves back to the TUI and x then toggles the TUI hide-all filter); drivers
+      must wait for the notes splash text before x, else x is echoed into the pane
+      before the splash reads keys; "unknown pane ... setting user_modified" is logged
+      for every pm-launched pane too (documented hook-before-register race, reset
+      by register_and_rebalance). Captures: /pm-captures/scenarios/29/ (README.md,
+      0-setup..6-teardown, 24 casts+mp4, scripts/).'
+    created_at: '2026-11-02T07:30:31Z'
+    last_edited: '2026-11-02T07:30:31Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
