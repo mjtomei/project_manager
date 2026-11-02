@@ -318,7 +318,8 @@ class TestProvidersLock:
                 holder.close()
             assert str(lock_path) in str(excinfo.value)
             assert "timed out" in str(excinfo.value)
-            # The failed attempt closed its own fd, so a fresh lock works.
+            # Nothing was left held: the timed-out attempt closed its fd
+            # without ever taking the lock, so a fresh lock works.
             with providers_lock(timeout=0.1):
                 pass
 
@@ -329,6 +330,18 @@ class TestProvidersLock:
                     raise RuntimeError("body failed")
             with providers_lock(timeout=0.1):
                 pass
+
+    def test_save_reports_an_uncreatable_pm_home_as_a_write_error(self, tmp_path):
+        """``save_providers`` called without the lock (a library caller)
+        names the path instead of leaking ``pm_home()``'s raw OSError."""
+        def boom():
+            raise PermissionError(13, "Permission denied", str(tmp_path / "pm"))
+
+        with patch("pm_core.providers.pm_home", side_effect=boom):
+            with pytest.raises(ProvidersWriteError) as excinfo:
+                save_providers({"providers": {}})
+        assert "cannot write" in str(excinfo.value)
+        assert "writable" in str(excinfo.value)
 
 
 class TestSetDefaultProvider:
@@ -424,6 +437,32 @@ class TestSetDefaultProvider:
         assert isinstance(result.exception, SystemExit)
         assert result.output.count("Error:") == 1
         assert "Traceback" not in result.output
+
+    def test_cli_reports_a_lock_timeout_with_one_error_line(self, tmp_path):
+        import fcntl
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+
+        path = tmp_path / "providers.yaml"
+        original = ("providers:\n"
+                    "  x:\n"
+                    "    type: local\n"
+                    "    api_base: http://localhost:1\n")
+        path.write_text(original)
+        holder = open(tmp_path / "providers.yaml.lock", "a")
+        try:
+            fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with patch("pm_core.providers.pm_home", return_value=tmp_path), \
+                    patch("pm_core.providers.PROVIDERS_LOCK_TIMEOUT", 0.1):
+                result = CliRunner().invoke(cli, ["provider", "default", "x"])
+        finally:
+            holder.close()
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+        assert result.output.count("Error:") == 1
+        assert "timed out" in result.output
+        assert "Traceback" not in result.output
+        assert path.read_text() == original
 
 
 # ---------------------------------------------------------------------------

@@ -56,7 +56,6 @@ import os
 import tempfile
 import time
 from contextlib import contextmanager
-from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -574,6 +573,13 @@ class ProvidersLockTimeout(ProvidersFileError):
 PROVIDERS_LOCK_TIMEOUT = 5.0
 
 
+def _write_error(where: str, exc: OSError) -> ProvidersWriteError:
+    """A :class:`ProvidersWriteError` naming *where* and the OS reason."""
+    return ProvidersWriteError(
+        f"cannot write {where}: {exc.strerror or exc} (pm keeps "
+        "providers.yaml in ~/.pm; check that it is writable)")
+
+
 def load_providers_for_edit() -> dict[str, Any]:
     """providers.yaml to change and save back, its ``providers`` block a
     mapping (a blank block, e.g. every entry commented out, reads as empty).
@@ -617,11 +623,8 @@ def providers_lock(timeout: float | None = None):
         path.parent.mkdir(parents=True, exist_ok=True)
         lock_file = open(lock_path, "a")
     except OSError as exc:
-        where = getattr(exc, "filename", None) or (Path.home() / ".pm")
-        raise ProvidersWriteError(
-            f"cannot write {where}: {exc.strerror or exc} (pm keeps "
-            "providers.yaml in ~/.pm; check that it is writable)"
-        ) from exc
+        where = getattr(exc, "filename", None) or "~/.pm"
+        raise _write_error(where, exc) from exc
 
     deadline = time.monotonic() + timeout
     try:
@@ -671,15 +674,15 @@ def save_providers(data: dict[str, Any]) -> None:
     """
     import yaml
 
-    path = _providers_path()
+    try:
+        path = _providers_path()
+    except OSError as exc:
+        raise _write_error("~/.pm", exc) from exc
     text = yaml.dump(data, default_flow_style=False, sort_keys=False)
     try:
         fd, tmp = tempfile.mkstemp(prefix=".providers.yaml.pm-", dir=str(path.parent))
     except OSError as exc:
-        raise ProvidersWriteError(
-            f"cannot write {path}: {exc.strerror or exc} (check that "
-            f"{path.parent} is writable)"
-        ) from exc
+        raise _write_error(str(path), exc) from exc
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(text)
@@ -691,10 +694,7 @@ def save_providers(data: dict[str, Any]) -> None:
         except OSError:
             pass
         if isinstance(exc, OSError):
-            raise ProvidersWriteError(
-                f"cannot write {path}: {exc.strerror or exc} (check that "
-                f"{path.parent} is writable)"
-            ) from exc
+            raise _write_error(str(path), exc) from exc
         raise
     _log.info("Saved provider config to %s", path)
 
