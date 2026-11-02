@@ -40,6 +40,22 @@ def _snapshot(path: Path) -> dict:
     }
 
 
+def _other_pr_registry(env, other: Path, other_branch: str):
+    """Give *other* (a clone of another PR) a tracked pm/project.yaml
+    listing that PR, committed, as a PR clone's registry is; return
+    ``(registry dir, its data, this PR's entry in it)``."""
+    inner = other / "pm"
+    inner.mkdir()
+    data, _ = env.fresh()
+    data["prs"].append({"id": "pr-c000001", "title": "Other",
+                        "branch": other_branch, "status": "in_progress"})
+    store.save(data, inner)
+    git(other, "add", "pm")
+    git(other, "commit", "-q", "-m", "registry")
+    data = store.load(inner)
+    return inner, data, store.get_pr(data, PR_ID)
+
+
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     """An origin repo, a pm project recorded with a stale workdir, and an
@@ -300,20 +316,6 @@ class TestRecovery:
         assert "re-linked" not in text
         assert "this clone's own tracked" in text
 
-    def _other_pr_registry(self, env, other: Path, other_branch: str):
-        """Give *other* (a clone of another PR) a tracked pm/project.yaml
-        listing that PR, committed, as a PR clone's registry is."""
-        inner = other / "pm"
-        inner.mkdir()
-        data, _ = env.fresh()
-        data["prs"].append({"id": "pr-c000001", "title": "Other",
-                            "branch": other_branch, "status": "in_progress"})
-        store.save(data, inner)
-        git(other, "add", "pm")
-        git(other, "commit", "-q", "-m", "registry")
-        data = store.load(inner)
-        return inner, data, store.get_pr(data, PR_ID)
-
     def test_run_from_another_prs_clone_does_not_write_its_project_yaml(
             self, env):
         """pm run from a shell in ANOTHER PR's clone (QA S11 story 3):
@@ -323,7 +325,7 @@ class TestRecovery:
         clone = env.clone(f"{SLUG}-10e74920")
         other_branch = "pm/pr-c000001-other"
         other = env.clone("pm-pr-c000001-other-10e74920", branch=other_branch)
-        inner, data, pr = self._other_pr_registry(env, other, other_branch)
+        inner, data, pr = _other_pr_registry(env, other, other_branch)
         res = workdirs.resolve_workdir(data, pr, inner)
         assert (res.status, res.path) == (workdirs.RECOVERED, str(clone))
         assert pr["workdir"] == str(clone)
@@ -345,7 +347,7 @@ class TestRecovery:
         subprocess.run(["git", "clone", "-q", str(env.origin), str(ws)],
                        check=True, capture_output=True)
         git(ws, "checkout", "-q", "-b", other_branch)
-        inner, data, pr = self._other_pr_registry(env, ws, other_branch)
+        inner, data, pr = _other_pr_registry(env, ws, other_branch)
         res = workdirs.resolve_workdir(data, pr, inner)
         assert (res.status, res.path) == (workdirs.RECOVERED, str(clone))
         assert os.path.realpath(ws) in res.not_recorded
@@ -795,14 +797,7 @@ class TestPrCd:
         clone = env.clone(f"{SLUG}-10e74920")
         other_branch = "pm/pr-c000001-other"
         other = env.clone("pm-pr-c000001-other-10e74920", branch=other_branch)
-        inner = other / "pm"
-        inner.mkdir()
-        data, _ = env.fresh()
-        data["prs"].append({"id": "pr-c000001", "title": "Other",
-                            "branch": other_branch, "status": "in_progress"})
-        store.save(data, inner)
-        git(other, "add", "pm")
-        git(other, "commit", "-q", "-m", "registry")
+        inner, _, _ = _other_pr_registry(env, other, other_branch)
         runner = CliRunner()
         with mock.patch.object(pr_mod, "state_root", return_value=inner), \
              mock.patch.object(pr_mod.os, "chdir") as chdir, \
