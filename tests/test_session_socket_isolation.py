@@ -361,15 +361,23 @@ class TestSocketPathFromTmuxEnv:
 # ---------------------------------------------------------------------------
 # wrapper: the entry-point resolver (R4.1)
 #
-# The wrapper runs before pm_core is imported, so it repeats the socket
-# directory instead of importing paths.  Pin it to the real value.
+# The wrapper reads the socket directory from paths (no copy of its own),
+# so a pane on a relocated socket directory is still recognised.
 # ---------------------------------------------------------------------------
 
 class TestWrapperMarksTmuxSocket:
-    def test_socket_dir_literal_matches_paths(self):
+    def test_follows_paths_socket_dir(self, tmp_path, monkeypatch):
         from pm_core import wrapper
 
-        assert wrapper._PM_SOCKET_DIR == str(paths.SHARED_SOCKET_DIR)
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        env = {"TMUX": f"{tmp_path}/pm-repo-abc,1234,0"}
+        wrapper._mark_tmux_socket(env)
+        assert env["PM_TMUX_SOCKET"] == f"{tmp_path}/pm-repo-abc"
+
+        # The old literal directory is no longer a pm socket directory.
+        env = {"TMUX": "/tmp/pm-sessions/pm-repo-abc,1234,0"}
+        wrapper._mark_tmux_socket(env)
+        assert "PM_TMUX_SOCKET" not in env
 
     def test_exports_pm_socket_from_tmux(self):
         from pm_core import wrapper

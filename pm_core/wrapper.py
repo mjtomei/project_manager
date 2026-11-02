@@ -84,13 +84,6 @@ def _mark_tmux_session(env: dict) -> None:
         env["PM_IN_TMUX_SESSION"] = "1"
 
 
-# Must match pm_core.paths.SHARED_SOCKET_DIR.  Kept inline so the wrapper
-# does not import pm_core before it has chosen which pm_core to run (a
-# session override / pm_root would otherwise be shadowed by the installed
-# copy).  See tmux.socket_path_from_tmux_env for the full resolver.
-_PM_SOCKET_DIR = "/tmp/pm-sessions"
-
-
 def _mark_tmux_socket(env: dict) -> None:
     """Export the private pm tmux socket when running under one.
 
@@ -99,14 +92,24 @@ def _mark_tmux_socket(env: dict) -> None:
     ``$TMUX``.  Resolving it here — before any pm command runs — makes
     every tmux call inside hooks/popups target the session's own server.
     Ordinary (non-pm) tmux sessions are left alone.
+
+    The socket directory comes from ``paths`` like the session tag does
+    (see ``_get_session_tag``; ``_run_cli`` purges it once another pm_core
+    is chosen).  The ``$TMUX`` parse repeats
+    ``tmux.socket_path_from_tmux_env`` rather than importing it: importing
+    ``pm_core.tmux`` configures its ``pm.tmux`` logger, and the purge drops
+    modules but not ``logging``'s loggers, so the chosen pm_core would
+    inherit a handler set up by the copy it replaced.
     """
     if env.get("PM_TMUX_SOCKET"):
         return
     raw = env.get("TMUX")
     if not raw:
         return
+    from pm_core.paths import SHARED_SOCKET_DIR
+
     path = raw.rsplit(",", 2)[0]
-    if path and os.path.dirname(path) == _PM_SOCKET_DIR:
+    if path and os.path.dirname(path) == str(SHARED_SOCKET_DIR):
         env["PM_TMUX_SOCKET"] = path
 
 
