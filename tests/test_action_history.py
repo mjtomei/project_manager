@@ -888,6 +888,27 @@ class TestReviewLoopHistory:
         assert model["timers"]["active"] == []
         assert {r["resolution"] for r in model["timers"]["recent"]} == {"elapsed"}
 
+    def test_iteration_before_its_launch_phase_reads_launching(self, clock):
+        # QA S56: the iteration attempt is journaled ~0.1 s before its
+        # "launching" phase; a read in that gap said "running for 0s".
+        rs.set_action_state(PR, "review-loop", "running", loop_id="aaaa",
+                            iteration=1)
+        parent = rs.get_action_state(PR, "review-loop")["attempt_id"]
+        ah.start_attempt(PR, "review-loop", loop_id="aaaa", parent=parent,
+                         iteration=2, label="iteration 2")
+        clock.advance(0.2)
+        m = hq.build_history(PR, now=clock.t)
+        (row,) = m["current"]
+        assert (row["name"], row["state"]) == ("review-loop i2", "launching")
+        assert m["waiting_for"] == "review-loop i2: launching for 0s"
+        assert hq.summary_badge(m) == " [review-loop i2: launching]"
+        # An adopted iteration (restart) is not launching anything.
+        ah.start_attempt(PR, "review-loop", loop_id="aaaa", parent=parent,
+                         iteration=3, label="iteration 3", adopted=True)
+        rows = {r["name"]: r["state"]
+                for r in hq.build_history(PR, now=clock.t)["current"]}
+        assert rows.get("review-loop i3 (adopted)") != "launching"
+
     def _retry_loop(self, clock, outcomes, monkeypatch):
         """Drive the loop with ``_run_claude_review`` faked per attempt."""
         from pm_core import review_loop as rl

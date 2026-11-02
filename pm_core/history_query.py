@@ -751,6 +751,13 @@ def _current_activity(attempts: dict[str, dict], timer_rows: dict,
                 a.get("action") == "review-loop":
             row["state"] = "between_iterations"
             row["text"] = "loop running; next iteration launching"
+        elif ph == "start" and a.get("action") == "review-loop" and \
+                a.get("iteration") and not a.get("adopted"):
+            # A new iteration is journaled a moment before its "launching"
+            # phase (lease claim, window discovery): it is already
+            # launching, not a generic "running" (QA S56).
+            row["state"] = "launching"
+            row["text"] = f"launching for {_dur(t_now - since)}"
         else:
             row["state"] = ph
             row["text"] = f"{_PHASE_LABELS.get(ph, ph)} for {_dur(t_now - since)}"
