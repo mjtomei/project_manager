@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T13:18:29.786114+00:00'
+  updated_at: '2026-11-02T13:38:52.695308+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8029,6 +8029,23 @@ prs:
       and post-fix/).'
     created_at: '2026-11-02T13:18:29Z'
     last_edited: '2026-11-02T13:18:29Z'
+  - id: note-826bb56
+    text: 'Review loop 4c75 i2 (commit 76fbc0d6, spec only; no code or requirement
+      changes; full suite 5601 passed / 1 skipped, 423 s, log /pm-captures/review-4c75-i2/full-suite.log).
+      Verification pass over the head after 4c75 i1. The S38 exact `pm _tui` match
+      and the S40 ambient-socket list probe are both sound. The TUI is only ever started
+      by create_session or _respawn_tui with `pm _tui` as separate shell words, never
+      through wrap_with_exit_trap or an env-file `sh -c`, so the double split always
+      reaches those words. The ambient socket is checked against the socket dir, deduplicated
+      against the scan, and goes through the same lstat/ownership check. Spec catch-up:
+      impl.md had no record of anything after b48f i21. R1.1 now states the tmux-safe
+      tag and format_literal rule (S28), R3.3 the unreadable-socket-dir list behaviour
+      (S34/S40), and R3.4 the one definition of a live `pm _tui` pane (S38). A new
+      section, "QA-driven fixes and reviews (2026-11-02)", records the S23/S28/S30/S34/S35/S38/S40
+      fixes and the 54bf/68bd/e661/4c75 loops. qa.md ambiguity 12 now says that S40
+      found the gap and 99deef53 fixed it.'
+    created_at: '2026-11-02T13:38:52Z'
+    last_edited: '2026-11-02T13:38:52Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
