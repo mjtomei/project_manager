@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T10:33:35.320652+00:00'
+  updated_at: '2026-11-02T10:46:07.797092+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -26010,6 +26010,32 @@ prs:
       on -L s26cli. Captures: /pm-captures/scenarios/26/.'
     created_at: '2026-11-02T10:33:35Z'
     last_edited: '2026-11-02T10:33:35Z'
+  - id: note-7c8fcf9
+    text: 'QA S27 refiner (2026-11-02, live at 4126cee0 = merged 7518aa8a code; pm_core
+      unchanged at 2c0953a8): host-mode provider integration (R40/R42/R43-host/E24/E25/A15)
+      held 4/4 with no fix. p-env (type claude, --api-base + --skip-check, --env PM_QA_SECRET)
+      as default: CLI and TUI Enter runs got the token only in env, --model p-env-model,
+      ANTHROPIC_MODEL + subagent pin, ambient alias vars unset, R7 scrubbed, PM_TMUX_SOCKET
+      kept; token absent from ps, pane start commands, headers, prompt.md and every
+      ~/.pm file except providers.yaml. Router r-host with --launcher: launcher (not
+      claude) ran in the clone with ANTHROPIC_BASE_URL=api_base, PM_ROUTE_BASE_URL
+      set, API_KEY/AUTH_TOKEN unset, header token env-only; its GET reached the HTTP
+      log. r-bad: the CLI cannot clear a router model (edit --clear model / add without
+      --model are refused), so use --api-base http://:8080 ("api_base ... has no host.
+      Remedy: fix its api_base in ~/.pm/providers.yaml", rc 1); a hand-edited no-model
+      entry gives "no model configured. Remedy: ...". TUI Enter and pm qa launch open
+      a pane/window that dies in ~0.1-0.2 s without showing the error (pr-089af69;
+      qa launch prints "Launched ..." rc 0); nothing left in workdirs/captures/sessions.
+      Two same-second runs (default p-env effort=high, PM_PROVIDER=p-two) each got
+      only their own token/model, no --effort, CLAUDE_CODE_EFFORT_LEVEL=low passed
+      through. E25: pm in the PM_PROVIDER run shell sees p-two, but the test session
+      it starts does not (its TUI environ lacks PM_PROVIDER; its guide pane launched
+      on p-env with p-env token) since panes take the shared server env: record only.
+      Traps: grep ps from a file (grep matches itself); `pm session` from a run shell
+      attaches in that pane (detach-client); serve the HTTP log from an empty dir;
+      remove ~/.pm/providers.yaml at teardown. Helpers: /pm-captures/scenarios/27/refiner-helpers.'
+    created_at: '2026-11-02T10:46:07Z'
+    last_edited: '2026-11-02T10:46:07Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
