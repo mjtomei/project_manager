@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T02:43:16.828204+00:00'
+  updated_at: '2026-11-02T02:53:08.728734+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25447,6 +25447,21 @@ prs:
       it.'
     created_at: '2026-11-02T02:43:16Z'
     last_edited: '2026-11-02T02:43:16Z'
+  - id: note-c254280
+    text: 'QA S10 refiner (2026-11-02): all 7 host-mode CLI stories held live at a610bc87
+      (project under /scratch, ~/.pm on the overlay). Draft corrections, not bugs:
+      (1) PM_PROJECT is the -C envvar, so a bogus exported PM_PROJECT redirects the
+      run (empty library); export it as the real <proj>/pm, as the TUI does, and only
+      PM_SESSION bogus; unset it before the outside-a-project check. (2) A plain-path
+      bare upstream is "local-only" to resolve_real_origin, so the clone origin stays
+      the project checkout; use a file:// upstream to get the real-upstream case.
+      (3) The prompt does name "pm/tmux session" in its generic isolation rule; assert
+      it names no specific session/pane instead. (4) pm init --dir inside another
+      git repo skips git init; keep the pm repo outside any repo. Drive from a non-pm-named
+      tmux session (or env -u TMUX), else captures go under the driver session tag.
+      Overlay hardlinks work: same-fs clone objects show link count 2.'
+    created_at: '2026-11-02T02:53:08Z'
+    last_edited: '2026-11-02T02:53:08Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
