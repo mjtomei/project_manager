@@ -53730,3 +53730,41 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-39f8040
+  plan: bugs
+  title: 'Bug: TUI''s debounced active_pr save overwrites an outside pm pr select
+    made within 1.5 s of a cursor move'
+  branch: pm/pr-39f8040-bug-tui-s-debounced-active-pr-save-overwrites-an-o
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/app.py ProjectManagerApp._load_state -> self._write_queue.flush_sync()
+    (pm_core/store.py WriteQueue), fed by pm_core/tui/pr_view.py persist_active_pr,
+    which enqueues the 1.5 s debounced ("set", "active_pr") op on every cursor move
+    (arrows, ]/[, fuzzy pr select). When a CLI write of active_pr (pm pr select X,
+    or pm pr add, which makes the new PR active) lands inside that debounce window
+    after the user moved the cursor to Y, the CLI writes active_pr=X and signals the
+    TUI (SIGUSR1); _load_state first flush_syncs the still-pending active_pr=Y over
+    X and only then re-reads disk, so the outside selection is silently lost: the
+    CLI printed "Active PR: X" but the cursor box, the * in pm pr list and pm status
+    all show Y. Repro (pr-6aa74c6 QA S14, live at b803a7ba / code 5dcf90dc, local-backend
+    project in a pm session on a private tmux server): in the TUI press ] (or a Down
+    arrow that moves the cursor) to land on Y; 0.2-0.5 s later run pm pr select X
+    from another window of the session (pm takes ~0.1 s; X must not be the PR the
+    TUI last followed, see pr-291ed27); 3 s later cursor, * and Active PR are all
+    Y. Observed 5/5 with ] and 4/4 with Down across the S14 refiner and run; in S14
+    story 2, five pm pr add "(now active)" writes made while ] was pressed every 0.4
+    s were all overwritten the same way. Display and disk agree, so nothing is corrupted,
+    but the newer outside selection loses. Expected: an outside active_pr write newer
+    than the TUI pending navigation wins (e.g. drop the pending active_pr op when
+    disk active_pr changed since the TUI last read it, then follow it). Related: pr-dd3682f
+    (300 s background-sync variant), pr-291ed27 (ignored re-select of the last-followed
+    PR).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T08:16:42.408216+00:00'
+  updated_at: '2026-11-02T08:16:42.408216+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
