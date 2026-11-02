@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T13:03:00.445059+00:00'
+  updated_at: '2026-11-02T13:03:51.552073+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -26196,6 +26196,30 @@ prs:
       /pm-captures/scenarios/29/ (s1-s5 cli/tui, evidence/).'
     created_at: '2026-11-02T13:03:00Z'
     last_edited: '2026-11-02T13:03:00Z'
+  - id: note-75eb684
+    text: 'QA S30 (2026-11-02): PASS at de47f015 (pm_core = bc940b76), all 5 stories
+      live from /scratch/s30 (podman 3.4.4, slim image localhost/pm-s30:qa, request
+      log on 127.0.0.1:18430), no fix. S1: pm qa list rc 0 (Regression Tests (0) +
+      hint), both launches print the empty-library message rc 1 in 0.08 s, podman.log
+      empty, no bridge; 20/20 blobs at c1fcecc5 and 5b352d16. S2: no-model and bad
+      api_base (http://:8080) give "provider cannot launch it: ... Remedy" + blank
+      + "No session was launched on the host." rc 1 in 0.3-0.4 s with one podman info
+      each and no container advice; pm qa launch (qa-demo lived ~0.3 s) and TUI Enter
+      (pane %4 ~0.3 s, TUI alive, k/j work) are pr-089af69; host mode "Could not build
+      the regression session" rc 1 in 0.1 s. S3: leftover file -> [Errno 17] File
+      exists, symlink -> "not a directory owned by uid 1000", both with the provider
+      framing; the remedy reports the same cause rc 1; target untouched; after removal
+      run 3 mounted route-bridge/r-ctr at /run/pm-route behind one bridge and the
+      GET reached the server. S4: fake run gets no /run/pm-route, no bridge, no request;
+      no-model still refused. S5: E26 podman.log sequence exact (bridge started and
+      kept), E27 docker message with no provider text and empty podman.log, E28 bogus
+      type both modes, E29 host refusal + container run via claude (launcher never
+      ran). Observation, not filed: every refused run clones ~/.pm/workdirs/qa/regression-demo-<run>/s-0/repo
+      before the provider check and removes it before exit (debug log git clone lines),
+      so snapshots stay clean. Rig: snap.sh must call /usr/bin/podman (the refiner
+      copy used PATH podman, which logs ps -a to podman.log). Captures: /pm-captures/scenarios/30/.'
+    created_at: '2026-11-02T13:03:51Z'
+    last_edited: '2026-11-02T13:03:51Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
