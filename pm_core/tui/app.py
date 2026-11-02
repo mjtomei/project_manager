@@ -23,6 +23,7 @@ _STARTUP_QUEUE_MAX_AGE = 60
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Vertical
+from textual.css.query import NoMatches
 from textual.timer import Timer
 
 from pm_core import store, guide, tui_pidfile
@@ -256,6 +257,21 @@ class ProjectManagerApp(App):
         Binding("o", "model_settings", "Models", show=True),
     ]
 
+    def _command_bar(self) -> CommandBar | None:
+        """The command bar, or ``None`` when it isn't reachable.
+
+        Textual 2.0.1 (the declared floor) exposes only the active
+        screen's DOM to ``App.query_one``, so while a modal screen is
+        pushed the default screen's command bar is not found and the
+        query raises ``NoMatches``.  Treat that as "no command bar": the
+        bar is hidden under the modal, so it can't have focus and must
+        not crash app-level key handling or a background reload.
+        """
+        try:
+            return self.query_one("#command-bar", CommandBar)
+        except NoMatches:
+            return None
+
     def on_key(self, event) -> None:
         """Handle z and w modifier prefix keys.
 
@@ -265,8 +281,8 @@ class ProjectManagerApp(App):
         Also buffers keystrokes when / was pressed but the command bar
         hasn't received focus yet (race condition fix).
         """
-        cmd_bar = self.query_one("#command-bar", CommandBar)
-        if cmd_bar.has_focus:
+        cmd_bar = self._command_bar()
+        if cmd_bar is not None and cmd_bar.has_focus:
             return
         # When a modal/screen is on top of the default screen, let it handle
         # its own keys — App-level prefix keys (y/w/z) must not swallow them.
@@ -380,8 +396,8 @@ class ProjectManagerApp(App):
                        "cycle_filter", "cycle_sort", "toggle_auto_start", "auto_sequence_pr", "focus_watcher",
                        "review_spec", "cleanup_pr", "show_auto_runs",
                        "model_settings"):
-            cmd_bar = self.query_one("#command-bar", CommandBar)
-            if cmd_bar.has_focus or self._command_pending:
+            cmd_bar = self._command_bar()
+            if (cmd_bar is not None and cmd_bar.has_focus) or self._command_pending:
                 _log.debug("check_action: blocked %s (command bar focused/pending)", action)
                 return False
         # Block PR actions when in guide mode or plans view (can't see the PR tree)
@@ -902,8 +918,9 @@ class ProjectManagerApp(App):
     def _command_bar_in_use(self) -> bool:
         """True while the user is typing a command (or has pressed ``/``
         and the command bar is about to take focus)."""
-        cmd_bar = self.query_one("#command-bar", CommandBar)
-        return bool(cmd_bar.has_focus or self._command_pending)
+        cmd_bar = self._command_bar()
+        return bool((cmd_bar is not None and cmd_bar.has_focus)
+                    or self._command_pending)
 
     def _show_normal_view(self) -> None:
         """Show the normal tech tree view."""
@@ -1642,7 +1659,9 @@ class ProjectManagerApp(App):
         if typing and content.strip():
             # focus() is deferred (call_later), so this lands after any
             # tree.focus() the dispatched commands queued.
-            self.query_one("#command-bar", CommandBar).focus()
+            cmd_bar = self._command_bar()
+            if cmd_bar is not None:
+                cmd_bar.focus()
 
     def on_unmount(self) -> None:
         """Clean up the reload pidfile and command queue on shutdown."""
@@ -1698,14 +1717,15 @@ class ProjectManagerApp(App):
         _log.debug("action: focus_command")
         self._command_pending = True
         self._command_buffer.clear()
-        cmd_bar = self.query_one("#command-bar", CommandBar)
-        cmd_bar.focus()
+        cmd_bar = self._command_bar()
+        if cmd_bar is not None:
+            cmd_bar.focus()
 
     def action_unfocus_command(self) -> None:
         self._command_pending = False
         self._command_buffer.clear()
-        cmd_bar = self.query_one("#command-bar", CommandBar)
-        if cmd_bar.has_focus:
+        cmd_bar = self._command_bar()
+        if cmd_bar is not None and cmd_bar.has_focus:
             cmd_bar.value = ""
             if self._plans_visible:
                 self.query_one("#plans-pane", PlansPane).focus()

@@ -19,6 +19,7 @@ def _stub_app(cmd_bar_focused=False, pending=False):
         _command_pending=pending,
         query_one=lambda *a, **k: cmd_bar,
     )
+    app._command_bar = lambda: ProjectManagerApp._command_bar(app)
     app._command_bar_in_use = (
         lambda: ProjectManagerApp._command_bar_in_use(app))
     return app
@@ -55,6 +56,7 @@ def _queue_host(tmp_path):
         _cmd_queue_ready = True
         _plans_visible = False
         _drain_command_queue = ProjectManagerApp._drain_command_queue
+        _command_bar = ProjectManagerApp._command_bar
         _command_bar_in_use = ProjectManagerApp._command_bar_in_use
 
         def compose(self):
@@ -119,6 +121,59 @@ def test_cli_command_from_queue_keeps_half_typed_text(tmp_path):
             await pilot.pause()
             return cmd_bar.value
     assert asyncio.run(body()) == "add pr-7533"
+
+
+def test_modal_on_top_treats_missing_command_bar_as_idle():
+    """At the textual floor (2.0.1) ``App.query_one`` sees only the active
+    screen's DOM, so with a modal pushed the default screen's
+    ``#command-bar`` is unreachable and the query raises ``NoMatches``.
+    App key handling and background reloads must treat that as "no
+    command bar" rather than crashing (QA s5: Esc in the model popup
+    killed the TUI at 2.0.1)."""
+    from textual.app import App
+    from textual.screen import ModalScreen
+    from textual.widgets import Static
+
+    from pm_core.tui.command_bar import CommandBar
+    from pm_core.tui.tech_tree import TechTree
+
+    class Popup(ModalScreen):
+        BINDINGS = [("escape", "back", "Back")]
+
+        def action_back(self):
+            self.dismiss(None)
+
+        def compose(self):
+            yield Static("popup")
+
+    class Host(App):
+        _command_pending = False
+        _w_mode = False
+        _y_mode = False
+        _z_count = 0
+        on_key = ProjectManagerApp.on_key
+        _command_bar = ProjectManagerApp._command_bar
+        _command_bar_in_use = ProjectManagerApp._command_bar_in_use
+
+        def compose(self):
+            yield TechTree(id="tech-tree")
+            yield CommandBar(id="command-bar")
+
+    async def body():
+        app = Host()
+        async with app.run_test(size=(80, 20)) as pilot:
+            app.query_one("#tech-tree", TechTree).focus()
+            await pilot.pause()
+            app.push_screen(Popup())
+            await pilot.pause()
+            idle = app._command_bar_in_use()
+            await pilot.press("escape")
+            await pilot.pause()
+            return idle, len(app.screen_stack)
+
+    idle, stack = asyncio.run(body())
+    assert idle is False
+    assert stack == 1
 
 
 def test_unfocused_hint_advertises_runs_popup():
