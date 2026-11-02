@@ -52,6 +52,17 @@ def test_pr_qa_help_points_at_the_single_instruction_interface():
     assert "pm qa run" in out
 
 
+def test_pr_qa_help_states_the_cli_has_no_fresh_flag():
+    """The absence of `--fresh` on the CLI must read as deliberate.
+
+    The command bar accepts `pr qa <id> --fresh`; the CLI is diagnostic
+    only.  Without this line an operator types `pm pr qa <id> --fresh` and
+    gets a bare Click "no such option" error.
+    """
+    out = _help("pr", "qa")
+    assert "no --fresh or --loop flag" in out
+
+
 def test_pr_start_help_names_fresh_and_tui_keys():
     out = _help("pr", "start")
     assert "--fresh" in out
@@ -76,6 +87,18 @@ def test_pr_signoff_help_names_routed_form_and_record():
     out = _help("pr", "signoff")
     assert "--fresh" in out
     assert "record" in out and "integrate" in out
+
+
+def test_pr_signoff_accepts_the_help_alias():
+    """`pm pr signoff help` shows help like every other command.
+
+    `_SignoffGroup` routes an unknown first token to `run` as a PR id, so
+    before this it answered "PR 'help' not found." — the one group where
+    the documented `pm <cmd> help` alias did not work.
+    """
+    result = CliRunner().invoke(cli, ["pr", "signoff", "help"])
+    assert result.exit_code == 0, result.output
+    assert "Sign-off: PR-level review" in result.output
 
 
 def _leaf_commands(cmd, path=()):
@@ -135,16 +158,23 @@ def test_help_text_only_names_real_commands():
         cmd = cli
         resolved = []
         for tok in toks:
-            tok = tok.split("|")[0]
-            if isinstance(cmd, click.Group) and tok in cmd.commands:
-                resolved.append(tok)
-                cmd = cmd.commands[tok]
+            # ``pm session home|kill|mobile|name|tag`` names several
+            # subcommands; every alternative must exist, not just the first
+            # (a stale ``kill`` behind a live ``home`` used to pass).
+            parts = tok.split("|")
+            if isinstance(cmd, click.Group) and parts[0] in cmd.commands:
+                unknown = [p for p in parts if p not in cmd.commands]
+                assert not unknown, (
+                    f"HELP_TEXT names unknown subcommand(s) {unknown}: "
+                    f"{stripped!r}")
+                resolved.extend(parts)
+                cmd = cmd.commands[parts[0]]
             else:
                 # The path may stop at an argument placeholder, a flag, or
                 # the capitalized description.  A lowercase word is a command
                 # name that does not exist.
-                is_stale = (tok[0] not in "<[-" and tok.isalpha()
-                            and tok.islower())
+                is_stale = (parts[0][0] not in "<[-" and parts[0].isalpha()
+                            and parts[0].islower())
                 assert not is_stale, \
                     f"HELP_TEXT names an unknown command: {stripped!r}"
                 break
@@ -217,6 +247,29 @@ def test_parse_qa_command_rejects_conflicts_and_typos(args):
     with pytest.raises(ValueError) as exc:
         parse_qa_command(args)
     assert "fresh" in str(exc.value) or "option" in str(exc.value)
+
+
+def test_parse_qa_command_errors_survive_tui_markup():
+    """The command-bar hint must not be eaten by Textual markup.
+
+    The usage text (and a typo'd token) can contain brackets.  Textual's
+    and rich's own `escape` only escape a bracket that opens a *recognised*
+    tag, so `[PR_ID]` slips through and the whole segment disappears from
+    the log line.  `escape_markup` must round-trip through the parser.
+    """
+    from textual.content import Content
+
+    with pytest.raises(ValueError) as exc:
+        parse_qa_command(["pr-001", "pr-002"])
+    shown = Content.from_markup(
+        command_surface.escape_markup(f"QA: {exc.value}")).plain
+    assert "pr qa [fresh|loop] [PR_ID]" in shown
+
+    with pytest.raises(ValueError) as exc:
+        parse_qa_command(["pr-001", "[odd]"])
+    shown = Content.from_markup(
+        command_surface.escape_markup(f"QA: {exc.value}")).plain
+    assert "[odd]" in shown
 
 
 # ---------------------------------------------------------------------------

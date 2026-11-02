@@ -23,6 +23,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Label
 
 from pm_core import store
+from pm_core.command_surface import escape_markup as escape
 from pm_core.model_config import EFFORT_LEVELS
 from pm_core.paths import configure_logger
 
@@ -31,16 +32,6 @@ _log = configure_logger("pm.tui.model_screen")
 ALL_ROLES = "(all roles)"
 CLEAR = "(clear)"
 _EFFORT_CYCLE = (None, *EFFORT_LEVELS)
-
-
-def escape(text: str) -> str:
-    """Escape every ``[`` for Label markup.  rich's and textual's escape()
-    skip brackets that start uppercase, and textual reads ``[OK]`` or
-    ``[Done]`` as a tag and drops it.  Textual takes only the backslash
-    right before a ``[`` as an escape; a trailing one gets a space so it
-    cannot escape a closing tag that follows."""
-    text = text.replace("[", "\\[")
-    return text + " " if text.endswith("\\") else text
 
 
 def model_choices(data: dict) -> list[str]:

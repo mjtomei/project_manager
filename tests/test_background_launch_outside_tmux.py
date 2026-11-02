@@ -25,8 +25,10 @@ PR = {"id": "pr-001", "title": "T", "branch": "b", "status": "in_review"}
 
 
 @pytest.mark.parametrize("background, expected", [
-    (True, "Review window: tmux session 'pm-proj-1234' not found."),
-    (False, "Review window requires tmux."),
+    (True, "Review window: tmux session 'pm-proj-1234' not found — start it "
+           "with 'pm session'."),
+    (False, "Review window requires tmux. Start a pm session first with: "
+            "pm session"),
 ])
 def test_review_window_gate(outside_tmux, capsys, background, expected):
     pr_mod._launch_review_window({"project": {}}, dict(PR),
@@ -35,8 +37,10 @@ def test_review_window_gate(outside_tmux, capsys, background, expected):
 
 
 @pytest.mark.parametrize("background, expected", [
-    (True, "Sign-off window: tmux session 'pm-proj-1234' not found."),
-    (False, "Sign-off window requires tmux."),
+    (True, "Sign-off window: tmux session 'pm-proj-1234' not found — start it "
+           "with 'pm session'."),
+    (False, "Sign-off window requires tmux. Start a pm session first with: "
+            "pm session"),
 ])
 def test_signoff_window_gate(outside_tmux, capsys, background, expected):
     signoff.launch_signoff_window({"project": {}}, dict(PR),

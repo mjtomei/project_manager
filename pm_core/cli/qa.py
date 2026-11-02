@@ -14,11 +14,11 @@ from pm_core.cli import cli
 def qa():
     """Manage QA instructions, regression tests, artifact recipes, and mocks.
 
-    This group runs individual items (``pm qa run``, ``pm qa standalone``,
-    ``pm qa regression``).  To run the full QA loop for a PR — planner plus
-    scenario windows — use the TUI: ``pm pr qa <id>`` prints the exact
-    command-bar form, or press ``t`` on the PR (``z t`` fresh restart,
-    ``zz t`` loop).
+    This group runs individual items (`pm qa run`, `pm qa standalone`,
+    `pm qa regression`).  To run the full QA loop for a PR — planner plus
+    scenario windows — use the TUI: `pm pr qa <id>` prints the exact
+    command-bar form, or press `t` on the PR (`z t` fresh restart,
+    `zz t` loop).
     """
 
 
@@ -370,9 +370,9 @@ def qa_run(instruction_id: str, pr_id: str | None):
     Creates a boilerplate single-scenario QA plan and runs it using the
     same child session infrastructure as the auto-start flow.
 
-    For the full QA loop (planner + all scenarios) use ``pm pr qa <id>``,
-    which prints the TUI command-bar form (TUI: ``t``; ``z t`` fresh
-    restart, ``zz t`` loop).
+    For the full QA loop (planner + all scenarios) use `pm pr qa <id>`,
+    which prints the TUI command-bar form (TUI: `t`; `z t` fresh
+    restart, `zz t` loop).
     """
     from pm_core import qa_instructions, store, qa_loop
     from pm_core.cli.helpers import _resolve_pr_id, _infer_pr_id

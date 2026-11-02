@@ -33,6 +33,7 @@ from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_s
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
+    HelpGroup,
     _closed_reopen_hint,
     _ensure_workdir,
     _get_pm_session,
@@ -909,7 +910,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                    S      start with a companion shell pane
                    z S    fresh restart + companion pane
 
-    With --companion (or the ``companion-pane`` global setting), a second
+    With --companion (or the `companion-pane` global setting), a second
     shell pane is opened alongside the Claude pane, cd'ed into the workdir.
     """
     root = state_root()
@@ -1379,12 +1380,14 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     # it may come from a shell outside tmux: the window opens in the pm
     # session of the project.
     if not tmux_mod.has_tmux() or not (background or tmux_mod.in_tmux()):
-        click.echo("Review window requires tmux.")
+        click.echo("Review window requires tmux. Start a pm session first "
+                   "with: pm session")
         return
 
     pm_session = _get_pm_session()
     if not pm_session or not tmux_mod.session_exists(pm_session):
-        click.echo(f"Review window: tmux session '{pm_session}' not found.")
+        click.echo(f"Review window: tmux session '{pm_session}' not found — "
+                   f"start it with 'pm session'.")
         return
 
     workdir = pr_entry.get("workdir")
@@ -1650,10 +1653,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
 def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: bool, review_iteration: int, review_loop_id: str, transcript: str | None, no_window: bool):
     """Mark a PR as in_review and launch a review window.
 
-    On a PR that is already past the review step (``qa`` / ``sign_off``) this
+    On a PR that is already past the review step (`qa` / `sign_off`) this
     is an *inspection*: it focuses the existing review window and never
     changes the phase, so a running QA loop / sign-off router is not
-    disturbed.  ``--fresh`` / ``--review-loop`` are refused there because they
+    disturbed.  `--fresh` / `--review-loop` are refused there because they
     would start a second agent against the in-flight phase.
 
     If PR_ID is omitted, infers from cwd (if inside a workdir) or
@@ -1713,7 +1716,9 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
                               transcript=transcript)
         return
     if status == "pending":
-        click.echo(f"PR {pr_id} is pending — start it first with: pm pr start {pr_id}", err=True)
+        click.echo(
+            f"PR {pr_id} is pending — start it first with: "
+            f"pm pr start {pr_id} (TUI: s)", err=True)
         raise SystemExit(1)
     if status in _REVIEW_INSPECTION_PHASES:
         # The review step has already happened (or the PR is past it).  A
@@ -1792,16 +1797,19 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
                           transcript=transcript)
 
 
-class _SignoffGroup(click.Group):
+class _SignoffGroup(HelpGroup):
     """Group whose unrecognized first token routes to the ``run`` subcommand.
 
     Keeps the pre-existing surface (``pm pr signoff <pr_id> [--fresh]``)
     working verbatim while explicit subcommands (``record``) stay reachable.
+    Inherits :class:`HelpGroup` so ``pm pr signoff help`` works like every
+    other command; ``help`` must not be routed to ``run`` as a PR id.
     """
 
     def parse_args(self, ctx, args):
         if args and args[0] not in self.commands \
-                and args[0] not in ctx.help_option_names:
+                and args[0] not in ctx.help_option_names \
+                and args[0] != "help":
             args = ["run", *args]
         return super().parse_args(ctx, args)
 
@@ -1818,7 +1826,7 @@ def pr_signoff_group(ctx):
       pm pr signoff integrate PR_ID     check integration with the latest base
       command bar: pr signoff [--fresh] [PR_ID]     = TUI i
 
-    ``--fresh`` kills an existing sign-off window and opens a new one.
+    `--fresh` kills an existing sign-off window and opens a new one.
     """
     if ctx.invoked_subcommand is None:
         ctx.invoke(pr_signoff)
@@ -2134,12 +2142,14 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
                    the Claude pane.
     """
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
-        click.echo("Merge window requires tmux.")
+        click.echo("Merge window requires tmux. Start a pm session first "
+                   "with: pm session")
         return
 
     pm_session = _get_pm_session()
     if not pm_session or not tmux_mod.session_exists(pm_session):
-        click.echo(f"Merge window: tmux session '{pm_session}' not found.")
+        click.echo(f"Merge window: tmux session '{pm_session}' not found — "
+                   f"start it with 'pm session'.")
         return
 
     workdir = cwd or pr_entry.get("workdir")
@@ -2806,7 +2816,10 @@ _QA_HELP = f"""Validate a PR for QA and print the exact command to start it.
 The full QA loop (planner + scenarios) needs the TUI: it manages
 scenario windows and tracks run state.  This CLI form therefore does
 not launch QA itself — it checks the PR and prints the command-bar
-form to use.  Run it inside a pm session (``pm session``).
+form to use.  Run it inside a pm session (`pm session`).
+
+This CLI command has no --fresh or --loop flag: both are command-bar
+spellings (see the examples below), not CLI options.
 
 \b
 QA modes (command bar, and the TUI key that does the same):
@@ -2823,7 +2836,7 @@ Examples:
   pr qa pr-001 --loop        # same as `pr qa loop`
 
 A single QA instruction — not the full loop — runs with
-``pm qa run <instruction-id> --pr <pr-id>``.
+`pm qa run <instruction-id> --pr <pr-id>`.
 
 If PR_ID is omitted, infers from cwd (if inside a workdir) or
 auto-selects when there's exactly one in_review/qa PR."""
@@ -2845,7 +2858,7 @@ def pr_qa(pr_id: str | None):
                 click.echo(
                     "No PRs in in_review or qa status — start one with "
                     "'pm pr start' (TUI: s), then review with 'pm pr review' "
-                    "(TUI: d).", err=True)
+                    "(TUI: d). Run 'pm pr list' to see every PR.", err=True)
             else:
                 click.echo("Multiple PRs eligible for QA. Specify one:", err=True)
                 for p in candidates:
@@ -2927,8 +2940,8 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     publication) the merge is refused and the PR returns to sign-off.  The
     merge never resolves conflicts.  Local backend: fast-forwards the main
     repo's base to the approved merge commit; vanilla: pushes it with a
-    lease on the approved base revision; GitHub: ``gh pr merge
-    --match-head-commit`` (or directs the user to merge on GitHub).
+    lease on the approved base revision; GitHub: `gh pr merge
+    --match-head-commit` (or directs the user to merge on GitHub).
     If PR_ID is omitted, infers from cwd or auto-selects.
 
     \b

@@ -308,4 +308,15 @@ the routed form and `--fresh` so help is complete.
 - Remaining user-facing TUI not-found messages that the first pass missed
   (spec review in `app.py`, plan file and QA item in `pane_ops.py`) now
   name `pr list` / `pm plan list` / `pm qa list`.
+- Review-loop i2: `command_surface.escape_markup()` replaces the
+  rich/textual `escape()` in the command-bar QA error — those only escape
+  a bracket that opens a *recognised* tag, so `[PR_ID]` was swallowed and
+  the corrective usage text vanished from the log line. `pr_view`'s QA
+  modes are now derived from `command_surface.QA_MODES` (no second list to
+  drift). `_SignoffGroup` inherits `HelpGroup` so `pm pr signoff help`
+  works like every other command. `pm pr qa --help` states outright that
+  the CLI has no `--fresh`/`--loop`. Review/merge/sign-off window tmux
+  errors name `pm session`. The sibling regression description in
+  `pm/plans/plan-regression.md` now matches the no-`--fresh`-on-CLI
+  resolution.
 

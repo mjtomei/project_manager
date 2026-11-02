@@ -79,9 +79,17 @@ COMMAND_BAR_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
 )
 
 
-def _escape_markup(text: str) -> str:
-    """Escape ``[`` so Textual renders a literal bracket (for ``[--fresh]``)."""
-    return text.replace("[", "\\[")
+def escape_markup(text: str) -> str:
+    """Escape every ``[`` so Textual renders a literal bracket.
+
+    Textual's own ``escape`` (and rich's) only escapes a bracket that opens
+    a markup tag it recognises, so ``[PR_ID]`` and ``[--fresh]`` slip
+    through and are swallowed as (invalid) tags.  Replace every ``[``:
+    Textual renders ``\\[`` as a literal bracket in every case.  A trailing
+    backslash gets a space so it cannot escape a tag that follows.
+    """
+    text = text.replace("[", "\\[")
+    return text + " " if text.endswith("\\") else text
 
 
 def qa_mode_lines(*, textual: bool = False, indent: str = "  ") -> list[str]:
@@ -89,7 +97,7 @@ def qa_mode_lines(*, textual: bool = False, indent: str = "  ") -> list[str]:
     lines = []
     for _mode, form, keys, desc in QA_MODES:
         line = f"{indent}{form:<26} = TUI {keys:<5}  {desc}"
-        lines.append(_escape_markup(line) if textual else line)
+        lines.append(escape_markup(line) if textual else line)
     return lines
 
 
@@ -104,15 +112,15 @@ def command_bar_lines(*, textual: bool = False, indent: str = "  ") -> list[str]
         head = f"{indent}{form}  — {desc}"
         detail = f"{indent}    CLI: {cli}   TUI: {keys}"
         if textual:
-            head = _escape_markup(head)
-            detail = _escape_markup(detail)
+            head = escape_markup(head)
+            detail = escape_markup(detail)
         lines.extend([head, detail])
     return lines
 
 
 def _flag_note_lines(indent: str, *, textual: bool = False) -> list[str]:
     lines = [f"{indent}{line}" for line in QA_FLAG_NOTE_LINES]
-    return [_escape_markup(line) for line in lines] if textual else lines
+    return [escape_markup(line) for line in lines] if textual else lines
 
 
 def qa_help_table() -> str:

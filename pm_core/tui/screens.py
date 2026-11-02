@@ -288,7 +288,7 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]zz t[/]  Start QA loop", classes="help-row")
             yield Label("  [bold]z t[/]   Fresh start QA", classes="help-row")
             yield Label("Command Bar", classes="help-section")
-            yield Label("  [bold]/[/]  Open the command bar (type `help` there for this screen)",
+            yield Label("  [bold]/[/]  Open the command bar (type help there for this screen)",
                         classes="help-row")
             from pm_core import command_surface
             for _line in command_surface.command_bar_help_lines_textual()[1:]:

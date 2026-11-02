@@ -10,7 +10,7 @@ import sys
 from rich.markup import escape
 
 from pm_core.paths import configure_logger
-from pm_core import store
+from pm_core import command_surface, store
 from pm_core.tui._shell import _run_shell, _run_shell_async
 
 _log = configure_logger("pm.tui.pr_view")
@@ -21,9 +21,12 @@ PR_ACTION_PREFIXES = ("pr start", "pr review", "pr qa", "pr merge")
 # QA command-bar modes: positional (`pr qa fresh <id>`) and flag
 # (`pr qa <id> --fresh`) spellings are equivalent.  Kept here (not in the
 # CLI) because `pm pr qa` is diagnostic-only; the command bar is where QA
-# actually starts.
-_QA_MODES = ("fresh", "loop")
-_QA_FLAGS = {"--fresh": "fresh", "--loop": "loop"}
+# actually starts.  Derived from the shared table so a mode documented in
+# `pm pr qa --help` / `pm tui keys` / the `?` screen is always accepted
+# here (the "run" entry is the plain form, not a modifier).
+_QA_MODES = tuple(
+    mode for mode, *_rest in command_surface.QA_MODES if mode != "run")
+_QA_FLAGS = {f"--{mode}": mode for mode in _QA_MODES}
 
 
 def parse_qa_command(args: list[str]) -> tuple[str | None, str | None]:
@@ -797,7 +800,10 @@ def handle_command_submitted(app, cmd: str) -> None:
         try:
             qa_mode, qa_pr_id = parse_qa_command(parts[2:])
         except ValueError as e:
-            app.log_message(f"QA: {e}")
+            # The usage text and any user-supplied token may contain
+            # brackets; escape them all or Textual eats them as markup and
+            # the corrective hint disappears exactly when it is needed.
+            app.log_message(command_surface.escape_markup(f"QA: {e}"))
             qa_mode = qa_pr_id = None
             app._inflight_pr_action = None
             if app._plans_visible:
