@@ -40317,7 +40317,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T22:12:56.674325+00:00'
+  updated_at: '2026-11-02T23:02:32.437129+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42364,6 +42364,18 @@ prs:
       path.'
     created_at: '2026-11-02T22:12:56Z'
     last_edited: '2026-11-02T22:12:56Z'
+  - id: note-2857eb3
+    text: 'Review c75e i1 (d2e0097e, NEEDS_WORK, small): reviewed the code since the
+      c1a8 PASS (S77 fd5bf53a _running_project_session, S80 2d6e962a merged-hold release)
+      plus a whole-diff skim (no dead functions; master@c3bac6ce already in). Both
+      fixes are correct and tested. Changes: release_merge_hold_journal now asks _terminal_pr_ids
+      (project.yaml load on the TUI main thread) only about PRs this TUI journaled
+      a hold for (none: no read), plus a unit test; impl.md R7/R8 now describe S80.
+      _running_project_session overlaps master _project_sessions (persisted pm_root
+      match); unify in pr-5b73042, which owns the _find_tui_pane socket fix. Full
+      suite 5847 passed/1 skipped, evidence /pm-captures/pr-8020495/review-c75e-i1.'
+    created_at: '2026-11-02T23:02:32Z'
+    last_edited: '2026-11-02T23:02:32Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
