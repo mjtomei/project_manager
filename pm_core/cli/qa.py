@@ -353,6 +353,32 @@ def _discard_unlaunched_run(qa_workdir: Path,
             break
 
 
+def _regression_route_mounts(session_tag: str | None) -> dict[Path, str]:
+    """The route bridge mount a container-mode regression session needs.
+
+    The session runs on the provider ``build_claude_shell_cmd`` resolves
+    with no explicit choice (``PM_PROVIDER``, the session's provider file,
+    ``pm provider default``).  On a router that launch first runs the
+    in-container bridge step, which needs the host bridge's socket dir
+    mounted, as a QA scenario container on the route gets it
+    (``qa_loop._route_mounts``).  Empty for any other provider, and for a
+    faked session (the fake launch has no bridge step).
+
+    A router whose settings cannot launch, or whose host bridge cannot be
+    set up, raises (:class:`~pm_core.router_route.RouteSetupError`) before
+    any bridge or container is started.
+    """
+    from pm_core import router_route
+    from pm_core.model_config import ModelResolution
+    from pm_core.paths import fake_claude_config_for_type
+    from pm_core.providers import get_provider
+    resolution = ModelResolution(provider=get_provider().name)
+    router_route.require_setup(resolution, container=True)
+    if fake_claude_config_for_type("qa_regression", session_tag) is not None:
+        return {}
+    return router_route.container_mounts(resolution, strict=True)
+
+
 def _install_regression_recipes(items: list[dict], scratch_path: Path,
                                 subdir: str, scratch_in: str
                                 ) -> list[tuple[str, str]]:
@@ -533,6 +559,9 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
             # other part of the project is mounted.
             reg_rw, reg_ro = (registry_mounts(root) if file_prs
                               else (None, None))
+            # A router provider reaches the container through the host
+            # route bridge: mount its socket dir, or stop here.
+            route = _regression_route_mounts(session_tag)
             container_mod.create_qa_container(
                 name=cname,
                 config=container_mod.load_container_config(),
@@ -541,6 +570,7 @@ def qa_regression(test_id: str, file_prs: bool, branch: str | None,
                 allowed_push_branch=None,
                 session_tag=session_tag,
                 pr_id=captures_key,
+                route_mounts=route or None,
                 extra_rw_mounts=reg_rw,
                 extra_ro_mounts=reg_ro or None,
             )

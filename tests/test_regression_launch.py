@@ -256,6 +256,8 @@ def test_container_run_uses_a_qa_container(project, home, monkeypatch):
     # Mounts only this run's captures dir, never captures/regression/.
     assert kw["pr_id"] == f"regression/demo/{run_id}"
     assert kw["allowed_push_branch"] is None
+    # Not on a router: no route bridge mount.
+    assert kw["route_mounts"] is None
     assert kw["extra_rw_mounts"] is None
     assert kw["extra_ro_mounts"] is None
     assert "-qa-regression-demo-" in kw["name"]
@@ -289,6 +291,102 @@ def test_container_run_mounts_registry_only_for_filing(project, home):
     assert kw["extra_ro_mounts"] == {project.root / "qa": "/pm-project/qa"}
     prompt = spies.build.call_args.kwargs["prompt"]
     assert "pm -C /pm-project pr add '<title>' --plan bugs" in prompt
+
+
+def _router_default(home: Path, monkeypatch, *, via_env: bool = False,
+                    **entry) -> None:
+    """Configure router provider r-ctr as the run's provider: the
+    providers.yaml default, or (*via_env*) selected with PM_PROVIDER."""
+    import yaml
+    monkeypatch.delenv("PM_PROVIDER", raising=False)
+    cfg = {"type": "router", "api_base": "http://127.0.0.1:18428",
+           "model": "r-ctr-model", **entry}
+    providers = {"providers": {"r-ctr": cfg}}
+    if via_env:
+        monkeypatch.setenv("PM_PROVIDER", "r-ctr")
+    else:
+        providers["default"] = "r-ctr"
+    (home / ".pm").mkdir(exist_ok=True)
+    (home / ".pm" / "providers.yaml").write_text(yaml.safe_dump(providers))
+
+
+def _bridge_patches(sock: Path, ensure=None):
+    """Stand in for the host route bridge at *sock*."""
+    return [patch("pm_core.router_route.ensure_host_bridge",
+                  ensure or MagicMock(return_value=sock)),
+            patch("pm_core.route_bridge.unix_connectable",
+                  return_value=True)]
+
+
+@pytest.mark.parametrize("via_env", [False, True])
+def test_container_run_on_a_router_mounts_the_route_bridge(
+        project, home, tmp_path, monkeypatch, via_env):
+    """A router default provider (or PM_PROVIDER) launches through the
+    in-container bridge step, so the container gets the host bridge's
+    socket dir at /run/pm-route, as a QA scenario container on the route
+    does (R41).  Without it the session died at the bridge step."""
+    _router_default(home, monkeypatch, via_env=via_env)
+    sock = tmp_path / "route-bridge" / "r-ctr" / "router.sock"
+    ensure = MagicMock(return_value=sock)
+    result, spies = _run_regression(
+        project, ["demo", "--file-prs"], container_enabled=True,
+        extra_patches=_bridge_patches(sock, ensure))
+    assert result.exit_code == 0, result.output
+    assert ensure.call_args.args[0].name == "r-ctr"
+    kw = spies.create.call_args.kwargs
+    assert kw["route_mounts"] == {sock.parent: "/run/pm-route"}
+    # Filing still mounts the registry alongside the route.
+    assert kw["extra_rw_mounts"] == {project.root: "/pm-project"}
+    assert spies.build.call_args.kwargs["container"] is True
+    spies.execvpe.assert_called_once()
+
+
+def test_faked_router_run_needs_no_route_bridge(project, home, tmp_path,
+                                                monkeypatch):
+    """A faked regression session has no bridge step: no host bridge is
+    started and nothing is mounted for the route."""
+    _router_default(home, monkeypatch)
+    sock = tmp_path / "route-bridge" / "r-ctr" / "router.sock"
+    ensure = MagicMock(return_value=sock)
+    result, spies = _run_regression(
+        project, ["demo"], container_enabled=True,
+        extra_patches=[*_bridge_patches(sock, ensure),
+                       patch("pm_core.paths.fake_claude_config_for_type",
+                             return_value={"verdicts": ["PASS"]})])
+    assert result.exit_code == 0, result.output
+    ensure.assert_not_called()
+    assert spies.create.call_args.kwargs["route_mounts"] is None
+
+
+@pytest.mark.parametrize("problem, expect", [
+    ({"model": ""}, "provider 'r-ctr': no model configured. Remedy: "),
+    ({"bridge": OSError("bind failed")},
+     "provider 'r-ctr': cannot set up the host route bridge: bind failed. "
+     "Remedy: run 'pm provider test r-ctr --container'"),
+])
+def test_container_run_on_a_router_that_cannot_launch_creates_nothing(
+        project, home, tmp_path, monkeypatch, problem, expect):
+    """A router whose settings cannot launch, or whose host bridge cannot
+    start, stops the run before any container exists (R42): the
+    provider's error and remedy, exit 1, nothing left behind."""
+    bridge_error = problem.pop("bridge", None)
+    _router_default(home, monkeypatch, **problem)
+    sock = tmp_path / "route-bridge" / "r-ctr" / "router.sock"
+    ensure = MagicMock(side_effect=bridge_error, return_value=sock)
+    result, spies = _run_regression(
+        project, ["demo"], container_enabled=True,
+        extra_patches=_bridge_patches(sock, ensure))
+    assert result.exit_code == 1
+    assert expect in result.output
+    assert "No session was launched on the host" in result.output
+    if bridge_error is None:
+        ensure.assert_not_called()
+    spies.create.assert_not_called()
+    spies.build.assert_not_called()
+    spies.execvpe.assert_not_called()
+    assert _qa_workdirs(home) == []
+    assert _run_captures(home) == []
+    assert _clone_overrides(home) == []
 
 
 def test_registry_mounts_leave_only_the_registry_writable(tmp_path):
