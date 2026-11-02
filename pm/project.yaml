@@ -51473,7 +51473,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/296
   gh_pr_number: 296
   created_at: '2026-10-28T02:46:55.100157+00:00'
-  updated_at: '2026-11-02T07:57:32.528423+00:00'
+  updated_at: '2026-11-02T08:11:15.641569+00:00'
   started_at: '2026-11-02T02:27:56.323149+00:00'
   reviewed_at: null
   merged_at: null
@@ -51607,6 +51607,20 @@ prs:
       80x24 nav cut).'
     created_at: '2026-11-02T07:57:32Z'
     last_edited: '2026-11-02T07:57:32Z'
+  - id: note-c9f7f5c
+    text: 'QA scenario 7 follow-up: the assigned cli-recording captures are now recorded
+      and present under /pm-captures/scenarios/7/ — cli-provider-default/ (pm provider
+      default beta between two pm provider list runs: alpha (default) -> beta (default)),
+      cli-provider-add-edit-remove/ (pm provider add gamma, edit alpha --model alpha-model-2,
+      remove beta, then list: gamma present, alpha at alpha-model-2, beta gone, (default)
+      on claude), and cli-pr-add/ (pm pr add "Third PR" with a live TUI session whose
+      pidfile caps include sigusr1; the TUI logged "action: reload (state only)" at
+      that moment, and pm pr list shows 2 -> 3 PRs). Each has recording.cast, recording.mp4
+      and manifest.md in the recipe format; the top-level manifest lists them. These
+      were re-run for real in a fresh isolated project (HOME=/scratch/home3, /scratch/proj7c).
+      No code change; the scenario-7 behavioral verdict is unchanged.'
+    created_at: '2026-11-02T08:11:15Z'
+    last_edited: '2026-11-02T08:11:15Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
