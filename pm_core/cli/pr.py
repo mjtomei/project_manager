@@ -3615,6 +3615,17 @@ def pr_model_set(pr_id: str, value: str | None, effort: str | None,
     click.echo(f"{pr_id}: set {what} for {scope}")
     click.echo("Running sessions keep their settings; new launches use "
                "these.")
+    # A level the selected route declares unsupported is still written (the
+    # metadata is dated), but the success line must not be the only feedback.
+    data = store.load(root)
+    pr_entry = store.get_pr(data, pr_id)
+    affected = list(roles) or list(PR_SESSION_TYPES)
+    seen: set[str] = set()
+    for role in affected:
+        warn = model_settings.effort_warning(data, role, pr=pr_entry)
+        if warn and warn not in seen:
+            seen.add(warn)
+            click.echo(f"Warning ({role}): {warn}", err=True)
 
 
 @pr_model.command("unset")

@@ -544,3 +544,213 @@ class TestWriteEnvFile:
             assert "rm -f" in prefix
         finally:
             os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
+# Effort level vocabulary and the ambient CLAUDE_CODE_EFFORT_LEVEL override
+# ---------------------------------------------------------------------------
+
+class TestEffortLaunch:
+    def test_shell_cmd_passes_new_levels(self):
+        for level in ("low", "medium", "high", "xhigh", "max"):
+            cmd = build_claude_shell_cmd(prompt="x", effort=level)
+            assert f"--effort {level}" in cmd
+
+    def test_shell_cmd_unsets_ambient_effort_when_pm_sets_one(
+            self, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "xhigh")
+        cmd = build_claude_shell_cmd(prompt="x", effort="high")
+        assert "--effort high" in cmd
+        assert "-u CLAUDE_CODE_EFFORT_LEVEL" in cmd
+
+    def test_shell_cmd_leaves_ambient_effort_alone_without_a_pm_level(
+            self, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "xhigh")
+        cmd = build_claude_shell_cmd(prompt="x")
+        assert "CLAUDE_CODE_EFFORT_LEVEL" not in cmd
+        assert "--effort" not in cmd
+
+    def test_shell_cmd_keeps_a_provider_assigned_level(self, monkeypatch):
+        """A provider's own env entry is explicit configuration: it is
+        transported, not unset, even when pm also passes --effort."""
+        from pm_core import providers
+        monkeypatch.setattr(
+            providers, "load_providers",
+            lambda: {"providers": {"p": {
+                "type": "claude",
+                "env": {"CLAUDE_CODE_EFFORT_LEVEL": "max"}}}})
+        env: dict[str, str] = {}
+        cmd = build_claude_shell_cmd(prompt="x", provider="p", effort="high",
+                                     env_out=env)
+        assert "--effort high" in cmd
+        assert "-u CLAUDE_CODE_EFFORT_LEVEL" not in cmd
+        assert env["CLAUDE_CODE_EFFORT_LEVEL"] == "max"
+
+    def test_shell_cmd_keeps_a_provider_no_override_assignment(
+            self, monkeypatch):
+        """``auto``/blank is an explicit "no override": the command keeps
+        the provider's assignment (and does not unset it), so --effort
+        applies as pm reports."""
+        from pm_core import providers
+        for value in ("auto", "unset", ""):
+            monkeypatch.setattr(
+                providers, "load_providers",
+                lambda value=value: {"providers": {"p": {
+                    "type": "claude",
+                    "env": {"CLAUDE_CODE_EFFORT_LEVEL": value}}}})
+            env: dict[str, str] = {}
+            cmd = build_claude_shell_cmd(prompt="x", provider="p",
+                                         effort="high", env_out=env)
+            assert "--effort high" in cmd
+            assert "-u CLAUDE_CODE_EFFORT_LEVEL" not in cmd
+            assert env["CLAUDE_CODE_EFFORT_LEVEL"] == value
+
+    def test_shell_cmd_unsets_the_level_once(self, monkeypatch):
+        """A provider that already unsets the variable must not make the
+        command unset it twice."""
+        from pm_core import providers
+        monkeypatch.setattr(
+            providers, "load_providers",
+            lambda: {"providers": {"p": {
+                "type": "claude",
+                "unset_env": ["CLAUDE_CODE_EFFORT_LEVEL"]}}})
+        cmd = build_claude_shell_cmd(prompt="x", provider="p", effort="high",
+                                     env_out={})
+        assert cmd.count("-u CLAUDE_CODE_EFFORT_LEVEL") == 1
+
+    def test_drop_ambient_effort(self):
+        from pm_core.claude_launcher import _drop_ambient_effort
+        env = {"CLAUDE_CODE_EFFORT_LEVEL": "xhigh", "A": "1"}
+        out = _drop_ambient_effort(env, "high")
+        assert "CLAUDE_CODE_EFFORT_LEVEL" not in out and out["A"] == "1"
+        assert _drop_ambient_effort(env, None) is env
+        # A provider that assigns the variable is explicit configuration.
+        assert _drop_ambient_effort(
+            env, "high", {"CLAUDE_CODE_EFFORT_LEVEL": "xhigh"}) is env
+
+    def test_shell_cmd_warns_when_the_route_declares_the_level_unsupported(
+            self, monkeypatch):
+        """The level is still passed (the metadata is dated), but a launch
+        must not read as confirmed."""
+        import pm_core.claude_launcher as launcher
+        from pm_core import providers
+        monkeypatch.setattr(
+            providers, "load_providers",
+            lambda: {"providers": {"p": {"type": "claude",
+                                         "supported_efforts": ["low"]}}})
+        seen = []
+        monkeypatch.setattr(launcher._log, "warning",
+                            lambda msg, *a: seen.append(msg % a))
+        build_claude_shell_cmd(prompt="x", provider="p", effort="high",
+                               env_out={})
+        assert any("not among them" in m for m in seen), seen
+        assert any("--effort high" in m for m in seen), seen
+
+    def test_shell_cmd_does_not_warn_for_a_declared_level(
+            self, monkeypatch):
+        import pm_core.claude_launcher as launcher
+        from pm_core import providers
+        monkeypatch.setattr(
+            providers, "load_providers",
+            lambda: {"providers": {"p": {"type": "claude",
+                                         "supported_efforts": ["high"]}}})
+        seen = []
+        monkeypatch.setattr(launcher._log, "warning",
+                            lambda msg, *a: seen.append(msg % a))
+        build_claude_shell_cmd(prompt="x", provider="p", effort="high",
+                               env_out={})
+        assert not any("not among them" in m for m in seen), seen
+
+    def test_launch_claude_warns_when_the_route_declares_the_level_unsupported(
+            self, monkeypatch, tmp_path):
+        """The subprocess launch paths warn like the shell path does: the
+        level is still passed, but it must not read as confirmed."""
+        import pm_core.claude_launcher as launcher
+        from pm_core import providers
+        monkeypatch.setattr(
+            providers, "load_providers",
+            lambda: {"providers": {"p": {"type": "claude",
+                                         "supported_efforts": ["low"]}}})
+        seen = []
+        monkeypatch.setattr(launcher._log, "warning",
+                            lambda msg, *a: seen.append(msg % a))
+
+        class Result:
+            returncode = 0
+
+        monkeypatch.setattr(launcher, "find_claude", lambda: "/bin/claude")
+        monkeypatch.setattr(launcher, "prepare_workspace", lambda cwd: None)
+        monkeypatch.setattr(launcher, "_skip_permissions", lambda: False)
+        monkeypatch.setattr(launcher.subprocess, "run",
+                            lambda cmd, **kw: Result())
+        launcher.launch_claude("x", "k", tmp_path, cwd=str(tmp_path),
+                               provider="p", effort="high")
+        assert any("not among them" in m for m in seen), seen
+
+    def test_launch_claude_print_warns_on_a_provider_env_override(
+            self, monkeypatch, tmp_path):
+        import pm_core.claude_launcher as launcher
+        from pm_core import providers
+        monkeypatch.setattr(
+            providers, "load_providers",
+            lambda: {"providers": {"p": {
+                "type": "claude",
+                "env": {"CLAUDE_CODE_EFFORT_LEVEL": "max"}}}})
+        seen = []
+        monkeypatch.setattr(launcher._log, "warning",
+                            lambda msg, *a: seen.append(msg % a))
+
+        class Result:
+            returncode = 0
+            stdout = "ok"
+
+        monkeypatch.setattr(launcher, "find_claude", lambda: "/bin/claude")
+        monkeypatch.setattr(launcher, "_skip_permissions", lambda: False)
+        monkeypatch.setattr(launcher.subprocess, "run",
+                            lambda cmd, **kw: Result())
+        launcher.launch_claude_print("x", cwd=str(tmp_path), provider="p",
+                                     effort="high")
+        assert any("overrides --effort high" in m for m in seen), seen
+
+    def test_launch_claude_drops_ambient_effort(self, monkeypatch, tmp_path):
+        import pm_core.claude_launcher as launcher
+        seen = {}
+
+        class Result:
+            returncode = 0
+
+        def fake_run(cmd, **kwargs):
+            seen["cmd"] = cmd
+            seen["env"] = kwargs.get("env")
+            return Result()
+
+        monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "xhigh")
+        monkeypatch.setattr(launcher, "find_claude", lambda: "/bin/claude")
+        monkeypatch.setattr(launcher, "prepare_workspace", lambda cwd: None)
+        monkeypatch.setattr(launcher, "_skip_permissions", lambda: False)
+        monkeypatch.setattr(launcher.subprocess, "run", fake_run)
+        rc = launcher.launch_claude(
+            "x", "k", tmp_path, cwd=str(tmp_path), effort="high")
+        assert rc == 0
+        assert "--effort" in seen["cmd"] and "high" in seen["cmd"]
+        assert "CLAUDE_CODE_EFFORT_LEVEL" not in (seen["env"] or {})
+
+    def test_launch_claude_print_drops_ambient_effort(self, monkeypatch,
+                                                      tmp_path):
+        import pm_core.claude_launcher as launcher
+        seen = {}
+
+        class Result:
+            returncode = 0
+            stdout = "ok"
+
+        def fake_run(cmd, **kwargs):
+            seen["env"] = kwargs.get("env")
+            return Result()
+
+        monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "xhigh")
+        monkeypatch.setattr(launcher, "find_claude", lambda: "/bin/claude")
+        monkeypatch.setattr(launcher, "_skip_permissions", lambda: False)
+        monkeypatch.setattr(launcher.subprocess, "run", fake_run)
+        launcher.launch_claude_print("x", cwd=str(tmp_path), effort="max")
+        assert "CLAUDE_CODE_EFFORT_LEVEL" not in (seen["env"] or {})
