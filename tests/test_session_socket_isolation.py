@@ -5492,6 +5492,10 @@ class TestSessionStartAttachesToLegacySession:
     that matter to the user — "no private session is created" and "the
     legacy session and its grouped sessions are neither killed nor moved" —
     were only asserted piecemeal.
+
+    The QA S35 adopt/respawn cases (``_start_against_unregistered_tui``)
+    are here too, because they share this setup.  One of them runs on a
+    private server instead of the default one.
     """
 
     def test_attaches_to_the_legacy_session_without_creating_a_private_one(
@@ -5666,20 +5670,20 @@ class TestSessionStartAttachesToLegacySession:
             _tmux(private_sock, "kill-server")
             Path(private_sock).unlink(missing_ok=True)
 
-    def _start_against_unregistered_legacy(self, short_sock_dir, tmp_path,
-                                           monkeypatch, name, pane_cmd,
-                                           dead=False, private=False):
-        """Run ``_session_start`` against a legacy session whose registry
-        lists no TUI.
+    def _start_against_unregistered_tui(self, short_sock_dir, tmp_path,
+                                        monkeypatch, name, pane_cmd,
+                                        dead=False, private=False):
+        """Run ``_session_start`` against a running session whose registry
+        lists no TUI (the QA S35 adopt/respawn decision).
 
         Returns ``(respawn calls, attached, registry, window 0's pane id,
         window 0's id)``; the registry and ids are read before the
         disposable server is killed.
 
         *pane_cmd* is window 0's start command.  With *dead*, the pane has
-        exited and is kept by ``remain-on-exit``.  With *private*, the
-        session runs on its own private socket instead of the default
-        server (the path QA S35 hit).
+        exited and is kept by ``remain-on-exit``.  The session is a legacy
+        one on the default server unless *private* puts it on its own
+        private socket (the path QA S35 hit).
         """
         from pm_core.cli import session as session_mod
         from pm_core import hook_install, pane_layout, pane_registry
@@ -5749,7 +5753,7 @@ class TestSessionStartAttachesToLegacySession:
         instead, and the attach goes ahead.
         """
         respawned, attached, registry, tui_pane, window_id = \
-            self._start_against_unregistered_legacy(
+            self._start_against_unregistered_tui(
                 short_sock_dir, tmp_path, monkeypatch, "pm-iso-unreg",
                 "sleep 300; : pm _tui")
 
@@ -5771,7 +5775,7 @@ class TestSessionStartAttachesToLegacySession:
         """
         name = "pm-iso-unregp"
         respawned, attached, registry, tui_pane, window_id = \
-            self._start_against_unregistered_legacy(
+            self._start_against_unregistered_tui(
                 short_sock_dir, tmp_path, monkeypatch, name,
                 "sleep 300; : pm _tui", private=True)
 
@@ -5787,7 +5791,7 @@ class TestSessionStartAttachesToLegacySession:
             self, short_sock_dir, tmp_path, monkeypatch, capsys):
         """No pane runs ``pm _tui``: the respawn path is unchanged."""
         respawned, attached, registry, _, window_id = \
-            self._start_against_unregistered_legacy(
+            self._start_against_unregistered_tui(
                 short_sock_dir, tmp_path, monkeypatch, "pm-iso-notui",
                 "sleep 300")
 
@@ -5799,7 +5803,7 @@ class TestSessionStartAttachesToLegacySession:
             self, short_sock_dir, tmp_path, monkeypatch, capsys):
         """A TUI pane that exited, kept by ``remain-on-exit``, is not a TUI."""
         respawned, _, registry, _, window_id = \
-            self._start_against_unregistered_legacy(
+            self._start_against_unregistered_tui(
                 short_sock_dir, tmp_path, monkeypatch, "pm-iso-deadtui",
                 "read x; : pm _tui", dead=True)
 
