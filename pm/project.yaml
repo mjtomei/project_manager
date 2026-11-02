@@ -50840,281 +50840,6 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
-- id: pr-049649a
-  plan: bugs
-  title: Remove all-PR autostart and fail closed on malformed or targetless saved
-    state
-  branch: pm/pr-049649a-remove-all-pr-autostart-and-fail-closed-on-malform
-  status: in_progress
-  depends_on: []
-  description: 'Remove every route to whole-backlog/all-PR autostart. Autostart must
-    require a validated explicit nonempty collection of target PR IDs; only their
-    dependency closures may run. User explicitly requested removing the feature entirely,
-    not just fixing the malformed-state case.
-
-
-    Incident 2026-10-27 18:52 UTC: recovery supplied a targets mapping instead of
-    the required list in ~/.pm/autostart-resume.json, with auto_start=true and all_mode=false.
-    targets_from_breadcrumb fell through to legacy targetless migration and returned
-    all_mode=true. That broadened scope, dropped per-target wait_for_merge gates,
-    merged #254, started unrelated work and created drafts #265/#266. Evidence: /home/matt/.local/state/pm-pr-shepherd/tui-popup-close-crash-20261027T185235Z/
-    (recovery-breadcrumb.json, incident.json, logs). The malformed input was a shepherd
-    error; the product must reject it without expanding authority.
-
-
-    Audit and remove ALL paths: TUI command-bar autostart all; any CLI/API/IPC variants;
-    keybindings; app._auto_start_all and other mode flags; watchers and background
-    drivers; scheduler targetless fallbacks; current and legacy breadcrumb/resume
-    migration; persisted all_mode=true; examples/docs/help and tests relying on whole-backlog
-    mode. Search callers and data flow, not only text occurrences. Preserve explicit
-    multi-target autostart and explicitly selected targets'' dependencies, per-target
-    manual merge holds, model routing and spec gates. Absence, empty targets, wrong
-    types, invalid IDs, malformed records, targetless legacy data, and all-mode requests
-    must fail closed or remain off with an actionable diagnostic; none may become
-    wildcard authority. Preserve/reject malformed evidence safely rather than silently
-    dropping merge gates. Valid legacy single-target data may migrate only to that
-    exact validated target with no broadened merge authority; define the conservative
-    handling explicitly.
-
-
-    Regressions must include command/IPC rejection, valid explicit multi-target and
-    dependency scheduling, empty/missing/dict/string/null targets, malformed records,
-    legacy auto_start/run_id without target, all_mode true, corrupt/truncated JSON,
-    reload/restart and watcher paths. Prove unrelated eligible PRs never start and
-    signed-off PRs held for manual merge never merge. Use isolated fixtures/fake launch
-    and merge callbacks; never test whole-backlog start or merge against a live PM
-    project. Do not merge any product PR or change global provider policy. Keep this
-    bug independent of the separate AutoRunsScreen dismissal crash.'
-  agent_machine: spark-424d
-  gh_pr: https://github.com/mjtomei/project_manager/pull/267
-  gh_pr_number: 267
-  created_at: '2026-10-27T19:03:40.643246+00:00'
-  updated_at: '2026-10-31T18:07:25.345765+00:00'
-  started_at: '2026-10-27T19:04:56.616056+00:00'
-  reviewed_at: '2026-10-29T02:22:47.161757+00:00'
-  merged_at: null
-  notes:
-  - id: note-a2c68b1
-    text: 'QA INPUT_REQUIRED: Malformed saved state is rejected instead of becoming
-      whole-backlog authority (incident reproduction): PASS; Every all-PR entry point
-      is gone and reports why: PASS; Explicit multi-target state survives a merge
-      restart exactly: PASS; Legacy saved state migrates only to its exact validated
-      target: PASS; Malformed saved-state shapes all fail closed with preserved evidence:
-      PASS; The auto-start watcher is observation-only when it has no targets: PASS;
-      Concurrent CLI clients cannot produce wildcard or corrupted state: INPUT_REQUIRED;
-      Saved state from another project never grants authority: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-049649a-fb7eecdb7ab986be)'
-    created_at: '2026-10-28T02:03:38Z'
-    last_edited: '2026-10-28T02:03:38Z'
-  - id: note-recovery-master-20261029
-    text: 'USER AUTHORIZED RECOVERY: restart through implementation to merge the latest
-      batch from origin/master before further review or QA. Preserve all existing
-      dirty source, local PR registry/routing, notes, stashes, QA planner/spec edits,
-      untracked evidence and transcripts; interrupted changes are owned work, not
-      disposable noise. First inspect the saved prior review/QA evidence and current
-      git state. Safely preserve and reconcile that work, fetch origin/master, merge
-      it INTO this existing PR branch, resolve conflicts preserving both master fixes
-      and this PR''s behavior, run relevant checks, commit and push only this PR branch
-      when complete. Do not reset/force-push master or merge the PR into master. Record
-      exact integrated master SHA and validation; do not hand off until integration
-      and needed checks are complete. All pending user decisions remain unwaived;
-      if any blocks implementation, report INPUT_REQUIRED. Keep primary DeepSeek1017/high
-      and explicit work Opus5.5/xhigh signoff override. Native review/QA must follow
-      implementation; prior QA evidence is not a pass for the integrated head.
-
-
-      Incident 2026-10-29 01:06 UTC: #267 QA S10 refiner inherited the REAL tmux session,
-      launched a scratch PR there, then mistakenly killed pm-project_manager-5b29c418
-      as test cleanup. S9/S12 recreated scratch TUIs under that real session and S12
-      polluted shared tmux PATH/PYTHONPATH and shared autostart breadcrumb state.
-      Original transcripts, dirty patches, untracked files and QA results are preserved
-      under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z.
-      This was infrastructure interruption, not an acceptance verdict. NEVER operate
-      on the user''s real tmux session or shared host configuration for test setup/cleanup.
-      Test with an explicit dedicated tmux socket, isolated PM state/config paths,
-      and verified fixture identity; inherited TMUX/TMUX_PANE, global tmux set-environment,
-      shared ~/.pm breadcrumbs and broad cleanup are unsafe. If isolation cannot be
-      established, stop and report INPUT_REQUIRED. #278 is the existing per-session
-      tmux isolation PR; this is concrete incident evidence for its coverage.
-
-      This new implementation handoff must preserve unfinished S9-S12 QA evidence
-      and revise future test setup to avoid the proven ambient targeting/shared state
-      leak; do not relaunch the old fixture workers. No scenario verdict was supplied
-      by recovery.'
-    created_at: '2026-10-29T01:30:33.195814+00:00'
-  - id: note-user-restart-all-20261029
-    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart
-      this PR in implementation and merge latest origin/master INTO this existing
-      PR branch before any new review/QA. User explicitly released old review/QA holds
-      for this restart; preserve all earlier questions, answers, verdicts and evidence
-      and re-evaluate after integration rather than invent answers or waive acceptance.
-      Preserve dirty source, planner/spec edits, local registry/routing, stashes,
-      untracked files and all evidence. The interrupted work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
-      inspect its per-PR backup and original transcripts as needed. Safely reconcile
-      interrupted changes and current master, test, commit and push only this PR branch.
-      Never force-push/reset master or merge the PR into master. Report integrated
-      master SHA and tests; only then hand off to native review/QA. Keep assigned
-      primary/helper model and explicit work Opus5.5/xhigh signoff override. No new
-      dependencies or unrelated work are authorized.
-
-      Test isolation is mandatory: #267 S10 refiner killed the REAL pm-project_manager-5b29c418
-      session after mistaking a test PR launch for ownership of that session. S9/S12
-      inherited ambient tmux context and recreated test TUIs under that real name;
-      S12 changed global tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use
-      an explicit dedicated test tmux socket and isolated state/config, verify fixture
-      ownership; never mutate the user''s real session or shared host configuration
-      as test cleanup. Preserve the failed-run evidence. #278 is the existing per-session
-      tmux-isolation fix. Do not relaunch old QA fixture workers.'
-    created_at: '2026-10-29T01:33:53.678599+00:00'
-    last_edited: '2026-10-29T01:33:53.678599+00:00'
-  - id: note-fc1581d
-    text: 'MASTER INTEGRATION 2026-10-29 (implementation restart): merged origin/master
-      4a74d88085edffcc300cb21f31777a798d647782 (352 commits) INTO this PR branch.
-      Merge commit 314ef61f; QA-isolation doc 924caeb2; final docs fdb1eb3d. No force-push,
-      no reset, PR not merged.
-
-
-      Conflict resolutions (preserving both master fixes and this PR''s behavior):
-
-      1) pm_core/autostart_state.py keeps master''s pr-25f4038 single-manual-policy
-      work (legacy record policy folding, bare-string/legacy single target -> wait_for_merge,
-      saved stop_before_merge marks -> wait targets, migrate_legacy_stop for stale
-      build_status inputs) under this PR''s fail-closed parser: all_mode rejected
-      (truthy or non-boolean), targets must be a list of valid records (dict/string/null/number
-      reject; duplicate ids reject), empty/targetless requests reject, saved stop_before_merge
-      must be a list of valid ids (dict/string/set/padded ids reject), unknown restored
-      ids reject the whole restore. build_status requires an explicit target for mode=targets.
-
-      2) pm_core/tui/auto_start.py consume_breadcrumb is one fail-closed flow: corrupt/non-object/rejected
-      state resets in-memory scope, logs an actionable diagnostic, quarantines the
-      bytes (autostart-resume.rejected-<stamp>.json), and never calls check_and_start.
-      Master''s session-owner check, QA-run adoption, loop-restart ordering and retry
-      fields are preserved (retry fields now type-validated so corrupt records cannot
-      raise on restore). Dead stop-marks helper and all-mode label branch removed;
-      the `all` verb still returns all_mode_removed.
-
-      3) Tests: record-shape conflicts resolved to wait_for_merge; master tests that
-      expected permissive/all-mode behavior (non-list targets, all_mode honored, bare/empty
-      entries kept, string stop set, non-string run_id) updated to the fail-closed
-      contract; targets_from_breadcrumb call sites moved to the BreadcrumbTargets
-      result.
-
-      4) pm/project.yaml: union of both registries (516 unique PRs), preserving this
-      PR''s notes and the provider:claude-work-xhigh-249 signoff override.
-
-
-      Validation on integrated head 924caeb2 (docs-only fdb1eb3d after it): full suite
-      4581 passed, 1 skipped, 0 failed. Focused autostart/parser/multi-target/single-policy/merge-wait/breadcrumb-loop/log-message/signoff-handoff/owed-REQA/launch-retry
-      suites all pass. Spec pm/specs/pr-049649a/impl.md has an Integration section
-      (master SHA + reconciliation); qa.md updated for the single-policy semantics
-      and MANDATORY test isolation: dedicated HOME (so pm_home() is not ~/.pm) + PM_TMUX_SOCKET;
-      never inherit TMUX/TMUX_PANE, never touch the real pm-project_manager-5b29c418
-      session or shared ~/.pm breadcrumbs; stop with INPUT_REQUIRED if isolation cannot
-      be established.
-
-
-      QA evidence: prior S0-S8 results and the interrupted S9-S12 fixtures are preserved
-      (test-session-leak-20261029T012237Z) but are NOT a verdict for this integrated
-      head; native review/QA must re-run on the current head. Do not merge: manual
-      merge gate applies.'
-    created_at: '2026-10-29T02:22:26Z'
-    last_edited: '2026-10-29T02:22:26Z'
-  - id: note-6ce8318
-    text: 'QA PASS: Incident replay — malformed saved state never becomes whole-backlog
-      authority: PASS; Saved merge-gate evidence — valid stop marks become holds,
-      malformed sets fail closed: PASS; Restart lifecycle — downtime completion, plain-restart
-      consumption, and save purity: PASS; Concurrent actors across the shared saved
-      state, command queue and reply files: PASS; Watcher scope follows explicit targets
-      and never inherits rejected state: PASS; Restored target set carries its merge
-      holds — sign-off never auto-merges: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-049649a-92642b9a5777115f)'
-    created_at: '2026-10-29T06:03:04Z'
-    last_edited: '2026-10-29T06:03:04Z'
-  - id: note-3d47f88
-    text: 'User-authorized restart from the main PM session on 2026-10-31 after #249
-      merged as eaf3372e60d1717bd97cc50b5e0b04c6df881fa1. Resume this existing PR
-      in its existing workdir. First integrate current origin/master INTO THIS PR
-      branch, preserving its intended behavior and all earlier review/QA corrections;
-      resolve real code/test conflicts and validate the combined behavior before handing
-      off for a fresh review/QA/sign-off sequence. Do not merge this PR into master
-      or push/reset/delete master or other branches. This is a user-directed implementation
-      return, not a reviewer/sign-off verdict. The read-only integration check found
-      substantive conflicts in: pm/project.yaml, pm_core/tui/auto_start.py, tests/test_qa_loop.py.
-      The prior SIGNOFF_MERGE is historical evidence for its recorded revisions, not
-      approval of a new integration. Retain all original source, dirty files, stashes,
-      drafts, fixtures and captures. Existing uncommitted content may have been intentionally
-      excluded; inspect its provenance instead of automatically committing it. Preserve
-      every PR record and unrelated local metadata during project.yaml reconciliation.
-      Do not weaken acceptance criteria, choose unresolved user policy questions or
-      reuse stale PASS results. Historical captures have been copied intact to the
-      main session captures; overwritten filename collisions are backed up in the
-      host migration record. Main session is pm-project_manager-c5a1006b; keep old
-      restored sessions idle. Assigned models and explicit work-Opus sign-off override
-      remain unchanged. Autostart will use wait_for_merge; no PR merge is authorized
-      by this request.'
-    created_at: '2026-10-31T18:07:25.345765+00:00'
-    last_edited: '2026-10-31T18:07:25.345765+00:00'
-  model: provider:deepseek-flash
-  session_models:
-    impl: provider:deepseek-flash
-    review: provider:deepseek-flash
-    qa: provider:deepseek-flash
-    qa_planning: provider:deepseek-flash
-    qa_scenario: provider:deepseek-flash
-    qa_concretize: provider:deepseek-flash
-    qa_verification: provider:deepseek-flash
-    qa_finalize: provider:deepseek-flash
-    qa_interactive: provider:deepseek-flash
-    signoff: provider:claude-work-xhigh-249
-    merge: provider:deepseek-flash
-  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-049649a-remove-all-pr-autostart-and-fail-clo-registered-20261027
-  signed_off_at: '2026-10-29T06:03:05.752461+00:00'
-  integration:
-    checked_at: '2026-10-31T18:03:29.079979+00:00'
-    target_repo: https://github.com/mjtomei/project_manager.git
-    base_branch: master
-    head: e0cdd55bd95b624246f5bc117fefcbac06efdff0
-    base_sha: eaf3372e60d1717bd97cc50b5e0b04c6df881fa1
-    conflicts:
-    - pm/project.yaml
-    - pm_core/tui/auto_start.py
-    - tests/test_qa_loop.py
-    overlap:
-    - pm/project.yaml
-    - pm_core/autostart_state.py
-    - pm_core/tui/app.py
-    - pm_core/tui/auto_start.py
-    - pm_core/tui/screens.py
-    - tests/test_auto_start_qa.py
-    - tests/test_autostart_multi_target.py
-    - tests/test_breadcrumb_review_loop.py
-    - tests/test_log_message_force.py
-    - tests/test_owed_reqa.py
-    - tests/test_qa_background_focus.py
-    - tests/test_qa_loop.py
-    - tests/test_review_launch_retry.py
-    - tests/test_tui_signoff_handoff.py
-    candidate_tree: null
-    merge_base: 4a74d88085edffcc300cb21f31777a798d647782
-    status: conflict
-    pr_id: pr-049649a
-    number: 267
-    workdir_head: e0cdd55bd95b624246f5bc117fefcbac06efdff0
-    remote_head: e0cdd55bd95b624246f5bc117fefcbac06efdff0
-    dirty: " M pm/project.yaml\n M pm/specs/pr-049649a/qa.md\n?? verify-s17-followup.md\n\
-      ?? verify-s18-followup.md\n?? verify-s4-followup.md\n"
-    signoff_sha: e0cdd55bd95b624246f5bc117fefcbac06efdff0
-    base_files_count: 113
-  signoff:
-    verdict: SIGNOFF_MERGE
-    sha: e0cdd55bd95b624246f5bc117fefcbac06efdff0
-    ts: '2026-10-29T06:13:27.551021+00:00'
-    origin: auto-sequence
-    integration:
-      target_repo: https://github.com/mjtomei/project_manager.git
-      base_branch: master
-      base_sha: 4a74d88085edffcc300cb21f31777a798d647782
-      candidate_tree: e99283693f2375209f8ac7eb69f15f03a37dabf9
-      status: up_to_date
-      head: e0cdd55bd95b624246f5bc117fefcbac06efdff0
 - id: pr-f0f4129
   plan: bugs
   title: Check base integration before review iterations and QA; return conflicts
@@ -53366,6 +53091,149 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T08:18:28.627726+00:00'
   updated_at: '2026-11-02T08:18:28.627726+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3d3b3ce
+  plan: bugs
+  title: 'Bug: pm provider test --live inlines a router provider''s secret env values
+    in the probe''s bash -c / podman exec argv'
+  branch: pm/pr-3d3b3ce-bug-pm-provider-test-live-inlines-a-router-provide
+  status: in_progress
+  depends_on: []
+  description: 'Found at #249 (pr-592e4bd) sign-off 2026-10-29 on HEAD 1987cb9c. worker_route._probe_shell_cmd
+    builds ''env -u ... NAME=value ... claude -p ...'' and live_probe passes it as
+    a bash -c argument (host) or inside ''podman exec ... bash -c'' (container). Every
+    value of the router provider''s env_vars() is inlined, including values pm itself
+    classifies as secret (providers.is_secret_env_var: KEY/TOKEN/SECRET/PASSWORD/CREDENTIAL/AUTH/HEADER),
+    e.g. a router entry with env: {ANTHROPIC_CUSTOM_HEADERS: ''x-team-token: ...''}
+    (R10 allows env on every provider type). The value is not logged or written to
+    disk, but it is readable in /proc/<pid>/cmdline (ps) by other users on the host
+    for the probe''s lifetime (up to 180 s). Every pane launch already avoids this
+    (#268 private env file; container -e NAME by name). Repro: providers.yaml with
+    that entry, then python -c ''from pm_core import worker_route; from pm_core.providers
+    import get_provider; print(worker_route._probe_shell_cmd(get_provider("acme",
+    strict=True), "sid", container=False))'' prints the header value. Evidence: /pm-captures/signoff/2026-10-29/probe-inline.txt.
+    Fix: pass the assignments through subprocess env= (host) and ''podman exec -e
+    NAME'' with the value in the runtime''s env (as container._run_runtime(env=...)
+    does), keep only env -u names in the argv; add a regression next to tests/test_worker_route.py::_probe_shell_cmd
+    tests.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/293
+  gh_pr_number: 293
+  created_at: '2026-10-29T14:01:10.973333+00:00'
+  updated_at: '2026-11-02T03:34:44.184884+00:00'
+  started_at: '2026-11-02T01:59:27.402561+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-a6d3aaa
+    text: 'User authorized starting this existing security bug on 2026-11-02, MAIN-account
+      Opus 5.5/xhigh for implementation, review, QA, helpers and sign-off. Its source
+      was renamed by merged #282: use pm_core/router_route.py and tests/test_router_route.py,
+      not obsolete worker_route names. Confirm the current live-probe path still embeds
+      provider env values in bash -c / podman exec argv, then keep those values out
+      of process arguments through the existing protected environment transport. Cover
+      host and container probes, inherited/unset variables, model/effort routing and
+      failure cleanup without widening credentials or permissions. Use synthetic canary
+      secrets in isolated fixtures; never print, copy into logs, or expose real credentials.
+      Ordinary launches already use protected transport; reuse appropriate abstractions
+      without rewriting launch lifecycle or relaxing fail-closed behavior.
+
+
+      #283 changes reasoning/bridge configuration, not these probe functions; coordinate
+      with its current interfaces and integrate newly merged master changes as needed.
+      No additional review/QA scheduling prerequisite was identified. Complete genuine
+      implementation and let PM advance to fresh review/QA. Preserve the manual wait-for-merge
+      gate; starting this PR does not authorize a merge.
+
+
+      Begin from current master and keep the implementation scoped to this PR. Use
+      isolated containers/test projects/tmux servers; do not drive the user''s live
+      PM session, alter shared host PM settings or affect unrelated work. Preserve
+      existing source, records, evidence and drafts. Leave lifecycle handoff to PM;
+      do not launch your own review/QA or send TUI keys to advance. No force-push,
+      master/other-branch reset/deletion, automatic spec approval or PR merge is authorized.
+      Current main-account routing supersedes older account notes.'
+    created_at: '2026-11-02T01:59:09Z'
+    last_edited: '2026-11-02T01:59:09Z'
+  - id: note-d13161b
+    text: 'Impl done 2026-11-02 at 2f7bb3fa (fix + tests + spec pm/specs/pr-3d3b3ce/impl.md,
+      no unresolved items). _probe_shell_cmd(cfg, sid, container=, env_out=) now emits
+      only ''env -u NAME'' names; live_probe passes the values via subprocess env=
+      (host) and ''podman exec -e NAME'' with the value in the runtime''s env (container),
+      the _run_runtime/build_exec_cmd convention. No env file, so a failed probe leaves
+      nothing to clean; model pins, unset list and fail-closed setup checks unchanged;
+      the probe still passes no --effort (as before). Regression: tests/test_router_route.py::TestProbeEnvTransport
+      (8 tests, synthetic canary in ANTHROPIC_CUSTOM_HEADERS; fail pre-fix on the
+      canary in argv). Captures under $CAP/impl/: pre-fix/provider-test-live (real
+      ''pm provider test acme [--container] --live'' in an isolated HOME, nested podman
+      python:3-slim, fake router, /proc cmdline observer: 4 processes leaked the canary),
+      pre-fix/failing-tests, post-fix/provider-test-live (0 leaks, Live: OK host+container,
+      router still got the header), post-fix/failure-path, post-fix/tests. Full suite
+      5441 passed / 12 failed, all test_markdown_render.py (no markdown module in
+      the impl container). Trial merge onto #283 pr-5ec411c@21da65cd is clean, test_router_route
+      247 passed. Ready for PM to advance to review/QA.'
+    created_at: '2026-11-02T02:21:30Z'
+    last_edited: '2026-11-02T02:21:30Z'
+  - id: note-6eec9d6
+    text: 'QA S2 refiner (container --live, verified live 2026-11-02): pm provider
+      add --env ACME_EMPTY= works from the CLI (no providers.yaml hand edit). The
+      forwarder URL uses the router port, so api_base http://127.0.0.1:P gives the
+      SAME in-container ANTHROPIC_BASE_URL; use api_base http://localhost:P to tell
+      them apart. HOME inside podman exec is /workspace, so a stub claude must write
+      transcript/hook/records under /home/pm/.claude and /home/pm/.pm/hooks. Keep
+      the isolated HOME short (<= ~60 chars): otherwise the bridge falls back to /tmp/pm-route-<uid>-<sha(route)>
+      shared by every isolated HOME, and a bridge left over from an earlier run (old
+      port) gets reused. Teardown: kill only the bridge whose argv names the printed
+      socket (pgrep -f "[r]oute_bridge.py host <sock>"). A plain pgrep -f matches
+      the calling shell, and the agent route forwarder is also a route_bridge.py process.'
+    created_at: '2026-11-02T02:48:53Z'
+    last_edited: '2026-11-02T02:48:53Z'
+  - id: note-5f3f571
+    text: 'QA S5 refiner (live at 21bc398d): routed impl pane from TUI `s` held every
+      Then. Recipe: private PM_TMUX_SOCKET, PYTHONPATH=/workspace, a `claude` stand-in
+      first on PATH (pm pr start needs one on PATH or it only prints the prompt; with
+      a router launcher it is never run), TEST_DIR needs a commit before `s`. Pane
+      start cmd = `cd <workdir> && sh -c ''set -a; . ~/.pm/run/env-XXXX.sh; set +a;
+      rm -f …; env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_AUTO_MODE_MODEL
+      <launcher> --model … --effort medium --session-id …''`; ~/.pm/run empty after
+      launch. Probe and pane records agree on all 12 route vars + header hash; pane
+      alone adds --effort (A5). Pass the canary to an observer via a file, not argv
+      (its own argv otherwise holds it); never kill by a pattern your tool shell argv
+      contains.'
+    created_at: '2026-11-02T03:34:44Z'
+    last_edited: '2026-11-02T03:34:44Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3d3b3ce-bug-pm-provider-test-live-inlines-a--0eb88069
+  model: provider:claude-main-xhigh-pm
+  effort: high
+- id: pr-0ebbc91
+  plan: bugs
+  title: 'Bug: pm provider test --live crashes with a raw ValueError traceback when
+    a provider env name contains "="'
+  branch: pm/pr-0ebbc91-bug-pm-provider-test-live-crashes-with-a-raw-value
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/router_route.py live_probe (subprocess.run with
+    env=, ~line 575) and provider config loading in pm_core/cli/provider.py. Repro
+    (QA S3 of pr-3d3b3ce, branch 21bc398d, isolated HOME): hand-edit ~/.pm/providers.yaml
+    so a router provider env has an entry whose name contains "=" (e.g. "BAD=TOKEN:
+    <value>"). pm provider show lists it as BAD=TOKEN=<redacted> and status OK; pm
+    provider test <name> --live prints "Preflight (host): OK" and then a full Python
+    traceback ending in subprocess._execute_child ValueError: illegal environment
+    variable name, exit 1. No process starts and no value leaks (verified with a /proc
+    observer), but the user gets a traceback rather than a fail-closed "Preflight:
+    FAILED - env name ... is not a valid variable name" line. Expected: reject or
+    flag invalid env names at load/preflight (provider show/test) with a clean message
+    naming the variable but not its value; check the container probe and ordinary
+    router launches for the same name. Capture: /pm-captures/scenarios/3/story7-bad-env-name
+    in that session.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T03:23:55.443880+00:00'
+  updated_at: '2026-11-02T03:23:55.443880+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

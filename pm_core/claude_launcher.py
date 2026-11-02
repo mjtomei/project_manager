@@ -14,6 +14,9 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from pm_core.model_config import (
+    AMBIENT_EFFORT_ENV, accepted_efforts_of, classify_effort_env,
+)
 from pm_core.paths import configure_logger, log_shell_command, write_env_file
 from pm_core.prompt_bounds import (
     PROMPT_ARG_LIMIT, PromptTooLargeError, prompt_bytes,
@@ -282,20 +285,58 @@ def peek_fake_verdicts(session_tag: str | None = None) -> dict:
     return out
 
 
-def _resolve_provider(provider: str | None = None, model: str | None = None):
+def _warn_effort_conflicts(provider_cfg, effort: str | None,
+                           provider_env: dict | None) -> None:
+    """Log what a launch cannot confirm about *effort*.
+
+    A provider's own ``CLAUDE_CODE_EFFORT_LEVEL`` overrides ``--effort``
+    inside the CLI (2.1.316), and a level outside the route's declared
+    ``supported_efforts`` may be rejected or ignored upstream.  Neither
+    stops the launch -- the level is still passed, because the metadata is
+    dated and the CLI accepts it -- but neither may read as confirmed.
+    Shared by every launch path so they cannot disagree about one launch.
+    """
+    if not effort:
+        return
+    assigned = (provider_env or {}).get(AMBIENT_EFFORT_ENV)
+    if assigned is not None:
+        kind, level = classify_effort_env(assigned)
+        if kind == "unknown":
+            _log.warning(
+                "provider %r sets %s=%r, which is not a Claude effort "
+                "level; --effort %s applies", provider_cfg.name,
+                AMBIENT_EFFORT_ENV, assigned, effort)
+        elif kind == "level" and level != effort:
+            _log.warning(
+                "provider %r assigns %s=%s; it overrides --effort %s "
+                "for this session", provider_cfg.name,
+                AMBIENT_EFFORT_ENV, level, effort)
+    accepted = accepted_efforts_of(provider_cfg)
+    if accepted is not None and effort not in accepted:
+        _log.warning(
+            "provider %r declares supported_efforts %s; --effort %s is "
+            "not among them (the router may reject or ignore it)",
+            provider_cfg.name, list(accepted), effort)
+
+
+def _resolve_provider(provider: str | None = None, model: str | None = None,
+                      effort: str | None = None):
     """Resolve provider config and return (env_vars, model_flag, run_env).
 
     Shared helper for launch_claude, launch_claude_print, and
     launch_claude_print_background to avoid repeating the same pattern.
     ``model_flag`` is the effective ``--model`` value (an explicit *model*
     overrides the provider's).  The routing environment is built from that
-    selection, as build_claude_shell_cmd's (providers.launch_env).
+    selection, as build_claude_shell_cmd's (providers.launch_env).  *effort*
+    only drives the launch warnings (:func:`_warn_effort_conflicts`); the
+    caller still passes ``--effort`` itself.
     """
     from pm_core.providers import get_provider, launch_env
     provider_cfg = get_provider(provider, strict=bool(provider))
     model_flag = model or provider_cfg.model_flag()
     provider_env, unset = launch_env(provider_cfg, provider_cfg.env_vars(),
                                      model_flag)
+    _warn_effort_conflicts(provider_cfg, effort, provider_env)
     run_env = None
     if provider_env or any(v in os.environ for v in unset):
         run_env = {**os.environ, **provider_env}
@@ -304,6 +345,25 @@ def _resolve_provider(provider: str | None = None, model: str | None = None):
     return provider_env, model_flag, run_env
 
 SESSION_REGISTRY = ".pm-sessions.json"
+
+
+def _drop_ambient_effort(run_env: dict | None, effort: str | None,
+                         provider_env: dict | None = None) -> dict | None:
+    """*run_env* with ``CLAUDE_CODE_EFFORT_LEVEL`` removed when pm sets effort.
+
+    The variable overrides ``--effort`` inside the Claude CLI (2.1.316), so
+    an inherited value would make the session run a different level than pm
+    reports.  A value the provider itself assigns is explicit configuration
+    and is kept.  Returns *run_env* unchanged when nothing needs removing.
+    """
+    if not effort or (provider_env and AMBIENT_EFFORT_ENV in provider_env):
+        return run_env
+    base = os.environ if run_env is None else run_env
+    if AMBIENT_EFFORT_ENV not in base:
+        return run_env
+    env = dict(base)
+    env.pop(AMBIENT_EFFORT_ENV, None)
+    return env
 
 
 def _registry_path(pm_root: Path) -> Path:
@@ -665,7 +725,8 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
     Args:
         provider: Name of the LLM provider to use. See providers.py.
         model: Explicit model ID to pass via --model (overrides provider model).
-        effort: Effort level to pass via --effort (low, medium, high).
+        effort: Effort level to pass via --effort (low, medium, high,
+            xhigh, max).
     """
     import uuid
 
@@ -677,7 +738,9 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
         raise FileNotFoundError("claude CLI not found. Install it first.")
 
     # Resolve provider for env vars and model flag (explicit model wins)
-    _, model_flag, run_env = _resolve_provider(provider, model)
+    provider_env, model_flag, run_env = _resolve_provider(
+        provider, model, effort)
+    run_env = _drop_ambient_effort(run_env, effort, provider_env)
 
     # Try to resume existing session, or generate new session ID
     session_id = None
@@ -802,7 +865,9 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
         raise FileNotFoundError("claude CLI not found. Install it first.")
 
     # Resolve provider (explicit model wins over the provider's)
-    _, effective_model, run_env = _resolve_provider(provider, model)
+    provider_env, effective_model, run_env = _resolve_provider(
+        provider, model, effort)
+    run_env = _drop_ambient_effort(run_env, effort, provider_env)
     cleanup_path: str | None = None
     if fc_config is not None:
         cmd = [_FAKE_CLAUDE_BIN]
@@ -916,7 +981,8 @@ def build_claude_shell_cmd(
             Resolves via providers.yaml config. When set, injects the
             appropriate environment variables and --model flag for the
             provider. None uses the default resolution order.
-        effort: Effort level to pass via ``--effort`` flag (low, medium, high).
+        effort: Effort level to pass via ``--effort`` flag (low, medium,
+            high, xhigh, max).
         write_dir: Host filesystem path where the prompt file should be
             written.  Defaults to ``cwd``.  When ``cwd`` is a
             container-internal path (e.g. ``/workspace``) that does not
@@ -980,6 +1046,20 @@ def build_claude_shell_cmd(
     # this session's model or account (providers.launch_env).
     provider_env, unset = launch_env(provider_cfg, provider_env,
                                      effective_model)
+    if effort:
+        # CLAUDE_CODE_EFFORT_LEVEL overrides --effort inside the CLI
+        # (claude 2.1.316).  pm's own selection is authoritative, so the
+        # ambient value is removed from the session.  A provider that
+        # assigns it explicitly is the user's own configuration: leave it
+        # and say so, rather than silently dropping a configured variable.
+        # Only a level that actually differs from --effort is a conflict:
+        # "auto"/"unset"/blank mean "no override" (the CLI ignores an
+        # unknown value), and an assignment equal to pm's level changes
+        # nothing.  model_config's effort notes make the same distinction.
+        if provider_env.get(AMBIENT_EFFORT_ENV) is None:
+            # A provider's unset_env may already list it; emit it once.
+            unset = tuple(dict.fromkeys((*unset, AMBIENT_EFFORT_ENV)))
+        _warn_effort_conflicts(provider_cfg, effort, provider_env)
     if provider_env:
         if env_out is not None:
             env_out.update(provider_env)
