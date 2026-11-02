@@ -349,8 +349,9 @@ chain with manual merges:
    the current dependency graph, so a prerequisite added later is held too.
 2. Each ready prerequisite runs implementation → review → QA → a fresh
    sign-off, then waits: the log shows `✓ <pr> signed off … — waiting for
-   manual merge (wait-for-merge: pr-final)` and `pm autostart status` / the
-   `a` popup show `[wait-for-merge ← pr-final]` with the reason.
+   manual merge (wait-for-merge: pr-final)`, and `pm autostart status` / the
+   `a` popup show it under `pr-final [wait-for-merge]` with a red `MANUAL
+   MERGE` label and `signed off — press g to merge`.
 3. Merge it yourself (`g` in the TUI or `pm pr merge <pr>`; the sign-off gate
    still applies). The TUI reloads the merged state and the scheduler starts
    the dependents that merge unblocked — no further `autostart` command.
@@ -366,9 +367,19 @@ policy survives a merge-triggered TUI restart. `--stop-before-merge` is
 accepted only as a deprecated alias for `--wait-for-merge`; it never creates a
 separate target-only hold.
 
-Press `a` in the TUI for a live runs popup (same data as `pm autostart status`):
-phase, running/waiting/paused/failed state with a reason, review iteration or QA
-progress, and Enter to jump to the run's tmux window.
+`pm autostart status` and the TUI's live runs popup (`a`) share one layout: a
+single dependency tree with one row per PR, so a dependency several targets
+share (or a target another target depends on) appears once and names the
+others as `also needed by …`. Each row shows its state, one phase/progress
+token (`review #3`, `qa 2/5 PASS:2`), the merge policy only where the tree
+does not already imply it (a target states `[wait-for-merge]` once for its
+whole closure), the title, and a short reason, wrapped to at most 99 columns.
+PRs waiting on you now — `INPUT_REQUIRED`, `IMPL SPEC REVIEW` / `QA SPEC
+REVIEW`, `MANUAL MERGE`, a permission prompt, a blocked sign-off — get a red
+label and are listed in the header (`⚠ 2 need you: …`). The CLI colors only
+a terminal (`--color/--no-color`, `NO_COLOR`, `--width N`); `--json` has the
+full structured data. In the popup, j/k select a PR and Enter jumps to its
+tmux window.
 
 ## Shared sessions
 
