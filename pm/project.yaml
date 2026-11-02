@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T13:38:52.695308+00:00'
+  updated_at: '2026-11-02T14:22:11.753144+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8046,6 +8046,37 @@ prs:
       found the gap and 99deef53 fixed it.'
     created_at: '2026-11-02T13:38:52Z'
     last_edited: '2026-11-02T13:38:52Z'
+  - id: note-0782464
+    text: 'QA S41 refiner (2026-11-02, 24efdc86, tmux 3.2a): all 3 stories held live
+      in 4 projects (rich_tui.v2 it''s, cost $5 "x"~日本, 37-char Japanese name -> hashed
+      socket, plain-app). Traps: (1) base-index 1 makes EVERY attach adopt (roles_alive:
+      set()), so count adopt lines from a per-attach debug-log mark. (2) Deleting
+      the registry drops the notes pane for good (adopt and heal only re-add the TUI),
+      so story 2 closes the old notes pane (Ctrl+D in the ed41 cat) and reopens it
+      with n after C-b 1 in BOTH terminals (n opens in the newest grouped session''s
+      current window). (3) TUI s then d works on the local backend once pm/ is committed:
+      no push/merge needed. (4) After kill -9 the pane leaves list-panes but the pid
+      can stay Zs, so wait on list-panes, not ps. (5) Identical PR titles give identical
+      PR ids in every project, so use per-project titles.'
+    created_at: '2026-11-02T14:06:53Z'
+    last_edited: '2026-11-02T14:06:53Z'
+  - id: note-7b39442
+    text: 'QA S41 (`pm _tui` rule with awkward names: rich_tui.v2 it''s, cost $5 "x"~日本,
+      37-char Japanese name with hashed socket, plain-app; base-index 1) PASS 3/3
+      on 24efdc86, no source changes. Captures /pm-captures/scenarios/41 (README.md).
+      (1) 4 go-file attaches + 4 racing pm tui send after deleting every registry:
+      each ~2, exactly one adopt per log after roles_alive: set(), no respawn, all
+      sends rc 0 to %0; 656 ticks per socket of a 0.1 s list-panes poll show one live
+      pm _tui pane (%0, same pid) and notes %2 unchanged; registries back as tui %0
+      only. (2) kill -9 TUI in rich_tui.v2 it''s/plain-app with review windows (review-diff
+      cds into a _tui path) + fresh notes: view/send rc 1 "No TUI pane found", notes/review-diff
+      byte-identical; pm session respawns %8 beside notes; sends move the selection.
+      (3) C-b & on cost main: respawn into new window index 1 named python3; registry
+      delete -> adopt %5 same pid; Ctrl+R keeps pid+lstart; teardown clean. Run note:
+      the respawned TUI lists the in_review PR first, so the card order changes after
+      s/d.'
+    created_at: '2026-11-02T14:22:11Z'
+    last_edited: '2026-11-02T14:22:11Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
