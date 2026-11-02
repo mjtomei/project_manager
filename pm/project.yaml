@@ -33039,7 +33039,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-11-02T21:37:04.053766+00:00'
+  updated_at: '2026-11-02T21:43:09.530465+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33104,6 +33104,12 @@ prs:
       /pm-captures/scenarios/4/{story6-two-client-race,tui-remedies}.'
     created_at: '2026-11-02T21:37:03Z'
     last_edited: '2026-11-02T21:37:03Z'
+  - id: note-eaaf278
+    text: 'QA scenario 5 incidental fix: discovery supervisor prompt told the watcher
+      to dedup with pm pr note <existing-id>, which fails with No such command; corrected
+      to pm pr note add <existing-id>. Commit f174ca89.'
+    created_at: '2026-11-02T21:43:09Z'
+    last_edited: '2026-11-02T21:43:09Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
