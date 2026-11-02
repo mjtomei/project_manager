@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T04:56:18.288115+00:00'
+  updated_at: '2026-11-02T05:09:23.546903+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25598,6 +25598,22 @@ prs:
       and ~/.pm/runtime/home-refresh-<session> mtimes. Helpers: /pm-captures/scenarios/14/refiner-helpers.'
     created_at: '2026-11-02T04:56:18Z'
     last_edited: '2026-11-02T04:56:18Z'
+  - id: note-52f9ecc
+    text: 'QA S15 (2026-11-02): PASS at c54e22ce, all 6 stories live from /scratch/s15
+      (spaced private socket "/scratch/s15/sock dir/pm sock"), no fix. CLI outside
+      tmux (with and without PM_TMUX_SOCKET), TUI Enter, the command bar (--branch
+      side, no --file-prs), pm qa launch and the CLI typed in a session pane all gave
+      the stand-in cwd=clone with PM_PROJECT/PM_SESSION/TMUX/TMUX_PANE/PM_POPUP_SESSION/PM_IN_TMUX_SESSION
+      unset. PM_TMUX_SOCKET was kept only when set. prompt.md names it once as tmux
+      -S ''<path>'' …, and pasting that with list-sessions into env -i bash worked.
+      The qa_regression fake drove TUI and qa-demo runs until Ctrl-C. Container mode:
+      no socket note, only PM_CAPTURES_PR + PM_HOST_HOME in the container and the
+      fake environ, and the container was gone 10.5 s after Ctrl-C. Docs/help: no
+      CAUTION; the example points at the Recipes list. Observation, not this scope:
+      after Ctrl-C a container-mode pm qa regression exits 0, because the status comes
+      from the build_exec_cmd cleanup trap. Captures: /pm-captures/scenarios/15/.'
+    created_at: '2026-11-02T05:09:23Z'
+    last_edited: '2026-11-02T05:09:23Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
