@@ -26,7 +26,9 @@ from pm_core.cli import cli
 from pm_core.cli.helpers import (
     _get_current_pm_session,
     _get_session_name_for_cwd,
+    _live_panes_and_tuis,
     _log,
+    _pm_session_of,
     _private_session_context,
     _select_session_socket,
     _set_share_mode_env,
@@ -134,6 +136,56 @@ def _session_is_shared(session_name: str) -> bool:
     ``PM_SHARE_MODE`` in the environment).
     """
     return tmux_mod.session_is_shared(session_name)
+
+
+def _adopt_running_tui(session_name: str) -> str | None:
+    """Record a live, unregistered ``pm _tui`` pane of *session_name*.
+
+    Returns the pane id, or ``None`` when the session has no live TUI pane.
+
+    The pane registry can lag the TUI.  A TUI registers itself
+    (``heal_registry``) only after it mounts, about a second after its pane
+    starts.  A session that an older pm started under a name tmux rewrote
+    (``pm-vue.app-…`` becomes ``pm-vue_app-…``) has its first registry
+    written under the old spelling, so the registry this pm reads lists no
+    TUI until then.  A ``pm session`` in that gap used to see "no TUI",
+    print "TUI pane missing — respawning..." and start a second TUI, which
+    the pidfile guard then refused (QA S35).  A pane already running the
+    TUI is adopted instead, so no second TUI is ever started next to it.
+
+    "A pane running the TUI" has the same definition as in the
+    ``pm tui view``/``send`` discovery (``_live_panes_and_tuis``, matched
+    through the session group).  A dead pane, kept by a user's
+    ``remain-on-exit``, is not adopted.  The entry is added under the
+    registry lock, and only if it is missing, so it does not duplicate the
+    entry the TUI's own heal may write at the same moment.
+    """
+    _, live_tuis = _live_panes_and_tuis()
+    for pane_id, tmux_session in live_tuis:
+        if _pm_session_of(tmux_session) != session_name:
+            continue
+        result = tmux_mod._run(
+            tmux_mod._tmux_cmd("display", "-p", "-t", pane_id,
+                               "#{pane_dead} #{window_id}"),
+            text=True)
+        fields = result.stdout.split() if result.returncode == 0 else []
+        if len(fields) != 2 or fields[0] != "0":
+            continue
+        window = fields[1]
+
+        def _add(raw, pane_id=pane_id, window=window):
+            data = pane_registry._prepare_registry_data(raw, session_name)
+            wdata = pane_registry.get_window_data(data, window)
+            if any(p["id"] == pane_id for p in wdata["panes"]):
+                return None  # already recorded there: skip the write
+            wdata["panes"].insert(0, {"id": pane_id, "role": "tui",
+                                      "order": 0, "cmd": "tui"})
+            return data
+
+        pane_registry.locked_read_modify_write(
+            pane_registry.registry_path(session_name), _add)
+        return pane_id
+    return None
 
 
 def _register_tmux_bindings(session_name: str) -> None:
@@ -767,6 +819,15 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
 
         _log.info("session exists: %s", session_name)
         _log.info("roles_alive: %s", roles_alive)
+
+        # The registry may not list a TUI that is running (it registers
+        # itself once mounted): adopt it rather than starting a second one.
+        if "tui" not in roles_alive:
+            adopted = _adopt_running_tui(session_name)
+            if adopted:
+                _log.info("TUI pane %s is running but was not registered; "
+                          "adopted it instead of respawning", adopted)
+                roles_alive.add("tui")
 
         # If TUI is missing, respawn it rather than killing the session
         if "tui" not in roles_alive:

@@ -5611,6 +5611,123 @@ class TestSessionStartAttachesToLegacySession:
             _tmux(private_sock, "kill-server")
             Path(private_sock).unlink(missing_ok=True)
 
+    def _start_against_unregistered_legacy(self, short_sock_dir, tmp_path,
+                                           monkeypatch, name, pane_cmd,
+                                           dead=False):
+        """Run ``_session_start`` against a legacy session whose registry
+        lists no TUI.
+
+        Returns ``(respawn calls, attached, registry, window 0's pane id,
+        window 0's id)``; the registry and ids are read before the
+        disposable server is killed.
+
+        *pane_cmd* is window 0's start command.  With *dead*, the pane has
+        exited and is kept by ``remain-on-exit``.
+        """
+        from pm_core.cli import session as session_mod
+        from pm_core import hook_install, pane_layout, pane_registry
+
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        for var in ("PM_TMUX_SOCKET", "PM_SHARE_MODE", "TMUX", "TMUX_PANE",
+                    "PM_IN_TMUX_SESSION", "PM_PROJECT"):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", short_sock_dir)
+        default_sock = short_sock_dir / "default"
+        monkeypatch.setattr(paths, "default_socket_path",
+                            lambda: default_sock)
+        monkeypatch.setattr(hook_install, "ensure_hooks_installed",
+                            lambda: None)
+        monkeypatch.setattr(session_mod, "state_root",
+                            MagicMock(side_effect=FileNotFoundError()))
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: name)
+        monkeypatch.setattr(session_mod, "_schedule_rebalance",
+                            lambda n: None)
+        respawned: list[tuple[str, str]] = []
+        monkeypatch.setattr(pane_layout, "_respawn_tui",
+                            lambda s, w: respawned.append((s, w)))
+        monkeypatch.setattr(pane_layout, "rebalance", lambda s, w: None)
+        attached: list[tuple[str, str | None]] = []
+        monkeypatch.setattr(
+            tmux, "attach",
+            lambda n, socket_path=None: attached.append((n, socket_path)))
+
+        r = _tmux(default_sock, "new-session", "-d", "-s", name, "-n",
+                  "main", pane_cmd)
+        assert r.returncode == 0, r.stderr
+        if dead:
+            _tmux(default_sock, "set-option", "-t", name, "remain-on-exit",
+                  "on")
+            _tmux(default_sock, "send-keys", "-t", f"{name}:0", "q", "Enter")
+            deadline = time.monotonic() + 5
+            while _tmux_out(default_sock, "display-message", "-p", "-t",
+                            f"{name}:0", "#{pane_dead}").strip() != "1":
+                assert time.monotonic() < deadline, "pane never exited"
+                time.sleep(0.05)
+        try:
+            session_mod._session_start()
+            registry = pane_registry.load_registry(name)
+            tui_pane = _tmux_out(default_sock, "list-panes", "-t",
+                                 f"{name}:0", "-F", "#{pane_id}").strip()
+            window_id = _tmux_out(default_sock, "display-message", "-p",
+                                  "-t", f"{name}:0", "#{window_id}").strip()
+        finally:
+            _tmux(default_sock, "kill-server")
+            Path(default_sock).unlink(missing_ok=True)
+        return (respawned, attached, registry, tui_pane, window_id)
+
+    def test_a_running_unregistered_tui_is_adopted_not_respawned(
+            self, short_sock_dir, tmp_path, monkeypatch, capsys):
+        """QA S35: the registry may not list a TUI that is running.
+
+        A TUI registers itself only once it has mounted (about a second
+        after its pane starts), and an older pm that started the session
+        under a name tmux rewrote (``pm-vue.app-…`` -> ``pm-vue_app-…``)
+        wrote its registry under the old spelling.  A ``pm session`` in
+        that gap used to print "TUI pane missing — respawning..." and start
+        a second TUI next to the running one (the pidfile guard then
+        refused it).  The running pane is adopted into the registry
+        instead, and the attach goes ahead.
+        """
+        respawned, attached, registry, tui_pane, window_id = \
+            self._start_against_unregistered_legacy(
+                short_sock_dir, tmp_path, monkeypatch, "pm-iso-unreg",
+                "sleep 300; : pm _tui")
+
+        out = capsys.readouterr().out
+        assert "started before per-session tmux servers" in out
+        assert "TUI pane missing" not in out
+        assert respawned == []
+        assert attached == [("pm-iso-unreg~1", None)]
+        panes = registry["windows"][window_id]["panes"]
+        assert [(p["id"], p["role"]) for p in panes] == [(tui_pane, "tui")]
+
+    def test_a_session_without_a_live_tui_pane_is_still_respawned(
+            self, short_sock_dir, tmp_path, monkeypatch, capsys):
+        """No pane runs ``pm _tui``: the respawn path is unchanged."""
+        respawned, attached, registry, _, window_id = \
+            self._start_against_unregistered_legacy(
+                short_sock_dir, tmp_path, monkeypatch, "pm-iso-notui",
+                "sleep 300")
+
+        assert "TUI pane missing — respawning..." in capsys.readouterr().out
+        assert respawned == [("pm-iso-notui", window_id)]
+        assert window_id not in registry.get("windows", {})
+
+    def test_a_dead_tui_pane_is_not_adopted(
+            self, short_sock_dir, tmp_path, monkeypatch, capsys):
+        """A TUI pane that exited, kept by ``remain-on-exit``, is not a TUI."""
+        respawned, _, registry, _, window_id = \
+            self._start_against_unregistered_legacy(
+                short_sock_dir, tmp_path, monkeypatch, "pm-iso-deadtui",
+                "read x; : pm _tui", dead=True)
+
+        assert "TUI pane missing — respawning..." in capsys.readouterr().out
+        assert respawned == [("pm-iso-deadtui", window_id)]
+        assert window_id not in registry.get("windows", {})
+
 
 @pytest.mark.skipif(not tmux.has_tmux(), reason="tmux not installed")
 class TestServerIsolationIntegration:
