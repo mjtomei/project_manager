@@ -855,6 +855,47 @@ class TestPopup:
             y0, y1 = out["selected_rows"]
             assert viewport.y <= y0 and y1 <= footer.y
 
+    @pytest.mark.parametrize("start,end,width,lines", [
+        ((50, 50), (140, 20), 99, 1),
+        ((70, 50), (160, 50), 99, 1),
+        ((160, 50), (50, 50), 40, 3)])
+    def test_footer_height_follows_a_resize(self, start, end, width, lines):
+        # Widening re-wraps the hint to fewer lines; the docked footer must
+        # shrink with it at once, not keep its old height until the next
+        # refresh tick (the tick is disabled here so it cannot mask that).
+        from textual.app import App
+        from textual.widgets import Static
+        from pm_core.tui.screens import AutoRunsScreen
+
+        out = {}
+
+        class Host(App):
+            def log_message(self, msg, **kw):
+                pass
+
+        async def body():
+            app = Host()
+            with patch("pm_core.tui.auto_start.build_status",
+                       return_value=mixed_status()):
+                async with app.run_test(size=start) as pilot:
+                    screen = AutoRunsScreen()
+                    screen.REFRESH_SECONDS = 3600
+                    app.push_screen(screen)
+                    await pilot.pause()
+                    await pilot.pause()
+                    await pilot.resize_terminal(*end)
+                    await pilot.pause()
+                    await pilot.pause()
+                    footer = app.screen.query_one("#runs-footer", Static)
+                    out["lines"] = len(footer.render().plain.splitlines())
+                    out["height"] = footer.region.height
+                    out["width"] = app.screen._width
+
+        asyncio.run(body())
+        assert out["width"] == width
+        assert out["lines"] == lines
+        assert out["height"] == lines, out
+
     def test_navigation_moves_over_wrapped_rows(self):
         # #238, #235, #236, #240, #234, #233: one stop per PR.
         out = _popup((80, 70), keys=["j"] * 5)

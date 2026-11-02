@@ -715,8 +715,12 @@ class AutoRunsScreen(ModalScreen):
             self._timer = None
 
     def on_resize(self, _event) -> None:
+        # After the refresh: during the resize event the widgets still have
+        # their old size, and rendering at that stale width left the docked
+        # footer at its old (taller) height after widening until the next
+        # 2s tick.
         if self._status:
-            self._render_rows()
+            self.call_after_refresh(self._render_rows)
 
     @staticmethod
     def _row_key(rows: list[dict], idx: int) -> str | None:
