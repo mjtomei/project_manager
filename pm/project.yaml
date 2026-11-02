@@ -39509,6 +39509,58 @@ prs:
       model/effort) and verify-s12/s6-followup.md.'
     created_at: '2026-11-02T02:01:25Z'
     last_edited: '2026-11-02T02:01:25Z'
+  - id: note-993b7e9
+    text: 'S49 refine (2026-11-02, head 815d6bfe, live dry run in an isolated env
+      -i tmux + scratch HOME): (1) The review INPUT_REQUIRED hold arms only when the
+      20 s verdict grace ends (about 15-17 s after the fake prints INPUT_REQUIRED
+      with delay 5), so time the 60 s from the hold appearing. It then held with null
+      due/remaining for 64 s and z d ended it cancelled at the stop time; the loop
+      reads `cancelled INPUT_REQUIRED`. (2) z d (the only TUI stop) also opens a plain
+      review that takes the next fake review slot. A PASS there stays `review running`,
+      because the manual mirror matches only LGTM/NEEDS_WORK/INPUT_REQUIRED, so script
+      that slot NEEDS_WORK. Plain-review rows also appear in the newest-first attempt
+      order. (3) After a grace is due, the Now row briefly reads "no verdict accepted
+      yet — waiting for the next turn" (about 2 s, until the fake next goes idle)
+      before the next iteration launches; the gate timer moves to Recent as elapsed
+      and never goes negative. (4) The TTY reference read pages via less once it is
+      past the screen height, so use `script -q -c "COLUMNS=80 PAGER=cat pm pr history
+      P"` after `stty cols 80`; it equals `| cat` word for word (max 77 cols). The
+      popup inner width is 74. (5) The supersede showed no queued lease phase (the
+      lease is released at once). fzf/less were missing from the container and were
+      installed with sudo apt-get.'
+    created_at: '2026-11-02T03:25:45Z'
+    last_edited: '2026-11-02T03:25:45Z'
+  - id: note-0c58e07
+    text: 'QA S49 (2026-11-02) PASS on 0223290e (spec 815d6bfe), no edits: all 4 stories
+      held live at 80 cols. S1 NW->PASS: each iN went launching (launch attempt 1/3)
+      -> agent_working -> turn_finished + grace -> "no verdict accepted yet" (0.3-1.7
+      s) -> next launch; graces fixed armed/due +20 s, strictly falling, never negative,
+      then elapsed; grace_remaining_s == timer remaining_s in 71 reads; popup badge
+      working -> "turn done, 7s left"; start exec 18.2 s = running spans only, runtime.start.attempt_id
+      in merged_ids. S2: IR hold armed at grace end (+24 s), 184 reads over 62 s with
+      null due, exec fixed, wait growing, no i2; z d -> cancelled INPUT_REQUIRED +0.8
+      s. S3: A superseded, A i1 cancelled KILLED 0.35 s later; B stopped in grace
+      -> grace cancelled, never elapsed, review-loop=failed KILLED. S4: H/Enter pagers
+      <=74 cols match TTY == | cat (76 cols) apart from live values. Harness gotcha:
+      after Esc in the popup wait >=1 s before the next C-b (tmux escape-time 500
+      ms + fzf ESC wait read Esc C-b as M-C-b; the popup stayed open). Obs: the start
+      row reads running for ~2 s after z z d until i1 agent starts; runtime JSON started_at
+      keeps the first run start (master set_action_state setdefault). Captures /pm-captures/scenarios/49.'
+    created_at: '2026-11-02T03:45:38Z'
+    last_edited: '2026-11-02T03:45:38Z'
+  - id: note-79a4b9f
+    text: 'QA S50 refiner (2026-11-02, live in an isolated sandbox): (1) a review
+      launch attempt that fails at container creation still uses up the next fake-claude
+      review verdict, because pm builds the fake command before podman run. With [NEEDS_WORK,
+      PASS] and attempt 1 failing, i1 got PASS. Re-run `pm fake-claude config set`
+      (this resets the cursors) when you repair the failure. (2) During the auto-start
+      re-arm cooldown, the History badge reads `[N runs]` and not the cooldown, as
+      impl R8 specifies (the badge follows activity rows). The cooldown shows in Waiting
+      for and in the H pager. (3) An auto-start re-arm resumes the exhausted loop
+      (same loop id, new attempt id). Its first child is `i1 (adopted)` vanished ("nothing
+      live to adopt; rerunning iteration"), followed by a fresh i1.'
+    created_at: '2026-11-02T03:27:58Z'
+    last_edited: '2026-11-02T03:27:58Z'
   - id: note-f96d58e
     text: 'QA S50 (2026-11-02, R16 review launch retries): fixed 2d8a84f7. A LAUNCH_FAILED
       review iteration journaled str(e)[:300]; the concise launch error ends with
@@ -39529,6 +39581,21 @@ prs:
       fails = missing markdown module in the container. Captures /pm-captures/scenarios/50.'
     created_at: '2026-11-02T04:02:57Z'
     last_edited: '2026-11-02T04:02:57Z'
+  - id: note-7903843
+    text: 'QA S51 refiner (2026-11-02; live at 815d6bfe, story 2 re-run at cf06f24f):
+      all 4 stories held in an isolated sandbox (/scratch/s51). Draft fixes: story
+      3 needs ''pm fake-claude config clear'' (dropping only the review entry keeps
+      _all, which fakes the review with its default PASS); the podman shim must fail
+      ''image inspect'' only for unauthorized* (a failing inspect of the default pm-dev:latest
+      triggers an auto-build); the HOLD lands ~33 s after zz d (pm presses Enter on
+      the dialog twice in the approved workdir and checks ~every 15 s, detail says
+      ''visible 31s''); z d also opens a fresh plain review that fails at container
+      creation and adds no history row; after pm pr close the impl window stays open
+      and tracked, so the closed PR''s History badge reads [start: turn done], not
+      [N runs]; the H pager equals ''pm pr history | cat'' word for word except path
+      tokens wider than the popup, which less breaks mid-token.'
+    created_at: '2026-11-02T04:08:47Z'
+    last_edited: '2026-11-02T04:08:47Z'
   - id: note-5711db9
     text: 'QA S51 (2026-11-02) PASS on cf06f24f, no code edits: all four non-retry
       launch endings held live (sandbox /scratch/q51). (1) z d 1.5 s into the first
@@ -39568,6 +39635,24 @@ prs:
       (README) and .../51/rerun.'
     created_at: '2026-11-02T04:53:36Z'
     last_edited: '2026-11-02T04:53:36Z'
+  - id: note-6cb6ded
+    text: 'S52 refine (815d6bfe, live dry run of all 5 stories, cap 2, fake-claude):
+      (1) The two first-batch workers race for scripted qa_scenario slots 1/2, so
+      the waiting scenario W is either of them (s2 in run 1, s7 = first of s7-s9 in
+      run 3); scenario numbers continue per PR (s4-s6, s7-s9). Read W from the hold
+      text. (2) Leaving qa ends a hold only at the held run''s status check, every
+      12x5 s = 60 s after the hold armed (master _HOLD_STATUS_CHECK_TICKS), not "within
+      a few seconds" as qa.md R17 says. (3) Suspected history defect: _compute_concurrency
+      counts a waiting_human tail as execution, so a held run under cap 2 reads "up
+      to 3 at once" and its wall figure grows during the hold (R5: union of execution
+      intervals). (4) Suspected history defect: after a stopped held run, a fresh
+      z t run shows the stale derived hold "QA INPUT_REQUIRED (auto-start will not
+      relaunch QA)" and "Waiting for: human:" for ~40 s while its planner works (runtime
+      qa stays done INPUT_REQUIRED until scenarios launch; _derived_holds ignores
+      the open qa attempt; R12 says only once the run is over). Setup: fzf/less need
+      sudo apt-get update first.'
+    created_at: '2026-11-02T04:36:44Z'
+    last_edited: '2026-11-02T04:36:44Z'
   - id: note-f164702
     text: 'QA S52 (2026-11-02, held QA run, cap 2): fixed 626b1240, both defects seen
       live and pre-pinned by the refiner (note-6cb6ded). (1) history_query._compute_concurrency
