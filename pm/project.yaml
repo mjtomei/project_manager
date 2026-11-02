@@ -40216,6 +40216,19 @@ prs:
       s launching read, 0.27 s qa->router "nothing" gap (also seen on A in JSON).'
     created_at: '2026-11-02T14:48:21Z'
     last_edited: '2026-11-02T14:48:21Z'
+  - id: note-07cdfac
+    text: 'S67 refiner (f4116d2c3, code f5d778bf3): whole two-project flow dry-run
+      live, all Thens held incl. d6a95eaf. XD start in the kill gap: 21/21 R1 + 10/10
+      text reads `start  interrupted` (owner exited) + `runtime: start=idle (stale:
+      owner exited)`, Waiting for: nothing, then swept on tui-mount. YC CLI start:
+      `start  running`, runtime start=idle (no stale) 13/13 + 10/10. Race hit both
+      first try (X start +2.8 s, Y +4.5 s after loop); kill 3.9 s into X S loop. Fixes:
+      open R1 window in X root (`pm pr cd` elsewhere -> "No project.yaml found");
+      `pm session` leaves a grouped pm-<tag>~1 session (match exact name); poll respawned
+      pidfile until pid changes; no reader polls YW (text-read at round ends). Drivers/evidence:
+      /pm-captures/pr-8020495/s67-refiner (main.sh, an3.py).'
+    created_at: '2026-11-02T14:46:27Z'
+    last_edited: '2026-11-02T14:46:27Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
