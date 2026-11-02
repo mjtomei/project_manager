@@ -53054,3 +53054,37 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-50e1e3f
+  plan: bugs
+  title: 'Bug: pm session --global/--group starts the shared tmux server with PM_SHARE_MODE
+    in its global environment, so every other session on that server inherits it'
+  branch: pm/pr-50e1e3f-bug-pm-session-global-group-starts-the-shared-tmux
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/session.py. _session_start sets os.environ["PM_SHARE_MODE"]
+    (via _set_share_mode_env, ~line 259) before tmux_mod.create_session starts the
+    shared server on /tmp/pm-sessions/pm-<tag>. tmux copies the starting process environment
+    into the server global environment, so PM_SHARE_MODE=global (or group:<g>) becomes
+    a global variable on that server, not just a session variable (the session already
+    gets it explicitly via set_environment and the TUI command prefix). Any other
+    session later created on the same server inherits it in every pane. Repro (seen
+    live by QA S16 on pr-7d5d036, tmux 3.2a): pm session --global in proj; from a
+    pane of it, with PM_SHARE_MODE unset and PM_TMUX_SOCKET kept (a host-mode pm qa
+    regression run does exactly this), run pm session in a second project zz. zz gets
+    a plain-named session pm-zz-<hash> on the shared server, but tmux -S <sock> show-environment
+    -g PM_SHARE_MODE prints global and the zz guide pane process environ has PM_SHARE_MODE=global.
+    pm commands in zz panes therefore mix the share mode into get_session_tag (pm
+    session name, debug-log tag, fake-claude config tag, cwd session lookup) for a
+    session that is not shared. Likely fix: after creating a shared session, tmux
+    set-environment -g -u PM_SHARE_MODE on that server (the session env and TUI prefix
+    already carry it), or start the server with the variable removed. Not caused by
+    pr-7d5d036, which only scrubs PM_SHARE_MODE from the regression run itself.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T06:33:02.505900+00:00'
+  updated_at: '2026-11-02T06:33:02.505900+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

@@ -15,6 +15,37 @@ TUI command bar and the default launch both produce
 `pm help` line for `pm qa regression`. R30–R33, E12–E16 and A7–A9 were added
 for these; the earlier items are unchanged.
 
+Revised 2026-11-02 (round 3) at head `ddd0ed30`, after QA round 2
+(S7–S13). Round 2 passed everything except R28 (S12): a run launched from
+a pane of the user's pm session kept `TMUX`/`TMUX_PANE`, so a `pm session`
+the test started in its own project reused and rebalanced the user's
+session. Since `a610bc87` the branch gained `634a4c05`: a host-mode run's
+environment also drops `TMUX`, `TMUX_PANE`, `PM_POPUP_SESSION` and
+`PM_IN_TMUX_SESSION`, and keeps `PM_TMUX_SOCKET`. Then `ddd0ed30` added
+these: when `PM_TMUX_SOCKET` is set, the host-mode prompt names it and tells
+the session to run plain `tmux` as `tmux -S <socket> …`; the docs describe
+the dropped variables; the docs' minimal example no longer points at the
+non-existent `throwaway-pm-test-project` recipe. R28 is reworded,
+R34–R36, E17–E20 and A10–A12 are added, R4, R6, R7 and A7 are amended, and
+the other items are unchanged.
+
+Revised 2026-11-02 (round 4) at head `a3777520`, after QA round 3
+(S14–S17). S15 and S17 passed. S14 failed R35: with `TMUX` scrubbed, a
+run's `pm -C <registry> pr add` reloaded the TUI pm found from the cwd (the
+test project's own TUI, or the first pm session with a TUI), never the
+user's. `44f6e5fc` fixed it: outside a pm session, `_find_tui_pane` now
+tries the `-C`/`PM_PROJECT` project's session before the cwd. S16 failed
+R7/R34/E18: a run launched from a `pm session --global` session kept
+`PM_SHARE_MODE`, so `pm tui view` in the test project showed the user's
+TUI. `a7b2e4c4` added `PM_SHARE_MODE` to the scrubbed variables. That undid
+R35 for share-mode sessions (the run now computes the plain tag, which
+names no session), so review `a3777520` made the `-C` lookup fall back to
+the live session that recorded that pm dir as its project
+(`~/.pm/sessions/<tag>/pm_root`). The `-C` lookup is used by every `pm`
+command run outside a pm session, not only by regression runs. R7, R34,
+R35 and E18 are amended, R37–R39, E21–E23 and A13 are added, A7 and A9
+are extended, and the other items are unchanged.
+
 ## What changed, as a user sees it
 
 - The 20 old regression scenarios under `pm/qa/regression/` are gone. The
@@ -37,11 +68,18 @@ for these; the earlier items are unchanged.
     writable. If the runtime is unusable or the container can't be created,
     the run stops with an error. It never falls back to the host.
   - Container mode off: the session runs on the host in the clone.
-    `PM_PROJECT` and `PM_SESSION` are removed from its environment.
+    `PM_PROJECT`, `PM_SESSION`, `TMUX`, `TMUX_PANE`, `PM_POPUP_SESSION`,
+    `PM_IN_TMUX_SESSION` and `PM_SHARE_MODE` are removed from its
+    environment, so `pm` in the run behaves as it does outside tmux, in a
+    plain (non-shared) mode. `PM_TMUX_SOCKET` is kept, since host
+    mode still shares the user's tmux server. When it is set, the prompt
+    names the socket and says to run plain `tmux` commands as
+    `tmux -S <socket> …`, shell-quoted.
   - The clone's push URL is disabled, so a `git push` fails.
   - With `--file-prs`, the prompt's filing section names the real registry
     (`pm -C <registry> pr add …`), because a plain `pm pr add` in the clone
-    would be lost.
+    would be lost. That filing reloads the TUI of the registry's own pm
+    session, including a `pm session --global`/`--group` session.
   - `--session/-s` is still accepted but hidden and ignored, with a note on
     stderr.
 - The TUI QA pane (Enter on a regression item), the TUI command bar
@@ -59,6 +97,14 @@ for these; the earlier items are unchanged.
   setup by whether the run's `prompt.md` exists.
 - Docs (`pm qa docs`, `pm help`) describe the isolated run. The `[!CAUTION]`
   callout is gone.
+- Any `pm` command run outside a pm session with `-C <pm dir>` or
+  `PM_PROJECT` (a `pm pr add`, `pm pr note add` or other change that
+  reloads the TUI, `pm tui view`/`send`, `pm autostart`) now targets that
+  project's TUI: the session named by its tag, else the live session on the
+  same tmux server that recorded that pm dir as its project (a shared
+  session). Only if neither has a TUI does pm fall back, as before, to the
+  cwd's session and then the first pm session with a TUI. Inside a pm
+  session, that session still comes first, as on master.
 - Every QA clone (regression runs, `pm qa debug`, and the PR QA loop's
   scenario workdirs) is now a plain local `git clone` of a path instead of
   `git clone --local`. On the same filesystem it still shares objects by
@@ -89,7 +135,12 @@ for these; the earlier items are unchanged.
   `pm help`, then the Regression tests section has no CAUTION callout and
   describes the isolated run: the clone, the container-or-host rule, the
   disposable test project, captures with `prompt.md`, `--branch`, the empty
-  library, and filing through `pm -C <registry>`.
+  library, and filing through `pm -C <registry>`. Round 3: it also says a
+  host-mode run drops the variables that point `pm` at the user's project
+  or session (`PM_PROJECT`, `PM_SESSION`, `TMUX`, `TMUX_PANE`, …), keeps
+  `PM_TMUX_SOCKET` and names it in the prompt. The minimal example refers
+  to "a setup recipe from the Recipes list above", not to a recipe that
+  does not exist.
 
 ### `pm qa regression` (CLI, foreground)
 
@@ -104,11 +155,16 @@ for these; the earlier items are unchanged.
   section whose paths exist in the scratch dir (`qa-instructions/`,
   `qa-artifacts/`), and the run's captures dir, followed by the test body.
   It does not mention the user's tmux session or pane, and it has no Filing
-  Findings section unless `--file-prs` was given.
+  Findings section unless `--file-prs` was given. In host mode with
+  `PM_TMUX_SOCKET` set, the Test Environment section names that socket and
+  says to run plain `tmux` as `tmux -S <socket> …` (shell-quoted). With no
+  `PM_TMUX_SOCKET`, or in container mode, there is no such note.
 - **R7** Given the run, when the user inspects where the session ran, then
-  it ran in the clone, not the project. `PM_PROJECT` and `PM_SESSION` were
-  unset even though they were set in the invoking shell. The project's
-  working tree and branches are unchanged.
+  it ran in the clone, not the project. `PM_PROJECT`, `PM_SESSION`, `TMUX`,
+  `TMUX_PANE`, `PM_POPUP_SESSION`, `PM_IN_TMUX_SESSION` and `PM_SHARE_MODE`
+  were unset even though they were set where the run was launched.
+  `PM_TMUX_SOCKET` kept its value. The project's working tree and branches
+  are unchanged. (Round 4: `PM_SHARE_MODE` added by `a7b2e4c4`.)
 - **R8** Given the run's clone, when anything in it runs `git push`, then the
   push fails ("does not appear to be a git repository") and the upstream is
   unchanged. `git fetch` still works.
@@ -204,7 +260,12 @@ for these; the earlier items are unchanged.
 - **R28** Given the user's live pm session for the project, when a
   regression run's session starts its own pm session in its disposable
   project, then the user's session windows, panes and pane registry are
-  unchanged, and the test's session has a different name.
+  unchanged, and the test's session has a different name. This holds when
+  the run was launched from a pane of the user's session (TUI Enter, the
+  command bar, `pm qa launch`, or a shell in one of its panes) and the test
+  starts its session from the run's own pane. pm's debug log shows no
+  "reusing … grouped session: pm-<user tag>" and no rebalance of the
+  user's session. (Round 2 S12 failed this. `634a4c05` fixed it.)
 - **R29** Given two runs of the same test, when one fails during setup and
   the other runs, then the failing run's cleanup removes only its own
   workdir and captures dir, and the healthy run's directories are intact.
@@ -228,6 +289,72 @@ for these; the earlier items are unchanged.
   order. The command bar adds no `--file-prs` the user didn't type; Enter
   always adds `--file-prs`.
 
+### Added in the round-3 revision
+
+- **R34** Given the user's pm session (on the default tmux server or a
+  private `PM_TMUX_SOCKET`), when a host-mode run is launched from each
+  surface (CLI in a plain shell outside tmux, CLI in a pane of the session,
+  TUI Enter, the command bar, `pm qa launch`, and the prefix+M `pm>` popup),
+  then the session's recorded environment matches R7 on every surface. The
+  run still targets the session's project. A fake-claude config keyed on
+  `qa_regression` still drives the session. After the session exits, a
+  TUI-launched pane is cleaned up as before: it leaves the pane registry and
+  the layout rebalances.
+- **R35** Given a `--file-prs` run launched from the user's TUI, when the
+  session files a finding with the prompt's `pm -C <registry> pr add`, then
+  the new PR shows in the user's TUI PR list within a few seconds, without
+  the user pressing `r`. This must also hold when other pm sessions with a
+  TUI (the test's own disposable-project session, or another project the
+  user has open) share the tmux server and sort before the user's session.
+  The early containment note says filed PRs "show up in their list
+  immediately". Before `634a4c05` a TUI-launched run reached the user's TUI
+  through `TMUX_PANE`. Without it, the reload went to the TUI of the
+  session pm resolves from the clone cwd, or else the first pm session on
+  the server that has a TUI (round 3 S14 failure). `44f6e5fc` fixed it by
+  resolving the `-C` registry's session first. Round 4: this must also
+  hold when the user's session is a `pm session --global` or `--group`
+  one (R37).
+- **R36** Given a real Claude session (not a stand-in) in host mode, on a
+  private `PM_TMUX_SOCKET`, when it follows the prompt and a short authored
+  test, then it creates its disposable project in the scratch dir, starts
+  that project's pm session on the socket's server, drives and captures it
+  with `tmux -S <socket>`, and writes its evidence to the run's captures
+  dir. It leaves the user's session unchanged, and the default tmux server
+  gets no session from it.
+
+### Added in the round-4 revision
+
+- **R37** Given the user's `pm session --global` (or `--group <g>`) session
+  for a project, whose TUI lists its PRs, and a `--file-prs` regression run
+  launched from it whose session has started its own pm session in a
+  disposable project on the same shared server (named to sort first), when
+  the run files a finding with the prompt's `pm -C <registry> pr add`, from
+  the test project or from the clone, then the user's shared TUI shows the
+  new PR within a few seconds without `r`, and the test project's TUI is
+  not reloaded at that moment. The run's own environment still has no
+  `PM_SHARE_MODE` (R7), and in the test project `pm session name` and
+  `pm tui view` (no `-s`) give the test project's session, the same as a
+  plain shell outside tmux with only that `PM_TMUX_SOCKET` exported.
+  (`a7b2e4c4` + `a3777520`.)
+- **R38** Given two projects A and B, each with a pm session and TUI on the
+  same tmux server, with A's session sorting first, when the user runs a
+  TUI-reloading `pm` command (`pm pr add`, `pm pr note add`) or
+  `pm tui view` for B from a shell outside any pm session, with
+  `pm -C <B pm dir>` or with `PM_PROJECT=<B pm dir>` exported, from a
+  neutral directory or from inside A's checkout, then B's TUI is the one
+  reloaded or shown, and A's TUI is untouched. Without `-C`/`PM_PROJECT`,
+  the same command in A's checkout still targets A. Typed in a pane of
+  A's pm session, a `-C B` command still reloads or shows A's TUI (the
+  in-session-first order is unchanged from master); the change lands in
+  B's registry either way.
+- **R39** Given one shared server holding the user's shared session and
+  two regression runs' test sessions, plus a second project in a separate
+  share-mode or plain session, when both runs and the user file PRs into
+  their registries at the same moment, then every PR lands in the right
+  `project.yaml`, each user TUI ends up listing exactly its own project's
+  new PRs without `r`, no test-project TUI and no other project's TUI logs
+  a reload at filing time, and no `.tmp` file is left behind.
+
 ## 2. Setup
 
 - Install pm from the PR clone (`./install.sh --local` from the repo, or the
@@ -242,8 +369,12 @@ for these; the earlier items are unchanged.
 - Session stand-ins. Use the fake-claude stand-in
   (`pm fake-claude config set '{"qa_regression": {}}'`), or a recording
   stand-in: an executable named `claude` placed earlier on PATH that logs its
-  cwd, `PM_PROJECT`, `PM_SESSION` and its argv, then exits or waits. The
-  fake stays open in a TTY pane and exits in a non-TTY shell.
+  cwd, `PM_PROJECT`, `PM_SESSION`, `TMUX`, `TMUX_PANE`, `PM_TMUX_SOCKET`,
+  `PM_POPUP_SESSION`, `PM_IN_TMUX_SESSION`, `PM_SHARE_MODE`, whether stdin
+  is a TTY, and its argv, then exits, waits, or execs an interactive shell.
+  The shell makes the run pane the session's real environment, so a QA
+  worker can act as the session from it. The fake stays open in a TTY pane
+  and exits in a non-TTY shell.
 - Container mode: `pm container enable`. Make the runtime unusable with
   `pm container set runtime <missing-binary>`, and make creation fail with
   `pm container set image <missing-tag>`. For the working path, set
@@ -294,6 +425,47 @@ for these; the earlier items are unchanged.
   If it does, check whether any other command (e.g. `pr list "x`) crashes it
   the same way; that would be a pre-existing command-bar bug to file
   separately, not a failure of this PR.
+- **E17** `PM_TMUX_SOCKET` whose path contains a space: the prompt's
+  `tmux -S …` command is quoted and works when pasted into a shell.
+- **E18** The user's session is a shared one (`pm session --global`), so its
+  panes carry `PM_SHARE_MODE` and a shared `PM_TMUX_SOCKET`. A run launched
+  from it still has to make `pm` behave as it does outside tmux (R7, R34).
+  The oracle is a plain shell outside tmux with only that `PM_TMUX_SOCKET`
+  exported: from the run's pane and from that shell, the same `pm session`
+  plus `pm tui view` (no `-s`) sequence in a disposable project must give
+  the same results. pm mixes `PM_SHARE_MODE` into the session-tag hash of
+  every command except `pm session` (which clears it), which is why it was
+  added to the scrub list (round 3 S16, `a7b2e4c4`). If the two shells
+  differ, that is a finding against R7/R34. Panes of the test project's
+  own session on the shared server do inherit `PM_SHARE_MODE` from that
+  server's global environment; that is pre-existing (pr-50e1e3f), not a
+  failure here.
+- **E19** The prefix+M `pm>` popup sets `PM_POPUP_SESSION` and `PM_PROJECT`
+  and runs typed commands in the popup with stdin from /dev/null (only
+  `pr qa …` and `review-loop` are handed to the TUI). `qa regression <id>`
+  typed there must run against the session's project with both variables
+  scrubbed (R34). If the session gets no terminal input, that is how every
+  popup command runs, and it was the same on master. It is not a failure of
+  this PR: check `pm pr list --plan bugs` and file it once.
+- **E20** Host-mode leftovers: the prompt does not ask the session to kill
+  the pm sessions it started, so they can outlive the run on the user's
+  server. Record them as evidence. Only a change to the user's own session
+  fails (A2, A10).
+- **E21** `-C`/`PM_PROJECT` names a project with no live session, or whose
+  session's TUI has exited: the command still succeeds and writes the
+  registry, prints no error, and its reload falls back to the cwd's
+  session or the first pm session with a TUI (a harmless state reload).
+  `pm -C <that dir> tui view` then shows that fallback TUI with its
+  session name in the header (unchanged from master); record it. Once the
+  project's TUI is back, the next command targets it again.
+- **E22** The `-C` pm dir is given in another spelling (a relative path, a
+  trailing slash, or a symlinked directory leading to the project), or the
+  shared session was started from a symlinked path: the lookup still finds
+  the project's session, because both sides are resolved.
+- **E23** Another project's live session on the same shared server (the
+  test project's, which recorded its own pm dir), or a dead session's
+  leftover `~/.pm/sessions/<tag>/pm_root` naming the `-C` pm dir: neither
+  is chosen. Only a live session whose recorded pm dir is the `-C` dir is.
 
 ## 4. Pass/Fail criteria
 
@@ -306,7 +478,14 @@ Pass means every Then clause above can be observed on the user's surface
 - a regression session targets, or is told to target, the invoking pm
   session
 - the session runs in the project dir rather than the clone, or with
-  `PM_PROJECT`/`PM_SESSION` set
+  any of the R7 variables set
+- `pm` in a host-mode run resolves, reuses, rebalances or attaches the
+  user's pm session (R28, E18)
+- a `--file-prs` filing from a TUI-launched run doesn't reach the user's
+  TUI list without a manual refresh (R35), including from a shared
+  session (R37)
+- a `pm -C`/`PM_PROJECT` command outside a pm session reloads or shows
+  another project's TUI while the named project's TUI is running (R38)
 - a container-mode failure falls back to the host
 - a failed launch leaves a workdir, a captures run dir, a container or a
   `prompt.md`
@@ -344,6 +523,38 @@ exercised.
   pr-3d1055c. It is out of scope here.
 - **A6** The plan docs (`plan-delivery`, `plan-regression`) that still
   describe a corpus port are user-owned records and are not checked.
+- **A10** Host mode, round 3: `PM_TMUX_SOCKET` is deliberately kept (A2),
+  so a test's pm session lands on the same server as the user's. On a
+  shared session (E18) that server is the shared socket. Correct behavior
+  is a distinct, test-named session that never touches the user's. Test
+  sessions left after the run (E20) are evidence, not failures. Workdirs
+  never being reaped is pr-c414c76.
+- **A11** R36 uses a real Claude for the regression session, because the
+  `tmux -S` note exists for a model that follows `tui-manual-test.md`'s
+  plain `tmux` commands. Keep the test body short. Clear any fake-claude
+  config for `qa_regression` and `_all` first. Unset the agent's
+  `CLAUDECODE`/`CLAUDE_CODE_*` variables in the tmux global environment
+  (round-2 S11 trap). If no real Claude can start in the environment, R36
+  is blocked.
+- **A12** R35 comes from the containment note's intended output 1 (filed
+  PRs show up in the user's list immediately). It is in scope because
+  `634a4c05` changed how a TUI-launched run finds the TUI. If R35 fails
+  only when another pm session sorts first, check whether the same failure
+  happens for a CLI run started from a plain shell. If it does, that part
+  is pre-existing. Still report the TUI-launched case as NEEDS_WORK, since
+  it worked before `634a4c05`.
+- **A13** Round 4: the `-C` lookup (R38) changes which TUI a `pm` command
+  outside a pm session reloads or shows: the named project's, where master
+  used the cwd's session or the first pm session with a TUI. That is the
+  intended reading of `-C`/`PM_PROJECT` and matches `_get_pm_session`.
+  Inside a pm session the current session still wins (unchanged from
+  master), so a `-C B` command typed in a pane of A's session reloads A's
+  TUI; that is recorded, not failed. A reload is a state-only re-read, so
+  the evidence for "which TUI was reloaded" is the TUI's own debug log
+  (`action: reload (state only)` in `~/.pm/debug/<tag>.log`) and the
+  `~/.pm/runtime/home-refresh-<session>` mtime, read per filing. A
+  concurrent filing masks a missing reload (round 3 S14), so per-filing
+  checks use solo filings.
 
 - **A7** Bugs found in round 1 and filed elsewhere are not failures of this
   PR: pr-a571291 (`--file-prs` filings make the filed PR the user's active
@@ -354,7 +565,18 @@ exercised.
   the pm dir's parent for a standalone pm repo), pr-e847a7a (other launch
   commands, such as a TUI instruction launch, interpolate prompt and
   transcript paths unquoted, so a project path with a space or an apostrophe
-  breaks them) and pr-3d1055c (A5). A worker that sees them should cite the
+  breaks them), pr-3d1055c (A5), pr-f51600e (an unbalanced quote on the
+  command bar crashes the TUI, E16), pr-c414c76 (QA/regression workdirs are
+  never reaped) and pr-f98ac63/pr-24f022e (prefix+P popup commands resolve
+  the cwd's tag or pm_core). Round 4 adds pr-a589f09 (a prefix+M popup
+  `qa regression` gets stdin from /dev/null, E19), pr-e6d0439 (the clone
+  override is written under the `PM_SHARE_MODE` tag, which the wrapper
+  never reads), pr-50e1e3f (`pm session --global`/`--group` leaves
+  `PM_SHARE_MODE` in the shared server's global environment, so a test
+  project's session on that server inherits it, E18), pr-60d2e79 (the
+  pytest suite writes into the real `~/.pm`; don't run it during a story
+  that diffs `~/.pm`) and pr-c3bf868 (a stale TUI pidfile can make a
+  reload target a dead or wrong process). A worker that sees them should cite the
   PR id and move on. Because of pr-e847a7a, E14's awkward project path is
   checked only on regression launches, which quote it.
 - **A8** pr-e64ecb6 and pr-9ff8a1b report the cross-device clone failure
@@ -369,6 +591,25 @@ exercised.
   different filesystem from `~/.pm` and `/tmp` is the same one; projects
   must live outside `/workspace`; the `pm session` guide pane starts a host
   `claude` once; the TUI's qa-item dedup allows one TUI-launched run at a
-  time.
+  time. Round 2 added these: give a bare upstream as a `file://` URL (a
+  plain path is "local-only" and the clone keeps the project as origin);
+  `PM_PROJECT` is the `-C` envvar, so export it as the real `<proj>/pm`;
+  `pm init --dir` must live outside any git repo; tmux 3.2a may not reap a
+  pane that exits within about a second, so read the pane text; the TUI's
+  `launch_pane` splits the session's current window, so select window 0
+  before TUI Enter; a `pm session` for `/workspace` needs a seeded
+  `pm fake-github` config when `gh` is missing. Round 3 added these: a
+  `pm session --global` session lives on its own server at
+  `/tmp/pm-sessions/pm-<share tag>`, and with no client attached its
+  window should be resized (200x50) before TUI Enter; `--group` needs an
+  existing Unix group (`id -gn`); a test project's bare `pm pr add` made
+  before its session exists reloads some other TUI through the fallback
+  (harmless, not R35; only the reload at the run's filing counts); filings
+  move `active_pr` (pr-a571291); commit `pm/project.yaml.lock` in the
+  fixture so `git status` stays clean; real Claude Code switches to the
+  alternate screen, so read its tmux use from pipe-pane hooks (put them at
+  `after-split-window[1]`; on tmux 3.2a `[0]` is pm's own hook) or from the
+  Bash `tool_use` entries in `~/.claude/projects/<clone-slug>/*.jsonl`, and
+  end it with `/exit` typed in its pane.
 
 No [UNRESOLVED] items.
