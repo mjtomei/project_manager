@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T16:40:24.084236+00:00'
+  updated_at: '2026-11-02T17:01:58.434909+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8257,6 +8257,35 @@ prs:
       Captures /pm-captures/scenarios/46 (README.md; harness/ scripts reusable).'
     created_at: '2026-11-02T16:40:23Z'
     last_edited: '2026-11-02T16:40:23Z'
+  - id: note-0eaa965
+    text: 'QA S45 (shared TUI killed while the joined second user attaches) NEEDS_WORK:
+      one defect found on 8ea8a9a1, fixed in f162a71cc; full suite 5617 passed / 1
+      skipped (422.5 s, /pm-captures/scenarios/45/post-fix/suite/full-suite.log).
+      (1) Story 1 (pre-existing, also on master): after the owner closed the TUI window
+      (kill-window), userb ran pm session --global --dir from its home, outside tmux.
+      That respawned the TUI in a new window, and _respawn_tui -> tmux.select_window
+      -> current_or_base_session switched the first ATTACHED grouped session, the
+      OWNER client ~1 (log "select_window: target=<base>~1:@4"), off its shell window.
+      userb reattached its old ~2, still on that shell window. Fix: _ensure_tui_running
+      calls _respawn_tui(..., select=False), and _session_start selects the respawned
+      window in the grouped session it attaches (select_window_in_session) and nowhere
+      else; the after-kill-pane hook path is unchanged. 2 new tests (pty client on
+      ~1; _session_start unit). The legacy-attach test stub in test_session_socket_isolation
+      now accepts the kwarg. Post-fix live: ~1 stays on its shell (same pane/pid),
+      ~2 lands on the new TUI window (cwd P, runs as pm, smallest), pidfile + both
+      registries list it once, controls unchanged. (2) Story 2: 12 rounds alternating
+      A/B kills, OFF 0-0.14. Exactly one TUI after every round; userb started it in
+      6 rounds (R4-6, 8, 9, 11). Poll max was 1 every round (no transient second TUI
+      this run; the refiner saw one in 1 of 12), 0 refusals, notes %6 kept, layout
+      99/100 every round. In R7/R10 userb looked before the kill and its registry
+      ended {} (no exited pane, not doubled; rebuilt by the next attach). (3) Story
+      3: 6 P + 6 Q rounds, 0 second TUI on either server, 0 "TUI startup refused",
+      tui-stderr.log empty; the attach won 2/6 in each (hook then logged nothing).
+      Teardown kills rc 0, /tmp/pm-sessions empty, keepme kept. Filed pr-f09d69d:
+      the test suite writes into the real ~/.pm. Captures /pm-captures/scenarios/45
+      (README.md; pre-fix/ and post-fix/).'
+    created_at: '2026-11-02T17:01:58Z'
+    last_edited: '2026-11-02T17:01:58Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
@@ -52943,6 +52972,34 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T16:37:56.411929+00:00'
   updated_at: '2026-11-02T16:37:56.411929+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-f09d69d
+  plan: bugs
+  title: 'Bug: the test suite writes into the real ~/.pm (debug logs, run/env files,
+    workdir locks, session dirs)'
+  branch: pm/pr-f09d69d-bug-the-test-suite-writes-into-the-real-pm-debug-l
+  status: pending
+  depends_on: []
+  description: 'Found in QA S45 on pr-073910f (2026-11-02). Running the full suite
+    from /workspace (env -u PM_HOST_HOME PATH=/usr/bin:/bin PYTHONPATH=/workspace:<pylib>
+    python3 -m pytest -q, 5617 passed) with a clean real HOME left, in the real ~/.pm:
+    debug/repo-<hash>.log x67, debug/my-notes-app-<hash>.log, debug/proj-deadbeef.log,
+    debug/<cwd-tag>.log (pane_layout respawn lines from tests/test_tui_respawn_race),
+    run/env-*.sh x8, workdirs/.signoff-step-{a,b,c,d,f,pr-001,pr-aaa1111}.lock + .merge--pr-001.lock
+    + workdirs/test, workdirs/test-abc12345, workdirs/test-project, sessions/<cwd-tag>/.
+    Likely causes: the debug logger resolves ~/.pm/debug at import (before tests monkeypatch
+    HOME); lock/env helpers resolve paths from the real HOME in tests that do not
+    isolate it. Repro: move ~/.pm aside, run the suite, list ~/.pm. Fix idea: an autouse
+    conftest fixture that points HOME (and any cached pm home path) at tmp_path, and
+    fails a test that writes under the real ~/.pm.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T17:01:35.235572+00:00'
+  updated_at: '2026-11-02T17:01:35.235572+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
