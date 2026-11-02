@@ -89,7 +89,12 @@ Append-only JSONL at `pm_home()/history/{pm-session}/{pr_id}.jsonl` — per
 pm session like the runtime mirror (`runtime_state._scope()`; two clones
 of one project share `~/.pm` and PR ids, and each clone's history is its
 own), `pm_home()/history/{pr_id}.jsonl` outside any session; the
-owner-lock dir `history/owners` stays shared.  One JSON object per
+owner-lock dir `history/owners` stays shared.  Outside tmux (cwd or
+`-C`/`PM_PROJECT`) the session is the project's running one: the session
+its plain tag names, else a running `pm session --global`/`--group`
+session that persisted the project's pm dir, asked on its own socket too,
+so a plain shell reads the journal that session's TUI writes instead of
+the empty plain-tag one (QA S77, `cli.helpers._running_project_session`).  One JSON object per
 line, written with `O_APPEND` under `flock(LOCK_EX)` so concurrent writers
 (TUI main thread, loop threads, `qa-run-bg`, CLI) never interleave or lose
 lines. Each event carries `v`, `ts` (ISO), `t` (epoch float from the

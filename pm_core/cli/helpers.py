@@ -4,6 +4,7 @@ Contains utility classes and functions used across multiple CLI submodules:
 HelpGroup, state management, PR ID resolution, TUI refresh, and session helpers.
 """
 
+import glob
 import os
 import shutil
 import signal
@@ -1382,8 +1383,63 @@ def _get_pm_session() -> str | None:
         from pm_core.paths import get_session_tag
         tag = get_session_tag(start_path=_project_override)
         if tag:
-            return f"pm-{tag}"
-    return _get_session_name_for_cwd()
+            return _running_project_session(f"pm-{tag}", _project_override)
+    name = _get_session_name_for_cwd()
+    try:
+        pm_root = store.find_project_root()
+    except (FileNotFoundError, OSError):
+        return name
+    return _running_project_session(name, pm_root)
+
+
+def _running_project_session(name: str, pm_root: Path) -> str:
+    """The session of the project whose pm dir is *pm_root*, seen from
+    outside any pm session: *name* (the session its plain tag names) when
+    that runs, else a running ``pm session --global``/``--group`` session
+    that persisted *pm_root* as its project, else *name*.
+
+    A share-mode tag mixes in ``PM_SHARE_MODE``, which a plain shell does
+    not have, so it computes the plain tag and named a session nobody
+    runs: ``pm -C <project> pr history`` read that session's empty journal
+    (QA S77, E18).  The share-mode session runs on its own socket
+    (``paths.shared_socket_path``), which a shell without
+    ``PM_TMUX_SOCKET`` does not talk to, so that socket is asked too.
+    Only the session name is resolved here; tmux commands still go to
+    the default / ``PM_TMUX_SOCKET`` server.  With ``PM_SHARE_MODE`` set,
+    *name* already is the share-mode session.
+    """
+    if os.environ.get("PM_SHARE_MODE"):
+        return name
+    if tmux_mod.session_exists(f"={name}"):
+        return name
+    from pm_core.paths import sessions_dir, shared_socket_path
+    tag = name.removeprefix("pm-")
+    repo = tag.rpartition("-")[0]
+    if not repo:
+        return name
+    try:
+        want = Path(pm_root).resolve()
+        # A share-mode tag keeps the plain tag's repo name; only its hash
+        # differs (``paths.get_session_tag``).
+        candidates = sorted(d for d in sessions_dir().glob(f"{glob.escape(repo)}-*")
+                            if d.name != tag and d.name.rpartition("-")[0] == repo)
+    except OSError:
+        return name
+    for d in candidates:
+        try:
+            persisted = (d / "pm_root").read_text().strip()
+        except OSError:
+            continue
+        if not persisted or Path(persisted).resolve() != want:
+            continue
+        sess = f"pm-{d.name}"
+        if tmux_mod.session_exists(f"={sess}"):
+            return sess
+        sock = shared_socket_path(d.name)
+        if sock.exists() and tmux_mod.session_exists(
+                f"={sess}", socket_path=str(sock)):
+            return sess
+    return name
 
 
 def _project_sessions(pm_root: Path):

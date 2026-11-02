@@ -498,6 +498,108 @@ class TestPmSessionOutsidePmTmux:
         assert loop_shared.get_pm_session() == "pm-pane-0001"
 
 
+class TestPmSessionOfAShareModeProject:
+    """A plain shell (no TMUX, PM_TMUX_SOCKET or PM_SHARE_MODE) reading a
+    project that runs as ``pm session --global``/``--group`` computes the
+    plain tag, which names no session.  It resolves the running share-mode
+    session that persisted the project's pm dir instead, on the default
+    server or on its own socket, so ``pm -C <project> pr history`` reads
+    the journal the TUI writes (QA S77, E18)."""
+
+    @pytest.fixture
+    def env(self, tmp_path, monkeypatch):
+        from pm_core import paths
+        from pm_core.cli import helpers
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.setattr(helpers, "_get_current_pm_session", lambda: None)
+        monkeypatch.setattr(helpers.tmux_mod, "has_tmux", lambda: True)
+        root = tmp_path / "xproj"
+        (root / "pm").mkdir(parents=True)
+        (root / "pm" / "project.yaml").write_text("project: {}\n")
+        monkeypatch.setattr(helpers, "_project_override", root / "pm")
+        monkeypatch.setattr(
+            paths, "get_session_tag",
+            lambda start_path=None, use_github_name=True: "xproj-1111")
+        socks = tmp_path / "socks"
+        socks.mkdir()
+        monkeypatch.setattr(paths, "shared_socket_path",
+                            lambda tag: socks / f"pm-{tag}")
+        live = set()  # (session name, socket path or None)
+        monkeypatch.setattr(
+            helpers.tmux_mod, "session_exists",
+            lambda name, socket_path=None: (name.lstrip("="), socket_path) in live)
+
+        def persist(tag, pm_root):
+            d = home / ".pm" / "sessions" / tag
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "pm_root").write_text(f"{pm_root}\n")
+
+        def run_on_socket(tag):
+            (socks / f"pm-{tag}").touch()
+            live.add((f"pm-{tag}", str(socks / f"pm-{tag}")))
+
+        class Env:
+            pass
+        e = Env()
+        e.helpers, e.root, e.live = helpers, root, live
+        e.persist, e.run_on_socket = persist, run_on_socket
+        return e
+
+    def test_running_global_session_on_its_socket_is_the_session(self, env):
+        env.persist("xproj-1111", env.root / "pm")  # the plain tag's dir
+        env.persist("xproj-2222", env.root / "pm")
+        assert env.helpers._get_pm_session() == "pm-xproj-1111"
+        env.run_on_socket("xproj-2222")
+        assert env.helpers._get_pm_session() == "pm-xproj-2222"
+
+    def test_running_plain_session_wins(self, env):
+        env.persist("xproj-2222", env.root / "pm")
+        env.run_on_socket("xproj-2222")
+        env.live.add(("pm-xproj-1111", None))
+        assert env.helpers._get_pm_session() == "pm-xproj-1111"
+
+    def test_share_session_on_the_default_server_is_found(self, env):
+        env.persist("xproj-2222", env.root / "pm")
+        env.live.add(("pm-xproj-2222", None))
+        assert env.helpers._get_pm_session() == "pm-xproj-2222"
+
+    def test_another_projects_or_repos_session_is_not_used(self, env, tmp_path):
+        env.persist("xproj-3333", tmp_path / "workdir-clone" / "pm")
+        env.run_on_socket("xproj-3333")
+        env.persist("yproj-4444", env.root / "pm")  # other repo name
+        env.run_on_socket("yproj-4444")
+        assert env.helpers._get_pm_session() == "pm-xproj-1111"
+
+    def test_share_mode_env_keeps_its_own_tag(self, env, monkeypatch):
+        monkeypatch.setenv("PM_SHARE_MODE", "global")
+        env.persist("xproj-2222", env.root / "pm")
+        env.run_on_socket("xproj-2222")
+        assert env.helpers._get_pm_session() == "pm-xproj-1111"
+
+    def test_cwd_of_the_project_root_finds_it_too(self, env, monkeypatch):
+        monkeypatch.setattr(env.helpers, "_project_override", None)
+        monkeypatch.setattr(env.helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-xproj-1111")
+        monkeypatch.chdir(env.root)
+        env.persist("xproj-2222", env.root / "pm")
+        env.run_on_socket("xproj-2222")
+        assert env.helpers._get_pm_session() == "pm-xproj-2222"
+
+    def test_cwd_outside_any_project_keeps_the_plain_name(self, env, tmp_path,
+                                                          monkeypatch):
+        monkeypatch.setattr(env.helpers, "_project_override", None)
+        monkeypatch.setattr(env.helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-xproj-1111")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+        assert env.helpers._get_pm_session() == "pm-xproj-1111"
+
+
 # ---------------------------------------------------------------------------
 # _find_live_tui_pane
 # ---------------------------------------------------------------------------
