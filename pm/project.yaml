@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T12:35:19.926197+00:00'
+  updated_at: '2026-11-02T12:43:16.932763+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7919,6 +7919,47 @@ prs:
       is blocked for the agent).'
     created_at: '2026-11-02T12:35:19Z'
     last_edited: '2026-11-02T12:35:19Z'
+  - id: note-5cbf513
+    text: 'QA S38 refiner (2026-11-02, HEAD 6f24e3a1, tmux 3.2a): smoke-run live.
+      Story 1 (base-index 1) PASSES, but only through the S35 adopt: `pm session`
+      checks live roles in window index 0 (`get_pane_indices(session_name)` defaults
+      window "0"), so every attach logs `roles_alive: set()` then "adopted it instead
+      of respawning". Stories 2 and 3 FAIL in a repo named rich_tui. `_live_panes_and_tuis`
+      (cli/helpers.py) treats any pane whose start command contains the substring
+      `_tui` as the TUI. The session name is in every exit-trap wrapper (`pm _pane-exited
+      pm-rich_tui-<h> ...; pm notes`), and the review-diff pane cds into ~/.pm/workdirs/rich_tui-<h>/.
+      After `kill -9` of the TUI with notes open, `pm tui view` printed the notes
+      pane (rc 0) and `pm tui send l` hit it. With EDITOR=true that `l` started the
+      editor, `pm notes` exited, and the whole server died. `pm session` printed only
+      Attaching and adopted the notes pane (%2), and after prefix+& on main it adopted
+      review-diff (%3), so no TUI was respawned. The rich-app control passed every
+      Then. Expect NEEDS_WORK: match the `pm _tui` command itself, not a substring.
+      Harness tips: EDITOR must stay open after a key (a script that echoes then `exec
+      cat`), and the respawned window is named python3, not main.'
+    created_at: '2026-11-02T12:43:07Z'
+    last_edited: '2026-11-02T12:43:07Z'
+  - id: note-31ac989
+    text: 'QA S38 (base-index 1, crashed TUI beside notes, closed main window; repos
+      rich_tui + control rich-app) NEEDS_WORK: one defect found and fixed in a337a168d
+      (tested as 00df49fd3, same code); full suite 5594 passed / 1 skipped (/pm-captures/scenarios/38/post-fix/suite/full-suite.log).
+      Pre-fix at 6f24e3a1 reproduced the refiner finding exactly: in rich_tui, after
+      kill -9 of the TUI, `pm tui view` printed the notes pane %2 (rc 0), `pm tui
+      send l` opened the editor in it, and `pm session` adopted %2 (no respawn); after
+      prefix+& on main, `pm session` adopted review-diff %3 and `send l` changed its
+      capture. Fix: `_live_panes_and_tuis` now splits `#{pane_start_command}` into
+      shell words (twice: tmux reports a one-string command as one double-quoted word)
+      and matches them with `tui_pidfile.cmdline_is_tui` (pm entry point + exact `_tui`
+      argument) instead of the substring `_tui`; +15 tests (TestStartCommandIsTui,
+      2 TestFindLiveTuiPane cases, a real-tmux `_session_start` case on session pm-iso_tui).
+      Post-fix all 3 stories PASS, rich_tui identical to rich-app; story 1 re-driven
+      because it attaches only via `_adopt_running_tui` (live-role check reads window
+      index 0, so each attach logs "adopted it instead of respawning", expected at
+      this HEAD). Harness notes: the TUI restores the previous selection across sessions,
+      so send `h` before a "selection moves on l" check; never `ps | grep pm-sessions`
+      from a recorded shell (it matches the QA agent command line), use `ps -eo stat,comm,args
+      | awk`. Captures: /pm-captures/scenarios/38 (README.md).'
+    created_at: '2026-11-02T12:43:16Z'
+    last_edited: '2026-11-02T12:43:16Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
