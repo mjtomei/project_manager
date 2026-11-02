@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T05:21:20.382534+00:00'
+  updated_at: '2026-11-02T05:34:53.728112+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7262,6 +7262,24 @@ prs:
       found in cwd, so from /workspace it runs the branch. Captures: /pm-captures/scenarios/25/.'
     created_at: '2026-11-02T05:21:20Z'
     last_edited: '2026-11-02T05:21:20Z'
+  - id: note-a73859d
+    text: 'QA S26 refiner (cross-clone QA resume, b48f i15/i20): live-verified 2026-11-02
+      at e372706b, all 5 stories hold and pre-fix f65e60e5^ returns live_elsewhere=True
+      for a planted server. Fixture traps: (1) a held INPUT_REQUIRED run that C already
+      recorded (result_recorded_by=C) is skipped by P under the S49 rule before the
+      i15 check runs, so keep workers verdict-less: qa_scenario [{"verdict":"INPUT_REQUIRED","delay":1800}].
+      (2) P only resumes or leaves a run whose PR is qa in P''s own project.yaml;
+      otherwise it skips it silently as foreign. Use `pm pr start` + `pm pr edit --status
+      qa` in P. (3) A QA started at in_progress leaves the PR in_progress, and the
+      next TUI start drops the snapshot. Set in_review in C first (an existing gap,
+      not this PR). (4) The run is owned by C''s live TUI pid, so the i15 path needs
+      C''s TUI process killed (kill -TERM pane_pid; kill-pane respawns). (5) P''s
+      idle scan runs every 5 s, so decisions land before the restart. (6) Do not run
+      two `pm pr start` of the same PR concurrently from the two clones (they collide
+      on .tmp-<pr>). (7) Run `pm session kill` for C from a plain shell and check
+      the socket is gone before B plants.'
+    created_at: '2026-11-02T05:34:53Z'
+    last_edited: '2026-11-02T05:34:53Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
