@@ -39215,7 +39215,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-11-02T00:53:53.624573+00:00'
+  updated_at: '2026-11-02T01:44:31.913450+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40101,6 +40101,30 @@ prs:
       reuses its path.'
     created_at: '2026-11-02T00:53:53Z'
     last_edited: '2026-11-02T00:53:53Z'
+  - id: note-9b71adf
+    text: 'QA S18 (2026-11-02) PASS, 3/3 stories, at 58b3ece2b, fake-claude, each
+      story its own project + private tmux socket. (1) REVIEW return starts a separate
+      loop: loop A fb27c3ed (NEEDS_WORK,PASS) -> SIGNOFF_REVIEW (one "back to review"
+      line) -> loop B 49abcc20 restarts at i1 with new sids; loop A i1/i2 stay regular
+      files byte-identical to the pre-return sha256 record, each with a cmp-identical
+      archive/<name>.<sid>.jsonl; router 1 survives as archive/signoff-<pr>.<sid1>.jsonl
+      (SIGNOFF_REVIEW); fresh router 2 -> SIGNOFF_MERGE waiting for manual merge;
+      no legacy review-<pr>-i*.jsonl in the run dir. (2) S79 cross-driver adoption
+      (e757 i10): CLI auto-sequence ticks to "sign_off: returning to review (iteration
+      2)", then pm autostart add during the 240 s held review -> exactly one "adopting
+      the open review window" (same pane %10), "Review loop resumed ... at iteration
+      1", "adopting in-flight iteration 1", zero Killed-existing-review-window / review
+      transcript-symlink lines after the add, same pane + SID_R throughout; TUI link
+      review-<pr>-<loop>-i1 -> <SID_R>.jsonl, frozen + archived after "✓ PASS (1 iteration)";
+      the CLI auto-sequence dir is untouched (sha256 + link targets identical). (3)
+      pm tui restart (no breadcrumb) while loop B is held -> autostart off -> re-add
+      adopts the same pane %10 under a new loop/run dir (link -> <SID_B>.jsonl), no
+      relaunch, restarted TUI reports PASS (1 iteration), native mtime after the restart.
+      In stories 2/3, router 2 SIGNOFF_MERGE was coerced to SIGNOFF_BLOCKED (no diff:
+      those stories make no commit); the scenario accepts that. Captures: /pm-captures/scenarios/18/{story1,story2,story3}/
+      (TUI + CLI cast/mp4, evidence).'
+    created_at: '2026-11-02T01:44:31Z'
+    last_edited: '2026-11-02T01:44:31Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
