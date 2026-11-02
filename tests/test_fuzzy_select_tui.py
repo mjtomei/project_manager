@@ -314,13 +314,13 @@ async def test_plan_select_expands_collapsed_plan_and_goes_to_first_pr(project):
     app = _app(project)
     async with app.run_test(size=(160, 50)) as pilot:
         await pilot.pause()
-        app.tree.select_pr("pr-111aaaa")  # cursor in tui-ux (plans[0])
         app.tree._hidden_plans.add("watchers")
         app.tree._recompute()
         assert "pr-333cccc" not in app.tree._ordered_ids
+        # On the collapsed label: "watchers" and "watch-merged" both score
+        # 700 (id prefix + name); the tie goes to the plan nearer the cursor.
+        app.tree.selected_index = app.tree._ordered_ids.index("_hidden:watchers")
         await _cmd(app, pilot, "plan select watch")
-        # "watchers" and "watch-merged" both score 700 (id prefix + name);
-        # the tie goes to the plan nearer the cursor's plan in the list.
         assert "watchers" not in app.tree._hidden_plans
         first = next(pid for pid in app.tree._ordered_ids
                      if app.tree._pr_map[pid].get("plan") == "watchers")
@@ -331,7 +331,42 @@ async def test_plan_select_expands_collapsed_plan_and_goes_to_first_pr(project):
         from textual.content import Content
         assert Content.from_markup(app.last).plain == (
             "Plan: watchers: Watcher framework and session health"
-            " → pr-333cccc [2 matches]")
+            " → #130 [2 matches]")
+
+
+@async_test
+async def test_plan_tie_prefers_plan_nearest_cursor_in_tree_order(project):
+    """Tree order (plan groups sorted by id) decides plan ties, not the
+    plans' order in project.yaml: there "watchers" sits next to "tui-ux",
+    but in the tree "watch-merged" does."""
+    app = _app(project)
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        order = app.tree._ordered_ids
+        assert order.index("pr-666ffff") < order.index("pr-333cccc")
+        app.tree.select_pr("pr-111aaaa")  # tui-ux, top of the tree
+        await _cmd(app, pilot, "plan select watch")
+        assert app.tree.selected_pr_id == "pr-666ffff"
+        assert app._fuzzy_results == ["watch-merged", "watchers"]
+        app.tree.select_pr("pr-777gggg")  # standalone, bottom of the tree
+        await _cmd(app, pilot, "plan select watch")
+        assert app.tree.selected_pr_id == "pr-333cccc"
+        assert app._fuzzy_results == ["watchers", "watch-merged"]
+
+
+@async_test
+async def test_plan_tie_ranks_plan_with_nothing_shown_last(project):
+    """A tied plan whose PRs are all filtered out never outranks one the
+    cursor can reach: "watch-merged" (merged only) loses the tie."""
+    app = _app(project)
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        app.tree._hide_merged = True
+        app.tree._recompute()
+        app.tree.select_pr("pr-111aaaa")
+        await _cmd(app, pilot, "plan select watch")
+        assert app.tree.selected_pr_id == "pr-333cccc"
+        assert app._fuzzy_results == ["watchers"]
 
 
 @async_test

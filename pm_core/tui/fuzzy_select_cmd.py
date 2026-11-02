@@ -16,6 +16,8 @@ from __future__ import annotations
 import re
 import shlex
 
+from pm_core import store
+from pm_core.cli.helpers import _pr_display_id
 from pm_core.tui.model_screen import escape
 
 _SELECT_RE = re.compile(r"(pr|plan)\s+select(?:\s+(.*))?", re.DOTALL)
@@ -100,10 +102,15 @@ def _goto_pr(app, pr_id: str) -> None:
 
 
 def _pr_label(pr: dict) -> str:
-    from pm_core.cli.helpers import _pr_display_id
     title = pr.get("title")
     title = title if isinstance(title, str) else ""
     return escape(f"{_pr_display_id(pr)} {title}".rstrip())
+
+
+def _pr_ref(app, pr_id: str) -> str:
+    """Escaped display id (``#N``, else the local id) for *pr_id*."""
+    pr = store.get_pr(app._data, pr_id)
+    return escape(_pr_display_id(pr) if pr else pr_id)
 
 
 def _plan_label(plan: dict) -> str:
@@ -124,15 +131,6 @@ def _suffix(count: int, hidden: int = 0) -> str:
     if hidden:
         parts.append(f"{hidden} hidden by filters")
     return escape(f" [{', '.join(parts)}]") if parts else ""
-
-
-def _cursor_plan_index(tree, plans: list[dict]) -> int:
-    """Index in *plans* of the plan under the tree cursor (0 if none)."""
-    plan_id = tree.get_selected_plan()
-    for i, plan in enumerate(plans):
-        if isinstance(plan, dict) and plan.get("id") == plan_id:
-            return i
-    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -188,17 +186,6 @@ def handle_pr_select(app, query: str) -> None:
 # plan select
 # ---------------------------------------------------------------------------
 
-def _plan_pr_counts(app, tree, plan_id: str) -> tuple[int, int]:
-    """(total PRs, PRs shown under current filters) for *plan_id*."""
-    total = shown = 0
-    for pr in app._data.get("prs") or []:
-        if isinstance(pr, dict) and pr.get("plan") == plan_id:
-            total += 1
-            if tree.passes_filters(pr):
-                shown += 1
-    return total, shown
-
-
 def handle_plan_select(app, query: str) -> None:
     """Handle 'plan select <query>' — fuzzy match plans, go to first PR."""
     from pm_core.tui.fuzzy_select import fuzzy_match_plans
@@ -210,15 +197,18 @@ def handle_plan_select(app, query: str) -> None:
         return
 
     tree = _tree(app)
+    # Ties go to the plan whose landing PR is nearest the cursor in tree
+    # order (the same index space as pr select's tie-break).
     ranked = fuzzy_match_plans(plans, query,
-                               cursor_index=_cursor_plan_index(tree, plans))
+                               cursor_index=tree.selected_index,
+                               positions=tree.plan_nav_positions())
     if not ranked:
         app.log_message(f"No plan matches for '{escape(query)}'")
         _clear_results(app)
         return
 
     best = ranked[0]
-    total, shown = _plan_pr_counts(app, tree, best["id"])
+    total, shown = tree.plan_pr_counts(best["id"])
     if not total:
         app.log_message(f"Plan '{_plan_label(best)}' has no PRs")
         _clear_results(app)
@@ -231,7 +221,7 @@ def handle_plan_select(app, query: str) -> None:
         return
 
     cyclable = [plan["id"] for plan in ranked
-                if _plan_pr_counts(app, tree, plan["id"])[1]]
+                if tree.plan_pr_counts(plan["id"])[1]]
     _set_results(app, cyclable, "plan")
 
     _ensure_tree_view(app)
@@ -240,7 +230,7 @@ def handle_plan_select(app, query: str) -> None:
         app.log_message(f"Plan '{_plan_label(best)}' has no visible PRs")
         return
     _goto_pr(app, first)
-    app.log_message(f"Plan: {_plan_label(best)} → {escape(first)}"
+    app.log_message(f"Plan: {_plan_label(best)} → {_pr_ref(app, first)}"
                     f"{_suffix(len(cyclable))}")
 
 
@@ -252,10 +242,7 @@ def _resolve_entry(app, tree, entry_id: str) -> str | None:
     """PR id to put the cursor on for a result entry, or None if the entry
     is no longer navigable (deleted, filtered out, plan emptied)."""
     if app._fuzzy_kind == "plan":
-        from pm_core import store
         if store.get_plan(app._data, entry_id) is None:
-            return None
-        if not _plan_pr_counts(app, tree, entry_id)[1]:
             return None
         return tree.first_pr_in_plan(entry_id)
     return entry_id if tree.is_navigable(entry_id) else None
@@ -267,8 +254,6 @@ def cycle_fuzzy(app, direction: int = 1) -> None:
     direction: +1 for next (]), -1 for prev ([).  Entries that are no
     longer navigable are skipped; the list itself is left intact.
     """
-    from pm_core import store
-
     results = app._fuzzy_results
     if not results:
         app.log_message("No match results to cycle (use /pr select or /plan select)")
@@ -294,7 +279,8 @@ def cycle_fuzzy(app, direction: int = 1) -> None:
 
     if app._fuzzy_kind == "plan":
         plan = store.get_plan(app._data, results[index]) or {"id": results[index]}
-        app.log_message(f"Match {pos}/{total}: {_plan_label(plan)} → {escape(target)}")
+        app.log_message(f"Match {pos}/{total}: {_plan_label(plan)} → "
+                        f"{_pr_ref(app, target)}")
     else:
         pr = store.get_pr(app._data, target)
         label = _pr_label(pr) if pr else escape(target)

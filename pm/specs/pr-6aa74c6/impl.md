@@ -64,6 +64,8 @@ Plan: `tui-ux`
   matched plan" behavior.
 - The cycling list holds every matched plan that has at least one PR shown by
   the current filters, in rank order. The target plan is first.
+- Messages name the landing PR by display id (`Plan: <id>: <name> → #N`, and
+  `Match k/n: <id>: <name> → #N` when cycling), the same way `pr select` does.
 
 ### R3 — One shared, retained result list cycled with `]` / `[`
 
@@ -98,9 +100,14 @@ Plan: `tui-ux`
 - New `TechTree.pr_nav_positions()` maps each PR id to its index in
   `_ordered_ids`. A PR inside a collapsed plan maps to the index of that plan's
   `_hidden:<plan>` label. A PR with no position sorts after all positioned PRs.
-- For plans, the cursor position is the index, in the plans list, of the plan
-  of the currently selected PR (or of the selected hidden label). Plan ties
-  break by distance in that list.
+- Plans use the same index space. `TechTree.plan_nav_positions()` maps each
+  plan to the navigation index of its first shown PR (where `plan select`
+  would land), or of its `_hidden:<plan>` label when collapsed. Plan ties
+  break by distance from `tree.selected_index`. A plan with no shown PR has
+  no position, so it loses a tie to any plan the cursor can reach. The tree
+  orders plan groups by id, so this is the visual order, not the order of the
+  plans in `project.yaml` (review-loop 8e9c i1 replaced a plans-list-index
+  tie-break that measured distance in `project.yaml` order).
 
 ### R5 — Selecting a PR selects it the way the rest of the TUI does
 

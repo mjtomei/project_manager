@@ -197,6 +197,9 @@ Test each key that is safe to press (won't change PR state):
     - `pm tui send p` -> toggle back to tree view
 
 15. **/pr select**, **/plan select** and **] / [** (fuzzy select + cycling):
+    - First, before any select has run in this TUI: `pm tui send ]` -> log
+      `No match results to cycle (use /pr select or /plan select)`, cursor
+      unchanged
     - `pm tui send /`, type `pr select <a word from two or more visible PR
       titles>`, then Enter
     - `pm tui view` -> cursor on the best match; log line
@@ -204,9 +207,7 @@ Test each key that is safe to press (won't change PR state):
     - `pm tui send ]` -> log `Match 2/K: …`, cursor moves to that PR;
       `pm tui send [` -> back to `Match 1/K`
     - `/plan select <part of a plan name>` -> cursor on that plan's first
-      PR (collapsed group expanded); log `Plan: <id>: <name> → <pr>`
-    - With no prior select, `]` logs
-      `No match results to cycle (use /pr select or /plan select)`
+      PR (collapsed group expanded); log `Plan: <id>: <name> → <#N>`
 
 ### Part 3: QA View Help
 

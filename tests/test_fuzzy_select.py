@@ -1,6 +1,8 @@
 """Tests for fuzzy matching and ranked selection."""
 
-from pm_core.tui.fuzzy_select import score_pr, score_plan, fuzzy_match_prs, fuzzy_match_plans
+from pm_core.tui.fuzzy_select import (
+    fuzzy_match_plans, fuzzy_match_prs, is_exact_pr_match, score_plan, score_pr,
+)
 
 
 def _make_pr(pr_id, title="", description="", plan="", gh_pr_number=None):
@@ -161,11 +163,9 @@ class TestFuzzyMatchPlans:
 
 
 # ---------------------------------------------------------------------------
-# Restart (2026-11-02) additions: exact-id parity, robustness, tree-order
-# tie-break, shared status-filter predicate.
+# Exact-id parity, robustness, tree-order tie-break, shared status-filter
+# predicate.
 # ---------------------------------------------------------------------------
-
-from pm_core.tui.fuzzy_select import is_exact_pr_match  # noqa: E402
 
 
 class TestExactIdParity:
@@ -265,7 +265,7 @@ class TestTreeOrderTieBreak:
                                  positions={"pr-a": 0, "pr-b": 99})
         assert ranked[0]["id"] == "pr-b"
 
-    def test_plan_tiebreak_by_cursor_plan_index(self):
+    def test_plan_tiebreak_by_list_index_without_positions(self):
         plans = [_make_plan("a", "fix x"), _make_plan("b", "fix y"),
                  _make_plan("c", "fix z")]
         assert fuzzy_match_plans(plans, "fix", cursor_index=2)[0]["id"] == "c"

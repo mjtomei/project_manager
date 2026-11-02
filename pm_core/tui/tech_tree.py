@@ -891,12 +891,33 @@ class TechTree(Widget):
                     positions[pr["id"]] = label_pos[plan_id]
         return positions
 
+    def plan_nav_positions(self) -> dict[str, int]:
+        """Map plan id -> navigation index of the plan's first shown PR
+        (where ``plan select`` lands), for proximity ranking in the same
+        index space as :meth:`pr_nav_positions`.  A collapsed plan takes its
+        ``_hidden:<plan>`` label's index; plans with nothing shown are
+        absent."""
+        positions: dict[str, int] = {}
+        for pr_id, pos in self.pr_nav_positions().items():
+            plan_id = self._pr_map[pr_id].get("plan") or "_standalone"
+            if plan_id not in positions or pos < positions[plan_id]:
+                positions[plan_id] = pos
+        return positions
+
+    def plan_pr_counts(self, plan_id: str) -> tuple[int, int]:
+        """(PRs in *plan_id*, of those shown under the current filters)."""
+        total = shown = 0
+        for pr in self._pr_map.values():
+            if (pr.get("plan") or "_standalone") == plan_id:
+                total += 1
+                shown += self.passes_filters(pr)
+        return total, shown
+
     def first_pr_in_plan(self, plan_id: str) -> str | None:
         """Expand *plan_id* if collapsed and return its first PR in
         navigation order, or None if the plan has no PR shown under the
         current filters (nothing is expanded then)."""
-        if not any((pr.get("plan") or "_standalone") == plan_id
-                   and self.passes_filters(pr) for pr in self._prs):
+        if not self.plan_pr_counts(plan_id)[1]:
             return None
         if plan_id in self._hidden_plans:
             self._hidden_plans.discard(plan_id)
