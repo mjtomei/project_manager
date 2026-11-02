@@ -8200,6 +8200,30 @@ prs:
       Captures /pm-captures/scenarios/44 (README.md).'
     created_at: '2026-11-02T15:29:32Z'
     last_edited: '2026-11-02T15:29:32Z'
+  - id: note-20106e8
+    text: 'QA S45 refiner (2026-11-02, 8ea8a9a1, tmux 3.2a): all 3 stories driven
+      live. (1) Story 1 FAILS one Then: when userb (outside tmux) re-joins after a
+      kill-window, _respawn_tui -> tmux.select_window -> current_or_base_session picks
+      the first ATTACHED grouped session, i.e. the OWNER client (debug: "select_window:
+      target=<base>~1:@N"), so the owner is yanked from its shell window to the new
+      TUI window while userb reattaches its old unattached ~N, which sits on the owner
+      shell window. Same code on origin/master (pre-existing). Fix idea: in the pm
+      session attach path select the respawned window in the grouped session being
+      attached, never another client. Everything else in story 1 held (TUI cwd = P,
+      runs as owner, smallest, pidfile + both registries list it once, Q/keepme unchanged).
+      (2) userb home must be outside /home here: from /home/userb, store.find_project_root
+      stats /home/pm/project.yaml (owner home 0750) and pm session crashes with PermissionError
+      (master too; see the note on pr-e8408b4). (3) The race only happens when the
+      go-file is released 0.05-0.15 s BEFORE the y of prefix+x: userb attach checks
+      ~0.15-0.2 s after release and the hook respawns <=0.1 s after the kill. At offset
+      0 the hook won 12/12. With the offsets, userb respawned in 9/12 rounds; 1 round
+      showed 2 TUIs briefly + "TUI startup refused" (P tag log) + TuiPidfileConflict
+      (tui-stderr.log), and it settled to 1 TUI. Notes kept pid + 99/100 split. (4)
+      Hook log location: a kill from userb client logs to the owner ~/.pm/debug/default.log,
+      not the tag log. Owner pm session --global logs to the NON-shared P tag log.
+      (5) Story 3: 10 P + 7 Q rounds, 0 second TUI, 0 conflicts. Teardown clean.'
+    created_at: '2026-11-02T16:28:09Z'
+    last_edited: '2026-11-02T16:28:09Z'
   - id: note-f5d5188
     text: 'QA S46 refiner (2026-11-02, 8ea8a9a1, tmux 3.2a): all 6 stories held live
       (kills from B dir, B-session shell, /tmp, $HOME, A src/deep, A workdir clone;
@@ -52871,11 +52895,24 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-11-02T15:27:09.952166+00:00'
-  updated_at: '2026-11-02T15:27:09.952166+00:00'
+  updated_at: '2026-11-02T16:28:10.585608+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-eccf3b5
+    text: 'Same family, found in QA S45 refiner on pr-073910f (2026-11-02): store.find_project_root
+      walks up from cwd testing (d / "pm" / "project.yaml").exists(); from /home/<user>
+      the /home level stats /home/pm/project.yaml, and when another account is literally
+      named pm with a 0750 home this raises PermissionError on Python 3.10. Then pm
+      session --global --dir <shared dir> run by a joiner from their own home prints
+      a traceback (_session_start catches only FileNotFoundError/SystemExit around
+      state_root()). Same code on origin/master. Repro: sudo useradd -m userb; sudo
+      -u userb sh -c "cd /home/userb && HOME=/home/userb PYTHONPATH=<pm src> python3
+      -c \"from pm_core import store; store.find_project_root()\"". Fix both walks
+      together (treat an unreadable level as not-a-project).'
+    created_at: '2026-11-02T16:28:10Z'
+    last_edited: '2026-11-02T16:28:10Z'
 - id: pr-3121cc8
   plan: bugs
   title: 'Bug: after-kill-pane hook (pm _pane-closed) writes its respawn log lines
