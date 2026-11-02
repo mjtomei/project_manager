@@ -466,6 +466,35 @@ class TestQAWorkdirs:
         assert scratch.name == "scratch"
         assert scratch.parent.name == "s-1"
 
+    def test_clone_does_not_force_hardlinks(self, tmp_path):
+        """The clone must not spell out ``--local``.
+
+        With an explicit ``--local`` git dies with "failed to create link
+        ... Invalid cross-device link" when the source repo is on another
+        filesystem than ~/.pm (a regression or debug run clones the
+        user's project checkout); a plain path clone hardlinks when it
+        can and copies otherwise.
+        """
+        qa_workdir = tmp_path / "qa"
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        calls = []
+
+        def fake_run_git(*args):
+            calls.append(args)
+            return MagicMock(returncode=0, stdout="")
+
+        with patch("pm_core.git_ops.run_git", side_effect=fake_run_git), \
+                patch("pm_core.push_proxy.resolve_real_origin",
+                      return_value=None):
+            create_scenario_workdir(qa_workdir, 0, repo_root=repo_root,
+                                    branch="master")
+
+        clone = [c for c in calls if c and c[0] == "clone"]
+        assert clone == [("clone", str(repo_root),
+                          str(qa_workdir / "s-0" / "repo"),
+                          "--branch", "master")]
+
 
 class TestQALoopState:
     def test_defaults(self):

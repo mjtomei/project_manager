@@ -108,8 +108,8 @@ SESSION_TYPE_VERDICTS: dict[str, tuple[str, ...]] = {
     "guide":           (),   # pm guide: onboarding / getting-started
     "cluster":         (),   # pm cluster: cross-repo exploration
     "container":       (),   # pm container build session
-    "qa_author":       (),   # pm qa: author / debug / launch / standalone
-    "qa_regression":   (),   # pm qa regression authoring
+    "qa_author":       (),   # pm qa: author / debug / standalone, launch of an instruction
+    "qa_regression":   (),   # regression test runs: pm qa regression (also via TUI / pm qa launch)
     "discuss":         (),   # TUI ad-hoc Claude / discuss panes
     "watcher_review":  (),   # TUI chat-driven watcher-loop review
 }
