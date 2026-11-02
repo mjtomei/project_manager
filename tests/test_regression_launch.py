@@ -149,6 +149,10 @@ def test_host_run_is_isolated_and_needs_no_pm_session(project, home,
     monkeypatch.setenv("PM_POPUP_SESSION", "pm-live-session")
     monkeypatch.setenv("PM_IN_TMUX_SESSION", "1")
     monkeypatch.setenv("PM_TMUX_SOCKET", "/tmp/shared.sock")
+    # A pm session --global session: pm in the run hashing it into session
+    # tags would make the test project's pm tui view find the user's TUI
+    # (QA S16, R7/R34).
+    monkeypatch.setenv("PM_SHARE_MODE", "global")
     result, spies = _run_regression(project, ["demo"],
                                     container_enabled=False)
     assert result.exit_code == 0, result.output
@@ -192,7 +196,7 @@ def test_host_run_is_isolated_and_needs_no_pm_session(project, home,
     assert args[:2] == ("bash", ["bash", "-c", "CLAUDE-CMD"])
     assert "PM_PROJECT" not in args[2] and "PM_SESSION" not in args[2]
     for var in ("TMUX", "TMUX_PANE", "PM_POPUP_SESSION",
-                "PM_IN_TMUX_SESSION"):
+                "PM_IN_TMUX_SESSION", "PM_SHARE_MODE"):
         assert var not in args[2], var
     # Host mode still shares the user's tmux server.  With TMUX gone a
     # plain tmux command would miss it, so the prompt names the socket.

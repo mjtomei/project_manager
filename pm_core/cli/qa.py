@@ -311,13 +311,18 @@ def qa_edit(instruction_id: str, category: str | None):
 # the test's own project would reuse, rebalance and try to attach the user's
 # session instead of creating the test's (QA S12, R28).  ``PM_IN_TMUX_SESSION``
 # makes commands such as ``pm pr merge`` open windows in that session, and
-# ``PM_POPUP_SESSION`` names it when the run is started from a popup.  Host
+# ``PM_POPUP_SESSION`` names it when the run is started from a popup.
+# ``PM_SHARE_MODE`` comes from a ``pm session --global``/``--group`` session:
+# ``get_session_tag`` mixes it into every project's hash, so ``pm tui view``
+# (and other cwd lookups) in the test's own project would miss that
+# project's session and fall back to the user's TUI (QA S16, R7/R34).  Host
 # mode still shares the user's tmux server (``PM_TMUX_SOCKET`` is kept); the
 # session's own pm commands just behave as they do outside tmux.  Without
 # ``TMUX`` a plain ``tmux`` command ignores that socket and reaches the
 # default server, so the prompt names the socket (``tmux_socket``).
 _REGRESSION_SCRUBBED_ENV = ("PM_PROJECT", "PM_SESSION", "TMUX", "TMUX_PANE",
-                            "PM_POPUP_SESSION", "PM_IN_TMUX_SESSION")
+                            "PM_POPUP_SESSION", "PM_IN_TMUX_SESSION",
+                            "PM_SHARE_MODE")
 
 # Push URL given to a regression clone's ``origin``.  The QA scenario clone
 # helper points ``origin`` at the real upstream, and on the host (container
