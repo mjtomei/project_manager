@@ -134,6 +134,10 @@ switches it to the project view,
 - pressing Esc closes the popup and leaves the TUI running (2.0.1's
   `App.query_one` sees only the active screen, so App-level command-bar
   lookups must not raise while the popup is up — QA s5);
+- keys the popup does not use (app-level `r` refresh and `z`/`w`/`y`
+  prefixes) and a background state reload while the popup is open must not
+  crash the TUI or take the popup's focus (`_command_bar()` returns None
+  when the command bar is unreachable — QA s5 / ff85d13a);
 - the installed `textual` version satisfies `>=2.0.1`.
 
 ### R14 — The popup reflects a default changed elsewhere
@@ -164,7 +168,10 @@ Dockerfile pre-install list matches `[project.dependencies]`.
 3. Provider entries can be created without network access using
    `pm provider add <name> --api-base http://localhost:<port> --model <m>
    --skip-check` (or `--type router`, which skips the connectivity check
-   automatically). No real LLM endpoint is needed.
+   automatically). No real LLM endpoint is needed. Current master already
+   includes #283's router fields (`launcher`, `remedy`, `classifier_model`,
+   `unset_env`, `probe_models`); a hand-written `providers.yaml` from an
+   older pm is a realistic starting state and those fields must survive.
 4. For concurrency, run the two actors as separate shells/panes (tmux or
    background jobs) against the same isolated HOME — that is the real
    contention surface (`~/.pm/providers.yaml` + `providers.yaml.lock`).
@@ -175,6 +182,12 @@ Dockerfile pre-install list matches `[project.dependencies]`.
 6. For TUI scenarios, create a throwaway project (`pm init --backend local
    --no-import`, a PR or two), start the pm session, and drive it with
    `pm tui send`; see `pm/qa/instructions/tui-manual-test.md`.
+7. Hand-written `providers.yaml` fixtures must be indented as a YAML
+   mapping (`providers:` then nested `  alpha:` then its fields). A
+   column-0 `providers:` followed by a column-0 `alpha:` is a null
+   `providers` block: pm lists only the built-in `claude` and
+   `pm provider default alpha` reports `Provider 'alpha' not found`
+   (observed in QA S4).
 
 ## Edge Cases
 
@@ -256,6 +269,15 @@ Dockerfile pre-install list matches `[project.dependencies]`.
   edge, on a clean install.
 - `pm md-render` failing with `ImportError` in a clean install (or in the
   shipped container image).
+
+## Run notes
+
+- Scenario 5's stored verdict still says NEEDS_WORK although ff85d13a fixed
+  the Esc crash and the fix was verified at textual 2.0.1 and 8.2.8; re-run
+  scenario 5 (or refresh its verdict) before sign-off (review-loop a9aa i1).
+- The merge preview against master (5b352d16, which merged #283 and
+  pr-3d3b3ce) is clean apart from the usual `pm/project.yaml` registry
+  conflict; #283's router provider interfaces are present on this branch.
 
 ## Ambiguities
 

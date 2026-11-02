@@ -51473,7 +51473,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/296
   gh_pr_number: 296
   created_at: '2026-10-28T02:46:55.100157+00:00'
-  updated_at: '2026-11-02T06:26:43.544393+00:00'
+  updated_at: '2026-11-02T07:28:40.914158+00:00'
   started_at: '2026-11-02T02:27:56.323149+00:00'
   reviewed_at: null
   merged_at: null
@@ -51573,6 +51573,19 @@ prs:
       refresh that verdict) before sign-off.'
     created_at: '2026-11-02T06:26:43Z'
     last_edited: '2026-11-02T06:26:43Z'
+  - id: note-473052f
+    text: 'QA planner probe (2026-11-02, not a live-TUI verdict): at the declared
+      floor textual 2.0.1 a background reload while the model popup is open still
+      raises NoMatches after ff85d13a. Headless repro: ProjectManagerApp + push ModelSettingsScreen
+      + action_reload() -> _load_state -> _update_display -> _update_status_bar ->
+      self.query_one(''#tech-tree'') (app.py:963) raises NoMatches; _show_normal_view''s
+      #tree-container queries would hit the same. The _command_bar() guard covers
+      on_key/check_action/_command_bar_in_use but not the reload path''s other default-screen
+      queries. Scenario 7''s ''background reload under the popup'' story targets this;
+      live effect is a logged traceback and a skipped reload while the popup is up
+      (the popup itself still renders and Esc still closes it).'
+    created_at: '2026-11-02T07:28:40Z'
+    last_edited: '2026-11-02T07:28:40Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
