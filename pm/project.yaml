@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T08:28:15.059871+00:00'
+  updated_at: '2026-11-02T08:33:01.483430+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -25871,6 +25871,25 @@ prs:
       not `( … &)`, or it ends as a PID-1 zombie. Helpers: /pm-captures/scenarios/24/refiner-helpers.'
     created_at: '2026-11-02T08:28:14Z'
     last_edited: '2026-11-02T08:28:14Z'
+  - id: note-28adcfc
+    text: 'QA S23 refiner (2026-11-02, live at c5c85a6b, pm_core a3777520): all 3
+      R39/R26-R29 stories held live from /scratch/s23r with no fix. Four runs started
+      in one second (TUI Enter, pm qa launch, pm qa regression --file-prs in a proj2
+      driver pane, --branch no-such-branch) and got distinct ids. D exited 1 and left
+      no workdir or captures. The aaa-one/aaa-two/aaa-three test sessions were created
+      on their own servers, each with its own pm_root. User windows, panes and registries
+      were unchanged, and the default server never appeared. With 4 simultaneous filings,
+      the proj TUI got 3 reloads and the proj2 TUI 1, all in the same second; the
+      aaa-* TUIs got 0. Solo B (from aaa-two) and solo C (from the clone) each showed
+      in their own TUI in under 0.4 s. Draft fixes: aaa-one still exists after run
+      A ends, so it, not aaa-two, sorts first on the shared server. The stand-in must
+      exec a shell only for */s-0/repo, because test projects sit under s-0/scratch
+      of the same regression-* dir. pm qa launch opens qa-demo at 80x24, so resize
+      it. pm session --global logs its session_cmd lines to proj-<plain hash>.log,
+      while the shared TUI logs to proj-<share hash>.log, so check both. Helpers:
+      /pm-captures/scenarios/23/refiner-helpers.'
+    created_at: '2026-11-02T08:33:01Z'
+    last_edited: '2026-11-02T08:33:01Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
