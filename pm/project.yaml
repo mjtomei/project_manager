@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T10:14:47.729809+00:00'
+  updated_at: '2026-11-02T10:19:06.561040+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7722,6 +7722,25 @@ prs:
       empty.'
     created_at: '2026-11-02T10:14:47Z'
     last_edited: '2026-11-02T10:14:47Z'
+  - id: note-53650c7
+    text: 'QA S32 (pm meta override + pm_root per session tag: shared, private twin,
+      pm-source clone) PASS 3/3 on c13abe72, no source changes. Captures /pm-captures/scenarios/32
+      (README.md index; per-terminal in-pane asciinema in a tmux -L q32h harness,
+      no extra pm clients). (1) pm meta in pm-P-82b905ec (--global) wrote ~/.pm/sessions/P-82b905ec/override;
+      window-3 pm which and the prefix+M popup `which` both gave the meta pm_core;
+      notes pane open/close hooks logged chosen_via=override is_ipc=True; a plain
+      shell in P stayed /workspace/pm_core. (2) Barrier race: twin pm-P-9daf7015 pm
+      meta wrote its override at 10:14:14.386 inside the shared 20-run loop (14.237-19.691),
+      all 20 shared lines stayed on the shared meta; closing each meta window removed
+      only that tag''s override; both TUI pids unchanged. (3) pm-source clone --global:
+      deep docs/a/b/c pm which = clone pm_core via chosen_via=pm_root; plain shell
+      = cwd_walk at root, installed when deep; private tag has no pm_root. Harness
+      note for next run: on a pane close `_pane-exited` and after-kill-pane race for
+      the registry; in 1 of 4 cycles handle_pane_exited unregistered first, so handle_any_pane_closed
+      logged no removed=[..] line (same end state, no Traceback) - repeat the n /
+      C-b x y cycle to see the removed= order.'
+    created_at: '2026-11-02T10:19:06Z'
+    last_edited: '2026-11-02T10:19:06Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
