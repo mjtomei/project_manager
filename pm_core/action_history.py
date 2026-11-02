@@ -397,7 +397,9 @@ def _kill0(pid: int) -> bool:
         return False
     except PermissionError:
         return True
-    except OSError:
+    except (OSError, OverflowError, ValueError):
+        # OverflowError: a pid no pid_t holds (e.g. from a damaged runtime
+        # entry's owner); such a process cannot exist.
         return False
     return True
 
@@ -564,6 +566,8 @@ _TEXT_FIELDS = ("kind", "attempt", "parent", "action", "phase", "loop_id",
                 "timer", "owner_attempt", "outcome", "purpose")
 # Identity values readers collect in sets (scenario) or format.
 _SCALAR_FIELDS = ("iteration", "scenario", "retry")
+# Exclusive bound on an owner pid (``pid_t`` is a C int).
+_MAX_PID = 2 ** 31
 
 
 def is_valid_time(v: Any) -> bool:
@@ -576,8 +580,12 @@ def _sane_owner(owner: Any) -> bool:
     if not isinstance(owner, dict):
         return True  # absent or foreign: readers treat liveness as unknown
     pid = owner.get("pid")
-    if pid is not None and (not isinstance(pid, int) or isinstance(pid, bool)):
-        return False  # owner_alive does int(pid) and kill(pid, 0)
+    if pid is not None and (not isinstance(pid, int) or isinstance(pid, bool)
+                            or not 0 < pid < _MAX_PID):
+        # owner_alive does int(pid) and kill(pid, 0): a pid no pid_t holds
+        # raised OverflowError, and a negative one probes a process group
+        # (-1: every process we may signal, so it read alive).
+        return False
     return all(owner.get(k) is None or isinstance(owner.get(k), str)
                for k in ("host", "start", "instance"))
 

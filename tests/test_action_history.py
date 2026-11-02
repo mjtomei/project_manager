@@ -156,6 +156,12 @@ class TestJournal:
             '"scenario": [1], "t": %s}' % t,
             '{"kind": "attempt_start", "attempt": "d", "action": "qa", '
             '"t": %s, "owner": {"pid": "abc"}}' % t,
+            # A pid no C long holds: os.kill raised OverflowError out of
+            # the liveness probe of this open attempt's owner.
+            '{"kind": "attempt_start", "attempt": "e", "action": "qa", '
+            '"t": %s, "owner": {"pid": %d}}' % (t, 10 ** 30),
+            '{"kind": "attempt_start", "attempt": "f", "action": "qa", '
+            '"t": %s, "owner": {"pid": -1}}' % t,
             '{"kind": ["phase"], "t": %s}' % t,
         ]
         with open(ah.journal_path(PR), "a") as f:
@@ -434,6 +440,9 @@ class TestJournal:
         assert ah.owner_alive({**me, "start": "other:0"}) is False
         assert ah.owner_alive({**me, "host": "elsewhere"}) is None
         assert ah.owner_alive(None) is None
+        # A damaged runtime entry's owner (no start token, no instance)
+        # reaches kill(pid, 0): a pid no pid_t holds is dead, not a raise.
+        assert ah.owner_alive({"pid": 10 ** 30}) is False
 
     def test_unusable_owners_dir_falls_back_to_pid(self, monkeypatch):
         # A read-only history dir without owners/ makes the mkdir fail;

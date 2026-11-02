@@ -390,8 +390,10 @@ attempt rows uninterpreted (omitted when absent).
   show `"t": 1e20`), identity fields readers key or join by (`kind`,
   `attempt`, `parent`, `action`, `phase`, `loop_id`, `timer`,
   `owner_attempt`, `outcome`, `purpose`) that are not strings, a
-  non-scalar `iteration`/`scenario`/`retry`, or an owner with a non-int
-  pid; so is a digit run past Python's int-conversion limit or deep
+  non-scalar `iteration`/`scenario`/`retry`, or an owner whose pid is
+  not an int in 1..2^31-1 (a larger one raised `OverflowError` from the
+  `kill(pid, 0)` liveness probe; a negative one probes a process group);
+  so is a digit run past Python's int-conversion limit or deep
   nesting (`ValueError`/`RecursionError` from `json.loads`).  A hook
   event file of the wrong shape reads as no event.  None of these may
   raise out of `pm pr history`, the popup or sign-off routing
