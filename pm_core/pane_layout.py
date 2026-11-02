@@ -703,21 +703,27 @@ def _process_registry_pane_closed(data: dict) -> None:
 
     from pm_core.pane_registry import tui_respawn_lock
 
-    for window_id, wdata in list(data.get("windows", {}).items()):
-        # Snapshot TUI pane IDs before reconciliation removes them
-        tui_ids = {p["id"] for p in wdata.get("panes", [])
-                   if p.get("role") == "tui"}
-        actual_window = None
-        # A `pm session` attach may find the TUI gone at this same moment
-        # and respawn it; deciding under the lock it also holds means only
-        # one of us starts a TUI (QA S42).
-        with tui_respawn_lock(session):
+    to_rebalance: list[str] = []
+    # A `pm session` attach may find the TUI gone at this same moment and
+    # respawn it; deciding under the lock it also holds means only one of
+    # us starts a TUI (QA S42).  The lock is taken once for the whole
+    # event, not once per registered window: this hook is a synchronous
+    # run-shell, so the client that closed the pane is frozen while it
+    # waits, and a stuck holder froze it for one full wait per window —
+    # 30 s with the main window and two review windows (QA S47).
+    with tui_respawn_lock(session):
+        for window_id, wdata in list(data.get("windows", {}).items()):
+            # Snapshot TUI pane IDs before reconciliation removes them
+            tui_ids = {p["id"] for p in wdata.get("panes", [])
+                       if p.get("role") == "tui"}
             removed = _reconcile_registry(session, window_id)
-            if removed:
-                _logger.info("handle_any_pane_closed: session=%s window=%s removed=%s",
-                             session, window_id, removed)
+            if not removed:
+                continue
+            _logger.info("handle_any_pane_closed: session=%s window=%s removed=%s",
+                         session, window_id, removed)
+            actual_window = None
             # Always respawn TUI regardless of user_modified
-            if removed and tui_ids & set(removed):
+            if tui_ids & set(removed):
                 running = _running_tui_pane(session)
                 if running:
                     _logger.info("handle_any_pane_closed: TUI pane was killed, "
@@ -726,16 +732,17 @@ def _process_registry_pane_closed(data: dict) -> None:
                 else:
                     _logger.info("handle_any_pane_closed: TUI pane was killed, respawning")
                     actual_window = _respawn_tui(session, window_id)
-        if not removed:
-            continue
-        if actual_window:
-            # _respawn_tui resets user_modified; always rebalance
-            # after respawn so the new TUI pane is sized correctly.
-            # Use the actual window ID (may differ if a new window
-            # was created because the TUI was the last pane).
-            rebalance(session, actual_window)
-        elif not wdata.get("user_modified"):
-            rebalance(session, window_id)
+            if actual_window:
+                # _respawn_tui resets user_modified; always rebalance
+                # after respawn so the new TUI pane is sized correctly.
+                # Use the actual window ID (may differ if a new window
+                # was created because the TUI was the last pane).
+                to_rebalance.append(actual_window)
+            elif not wdata.get("user_modified"):
+                to_rebalance.append(window_id)
+    # Layout work runs after the lock is released, as before.
+    for window_id in to_rebalance:
+        rebalance(session, window_id)
 
 
 def _running_tui_pane(session: str) -> str | None:

@@ -524,3 +524,79 @@ class TestHookDecidesUnderTheLock:
                 {"id": "%0", "role": "tui", "order": 0, "cmd": "pm _tui"}]}}})
         assert events == [("lock", "pm-x"), "enter", "reconcile",
                           "running?", "respawn", "exit", "rebalance"]
+
+    def test_one_lock_for_all_windows_rebalances_after(self, monkeypatch):
+        """With several registered windows the hook takes the lock once,
+        reconciles every window under it, and rebalances after it."""
+        events = []
+
+        class Lock:
+            def __init__(self, name):
+                events.append(("lock", name))
+
+            def __enter__(self):
+                events.append("enter")
+                return True
+
+            def __exit__(self, *exc):
+                events.append("exit")
+
+        removed = {"@0": ["%0"], "@4": [], "@6": ["%9"]}
+        monkeypatch.setattr(pane_registry, "tui_respawn_lock", Lock)
+        monkeypatch.setattr(pane_layout, "_reconcile_registry",
+                            lambda s, w: events.append(("reconcile", w))
+                            or removed[w])
+        monkeypatch.setattr(pane_layout, "_running_tui_pane",
+                            lambda s: events.append("running?") or None)
+        monkeypatch.setattr(pane_layout, "_respawn_tui",
+                            lambda s, w: events.append(("respawn", w)) or "@7")
+        monkeypatch.setattr(pane_layout, "rebalance",
+                            lambda s, w: events.append(("rebalance", w)))
+        pane_layout._process_registry_pane_closed({
+            "session": "pm-x", "windows": {
+                "@0": {"panes": [{"id": "%0", "role": "tui", "order": 0,
+                                  "cmd": "pm _tui"}]},
+                "@4": {"panes": [{"id": "%5", "role": "review-claude",
+                                  "order": 0, "cmd": "x"}]},
+                "@6": {"user_modified": True, "panes": [
+                    {"id": "%9", "role": "review-claude", "order": 0,
+                     "cmd": "x"}]}}})
+        # The TUI's window was gone: rebalance the window it respawned in;
+        # @4 lost nothing; @6 was rearranged by the user.
+        assert events == [("lock", "pm-x"), "enter",
+                          ("reconcile", "@0"), "running?", ("respawn", "@0"),
+                          ("reconcile", "@4"), ("reconcile", "@6"),
+                          "exit", ("rebalance", "@7")]
+
+
+class TestStuckHolderDelaysOneWait:
+    """QA S47: the after-kill-pane hook is a synchronous run-shell, so the
+    client that closed a pane is frozen while the hook waits for the lock.
+    A stuck holder used to cost one full wait per registered window."""
+
+    def test_a_close_with_three_windows_waits_once(self, tmp_path,
+                                                   monkeypatch):
+        import fcntl
+        import functools
+        monkeypatch.setenv("HOME", str(tmp_path))
+        log = MagicMock()
+        monkeypatch.setattr(pane_registry, "_logger", log)
+        monkeypatch.setattr(
+            pane_registry, "tui_respawn_lock",
+            functools.partial(pane_registry.tui_respawn_lock, timeout=0.4))
+        monkeypatch.setattr(pane_layout, "_reconcile_registry",
+                            lambda s, w: [])
+        monkeypatch.setattr(pane_layout, "rebalance", lambda s, w: None)
+        reg = pane_registry.registry_path(SESSION)
+        reg.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = reg.with_suffix(reg.suffix + ".respawn.lock")
+        with open(lock_path, "a") as holder:  # another process's flock
+            fcntl.flock(holder, fcntl.LOCK_EX)
+            start = time.monotonic()
+            pane_layout._process_registry_pane_closed({
+                "session": SESSION, "windows": {
+                    w: {"panes": []} for w in ("@0", "@4", "@6")}})
+            elapsed = time.monotonic() - start
+        assert 0.4 <= elapsed < 0.8, elapsed
+        assert log.warning.call_count == 1
+        assert "still held" in log.warning.call_args.args[0]
