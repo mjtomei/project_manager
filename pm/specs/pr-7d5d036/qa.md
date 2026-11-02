@@ -43,7 +43,7 @@ names no session), so review `a3777520` made the `-C` lookup fall back to
 the live session that recorded that pm dir as its project
 (`~/.pm/sessions/<tag>/pm_root`). The `-C` lookup is used by every `pm`
 command run outside a pm session, not only by regression runs. R7, R34,
-R35 and E18 are amended, R37–R39, E21–E23 and A13 are added, A7 and A9
+R35 and E18 are amended, R37–R39, E21–E23, A13 and A14 are added, A7 and A9
 are extended, and the other items are unchanged.
 
 ## What changed, as a user sees it
@@ -555,6 +555,14 @@ exercised.
   `~/.pm/runtime/home-refresh-<session>` mtime, read per filing. A
   concurrent filing masks a missing reload (round 3 S14), so per-filing
   checks use solo filings.
+- **A14** Container mode and R35/R37: a container run files with
+  `pm -C /pm-project pr add` inside the container, which can't see the
+  host tmux server or signal the host TUI, so the user's TUI shows the PR
+  only after `r` or its 300 s sync. That predates the `-C` lookup and is
+  not a failure of this PR; if observed, check `pm pr list --plan bugs`
+  and file it once. Since the `-C` lookup now runs inside the container at
+  filing time, the filing itself must still exit 0 with no traceback and
+  land in the host registry.
 
 - **A7** Bugs found in round 1 and filed elsewhere are not failures of this
   PR: pr-a571291 (`--file-prs` filings make the filed PR the user's active
