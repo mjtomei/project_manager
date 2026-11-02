@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T10:58:26.096139+00:00'
+  updated_at: '2026-11-02T11:15:00.811729+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7818,6 +7818,24 @@ prs:
       (README.md).'
     created_at: '2026-11-02T10:58:26Z'
     last_edited: '2026-11-02T10:58:26Z'
+  - id: note-0d8929b
+    text: 'QA S35 fix (commit 7a32e6656; full suite 5571 passed / 1 skipped, log /pm-captures/scenarios/35/post-fix/suite/full-suite.log).
+      A recheck on 43b354456 found a race in story 3. A new-pm ''pm session'' run
+      within about 1 s of an older pm''s half-started dotted-name session (pm-vue.app-<h>,
+      renamed by tmux to pm-vue_app-<h>) printed ''TUI pane missing — respawning...''
+      and started a second TUI, which the pidfile guard refused. Pre-fix: 2/2 rounds
+      at a 0 s gap; a 5 s gap was clean. Cause: the old pm writes its registry under
+      its own spelling, the old TUI heals pm-vue_app-<h>.json only when it mounts,
+      and the attach path judged ''TUI missing'' from the registry alone. Fix: cli/session.py
+      _adopt_running_tui. Before respawning it adopts a live, not-dead pm _tui pane
+      of that session, using the same discovery as pm tui view/send, and records it
+      in the registry under the lock, only if missing. Post-fix: 3/3 rounds clean,
+      and story 3 re-driven live with L2 started immediately holds (same TUI pid,
+      no respawn line). Three real-tmux tests. Still open for the user: L3''s create
+      prints only ''Creating tmux session ...'', not the ''Attaching to session ...~1''
+      the Then expects (create path, same on master). Pre/post captures: /pm-captures/scenarios/35/{pre-fix,post-fix}.'
+    created_at: '2026-11-02T11:15:00Z'
+    last_edited: '2026-11-02T11:15:00Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
