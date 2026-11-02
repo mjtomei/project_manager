@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-02T04:15:10.382956+00:00'
+  updated_at: '2026-11-02T04:42:48.188240+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48352,6 +48352,23 @@ prs:
       the qa.md edits, verify-s51-followup.md.'
     created_at: '2026-11-02T04:15:10Z'
     last_edited: '2026-11-02T04:15:10Z'
+  - id: note-fab1d23
+    text: 'review-loop 48dd i9 (6ed6c31f): one real gap fixed. The project.yaml resolver
+      appended every one-sided record addition to the end of an id-keyed list; master''s
+      GitHub merges insert records mid-list (#249, #272), so an integration moved
+      them to the end of the PR branch''s list, the branch''s order drifted from the
+      base''s, and the next integration refused ''both sides reordered records differently''
+      once the base reordered anything (the eaf3372e refusal across several PRs).
+      _merge_id_list now places each addition after every record that precedes it
+      on its own side (PR-first at the same anchor); plain appends (#250) are unchanged.
+      On the real registry the 2c2c9e45 merge now keeps both sides'' order exactly.
+      Two new tests fail pre-fix. Full suite 5768 passed, 1 skipped; merged with master@5b352d16
+      (clean, no project.yaml conflict) 5871 passed, 1 skipped (/pm-captures/review-48dd-i9/).
+      This branch''s own existing drift (pr-a3b86b7/pr-996519f at the end) stays:
+      the next merge sees it as a one-sided reorder and takes it. Left uncommitted:
+      the user model switch in pm/project.yaml, the qa.md edits, verify-s51-followup.md.'
+    created_at: '2026-11-02T04:42:48Z'
+    last_edited: '2026-11-02T04:42:48Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
