@@ -45339,7 +45339,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-11-02T03:38:20.713591+00:00'
+  updated_at: '2026-11-02T03:52:43.480490+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48319,6 +48319,22 @@ prs:
       effort: high), the qa.md edits and verify-s51-followup.md.'
     created_at: '2026-11-02T03:38:20Z'
     last_edited: '2026-11-02T03:38:20Z'
+  - id: note-19d63a7
+    text: 'review-loop 48dd i7 (99de66d1): one gap fixed. integration._PR_BEHAVIOR_FIELDS
+      listed a base change to the PR model/session_models but not to their reasoning-effort
+      siblings effort/session_effort, which model_config resolves a launch effort
+      from (pm pr model sets both), so a base that changed the PR effort merged CLEAN
+      with no behaviour change and the merge gate asked for no evidence statement.
+      Added both fields; new test test_a_base_change_to_the_prs_reasoning_effort_is_behavioural
+      fails pre-fix. No behaviour change: integration._short (a JSON value preview)
+      renamed _value_preview so it no longer collides with the _short revision-shortener
+      alias used elsewhere. Spec R3/R9-5 updated. Full suite 5764 passed, 1 skipped
+      (/pm-captures/review-48dd-i7/). master c1fcecc5 (#282) is not yet in the branch
+      but merges with no overlapping files (no project.yaml/config change), so the
+      sign-off check will see it as clean. Left uncommitted: the user model switch
+      in pm/project.yaml, the qa.md edits, verify-s51-followup.md.'
+    created_at: '2026-11-02T03:52:43Z'
+    last_edited: '2026-11-02T03:52:43Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
