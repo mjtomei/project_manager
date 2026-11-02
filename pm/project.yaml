@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T11:15:00.811729+00:00'
+  updated_at: '2026-11-02T11:16:21.728793+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -7836,6 +7836,40 @@ prs:
       the Then expects (create path, same on master). Pre/post captures: /pm-captures/scenarios/35/{pre-fix,post-fix}.'
     created_at: '2026-11-02T11:15:00Z'
     last_edited: '2026-11-02T11:15:00Z'
+  - id: note-d8b0283
+    text: 'QA S36 refiner (2026-11-02, c13abe72, tmux 3.2a): both stories held live.
+      Implementation windows (TUI s) get no pane-registry entry, so the registry prune
+      can only be seen on review windows (TUI d: review-claude + review-diff). A plain
+      `pm session` from a pane of another pm session adopts that ambient session (impl.md
+      edge case) and fails with a TmuxCommandError traceback ending "sessions should
+      be nested with care, unset $TMUX to force" (master behaves the same). `--dir`
+      needs --global/--group, so reach B from inside A with `unset TMUX; pm session`.
+      Window ids only line up if both sessions open windows in the same order: s+d
+      on PR1, then s+d on PR2, gives @3 and @5 on both servers.'
+    created_at: '2026-11-02T11:16:06Z'
+    last_edited: '2026-11-02T11:16:06Z'
+  - id: note-f97007a
+    text: 'QA S36 (attach-time registry prune with @N collisions across servers) PASS
+      2/2 on 02f2eafbf, no source changes. Live on tmux 3.2a, real HOME, two private
+      sessions pm-alpha/pm-beta driven from a -L q36h harness. (1) After s+d on both
+      PRs in both TUIs, both servers had @3/@5 review windows with identical pane
+      ids. Killing A''s @3 with C-b & left A''s registry listing @3 %4/%3. A plain
+      pm session in a second A terminal attached ~2 and pruned @3 0.78 s later (scheduled
+      background rebalance for 5 window(s), then reconcile: window @3 gone ... removed
+      dead panes [''%4'', ''%3'']). B''s registry md5 and list-windows -a were unchanged,
+      and B''s live @3 survived. (2) B''s @5 was killed with kill-window. Two barrier-synced
+      attaches (date stamps 2 ms apart, both logs scheduling at 11:10:55) pruned only
+      B''s @5 (%7/%6). A''s registry stayed md5-identical with its live @5 %7/%6.
+      The B~2 client tty matched A''s shell-window pane_tty. In B, d then opened @7
+      review-pr-<PR2>, registered %10/%9, with no error. Teardown: kill B then A,
+      both rc 0, /tmp/pm-sessions empty, no default server. The Given''s edge case
+      also reproduced: in-pane pm session with TMUX set gives a TmuxCommandError traceback
+      (already filed as pr-e848481/pr-5a1f570), and --dir needs --global/--group.
+      Harness tip: record each user terminal with a grouped harness session attached
+      from a separate -L rec server under asciinema. That adds no clients to pm''s
+      servers, so list-clients Thens stay exact. Captures: /pm-captures/scenarios/36/.'
+    created_at: '2026-11-02T11:16:21Z'
+    last_edited: '2026-11-02T11:16:21Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
