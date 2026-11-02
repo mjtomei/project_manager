@@ -18,8 +18,18 @@ Plan: `tui-ux`
   NEEDS_WORK was "Help screen documents bracket cycling keys". The `bf747084`
   fix added the help row, but under the current Textual 8.2.7 markup it renders
   as `] / [[/]  Cycle fuzzy match results`, and everything after the `]` is bold.
-  `[bold][[/]` is not an escape in Textual, so the finding is still open on the
-  merged head (see R6).
+  `[bold][[/]` is not an escape in Textual, so the finding was still open on the
+  merged head at restart. R6 fixes it, and QA S6 and S13 passed the help rows.
+- Sign-off return (2026-11-02). The sign-off of `5b0ceb3f` returned IMPL only
+  because merging `master@4d0c07a5` conflicted in `pm/project.yaml`; the code
+  was ready. Master was merged as `a0c488f3`:
+  - The registry was resolved from master's text, with the branch's four
+    changed records and four new records added. The PR entries are identical,
+    as a multiset, to `store.merge_3way(base, ours=master, theirs=branch)`.
+  - Every other path is exactly one side's blob. The tree equals the
+    sign-off candidate tree `3fc2fb02`, apart from the registry layout and
+    the committed `qa.md`. No code change.
+  - The live registry delta stays uncommitted.
 
 ## Requirements (grounded in code)
 
@@ -263,6 +273,17 @@ of them blocks this PR.
 - pr-291ed27: `_followed_active_pr` is not updated on navigation. Its fix now
   belongs in `pr_view.persist_active_pr`, and it should land after
   pr-dd3682f.
+- pr-39f8040: the TUI's debounced `active_pr` save overwrites an outside
+  `pm pr select` made within the 1.5 s debounce. This happens with arrow keys
+  as well as `]` (QA S14).
+- pr-45ffba0: a SIGUSR2 queue drain that runs right after a command-bar
+  command refocuses the bar. The next key is then lost or typed into the bar
+  (QA S15).
+- pr-25d4825: handing focus back to the tree (`_focus_current_view`, and the
+  `tree.focus()` calls in `handle_command_submitted`) uses Textual's default
+  `scroll_visible`. A tree taller than its container scrolls to its top, and
+  the cursor can end up off-screen. This also happens on master with an
+  exact-id `/pr select` or Esc (QA S10 refiner).
 
 ## Test plan
 

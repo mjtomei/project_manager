@@ -6869,7 +6869,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/136
   gh_pr_number: 136
   created_at: '2026-03-09T16:23:27.180369+00:00'
-  updated_at: '2026-11-02T05:11:10.991759+00:00'
+  updated_at: '2026-11-02T09:56:30.097861+00:00'
   started_at: '2026-03-10T15:18:02.866746+00:00'
   reviewed_at: '2026-03-11T00:23:28.233394+00:00'
   merged_at: null
@@ -6938,6 +6938,25 @@ prs:
       while / is pending).'
     created_at: '2026-11-02T08:38:30Z'
     last_edited: '2026-11-02T08:38:30Z'
+  - id: note-1197e30
+    text: 'Sign-off IMPL return handled 2026-11-02. The conflict with master@4d0c07a5
+      was registry-only, and no code changed. Master merged as a0c488f3: pm/project.yaml
+      was resolved from master''s text, adding the branch''s 4 changed records (pr-6aa74c6,
+      pr-0939d97, pr-adfdce3, pr-291ed27) and its 4 new ones (pr-bda8833, pr-dd3682f,
+      pr-39f8040, pr-45ffba0). As a multiset, the PR entries equal store.merge_3way(base,
+      ours=master, theirs=branch): 601 records, every note kept, and master''s duplicate
+      pr-049649a untouched. Every other path is exactly one side''s blob, and the
+      tree equals sign-off candidate 3fc2fb02 apart from the registry layout and qa.md.
+      Also committed: the QA planner''s qa.md (779c1617); this commit files pr-25d4825
+      (the S10 focus-handback tree scroll, which leaves the cursor off-screen; pre-existing,
+      also on master) and updates impl.md (sign-off return, list of filed bugs). Full
+      suite on a0c488f3: 5611 passed, 1 skipped (env -u PM_HOST_HOME PATH=/usr/bin:/bin,
+      pm venv pytest 9.0.3 plus markdown). The live registry delta (status, model,
+      effort, workdir, 2 notes here, note-ce368b8 on pr-adfdce3) is still uncommitted.
+      In that live file, an earlier pm write had collapsed the duplicate pr-049649a
+      into a YAML anchor/alias of the newer copy; it was kept as is.'
+    created_at: '2026-11-02T09:56:30Z'
+    last_edited: '2026-11-02T09:56:30Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-6aa74c6-fuzzy-select-for-pr-and-plan-command-ab512a43
 - id: pr-98bf8df
   plan: plan-qa
@@ -54401,6 +54420,87 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T09:09:12.448622+00:00'
   updated_at: '2026-11-02T09:09:12.448622+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-25d4825
+  plan: bugs
+  title: 'Bug: handing focus back to the TUI tree after a command-bar command or Esc
+    scrolls a tall tree to its top and leaves the cursor off-screen'
+  branch: pm/pr-25d4825-bug-handing-focus-back-to-the-tui-tree-after-a-com
+  status: pending
+  depends_on: []
+  description: 'Location: every place that hands focus back to the PR tree after a
+    command-bar command calls Widget.focus() with Textual''s default scroll_visible=True:
+
+    - ProjectManagerApp._focus_current_view in pm_core/tui/app.py. On pr-6aa74c6 it
+    serves Esc in the command bar and the /pr select and /plan select branch. Master''s
+    action_unfocus_command does the same inline.
+
+    - The query_one("#tech-tree").focus() calls in pm_core/tui/pr_view.py handle_command_submitted:
+    action-guard refusal, review-loop, edit, pr qa, autostart and the generic run_command
+    tail.
+
+
+    Mechanism (read from the Textual 8.2.7 source, not re-run separately):
+
+    - Screen.set_focus queues scroll_to_center(widget, origin_visible=True) whenever
+    `not self.can_view_entire(widget)`.
+
+    - TechTree is a single widget. Once the tree overflows #tree-container, it is
+    taller than the viewport, so that call scrolls the container to the tree''s origin
+    (its top), and the cursor box ends up below the fold.
+
+    - When the command also moved the cursor, TechTree.select_pr''s call_after_refresh(_scroll_selected_into_view)
+    usually runs later and hides the problem. With no cursor move (a re-select of
+    the PR under the cursor, or Esc in the bar), nothing scrolls back.
+
+
+    Repro (QA pr-6aa74c6 S10 refiner, 2026-11-02; seen on master with an exact-id
+    /pr select and on pr-6aa74c6 at 5dcf90dc):
+
+    1. Use a 200x50 TUI with a tree that overflows (4 plans plus Standalone, about
+    14 PRs).
+
+    2. Put the cursor on a PR below the first screenful, e.g. pr-60f857a.
+
+    3. Either submit `/pr select <the PR under the cursor>`, or type `/` and press
+    Esc. Either way the tree jumps to its top and the cursor box is off-screen. (The
+    refiner also listed 60f857a -> e9b0e10.)
+
+    4. The next cursor move (j/k, ]/[) scrolls the cursor back into view.
+
+    At 200x110, where the whole tree fits, it does not happen.
+
+
+    Fix direction:
+
+    - In one shared helper (_focus_current_view), hand focus back with focus(scroll_visible=False)
+    and then call TechTree._scroll_selected_into_view(). Alternatively, make TechTree''s
+    focus scrolling target the selected node instead of the widget origin.
+
+    - pr-adfdce3 note-5fbd062 already asks the other handback sites to reuse _focus_current_view,
+    so they inherit the fix.
+
+    - Add a Textual pilot test: a tall tree in a small terminal with the cursor below
+    the fold. After Esc from the command bar, the selected node''s region must stay
+    inside the visible region of #tree-container.
+
+
+    Related:
+
+    - pr-562d71d: the selected node sits under the bottom bars after a select (a different
+    symptom, same scroll code).
+
+    - pr-adfdce3: which view gets focus after a command.
+
+    - note-33583b0 on pr-6aa74c6 (the S10 refiner note).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-02T09:50:08.146101+00:00'
+  updated_at: '2026-11-02T09:50:08.146101+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
