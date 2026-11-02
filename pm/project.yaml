@@ -38712,7 +38712,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T11:24:23.976345+00:00'
+  updated_at: '2026-11-02T13:42:19.986885+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40091,6 +40091,33 @@ prs:
       the open `?`. Captures /pm-captures/scenarios/62 (README, pre-fix/, post-fix/).'
     created_at: '2026-11-02T11:24:23Z'
     last_edited: '2026-11-02T11:24:23Z'
+  - id: note-cea3a0e
+    text: 'S63 refiner (fa5fb2e0, 2026-11-02): all 3 stories live first try in /scratch/s63r
+      (S56 drivers re-pointed; evidence + scripts /pm-captures/pr-8020495/s63-refiner).
+      Scope the Thens: start row reads running for ~2 s into the story-2/3 loops until
+      the next 5 s impl-idle tick; in the ~0.4 s between the exec and the resume,
+      reads show B interrupted with runtime "running (stale: owner exited)", then
+      no review-loop runtime/"Waiting for: nothing"; the adopted i1 reads "running
+      for 0s" ~0.1 s. Pagers rewrap at 74 cols, so compare tokens.'
+    created_at: '2026-11-02T13:09:05Z'
+    last_edited: '2026-11-02T13:09:05Z'
+  - id: note-bdf66a4
+    text: 'QA S63 (2026-11-02, fa5fb2e0, no code edits): ran twice in fresh sandboxes
+      (/pm-captures/scenarios/63 README, run1/, run2/). Every Then held except race-dependent
+      literals. The 20 s verdict grace (master poll_for_verdict drops idle events
+      inside the grace) races fake-claude 2 s idle re-emit at ~arm+20 s. Idle just
+      before due -> "no verdict accepted yet" ~1.9 s, agent 22 s, exec 24 s; just
+      after -> <=0.11 s, agent 20 s, exec 22 s. Refiner journal had both (S1 long/long,
+      S2 i2 short, S3 i2 short); run1 5/5 long; run2 S1 i1 short, rest long. So S1
+      "<0.25 s" and S1 "exec 24s [agent 22s]" contradict per iteration; S2 i2 exec
+      22.4 and S3 resumed i2 exec 22s read 24.2/24s. Also run2 S3: one rb read at
+      TR+0.33 s showed the resumed parent with no open iteration ("loop running; next
+      iteration launching"): runtime-mirror parent start and loop-thread adopted i1
+      start are separate appends 13 ms apart. Restart-gap read counts vary (1 stale+1
+      none vs 2 stale+0 none). Next S63-style plan: accept either race side (transient
+      <=2 s; exec 22|24, agent 20|22) or pin the fake idle phase.'
+    created_at: '2026-11-02T13:42:19Z'
+    last_edited: '2026-11-02T13:42:19Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
