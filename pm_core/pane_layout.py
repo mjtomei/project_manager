@@ -835,13 +835,21 @@ def _running_tui_pane(session: str) -> str | None:
     return running[0] if running else None
 
 
-def handle_any_pane_closed() -> None:
+def handle_any_pane_closed(session: str = "") -> None:
     """Handle a pane-close event when we don't know which pane died.
 
     Called from global tmux hooks (after-kill-pane). Only processes the
-    current session's registry — the killed pane must belong to the
-    session where the hook fired.  If the killed pane was the TUI,
-    automatically respawns it.
+    session's registry — the killed pane must belong to the session where
+    the hook fired.  If the killed pane was the TUI, automatically
+    respawns it.
+
+    ``session`` is the session the hook fired in (``#{session_name}``).
+    When it is empty the session is derived from ``$TMUX_PANE``, which can
+    name a pane that is not on this server: the pane the hook reports has
+    just been killed, and a server started from inside an ambient tmux
+    inherits that tmux's pane id.  Either way ``display-message -t`` then
+    returns an empty name and the killed TUI would never be respawned, so
+    the hook's own session name is the reliable one.
     """
     _ensure_logging()
     _logger.info("handle_any_pane_closed called")
@@ -853,7 +861,7 @@ def handle_any_pane_closed() -> None:
 
     # A user's own grouped view (myview) shares the pm session's registry.
     from pm_core.pane_registry import pm_session_name
-    current_session = pm_session_name(tmux_mod.get_session_name())
+    current_session = pm_session_name(session or tmux_mod.get_session_name())
     reg_path = registry_path(current_session)
     if not reg_path.exists():
         _logger.info("handle_any_pane_closed: no registry for %s", current_session)

@@ -319,7 +319,7 @@ def _register_tmux_bindings(session_name: str) -> None:
                  fallback),
                 check=False)
     subprocess.run(tmux_mod._tmux_cmd("set-hook", "-g", "after-kill-pane",
-             "run-shell 'pm _pane-closed'"), check=False)
+             "run-shell 'pm _pane-closed #{q:session_name}'"), check=False)
     subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "after-split-window",
              "run-shell 'pm _pane-opened #{q:session_name} #{window_id} #{pane_id}'"),
             check=False)
@@ -1477,9 +1477,14 @@ def pane_exited_cmd(session: str, window: str, generation: str, pane_id: str):
 
 
 @cli.command("_pane-closed", hidden=True)
-def pane_closed_cmd():
-    """Internal: handle pane close from global tmux hook."""
-    pane_layout.handle_any_pane_closed()
+@click.argument("session", default="")
+def pane_closed_cmd(session: str):
+    """Internal: handle pane close from global tmux hook.
+
+    ``session`` is the session the hook fired in (``#{q:session_name}``);
+    when it is empty the handler falls back to ``$TMUX_PANE``.
+    """
+    pane_layout.handle_any_pane_closed(session)
 
 
 @cli.command("_pane-opened", hidden=True)

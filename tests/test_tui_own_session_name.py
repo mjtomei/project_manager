@@ -168,6 +168,27 @@ def test_pane_closed_from_a_grouped_view_updates_the_pm_registry(
         "pm-proj-abc.json"]
 
 
+def test_pane_closed_uses_the_hook_session_name_over_a_stale_tmux_pane(
+        tmux_server, monkeypatch, tmp_path):
+    """The after-kill-pane hook passes ``#{session_name}``; ``$TMUX_PANE``
+    can name a pane that is not on this server — the pane the hook reports
+    has just been killed, and a server started from inside an ambient tmux
+    inherits that tmux's pane id.  A targeted ``display-message`` then
+    returns an empty name, so the hook's own session name must win."""
+    from click.testing import CliRunner
+    from pm_core import pane_registry
+    from pm_core.cli import cli
+    wid, keep, gone = _view_registry(tmux_server, tmp_path, monkeypatch, "myview")
+    monkeypatch.setenv("TMUX_PANE", "%999")  # no such pane on this server
+    assert tmux_server("display-message", "-p", "-t", "%999",
+                       "#{session_name}") == ""
+    tmux_server("kill-pane", "-t", gone)
+    r = CliRunner().invoke(cli, ["_pane-closed", "myview"])
+    assert r.exit_code == 0, r.output
+    data = pane_registry.load_registry("pm-proj-abc")
+    assert [p["id"] for p in data["windows"][wid]["panes"]] == [keep]
+
+
 @pytest.mark.parametrize("view", ["myview", "pm-laptop", "my~view"])
 def test_rebalance_from_a_grouped_view_uses_the_pm_registry(
         tmux_server, monkeypatch, tmp_path, view):
