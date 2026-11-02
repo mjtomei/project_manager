@@ -771,7 +771,7 @@ class AutoRunsScreen(ModalScreen):
         title = Text("\n").join(
             view.to_rich(ln) for ln in view.header_lines(
                 st, min(view.MAX_WIDTH, width + self._GUTTER),
-                "Auto-start runs"))
+                "Auto-start runs", rows=self._rows))
         self.query_one("#runs-title", Static).update(title)
         self.query_one("#runs-footer", Static).update("\n".join(
             view.plain(ln) for ln in view.hint_lines(

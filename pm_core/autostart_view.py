@@ -29,6 +29,8 @@ Both wrap onto continuation lines indented under the row.
 
 from __future__ import annotations
 
+import re
+
 from rich.cells import cell_len
 from rich.color import ColorSystem
 from rich.style import Style
@@ -96,7 +98,22 @@ NBSP = "\u00a0"
 def _nb(text: str) -> str:
     return text.replace(" ", NBSP)
 
+
 _WS = str.maketrans("\t\n\r\v\f", "     ")
+# Terminal escape sequences (CSI, OSC, two-byte) and other C0/C1 control
+# characters in a title or reason (e.g. a QA error copied from coloured tool
+# output): printed raw they would leak escapes into plain output and throw
+# off the cell count, so the layout drops them.
+_ESCAPES = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]"
+                      r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?"
+                      r"|\x1b[@-Z\\-_]")
+_CONTROLS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def _clean(text: str) -> str:
+    """*text* as laid out: whitespace controls as spaces, escape sequences
+    and other control characters removed."""
+    return _CONTROLS.sub("", _ESCAPES.sub("", text.translate(_WS)))
 
 
 def clamp_width(width: int | None) -> int:
@@ -115,7 +132,7 @@ def _tokens(segs: list[Seg]) -> list[tuple[str, str, bool]]:
     for text, role in segs:
         # A multi-line reason (a QA error traceback) or a tab would break
         # the hanging indent and the cell count: lay it out as spaces.
-        text = text.translate(_WS)
+        text = _clean(text)
         if not text:
             continue
         if role == "sep":
@@ -238,12 +255,12 @@ def wrap(segs: list[Seg], width: int, indent: str) -> list[Line]:
 # Row content
 # ---------------------------------------------------------------------------
 
-def needs_human(status: dict) -> list[dict]:
+def needs_human(status: dict, rows: list[dict] | None = None) -> list[dict]:
     """Runs that need a human now (``attention`` set), each PR once, in
     report order — a shared dependency is one run however many targets
-    need it."""
+    need it.  *rows* is ``status_rows(status)`` when the caller has it."""
     out, seen = [], set()
-    for row in status_rows(status):
+    for row in status_rows(status) if rows is None else rows:
         run = row["run"]
         if run.get("attention") and run["pr_id"] not in seen:
             seen.add(run["pr_id"])
@@ -388,9 +405,10 @@ def row_lines(row: dict, width: int, *, notice: str | None = None,
     return lines
 
 
-def header_lines(status: dict, width: int,
-                 title: str = "Auto-start") -> list[Line]:
-    """The report header: mode, target count, need-you list, run, owner."""
+def header_lines(status: dict, width: int, title: str = "Auto-start",
+                 rows: list[dict] | None = None) -> list[Line]:
+    """The report header: mode, target count, need-you list, run, owner.
+    *rows* is ``status_rows(status)`` when the caller has it."""
     mode = status.get("mode") or "off"
     segs: list[Seg] = [(f"{title}: ", "header")]
     if mode == "targets":
@@ -398,7 +416,7 @@ def header_lines(status: dict, width: int,
         segs.append((f"{n} target{'s' if n != 1 else ''}", "header"))
     else:
         segs.append(("off", "header"))
-    need = needs_human(status) if mode != "off" else []
+    need = needs_human(status, rows) if mode != "off" else []
     if need:
         names = display_names(status)
         ids = ", ".join(names.get(r["pr_id"], r["pr_id"]) for r in need)
@@ -427,12 +445,13 @@ def hint_lines(items: list[str], width: int) -> list[Line]:
 def report_lines(status: dict, width: int = MAX_WIDTH) -> list[Line]:
     """Header + every row (the CLI text report)."""
     width = clamp_width(width)
-    lines = header_lines(status, width)
     if (status.get("mode") or "off") == "off":
-        lines.append([("No auto-start targets (auto-start off).", "")])
-        return lines
+        return header_lines(status, width) + [
+            [("No auto-start targets (auto-start off).", "")]]
+    rows = status_rows(status)
+    lines = header_lines(status, width, rows=rows)
     names = display_names(status)
-    for row in status_rows(status):
+    for row in rows:
         lines += row_lines(row, width, names=names)
     return lines
 

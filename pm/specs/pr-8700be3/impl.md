@@ -43,7 +43,9 @@ R1 — Drop text the tree already implies.
   reasons do not repeat `wait-for-merge ← T`.
 - Exceptions still shown: a hold by a wait target that is *not* an ancestor
   of the row in the forest (a shared dependency placed under an auto-merge
-  target → `[wait-for-merge ← X]`); an auto-merge target held by a wait
+  target → `[wait-for-merge ← X]`), stated once on the topmost such PR —
+  its subtree is in its closure, so held the same way, and shows no label
+  for that hold (row field `inherited`); an auto-merge target held by a wait
   target (`[auto-merge] [wait-for-merge ← X]`, even when X is its ancestor,
   because it overrides the target's own configured policy).  Every target
   row names its own policy (`[wait-for-merge]` / `[auto-merge]`).
@@ -104,7 +106,9 @@ R4 — Width and wrapping.
   wrap onto continuation lines with a hanging indent (row indent + 4);
   over-long words are hard-split.  Width uses Unicode cell width
   (`rich.cells.cell_len`) on the plain text, so styling never counts.  Same
-  for the header.  Tabs/newlines in reasons are laid out as spaces.
+  for the header.  Tabs/newlines in reasons are laid out as spaces;
+  terminal escape sequences and other control characters in titles or
+  reasons are dropped (the JSON keeps them verbatim).
 - Tree indentation is two cells per level, capped so a row keeps at least
   24 cells for its content (deeper levels stay flat at the cap).
 - Short lead phrases (`blocked on`, `also needed by`, `↻ dependency cycle:
@@ -160,8 +164,9 @@ R6 — One dependency forest, one row per PR (user requirement 2026-11-02).
   ids (`#240`), except where several local PRs share a display id — then
   each is named by its pm id.
 - Row fields: `{pr_id, depth, kind (target|dep), run, parent, ancestors,
-  root, also, cycle, progress, policy}`.  Policy labels are relative to the
-  row's ancestors (R1).
+  root, inherited, also, cycle, progress, policy}`.  Policy labels are
+  relative to the row's ancestors and the wait targets holding them
+  (`inherited`, R1).
 - Popup selection key is the pm id alone (one row per PR), so a selection
   survives refreshes even if the PR moves in the tree; navigation moves one
   PR per j/k; Enter/f focuses that PR's window.

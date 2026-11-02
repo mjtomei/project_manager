@@ -18,7 +18,9 @@ from rich.cells import cell_len
 from pm_core import autostart_state as st
 from pm_core import autostart_view as view
 
-from autostart_mixed_fixture import edge_status, mixed_inputs, mixed_status
+from autostart_mixed_fixture import (
+    _pr, edge_status, mixed_inputs, mixed_status,
+)
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 NEED_YOU = {"pr-0a1b2c3", "pr-5b6c7d8", "pr-9f0a1b2", "pr-7d8e9f0",
@@ -142,6 +144,24 @@ class TestDedupe:
         # An auto-merge target that a wait target's closure holds.
         nested = " ".join(_row_block(text, "◎ #241").split())
         assert "[auto-merge] [wait-for-merge ← #239]" in nested
+
+    def test_exception_stated_once_per_subtree(self):
+        # A chain placed under an auto-merge target but held by a wait
+        # target elsewhere: the exception is on the topmost held PR only;
+        # everything below it is in that PR's closure, so held the same way.
+        prs = [_pr("A", deps=["X"]), _pr("X", "in_progress", deps=["Y"]),
+               _pr("Y", "in_progress", deps=["Z"]), _pr("Z", "in_progress"),
+               _pr("W", deps=["V"]), _pr("V", deps=["X"])]
+        status = st.build_status({"prs": prs, "targets": {
+            "A": {}, "W": {"wait_for_merge": True}}})
+        text = st.format_text(status)
+        assert text.count("wait-for-merge ← W") == 1
+        assert "[wait-for-merge ← W]" in _row_block(text, "└ X")
+        rows = {r["pr_id"]: r for r in st.status_rows(status)}
+        assert rows["Z"]["ancestors"] == ["A", "X", "Y"]
+        assert rows["Z"]["inherited"] == ["A", "X", "Y", "W"]
+        for pid in ("Y", "Z"):
+            assert st.policy_labels(rows[pid]) == []
 
     def test_blockers_name_prs_and_status_only(self):
         status = mixed_status()
@@ -444,6 +464,33 @@ class TestWidth:
     def test_styling_does_not_count_toward_width(self):
         for ln in _text(60, color=True).splitlines():
             assert cell_len(ANSI.sub("", ln)) <= 60
+
+    def test_escape_sequences_never_reach_the_output(self):
+        # A title or reason carrying terminal escapes (a QA error copied
+        # from coloured tool output): plain output has no ESC bytes, widths
+        # count only what is shown, and colour output only has our SGR.
+        inp = mixed_inputs()
+        for p in inp["prs"]:
+            if p["id"] == "pr-6c7d8e9":
+                p["title"] = "Fix \x1b[31mred\x1b[0m popup\x07 \x1b]0;t\x07ok"
+        inp["qa_loops"]["pr-2e3f4a5"] = {
+            "running": False, "error": "boom \x1b[1;33mwarn\x1b[0m\x00 end"}
+        status = st.build_status(inp)
+        plain = st.format_text(status, width=40)
+        assert "\x1b" not in plain and "\x07" not in plain
+        assert "\x00" not in plain
+        assert "Fix red popup ok" in " ".join(_row_block(plain, "◎ #238").split())
+        assert "QA error: boom warn end" in " ".join(
+            _row_block(plain, "└ #235").split())
+        assert all(cell_len(ln) <= 40 for ln in plain.splitlines())
+        colored = st.format_text(status, width=40, color=True)
+        assert ANSI.sub("", colored) == plain
+        popup = "".join(view.to_rich(ln).plain
+                        for ln in view.report_lines(status, 40))
+        assert "\x1b" not in popup
+        # The JSON keeps the data verbatim.
+        assert "\x1b[1;33m" in next(
+            r for r in status["runs"] if r["pr_id"] == "pr-2e3f4a5")["reason"]
 
     def test_overlong_token_is_split_not_overflowing(self):
         lines = view.wrap([("x" * 50, "id")], 30, "    ")

@@ -1059,13 +1059,17 @@ def status_rows(status: dict) -> list[dict]:
     another target's dependency) sits at the first path a depth-first walk
     reaches it by; the other relationships become references on its row.
 
-    Each row: ``{pr_id, depth, kind, run, parent, ancestors, root, also,
-    cycle, progress, policy}``:
+    Each row: ``{pr_id, depth, kind, run, parent, ancestors, root,
+    inherited, also, cycle, progress, policy}``:
 
     - *kind* ``target`` (the PR is an auto-start target, at any depth) or
       ``dep``; *policy* is a target's own configured policy;
     - *parent* / *ancestors* / *root*: its place in the tree (ancestors
-      root first); a hold by an ancestor wait target is implied there;
+      root first);
+    - *inherited*: wait targets whose hold its place already shows — its
+      ancestors, and every wait target holding an ancestor (a wait target
+      holds its whole closure, so all of a held PR's subtree is held by
+      the same targets, whose label is on that PR's row);
     - *also*: PRs that need this one but are not its tree parent — other
       direct dependents in the forest, then targets whose need is not
       visible through forest edges (a merged intermediate);
@@ -1174,6 +1178,10 @@ def status_rows(status: dict) -> list[dict]:
     def emit(n: str, depth: int) -> None:
         anc = ancestors(n)
         run = nodes[n]
+        inherited = list(anc)
+        for a in anc:
+            inherited += [h for h in nodes[a].get("held_by") or []
+                          if h not in inherited]
         cycle = [c for c in children[n] if c == n or c in anc]
         also = [p for p in parents[n]
                 if p != tree_parent[n] and n not in ancestors(p)]
@@ -1185,7 +1193,7 @@ def status_rows(status: dict) -> list[dict]:
             "pr_id": n, "depth": depth,
             "kind": "target" if n in targets else "dep",
             "run": run, "parent": tree_parent[n], "ancestors": anc,
-            "root": anc[0] if anc else n,
+            "root": anc[0] if anc else n, "inherited": inherited,
             "also": also, "cycle": cycle, "progress": _progress(run),
             "policy": (targets[n].get("policy") if n in targets else None),
         })
@@ -1217,8 +1225,10 @@ def policy_labels(row: dict,
     tree shows nothing for that hold: the policy is stated once, on the
     target.  Exceptions: a hold by a wait target that is not an ancestor
     (a shared dependency placed under another target → ``wait-for-merge ←
-    X``), and an auto-merge target that a wait target holds.  *name* maps a
-    holder's PR id to the text that names it (the report uses display ids).
+    X``, stated once on that PR, not again on its subtree — the row's
+    ``inherited``), and an auto-merge target that a wait target holds.
+    *name* maps a holder's PR id to the text that names it (the report
+    uses display ids).
     """
     run = row.get("run") or {}
     pr_id = run.get("pr_id") or row.get("pr_id")
@@ -1231,7 +1241,8 @@ def policy_labels(row: dict,
             out.append(("wait-for-merge ← " + ", ".join(map(name, others)),
                         "exception"))
         return out
-    implied = set(row.get("ancestors") or [])
+    implied = (set(row.get("ancestors") or [])
+               | set(row.get("inherited") or []))
     extra = [t for t in others if t not in implied]
     if extra:
         return [("wait-for-merge ← " + ", ".join(map(name, extra)),
