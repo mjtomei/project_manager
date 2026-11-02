@@ -25200,7 +25200,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/284
   gh_pr_number: 284
   created_at: '2026-05-08T00:33:33.593694+00:00'
-  updated_at: '2026-11-02T11:29:23.372085+00:00'
+  updated_at: '2026-11-02T11:44:59.905863+00:00'
   started_at: '2026-11-01T19:44:36.226185+00:00'
   reviewed_at: null
   merged_at: null
@@ -26112,6 +26112,21 @@ prs:
       (story1, story2, pre-fix, post-fix).'
     created_at: '2026-11-02T11:29:23Z'
     last_edited: '2026-11-02T11:29:23Z'
+  - id: note-398ea0c
+    text: 'Review f51f i1 (2026-11-02, c5a5dd14 pushed): the route-mount fix (ef4f5c19)
+      is sound. It resolves the provider the same way build_claude_shell_cmd does,
+      checks router settings before the fake check (as the launch does), and mounts
+      the bridge like qa_loop._route_mounts but with strict=True. One fix: a container-mode
+      run whose provider cannot launch (a no-model router, or a host bridge that will
+      not start) printed the container retry advice ("fix the container runtime/image",
+      "pm container disable"), which cannot fix a provider setting. A ProviderNotFoundError
+      now prints "Container mode is enabled, but the regression session''s provider
+      cannot launch it: <provider error + Remedy>" and "No session was launched on
+      the host."; a real container failure keeps the runtime remedy (tests assert
+      both). Spec E10 updated for the route mount. Full suite 5593 passed/1 skipped
+      (markdown dep from pip --target).'
+    created_at: '2026-11-02T11:44:59Z'
+    last_edited: '2026-11-02T11:44:59Z'
   review_spec: false
   model: provider:claude-work-xhigh-249
   effort: high
