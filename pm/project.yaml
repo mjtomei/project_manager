@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-03T04:07:21.442519+00:00'
+  updated_at: '2026-11-03T11:34:23.813140+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8656,6 +8656,48 @@ prs:
       A''s tag log.'
     created_at: '2026-11-03T04:07:21Z'
     last_edited: '2026-11-03T04:07:21Z'
+  - id: note-7369035
+    text: 'QA S60 concretizer (2026-11-03): the refined S60 steps drop the "plan-step
+      review background pane" clause. plans.review.review_step() calls launch_claude_print_background(),
+      which starts a daemon thread and returns; every caller (pm plan add|breakdown|review|deps|import)
+      then exits the CLI process, so the callback (review file + split_pane_background
+      pane) never runs. Verified live at HEAD 1332934b: `pm plan review <id> < /dev/null`
+      printed "Reviewing results... (background)", exited, wrote no pm/reviews/*.txt
+      and opened no pane (also with a 6 s fake body). tests/test_plan_review.py calls
+      the callback directly, so it cannot see this. Pre-existing and unrelated to
+      the edge-space fixes; needs its own bug PR if the pane is expected to work.
+      The other S60 stories were validated live on tmux 3.2a: edge-space view Ctrl-Q
+      detaches only the pressing client; tui view/send + mobile-aware prefix pane
+      switch from a trailing-space view; a view named like a grouped session is not
+      listed and -d detaches it; window-name round-trip via pm session mobile zoom;
+      prefix+M popup cwd keeps a repo dir trailing space.'
+    created_at: '2026-11-03T11:00:06Z'
+    last_edited: '2026-11-03T11:00:06Z'
+  - id: note-4a5d361
+    text: 'QA S60 (edge-space view and window names) PASS 5/5 on 1332934b, no source
+      changes. Stories: (1) Ctrl-Q in a user view named " lead view" detaches only
+      the pressing client (/dev/pts/9) while the ~1 client stays attached and the
+      TUI keeps running; list still shows one row CLIENTS=1; log "detach_current_client:
+      detached /dev/pts/9 (session  lead view, window @0)" preserves the leading space.
+      (2) In a view named "trail view " (trailing space) pm tui view/send resolve
+      the base session ([Session: pm-qa60-alpha-fc9ca896, Pane: %0]; Sent keys ''r''
+      to TUI pane %0), and prefix+Down takes the mobile path (lower pane active, zoomed_flag
+      1, log is_mobile(pm-qa60-alpha-fc9ca896, @0): True (force flag)). That log line
+      lands in a separate tag file (workspace-<hash>.log) only because this harness
+      issues tmux commands from /workspace, so run-shell resolves its root there;
+      the line itself is correct. (3) A view named " pm-qa60-alpha-fc9ca896~1" is
+      not listed, --disconnect-others prints "Disconnected 2 other client(s)." and
+      leaves base/~1/view/TUI, and the later pm session prints "Attaching to session
+      ''pm-qa60-alpha-fc9ca896~1''" (real grouped session, never the look-alike view).
+      (4) Windows " notes " and "" round-trip verbatim; --force from a shell pane
+      inside a view zooms all three windows and --no-force returns all flags to 0.
+      (5) Repo dir with a trailing space: list shows "pm-qa60-trail -c8d184b3" on
+      its own socket; prefix+M opens the popup with cwd "/scratch/qa60/qa60-trail
+      " and `session name` prints the full name. Captures /pm-captures/scenarios/60/story{1..5}.
+      Observation only, matches code: `pm session mobile --no-force` from a plain
+      shell clears the flag but does not unzoom (the unzoom loop is gated on in_tmux()).'
+    created_at: '2026-11-03T11:34:23Z'
+    last_edited: '2026-11-03T11:34:23Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
