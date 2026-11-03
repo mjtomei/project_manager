@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-03T15:29:46.745854+00:00'
+  updated_at: '2026-11-03T15:31:33.021926+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8773,6 +8773,21 @@ prs:
       (the pane otherwise imports /opt/pm-src).'
     created_at: '2026-11-03T15:29:46Z'
     last_edited: '2026-11-03T15:29:46Z'
+  - id: note-b6ed80f
+    text: 'QA S64 (non-git session anchored on the project from any subdirectory)
+      PASS on stories 1-5; story 6 found one defect, fixed in c6eaca27. (1) DEFECT+FIX:
+      `pm session --global --print-connect` in a non-git dir printed `tmux -S /tmp/pm-sessions/pm-modern-9c70933a
+      attach` (exit 0) although `pm session --global` refuses with "Cannot determine
+      session tag" — a connect command for a session that can never exist. The shared
+      print now runs the same get_session_tag check and refuses before printing; plain
+      --print-connect and resolvable shared prints are unchanged. Captures /pm-captures/scenarios/64/{pre-fix,post-fix}.
+      (2) SPEC LITERAL (no product change): story 1/2 Thens say a second attach prints
+      `~1`, but with the first client still attached to ~1, `pm session` creates and
+      attaches a new unattached grouped view (~2, ~3) by design (find_unattached_grouped_session;
+      S16/S45 per-client views). Every other clause holds (one base session/server/TUI,
+      pid unchanged, one list row); the scenario text should say `~N`. Captures /pm-captures/scenarios/64/.'
+    created_at: '2026-11-03T15:31:32Z'
+    last_edited: '2026-11-03T15:31:32Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
