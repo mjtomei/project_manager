@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-03T21:02:43.806964+00:00'
+  updated_at: '2026-11-03T21:29:18.263099+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8880,6 +8880,27 @@ prs:
       iteration counter (fixed sleeps drift).'
     created_at: '2026-11-03T21:02:43Z'
     last_edited: '2026-11-03T21:02:43Z'
+  - id: note-cc24569
+    text: 'QA scenario 71 refiner (2026-11-03, head 44326ccd): (1) The draft story-4
+      Then "a fresh base is created" is wrong. With the base killed elsewhere and
+      a client on ~1, `pm session` prefix-matches the surviving group: it reuses an
+      unattached ~1 or creates a new ~N (e.g. ~2 when ~1 is attached), attaches there
+      on the same socket, and starts no new base; the same TUI pane stays live. (2)
+      Harness trap: driving pane ops as `tmux -S <sock> split-window/kill-pane` from
+      the harness shell can make the global hooks'' `#{session_name}` resolve to the
+      harness client''s current session — a TUI kill in A logged `handle_any_pane_closed:
+      ignoring non-pm session scratch`. Drive splits/closes with C-b key presses in
+      an attached client (C-b x prompts; send y). (3) window-resized needs tmux >=
+      3.3; stock 3.2a rejects it (`set-hook ... invalid option: window-resized`).
+      Built 3.5a at /usr/local/bin; start the pm server with PATH=/usr/local/bin:$PATH
+      and use the same binary for all commands on its socket. (4) Hook logs are per-cwd
+      under ~/.pm/debug/ (A-<tag>.log vs workspace-<tag>.log); grep them all. (5)
+      Verified live: scratch ignored by all three hooks (no scratch.json, no TUI),
+      stale scratch.json untouched, kill scoping (A group + myview gone; scratch server/socket/client
+      kept; B untouched), `No session` + socket kept after a base kill, and a final
+      `pm session kill` removes the stale socket after scratch is killed.'
+    created_at: '2026-11-03T21:29:18Z'
+    last_edited: '2026-11-03T21:29:18Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
