@@ -33039,7 +33039,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-11-03T00:03:52.715928+00:00'
+  updated_at: '2026-11-03T00:13:29.577545+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33138,6 +33138,22 @@ prs:
       as scenario errata, or change HelpScreen to the shared COMMAND_BAR_HEADER?'
     created_at: '2026-11-03T00:03:52Z'
     last_edited: '2026-11-03T00:03:52Z'
+  - id: note-36fc51c
+    text: 'QA scenario 8 (sign-off help + skip_qa lifecycle) PASS. Runtime-confirmed:
+      bare `pm pr signoff` auto-selects the sole in_review PR under skip_qa on (stdout,
+      rc 0, no tmux session created); skip_qa-aware refusals for pending/in_progress
+      say "after review (expected qa, in_review, sign_off)" with the pr start / pr
+      review remedies; `pm pr signoff help` and `--help` both exit 0 and list exactly
+      integrate + record; `pm pr signoff --fresh <id>` routes to the hidden run form
+      (Click 8.5.0, no E9); with skip_qa off, in_review is refused with "after QA
+      (expected qa, sign_off)" + command-bar remedy, qa is accepted, merged refuses
+      with the inspect remedy. One literal mismatch for future scenario authors, not
+      a defect: the group usage renders `pm pr signoff [OPTIONS] [COMMAND] [ARGS]...`
+      (COMMAND optional) because the hidden run form handles bare/`--fresh` invocations
+      — same shape as `pm watcher`, whereas `pm pr note` (no run form) renders required
+      COMMAND. Captures: /pm-captures/scenarios/8/{story1-autoselect,story2-refusals,story3-help-and-fresh,story4-expected-states}.'
+    created_at: '2026-11-03T00:13:29Z'
+    last_edited: '2026-11-03T00:13:29Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
