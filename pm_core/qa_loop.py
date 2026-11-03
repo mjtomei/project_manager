@@ -19,6 +19,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -5292,10 +5293,15 @@ def _add_status_pane(session: str, planner_pane: str, status_path) -> None:
     # also retry a failed early registration without duplicating an existing one.
     _register_qa_planner(session, planner_pane)
     try:
-        # Use the script path directly (avoids PYTHONPATH issues)
+        # Use the script path directly (avoids PYTHONPATH issues).  tmux runs
+        # this through the shell, and both the install path and the session
+        # name (derived from the repo directory) may contain a space; the
+        # script takes exactly two arguments, so an unquoted split made it
+        # exit with its usage line and no dashboard (review-loop 9d4c i2).
         _qa_status_script = Path(__file__).parent / "qa_status.py"
         status_cmd = (
-            f"python3 {_qa_status_script} {status_path} {session}"
+            f"python3 {shlex.quote(str(_qa_status_script))} "
+            f"{shlex.quote(str(status_path))} {shlex.quote(session)}"
         )
         status_pane = tmux_mod.split_pane_at(
             planner_pane, "h", status_cmd, background=True,

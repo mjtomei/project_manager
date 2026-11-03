@@ -8,8 +8,10 @@ its pane — no status pane, no qa-planner registration, and the window was
 gone again by the time the run finished.
 """
 
+import shlex
 import subprocess
 import time
+from pathlib import Path
 from unittest.mock import patch
 
 
@@ -73,3 +75,27 @@ class TestExecutionOnlyMainPane:
             for pane, role, _cmd in call.args[2]
         ]
         assert registered == [("%9", "qa-planner"), ("%10", "qa-status")]
+
+    def test_status_command_survives_a_space_in_the_session_name(self):
+        """A repo directory may contain a space, and qa_status takes 2 args.
+
+        The command runs through ``sh -c``; unquoted, ``pm-my repo-<hash>``
+        split into extra argv elements and the script exited with its usage
+        line, so no dashboard appeared for such a project.
+        """
+        session = "pm-my repo-abc123"
+        with patch("pm_core.tmux.split_pane_at", return_value="%10") as split, \
+                patch("pm_core.tmux.pane_window_id", return_value="@5"), \
+                patch("pm_core.pane_registry.prune_dead_windows",
+                      return_value=[]), \
+                patch("pm_core.pane_registry.load_registry", return_value={}), \
+                patch("pm_core.pane_layout.register_and_rebalance"):
+            qa_loop._add_status_pane(session, "%9", "/qa/status.json")
+
+        cmd = split.call_args.args[2]
+        assert shlex.split(cmd) == [
+            "python3",
+            str(Path(qa_loop.__file__).parent / "qa_status.py"),
+            "/qa/status.json",
+            session,
+        ]

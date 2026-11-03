@@ -790,7 +790,7 @@ class TestListClientsInGroup:
     def test_returns_clients_in_group(self, _mock_grouped, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout="/dev/pts/0 base~1\n/dev/pts/1 base~2\n/dev/pts/2 other-session\n",
+            stdout="/dev/pts/0:base~1\n/dev/pts/1:base~2\n/dev/pts/2:other-session\n",
         )
         clients = tmux.list_clients_in_group("base")
         assert len(clients) == 2
@@ -802,7 +802,7 @@ class TestListClientsInGroup:
     def test_includes_base_session_clients(self, _mock_grouped, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout="/dev/pts/0 base\n",
+            stdout="/dev/pts/0:base\n",
         )
         clients = tmux.list_clients_in_group("base")
         assert len(clients) == 1
@@ -820,7 +820,7 @@ class TestListClientsInGroup:
     def test_excludes_unrelated_sessions(self, _mock_grouped, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout="/dev/pts/0 unrelated\n/dev/pts/1 base~1\n",
+            stdout="/dev/pts/0:unrelated\n/dev/pts/1:base~1\n",
         )
         clients = tmux.list_clients_in_group("base")
         assert len(clients) == 1
@@ -855,10 +855,38 @@ class TestListClientsInGroup:
         """
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout="/dev/pts/0 myview\n/dev/pts/1 unrelated\n",
+            stdout="/dev/pts/0:myview\n/dev/pts/1:unrelated\n",
         )
         clients = tmux.list_clients_in_group("base")
         assert clients == [{"tty": "/dev/pts/0", "session": "myview"}]
+
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.sessions_in_group",
+           return_value=["base", " base-lead", "base-trail "])
+    def test_keeps_edge_spaces_in_the_session_name(
+            self, _mock_members, mock_run):
+        """A whitespace split (or a ``strip``) lost the edge space and the client.
+
+        A repo directory may be named with a leading or trailing space, so
+        the session name keeps one (``paths.tmux_safe_name`` only rewrites
+        what tmux rewrites).  ``split(None, 1)`` collapsed a leading space
+        away, and stripping the output trimmed a trailing one, so the
+        client was never matched to the group and ``--disconnect-others``
+        left it attached — the field separator is ``:`` and the rows are
+        split without ``strip()`` for that reason.
+        """
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="/dev/pts/0: base-lead\n"
+                   "/dev/pts/1:base\n"
+                   "/dev/pts/2:base-trail \n",
+        )
+        clients = tmux.list_clients_in_group("base")
+        assert clients == [
+            {"tty": "/dev/pts/0", "session": " base-lead"},
+            {"tty": "/dev/pts/1", "session": "base"},
+            {"tty": "/dev/pts/2", "session": "base-trail "},
+        ]
 
 
 # ---------------------------------------------------------------------------

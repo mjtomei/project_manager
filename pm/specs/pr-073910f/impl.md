@@ -4402,3 +4402,40 @@ resolved name is a pm one (`pm-*`):
 Tests: `TestNonPmSessionIgnored` in `tests/test_pane_layout.py` (split,
 close and resize in a scratch session; a pm session still registers and
 still rebalances).
+
+## Review iteration (2026-11-03, review-loop 9d4c i2)
+
+Verification pass over the head after the 9d4c i1 fixes; two
+awkward-name parsing gaps, both of the class this PR already fixed
+elsewhere (a session name comes from the repo directory and may contain
+spaces).  No requirement changes.
+
+1. **`tmux.list_clients_in_group()` lost a client whose session name has
+   an edge space.**  It parsed `list-clients -F "#{client_tty}
+   #{session_name}"` with `split(None, 1)` — which collapses the leading
+   whitespace of the name — and stripped the whole output, which trims a
+   trailing one.  Either way the parsed name did not match
+   `sessions_in_group()`, so `pm session --disconnect-others` left that
+   client attached (and a view client still constrains the shared
+   window's size, which is what the flag exists to reclaim).  The fields
+   are now `:`-separated like every other session listing here (tmux
+   rewrites `:` in a name to `_`), and the rows are split without
+   `strip()`.  Verified live on tmux 3.2a: sessions named ` lead x` and
+   `trail x ` both round-trip through `#{client_tty}:#{session_name}`.
+   Test: `TestListClientsInGroup::test_keeps_edge_spaces_in_the_session_name`
+   in `tests/test_shared_sessions.py`.
+2. **The QA status dashboard command did not quote its arguments.**
+   `qa_loop._add_status_pane()` built `python3 <script> <status>
+   <session>` for tmux to run through the shell; a session name derived
+   from a repo directory with a space split into extra argv elements and
+   `qa_status.py` exited with its usage line, so such a project got no
+   dashboard.  All three arguments are `shlex.quote`d now.  Test:
+   `TestExecutionOnlyMainPane::test_status_command_survives_a_space_in_the_session_name`
+   in `tests/test_qa_execution_only_window.py`.
+
+Verification: the 9d4c i1 resize guard re-checked live on tmux 3.2a (a
+scratch session on a pm server is ignored and writes no `.resize` file; a
+pm session still rebalances), and the client parser live-checked with
+sessions named ` lead x` and `trail x `.  The PR-affected test files pass
+twice in one HOME (1195 each); full suite 5654 passed / 1 skipped, 421.0 s
+(log `/pm-captures/review-9d4c-i2/full-suite-final.log`).

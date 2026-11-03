@@ -1559,9 +1559,17 @@ def list_clients_in_group(base: str, socket_path: str | None = None) -> list[dic
     flag exists to reclaim.
 
     Returns list of dicts with keys: tty, session.
+
+    ``:`` separates the fields, like every other session listing here: a
+    session name is derived from the repo directory and may contain
+    spaces, and a whitespace split drops a *leading* one (``split(None,
+    1)`` collapses the run), so a session whose name starts with a space
+    was never matched against the group and its client stayed attached.
+    tmux rewrites ``:`` in a session name to ``_``, so it cannot collide
+    with the separator (the client tty never contains one either).
     """
     result = _run(
-        _tmux_cmd("list-clients", "-F", "#{client_tty} #{session_name}",
+        _tmux_cmd("list-clients", "-F", "#{client_tty}:#{session_name}",
                    socket_path=socket_path),
         text=True,
     )
@@ -1569,10 +1577,13 @@ def list_clients_in_group(base: str, socket_path: str | None = None) -> list[dic
         return []
     group_sessions = set(sessions_in_group(base, socket_path=socket_path))
     clients = []
-    for line in result.stdout.strip().splitlines():
-        parts = line.split(None, 1)
-        if len(parts) == 2 and parts[1] in group_sessions:
-            clients.append({"tty": parts[0], "session": parts[1]})
+    # No ``.strip()``: it would also trim a trailing space off the last
+    # session name (the names may contain one), while ``splitlines``
+    # already drops the final newline.
+    for line in result.stdout.splitlines():
+        tty, sep, session = line.partition(":")
+        if tty and sep and session in group_sessions:
+            clients.append({"tty": tty, "session": session})
     return clients
 
 
