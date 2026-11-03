@@ -1262,7 +1262,11 @@ def launch_bridge_in_tmux(prompt: str | None, cwd: str, session_name: str) -> st
     from pm_core.tmux import split_pane_background
 
     socket_path = f"/tmp/pm-bridge-{uuid.uuid4().hex[:12]}.sock"
-    bridge_cmd = f"python3 -m pm_core.bridge {socket_path} --cwd '{cwd}'"
+    # ``shlex.quote``, not ``'…'``: the workdir path is derived from the
+    # repo directory, so it may contain a single quote (``it's repo``),
+    # which closed the quote and made the pane die on a shell parse error
+    # (the same awkward-path rule as the prompt-file path above).
+    bridge_cmd = f"python3 -m pm_core.bridge {socket_path} --cwd {shlex.quote(cwd)}"
     if prompt:
         # The bridge reads the prompt file itself, so only its path matters
         # here (the returned bootstrap text is for claude-as-argv launches).

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shlex
 import signal
 import sys
 import time
@@ -53,9 +54,15 @@ class PrListProvider:
             project_root = Path.cwd()
 
         py = sys.executable or "python3"
+        # Both the interpreter path and the session name are shell words:
+        # tmux runs this command through the shell, and the session name is
+        # derived from the repo directory, so it may contain a space.  An
+        # unquoted one split into extra argv entries, argparse rejected
+        # them, and the home window showed its usage line instead of the
+        # PR list.  ``shlex.quote`` leaves ordinary values bare.
         cmd = (
-            f"{py} -m pm_core.home_window.pr_list "
-            f"--session {session}"
+            f"{shlex.quote(py)} -m pm_core.home_window.pr_list "
+            f"--session {shlex.quote(session)}"
         )
         tmux_mod.new_window(
             session, WINDOW_NAME, cmd, str(project_root), switch=False,

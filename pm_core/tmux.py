@@ -956,8 +956,16 @@ def list_windows(session: str) -> list[dict]:
     if result.returncode != 0:
         return []
     windows = []
-    for line in result.stdout.strip().splitlines():
-        parts = line.split(None, 2)
+    # No ``.strip()`` on the output and an explicit single-space
+    # separator: tmux stores a window name as given (it rewrites only
+    # control characters, verified on tmux 3.2a), so a name with a
+    # leading or trailing space must round-trip.  ``split(None, 2)``
+    # treats the run of separator + leading space as one separator and
+    # ``.strip()`` trims the last row's trailing space — and both drop a
+    # window with an empty name entirely (review-loop 1346 i1; the same
+    # round-trip rule as the session-name listings).
+    for line in result.stdout.splitlines():
+        parts = line.split(" ", 2)
         if len(parts) >= 3:
             windows.append({"id": parts[0], "index": parts[1], "name": parts[2]})
     return windows

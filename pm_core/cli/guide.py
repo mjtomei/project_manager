@@ -4,6 +4,7 @@ Registers the ``guide`` command and the ``notes`` command.
 """
 
 import os
+import shlex
 from pathlib import Path
 
 import click
@@ -130,7 +131,14 @@ def _run_guide(fresh=False):
             save_cmd = ""
             if not session_id and root:
                 session_id = str(uuid_mod.uuid4())
-                save_cmd = f"pm _save-session '{session_key}' '{session_id}' '{root}' ; "
+                # ``shlex.quote``, not ``'…'``: the root is a repo path,
+                # so it may contain a single quote (``it's repo``), which
+                # closed the quote and made the ``bash -c`` command fail
+                # to parse — the guide never started (the same
+                # awkward-path rule as the other launch surfaces).
+                save_cmd = (f"pm _save-session {shlex.quote(session_key)} "
+                            f"{shlex.quote(session_id)} "
+                            f"{shlex.quote(str(root))} ; ")
 
             env: dict[str, str] = {}
             claude_cmd = build_claude_shell_cmd(prompt=prompt, session_id=session_id,
@@ -138,7 +146,8 @@ def _run_guide(fresh=False):
                                                 env_out=env)
 
             # On failure (non-zero exit), clear the session so next launch starts fresh
-            clear_cmd = f"pm _clear-session '{session_key}' '{root}'" if root else "true"
+            clear_cmd = (f"pm _clear-session {shlex.quote(session_key)} "
+                         f"{shlex.quote(str(root))}" if root else "true")
             cmd = f"{save_cmd}{claude_cmd} ; rc=$? ; if [ $rc -ne 0 ]; then {clear_cmd}; fi"
 
             os.execvpe("bash", ["bash", "-c", cmd], {**os.environ, **env})

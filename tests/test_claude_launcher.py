@@ -404,6 +404,17 @@ class TestLaunchBridgeInTmux:
         assert "it'\\''s a test" in cmd
 
     @patch("pm_core.tmux.split_pane_background")
+    def test_quotes_a_cwd_with_a_quote(self, mock_split):
+        # The workdir path is derived from the repo directory, so it may
+        # contain a single quote.  Interpolated as `'{cwd}'` that closed
+        # the quote and the pane died on a shell parse error.
+        import shlex
+        launch_bridge_in_tmux(None, "/tmp/it's repo", "sess")
+        cmd = mock_split.call_args[0][2]
+        argv = shlex.split(cmd)
+        assert argv[argv.index("--cwd") + 1] == "/tmp/it's repo"
+
+    @patch("pm_core.tmux.split_pane_background")
     def test_no_prompt(self, mock_split):
         launch_bridge_in_tmux(None, "/tmp/proj", "sess")
         cmd = mock_split.call_args[0][2]

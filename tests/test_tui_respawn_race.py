@@ -474,6 +474,17 @@ class TestFindRunningTuiPane:
         assert _find_running_tui_pane(SESSION) == (tui, window)
         # Another session on the same server running a TUI does not count.
         server("new-session", "-d", "-s", "pm-other", "pm _tui")
+        # The stub reads $HOME/stub-exit when it starts, and the pane's
+        # shell can start well after `new-session` returns on a loaded
+        # machine.  Wait for the stub to be running before touching the
+        # file, or `pm-other` exits at startup and the "other session's
+        # TUI" assertion below fails nondeterministically.
+        other = server("list-panes", "-t", "=pm-other:", "-F", "#{pane_id}")
+        deadline = time.monotonic() + 5
+        while server("display-message", "-p", "-t", other,
+                     "#{pane_current_command}") != "sleep":
+            assert time.monotonic() < deadline
+            time.sleep(0.05)
         # A TUI pane that has exited (kept by remain-on-exit) is not one.
         server("set-option", "-w", "-t", f"={SESSION}:", "remain-on-exit",
                "on")

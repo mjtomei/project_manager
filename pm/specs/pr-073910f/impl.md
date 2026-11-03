@@ -4553,3 +4553,61 @@ code (checked in a scratch worktree at the previous head).
 Verification: the ten PR-affected test files pass twice in one HOME (807
 each); full suite 5663 passed / 1 skipped, 427.1 s (log
 `/pm-captures/review-9d4c-i4/full-suite-final.log`).
+
+## Review iteration (2026-11-03, review-loop 1346 i1)
+
+Recovery of the interrupted 9d4c i5 pass (the session was stopped without a
+verdict while re-running the affected tests; its uncommitted work is kept)
+plus the completion of that pass.  No requirement changes.
+
+1. **The home-window command did not quote the session name.**
+   `home_window.pr_list.PrListProvider.ensure_window()` builds
+   `python -m pm_core.home_window.pr_list --session <name>` as a *shell*
+   command for `tmux new-window`.  The session name is derived from the
+   repo directory, so one containing a space split into extra argv
+   entries; argparse rejected them and the home window showed its usage
+   line instead of the PR list.  Both the interpreter path and the name
+   now go through `shlex.quote` (which leaves ordinary values bare).
+2. **`launch_bridge_in_tmux()` interpolated the workdir as `'<cwd>'`.**
+   A workdir derived from a repo directory containing a single quote
+   (`it's repo`) closed the quote, so the bridge pane died on a shell
+   parse error.  The cwd now goes through `shlex.quote`, the same rule
+   `build_claude_shell_cmd` applies to its prompt-file path (QA S23).
+3. **`pm guide`'s setup path quoted the root the same way.**
+   `pm _save-session … '<root>'` and `pm _clear-session … '<root>'` broke
+   for a repo path containing a quote, so the guide never started.  Both
+   now use `shlex.quote`.  Incidental (guide.py is not otherwise touched
+   by this PR) but the same awkward-path class the PR hardens.
+4. **`tmux.list_windows()` trimmed window names.**  The listing was read
+   with `.strip().splitlines()` and parsed with `split(None, 2)`:
+   a window named ` lead` / `trail ` lost the edge space and a window
+   with an empty name was dropped entirely, so a rebalance (and every
+   name-based lookup) skipped it.  Rows are now read with `splitlines()`
+   and split on the explicit single-space separator, so a name — which
+   tmux stores as given, rewriting only control characters — round-trips
+   verbatim.
+5. **A respawn-race test read `$HOME/stub-exit` before the stub had
+   started.**  `test_dead_and_other_session_tui_panes_are_not_running_tuis`
+   created the `pm-other` session and immediately touched the file the
+   stub checks at startup; on a loaded machine the pane's shell starts
+   after `new-session` returns, so `pm-other` exited at once and the
+   "other session's TUI" assertion failed nondeterministically (observed
+   once in a combined run, not reproducible in isolation).  The test now
+   waits for the stub to be running (`#{pane_current_command}` = `sleep`)
+   before touching the file.
+
+Tests: `TestEnsureWindowQuoting::test_session_name_is_one_shell_word`
+(`tests/test_home_window.py`),
+`TestLaunchBridgeInTmux::test_quotes_a_cwd_with_a_quote`
+(`tests/test_claude_launcher.py`),
+`TestGuideSetupCommandQuoted::test_a_root_with_a_quote_is_one_shell_word`
+(`tests/test_awkward_repo_paths.py`) and
+`TestListWindows::test_keeps_edge_spaces_and_empty_names`
+(`tests/test_tmux.py`).  All four fail on the pre-fix code (checked in a
+scratch worktree at the previous head).  The respawn-race fix is verified
+against a stub that sleeps before checking the file: the old test fails
+deterministically, the new one passes.
+
+Verification: the 22 PR-affected test files pass twice in one HOME (1407
+each); full suite 5667 passed / 1 skipped, 426.9 s (log
+`/pm-captures/review-1346-i1/full-suite.log`).

@@ -547,6 +547,23 @@ class TestListWindows:
         assert result[1] == {"id": "@1", "index": "1", "name": "editor"}
 
     @patch("pm_core.tmux.subprocess.run")
+    def test_keeps_edge_spaces_and_empty_names(self, mock_run):
+        # tmux stores a window name as given, so a user's window named
+        # " lead" / "trail " / "" must come back verbatim; the old
+        # whitespace split trimmed the edge spaces and dropped the empty
+        # row, so a rebalance skipped that window (review-loop 1346 i1).
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="@0 0 main\n@1 1  lead\n@2 2 trail \n@3 3 \n",
+        )
+        assert list_windows("sess") == [
+            {"id": "@0", "index": "0", "name": "main"},
+            {"id": "@1", "index": "1", "name": " lead"},
+            {"id": "@2", "index": "2", "name": "trail "},
+            {"id": "@3", "index": "3", "name": ""},
+        ]
+
+    @patch("pm_core.tmux.subprocess.run")
     def test_empty_on_error(self, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stdout="")
         assert list_windows("sess") == []

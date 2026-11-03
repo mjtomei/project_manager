@@ -73,6 +73,28 @@ class TestParkIfOnSafety:
             assert home_window.park_if_on("pm-x", "@1") == []
 
 
+class TestEnsureWindowQuoting:
+    def test_session_name_is_one_shell_word(self):
+        # tmux runs the home-window command through the shell, and the
+        # session name is derived from the repo directory, so it may
+        # contain a space.  Unquoted, argparse saw extra argv entries and
+        # the home window showed its usage line instead of the PR list.
+        import shlex
+        from pathlib import Path
+
+        provider = PrListProvider()
+        with patch("pm_core.home_window.pr_list.tmux_mod.find_window_by_name",
+                   return_value=None), \
+             patch("pm_core.home_window.pr_list.tmux_mod.new_window") as new_window, \
+             patch("pm_core.store.find_project_root",
+                   return_value=Path("/tmp")):
+            provider.ensure_window("pm-my repo-abc123")
+        cmd = new_window.call_args.args[2]
+        words = shlex.split(cmd)
+        assert words[-2:] == ["--session", "pm-my repo-abc123"]
+        assert "--session 'pm-my repo-abc123'" in cmd
+
+
 class TestRefreshHome:
     def test_no_op_when_session_unresolvable(self):
         # No explicit session and none resolvable -> silent no-op, no

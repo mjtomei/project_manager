@@ -331,3 +331,38 @@ class TestAttachPrunesWindowsKilledOutsidePm:
         code = popen.call_args[0][0][-1]
         assert "rebalance('pm-x', '@0')" in code
         assert "'@3'" not in code
+
+
+class TestGuideSetupCommandQuoted:
+    def test_a_root_with_a_quote_is_one_shell_word(self, monkeypatch):
+        """``pm guide``'s setup path built ``pm _save-session ... '<root>'``.
+
+        The root is a repo path, so a quote in it closed the shell string:
+        ``bash -c`` failed to parse and the guide never started (the same
+        awkward-path class as the launch surfaces above).
+        """
+        from pm_core.cli import guide as guide_cli
+
+        root = Path("/tmp/it's repo/pm")
+        monkeypatch.setattr(guide_cli, "state_root", lambda: root)
+        monkeypatch.setattr(guide_cli, "_get_pm_session", lambda: None)
+        monkeypatch.setattr(
+            guide_cli.guide_mod, "detect_state",
+            lambda r: ("no_project", {"root": r}))
+        monkeypatch.setattr(guide_cli.guide_mod, "build_setup_prompt",
+                            lambda *a, **k: "prompt")
+        monkeypatch.setattr(guide_cli, "find_claude", lambda: "claude")
+        monkeypatch.setattr(guide_cli, "_in_pm_tmux_session", lambda: True)
+        monkeypatch.setattr(guide_cli, "_prepare_guide_workspace", lambda: None)
+        monkeypatch.setattr(guide_cli, "clear_session", lambda *a: None)
+        monkeypatch.setattr(guide_cli, "build_claude_shell_cmd",
+                            lambda **k: "claude")
+        execs = []
+        monkeypatch.setattr(guide_cli.os, "execvpe",
+                            lambda f, args, env: execs.append(args))
+
+        guide_cli._run_guide(fresh=True)
+
+        [args] = execs
+        words = shlex.split(args[-1])          # must not raise
+        assert str(root) in words
