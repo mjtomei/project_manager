@@ -40317,7 +40317,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-02T23:57:37.402363+00:00'
+  updated_at: '2026-11-03T00:18:52.533633+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42434,6 +42434,42 @@ prs:
       left them polling).'
     created_at: '2026-11-02T23:57:37Z'
     last_edited: '2026-11-02T23:57:37Z'
+  - id: note-8d729b8
+    text: 'QA S83 refiner (2026-11-02, 6d1e8651): all 4 stories held live in /scratch/s83r
+      (evidence /pm-captures/pr-8020495/s83-refiner). --group works in the container:
+      use the primary group ''pm'' (`pm session --group pm`, socket 0770 pm:pm under
+      /tmp/pm-sessions); Y is then on its own shared socket too. Plain-shell -C/PM_PROJECT/root/subdir
+      reads of the global X and group Y both resolve to the share-mode journal and
+      match the inside runtime/current at the same moment; PR workdir without -C =
+      clone''s own tag (pm-pm-<XA>-<slug>-<hash>-<hash>/), status pending. `pm session
+      kill` needs --global (plain form rc 1 ''No session pm-<plain tag> found'');
+      a stopped X reads pm-<plain tag>/ empty; `pm session --global` again restores
+      the global journal. Story 4 reshaped to stop X while its 3rd loop''s i2 runs:
+      after restart it reads interrupted / swept on tui-mount, i2 ''→ unknown >Ns
+      (pid <old>)'', grace lost. Pager compare must ignore the fake idle clock ''agent
+      turn finished at HH:MM:SS''.'
+    created_at: '2026-11-02T23:59:02Z'
+    last_edited: '2026-11-02T23:59:02Z'
+  - id: note-7af0f6c
+    text: 'QA S83 (2026-11-03) PASS on 8dc458192 (app d2e0097e), no code edits: S77
+      E18 re-check held live (sandbox /scratch/q83, torn down; captures + per-Then
+      README in /pm-captures/scenarios/83). X `pm session --global` + Y `pm session
+      --group pm` in one HOME. (1) Concurrent loops cc67/76a3 done PASS, iterations
+      exec 23s [launching 2s · agent 21s], own journal paths, 0 cross-project hits,
+      owners/ one lock per TUI pid, pager == `| cat` (X differs only by the fake idle
+      clock). (2) `pm tui restart` in X at z+2.6 s: X loop swept on tui-mount (owner-exited
+      form <0.5 s), i1 >3s (pid 27425), grace lost; Y 151 reads 0 interrupted/lost/swept,
+      grace only fell, journal pid Y only. (3) Plain shell outside tmux at z+4.1..5.8
+      s: X -C/PM_PROJECT/root/docs-subdir and Y -C/root all name the share-mode journal,
+      attempts == inside ref, runtime == nearest inside read, current equal but for_s;
+      workdir without -C = clone tag pm-pm-<XA>-…-b3a760a3-415b977a, exists false,
+      [], pending; -C ~/xproj rc 1. (4) `pm session kill` rc 1 (pm-<plain tag>), `kill
+      --global` at i2 grace 15 s left: read names pm-<plain tag>/ (created by the
+      read), []; `pm session --global` again: new pid 49401 + lock, loop 1e7d swept
+      at the mount, i2 >7s (pid 27425), grace lost; new loop 4074 done PASS; Y 306
+      reads clean. agg is not installed: arm64 v1.9.0 download.'
+    created_at: '2026-11-03T00:18:52Z'
+    last_edited: '2026-11-03T00:18:52Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
