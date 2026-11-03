@@ -1184,8 +1184,8 @@ def session_list():
         click.echo("tmux is not installed.", err=True)
         raise SystemExit(1)
 
-    from pm_core.paths import (SHARED_SOCKET_DIR, get_session_tag,
-                               session_socket_path)
+    from pm_core.paths import (SHARED_SOCKET_DIR, display_width,
+                               get_session_tag, session_socket_path)
 
     # The cwd project's socket is probed by name as well, so its session is
     # still listed when the socket directory can be written but not read
@@ -1234,14 +1234,20 @@ def session_list():
         return
 
     # Session names are repo-name + hash, so they can be long; size the
-    # column to the data instead of truncating/misaligning.
-    width = max(len("SESSION"), *(len(r["name"]) for r in rows))
+    # column to the data instead of truncating/misaligning.  Measure in
+    # terminal cells, not code points: a repo directory named in a
+    # non-Latin script keeps its wide characters in the tag
+    # (``paths.tmux_safe_name``), and padding by ``len()`` would shift the
+    # CLIENTS/SOCKET columns right on every row that has one.
+    width = max(display_width("SESSION"),
+                *(display_width(r["name"]) for r in rows))
     click.echo(f"{'SESSION':<{width}} {'CLIENTS':>7}  SOCKET")
     for row in rows:
         sock = row["socket"] or "(default server)"
         if row.get("shared"):
             sock += "  (shared)"
-        click.echo(f"{row['name']:<{width}} {row['attached']:>7}  {sock}")
+        pad = " " * (width - display_width(row["name"]))
+        click.echo(f"{row['name']}{pad} {row['attached']:>7}  {sock}")
 
 
 @session.command("kill")

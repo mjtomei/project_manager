@@ -4132,6 +4132,99 @@ class TestStartSessionName:
         assert session_mod._resolve_start_session_name(shared=True) == "pm-live"
 
 
+class TestOwnedOnlyForTarget:
+    """The ownership exemption is "not the server this process is attached to".
+
+    A joiner's plain ``pm session`` inside a shared session adopts it with
+    ``is_shared`` false (``_set_share_mode_env`` clears ``PM_SHARE_MODE``
+    when no flag is given), and the shared socket belongs to the sharing
+    user, so the ownership check must exempt that server — otherwise the
+    joiner cannot reattach from a pane (review-loop 43f6 i1).  Every other
+    implicit target keeps requiring a socket this user owns.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _plain_context(self, monkeypatch, tmp_path):
+        """A private invocation (no ``--global``/``--group``) as a plain shell."""
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+
+    def test_attached_to_the_sessions_own_socket(self, monkeypatch):
+        from pm_core.cli import session as session_mod
+
+        sock = str(paths.session_socket_path("repo-abc"))
+        monkeypatch.setattr(session_mod, "_get_current_pm_session",
+                            lambda: "pm-repo-abc")
+        monkeypatch.setattr(session_mod.tmux_mod, "resolve_ambient_socket",
+                            lambda **kwargs: sock)
+
+        assert session_mod._attached_to_session_socket("pm-repo-abc") is True
+        assert session_mod._owned_only_for_target("pm-repo-abc") is False
+
+    def test_legacy_default_server_is_not_the_sessions_socket(self, monkeypatch):
+        """A legacy session's ambient socket is the default server's path.
+
+        It never equals the deterministic private path, so a socket
+        planted under that name is still refused (review-loop b48f i15).
+        """
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setattr(session_mod, "_get_current_pm_session",
+                            lambda: "pm-repo-abc")
+        monkeypatch.setattr(session_mod.tmux_mod, "resolve_ambient_socket",
+                            lambda **kwargs: str(paths.default_socket_path()))
+
+        assert session_mod._attached_to_session_socket("pm-repo-abc") is False
+        assert session_mod._owned_only_for_target("pm-repo-abc") is True
+
+    def test_a_different_ambient_session_is_not_attached(self, monkeypatch):
+        """Being inside pm-x does not exempt pm-y's socket (R5b's shape)."""
+        from pm_core.cli import session as session_mod
+
+        sock = str(paths.session_socket_path("repo-abc"))
+        monkeypatch.setattr(session_mod, "_get_current_pm_session",
+                            lambda: "pm-other")
+        monkeypatch.setattr(session_mod.tmux_mod, "resolve_ambient_socket",
+                            lambda **kwargs: sock)
+
+        assert session_mod._attached_to_session_socket("pm-repo-abc") is False
+        assert session_mod._owned_only_for_target("pm-repo-abc") is True
+
+    def test_no_ambient_socket_is_not_attached(self, monkeypatch):
+        """A pane whose $TMUX names no socket proves nothing: fail closed."""
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setattr(session_mod, "_get_current_pm_session",
+                            lambda: "pm-repo-abc")
+        monkeypatch.setattr(session_mod.tmux_mod, "resolve_ambient_socket",
+                            lambda **kwargs: None)
+
+        assert session_mod._attached_to_session_socket("pm-repo-abc") is False
+
+    def test_an_unqueryable_tmux_is_not_attached(self, monkeypatch):
+        """tmux missing/unexecutable degrades to "not attached", never raises."""
+        from pm_core.cli import session as session_mod
+
+        def _boom():
+            raise OSError("tmux: not found")
+
+        monkeypatch.setattr(session_mod, "_get_current_pm_session", _boom)
+
+        assert session_mod._attached_to_session_socket("pm-repo-abc") is False
+        assert session_mod._owned_only_for_target("pm-repo-abc") is True
+
+    def test_a_shared_context_is_exempt_without_being_attached(self, monkeypatch):
+        """``--global``/``--group`` (or a shared pane) may name the owner's socket."""
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setenv("PM_SHARE_MODE", "global")
+        monkeypatch.setattr(session_mod, "_attached_to_session_socket",
+                            lambda name: pytest.fail(
+                                "a shared context needs no attachment check"))
+
+        assert session_mod._owned_only_for_target("pm-shared-abc") is False
+
+
 class TestSessionIsShared:
     """Shared-ness comes from the session, not only from this call's flags.
 
@@ -5290,6 +5383,34 @@ class TestSessionListCommand:
         assert "/tmp/pm-sessions/pm-a" in lines[1]
         assert "(default server)" in lines[2]
         assert "(shared)" in lines[3]
+
+    def test_wide_names_keep_the_columns_aligned(self, monkeypatch):
+        """Pad by terminal cells, not code points (review-loop 43f6 i2).
+
+        ``paths.tmux_safe_name`` keeps valid non-ASCII text in the tag, so
+        a repo directory named in a non-Latin script produces a session
+        name whose display width exceeds ``len()``.  Padding by ``len()``
+        would push the SOCKET column right on that row only.
+        """
+        result = self._invoke(monkeypatch, [
+            {"name": "pm-日本語-abc12345",
+             "socket": "/tmp/pm-sessions/pm-wide",
+             "attached": 1, "shared": False},
+            {"name": "pm-a", "socket": "/tmp/pm-sessions/pm-a",
+             "attached": 0, "shared": False},
+        ])
+
+        assert result.exit_code == 0, result.output
+        header, wide, plain = result.output.splitlines()
+        from pm_core.paths import display_width
+
+        def socket_column(line, marker):
+            return display_width(line[:line.index(marker)])
+
+        assert "pm-日本語-abc12345" in wide
+        assert (socket_column(header, "SOCKET")
+                == socket_column(wide, "/tmp/pm-sessions/pm-wide")
+                == socket_column(plain, "/tmp/pm-sessions/pm-a"))
 
     def test_empty_listing(self, monkeypatch):
         result = self._invoke(monkeypatch, [])

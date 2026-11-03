@@ -4333,3 +4333,39 @@ session-start path.
 Verification: full suite 5640 passed / 1 skipped, 439.7 s (log
 `/pm-captures/review-43f6-i1/full-suite-final.log`); the twelve
 PR-affected test files also pass twice in one HOME (1034 each).
+
+## Review iteration (2026-11-03, review-loop 43f6 i2)
+
+No requirement changes; one test gap in the i1 exemption and one
+rendering defect in the new `pm session list`.
+
+1. **The i1 ownership exemption had no direct test.**  The only test
+   replaced `_attached_to_session_socket()` with a lambda, so the
+   helper's own two conditions were unverified: a regression (dropping
+   the "inside this session" test, or the socket comparison) would still
+   pass the suite.  New `TestOwnedOnlyForTarget` covers the attached
+   case, a legacy default-server ambient socket (never the session's own
+   socket, so a planted one is still refused — b48f i15), a different
+   ambient session, no ambient socket, an unqueryable tmux (degrades to
+   "not attached", never raises), and the shared-context exemption that
+   must not consult attachment at all.
+
+2. **`pm session list` padded by code points, not terminal cells.**  The
+   SESSION column is sized from the data (b972 i4), but `len()` counts
+   characters: `paths.tmux_safe_name` keeps valid non-ASCII text, so a
+   repo directory named in a non-Latin script produced a row whose
+   CLIENTS/SOCKET columns sat further right than every other row (and
+   than the header).  The width rule the home-window renderer already
+   used (`_char_width`/`_display_width`, combining marks zero, East
+   Asian Wide/Fullwidth two cells) is now `paths.char_width()` /
+   `paths.display_width()`; `home_window/pr_list.py` imports them
+   instead of keeping its own copy, and `pm session list` pads by cells.
+   Test: `test_wide_names_keep_the_columns_aligned` (the SOCKET column
+   starts at the same display column for the header, a CJK-named row and
+   an ASCII row).
+
+Verification: `tests/test_session_socket_isolation.py` 298 passed;
+`tests/test_home_window.py tests/test_tmux.py tests/test_cli_helpers.py`
+208 passed; the changed test files also pass twice in one HOME (338
+each); full suite 5647 passed / 1 skipped, 437.8 s (log
+`/pm-captures/review-43f6-i2/full-suite-final.log`).

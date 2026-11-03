@@ -19,6 +19,7 @@ import stat
 import subprocess
 import tempfile
 import time
+import unicodedata
 from pathlib import Path
 
 # Cache for session tags to avoid repeated subprocess calls
@@ -280,6 +281,28 @@ def tmux_safe_name(name: str) -> str:
         if chars[i] == "$" and chars[i + 1] in _TMUX_DOLLAR_ESCAPED_BEFORE:
             chars[i] = "_"
     return "".join(chars)
+
+
+def char_width(ch: str) -> int:
+    """Display columns a single character occupies in a terminal.
+
+    Combining marks add nothing; East-Asian Wide/Fullwidth glyphs take two
+    cells.  pm keeps valid non-ASCII text in a session tag
+    (:func:`tmux_safe_name`), so a table that pads by ``len()`` misaligns
+    every row whose name contains such text.
+    """
+    if unicodedata.combining(ch):
+        return 0
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+
+def display_width(text: str) -> int:
+    """Return the number of terminal cells *text* occupies.
+
+    The one definition of display width: ``pm session list`` pads its
+    columns with it, and the home-window renderer truncates with it.
+    """
+    return sum(char_width(ch) for ch in text)
 
 
 def get_session_tag(start_path: Path | None = None, use_github_name: bool = True) -> str | None:

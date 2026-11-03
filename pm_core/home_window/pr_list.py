@@ -15,10 +15,11 @@ import os
 import signal
 import sys
 import time
-import unicodedata
 from pathlib import Path
 
 from pm_core import tmux as tmux_mod
+from pm_core.paths import char_width as _char_width
+from pm_core.paths import display_width as _display_width
 from pm_core.paths import pm_home
 
 
@@ -82,19 +83,6 @@ def _terminal_size() -> tuple[int, int]:
         return (ts.columns, ts.lines)
     except OSError:
         return DEFAULT_SIZE
-
-
-def _char_width(ch: str) -> int:
-    # Display columns a single character occupies in a terminal.
-    # Combining marks add nothing; East-Asian Wide/Fullwidth glyphs
-    # (including the PR status emoji like ⏳/🔨/👀) take two cells.
-    if unicodedata.combining(ch):
-        return 0
-    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
-
-
-def _display_width(s: str) -> int:
-    return sum(_char_width(c) for c in s)
 
 
 def _truncate(line: str, width: int) -> str:
