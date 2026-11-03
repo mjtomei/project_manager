@@ -305,10 +305,13 @@ THEN the log names `pm plan list` and an empty file never opens the editor
 on the project root. GIVEN a standalone PR with no plan, WHEN the user
 presses `v`, THEN the log names `M` and `pm pr edit <id> --plan <plan-id>`.
 `pm pr edit --help` names title, description, dependencies, status, plan
-and the interactive editor; `pm session --help` says the notes pane is
-on-demand (`n`), not part of the layout; `pm help` and `pm getting-started`
-describe `pm session` as starting the TUI with notes opened by `n`, not a
-"notes editor". (Commits 6a82 i7/i10.)
+and the interactive editor. `pm help`'s TUI / command-bar section describes
+`pm session` as starting/attaching the TUI with `n` opening notes, and
+`pm getting-started` says "press n there for the notes pane"; neither
+promises a "notes editor" and `pm session --help` makes no notes-pane claim
+at all (the correction lives in the two user-facing help surfaces and in
+`_session_start`'s internal docstring, not the group help). (Commits 6a82
+i7/i10.)
 
 R34. **Picker chords name their fzf requirement.** GIVEN the TUI, WHEN the
 user opens `?` or runs `pm tui keys`, THEN both say the `z`/`zz` picker
@@ -446,10 +449,10 @@ and does not start a second action.
 
 No **[UNRESOLVED]** ambiguities remain.
 
-## Run history (as of 2026-11-03)
+## Run history (as of 2026-11-03, updated by the scenario-24 planning pass)
 
-Scenarios 1–18 have run against this branch. Scenario titles and verdicts
-(see the PR notes for the detailed errata and captures):
+Scenarios 1–18 and 20–23 have run against this branch. Scenario titles and
+verdicts (see the PR notes for the detailed errata and captures):
 
 - 1–5: CLI help discoverability; wrong-state/not-found remedies; TUI QA
   modes and command-bar help; concurrent QA/review remedies; plan name
@@ -468,9 +471,19 @@ Scenarios 1–18 have run against this branch. Scenario titles and verdicts
   run was interrupted by the workdir/runner recovery; no verdict was
   recorded. Scenario 20 from that run ("Concurrent actors on shared state,
   library files, and the command bar") was queued but never launched.
+- 20–23 (the re-planned run): concurrent scaffolders / autostart targets
+  (PASS); the command bar as a general CLI — multi-line remedy and a live
+  loop stop (PASS after efab1f4f8); fresh restart parity across start,
+  review and sign-off (PASS); single-instruction `pm qa run` and its
+  no-session / not-found / launch remedies (PASS after 162913959).
 
-The next plan therefore starts at scenario 20 and covers: the unrun
-concurrency edge cases E15/E16/E17, the command-bar CLI passthrough
-(R35/E18), fresh restarts on start/review/signoff (R2/R3), and the
-single-instruction QA path (`pm qa run`) plus the `pm qa`/launch remedies.
+The next plan starts at scenario 24 and covers the two areas still without
+a verdict: the interrupted plans-view / standalone-PR plan remedies
+(R24/R33, including the plans-view keys and the corrected session /
+`pr edit` help summaries) and the `pm pr qa` diagnostic contract itself
+(R15/E1/E6/E8: what a valid run prints, the missing-session remedy, the
+mode-spelling tolerance, wrong-state refusals, and the narrow-terminal
+help). Concurrency is exercised through the per-plan tmux windows the
+plans-view actions share, and by leaving a live QA run untouched while
+diagnostics run beside it.
 
