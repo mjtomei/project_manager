@@ -305,7 +305,10 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]?[/]  Show this help", classes="help-row")
             yield Label("  [bold]ctrl+b d[/]  Detach from session", classes="help-row")
             yield Label("Tmux Prefix Bindings", classes="help-section")
-            yield Label("  [bold]prefix P[/]  PR action picker popup (q/Esc to quit; z s/d/t/i fresh, zz d/t loop)", classes="help-row")
+            # The z/zz chords exist only in the fzf picker; the no-fzf
+            # fallback is a numbered line menu that ignores `z` (it closes
+            # the popup), so the row names the requirement.
+            yield Label("  [bold]prefix P[/]  PR action picker popup (q/Esc to quit; z s/d/t/i fresh, zz d/t loop — requires fzf)", classes="help-row")
             yield Label("  [bold]prefix M[/]  pm command runner popup (Ctrl+C to quit)", classes="help-row")
             yield Label("  [bold]prefix R[/]  Rebalance panes", classes="help-row")
             # The loop keys run the tree-view PR actions (`review_pr` /

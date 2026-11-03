@@ -536,6 +536,20 @@ def test_tui_keys_documents_prefix_keys_as_prefixes():
     assert "ys start" in out and "yd review" in out and "yt QA" in out
 
 
+def test_picker_chord_help_names_the_fzf_requirement():
+    """The picker's z/zz chords exist only in the fzf picker.
+
+    Without fzf the PR action picker falls back to a numbered line menu
+    that has no chord handling (a `z` press is not a shortcut and closes
+    the popup).  Both help surfaces documented the chords unconditionally,
+    so an operator without fzf was sent to a key that does not exist there
+    — the same class of claim-versus-code drift this PR sweeps.
+    """
+    flat = " ".join(CliRunner().invoke(cli, ["tui", "keys"]).output.split())
+    assert "z s/d/t/i fresh zz d/t loop (requires fzf" in flat
+    assert "z s/d/t/i fresh, zz d/t loop — requires fzf" in _render_help_screen()
+
+
 def test_z_prefix_names_every_action_it_modifies():
     """`z` is not limited to s/S/d/t.
 

@@ -329,7 +329,8 @@ QA view (q):
 
 Tmux prefix bindings:
   prefix P         PR action picker popup (q/Esc to quit)
-                   z s/d/t/i fresh   zz d/t loop
+                   z s/d/t/i fresh   zz d/t loop (requires fzf; the
+                   no-fzf fallback is a numbered menu with no chords)
   prefix M         pm command runner popup (Ctrl+C to quit)
   prefix R         Rebalance panes
 

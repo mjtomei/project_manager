@@ -765,3 +765,15 @@ the routed form and `--fresh` so help is complete.
   "install it first", with a parametrized test.
   Full suite (minus the known markdown-module baseline): 5561 passed,
   1 skipped.
+
+- Review-loop 6a82 i1: one help claim the picker's own code contradicts.
+  Both `pm tui keys` and the `?` screen documented the PR-action picker's
+  `z s/d/t/i fresh` / `zz d/t loop` chords unconditionally, but those
+  chords exist only in the fzf picker. Without fzf the picker falls back
+  to a numbered line menu (which prints its own "install fzf" tip) that
+  has no chord handling — a `z` press is not a shortcut and just closes
+  the popup. Both rows now say "requires fzf" and name the fallback, with
+  a test asserting both surfaces (the same claim-versus-code drift this
+  sweep exists to remove).
+  Full suite (minus the known markdown-module baseline): 5563 passed,
+  1 skipped.
