@@ -3154,9 +3154,57 @@ class TestResolveSessionSocket:
         real_uid = os.getuid()
         monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", sock_dir)
         monkeypatch.setattr(session_mod.os, "getuid", lambda: real_uid + 1)
+        # An implicit lookup from a plain shell: private context, and not
+        # attached to any session (so the ownership check applies).
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        monkeypatch.delenv("TMUX", raising=False)
 
         with pytest.raises(SystemExit):
             session_mod._resolve_session_socket("pm-repo-abc", False)
+
+    def test_an_attached_shared_session_is_not_refused(self, monkeypatch,
+                                                       tmp_path):
+        """A joiner's plain ``pm session`` may target the sharing user's socket.
+
+        ``_set_share_mode_env`` pops ``PM_SHARE_MODE`` for an invocation
+        with no ``--global``/``--group``, so ``is_shared`` is false even
+        when the ambient session it adopts is shared.  The socket belongs
+        to the sharing user by design, so the ownership check must exempt
+        the server this process is already attached to — the same rule
+        ``_owned_only_for_target`` applies to kill/mobile/discovery.  A
+        refusal here would block a joiner reattaching from inside the
+        session (the documented fallback is a private twin, not an error).
+        """
+        from pm_core.cli import session as session_mod
+
+        sock_dir = tmp_path / "pm-sessions"
+        sock_dir.mkdir()
+        sock = sock_dir / "pm-shared-abc"
+        sock.write_text("")
+        real_uid = os.getuid()
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", sock_dir)
+        monkeypatch.setattr(session_mod.os, "getuid", lambda: real_uid + 1)
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.setattr(session_mod, "_attached_to_session_socket",
+                            lambda name: name == "pm-shared-abc")
+        seen = {}
+
+        def fake_find(name, owned_only=False):
+            seen["owned_only"] = owned_only
+            return str(sock), True
+
+        monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
+                            fake_find)
+        monkeypatch.setattr(session_mod.tmux_mod, "session_exists",
+                            lambda *a, **kw: True)
+
+        assert session_mod._resolve_session_socket(
+            "pm-shared-abc", False) == (str(sock), False)
+        # The probe follows the same exemption, so the shared socket the
+        # joiner is attached to is the one that answers.
+        assert seen["owned_only"] is False
+        assert os.environ["PM_TMUX_SOCKET"] == str(sock)
 
     def test_refuses_a_symlink_planted_at_the_socket_path(self, monkeypatch,
                                                           tmp_path):
@@ -4160,6 +4208,36 @@ class TestSessionIsShared:
         with patch("pm_core.cli.session.subprocess.run"):
             session_mod._register_tmux_bindings("pm-x")
         assert opts == []
+
+    def test_after_kill_pane_hook_passes_the_session_name(self, monkeypatch):
+        """The hook must name the session it fired in (QA S54, bb80cd1a).
+
+        A hook process can inherit a ``$TMUX_PANE`` that names a pane on a
+        different server (the pane the hook reports has just been killed,
+        or a server started from inside an ambient tmux).  Without the
+        argument, ``pm _pane-closed`` resolved an empty session, found no
+        registry and never respawned the killed TUI.  ``#{q:session_name}``
+        is tmux's shell-quoted form: the name may contain a space.
+        """
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        monkeypatch.setattr(session_mod.tmux_mod, "session_is_shared",
+                            lambda *a, **k: False)
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        monkeypatch.setattr(session_mod.subprocess, "run", fake_run)
+        session_mod._register_tmux_bindings("pm-x")
+
+        hooks = [c for c in calls
+                 if "set-hook" in c and "after-kill-pane" in c]
+        assert hooks, "after-kill-pane hook was not installed"
+        assert hooks[0][-1] == (
+            "run-shell 'pm _pane-closed #{q:session_name}'")
 
 
 class TestPaneSwitchBindingGate:

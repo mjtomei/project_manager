@@ -698,14 +698,23 @@ def _resolve_session_socket(session_name: str,
         raise SystemExit(1)
     # Private servers live in a world-writable directory; refuse to connect
     # to a socket another user planted at our path.  Shared sessions are
-    # owned by the sharing user by design, so this check is private-only.
+    # owned by the sharing user by design, so this check is private-only —
+    # and so is the server this process is already attached to: a joiner's
+    # plain ``pm session`` inside a shared session adopts that session
+    # (``_resolve_start_session_name``), which makes ``is_shared`` false
+    # (``_set_share_mode_env`` pops ``PM_SHARE_MODE`` without a flag) while
+    # the socket is the sharing user's.  ``_owned_only_for_target`` is the
+    # same "implicit target, not the server I am on" rule ``kill``/``mobile``
+    # apply, so a joiner reattaching is not refused a socket that is
+    # legitimately not theirs.
     # It deliberately runs before the legacy check below: fail closed on a
     # socket we do not own even though the legacy path would not connect to
     # it (a squatted socket is a hostile condition, not something to route
     # around silently).
     # The ownership comes from the same ``lstat`` result, so a dangling
     # link planted by another user is never mistaken for our own socket.
-    if not is_shared:
+    owned_only = not is_shared and _owned_only_for_target(session_name)
+    if owned_only:
         owner = entry.st_uid if entry is not None else os.getuid()
         if owner != os.getuid():
             click.echo(
@@ -718,9 +727,12 @@ def _resolve_session_socket(session_name: str,
     if not is_shared:
         # Private start: the uid check above already refused a socket we do
         # not own, and this repeats it inside the probe so a file created
-        # between the check and the connect cannot be adopted either.
+        # between the check and the connect cannot be adopted either.  The
+        # probe follows the same exemption: the server this process is
+        # attached to is not a planted one (and for a shared session it is
+        # the only one that answers).
         hosting_socket, on_private = tmux_mod.find_session_server(
-            session_name, owned_only=True)
+            session_name, owned_only=owned_only)
         if hosting_socket is not None and not on_private:
             _log.info("legacy default-server session found: %s", session_name)
             # Address the default server explicitly rather than clearing the

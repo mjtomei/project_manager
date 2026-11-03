@@ -4278,3 +4278,58 @@ it is not a regression of this PR: R7 hashes the long *socket* path but
 the other tag-derived artifacts still use the raw tag.
 
 Residual notes unchanged (see 1237 i2).
+
+## QA-driven fix (2026-11-02, commit bb80cd1a)
+
+The `after-kill-pane` hook now passes the session it fired in:
+`run-shell 'pm _pane-closed #{q:session_name}'`, and `pm _pane-closed`
+takes it as an optional argument, falling back to `$TMUX_PANE` when it is
+empty.  A hook process can inherit a `$TMUX_PANE` that names a pane on a
+different server (the pane the hook reports has just been killed, or a
+server started from inside an ambient tmux); a targeted
+`display-message` then returned an empty session name,
+`handle_any_pane_closed()` found no registry and the killed TUI was never
+respawned (QA S54).  The `after-split-window` hook already used the same
+form.  Test:
+`test_pane_closed_uses_the_hook_session_name_over_a_stale_tmux_pane`
+(`tests/test_tui_own_session_name.py`).
+
+## Review iteration (2026-11-03, review-loop 43f6 i1)
+
+No requirement changes; one shared-session consistency fix in the
+session-start path.
+
+1. **A joiner's plain `pm session` inside a shared session was refused.**
+   `_session_start()` computes `is_shared` from the `--global`/`--group`
+   flags only, and `_set_share_mode_env()` pops `PM_SHARE_MODE` when
+   neither is given.  A plain `pm session` inside an already-shared
+   session therefore adopts the ambient shared session (703c i8) with
+   `is_shared` false, and `_resolve_session_socket()`'s private-socket
+   ownership check compared the socket's uid with the *joiner's*: the
+   shared socket belongs to the sharing user.  It exited with
+   "Refusing to use tmux socket … owned by uid N, not you", so a second
+   account in a `--global`/`--group` session could not reattach from a
+   pane.  The owner was unaffected (they own the socket), which is why
+   703c i8 recorded the residual as harmless.  QA ambiguity 3 ("a
+   joiner's plain `pm session` starts a private twin") assumed the joiner
+   has no local pane registry; their own `--global --dir` attach adopts
+   the running TUI and writes one (`_adopt_running_tui`), after which the
+   ambient-adoption rule (703c i8) applies and the private-twin fallback
+   is not reached.  Refusing was never the intended outcome.
+   The check and the `find_session_server()` probe now use
+   `_owned_only_for_target()`, the same "implicit target, not the server
+   this process is already attached to" rule `pm session kill`/`mobile`
+   apply: a process attached to the session's own server is exempt (a
+   real socket is never a link, and that server is the one it is already
+   talking to), while a plain shell and a pane of a different pm session
+   still require ownership.  A legacy session's default-server socket
+   never equals the deterministic path, so its check is unchanged.
+   Tests: `test_an_attached_shared_session_is_not_refused` (asserts both
+   the ownership check and the probe exemption), and
+   `test_refuses_socket_owned_by_another_user` now clears
+   `PM_SHARE_MODE`/`TMUX` so it exercises the unattached case
+   deterministically.
+
+Verification: full suite 5640 passed / 1 skipped, 439.7 s (log
+`/pm-captures/review-43f6-i1/full-suite-final.log`); the twelve
+PR-affected test files also pass twice in one HOME (1034 each).
