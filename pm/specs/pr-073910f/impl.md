@@ -437,8 +437,15 @@ No **[UNRESOLVED]** ambiguities.
   TUI logs and continues rather than issuing a server-wide detach.
 - `--global`/`--group` still set `window-size=smallest` on base + grouped
   sessions and still grant `server-access` on the private/shared socket.
-- Non-git directory: session name falls back to `pm-<dir>-00000000`; the tag
-  is taken from that name, so a deterministic socket still exists.  With a
+- Non-git directory: session name falls back to `pm-<dir>-00000000`, where
+  `<dir>` is the project directory found by walking up from the cwd — the
+  nearest ancestor with `pm/project.yaml`, else the nearest with a
+  root-level `project.yaml` (pm's legacy standalone layout, which
+  `store.find_project_root` still accepts), else the cwd itself — so a
+  subdirectory of the project attaches to the project's session instead of
+  starting a second one (QA scenario 62; the standalone layout in
+  review-loop 3d42 i1).  The tag is taken from that name, so a
+  deterministic socket still exists.  With a
   share mode set (`--global`/`--group`, or inherited inside a shared
   session) the fallback ends in a hash of the mode instead, so
   `pm session kill --global` cannot compute the private session's own name;
@@ -4645,3 +4652,41 @@ under the old name.  pm never renames a session and every registry,
 pidfile and socket is keyed by the name, so a renamed session is already
 outside pm's management (there was no `pm session list` before this
 change, so nothing regressed); it is not renamed or re-keyed here.
+
+## QA-driven fix (2026-11-03, commit 50cbdef7)
+
+QA scenario 62 found one defect in the non-git session-name fallback (the
+`pm-<dir>-00000000` path), and it was fixed on the head:
+
+1. **A non-git project's fallback name was taken from the caller's cwd
+   basename.**  A plain `pm session` run from a subdirectory of such a
+   project therefore computed a different name, started a second session
+   and TUI on a second socket, and never attached to the project's
+   session.  The fallback now walks up from the cwd to the directory
+   holding `pm/project.yaml` — the anchor pm's own project discovery uses
+   — and keeps the cwd basename only for a directory that is not a pm
+   project at all.
+
+Test: `test_non_git_fallback_uses_the_project_dir_from_a_subdirectory`
+(`TestGetSessionNameForCwd`, `tests/test_cli_helpers.py`).
+
+## Review iteration (2026-11-03, review-loop 3d42 i1)
+
+Verification pass over the head after the S58-S62 QA fixes; no requirement
+changes.  One gap of the QA S62 class remained, in the same fallback:
+
+1. **The non-git anchor ignored pm's legacy standalone layout.**  The
+   walk-up looked for `pm/project.yaml` only, but pm's project discovery
+   (`store.find_project_root`) also accepts a root-level `project.yaml`
+   for backward compatibility.  For such a project the subdirectory bug
+   was still present: a plain `pm session` from a subdirectory computed
+   the subdirectory's basename, so it started a second session and TUI on
+   a second socket instead of attaching to the project's.  The walk-up now
+   prefers the nearest ancestor with `pm/project.yaml` and, only when
+   there is none, the nearest with a root-level `project.yaml` — so a
+   target repo's own `pm/` subdirectory is never mistaken for the project.
+
+Tests: `test_non_git_standalone_project_anchors_on_its_root` (fails on the
+pre-fix head with `pm-specs-00000000`) and
+`test_a_nested_pm_dir_wins_over_a_root_level_project_yaml` (the
+`pm/project.yaml` preference), both in `TestGetSessionNameForCwd`.

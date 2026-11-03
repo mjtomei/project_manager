@@ -1262,15 +1262,24 @@ def _get_session_name_for_cwd() -> str:
     # `pm session` run from a project subdirectory compute a *different*
     # name and start a second session and TUI on a second socket instead of
     # attaching to the project's session (QA scenario 62).  Walk up to the
-    # directory holding ``pm/project.yaml`` — the same anchor pm's own
-    # project discovery uses — and fall back to the cwd for a directory
-    # that is not a pm project at all.
+    # directory holding ``pm/project.yaml`` — the anchor pm's own project
+    # discovery uses — and fall back to the cwd for a directory that is not
+    # a pm project at all.
+    #
+    # A root-level ``project.yaml`` anchors the name too: that is pm's
+    # legacy standalone layout, which ``store.find_project_root`` still
+    # accepts for backward compatibility, and without it the same bug
+    # remained for such a project (a subdirectory started a second
+    # session).  ``pm/project.yaml`` wins wherever it exists, so a target
+    # repo's own ``pm/`` subdirectory is never mistaken for the project.
     from pm_core.paths import tmux_safe_name
-    project_dir = Path.cwd()
-    for candidate in [project_dir, *project_dir.parents]:
-        if (candidate / "pm" / "project.yaml").exists():
-            project_dir = candidate
-            break
+    here = Path.cwd()
+    candidates = [here, *here.parents]
+    project_dir = next(
+        (c for c in candidates if (c / "pm" / "project.yaml").exists()), None)
+    if project_dir is None:
+        project_dir = next(
+            (c for c in candidates if (c / "project.yaml").exists()), here)
     name = f"pm-{tmux_safe_name(project_dir.name)}"
     share_mode = os.environ.get("PM_SHARE_MODE")
     if share_mode:

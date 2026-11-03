@@ -418,6 +418,34 @@ class TestGetSessionNameForCwd:
         assert shared.startswith("pm-my-proj-")
         assert shared != "pm-my-proj-00000000"
 
+    def test_non_git_standalone_project_anchors_on_its_root(
+            self, monkeypatch, tmp_path):
+        """The legacy standalone layout (root-level project.yaml) anchors too.
+
+        ``store.find_project_root`` accepts a root-level ``project.yaml``
+        for backward compatibility, so such a project is a pm project — but
+        the walk-up only looked for ``pm/project.yaml``, leaving the
+        subdirectory bug (QA scenario 62) in place for it.
+        """
+        proj = tmp_path / "legacy-proj"
+        (proj / "specs").mkdir(parents=True)
+        (proj / "project.yaml").write_text("project: {}\n")
+        monkeypatch.chdir(proj / "specs")
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        assert _get_session_name_for_cwd() == "pm-legacy-proj-00000000"
+
+    def test_a_nested_pm_dir_wins_over_a_root_level_project_yaml(
+            self, monkeypatch, tmp_path):
+        """``pm/project.yaml`` is the stronger anchor when both exist."""
+        repo = tmp_path / "target-repo"
+        (repo / "pm").mkdir(parents=True)
+        (repo / "pm" / "project.yaml").write_text("project: {}\n")
+        (repo / "project.yaml").write_text("project: {}\n")
+        (repo / "sub").mkdir()
+        monkeypatch.chdir(repo / "sub")
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        assert _get_session_name_for_cwd() == "pm-target-repo-00000000"
+
 
 class TestPmSessionOutsidePmTmux:
     """A process outside a pm tmux session (a QA driver spawned by
