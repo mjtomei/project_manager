@@ -929,3 +929,22 @@ the routed form and `--fresh` so help is complete.
   pidfile remedies, autostart unknown/terminal listings, the skip_qa
   expected list, three command-bar `--help` spellings, and the quoted-text
   non-match). Related files pass (622 + 275 cases).
+
+- Review-loop 6a82 i9: the command-bar help check tokenized the wrong way,
+  plus two `--depends-on` refusals that stopped at "Unknown PR IDs".
+  (a) `handle_command_submitted`'s new `--help` / `-h` branch split the typed
+  command on whitespace (`cmd.split()`), so a flag *word* inside a
+  multi-word quoted argument opened the help screen instead of running the
+  command: `pr note add pr-001 'mention -h as a flag'` and
+  `pr add 'Fix -h handling'` never reached `run_command`.  It now tokenizes
+  with `shlex` — the same splitter `run_command` uses to build the CLI's
+  argv — so a quoted phrase stays one value, while a bare `--help` still
+  matches.  An unmatched quote falls through to the existing "Invalid
+  command syntax" path rather than opening help.  The quoted-text test is
+  parametrized over the multi-word cases.
+  (b) `pm pr add --depends-on` and `pm pr edit --depends-on` said only
+  "Unknown PR IDs" (the edit path printed nothing else), unlike every other
+  not-found refusal in the sweep — including the `pm autostart add` sibling
+  fixed in i8.  Both now name `pm pr list`, with a test for each.
+  Related files pass (168 in `tests/test_command_surface.py`, plus the
+  pr_view / pidfile / autostart / pr-notes suites).

@@ -697,10 +697,17 @@ def handle_command_submitted(app, cmd: str) -> None:
     # only the *last* line of stdout, so a multi-line `--help` came out as
     # one useless line — and `pr qa --help` (the command this PR exists to
     # make discoverable) died as "unknown QA option".  Show the same screen
-    # `help` opens.  Tokenized with `split()` rather than `shlex` so a
-    # quoted `--help` inside a note's text is left alone; unquoted, Click
-    # would treat it as its own eager help flag, so this matches the CLI.
-    if any(tok in ("-h", "--help") for tok in cmd.split()):
+    # `help` opens.  Tokenized with `shlex` — the same splitter `run_command`
+    # uses to build the CLI's argv — so a flag inside a quoted argument
+    # (`pr note add pr-001 'mention --help here'`) is left alone: the CLI
+    # receives that phrase as one value, not as its eager help flag.  An
+    # unmatched quote is a syntax error (handled below), never a help
+    # request, so it falls through rather than opening the screen.
+    try:
+        help_tokens = shlex.split(cmd)
+    except ValueError:
+        help_tokens = []
+    if any(tok in ("-h", "--help") for tok in help_tokens):
         app.action_unfocus_command()
         app.action_show_help()
         return

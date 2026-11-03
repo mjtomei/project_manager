@@ -1490,6 +1490,32 @@ def test_require_plan_names_the_listing_command(capsys):
     assert "pm plan list" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("args", [
+    ["add", "T", "--depends-on", "pr-999"],
+    ["edit", "pr-001", "--depends-on", "pr-999"],
+])
+def test_depends_on_unknown_ids_names_the_listing_command(tmp_path, args):
+    """`--depends-on` with a typo'd id names `pm pr list`.
+
+    Both scaffolders stopped at "Unknown PR IDs", unlike every other
+    not-found refusal in the sweep (`_require_pr`, `pm autostart add`), so
+    the operator had to guess how to find a real id.
+    """
+    from unittest import mock
+
+    from pm_core.cli import pr as pr_mod
+
+    (tmp_path / "project.yaml").write_text(
+        "project:\n  backend: vanilla\n  base_branch: master\n"
+        "prs:\n  - id: pr-001\n    title: T\n    status: pending\n")
+    with mock.patch.object(pr_mod, "state_root", return_value=tmp_path):
+        result = CliRunner().invoke(pr_mod.pr, args)
+
+    assert result.exit_code == 1, result.output
+    assert "Unknown PR IDs" in result.output
+    assert "pm pr list" in result.output
+
+
 def test_provider_show_not_found_names_the_listing_command(tmp_path):
     """`pm provider show` must name `pm provider list`, like `remove` does.
 
@@ -2427,12 +2453,23 @@ def test_command_bar_help_flag_opens_the_help_screen(cmd):
     assert app._inflight_pr_action is None
 
 
-def test_command_bar_help_flag_leaves_quoted_text_alone(monkeypatch):
-    """A quoted `--help` inside a note's text is not the help flag.
+@pytest.mark.parametrize("cmd", [
+    "pr note add pr-001 'see --help'",
+    # A flag *word* inside a multi-word quoted phrase is still one value to
+    # the CLI.  Splitting on whitespace instead of with `shlex` matched the
+    # bare `-h` / `--help` token and opened the help screen instead of
+    # running the command.
+    "pr note add pr-001 'mention -h as a flag'",
+    'pr note add pr-001 "see --help for details"',
+    "pr add 'Fix -h handling'",
+])
+def test_command_bar_help_flag_leaves_quoted_text_alone(monkeypatch, cmd):
+    """A `--help` inside a quoted argument is text, not the help flag.
 
-    The check tokenizes with `split()` (not `shlex`) precisely so quoted
-    argument text cannot open the help screen; unquoted `--help` is Click's
-    own eager flag, so intercepting it matches the CLI.
+    The check tokenizes with `shlex` — the same splitter `run_command` uses
+    to build the CLI's argv — so a quoted phrase reaches the command as one
+    value and cannot open the help screen; a bare `--help` is Click's own
+    eager flag, so intercepting that matches the CLI.
     """
     from types import SimpleNamespace
 
@@ -2450,7 +2487,7 @@ def test_command_bar_help_flag_leaves_quoted_text_alone(monkeypatch):
         _root=None,
         query_one=lambda *a, **k: SimpleNamespace(focus=lambda: None))
 
-    pr_view.handle_command_submitted(app, "pr note add pr-001 'see --help'")
+    pr_view.handle_command_submitted(app, cmd)
 
     assert shown == [], shown
-    assert ran == ["pr note add pr-001 'see --help'"], ran
+    assert ran == [cmd], ran

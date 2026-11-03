@@ -271,7 +271,9 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
         existing_ids = {p["id"] for p in (data.get("prs") or [])}
         unknown = [d for d in deps if d not in existing_ids]
         if unknown:
-            click.echo(f"Unknown PR IDs in --depends-on: {', '.join(unknown)}", err=True)
+            click.echo(
+                f"Unknown PR IDs in --depends-on: {', '.join(unknown)} — "
+                f"run 'pm pr list' to see every PR.", err=True)
             if existing_ids:
                 click.echo(f"Available PRs: {', '.join(sorted(existing_ids))}", err=True)
             raise SystemExit(1)
@@ -367,7 +369,12 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
             existing_ids = {p["id"] for p in (data.get("prs") or [])}
             unknown = [d for d in deps if d not in existing_ids]
             if unknown:
-                click.echo(f"Unknown PR IDs: {', '.join(unknown)}", err=True)
+                # Same remedy as the other not-found refusals (`_require_pr`,
+                # `pm autostart add`): name the listing command so the
+                # operator can find a real id.
+                click.echo(
+                    f"Unknown PR IDs: {', '.join(unknown)} — run 'pm pr "
+                    f"list' to see every PR.", err=True)
                 raise SystemExit(1)
             pr_entry["depends_on"] = deps
             changes.append(f"depends_on={', '.join(deps)}")
