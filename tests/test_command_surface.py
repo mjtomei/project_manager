@@ -310,7 +310,7 @@ def test_getting_started_plan_keys_match_the_plans_pane():
 
 
 def test_help_screen_lines_escape_textual_markup():
-    lines = command_surface.command_bar_help_lines_textual()
+    lines = command_surface.command_bar_rows_textual()
     assert any("\\[--fresh]" in line for line in lines)
     assert not any(re.search(r"(?<!\\)\[", line) for line in lines), \
         "unescaped '[' would be parsed as Textual markup"
@@ -1484,6 +1484,59 @@ def test_model_screen_not_found_names_the_listing_command(tmp_path):
     shown = " ".join(screen._table_lines())
     assert "pr-999" in shown
     assert "pr list" in shown
+
+
+def test_model_screen_save_not_found_names_the_listing_command(tmp_path):
+    """The modal's save refusal names `pr list` too.
+
+    ``_apply`` reloads under the store lock; a PR removed in the meantime
+    surfaced as a bare "Not saved: PR <id> not found" in the status line —
+    the same dead end as the rendering path fixed above.
+    """
+    from unittest import mock
+
+    from pm_core.tui import model_screen
+
+    (tmp_path / "project.yaml").write_text(
+        "project:\n  backend: vanilla\n  base_branch: master\nprs: []\n")
+    screen = model_screen.ModelSettingsScreen(tmp_path, "pr-999")
+    screen._load()
+
+    def fake_update(root, edit):
+        edit({"project": {}, "prs": []})  # the PR vanished before the save
+
+    with mock.patch.object(model_screen.store, "locked_update", fake_update):
+        screen._apply("model", "claude-sonnet-5-5")
+
+    assert "not found" in screen._status
+    assert "pr list" in screen._status
+
+
+def test_help_screen_uses_the_shared_command_bar_header():
+    """The `?` screen and `pm tui keys` must title the section the same way.
+
+    QA scenario 6 read "Command bar (press /):" (the shared header) while
+    the screen rendered "Command Bar", so the two help surfaces disagreed
+    on the one thing this PR unifies.  The screen now renders
+    ``COMMAND_BAR_HEADER`` itself.
+    """
+    text = _render_help_screen()
+    assert command_surface.COMMAND_BAR_HEADER in text
+    out = CliRunner().invoke(cli, ["tui", "keys"]).output
+    assert command_surface.COMMAND_BAR_HEADER in out
+
+
+def test_command_bar_rows_helper_cannot_drop_a_row():
+    """The rows helper is the screen's source; there is no slicing.
+
+    The HelpScreen used to slice the section helper's first element to drop
+    the header, so a change to that element would have silently dropped a
+    row from the `?` screen.
+    """
+    rows = command_surface.command_bar_rows_textual()
+    assert command_surface.COMMAND_BAR_HEADER not in rows
+    assert rows[0].strip().startswith("pr start")
+    assert any("pr qa fresh" in row for row in rows)
 
 
 # ---------------------------------------------------------------------------

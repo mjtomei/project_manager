@@ -27,7 +27,7 @@ class ImprovementFixImplWatcher(BaseWatcher):
     DESCRIPTION = ("Drive plan=improvements PRs through auto-sequence "
                    "(gated at QA PASS)")
     WINDOW_NAME = "improvement-fix-impl"
-    DEFAULT_INTERVAL = 1800  # 30 minutes — UX is taste-driven
+    DEFAULT_INTERVAL = 1800  # 30 minutes — improvements are taste-driven
     VERDICTS = ("READY", "INPUT_REQUIRED")
     KEYWORDS = ("READY", "INPUT_REQUIRED")
 

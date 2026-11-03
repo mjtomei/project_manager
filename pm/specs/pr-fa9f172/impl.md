@@ -700,3 +700,23 @@ the routed form and `--fresh` so help is complete.
   was blocked by `check_action`; the notes / log / guide chords still work
   there, so the comment (not the row — the row stays tree-only by design)
   was corrected to say what is actually blocked or intercepted.
+
+- Review-loop e4f7 i2: renderer agreement and the last save-path refusal.
+  (a) The `?` HelpScreen rendered its own "Command Bar" title while
+  `pm tui keys` rendered the shared "Command bar (press /):" — the exact
+  drift this PR exists to stop, and the literal mismatch QA scenario 6
+  flagged. The screen now renders `command_surface.COMMAND_BAR_HEADER`
+  (styled like its other section headings), so the three surfaces title
+  the section identically. The duplicate "/ Open the command bar" row
+  moved its "type help there for this screen" hint onto the Panes & Views
+  `/` row instead of repeating the key twice.
+  (b) The screen used to slice `command_bar_help_lines_textual()[1:]` to
+  drop the header. That section helper is gone; `command_bar_rows_textual()`
+  now returns the rows and flag note only, so a future change cannot
+  silently drop a row from the screen. A test pins the rows helper (no
+  header, first row is `pr start`).
+  (c) `model_screen._apply`'s "Not saved: PR <id> not found" (the PR
+  vanished between opening the modal and the locked save) now names
+  `pr list` / TUI `r`, matching the render path fixed in e4f7 i1.
+  (d) The improvement watcher's stale "UX is taste-driven" comment now
+  says `improvements`.

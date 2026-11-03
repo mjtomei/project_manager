@@ -209,9 +209,14 @@ def command_bar_help_text() -> str:
                       *_flag_note_lines("  ")])
 
 
-def command_bar_help_lines_textual() -> list[str]:
-    """The command-bar section for the TUI ``?`` HelpScreen (escaped markup)."""
-    return [COMMAND_BAR_HEADER,
-            *command_bar_lines(textual=True, indent="  "),
+def command_bar_rows_textual() -> list[str]:
+    """The command-bar section for the TUI ``?`` HelpScreen (escaped markup).
+
+    Returns the rows and the flag note, not the heading: the HelpScreen
+    renders :data:`COMMAND_BAR_HEADER` itself as a styled section heading.
+    An explicit rows helper (rather than slicing the heading off a section
+    helper) means a new row cannot be silently dropped by the screen.
+    """
+    return [*command_bar_lines(textual=True, indent="  "),
             "",
             *_flag_note_lines("  ", textual=True)]

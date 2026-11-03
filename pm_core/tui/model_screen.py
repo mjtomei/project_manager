@@ -324,7 +324,8 @@ class ModelSettingsScreen(ModalScreen):
                 return
             pr = store.get_pr(data, pr_id)
             if pr is None:
-                raise ValueError(f"PR {pr_id} not found")
+                raise ValueError(
+                    f"PR {pr_id} not found — see `pr list` (TUI: r to refresh)")
             model_settings.set_pr_value(pr, kind, value,
                                         [target] if target else None)
 

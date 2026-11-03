@@ -271,7 +271,8 @@ class HelpScreen(ModalScreen):
             if not (self._in_plans or self._in_qa):
                 yield Label("  [bold]c[/]  Launch Claude session", classes="help-row")
             yield Label("  [bold]H[/]  Launch guide (setup or assist)", classes="help-row")
-            yield Label("  [bold]/[/]  Open command bar", classes="help-row")
+            yield Label("  [bold]/[/]  Open command bar (type help there for this screen)",
+                        classes="help-row")
             yield Label("  [bold]n[/]  Open notes", classes="help-row")
             yield Label("  [bold]m[/]  Meta: work on pm itself", classes="help-row")
             yield Label("  [bold]L[/]  View TUI log", classes="help-row")
@@ -318,10 +319,13 @@ class HelpScreen(ModalScreen):
                 yield Label("QA Loop", classes="help-section")
                 yield Label("  [bold]zz t[/]  Start QA loop", classes="help-row")
                 yield Label("  [bold]z t[/]   Fresh start QA", classes="help-row")
-            yield Label("Command Bar", classes="help-section")
-            yield Label("  [bold]/[/]  Open the command bar (type help there for this screen)",
-                        classes="help-row")
-            for _line in command_surface.command_bar_help_lines_textual()[1:]:
+            # The heading is the shared one, so the `?` screen and
+            # `pm tui keys` render the same section title (the drift this
+            # PR exists to stop).  It is styled like the screen's other
+            # section headings; the rows come from the shared module.
+            yield Label(command_surface.COMMAND_BAR_HEADER,
+                        classes="help-section")
+            for _line in command_surface.command_bar_rows_textual():
                 yield Label(_line, classes="help-row")
             yield Label("")
             yield Label("[dim]Press Esc/? to close  |  h to discuss pm[/]", classes="help-row")
