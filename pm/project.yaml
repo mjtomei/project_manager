@@ -33039,7 +33039,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-11-03T22:04:10.039917+00:00'
+  updated_at: '2026-11-03T22:09:34.322932+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33328,6 +33328,29 @@ prs:
       there too, but the scenario''s Then asserts this exact line, so it was not changed.'
     created_at: '2026-11-03T22:04:09Z'
     last_edited: '2026-11-03T22:04:09Z'
+  - id: note-7c21dbd
+    text: 'QA scenario 22 (fresh restart parity) PASS. Runtime-verified in a throwaway
+      local project at 9585f9a66: (1) `pm pr start` on a pending PR prints "is now
+      in_progress" + "Launched Claude in tmux window", the plain re-run prints "already
+      in_progress, reusing existing workdir." + "Switched to existing window" and
+      keeps the same window id (nwin 1), `--fresh` prints the same reuse line + "Killed
+      existing window" + "Launched Claude in tmux window" and yields a NEW window
+      id with nwin 1; one in_progress record throughout. (2) Two simultaneous `--fresh`
+      starts both exit 0 with no Traceback, each showing the clean kill/relaunch pair,
+      ending with exactly one window, one record, no .tmp-<id> partial clone and a
+      single (clean) workdir line. (3) `pm pr review` / `--fresh` mirror the start
+      behavior for review-<id> (plain switches, fresh kills+reopens, id changes, status
+      stays in_review). (4) `pm pr signoff` / `--fresh` do the same for signoff-<id>;
+      the plain and fresh re-runs do not reprint "marked as sign_off" and status stays
+      sign_off. (5) `pm pr merge --fresh` is rejected by Click (rc=2, "Error: No such
+      option ''--fresh''.") with the status unchanged, and `pm pr merge --help` exits
+      0, states "There is no --fresh option", names the retry path `pm pr signoff
+      --fresh <id>` then merge again, lists the TUI `g      merge` / `G      merge
+      with a companion shell pane` forms, and its Options block holds only --companion,
+      --no-signoff-check and -h/--help. No code changes needed. Captures: /pm-captures/scenarios/22/{story1-start,story2-concurrent,story3-review,story4-signoff,story5-merge}
+      (cast + mp4 + manifest each).'
+    created_at: '2026-11-03T22:09:34Z'
+    last_edited: '2026-11-03T22:09:34Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
