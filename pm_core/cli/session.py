@@ -1580,7 +1580,13 @@ def popup_show_cmd(kind: str, client: str | None = None,
         tmux_mod._tmux_cmd("display-message", *target, "-p", "#{pane_current_path}"),
         capture_output=True, text=True, check=False,
     )
-    pane_cwd = cwd_result.stdout.strip() if cwd_result.returncode == 0 else ""
+    # ``rstrip("\n")``, not ``strip()``: a repo directory may end with a
+    # space, and tmux reports the pane's cwd verbatim.  Trimming it named a
+    # directory that does not exist, so ``display-popup -d`` did not start
+    # the popup in the user's directory (the same round-trip rule as the
+    # session-name reads; review-loop 9d4c i4).
+    pane_cwd = (cwd_result.stdout.rstrip("\n")
+                if cwd_result.returncode == 0 else "")
 
     if session:
         win_result = subprocess.run(

@@ -3901,6 +3901,33 @@ class TestResolveTargetSession:
         assert session_mod._resolve_target_session() == "pm-shared"
         assert seen == [["pm-shared"]]
 
+    def test_a_non_git_private_session_is_not_a_shared_target(
+            self, monkeypatch, tmp_path):
+        """A non-git directory has no tag hash to mix the mode into.
+
+        The fallback name used to be identical for the private session and
+        a ``--global`` invocation, so ``pm session kill --global`` run
+        inside that private session picked the ambient session — which is
+        the private one — and killed it (review-loop 9d4c i4).
+        """
+        from pm_core.cli import session as session_mod
+
+        d = tmp_path / "not-a-repo"
+        d.mkdir()
+        monkeypatch.chdir(d)
+        monkeypatch.setenv("PM_SHARE_MODE", "global")
+        private = "pm-not-a-repo-00000000"
+        monkeypatch.setattr(session_mod, "_known_ambient_session",
+                            lambda: private)
+        monkeypatch.setattr(session_mod, "_ambient_share_mode",
+                            lambda name: None)
+        seen: list[list[str]] = []
+        monkeypatch.setattr(session_mod, "_pick_existing_session",
+                            lambda cands: seen.append(cands) or cands[0])
+        target = session_mod._resolve_target_session()
+        assert target != private
+        assert seen and private not in seen[0]
+
     def test_an_empty_share_mode_counts_as_unset(self, monkeypatch):
         """An exported empty ``PM_SHARE_MODE`` must not hide the ambient
         session.

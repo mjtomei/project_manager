@@ -1227,7 +1227,13 @@ def list_grouped_sessions(base: str, socket_path: str | None = None) -> list[str
         return []
     prefix = base + "~"
     grouped = []
-    for line in result.stdout.strip().splitlines():
+    # No ``.strip()``: it trims the leading space off the first row's name
+    # and the trailing space off the last row's, so a user's own view named
+    # `` pm-x~1`` / ``pm-x~1 `` was reported under the name ``pm-x~1`` —
+    # a session tmux does not know.  ``splitlines`` already drops the final
+    # newline (the same round-trip rule as ``list_clients_in_group``,
+    # review-loop 9d4c i4).
+    for line in result.stdout.splitlines():
         if not line.startswith(prefix):
             continue
         # The whole remainder must be the number, not just the part after

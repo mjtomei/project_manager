@@ -981,6 +981,23 @@ class TestListGroupedSessions:
         assert list_grouped_sessions("pm-x") == ["pm-x~1"]
 
     @patch("pm_core.tmux.subprocess.run")
+    def test_keeps_edge_spaces_in_a_view_name(self, mock_run):
+        """tmux stores a name verbatim; a view may be named ``pm-x~1 ``.
+
+        ``strip()`` on the whole listing trimmed the leading space off the
+        first row and the trailing one off the last, so such a view was
+        reported under the name ``pm-x~1`` — a session tmux does not know,
+        and one that would be taken for a real grouped session.  The
+        remainder after ``base~`` must be the number itself (review-loop
+        9d4c i4).
+        """
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=" pm-x~9\npm-x~1\npm-x~2 \n")
+        # The edge-space rows are views, not grouped sessions; the real
+        # ``pm-x~1`` is still found between them.
+        assert list_grouped_sessions("pm-x") == ["pm-x~1"]
+
+    @patch("pm_core.tmux.subprocess.run")
     def test_another_projects_grouped_session_is_not_ours(self, mock_run):
         """The whole remainder after ``base~`` must be the number.
 

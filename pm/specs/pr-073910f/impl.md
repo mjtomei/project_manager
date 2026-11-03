@@ -438,7 +438,12 @@ No **[UNRESOLVED]** ambiguities.
 - `--global`/`--group` still set `window-size=smallest` on base + grouped
   sessions and still grant `server-access` on the private/shared socket.
 - Non-git directory: session name falls back to `pm-<dir>-00000000`; the tag
-  is taken from that name, so a deterministic socket still exists.
+  is taken from that name, so a deterministic socket still exists.  With a
+  share mode set (`--global`/`--group`, or inherited inside a shared
+  session) the fallback ends in a hash of the mode instead, so
+  `pm session kill --global` cannot compute the private session's own name;
+  a shared session cannot be created here anyway (`pm session` refuses
+  without a git tag) (review-loop 9d4c i4).
 
 ## Incident during implementation (recorded honestly)
 
@@ -4487,3 +4492,64 @@ pre-fix code (checked in a scratch worktree at the previous head).
 Verification: the eight PR-affected test files pass twice in one HOME
 (654 each); full suite 5658 passed / 1 skipped, 435.5 s (log
 `/pm-captures/review-9d4c-i3/full-suite-final.log`).
+
+## Review iteration (2026-11-03, review-loop 9d4c i4)
+
+Verification pass over the head after the 9d4c i3 fixes: two more
+session-name readbacks — and one path readback — still trimmed a value
+tmux stores as given, and an independent review pass found one
+destructive-path gap in the share-mode handling.  No requirement
+changes.
+
+1. **`tmux.list_grouped_sessions()` stripped the session listing.**
+   `list-sessions -F "#{session_name}"` rows were read with
+   `.strip().splitlines()`, which trims the leading space off the first
+   row and the trailing space off the last.  A user's own view named
+   ` pm-x~1` or `pm-x~1 ` was therefore reported as `pm-x~1` — a name
+   tmux does not know, taken for a real grouped session (and a later
+   bare `-t` would prefix-match it back to the view).  Rows are now read
+   with `splitlines()` and no `strip()`, the same rule as the other
+   listings (verified live on tmux 3.2a: `pm-x~1 ` is stored and
+   reported verbatim).
+2. **`plans.review.review_step()` trimmed the session it targets.**
+   The background pane a plan-step review opens was created from
+   `display-message -p "#{session_name}"` read through `.strip()`, so
+   from inside a view named with an edge space the name no longer
+   existed and `split-pane` failed (silently: the `except Exception`
+   around the pane launch).  New `_current_session_name()` reads it with
+   `rstrip("\n")` (and treats a failed tmux query as "no session"); both
+   the PASS and NEEDS_FIX branches use it.
+3. **`pm _popup-show` trimmed the pane's cwd.**  The `-d` start
+   directory was read from `#{pane_current_path}` with `.strip()`, so a
+   repo directory ending in a space named a directory that does not
+   exist instead of the user's.  Paths are read verbatim now, like the
+   session names (R1.1's format-expanded path rule applies to what is
+   read back as well as to what is passed).
+4. **A non-git directory's fallback name ignored the share mode.**
+   `get_session_tag()` mixes `PM_SHARE_MODE` into the hash, but the
+   no-tag fallback was `pm-<dir>-00000000` with or without a mode.  The
+   private session of such a directory therefore had exactly the name a
+   `--global` invocation computes, so `pm session kill --global` run
+   inside it picked the ambient (private) session and killed it instead
+   of reporting "no session" — the case the d1c0 i7 fix closed for git
+   repos, where the tag separates the two.  With a mode set, the
+   fallback now ends in a hash of the mode; the private name is
+   unchanged (`-00000000`), and `pm session --global` still refuses in a
+   non-git directory (no tag).  Found by an independent review pass over
+   the change set.
+
+Tests: `TestListGroupedSessions::test_keeps_edge_spaces_in_a_view_name`
+(`tests/test_tmux.py`),
+`TestReviewStep::test_callback_keeps_an_edge_space_in_the_session_name`
+(`tests/test_plan_review.py`),
+`test_popup_keeps_an_edge_space_in_the_pane_cwd`
+(`tests/test_popup_show_client.py`),
+`TestGetSessionNameForCwd::test_non_git_fallback_name_carries_the_share_mode`
+(`tests/test_cli_helpers.py`) and
+`TestResolveTargetSession::test_a_non_git_private_session_is_not_a_shared_target`
+(`tests/test_session_socket_isolation.py`).  All five fail on the pre-fix
+code (checked in a scratch worktree at the previous head).
+
+Verification: the ten PR-affected test files pass twice in one HOME (807
+each); full suite 5663 passed / 1 skipped, 427.1 s (log
+`/pm-captures/review-9d4c-i4/full-suite-final.log`).

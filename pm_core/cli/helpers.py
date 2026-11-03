@@ -1249,9 +1249,21 @@ def _get_session_name_for_cwd() -> str:
     if tag:
         return f"pm-{tag}"
 
-    # Fallback if not in a git repo
+    # Fallback if not in a git repo.  The name carries the share mode when
+    # one is set: `get_session_tag` mixes it into the tag hash, but there
+    # is no tag here, so without this the private session of this directory
+    # and a `--global` invocation computed the *same* name — and
+    # `pm session kill --global` run inside that private session killed it
+    # instead of reporting "no session" (review-loop 9d4c i4).  The private
+    # name keeps the historical ``-00000000`` placeholder.
     from pm_core.paths import tmux_safe_name
-    return f"pm-{tmux_safe_name(Path.cwd().name)}-00000000"
+    name = f"pm-{tmux_safe_name(Path.cwd().name)}"
+    share_mode = os.environ.get("PM_SHARE_MODE")
+    if share_mode:
+        import hashlib
+        digest = hashlib.md5(share_mode.encode()).hexdigest()[:8]
+        return f"{name}-{digest}"
+    return f"{name}-00000000"
 
 
 def _get_current_pm_session() -> str | None:

@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from pm_core.cli.helpers import (
+    _get_session_name_for_cwd,
     _infer_pr_id,
     _make_pr_entry,
     _pr_display_id,
@@ -363,6 +364,35 @@ class TestEnsureWorkdir:
         data = {"project": {"name": "test"}}
         result = _ensure_workdir(data, pr_entry, tmp_path)
         assert result is None
+
+
+class TestGetSessionNameForCwd:
+    """The non-git fallback name must distinguish share modes."""
+
+    def test_non_git_fallback_name_carries_the_share_mode(self, monkeypatch,
+                                                         tmp_path):
+        """A non-git directory has no tag hash to mix the mode into.
+
+        ``get_session_tag`` returns None here, so without this the private
+        session of the directory and a ``--global`` invocation computed
+        the same name — and ``pm session kill --global`` run inside that
+        private session killed it (review-loop 9d4c i4).
+        """
+        d = tmp_path / "not-a-repo"
+        d.mkdir()
+        monkeypatch.chdir(d)
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        private = _get_session_name_for_cwd()
+        assert private == "pm-not-a-repo-00000000"
+
+        monkeypatch.setenv("PM_SHARE_MODE", "global")
+        shared = _get_session_name_for_cwd()
+        assert shared != private
+        assert shared.startswith("pm-not-a-repo-")
+
+        monkeypatch.setenv("PM_SHARE_MODE", "group:staff")
+        grouped = _get_session_name_for_cwd()
+        assert grouped not in (private, shared)
 
 
 class TestPmSessionOutsidePmTmux:
