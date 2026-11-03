@@ -8730,6 +8730,15 @@ prs:
       + post-fix casts/mp4/manifests, suite/full-suite.log).'
     created_at: '2026-11-03T12:44:29Z'
     last_edited: '2026-11-03T12:44:29Z'
+  - id: note-0b22a67
+    text: 'QA S59 refiner (2026-11-03): the resize half of scenario 59 needs tmux
+      >= 3.3 for the window-resized hook; this image ships tmux 3.2a, where pm logs
+      "set-hook window-resized failed: invalid option". Build tmux 3.5a (apt libevent-dev
+      libncurses-dev bison pkg-config; configure/make the 3.5a tarball) and put its
+      bin first on PATH for the pm server and every tmux client. The refined steps
+      include the recipe; all stories were smoke-tested live on this branch.'
+    created_at: '2026-11-03T10:46:56Z'
+    last_edited: '2026-11-03T10:46:56Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
