@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-03T16:00:26.874390+00:00'
+  updated_at: '2026-11-03T16:27:09.168631+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8809,6 +8809,26 @@ prs:
       race); README updated.'
     created_at: '2026-11-03T16:00:26Z'
     last_edited: '2026-11-03T16:00:26Z'
+  - id: note-dd781c7
+    text: 'QA scenario 66 (degraded environments) PASS 5/5 on a6969f12, no source
+      changes. (1) With tmux shadowed out of PATH and $TMUX exported, pm session list/kill/mobile
+      print "tmux is not installed.", pm tui view/send print "No TUI pane found. Is
+      there a pm tmux session running?", pm session prints "tmux is required for ''pm
+      session''. Install it first."; all exit 1, no traceback, and /tmp/pm-sessions
+      is unchanged. (2) A TUI respawned with a tmux-less PATH but $TMUX/$PM_TMUX_SOCKET
+      set survives Ctrl-Q: pane_dead=0, the same client stays attached, the log records
+      quit_app / "detach_current_client: tmux cannot be run; leaving clients attached"
+      / "quit_app: no attached client to detach", and ? still shows the Keyboard Shortcuts
+      screen with no traceback. (3) A plain shell exporting a killed session''s PM_TMUX_SOCKET
+      gets "No pm sessions found." (rc 0) from list and "No TUI pane found..." (rc
+      1) from tui view. (4) Starting projB with a stale PM_TMUX_SOCKET for projA creates
+      only pm-projB-<hash>, never recreates the projA socket. (5) A plain shell window
+      inside session A with only $TMUX: pm session list shows projA once (no default-server
+      row) plus projB, and pm tui send "?" reports "(session: pm-projA-<hash>)" and
+      changes only projA''s frame. Captures: /pm-captures/scenarios/66 (README + per-story
+      cast/mp4/manifest).'
+    created_at: '2026-11-03T16:27:09Z'
+    last_edited: '2026-11-03T16:27:09Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
