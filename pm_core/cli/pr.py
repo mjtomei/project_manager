@@ -1704,7 +1704,7 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
       command bar  pr review [--fresh] [PR_ID]
       TUI          d      review (inspection once past review)
                    z d    kill a running loop, open a fresh review
-                   zz d   start/stop the review loop
+                   zz d   start the review loop (supersedes a running one)
     """
     root = state_root()
     data = store.load(root)
@@ -2904,27 +2904,45 @@ Examples:
 A single QA instruction — not the full loop — runs with
 `pm qa run <instruction-id> --pr <pr-id>`.
 
-If PR_ID is omitted, infers from cwd (if inside a workdir) or
-auto-selects when there's exactly one in_review/qa PR."""
+If PR_ID is omitted, infers it from the current workdir or the active
+PR; otherwise auto-selects when exactly one PR is in_review or qa."""
 
 
 class _QaCommand(click.Command):
-    """``pr qa`` that tolerates the two-token command-bar mode on the CLI.
+    """``pr qa`` that tolerates a command-bar spelling on the CLI.
 
-    ``pm pr qa fresh pr-001`` is exactly the command-bar form an operator
-    (or a driving Claude session) pastes onto the CLI.  Click would answer
-    ``Got unexpected extra argument (pr-001)`` before ``pr_qa`` can name
-    the command-bar route and the TUI key — the same discoverability miss
-    this PR fixes, one surface over.  Keep only the mode token so
-    ``pr_qa`` prints its corrective hint; anything with an option (notably
-    ``--help``) is left to Click.
+    ``pm pr qa fresh pr-001`` and ``pm pr qa pr-001 --fresh`` are exactly
+    the command-bar forms an operator (or a driving Claude session) pastes
+    onto the CLI.  Click would answer ``Got unexpected extra argument
+    (pr-001)`` / ``No such option '--fresh'`` before ``pr_qa`` can name the
+    command-bar route and the TUI key — the same discoverability miss this
+    PR fixes, one surface over.  Keep only the mode token so ``pr_qa``
+    prints its corrective hint; anything with ``--help`` is left to Click.
 
     The mode may be on either side of the id (``pr qa fresh pr-001`` and
-    ``pr qa pr-001 fresh`` are both command-bar spellings), so scan the
-    whole argument list rather than only ``args[0]``.
+    ``pr qa pr-001 fresh`` are both command-bar spellings) and may use the
+    flag spelling, so scan the whole argument list rather than only
+    ``args[0]``.  The flag -> mode mapping is the shared one, so a new QA
+    mode reaches this tolerance without a second list.
     """
 
     def parse_args(self, ctx, args):
+        if any(arg in ctx.help_option_names for arg in args):
+            # Help always wins: drop a QA flag so ``pm pr qa --fresh --help``
+            # shows the help (which says the CLI has no such flag) instead of
+            # Click's "No such option".
+            return super().parse_args(
+                ctx, [arg for arg in args
+                      if arg not in command_surface.QA_FLAG_MODES])
+        # A flag spelling (`--fresh` / `--loop`) is a command-bar form: keep
+        # the mode token so ``pr_qa`` prints its corrective hint instead of
+        # Click's "No such option", wherever the flag sits.
+        flag_modes = [command_surface.QA_FLAG_MODES[arg] for arg in args
+                      if arg in command_surface.QA_FLAG_MODES]
+        if flag_modes:
+            return super().parse_args(ctx, [flag_modes[0]])
+        # The other command-bar spelling is two plain positionals
+        # (`fresh pr-001` / `pr-001 fresh`): keep only the mode token.
         if len(args) > 1 and not any(arg.startswith("-") for arg in args):
             modes = [arg for arg in args
                      if arg in command_surface.QA_MODIFIER_MODES]
@@ -2958,15 +2976,16 @@ def pr_qa(pr_id: str | None):
         click.echo(f"Auto-selected {pr_id}")
 
     if pr_id in command_surface.QA_MODIFIER_MODES:
-        # `pr qa fresh <id>` is the command-bar spelling; this CLI is
-        # diagnostic only.  Without this, a mode typed on the CLI reads as a
-        # missing PR id ("PR 'fresh' not found") — the discoverability miss
-        # this PR exists to fix, one surface over.  The mode set and the TUI
-        # key come from the shared table so a new mode is not missed here.
+        # `pr qa fresh <id>` / `pr qa <id> --fresh` are command-bar
+        # spellings; this CLI is diagnostic only.  Without this, a mode typed
+        # on the CLI reads as a missing PR id ("PR 'fresh' not found") and the
+        # flag spelling dies on Click's "No such option" — the discoverability
+        # miss this PR exists to fix, one surface over.  The mode set and the
+        # TUI key come from the shared table so a new mode is not missed here.
         key = command_surface.QA_MODE_KEYS[pr_id]
         click.echo(
             f"'{pr_id}' is a QA mode in the TUI command bar, not a CLI "
-            f"argument — the CLI form is diagnostic only and has no modes. "
+            f"argument or flag — the CLI form is diagnostic only. "
             f"Open the TUI command bar (press /) and type "
             f"'pr qa {pr_id} <id>' (TUI: {key}).", err=True)
         raise SystemExit(1)

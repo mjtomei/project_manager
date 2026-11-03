@@ -115,7 +115,7 @@ def stop_loop_or_fresh_review(app) -> None:
 
 
 # ---------------------------------------------------------------------------
-# zz d  — start or stop loop
+# zz d  — start a fresh loop (supersedes a running one)
 # ---------------------------------------------------------------------------
 
 def start_or_stop_loop(app) -> None:

@@ -88,6 +88,19 @@ def test_pr_review_help_names_fresh_and_loop_keys():
         assert key in out
 
 
+def test_pr_review_help_does_not_call_zz_d_a_toggle():
+    """`zz d` always starts a fresh loop; it does not stop one.
+
+    ``start_or_stop_loop``'s own docstring says the toggle behaviour was
+    removed (a running loop is superseded, not merely stopped), but the new
+    equivalent-forms block advertised "start/stop" — a claim the code
+    contradicts, in a help surface this PR added.
+    """
+    out = " ".join(_help("pr", "review").split())
+    assert "zz d start/stop" not in out
+    assert "zz d start the review loop" in out
+
+
 def test_pr_merge_help_names_tui_keys_and_no_fresh():
     out = _help("pr", "merge")
     assert "TUI" in out and "g" in out and "G" in out
@@ -139,17 +152,56 @@ def test_pr_merge_help_names_the_picker_fresh_signoff_chord():
         "pr signoff --fresh {pr_id}"
 
 
-def test_cli_merge_and_qa_deliberately_reject_fresh():
-    """`--fresh` is a command-bar spelling for QA, and meaningless for merge.
+def test_cli_merge_deliberately_rejects_fresh():
+    """`--fresh` is meaningless for merge (there is no session to restart).
 
-    The help says so; this asserts the CLI really has no such option, so
-    the documented absence cannot silently become a supported flag (or a
-    positional that swallows the id).
+    The help says so; this asserts the CLI really has no such option, so the
+    documented absence cannot silently become a supported flag.
     """
-    for args in (["pr", "qa", "--fresh"], ["pr", "merge", "--fresh"]):
-        result = CliRunner().invoke(cli, args)
-        assert result.exit_code != 0, result.output
-        assert "No such option" in result.output, result.output
+    result = CliRunner().invoke(cli, ["pr", "merge", "--fresh"])
+    assert result.exit_code != 0, result.output
+    assert "No such option" in result.output, result.output
+
+
+@pytest.mark.parametrize("mode", command_surface.QA_MODIFIER_MODES)
+def test_pr_qa_cli_flag_spelling_gets_the_same_hint(tmp_path, mode):
+    """`pm pr qa <id> --fresh` is a command-bar spelling with the flag.
+
+    The positional spellings already reach ``pr_qa``'s corrective hint; the
+    flag spelling — the one the PR description asks to accept everywhere, and
+    the one a driving Claude session is most likely to guess — still died on
+    Click's ``No such option '--fresh'`` (exit 2).  It must reach the same
+    hint naming the command-bar form and TUI key, in either position, and
+    must not run QA.
+    """
+    from unittest import mock
+
+    from pm_core.cli import pr as pr_mod
+
+    (tmp_path / "project.yaml").write_text(
+        "project:\n  backend: vanilla\n  base_branch: master\nprs: []\n")
+    flag = f"--{mode}"
+    for args in (["qa", flag], ["qa", flag, "pr-001"],
+                 ["qa", "pr-001", flag]):
+        with mock.patch.object(pr_mod, "state_root", return_value=tmp_path):
+            result = CliRunner().invoke(pr_mod.pr, args)
+        assert result.exit_code == 1, (args, result.output)
+        assert "No such option" not in result.output, (args, result.output)
+        assert "command bar" in result.output, (args, result.output)
+        assert f"pr qa {mode} <id>" in result.output, (args, result.output)
+        assert command_surface.QA_MODE_KEYS[mode] in result.output, (
+            args, result.output)
+
+
+def test_pr_qa_flag_spelling_does_not_swallow_help():
+    """`--fresh` must not turn `pm pr qa --fresh --help` into an error.
+
+    Help wins: the flag is dropped so Click renders the help, which states
+    outright that the CLI has no ``--fresh``.
+    """
+    out = _help("pr", "qa", "--fresh")
+    assert "QA modes" in out
+    assert "no --fresh or --loop flag" in " ".join(out.split())
 
 
 @pytest.mark.parametrize("name", ["start", "review", "merge", "signoff"])

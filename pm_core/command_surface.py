@@ -45,7 +45,11 @@ QA_MODIFIER_MODES: tuple[str, ...] = tuple(
     mode for mode, *_rest in QA_MODES if mode != "run")
 QA_MODE_KEYS: dict[str, str] = {
     mode: keys for mode, _form, keys, _desc in QA_MODES}
-_QA_FLAGS: dict[str, str] = {
+# The flag spelling of each mode (`--fresh` -> `fresh`).  Shared so the
+# command-bar parser and the CLI's tolerance for a command-bar spelling
+# (which must reject it with a corrective hint, not Click's "No such
+# option") cannot disagree about which flags exist.
+QA_FLAG_MODES: dict[str, str] = {
     f"--{mode}": mode for mode in QA_MODIFIER_MODES}
 
 
@@ -71,8 +75,8 @@ def parse_qa_command(args: list[str]) -> tuple[str | None, str | None]:
     mode: str | None = None
     pr_id: str | None = None
     for tok in args:
-        if tok in _QA_FLAGS:
-            candidate = _QA_FLAGS[tok]
+        if tok in QA_FLAG_MODES:
+            candidate = QA_FLAG_MODES[tok]
         elif tok in QA_MODIFIER_MODES:
             candidate = tok
         elif tok.startswith("-"):

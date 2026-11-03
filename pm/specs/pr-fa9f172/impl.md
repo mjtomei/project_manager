@@ -799,3 +799,31 @@ the routed form and `--fresh` so help is complete.
   the spec matches the shipped code, and re-verified the whole tree on the
   current checkout (see the count above). No source or test changes were
   needed this iteration.
+
+- Review-loop 6a82 i4: two help claims the code contradicts, plus the
+  last command-bar spelling that died on a bare Click error.
+  (a) `pm pr review --help`'s new equivalent-forms block said `zz d`
+  "start/stop the review loop", but `review_loop_ui.start_or_stop_loop`
+  always starts a fresh loop (it supersedes a running one; its own
+  docstring says the toggle was removed). The row now reads "start the
+  review loop (supersedes a running one)", and the stale "start or stop
+  loop" section comment above the function is corrected too. A test pins
+  both halves.
+  (b) `pm pr qa --fresh` / `--loop` — the *flag* spelling of a QA mode,
+  the one a driving session is most likely to guess and the one the PR
+  description asks to accept everywhere — still died on Click's
+  `No such option '--fresh'` (exit 2), while the positional spellings
+  already reached `pr_qa`'s corrective hint (i14/i18). `_QaCommand` now
+  reads the shared `command_surface.QA_FLAG_MODES` map and keeps only the
+  mode token in either position, so the flag form reaches the same hint
+  naming the command-bar form and TUI key; the CLI still accepts no such
+  flag (no QA runs, exit 1), which the help states. `--help` still wins:
+  `pm pr qa --fresh --help` drops the flag and renders the help. The
+  map is now public (`QA_FLAG_MODES`) so the command bar's parser and the
+  CLI's tolerance cannot disagree about which flags exist.
+  (c) `pm pr qa --help`'s inference sentence now matches `_infer_pr_id`:
+  it also uses the active PR, not only the workdir and a single
+  in_review/qa candidate.
+  Full suite: 5584 passed, 1 skipped (with `markdown` installed; the
+  prior iterations' "minus the known markdown-module baseline" caveat
+  does not apply in this container).
