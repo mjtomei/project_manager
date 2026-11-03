@@ -171,8 +171,15 @@ class HelpGroup(click.Group):
             # If there's a real 'help' command registered, let it run
             if super().get_command(ctx, "help") is not None:
                 return super().resolve_command(ctx, args)
-            # Otherwise replace 'help' with '--help'
-            args = ["--help"] + args[1:]
+            # Otherwise render this group's help and exit.  Do it here rather
+            # than rewriting to '--help': on Click <8.2 an unknown
+            # option-looking token restarts option parsing from ``ctx.args``,
+            # which still holds the original 'help', so the rewritten flag is
+            # lost and the command fails with "No such command '--help'".
+            # ``pyproject.toml`` allows click>=8.0, so the alias must not rely
+            # on that newer-only restart.
+            click.echo(ctx.get_help(), color=ctx.color)
+            ctx.exit()
         # Alias l/ls to list when the group has a list subcommand
         if args and args[0] in ("l", "ls") and super().get_command(ctx, "list") is not None:
             args = ["list"] + args[1:]

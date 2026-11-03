@@ -179,6 +179,39 @@ def test_pr_signoff_accepts_the_help_alias():
     assert "Sign-off: PR-level review" in result.output
 
 
+def test_help_alias_does_not_depend_on_the_click_option_restart(monkeypatch):
+    """The `help` alias renders help itself, on every supported Click.
+
+    Rewriting ``help`` to ``--help`` and letting ``resolve_command`` retry
+    only works on Click >= 8.2: earlier versions restart option parsing from
+    ``ctx.args`` (still holding the original ``help`` token), so the flag is
+    lost and the command dies with "No such command '--help'".  Click 8.1.x
+    is inside the ``click>=8.0`` range this project declares, so the alias
+    must not reach the version-specific retry at all.
+
+    The stand-in below is Click 8.1's ``Group.resolve_command``: it differs
+    from 8.4's only in re-parsing ``ctx.args`` instead of the rewritten
+    ``args``.
+    """
+
+    def resolve_command_81(self, ctx, args):
+        cmd_name = args[0]
+        cmd = self.get_command(ctx, cmd_name)
+        if cmd is None and ctx.token_normalize_func is not None:
+            cmd_name = ctx.token_normalize_func(cmd_name)
+            cmd = self.get_command(ctx, cmd_name)
+        if cmd is None and not ctx.resilient_parsing:
+            if cmd_name.startswith("-"):
+                self.parse_args(ctx, ctx.args)  # Click 8.1 passes ctx.args
+            ctx.fail(f"No such command {cmd_name!r}.")
+        return cmd_name if cmd else None, cmd, args[1:]
+
+    monkeypatch.setattr(click.Group, "resolve_command", resolve_command_81)
+    result = CliRunner().invoke(cli, ["pr", "signoff", "help"])
+    assert result.exit_code == 0, result.output
+    assert "Sign-off: PR-level review" in result.output
+
+
 def _leaf_commands(cmd, path=()):
     if isinstance(cmd, click.Group):
         for name, sub in cmd.commands.items():
