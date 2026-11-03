@@ -645,10 +645,30 @@ def _resolve_command_bar_pr(app, identifier: str) -> dict | None:
     return pr
 
 
+def _refocus_active_view(app) -> None:
+    """Return focus to the view the user is looking at.
+
+    The command bar keeps focus across a command, so every path that
+    finishes with it has to hand focus back.  In the QA view the target is
+    the QA pane: focusing the hidden tech-tree left the QA pane's keys dead
+    until the user left and re-entered the view.  Mirrors
+    ``ProjectManagerApp.action_unfocus_command``, which already handles all
+    three views.
+    """
+    from pm_core.tui.tech_tree import TechTree
+    from pm_core.tui.plans_pane import PlansPane
+    if app._plans_visible:
+        app.query_one("#plans-pane", PlansPane).focus()
+    elif getattr(app, "_qa_visible", False):
+        from pm_core.tui.qa_pane import QAPane
+        app.query_one("#qa-pane", QAPane).focus()
+    else:
+        app.query_one("#tech-tree", TechTree).focus()
+
+
 def handle_command_submitted(app, cmd: str) -> None:
     """Handle commands typed in the command bar."""
     from pm_core.tui.tech_tree import TechTree
-    from pm_core.tui.plans_pane import PlansPane
     from pm_core.tui import pane_ops
 
     _log.info("command submitted: %s", cmd)
@@ -673,10 +693,7 @@ def handle_command_submitted(app, cmd: str) -> None:
         if cmd.startswith(prefix):
             action_key = cmd
             if not guard_pr_action(app, action_key):
-                if app._plans_visible:
-                    app.query_one("#plans-pane", PlansPane).focus()
-                else:
-                    app.query_one("#tech-tree", TechTree).focus()
+                _refocus_active_view(app)
                 return
             app._inflight_pr_action = action_key
             break
@@ -716,10 +733,7 @@ def handle_command_submitted(app, cmd: str) -> None:
         # review-{display_id} to appear and switches there unless the
         # user dismissed the spinner with q/Esc.  Doing it here would
         # race with the popup and ignore the suppress flag.
-        if app._plans_visible:
-            app.query_one("#plans-pane", PlansPane).focus()
-        else:
-            tree.focus()
+        _refocus_active_view(app)
         return
 
     # Handle edit command: 'edit [PR_ID]' — opens the PR's edit pane
@@ -736,13 +750,10 @@ def handle_command_submitted(app, cmd: str) -> None:
             tree = app.query_one("#tech-tree", TechTree)
             tree.select_pr(edit_pr_id)
         pane_ops.edit_plan(app)
-        # Return focus to the tree (or plans pane) so subsequent nav keys
+        # Return focus to the tree (or plans/QA pane) so subsequent nav keys
         # don't leak into the command bar's Input, mirroring the other
         # command branches.
-        if app._plans_visible:
-            app.query_one("#plans-pane", PlansPane).focus()
-        else:
-            app.query_one("#tech-tree", TechTree).focus()
+        _refocus_active_view(app)
         return
 
     # Handle auto-start commands: ``autostart [verb] [ids…] [flags]``
@@ -784,10 +795,7 @@ def handle_command_submitted(app, cmd: str) -> None:
             # the corrective hint disappears exactly when it is needed.
             app.log_message(command_surface.escape_markup(f"QA: {e}"))
             app._inflight_pr_action = None
-            if app._plans_visible:
-                app.query_one("#plans-pane", PlansPane).focus()
-            else:
-                app.query_one("#tech-tree", TechTree).focus()
+            _refocus_active_view(app)
             return
         if qa_pr_id is None:
             tree = app.query_one("#tech-tree", TechTree)
@@ -821,10 +829,7 @@ def handle_command_submitted(app, cmd: str) -> None:
                     handler(app, qa_pr["id"])
         # QA is handled directly (not via run_command), so clear the guard
         app._inflight_pr_action = None
-        if app._plans_visible:
-            app.query_one("#plans-pane", PlansPane).focus()
-        else:
-            app.query_one("#tech-tree", TechTree).focus()
+        _refocus_active_view(app)
         return
 
     # Commands that launch interactive Claude sessions need a tmux pane
@@ -842,10 +847,7 @@ def handle_command_submitted(app, cmd: str) -> None:
             working_message = f"Reviewing {pr_id}"
 
         run_command(app, cmd, working_message=working_message, action_key=action_key)
-    if app._plans_visible:
-        app.query_one("#plans-pane", PlansPane).focus()
-    else:
-        app.query_one("#tech-tree", TechTree).focus()
+    _refocus_active_view(app)
 
 
 def run_command(app, cmd: str, working_message: str | None = None,

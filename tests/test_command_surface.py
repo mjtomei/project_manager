@@ -363,8 +363,9 @@ def test_help_screen_renders_the_whole_command_bar_section():
         # rows this PR lengthened in the keybinding list
         "Watcher prefix: ww list, wf focus, ws start/stop, wr review",
         "Cleanup, then: ys start, yd review, yt QA",
-        # z modifies every pane action, not just s/S/d/t
-        "s S d t e v n L H c; zz d / zz t: loop",
+        # z modifies every pane action, not just s/S/d/t (incl. the `wr`
+        # watcher-review chord)
+        "s S d t e v n L H c, wr; zz d / zz t: loop",
         # the one App binding neither surface listed before
         "Reload state from disk (no sync)",
         # the PR-action rows now carry the same modifier keys as
@@ -506,13 +507,14 @@ def test_z_prefix_names_every_action_it_modifies():
     """`z` is not limited to s/S/d/t.
 
     ``_consume_z`` is also read by ``edit_plan``, ``view_plan``,
-    ``launch_notes``, ``view_log``, ``launch_guide`` and ``launch_claude``,
-    so a row naming only s/S/d/t (as this sweep first wrote it) both hides
-    working chords and misstates the prefix.  ``m`` consumes ``z`` but does
-    not support a fresh restart, so it must not be named.
+    ``launch_notes``, ``view_log``, ``launch_guide``, ``launch_claude`` and
+    ``launch_watcher_review`` (the ``wr`` chord), so a row naming only
+    s/S/d/t (as this sweep first wrote it) both hides working chords and
+    misstates the prefix.  ``m`` consumes ``z`` but does not support a
+    fresh restart, so it must not be named.
     """
     out = CliRunner().invoke(cli, ["tui", "keys"]).output
-    assert "(s S d t e v n L H c; zz d / zz t: loop)" in out
+    assert "(s S d t e v n L H c, wr; zz d / zz t: loop)" in out
     assert "Prefix before s/S/d/t:" not in out
 
 
@@ -567,6 +569,34 @@ def test_command_bar_help_returns_focus_to_the_view():
         log_message=lambda *a, **k: None)
     pr_view.handle_command_submitted(app, "help")
     assert calls == ["unfocus", "help"]
+
+
+def test_command_bar_returns_focus_to_the_qa_pane():
+    """In the QA view, focus must go back to the QA pane, not the hidden tree.
+
+    The command bar keeps focus across a command, and every branch ended
+    with "plans pane else tech-tree" — so in the QA view the QA pane's keys
+    (j/k, Enter, e, d, a) went dead until the user left and re-entered the
+    view.  ``action_unfocus_command`` already handled all three views; the
+    command branches now share one helper that does too.
+    """
+    from types import SimpleNamespace
+
+    from pm_core.tui import pr_view
+
+    focused = []
+
+    def query_one(selector, *rest):
+        return SimpleNamespace(focus=lambda: focused.append(selector))
+
+    app = SimpleNamespace(
+        _root=None, _inflight_pr_action=None, _plans_visible=False,
+        _qa_visible=True,
+        log_message=lambda *a, **k: None, query_one=query_one)
+
+    pr_view.handle_command_submitted(app, "pr qa --frosh")
+
+    assert focused == ["#qa-pane"], focused
 
 
 def test_non_github_backend_remedies_name_a_working_command(tmp_path,
@@ -1510,6 +1540,48 @@ def test_model_screen_save_not_found_names_the_listing_command(tmp_path):
 
     assert "not found" in screen._status
     assert "pr list" in screen._status
+
+
+def test_plan_actions_report_a_missing_plan_file(tmp_path):
+    """Enter / `e` on a plan whose file is missing must say so.
+
+    Both returned silently, so the key looked broken; `v`
+    (``view_plan``) already named `pm plan list`.  A live plan in this
+    project (`plan-b6aac3d`) has no file on disk, so the state is
+    reachable, not hypothetical.  An empty ``file`` must not resolve to
+    the project root — which exists — and open the editor on the whole
+    project.
+    """
+    from types import SimpleNamespace
+
+    from pm_core.tui import pane_ops
+
+    logs = []
+    app = SimpleNamespace(
+        _root=tmp_path,
+        _data={"plans": [
+            {"id": "plan-gone", "file": "plans/plan-gone.md"},
+            {"id": "plan-nofile", "file": ""},
+        ]},
+        log_message=lambda msg, **kw: logs.append(msg),
+    )
+
+    pane_ops.launch_plan_activated(app, "plan-gone")
+    assert "Plan file not found" in logs[-1]
+    assert "pm plan list" in logs[-1]
+
+    pane_ops.handle_plan_action(app, "edit", "plan-gone")
+    assert "Plan file not found" in logs[-1]
+    assert "pm plan list" in logs[-1]
+
+    pane_ops.handle_plan_action(app, "edit", "plan-nofile")
+    assert "Plan file not found" in logs[-1]
+    assert str(tmp_path) not in logs[-1], (
+        "an empty plan file must not resolve to the project root")
+
+    pane_ops.launch_plan_activated(app, "plan-unknown")
+    assert "plan-unknown" in logs[-1]
+    assert "pm plan list" in logs[-1]
 
 
 def test_help_screen_uses_the_shared_command_bar_header():

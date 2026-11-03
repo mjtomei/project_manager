@@ -297,7 +297,7 @@ class HelpScreen(ModalScreen):
             # guide chords still work there, but they stay documented here
             # rather than repeated per view.)
             if not (self._in_plans or self._in_qa):
-                yield Label("  [bold]z[/]  Prefix: restart the pane instead of focusing it (s S d t e v n L H c; zz d / zz t: loop)", classes="help-row")
+                yield Label("  [bold]z[/]  Prefix: restart the pane instead of focusing it (s S d t e v n L H c, wr; zz d / zz t: loop)", classes="help-row")
             yield Label("  [bold]r[/]  Refresh / sync with GitHub", classes="help-row")
             yield Label("  [bold]R[/]  Reload state from disk (no sync)", classes="help-row")
             yield Label("  [bold]C[/]  Show shared connect command", classes="help-row")

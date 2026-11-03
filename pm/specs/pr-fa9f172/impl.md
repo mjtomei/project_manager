@@ -720,3 +720,22 @@ the routed form and `--fresh` so help is complete.
   `pr list` / TUI `r`, matching the render path fixed in e4f7 i1.
   (d) The improvement watcher's stale "UX is taste-driven" comment now
   says `improvements`.
+
+- Review-loop e4f7 i3: two silent dead ends in the plans view, and the
+  command-bar focus hand-off in the QA view.
+  (a) `launch_plan_activated` (Enter) and `handle_plan_action("edit")`
+  (`e`) returned silently when the selected plan's file was missing, so
+  the key read as broken — a live plan in this project (`plan-b6aac3d`)
+  has no file on disk. Both now log the same "Plan file not found — run
+  `pm plan list`…" remedy as `view_plan` (`v`), via one shared
+  `_report_plan_file_missing` helper. An empty `file` no longer resolves
+  to the project root (which exists) and opens the editor on the whole
+  project.
+  (b) Every command-bar branch ended with "plans pane else tech-tree", so
+  in the QA view focus landed on the hidden tree and the QA pane's keys
+  (j/k, Enter, e, d, a) went dead until the view was re-entered. A shared
+  `_refocus_active_view` (mirroring `action_unfocus_command`) handles all
+  three views; six duplicated blocks collapse into it.
+  (c) The `z` prefix row now names the `wr` watcher-review chord, which
+  also honors `z` (fresh restart); the test that claims to name "every
+  action it modifies" was missing it.

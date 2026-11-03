@@ -246,6 +246,27 @@ def edit_plan(app) -> None:
     launch_pane(app, f"pm pr edit {pr_id}", "pr-edit", fresh=fresh)
 
 
+def _report_plan_file_missing(app, plan_id: str | None, plan: dict | None,
+                              plan_path: Path | None = None) -> None:
+    """Log the not-found remedy every plan-file action shares.
+
+    Pressing Enter (``launch_plan_activated``) or ``e``
+    (``handle_plan_action``) on a plan whose file is missing used to return
+    silently, so the key read as broken — a live plan (``plan-b6aac3d`` in
+    this project) has no file on disk.  ``v`` (``view_plan``) already named
+    the listing command; all three now say the same thing.
+    """
+    if plan is None:
+        app.log_message(f"Plan {plan_id} not found — run `pm plan list` to "
+                        f"see every plan")
+    elif plan_path is None:
+        app.log_message("Plan file not found — run `pm plan list` to see "
+                        "every plan")
+    else:
+        app.log_message(f"Plan file not found: {plan_path} — run `pm plan "
+                        f"list` to see every plan")
+
+
 def view_plan(app) -> None:
     """Open the plan file associated with the selected PR in a pane."""
     from pm_core.tui.tech_tree import TechTree
@@ -263,12 +284,11 @@ def view_plan(app) -> None:
         return
     plan_file = plan.get("file", "")
     if not plan_file or not app._root:
-        app.log_message("Plan file not found — run `pm plan list` to see every plan")
+        _report_plan_file_missing(app, plan.get("id"), plan)
         return
     plan_path = app._root / plan_file
     if not plan_path.exists():
-        app.log_message(f"Plan file not found: {plan_path} — run `pm plan list` "
-                        f"to see every plan")
+        _report_plan_file_missing(app, plan.get("id"), plan, plan_path)
         return
     launch_pane(app, f"less {plan_path}", "plan", fresh=fresh)
 
@@ -689,11 +709,21 @@ def handle_plan_action(app, action: str, plan_id: str | None) -> None:
     if action == "edit":
         if plan_id:
             plan = store.get_plan(app._data, plan_id)
-            if plan and app._root:
-                plan_path = app._root / plan.get("file", "")
-                if plan_path.exists():
-                    editor = find_editor()
-                    _launch_in_plans_window(app, plan_id, f"{editor} {plan_path}", "plan-edit")
+            if not plan or not app._root:
+                _report_plan_file_missing(app, plan_id, plan)
+                return
+            plan_file = plan.get("file", "")
+            if not plan_file:
+                # `root / ""` is the project root, which exists — without
+                # this guard the editor would open on the whole project.
+                _report_plan_file_missing(app, plan_id, plan)
+                return
+            plan_path = app._root / plan_file
+            if not plan_path.exists():
+                _report_plan_file_missing(app, plan_id, plan, plan_path)
+                return
+            editor = find_editor()
+            _launch_in_plans_window(app, plan_id, f"{editor} {plan_path}", "plan-edit")
     elif action == "breakdown":
         if plan_id:
             _launch_in_plans_window(app, plan_id, f"pm plan breakdown {plan_id}", "plan-breakdown")
@@ -733,10 +763,17 @@ def launch_plan_activated(app, plan_id: str) -> None:
     _log.info("plan activated: %s", plan_id)
     plan = store.get_plan(app._data, plan_id)
     if not plan or not app._root:
+        _report_plan_file_missing(app, plan_id, plan)
         return
-    plan_path = app._root / plan.get("file", "")
-    if plan_path.exists():
-        _launch_in_plans_window(app, plan_id, f"less {plan_path}", "plan")
+    plan_file = plan.get("file", "")
+    if not plan_file:
+        _report_plan_file_missing(app, plan_id, plan)
+        return
+    plan_path = app._root / plan_file
+    if not plan_path.exists():
+        _report_plan_file_missing(app, plan_id, plan, plan_path)
+        return
+    _launch_in_plans_window(app, plan_id, f"less {plan_path}", "plan")
 
 
 # ---------------------------------------------------------------------------
