@@ -33039,7 +33039,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-11-03T19:11:46.600790+00:00'
+  updated_at: '2026-11-03T19:14:16.128328+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33243,6 +33243,20 @@ prs:
       target ambiguous. Captures: /pm-captures/scenarios/16/{command-bar-help,quoting,view-focus,prefix-fzf}.'
     created_at: '2026-11-03T19:11:46Z'
     last_edited: '2026-11-03T19:11:46Z'
+  - id: note-94e56e0
+    text: 'QA S18 PASS (autostart owner refusals + group help aliases across Click
+      versions). Erratum for future scenario authors, not a defect: for groups with
+      a hidden no-subcommand run form the usage line differs by Click version — on
+      8.1.7 `pm watcher help` / `pm pr signoff help` render `Usage: pm <group> [OPTIONS]
+      COMMAND [ARGS]...`, while Click 8.2+ renders `[COMMAND]` (optional). Within
+      each version `help` is byte-identical to `--help`, which is what S18 asserts
+      (extends the signoff-shape note from S8 to watcher). Verified all 17 top-level
+      groups on both 8.1.7 and 8.5.0: exit 0, empty stderr, help == --help, no "No
+      such command". Autostart refusals verified verbatim: owner_unavailable (no session
+      / no pidfile / stale pidfile incl. unreadable), unknown_pr, terminal_pr, the
+      --json shape, and no autostart key written. Captures: /pm-captures/scenarios/18/{cli-autostart,click81,click85}.'
+    created_at: '2026-11-03T19:14:16Z'
+    last_edited: '2026-11-03T19:14:16Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
