@@ -879,7 +879,14 @@ def get_session_name() -> str:
             _tmux_cmd("display-message", "-p", "#{session_name}"),
             text=True,
         )
-    return result.stdout.strip()
+    # ``rstrip("\n")``, not ``strip()``: tmux stores a session name as
+    # given, and a user's own view of a pm session may be named with a
+    # leading or trailing space (S118/S121/S124: "however it is named").
+    # Trimming it here made the name differ from the one tmux reports
+    # everywhere else — the group query then failed and a pm session was
+    # not recognised from inside such a view (the same round-trip rule as
+    # ``list_clients_in_group``, review-loop 9d4c i3).
+    return result.stdout.rstrip("\n")
 
 
 def get_pane_indices(session: str, window: str = "0") -> list[tuple[str, int]]:
@@ -1492,7 +1499,10 @@ def switch_sessions_to_window(sessions: list[str], session: str, window_name: st
         text=True,
     )
     if r.returncode == 0:
-        for line in r.stdout.strip().splitlines():
+        # No ``.strip()``: it trims the leading space off the first row's
+        # session name, so a view named with one never matched ``sessions``
+        # and its client was not switched (review-loop 9d4c i3).
+        for line in r.stdout.splitlines():
             parts = line.split(":", 1)
             if len(parts) == 2:
                 client_map[parts[0]] = parts[1]
@@ -1661,7 +1671,12 @@ def _detach_current_client(socket_path: str | None) -> bool:
                   socket_path=socket_path),
         text=True,
     )
-    session = session_r.stdout.strip() if session_r.returncode == 0 else ""
+    # ``rstrip("\n")``, not ``strip()``: the name is a session's, and a
+    # view may carry an edge space (see ``get_session_name``); trimming it
+    # made the group lookup and the client filter miss, so Ctrl-Q from
+    # such a view detached nothing (review-loop 9d4c i3).
+    session = (session_r.stdout.rstrip("\n")
+               if session_r.returncode == 0 else "")
     if not session:
         return False
     # Resolve the pm base through the session *group*: tmux reports the

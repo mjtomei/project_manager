@@ -4439,3 +4439,51 @@ pm session still rebalances), and the client parser live-checked with
 sessions named ` lead x` and `trail x `.  The PR-affected test files pass
 twice in one HOME (1195 each); full suite 5654 passed / 1 skipped, 421.0 s
 (log `/pm-captures/review-9d4c-i2/full-suite-final.log`).
+
+## Review iteration (2026-11-03, review-loop 9d4c i3)
+
+Verification pass over the head after the 9d4c i2 fixes; the rest of the
+session-name readback sites now follow the same round-trip rule (a
+session name is stored by tmux as given, and a user's own view of a pm
+session may be named with a leading or trailing space — S118/S121/S124,
+"however it is named").  No requirement changes.
+
+1. **`tmux.get_session_name()` trimmed the name it read back.**
+   `display-message -p "#{session_name}"` prints the stored name plus a
+   newline; `.strip()` also removed a space that is part of the name
+   (verified live on tmux 3.2a: `trail x ` comes back as `trail x \n`).
+   Every caller that resolves "the session this process is in" then had a
+   name tmux does not know: `pm_session_name()`'s group query failed and
+   the pm session was not recognised from inside such a view.  Now
+   `rstrip("\n")`.
+2. **`tmux.switch_sessions_to_window()` stripped the client listing.**
+   Its `list-clients -F "#{session_name}:#{client_tty}"` rows put the
+   session name first, so `.strip()` trimmed the *first row's* leading
+   space; the session's client was never found and the `switch-client`
+   that moves it to a replacement window was skipped.  The rows are now
+   read with `splitlines()` and no `strip()` (the same rule as
+   `list_clients_in_group`).
+3. **`tmux._detach_current_client()` trimmed the pane's session name.**
+   The `display-message -p -t $TMUX_PANE "#{session_name}"` answer went
+   through `.strip()`, so for a view named with an edge space the group
+   lookup missed and the client filter matched nothing: Ctrl-Q detached
+   nothing.  Now `rstrip("\n")`.
+4. **`qa_status._find_attached_session()` trimmed its session names.**
+   The standalone dashboard script made the same two reads (the pane's
+   `#{session_name}:#{session_group}` and the `list-sessions` scan); a
+   leading space in a view's name made the first query fail and the
+   fallback return the trimmed name, so the dashboard's Enter switch
+   targeted a session that does not exist.  Now `rstrip("\n")` for the
+   single-line query and no `strip()` on the listing.
+
+Tests: `TestGetSessionName::test_keeps_an_edge_space_in_the_session_name`,
+`TestSwitchSessionsToWindow::test_keeps_a_leading_space_in_the_session_name`
+(`tests/test_tmux.py`),
+`TestDetachCurrentClient::test_keeps_a_trailing_space_in_the_pane_session_name`
+(`tests/test_session_socket_isolation.py`), and
+`tests/test_qa_status_attached_session.py`.  All four fail on the
+pre-fix code (checked in a scratch worktree at the previous head).
+
+Verification: the eight PR-affected test files pass twice in one HOME
+(654 each); full suite 5658 passed / 1 skipped, 435.5 s (log
+`/pm-captures/review-9d4c-i3/full-suite-final.log`).

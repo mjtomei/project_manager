@@ -293,7 +293,13 @@ def _find_attached_session(base: str) -> str:
                     "#{session_name}:#{session_group}"),
                 capture_output=True, text=True,
             )
-            current, _, group = result.stdout.strip().partition(":")
+            # ``rstrip("\n")``, not ``strip()``: the session name comes
+            # first, and a user's own view of the session may be named with
+            # a leading space (S118/S121/S124).  Trimming it named a
+            # different (non-existent) session, so the lookup fell through
+            # and the dashboard did not follow its window (review-loop 9d4c
+            # i3; the same round-trip rule as the tmux helpers).
+            current, _, group = result.stdout.rstrip("\n").partition(":")
             if current and (current == base or _is_grouped_of(current, base)
                             or group == base):
                 # Verify it has attached clients
@@ -328,7 +334,11 @@ def _find_attached_session(base: str) -> str:
                 "#{session_name}:#{session_group}:#{session_attached}"),
             capture_output=True, text=True,
         )
-        for line in result.stdout.strip().splitlines():
+        # No ``.strip()``: it trims the leading space off the first row's
+        # session name, so a view named with one was returned under the
+        # wrong name and the switch targeted no session (review-loop 9d4c
+        # i3).  ``splitlines`` already drops the final newline.
+        for line in result.stdout.splitlines():
             name, _, rest = line.partition(":")
             group, _, attached = rest.partition(":")
             if name and (name == base or _is_grouped_of(name, base)

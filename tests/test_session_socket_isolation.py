@@ -1568,6 +1568,53 @@ class TestDetachCurrentClient:
         assert len(detaches) == 1
         assert detaches[0][-2:] == ["-t", "/dev/pts/9"]
 
+    @patch("pm_core.tmux.subprocess.run")
+    def test_keeps_a_trailing_space_in_the_pane_session_name(
+            self, mock_run, monkeypatch):
+        """A view may be named with a trailing space (S118/S121/S124).
+
+        ``display-message -p`` prints the stored name plus a newline, so
+        ``strip()`` trimmed a space that is part of the name: the group
+        query missed, the client filter missed, and Ctrl-Q detached
+        nothing (review-loop 9d4c i3).
+        """
+        monkeypatch.setenv("TMUX_PANE", "%7")
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+
+        def fake_run(cmd, **kwargs):
+            joined = " ".join(cmd)
+            if "list-sessions" in cmd:
+                if "#{session_group}" in joined:
+                    return MagicMock(
+                        returncode=0,
+                        stdout="pm-x:\ntrail x :pm-x\n")
+                return MagicMock(returncode=0, stdout="pm-x\ntrail x \n")
+            if "list-clients" in cmd:
+                return MagicMock(
+                    returncode=0,
+                    stdout="/dev/pts/1|100|10|trail x \n")
+            if "detach-client" in cmd:
+                return MagicMock(returncode=0, stdout="")
+            if "#{session_group}" in cmd:
+                target = cmd[cmd.index("-t") + 1]
+                # The untrimmed name reaches the group query.
+                return MagicMock(returncode=0,
+                                 stdout="pm-x\n"
+                                 if target == "=trail x :" else "")
+            if "#{session_name}" in cmd:
+                return MagicMock(returncode=0, stdout="trail x \n")
+            if "#{window_id}" in cmd:
+                return MagicMock(returncode=0, stdout="@1\n")
+            return MagicMock(returncode=0, stdout="0\n")
+
+        mock_run.side_effect = fake_run
+        assert tmux.detach_current_client() is True
+
+        detaches = [c[0][0] for c in mock_run.call_args_list
+                    if "detach-client" in c[0][0]]
+        assert len(detaches) == 1
+        assert detaches[0][-2:] == ["-t", "/dev/pts/1"]
+
 
 # ---------------------------------------------------------------------------
 # tmux: session-group membership

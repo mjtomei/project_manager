@@ -143,6 +143,40 @@ class TestSwitchSessionsToWindow:
 
     @patch("pm_core.tmux.find_window_by_name")
     @patch("pm_core.tmux._run")
+    def test_keeps_a_leading_space_in_the_session_name(
+            self, run, find_window, monkeypatch):
+        """A view may be named with a leading space (S118/S121/S124).
+
+        ``strip()`` on the whole listing trimmed the first row's name, so
+        the client of such a view was never found and the ``switch-client``
+        that moves it to the replacement window was skipped (review-loop
+        9d4c i3).
+        """
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+        find_window.return_value = {"id": "@9", "index": "3"}
+        responses = {
+            "list-clients": MagicMock(
+                returncode=0,
+                stdout=" lead x:/dev/pts/1\n"
+                       "pm-x:/dev/pts/2\n"),
+        }
+
+        def fake_run(cmd, **kwargs):
+            for key, result in responses.items():
+                if key in cmd:
+                    return result
+            return MagicMock(returncode=0, stdout="")
+
+        run.side_effect = fake_run
+        switch_sessions_to_window([" lead x"], " lead x", "review")
+
+        switch_cmds = [c.args[0] for c in run.call_args_list
+                       if "switch-client" in c.args[0]]
+        assert switch_cmds == [["tmux", "switch-client", "-t",
+                                " lead x", "-c", "/dev/pts/1"]]
+
+    @patch("pm_core.tmux.find_window_by_name")
+    @patch("pm_core.tmux._run")
     def test_unknown_client_still_selects_the_window(self, run, find_window,
                                                      monkeypatch):
         monkeypatch.setenv("PM_TMUX_SOCKET", "")
@@ -602,6 +636,20 @@ class TestGetSessionName:
         assert "-t" in cmd
         assert "%5" in cmd
         assert result == "myproj"
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_keeps_an_edge_space_in_the_session_name(self, mock_run):
+        """A view may be named with an edge space (S118/S121/S124).
+
+        ``display-message -p`` prints the stored name plus a newline, so
+        ``strip()`` trimmed a space that is part of the name: the group
+        query then failed and the pm session was not recognised from
+        inside such a view (review-loop 9d4c i3).
+        """
+        mock_run.return_value = MagicMock(returncode=0, stdout=" trail x \n")
+        with patch.dict(os.environ, {"TMUX_PANE": "%5"}):
+            result = get_session_name()
+        assert result == " trail x "
 
     @patch("pm_core.tmux.subprocess.run")
     def test_fallback_without_tmux_pane(self, mock_run):
