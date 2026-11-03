@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-03T22:34:44.993228+00:00'
+  updated_at: '2026-11-03T22:54:31.774593+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8970,6 +8970,26 @@ prs:
       is what wins over /opt/pm-src.'
     created_at: '2026-11-03T22:34:44Z'
     last_edited: '2026-11-03T22:34:44Z'
+  - id: note-1d16ef7
+    text: 'QA scenario 74 (non-git anchoring, both layouts) PASS 5/5 on 80e0efc4,
+      no source changes. All five stories driven live with a throwaway HOME and fixtures
+      under /tmp/qa74 (modern keeps pm/project.yaml; standalone and outer use root-level
+      project.yaml; outer/target is nested modern). (1) standalone/sub/deep: name/start/list/--print-connect/kill
+      all pm-standalone-00000000; header Project: standalone; one base + ~1 on one
+      socket; kill removed the socket. (2) start from standalone/other/deep attached
+      as ~2 (Attaching to session ...~2), same base/socket/TUI pid, list from third
+      CLIENTS 2. (3) outer/target/sub resolved pm-target-00000000 (its pm/project.yaml
+      beat outer root-level), headers modern/target/outer, three sockets, no pm-sub/deep.
+      (4) c6eaca27 confirmed live: --global and --global --print-connect both exit
+      1 with Cannot determine session tag (not in a git repo?). and print no tmux
+      line; no 9c70933a socket; kill --global exits 1 No session ...9c70933a found.
+      and the private session/TUI pid/clients survive. (5) concurrent A/B starts both
+      printed Creating and converged (both clients on ~1, no duplicate-session error);
+      40 list snapshots each had exactly one row; E killed / F recreated on the same
+      socket; no subdirectory-named session/socket. Captures /pm-captures/scenarios/74
+      (README + per-story manifests, casts and mp4s).'
+    created_at: '2026-11-03T22:54:31Z'
+    last_edited: '2026-11-03T22:54:31Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
