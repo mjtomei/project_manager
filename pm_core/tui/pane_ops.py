@@ -371,7 +371,7 @@ def launch_claude(app) -> None:
     from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
     claude = find_claude()
     if not claude:
-        app.log_message("Claude CLI not found")
+        app.log_message("Claude CLI not found — install Claude Code first")
         return
 
     sess = app._session_name or "default"
@@ -421,7 +421,7 @@ def launch_discuss(app) -> None:
     from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
     claude = find_claude()
     if not claude:
-        app.log_message("Claude CLI not found")
+        app.log_message("Claude CLI not found — install Claude Code first")
         return
 
     prompt = """\
@@ -499,7 +499,7 @@ def launch_watcher_review(app) -> None:
 
     claude = find_claude()
     if not claude:
-        app.log_message("Claude CLI not found")
+        app.log_message("Claude CLI not found — install Claude Code first")
         return
 
     # Resolve the meta workdir's pm/ root — that's where the watchers

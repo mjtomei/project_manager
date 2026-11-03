@@ -654,7 +654,7 @@ COMMANDS
   pm qa show <id>                  Show full content of a QA instruction or artifact recipe
   pm qa run <id> --pr <pr-id>      Run ONE instruction against a PR (not the full loop)
   pm qa standalone <id>            Run a QA instruction against master
-  pm qa regression <test-id>       Run a regression test (replaces `pm tui test`)
+  pm qa regression <test-id>       Run a regression test from pm/qa/regression/
   pm qa debug <id>                 Interactive session to verify an instruction works
   pm qa launch <id>                Launch a QA item as a Claude pane
   pm qa captures-path <pr-id>      Print the host path of a PR's captures directory

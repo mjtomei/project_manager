@@ -1117,6 +1117,19 @@ def test_prompt_texts_do_not_reference_removed_pr_done():
         assert "pm pr done" not in (root / rel).read_text(), rel
 
 
+def test_help_text_does_not_name_removed_commands():
+    """`pm help` must not send an operator to a command that no longer exists.
+
+    The sweep removed ``pm pr done`` from the injected prompts but left
+    ``(replaces `pm tui test`)`` on the ``pm qa regression`` line: the old
+    command is gone, so the parenthetical read as a runnable command and
+    answered "No such command".  The help surface now names the directory
+    the tests live in instead.
+    """
+    for removed in ("pm tui test", "pm pr done"):
+        assert removed not in HELP_TEXT, removed
+
+
 def test_review_window_no_workdir_names_the_start_command(tmp_path, capsys):
     """A window that cannot open for lack of a workdir names the way to make one."""
     from unittest import mock
@@ -1607,6 +1620,34 @@ def test_plan_actions_report_a_missing_plan_file(tmp_path):
     pane_ops.launch_plan_activated(app, "plan-unknown")
     assert "plan-unknown" in logs[-1]
     assert "pm plan list" in logs[-1]
+
+
+@pytest.mark.parametrize("launcher", ["launch_claude", "launch_discuss",
+                                      "launch_watcher_review"])
+def test_claude_not_found_names_the_install_remedy(launcher):
+    """A missing Claude binary is a user-facing not-found error too.
+
+    The three pane launchers logged a bare "Claude CLI not found" and
+    returned, so the key read as broken with no way forward.
+    `claude_launcher` itself already raises "install it first"; the TUI
+    message now says the same.
+    """
+    from types import SimpleNamespace
+    from unittest import mock
+
+    from pm_core.tui import pane_ops
+
+    logs = []
+    app = SimpleNamespace(
+        _root=None,
+        _session_name="s",
+        _consume_z=lambda: 0,
+        log_message=lambda msg, **kw: logs.append(msg),
+    )
+    with mock.patch("pm_core.claude_launcher.find_claude", return_value=None):
+        getattr(pane_ops, launcher)(app)
+    assert "Claude CLI not found" in logs[-1]
+    assert "install" in logs[-1].lower()
 
 
 def test_help_screen_uses_the_shared_command_bar_header():

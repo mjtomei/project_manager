@@ -748,3 +748,20 @@ the routed form and `--fresh` so help is complete.
   / edit remedies escaped elsewhere (i2, i18). It now goes through
   `command_surface.escape_markup`, with a `Content.from_markup` assertion
   that the bracketed command survives.
+
+- Review-loop e4f7 i5: two stale surfaces the sweep had not reached.
+  (a) `pm help`'s `pm qa regression` line still read
+  "(replaces `pm tui test`)". `pm tui test` was removed (moved to
+  `pm qa regression`), so the parenthetical read as a runnable command and
+  answered "No such command" — the same class as the `pm pr done`
+  references already removed from the injected prompts. It now names the
+  directory (`pm/qa/regression/`), and a test asserts HELP_TEXT names
+  neither `pm tui test` nor `pm pr done`.
+  (b) The three TUI pane launchers (`launch_claude`, `launch_discuss`,
+  `launch_watcher_review`) logged a bare "Claude CLI not found" and
+  returned. Unlike the CLI launchers, which fall back to a copy-paste
+  prompt, these left the key looking broken with no next step. Each now
+  says "install Claude Code first", matching `claude_launcher`'s own
+  "install it first", with a parametrized test.
+  Full suite (minus the known markdown-module baseline): 5561 passed,
+  1 skipped.
