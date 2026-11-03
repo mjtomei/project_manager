@@ -33039,7 +33039,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-11-03T07:44:22.393147+00:00'
+  updated_at: '2026-11-03T08:01:55.053258+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33188,6 +33188,22 @@ prs:
       window-id-change assertion still held, but worth a look if window leaks recur.'
     created_at: '2026-11-03T07:44:22Z'
     last_edited: '2026-11-03T07:44:22Z'
+  - id: note-e4dddb4
+    text: 'QA S13 story 7 re-run (supersedes item 2 of note-8d147b4): the prescribed
+      no-wait command-bar burst DOES hit the Busy guard. Fixture: PR-A #42 in_review
+      with a live QA run, PR-B pending with no workdir (so pr start clones). Driver:
+      type `/` + `pr start pr-02a12bc` + Enter, then — as soon as the "⠋ Starting
+      pr-02a12bc..." spinner line appears (no wait for completion) — `/` + `pr qa
+      #42 --fresh` + Enter. Both arrive through the command bar in the same second:
+      "Busy: pr start pr-02a12bc — wait for it to finish", fresh-start count 0→0,
+      qa-#42 windows @2/@3 unchanged. The earlier submit_tui_command driver was a
+      workaround for a burst paced 0.4 s per keystroke, which outran the ~1 s start;
+      it is not needed. Focus probe: the command bar keeps its unfocused placeholder,
+      `l` moves the tree and logs Selected: pr-327e83c; k/j still cannot move because
+      the two standalone PRs render side by side (item 1 of the earlier note stands).
+      Captures rewritten in /pm-captures/scenarios/13/story7-busy-guard/.'
+    created_at: '2026-11-03T08:01:54Z'
+    last_edited: '2026-11-03T08:01:54Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
