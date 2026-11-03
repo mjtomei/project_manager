@@ -33039,7 +33039,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-11-03T21:42:44.777943+00:00'
+  updated_at: '2026-11-03T22:04:10.039917+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33307,6 +33307,27 @@ prs:
       following `pr list` works.'
     created_at: '2026-11-03T21:41:48Z'
     last_edited: '2026-11-03T21:41:48Z'
+  - id: note-c683f69
+    text: 'QA scenario 21 (command bar as a general CLI) — PASS on stories 1/3/4/5,
+      NEEDS_WORK on story 2 fixed in efab1f4f8. R35/E18: the generic `<command> [args]`
+      path logged only the last stderr line, so `pr add X --depends-on bogus` showed
+      "Available PRs: …" and `pr note edit <id> bogus ''x''` showed the note row,
+      dropping the `pm pr list` / `pm pr note list <id>` remedy printed above them.
+      `command_surface.pick_error_line` now prefers the first stderr line naming a
+      pm command to run and otherwise keeps the last line (Click usage errors and
+      a traceback''s final exception line stay last); both the sync and async command-bar
+      runners use it. Runtime-verified pre/post fix at 200x50; captures under /pm-captures/scenarios/21/{pre-fix,post-fix,story1-command-bar,story3-prefixed-spelling,story4-review-loop-stop,story5-literal-markup}.
+      Story 4 (R32/E17): `review-loop stop|cancel <id>` against a live loop logs the
+      cancel-path refusal verbatim, the review window id @7 and its python3 fake process
+      are untouched, and the tree stays `in_review ⟳1`. Story 5: `creds[work] and
+      [x]` renders literally in the bar and in `pm pr note list`. Errata for the next
+      run: (1) the fixture must commit pm/project.yaml on master or `pr start` refuses;
+      (2) with two standalone PRs the tree is side by side, so use h/l (not j/k) for
+      the focus check; (3) story 3''s `pm pr list` still logs only Click''s `Error:
+      No such command ''pm''.` — R35''s closing sentence reads as wanting a correction
+      there too, but the scenario''s Then asserts this exact line, so it was not changed.'
+    created_at: '2026-11-03T22:04:09Z'
+    last_edited: '2026-11-03T22:04:09Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
