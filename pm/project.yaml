@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-03T00:29:51.814229+00:00'
+  updated_at: '2026-11-03T03:21:09.249964+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8616,6 +8616,23 @@ prs:
       behaviour; noted, not filed.'
     created_at: '2026-11-03T00:29:51Z'
     last_edited: '2026-11-03T00:29:51Z'
+  - id: note-533d42e
+    text: 'QA scenario 56 (shared session, second Unix account; head ed48339b) PASS
+      4/4, no source changes. (1) Joiner (uid 1001) plain `pm session` with the shared
+      session''s TMUX/TMUX_PANE attached to ~2, TUI shown, no refusal; one list row
+      CLIENTS 2 (shared); owner TUI %0/3152 and window @2 unchanged; window-size smallest.
+      (2) Two racers released together attached once each (~2, ~3), one socket/one
+      TUI pane, CLIENTS 3. (3) Plain-shell joiner created the documented private twin
+      (srwx------ qjoiner) with the shared session untouched; qjoiner lists 2 rows,
+      owner 1; --global still required. (4) Owner-planted 0777 socket at the joiner''s
+      own tag: pm session / --print-connect / pm tui view / pm session kill all refused
+      rc 1 with the documented messages, planted server untouched; explicit `pm tui
+      view -s` reached it. Captures /pm-captures/scenarios/56 (README + per-story
+      manifests/casts/mp4s). Harness notes: `pm session tag --global` omits the pm-
+      prefix; casts end on the alt-screen exit after detach (TUI is the middle frame);
+      agg was downloaded (aarch64-gnu) as in earlier runs.'
+    created_at: '2026-11-03T03:21:09Z'
+    last_edited: '2026-11-03T03:21:09Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
