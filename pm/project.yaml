@@ -33039,7 +33039,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-11-02T21:43:09.530465+00:00'
+  updated_at: '2026-11-03T00:03:52.715928+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33124,6 +33124,20 @@ prs:
       D deliberately excludes. Full suite green (5561 passed, 1 skipped).'
     created_at: '2026-11-02T22:18:03Z'
     last_edited: '2026-11-02T22:18:03Z'
+  - id: note-eb8ca4b
+    text: 'QA scenario 6 (help renderers): CLI half, the ? modal at 200x50 and 60x30,
+      plans/QA help, and all four command-bar spellings (help, ?, commands, help pr)
+      verified from the surface; captures in /pm-captures/scenarios/6/{cli-help,tui-help}.
+      Two literal Then mismatches look like scenario errata vs the approved spec:
+      (1) the ? screen command-bar section header renders "Command Bar" (the title-case
+      section heading; impl spec A4 calls it a "Command Bar" section) rather than
+      "Command bar (press /):" — the rows and --loop note are present; (2) with the
+      two independent no-plan PRs the tree places the components side by side, so
+      j/Down has no down-neighbour and does not move the selection (l/Right does,
+      and j is not typed into the bar, so focus did return). Please confirm: treat
+      as scenario errata, or change HelpScreen to the shared COMMAND_BAR_HEADER?'
+    created_at: '2026-11-03T00:03:52Z'
+    last_edited: '2026-11-03T00:03:52Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
