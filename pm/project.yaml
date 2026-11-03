@@ -8530,6 +8530,52 @@ prs:
       Captures: /pm-captures/scenarios/50/run (README.md).'
     created_at: '2026-11-02T19:36:32Z'
     last_edited: '2026-11-02T19:36:32Z'
+  - id: note-54be404
+    text: 'QA S52 (reconciled-entry respawn race + stuck/unusable respawn lock) PASS
+      on 5d8fc48be, no source changes; captures /pm-captures/scenarios/52. (1) Story
+      1, 8 kill×reattach rounds at x-leads 0.40-0.60 s: 3 rounds hit the fixed path
+      (the attach rebalance reconciled the dead TUI entry before the hook read it;
+      `handle_any_pane_closed: no TUI is running and none is registered ... respawning
+      in window @0`), 5 took the hook path; every round ended with one live `pm _tui`
+      in main, cwd A, one registry TUI entry, and the 50 ms poller never saw 2. (2)
+      Story 2, two clients closing the TUI and a notes-window pane together: 6 rounds,
+      attach rounds at 505/605/556 ms before the ys; the 605 ms round showed the unlisted
+      fallback, the rest the hook; the notes window kept its surviving pane and both
+      clients stayed attached. (3) Story 3, stuck lock: exactly one `still held after
+      10s` per event and no TUI started (unlisted fallback needs the lock), then `pm
+      session` printed `TUI pane missing — respawning...` and started one TUI in main.
+      Nuance: with the Given one-pane notes window, killing its only pane destroys
+      the window and the closing client is NOT frozen (C-b t processed in ~10 ms);
+      the 10.14-10.23 s freeze appears when the closed pane''s window survives (4
+      of 5 such runs; 1 was a scheduling race). (4) Story 4, lock path a directory:
+      two `cannot lock ... [Errno 21] Is a directory` lines (one per event), both
+      clients unfroze in 165/331 ms, one TUI in main from the hook path (`removed=[...]`
+      + `_respawn_tui: created`), and after rmdir a later close logged no lock line
+      and recreated the lock as an empty regular file. No Traceback/TuiPidfileConflict/startup-refused
+      anywhere. Harness: `display-message -c <client>` is unusable in this tmux 3.2a
+      (prints usage); poll `list-panes -a -F "#{pane_in_mode}"` instead, and give
+      a harness pane C-b Left twice when focusing after C-b <n>.'
+    created_at: '2026-11-02T23:07:32Z'
+    last_edited: '2026-11-02T23:07:32Z'
+  - id: note-5d898b2
+    text: 'QA S52 re-evaluation after review (head 5d8fc48be): story 3''s prescribed
+      Then does NOT hold in its prescribed Given, and this is a spec/fixture conflict,
+      not a product defect — verdict changed to INPUT_REQUIRED. Re-ran the literal
+      state twice (23:29 and 22:48): notes window holding ONE shell pane, lock held,
+      client on it presses C-b x/y — the client is unfrozen after 11 ms, and 311 ms
+      when the C-b t is delayed 0.3 s, so it is not queued behind the hook at all;
+      the hook still logs exactly one `still held after 10s` at +10 s and starts no
+      TUI. Killing the only pane destroys the window, and tmux does not block that
+      client''s command queue; the ~10 s freeze exists only when the closed pane''s
+      window survives (10150 ms in the new CLI capture, 10.14-10.23 s in four earlier
+      runs). The Given should hold a surviving pane or the Then should say the hook
+      waits in the background. Everything else stands: stories 1, 2 and 4 all held.
+      Also produced the missing cli-recording artifacts: /pm-captures/scenarios/52/cli/{recording.cast,recording.mp4,manifest.md,cli-demo.sh}
+      — stuck lock 10150 ms + one warning, directory lock 131 ms + two cannot-lock
+      lines + one TUI, rmdir leaves no lock line and a regular empty lock file. Updated
+      README/manifest at /pm-captures/scenarios/52.'
+    created_at: '2026-11-02T23:34:30Z'
+    last_edited: '2026-11-02T23:34:30Z'
   - id: note-afcae13
     text: 'QA scenario 54 (Unicode line separators through the whole journey) PASS
       5/5 on 5d8fc48b, plus one fix in bb80cd1a. (1) U+0085/U+2028/U+2029 dirs: tag
