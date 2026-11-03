@@ -33039,7 +33039,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-11-03T08:36:29.261574+00:00'
+  updated_at: '2026-11-03T19:11:46.600790+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33217,6 +33217,32 @@ prs:
       passed, 1 skipped. Captures: /pm-captures/scenarios/15/{cli-help,tui-keys,tui-help,signoff-help,click81,tui-launcher}.'
     created_at: '2026-11-03T08:36:29Z'
     last_edited: '2026-11-03T08:36:29Z'
+  - id: note-d40c323
+    text: 'QA S16 (command-bar help — flag spelling, quoting, focus return) PASS.
+      Runtime-verified from the TUI at 200x50: `/ pr qa --help` and `/ pr start -h`
+      both open the real Keyboard Shortcuts HelpScreen (no CLI dump, no `unknown QA
+      option`), whose `Command bar (press /):` section lists `pr qa [PR_ID]` t, `pr
+      qa fresh [PR_ID]` z t, `pr qa loop [PR_ID]` zz t and the `--fresh`/`--loop`
+      flag-equivalence notes; Esc restores the unfocused command bar and the next
+      nav key moves the tree selection. `/ pr note add pr-95325c4 ''mention --help
+      here''` opens no HelpScreen and `pm pr note list` keeps the literal `--help`;
+      `/ pr note add pr-95325c4 don''t forget` and `/ pr start "unclosed` log `Invalid
+      command syntax: No closing quotation — check the quoting (e.g. pr note add pr-001
+      ''text'')` with the TUI still responsive; the following `pr start pr-95325c4`
+      is not Busy and logs `Launched Claude in tmux window` (fake-claude `_all` confirmed).
+      In the QA and plans views, `help` opens/closes and `j` moves ▶ First Item→Second
+      Item / Plan A→Plan B. The `?` screen and `pm tui keys` both name `z s/d/t/i
+      fresh` / `zz d/t loop` with `requires fzf`; only `pm tui keys` adds the no-fzf
+      numbered-menu fallback. Fixture notes for the next run: (1) the GIVEN needs
+      an initial git commit plus committing pm/project.yaml on master (pm push alone
+      leaves it on a sync branch) or `pr start` refuses with "not committed on master
+      yet"; (2) with two standalone PRs the tree lays them out side by side, so k/j
+      have no vertical neighbour — use l/h to show selection movement (same errata
+      as scenarios 6/15); (3) create the verify window with `new-window -d -P -F "#{window_index}"`
+      and target it by index, since a second window named `verify` makes the name
+      target ambiguous. Captures: /pm-captures/scenarios/16/{command-bar-help,quoting,view-focus,prefix-fzf}.'
+    created_at: '2026-11-03T19:11:46Z'
+    last_edited: '2026-11-03T19:11:46Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
