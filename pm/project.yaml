@@ -33039,7 +33039,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-11-03T22:39:59.957604+00:00'
+  updated_at: '2026-11-03T23:54:56.467560+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33425,6 +33425,41 @@ prs:
       /pm-captures/scenarios/22/<story>/{cli-recording,tmux-screen-recording}/.'
     created_at: '2026-11-03T22:39:59Z'
     last_edited: '2026-11-03T22:39:59Z'
+  - id: note-69ef5d6
+    text: 'QA S24 (plans-view file actions, standalone-PR remedy, help surfaces, per-plan
+      windows) PASS 5/5 stories at 7c8c3e233. Runtime-verified in /scratch/pm-test24-1793749715
+      (session pm-pm-test24-1793749715-41cba046) with less/vim installed and EDITOR=vim.
+      (1) Alpha (file deleted): Enter and e each log "Plan file not found: /scratch/.../pm/plans/plan-a3e13a1.md
+      — run `pm plan list` to see every plan"; the two identical consecutive lines
+      dedupe to one log record; no window/less/vim, no traceback, list intact, Down
+      moves ▶ to Beta. (2) Beta (file:"" via the store API bootstrap edit): both actions
+      log the no-path form "Plan file not found — run `pm plan list` to see every
+      plan"; no window, no editor on the project root (pane_start_command checked);
+      p toggles back to the tree. (3) Gamma (valid): Enter opens window plan-24ed2c5
+      running less on the plan file (GAMMA-UNIQUE-CONTENT renders, client follows);
+      e adds a second pane in the same window running vim on the plan file (not the
+      project root); :q closes it and the TUI stays responsive. (4) Standalone PR:
+      v logs "No plan associated with pr-67a5608 — assign one with `M` (or `pm pr
+      edit pr-67a5608 --plan <plan-id>`)." and creates nothing; after pm pr edit pr-67a5608
+      --plan plan-24ed2c5 the PR moves under Gamma and v logs "Launched plan pane"
+      with less in a plan-role main-window pane and no new remedy line. (5) Help:
+      pm getting-started has exactly "a=add  w=breakdown  c=review  l=load  e=edit  D=deps  Enter=view
+      file" and no v=view; the plans-view ? screen shows Plan Navigation/Enter View
+      plan file, Plan Actions a/e/w/c/l, Cross-plan D and no tree PR Actions; pm pr
+      edit --help names title/description/dependencies/status/plan + the interactive
+      editor; pm help and pm getting-started say pm session is the TUI with n for
+      notes and neither says "notes editor". (6) Two clients on the grouped session:
+      back-to-back Enter then e on Alpha logs the remedy once and creates no window;
+      Gamma then Delta open plan-24ed2c5 and plan-68b0be8 with their own less and
+      own UNIQUE-CONTENT and both clients follow; Enter twice on a windowless plan
+      yields exactly one window with one pane. No code changes needed. Fixture note
+      for the next run: the scenario points the recorder at $S~1 as "the attached
+      grouped session", but here the failed pm-session attach left $S~1 unattached
+      while the recorder attached to $S; the client-follow behavior is real and was
+      verified in S (story 3) and S~1 (story 6). Captures: /pm-captures/scenarios/24/{plans-view,help/cli-recording}
+      (cast + mp4 + manifest each; plans-view also has transcript.log).'
+    created_at: '2026-11-03T23:54:56Z'
+    last_edited: '2026-11-03T23:54:56Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
