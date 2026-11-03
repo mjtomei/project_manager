@@ -2308,3 +2308,149 @@ def test_qa_launch_invalid_item_id_names_the_library():
     assert result.exit_code == 1, result.output
     assert "Invalid QA item id" in result.output
     assert "pm qa list" in result.output
+
+
+# ---------------------------------------------------------------------------
+# i8: the remaining remedy-less surfaces
+# ---------------------------------------------------------------------------
+
+def test_autostart_owner_messages_name_pm_session(tmp_path):
+    """`pm autostart …` in a plain shell names the command that starts a TUI.
+
+    The "no pm session" branch already did, but the three pidfile branches
+    (missing / stale / dead pid) said only "is not running" — a dead end for
+    a caller with no TUI.  They surface from the documented `pm autostart`
+    commands, not just internally (the same class as the stale-pidfile
+    messages fixed in `helpers._validate_tui_owner`).
+    """
+    from unittest import mock
+
+    from pm_core.cli import autostart as autostart_mod
+
+    missing = tmp_path / "missing.pid"
+    with mock.patch.object(autostart_mod, "_tui_pidfile_for_session",
+                           return_value=missing):
+        with pytest.raises(autostart_mod._Fail) as exc:
+            autostart_mod._resolve_owner("pm-x")
+    assert "pm session" in exc.value.message, exc.value.message
+
+    stale = tmp_path / "stale.pid"
+    stale.write_text("")  # unreadable -> stale
+    with mock.patch.object(autostart_mod, "_tui_pidfile_for_session",
+                           return_value=stale):
+        with pytest.raises(autostart_mod._Fail) as exc:
+            autostart_mod._resolve_owner("pm-x")
+    assert "pm session" in exc.value.message, exc.value.message
+
+    # The dead-pid branch: a readable pid whose process is gone.  Patch
+    # `kill` rather than pick a "free" pid, which could be reused.
+    dead = tmp_path / "dead.pid"
+    dead.write_text("999999")
+    with mock.patch.object(autostart_mod, "_tui_pidfile_for_session",
+                           return_value=dead), \
+            mock.patch.object(autostart_mod.os, "kill",
+                              side_effect=ProcessLookupError):
+        with pytest.raises(autostart_mod._Fail) as exc:
+            autostart_mod._resolve_owner("pm-x")
+    assert "pm session" in exc.value.message, exc.value.message
+
+
+def test_autostart_unknown_and_terminal_prs_name_the_listing(tmp_path):
+    """`pm autostart add` refusals name how to see the real ids/statuses.
+
+    "unknown PR id(s)" / "already merged/closed" stopped at the refusal, so
+    the operator had to guess the listing command.
+    """
+    from unittest import mock
+
+    from pm_core.cli import autostart as autostart_mod
+
+    data = {"project": {"repo_id": "r"},
+            "prs": [{"id": "pr-001", "title": "T", "status": "pending"}]}
+    with mock.patch.object(autostart_mod, "state_root",
+                           return_value=tmp_path), \
+            mock.patch.object(autostart_mod.store, "load", return_value=data):
+        with pytest.raises(autostart_mod._Fail) as exc:
+            autostart_mod._validate(("nope",), for_add=True)
+    assert "pm pr list" in exc.value.message, exc.value.message
+
+    merged = {"project": {"repo_id": "r"},
+              "prs": [{"id": "pr-001", "title": "T", "status": "merged"}]}
+    with mock.patch.object(autostart_mod, "state_root",
+                           return_value=tmp_path), \
+            mock.patch.object(autostart_mod.store, "load", return_value=merged):
+        with pytest.raises(autostart_mod._Fail) as exc:
+            autostart_mod._validate(("pr-001",), for_add=True)
+    assert "pm pr list" in exc.value.message, exc.value.message
+
+
+def test_signoff_skip_qa_refusal_does_not_advertise_qa(tmp_path):
+    """Under `skip_qa` the refusal must not list `qa` as an expected state.
+
+    The message said "sign-off runs after review (expected qa, in_review,
+    sign_off)" — the expected list contradicted the sentence.  `qa` stays
+    accepted (a record can predate the setting) but is not advertised.
+    """
+    result = _lifecycle_refusal(tmp_path, ["signoff", "pr-001"],
+                                status="in_progress", skip_qa=True)
+    assert result.exit_code == 1, result.output
+    out = " ".join(result.output.split())
+    assert "sign-off runs after review" in out
+    assert "expected in_review, sign_off" in out
+
+
+@pytest.mark.parametrize("cmd", ["pr qa --help", "pr qa -h",
+                                 "pr start --help"])
+def test_command_bar_help_flag_opens_the_help_screen(cmd):
+    """`--help` / `-h` works in the command bar, like every other surface.
+
+    The bar runs commands through the CLI and logs only the last stdout
+    line, so a multi-line `--help` came out as one useless line — and
+    `pr qa --help` (the command this PR exists to make discoverable) died
+    as "unknown QA option".  It now opens the same screen `help` opens.
+    """
+    from types import SimpleNamespace
+
+    from pm_core.tui import pr_view
+
+    calls = []
+    app = SimpleNamespace(
+        action_unfocus_command=lambda: calls.append("unfocus"),
+        action_show_help=lambda: calls.append("help"),
+        log_message=lambda *a, **k: None,
+        _inflight_pr_action=None)
+
+    pr_view.handle_command_submitted(app, cmd)
+
+    assert calls == ["unfocus", "help"], calls
+    # The guard loop runs after the help branch; nothing may be left armed.
+    assert app._inflight_pr_action is None
+
+
+def test_command_bar_help_flag_leaves_quoted_text_alone(monkeypatch):
+    """A quoted `--help` inside a note's text is not the help flag.
+
+    The check tokenizes with `split()` (not `shlex`) precisely so quoted
+    argument text cannot open the help screen; unquoted `--help` is Click's
+    own eager flag, so intercepting it matches the CLI.
+    """
+    from types import SimpleNamespace
+
+    from pm_core.tui import pr_view
+
+    ran = []
+    monkeypatch.setattr(pr_view, "run_command",
+                        lambda *a, **k: ran.append(a[1]))
+    shown = []
+    app = SimpleNamespace(
+        action_unfocus_command=lambda: None,
+        action_show_help=lambda: shown.append(True),
+        log_message=lambda *a, **k: None,
+        _inflight_pr_action=None, _plans_visible=False, _qa_visible=False,
+        _root=None,
+        query_one=lambda *a, **k: SimpleNamespace(focus=lambda: None))
+
+    pr_view.handle_command_submitted(app, "pr note add pr-001 'see --help'")
+
+    assert shown == [], shown
+    assert ran == ["pr note add pr-001 'see --help'"], ran

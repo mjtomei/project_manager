@@ -899,3 +899,33 @@ the routed form and `--fresh` so help is complete.
   Full suite: 5603 passed, 1 skipped after the i7 edits (5594 before
   them; the nine new cases are the two quote tests, the three stop-token
   cases, the start-token case, and the three `pr cd` cases).
+
+- Review-loop 6a82 i8: the last remedy-less `autostart` refusals, a
+  self-contradicting expected-states list, and `--help` in the command bar.
+  (a) `pm_core/cli/autostart.py` `_resolve_owner`'s three pidfile branches
+  ("no pidfile", "stale pidfile", dead pid) said only "is not running" —
+  a dead end for a caller with no TUI, although the same function's "no pm
+  session" branch names `pm session` and `helpers._validate_tui_owner`
+  names it for the identical conditions. All three now name `pm session`.
+  `_validate`'s "unknown PR id(s)" / "already merged/closed" now name
+  `pm pr list`; the TUI siblings in `pm_core/tui/auto_start.py`
+  (`add_targets` / `remove_targets`, reached by the command bar's
+  `autostart add`) carry the same remedy.
+  (b) Under `skip_qa`, `pr_signoff`'s wrong-status refusal read
+  "sign-off runs after review (expected qa, in_review, sign_off)" — the
+  expected list contradicted the sentence, and the code comment claimed
+  `qa` was dropped. `qa` stays accepted (a record can predate the
+  setting) but the advertised list is now `in_review, sign_off`.
+  (c) `--help` / `-h` in the command bar ran the command through the CLI
+  and logged only the *last* stdout line (a multi-line help came out as
+  one useless line), and `pr qa --help` — the command this PR exists to
+  make discoverable — died as "unknown QA option '--help'". Both now open
+  the same HelpScreen `help` does, before the in-flight guard. The check
+  tokenizes with `split()` (not `shlex`), so a quoted `--help` inside a
+  note's text is left alone; unquoted, Click treats it as its own eager
+  flag, so this matches the CLI. (It also stops `plan add --help` from
+  launching a Claude pane running `pm plan add --help`.)
+  Tests added in `tests/test_command_surface.py` for all three (owner
+  pidfile remedies, autostart unknown/terminal listings, the skip_qa
+  expected list, three command-bar `--help` spellings, and the quoted-text
+  non-match). Related files pass (622 + 275 cases).

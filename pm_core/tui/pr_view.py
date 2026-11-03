@@ -692,6 +692,19 @@ def handle_command_submitted(app, cmd: str) -> None:
         app.action_show_help()
         return
 
+    # `--help` / `-h` is the universal spelling for help on every pm
+    # command, but the command bar runs commands through the CLI and logs
+    # only the *last* line of stdout, so a multi-line `--help` came out as
+    # one useless line — and `pr qa --help` (the command this PR exists to
+    # make discoverable) died as "unknown QA option".  Show the same screen
+    # `help` opens.  Tokenized with `split()` rather than `shlex` so a
+    # quoted `--help` inside a note's text is left alone; unquoted, Click
+    # would treat it as its own eager help flag, so this matches the CLI.
+    if any(tok in ("-h", "--help") for tok in cmd.split()):
+        app.action_unfocus_command()
+        app.action_show_help()
+        return
+
     # Guard PR action commands from the command bar too
     action_key = None
     for prefix in PR_ACTION_PREFIXES:

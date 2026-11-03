@@ -1943,15 +1943,21 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
         click.echo(_closed_reopen_hint(pr_id), err=True)
         raise SystemExit(1)
     # With project.skip_qa there is no QA stage: sign-off follows review.
+    # `qa` stays *accepted* under skip_qa (a record can predate the setting),
+    # but it is not advertised: "runs after review (expected qa, …)" read as
+    # a contradiction.
     entry_statuses = ("qa",)
-    if (data.get("project") or {}).get("skip_qa"):
+    skip_qa = bool((data.get("project") or {}).get("skip_qa"))
+    if skip_qa:
         entry_statuses = ("qa", "in_review")
     if status not in entry_statuses + ("sign_off",):
         # The expected list follows `skip_qa`: with it there is no QA stage
         # (sign-off follows review), so naming only qa/sign_off would send
         # the operator to a stage this project never runs.
-        expected = ", ".join(entry_statuses + ("sign_off",))
-        after = "review" if (data.get("project") or {}).get("skip_qa") else "QA"
+        expected_states = ("in_review", "sign_off") if skip_qa else (
+            "qa", "sign_off")
+        expected = ", ".join(expected_states)
+        after = "review" if skip_qa else "QA"
         click.echo(
             f"PR {pr_id} is {status} — sign-off runs after {after} "
             f"(expected {expected}). "
