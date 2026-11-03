@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-03T22:06:58.696904+00:00'
+  updated_at: '2026-11-03T22:34:44.993228+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8952,6 +8952,24 @@ prs:
       casts and mp4s).'
     created_at: '2026-11-03T22:06:58Z'
     last_edited: '2026-11-03T22:06:58Z'
+  - id: note-b048694
+    text: 'QA S73 (pm meta override: shared session vs private twin) PASS 5/5 on 2febc2cb,
+      no source changes. Live on tmux 3.2a with a disposable HOME and throwaway project
+      P: shared and private tags/sockets differ; pm meta in each set its own ~/.pm/sessions/<tag>/override
+      (distinct meta-<tag> workdirs) and launched exactly one meta window on its own
+      server; pm which in each shell resolved its own meta pm_core and pm pr list
+      read P; killing the shared meta window removed only the shared override and
+      pm which fell back to /workspace/pm_core while the private override/window persisted;
+      both meta sessions relaunched back-to-back with Using existing workdir / Resuming
+      in-progress work (no Traceback); from the private shell, pm session --global
+      --print-connect named the shared socket and pm session kill --global killed
+      only the shared session, leaving the private socket/client/TUI/shell/meta/override
+      intact and pm session list showing only the private row. Captures: /pm-captures/scenarios/73
+      (README + 9 casts/mp4s/manifests). Note: /tmp/pm-venv was absent and its editable
+      install fell back to legacy setup.py develop (setuptools 59.6), so PYTHONPATH=/workspace
+      is what wins over /opt/pm-src.'
+    created_at: '2026-11-03T22:34:44Z'
+    last_edited: '2026-11-03T22:34:44Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
