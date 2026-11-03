@@ -33039,7 +33039,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-11-03T00:52:44.510254+00:00'
+  updated_at: '2026-11-03T07:44:22.393147+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33172,6 +33172,22 @@ prs:
       renames . to _), so pr start from outside tmux falls back to interactive launch.'
     created_at: '2026-11-03T00:52:44Z'
     last_edited: '2026-11-03T00:52:44Z'
+  - id: note-8d147b4
+    text: 'QA S13 (command-bar identifiers/modes/fresh/loop/Busy) PASS. Errata + observations
+      for the next run: (1) the GIVEN "press k then j until the log shows Selected:
+      <B_ID>" does not work here: with two standalone PRs the tree renders them side
+      by side, so k/j have no vertical neighbour and never move the selection; use
+      l/Right (and after pr start reorders in_progress first, the columns swap). (2)
+      Story 7 says submit both commands "in the same burst": a human-speed tmux send-keys
+      burst (Enter, then / at +0.4 s) lands after `pm pr start` has already returned
+      (~1 s for the tiny fixture clone), so the Busy guard never fires; submitting
+      both through the TUI queue (submit_tui_command, the picker path) back-to-back
+      reproduces it deterministically. (3) Observed, not asserted by the scenario:
+      after overlapping fresh/loop actions at 07:36:55 two windows named qa-#42 coexisted
+      (@29 and @30) even though the fresh path logged killing the stale ones; the
+      window-id-change assertion still held, but worth a look if window leaks recur.'
+    created_at: '2026-11-03T07:44:22Z'
+    last_edited: '2026-11-03T07:44:22Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
