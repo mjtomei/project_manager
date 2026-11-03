@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-03T21:01:32.826453+00:00'
+  updated_at: '2026-11-03T21:02:43.806964+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8847,6 +8847,39 @@ prs:
       (per-story cast+mp4+manifest, per-round evidence).'
     created_at: '2026-11-03T21:01:32Z'
     last_edited: '2026-11-03T21:01:32Z'
+  - id: note-0a92fec
+    text: 'QA scenario 69 (Unicode line separators through the whole session lifecycle
+      — tag normalization commit 9037574f) PASS 4/4 on 44326ccd, no source changes.
+      Fixture /tmp/qa69/root: qa-nel<U+0085>repo, qa-line<U+2028>sep, qa-plain, qa-para<U+2029>graph;
+      disposable HOME, PYTHONPATH=/workspace, LC_ALL=C.UTF-8, no ambient TMUX. (1)
+      NEL repo: first `pm session` prints exactly `Creating tmux session ''pm-qa-nel_repo-bbaec8a1''...`
+      (od -c: no 302 205 bytes), stderr only the no-TTY attach failure (no "Failed
+      to detect TUI pane", no duplicate-session error); second run prints `Attaching
+      to session ''pm-qa-nel_repo-bbaec8a1~1''...` with no second Creating; one socket,
+      server lists base + ~1; name/list (one row CLIENTS 0)/--print-connect (`tmux
+      -S /tmp/pm-sessions/pm-qa-nel_repo-bbaec8a1 attach`)/tui view (`[Session: ...,
+      Pane: %0]` + project)/tui send `?` (Sent keys, then the Keyboard Shortcuts screen)
+      all use the normalized tag; TUI pane cwd and the shell window pwd both carry
+      literal 302 205; kill prints Killed session and removes the socket. (2) NEL
+      + LINE SEP + control running with one driver client each: `pm session list`
+      from a plain shell and from a qa-shell pane inside the NEL session are identical,
+      three rows CLIENTS 1 with their own sockets, no ~N/duplicate/(default server)
+      row. (3) Legacy default-server `pm-legacy<U+2028>repo`: under C.UTF-8 the required
+      run drops it (raw separator splits lines, ambiguity 18) while the three new
+      rows stay intact and its raw 342 200 250 name is unchanged; supplementary LC_ALL=C
+      run renders it as a `pm-legacy_repo` (default server) row without disturbing
+      the new rows. (4) 30-iteration loops, round A from a plain shell and round B
+      from the in-session pane with start/kill driven from the plain shell: all rc=0,
+      no traceback, para appears the iteration after its start (11), killed LINE SEP
+      stops after its kill (21), final iteration lists NEL + pm-qa-para_graph-73b0c7ec
+      only; row counts 30/20/20, no partial names or duplicates. Captures /pm-captures/scenarios/69
+      (README + cli cast/mp4/manifest per story). Fixture traps: this container has
+      no TTY, so the two `pm session` runs use </dev/null and the pre-existing uncaught
+      TmuxCommandError traceback (master too, filed pr-07541e7) appears on stderr;
+      story 4 must coordinate the in-pane loop and the plain-shell driver with an
+      iteration counter (fixed sleeps drift).'
+    created_at: '2026-11-03T21:02:43Z'
+    last_edited: '2026-11-03T21:02:43Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
