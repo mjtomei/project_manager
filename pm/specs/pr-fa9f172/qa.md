@@ -62,9 +62,10 @@ the QA restart/loop equivalents. The plans-view key row names `D=deps` and
 
 R4. **`pm tui keys` and the `?` screen carry the same command-bar table.**
 GIVEN a running TUI (for the `?` screen), WHEN the user runs `pm tui keys`
-or presses `?`, THEN both render the command-bar section with each form's
-CLI and TUI equivalent (including `pr qa fresh` = `z t`, `pr qa loop` =
-`zz t`, and the `--fresh` / `--loop` note). The `?` screen is
+or presses `?`, THEN both render the command-bar section under the same
+shared heading (`Command bar (press /):`) with each form's CLI and TUI
+equivalent (including `pr qa fresh` = `z t`, `pr qa loop` = `zz t`, and
+the `--fresh` / `--loop` note). The `?` screen is
 context-sensitive: in the plans and QA views it omits tree-only actions
 (`t`, `S`, `G`, `z`, `zz d`/`zz t`, `c`) and shows the view's own keys
 (plans: `a e w c l D p`, Enter views the file; QA: Enter runs, `e` edits,
@@ -154,8 +155,10 @@ R16. **skip_qa projects get skip_qa-aware refusals.**
 GIVEN a project with `skip_qa: true`, WHEN the user runs `pm pr signoff`
 with no id while an `in_review` PR exists, THEN it auto-selects that PR
 instead of reporting "No PR is ready"; and WHEN it refuses a wrong status,
-THEN the expected states are `qa`/`in_review`/`sign_off` and the text says
-sign-off runs after review, not after QA.
+THEN the advertised expected states are `in_review`/`sign_off` (`qa` is
+still accepted for a record that predates the setting, but it is not
+advertised, so the list cannot contradict the sentence) and the text says
+sign-off runs after review, not after QA. (Corrected in 6a82 i8.)
 
 R17. **TUI QA/review state messages carry the remedy.**
 GIVEN a running QA for a PR, WHEN the user starts QA again (`t` or
@@ -210,7 +213,153 @@ GIVEN a generated session prompt, WHEN the user reads it, THEN it forbids
 `pm pr review` (not the removed `pm pr done`) alongside the other
 TUI-managed launches.
 
+### Later review-loop fixes (recorded after the first QA run)
+
+These extend the requirements above; the first QA pass ran before the
+commits named.
+
+R24. **Plans-view file actions name the listing command when the file is
+missing.** GIVEN a plan whose `file` is absent, empty, or points at a
+missing path, WHEN the user presses Enter or `e` in the plans view (or
+`v`), THEN the log names the remedy (`pm plan list`) instead of silently
+doing nothing; an empty `file` never opens the editor on the project root.
+
+R25. **Command-bar completion returns focus to the active view.** GIVEN
+the tree, plans, or QA view, WHEN the user submits a command (including
+`help`), THEN focus returns to that view's pane after any screen closes,
+so the next navigation key moves that view's selection instead of being
+typed into the command bar. The same holds after a command-bar refusal
+(unknown PR id, autostart error, invalid syntax), not only after a screen
+closes. (Commits 692008f3 and 6a82 i2/i7: the QA view previously focused
+the hidden tech tree, and the autostart / not-found paths left the bar
+focused.)
+
+R26. **Retired commands are not named by live surfaces.** GIVEN the
+installed checkout, WHEN the user reads `pm help`, `pm tui keys`, or a
+generated prompt, THEN no line names `pm tui test` or `pm pr done`;
+`pm qa regression` names `pm/qa/regression/`. WHEN a TUI launcher finds no
+`claude` on PATH, THEN it logs "install Claude Code first" (not a bare
+not-found) and leaves the TUI responsive.
+
+R27. **Concurrent `pm pr start` of one PR is serialized.** GIVEN two
+operators starting the same pending PR at the same instant, WHEN both run
+`pm pr start <id>`, THEN exactly one clone/workdir/window is created,
+neither prints an unhandled traceback, the loser reuses the started PR,
+and `pm pr list` shows one `in_progress` record; a concurrent start of a
+different PR is not blocked by the per-PR lock. (Commit a22c1f18.)
+
+### Review-loop 6a82 fixes (recorded after scenarios 1–15)
+
+These extend the requirements above; scenarios 1–15 ran before the commits
+named.
+
+R28. **Command-bar `--help` opens the same screen as `help`.** GIVEN a
+running TUI, WHEN the user submits a command containing `--help` or `-h`
+(e.g. `pr qa --help`, `pr start -h`), THEN the HelpScreen opens instead of
+one truncated log line or an "unknown option" error. The check is
+tokenized: a flag inside a quoted argument (`pr note add <id> 'mention
+--help here'`) is passed through literally and does not open help. An
+unmatched quote is a syntax error ("Invalid command syntax … check the
+quoting"), not a help request; the TUI stays responsive and no PR action
+is left stuck as "Busy". (Commit 6a82 i7/i8/i9.)
+
+R29. **Autostart owner refusals name the way to get an owner.** GIVEN no pm
+tmux session (or a stale/unreadable pidfile), WHEN the user runs
+`pm autostart add <id>` from a plain shell, THEN the message names
+`pm session` (not only "restart the TUI"); WHEN the id is unknown or
+already merged/closed, THEN it names `pm pr list`. The same remedies appear
+from the command-bar `autostart add` path. (Commit 6a82 i6/i8.)
+
+R30. **Scaffolder, dependency, and terminal-PR refusals name the next
+command.** GIVEN a project, WHEN `pm qa add-instruction` /
+`add-regression` / `add-artifact` / `author-*` / `pm qa mocks add` is given
+a name that already exists, THEN the refusal names `pm qa edit <id>` (or
+`pm qa mocks edit <id>`) or choosing another name; WHEN `pm pr add` /
+`pm pr edit` is given an unknown `--depends-on` id, THEN it names
+`pm pr list`; WHEN `pm qa launch` is given an id without `category:id`,
+THEN it names `pm qa list`; WHEN `pm pr cd` targets a merged/closed PR with
+no workdir, THEN it names `pm pr show <id>` (not the `pm pr start` that
+would refuse), while a non-terminal PR still names `pm pr start <id>`
+(TUI `s`). (Commit 6a82 i5/i6/i9.)
+
+R31. **`help` is an alias on every group, including under Click <8.2.**
+GIVEN a checkout whose `click>=8.0` resolves to 8.1.x, WHEN the user runs
+`pm project help`, `pm model help`, `pm watcher help`, `pm qa help`, or
+`pm pr signoff help`, THEN each renders its group help and exits 0 — never
+`Error: No such command '--help'`. The same holds under the current Click.
+For a group with a hidden no-subcommand run form (`pm watcher`,
+`pm pr signoff`) the usage line differs by Click version: `COMMAND` on
+8.1.x, `[COMMAND]` on 8.2+; within each version `help` is byte-identical
+to `--help`. That difference is not a defect. (Commits 9e10f888, 6a82 i2;
+scenario 18.)
+
+R32. **`review-loop stop` is refused with the real cancel path.** GIVEN a
+running TUI, WHEN the user submits `review-loop stop <id>` (or `cancel` /
+`off`) in the command bar, THEN no loop starts and the log says the command
+has no stop form, naming Ctrl+R (restart the TUI) or Ctrl+C in the review
+pane — not "PR not found: stop". (Commit 6a82 i7.)
+
+R33. **Plan remedies and corrected summaries.** GIVEN a plan whose file is
+missing/empty, WHEN the user presses Enter, `e`, or `v` in the plans view,
+THEN the log names `pm plan list` and an empty file never opens the editor
+on the project root. GIVEN a standalone PR with no plan, WHEN the user
+presses `v`, THEN the log names `M` and `pm pr edit <id> --plan <plan-id>`.
+`pm pr edit --help` names title, description, dependencies, status, plan
+and the interactive editor; `pm session --help` says the notes pane is
+on-demand (`n`), not part of the layout; `pm help` and `pm getting-started`
+describe `pm session` as starting the TUI with notes opened by `n`, not a
+"notes editor". (Commits 6a82 i7/i10.)
+
+R34. **Picker chords name their fzf requirement.** GIVEN the TUI, WHEN the
+user opens `?` or runs `pm tui keys`, THEN both say the `z`/`zz` picker
+chords require fzf; `pm tui keys` also names the no-fzf fallback (a
+numbered menu with no chords), and with fzf absent the picker really is a
+numbered menu that ignores the chord keys. (Commit 6a82 i1; the `?` row
+names the requirement, `pm tui keys` names the fallback.)
+
+R35. **A command-bar command's failure still names the remedy.** GIVEN a
+running TUI, WHEN the user submits an ordinary CLI command through the
+command bar (`<command> [args]` row) that fails with a multi-line
+diagnostic, THEN the single line the bar logs is the corrective one. A
+remedy printed before trailing context (`pr add X --depends-on bogus`
+prints "Available PRs: …" after the remedy; `pr note edit/delete` prints
+"Available notes:" and the note lines after it) must not be the line that
+is dropped, and user text with brackets must render literally. A successful
+multi-line result must at least log a line that identifies the result (the
+bar shows one line by design). The command-bar table already documents that
+the `pm` prefix is omitted; submitting `pm pr list` should leave the
+operator with a correction, not only Click's "No such command 'pm'".
+
 ## Edge Cases
+
+E13. **Quoted help flag** — `pr note add <id> 'see --help'` must add the
+note with that literal text, not open the HelpScreen (R28).
+
+E14. **Unmatched quote** — `pr note add <id> don't forget` logs the
+syntax-error remedy; a following `pr start <id>` is accepted, proving the
+in-flight guard was cleared (R28).
+
+E15. **Concurrent same-name scaffolder** — two `pm qa add-instruction
+<same-name>` invocations at once leave one valid instruction file; any
+loser names `pm qa edit`, and no invocation leaves a truncated/corrupt
+file or traceback.
+
+E16. **Concurrent autostart requests** — two plain shells run
+`pm autostart add` for the same PR and for different PRs at once while the
+TUI runs: each target lands exactly once in `pm autostart list`, no reply
+is lost or corrupted, and neither invocation prints a traceback. With no
+TUI, both name `pm session` and exit 2 without touching the target set.
+
+E17. **`review-loop stop` against a live loop** — the refusal is a no-op
+for the running loop: its review window/process is untouched (same window
+id, still listed) while the command bar answers with the cancel path
+(R32).
+
+E18. **Multi-line failure from the command bar** — `pr add X --depends-on
+bogus` and `pr note edit <id> bogus 'x'` end their stderr with context
+lines, so the bar's last-line rule can hide the `pm pr list` /
+`pm pr note list <id>` remedy; `pr note list <id>` and `plan list` show
+only their last row (R35).
 
 E1. **`pm pr qa --help` on a narrow terminal** — Click may wrap the table;
 the modes and keys must still be present (assert content, not layout).
@@ -235,10 +384,13 @@ paths with brackets render literally in the TUI log.
 E8. **A `pm pr qa` on a valid PR always exits 1** — a driving agent must
 not read that as a failed action and retry.
 
-E9. **`pm pr signoff help` under older Click (8.1.x)** — observed to fail
-with `No such command '--help'` while Click 8.5 succeeds (the repo allows
-`click>=8.0`). Confirm with the scenario's installed `pm`; if it fails, it
-is a real defect in the new help alias.
+E9. **`pm pr signoff help` under older Click (8.1.x)** — confirmed
+reproduced while planning: with Click 8.1.7 (allowed by the project's
+`click>=8.0`) and the PR checkout on `PYTHONPATH`,
+`pm pr signoff help` prints `Error: No such command '--help'.`; `pm watcher
+help` fails the same way, while `pm pr help` / `pm plan help` (which
+register a real `help` command) work. Under Click 8.5 all three work. If
+a scenario reproduces this, it is a real defect in the help alias.
 
 E10. **QA fresh while a run is already active** — must restart (kill and
 rebuild), not report "already running"; the loop toggle (`zz t` /
@@ -293,3 +445,32 @@ and does not start a second action.
    routed form instead of exposing a second spelling.
 
 No **[UNRESOLVED]** ambiguities remain.
+
+## Run history (as of 2026-11-03)
+
+Scenarios 1–18 have run against this branch. Scenario titles and verdicts
+(see the PR notes for the detailed errata and captures):
+
+- 1–5: CLI help discoverability; wrong-state/not-found remedies; TUI QA
+  modes and command-bar help; concurrent QA/review remedies; plan name
+  (1–4 PASS, 5 NEEDS_WORK, fixed in b8ed).
+- 6–9: help renderers (INPUT_REQUIRED, CLI half verified); watcher /
+  backend / prompt surfaces (PASS); sign-off + skip_qa (PASS); concurrent
+  CLI actors on one PR (NEEDS_WORK, fixed by the start lock in a22c1f18).
+- 10–15: concurrent starts (PASS); CLI QA-mode hint (PASS); TUI help /
+  focus (PASS); command-bar identifiers / modes / fresh / loop / Busy
+  (PASS); `improvements` naming (PASS); top-level help + Click versions +
+  launcher remedy (NEEDS_WORK, fixed in 9e10f888).
+- 16–18: command-bar `--help` / quoting / focus (PASS); CLI refusals for
+  scaffolds, dependencies, QA ids and terminal PRs (PASS); autostart owner
+  refusals and group `help` aliases on Click 8.1.7/8.5.0 (PASS).
+- 19 (plans-view and standalone-PR plan remedies) was launched but its
+  run was interrupted by the workdir/runner recovery; no verdict was
+  recorded. Scenario 20 from that run ("Concurrent actors on shared state,
+  library files, and the command bar") was queued but never launched.
+
+The next plan therefore starts at scenario 20 and covers: the unrun
+concurrency edge cases E15/E16/E17, the command-bar CLI passthrough
+(R35/E18), fresh restarts on start/review/signoff (R2/R3), and the
+single-instruction QA path (`pm qa run`) plus the `pm qa`/launch remedies.
+
