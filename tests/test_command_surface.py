@@ -74,6 +74,22 @@ def test_pr_qa_help_states_the_cli_has_no_fresh_flag():
     assert "no --fresh or --loop flag" in out
 
 
+def test_pr_edit_help_names_every_field_it_edits():
+    """`pm pr edit` edits more than the summary used to admit.
+
+    The docstring said "title, description, dependencies, or status" while
+    the command also takes `--plan` and, with no options, opens the
+    interactive editor the TUI's `e` / Enter uses.  A complete-help sweep
+    must not hide a field behind its own summary.
+    """
+    out = " ".join(_help("pr", "edit").split()).lower()
+    for token in ("title", "description", "dependencies", "status", "plan",
+                  "interactive editor"):
+        assert token in out, f"{token!r} missing from `pm pr edit --help`"
+    # The summary line itself, not just the options table.
+    assert "edit an existing pr: title" in out
+
+
 def test_pr_start_help_names_fresh_and_tui_keys():
     out = _help("pr", "start")
     assert "--fresh" in out
@@ -413,6 +429,33 @@ def test_getting_started_plan_keys_match_the_plans_pane():
     assert "Enter=view file" in text
     assert "D=deps" in text
     assert "v=view" not in text
+
+
+def test_help_does_not_claim_session_starts_a_notes_editor():
+    """`pm session` no longer starts the notes pane.
+
+    ``_session_start`` says so explicitly ("Notes pane is no longer
+    auto-started — press ``n`` in the TUI"), yet both the top-level summary
+    and the getting-started guide still promised "TUI + notes editor".  A
+    help sweep that leaves the session description advertising a pane it no
+    longer opens sends the operator looking for something that is not
+    there.  The accurate pointer is the ``n`` key (documented by
+    ``pm tui keys`` as "Open notes").
+    """
+    from pm_core.cli import HELP_TEXT, _getting_started_text
+    import pm_core.cli as cli_mod
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(cli_mod, "_detect_git_repo", lambda: None)
+        getting_started = " ".join(_getting_started_text().split())
+
+    for text in (HELP_TEXT, getting_started):
+        assert "notes editor" not in text
+    assert "n opens notes" in HELP_TEXT
+    assert "press n" in getting_started
+    # The notes pane is still reachable and documented.
+    keys = CliRunner().invoke(cli, ["tui", "keys"]).output
+    assert re.search(r"^\s*n\s{2,}Open notes", keys, re.M)
 
 
 def test_help_screen_lines_escape_textual_markup():

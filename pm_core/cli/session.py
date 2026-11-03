@@ -226,7 +226,10 @@ def _schedule_rebalance(session_name: str) -> None:
 def _session_start(share_global: bool = False, share_group: str | None = None,
                    start_dir: str | None = None,
                    disconnect_others: bool = False):
-    """Start a tmux session with TUI + notes editor.
+    """Start a tmux session with the TUI.
+
+    The notes pane is opened on demand (`n` in the TUI, or `pm notes`); it
+    is not part of the session layout any more.
 
     If no project exists yet, starts pm guide instead of the TUI so
     the guided workflow can initialize the project inside tmux.

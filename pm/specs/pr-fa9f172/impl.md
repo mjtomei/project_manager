@@ -948,3 +948,20 @@ the routed form and `--fresh` so help is complete.
   fixed in i8.  Both now name `pm pr list`, with a test for each.
   Related files pass (168 in `tests/test_command_surface.py`, plus the
   pr_view / pidfile / autostart / pr-notes suites).
+
+- Review-loop 6a82 i10: two summaries that described less than the command
+  does.
+  (a) `pm help` (both the COMMANDS line and the TUI / COMMAND BAR section
+  added by this PR) and `pm getting-started` still promised "TUI + notes
+  editor", but `_session_start` says the notes pane is no longer
+  auto-started — it opens on demand with `n` (or `pm notes` in a pane).
+  Both help surfaces now say what `pm session` starts and point at `n`;
+  `needs_guide`'s stale "session startup starts the notes pane" rationale
+  and `_session_start`'s docstring are corrected too. A test asserts
+  neither surface says "notes editor", that `n` is named on both, and that
+  `pm tui keys` still documents it.
+  (b) `pm pr edit --help`'s summary stopped at "title, description,
+  dependencies, or status", hiding `--plan` and the no-options interactive
+  editor (the TUI `e` / Enter path); the `HELP_TEXT` line repeated the
+  shortened list. Both name every field now, with a test.
+  Full suite: 5617 passed, 1 skipped.

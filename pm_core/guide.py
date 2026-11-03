@@ -45,9 +45,9 @@ def is_setup_state(state: str) -> bool:
 def needs_guide(root: Optional[Path]) -> bool:
     """Return True if the guide should auto-launch (project is in setup).
 
-    Used by session startup to decide whether to start the notes pane
-    (skip it when the guide will auto-launch) and by the TUI to trigger
-    the guide pane on first load.
+    Used by the TUI to trigger the guide pane on first load.  (Session
+    startup no longer consults it: the notes pane is opened on demand, not
+    part of the session layout.)
     """
     state, _ = detect_state(root)
     return is_setup_state(state)

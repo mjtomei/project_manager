@@ -337,7 +337,11 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
               help="New status (pending, in_progress, in_review, qa, sign_off, merged, closed)")
 @click.option("--plan", default=None, help="Associated plan ID")
 def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | None, status: str | None, plan: str | None):
-    """Edit an existing PR's title, description, dependencies, or status."""
+    """Edit an existing PR: title, description, dependencies, status or plan.
+
+    With no options, opens an interactive editor that saves on each write
+    (the TUI's `e` / Enter path); pass a flag to make a one-shot change.
+    """
     root = state_root()
     data = store.load(root)
     pr_entry = _require_pr(data, pr_id)

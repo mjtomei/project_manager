@@ -551,8 +551,8 @@ def _getting_started_text() -> str:
     lines += """\
   1. Start a session (recommended):
        pm session
-     Starts a tmux session with TUI + notes editor.  A guide Claude session
-     auto-launches to walk you through setup.
+     Starts a tmux session with the TUI (press n there for the notes pane).
+     A guide Claude session auto-launches to walk you through setup.
 
   Or use individual CLI commands:
      pm init                     Initialize pm/ directory
@@ -591,7 +591,7 @@ COMMANDS
   pm init [target-repo-url]     Create pm/ directory (auto-detects repo from cwd)
   pm status                     Show project status: active PR, counts by status
   pm push                       Commit pm/ changes to a branch and create PR
-  pm session                    Start tmux session with TUI + notes editor
+  pm session                    Start a tmux session with the TUI
   pm plan add <name>            Add a plan and launch Claude to develop it
   pm plan list                  List plans
   pm plan breakdown [plan-id]   Launch Claude to break plan into PRs
@@ -603,7 +603,7 @@ COMMANDS
   pm plan fix --review <file>   Fix issues found by any review
 
   pm pr add <title>             Add a PR (becomes active) [--plan, --depends-on]
-  pm pr edit <pr-id>            Edit PR title, description, or dependencies
+  pm pr edit <pr-id>            Edit PR title, description, deps, status, or plan
   pm pr select <pr-id>          Set the active PR
   pm pr cd <pr-id>              Open a shell in a PR's workdir
   pm pr list                    List PRs with status (* = active)
@@ -703,7 +703,7 @@ COMMANDS
   pm getting-started            Show getting started guide
 
 TUI / COMMAND BAR
-  pm session                    Start or attach the TUI + notes editor
+  pm session                    Start or attach the TUI (n opens notes)
   ?                             In the TUI: keyboard shortcuts + command-bar forms
   /                             In the TUI: command bar (type 'help' there for the same screen)
   pm tui keys                   Print keybindings and command-bar equivalents
