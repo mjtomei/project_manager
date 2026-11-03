@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-03T03:21:09.249964+00:00'
+  updated_at: '2026-11-03T04:07:21.442519+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8633,6 +8633,29 @@ prs:
       agg was downloaded (aarch64-gnu) as in earlier runs.'
     created_at: '2026-11-03T03:21:09Z'
     last_edited: '2026-11-03T03:21:09Z'
+  - id: note-6db99c4
+    text: 'QA S58 (pane-close hook / scenario 58) — one bug found and fixed in fc99e992.
+      (1) BUG: a plain (non-pm) session created on a pm session''s tmux server received
+      the global pane hooks; `pm _pane-opened` created a registry for it and the next
+      `pm _pane-closed` there respawned a pm TUI (the guide) into the user''s scratch
+      session, plus a stale `~/.pm/pane-registry/scratch-<name>.json`. Repro: A on
+      its private socket, `tmux -S $SOCK_A new-session -d -s scratch-local bash`,
+      split a second pane, close it — scratch-local gains `pm _tui` and a registry.
+      Fix: both hook handlers resolve the session through its group and ignore it
+      unless the resolved name is `pm-*` (views still resolve to the base registry;
+      the empty-session case still logs `no registry for `). Tests: `TestNonPmSessionIgnored`
+      in tests/test_pane_layout.py. (2) Spec note for the next QA run: story 2''s
+      Then "the registry''s TUI entry is gone" does not hold after the failed pre-change
+      hook — the registry keeps the dead `role="tui"` entry until a heal/reconcile
+      pass (documented in `_find_live_tui_pane`); `pm tui view` ignores it and the
+      attach path removes it. (3) Harness notes: harness panes must have PYTHONPATH=/workspace
+      (else `pm` resolves to /opt/pm-src); the server-global TMUX_PANE can collide
+      with pane ids later created on the private server (kill the shell pane or start
+      from a higher-id harness pane so it stays stale); the story-5 key-driven hook
+      fired with cwd /workspace so its log line landed in workspace-<tag>.log, not
+      A''s tag log.'
+    created_at: '2026-11-03T04:07:21Z'
+    last_edited: '2026-11-03T04:07:21Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
