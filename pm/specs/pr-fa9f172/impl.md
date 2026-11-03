@@ -739,3 +739,12 @@ the routed form and `--fresh` so help is complete.
   (c) The `z` prefix row now names the `wr` watcher-review chord, which
   also honors `z` (fresh restart); the test that claims to name "every
   action it modifies" was missing it.
+
+- Review-loop e4f7 i4: the last unescaped user-typed text in the command
+  bar. `guard_pr_action` renders the raw in-flight command
+  (`app._inflight_pr_action`) into the "Busy" remedy, so a bracketed token
+  (`pr qa [x]`) was swallowed by Textual's markup parser and vanished from
+  the very message that names it — the same class of bug the QA / not-found
+  / edit remedies escaped elsewhere (i2, i18). It now goes through
+  `command_surface.escape_markup`, with a `Content.from_markup` assertion
+  that the bracketed command survives.

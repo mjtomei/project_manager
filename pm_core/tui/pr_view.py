@@ -34,7 +34,12 @@ def guard_pr_action(app, action_desc: str) -> bool:
     """
     if app._inflight_pr_action:
         _log.info("action blocked: %s (busy: %s)", action_desc, app._inflight_pr_action)
-        app.log_message(f"Busy: {app._inflight_pr_action} — wait for it to finish", sticky=1.0)
+        # The in-flight action is the raw command the user typed; escape it
+        # or a bracketed token (`pr qa [x]`) is swallowed as markup and the
+        # command vanishes from the very message that names it.
+        app.log_message(
+            f"Busy: {command_surface.escape_markup(app._inflight_pr_action)} "
+            f"— wait for it to finish", sticky=1.0)
         app.clear_log_message_later(1.0)
         return False
     return True

@@ -749,6 +749,31 @@ def test_qa_already_running_names_the_restart_command():
     assert "pr qa fresh pr-001" in held and "zz t" in held
 
 
+def test_busy_guard_keeps_bracketed_command_text():
+    """The in-flight command is user-typed; its brackets must survive.
+
+    ``guard_pr_action`` renders the raw typed command into the "Busy"
+    remedy.  Textual's markup parser swallows ``[x]`` / ``[OK]``, so a
+    bracketed token vanished from the message that names it — the same
+    class of bug the QA and not-found remedies escaped elsewhere.
+    """
+    from types import SimpleNamespace
+
+    from textual.content import Content
+
+    from pm_core.tui import pr_view
+
+    logs = []
+    app = SimpleNamespace(
+        _inflight_pr_action="pr qa [x]",
+        log_message=lambda msg, **kw: logs.append(msg),
+        clear_log_message_later=lambda *a, **kw: None,
+    )
+    assert pr_view.guard_pr_action(app, "pr start pr-001") is False
+    assert Content.from_markup(logs[0]).plain == (
+        "Busy: pr qa [x] — wait for it to finish")
+
+
 def test_command_bar_qa_resolves_a_github_display_id(tmp_path):
     """`pm pr qa` prints `#N` for a GitHub PR; the command bar must accept it.
 
