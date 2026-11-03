@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-03T16:27:09.168631+00:00'
+  updated_at: '2026-11-03T21:01:32.826453+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8829,6 +8829,24 @@ prs:
       cast/mp4/manifest).'
     created_at: '2026-11-03T16:27:09Z'
     last_edited: '2026-11-03T16:27:09Z'
+  - id: note-647958d
+    text: 'QA scenario 70 (a legacy session vanishing inside the start TUI-check window,
+      and concurrent starts converging) PASS 4/4 on 44326ccd, no source changes. Story
+      1, 3 rounds: with the TUI-respawn lock held, `pm session kill` removed the whole
+      legacy group; the blocked start printed `TUI pane missing — respawning...` then
+      `Creating tmux session ...` and replaced it on /tmp/pm-sessions/<name> (base
+      + ~1 + one live TUI in @0) with no rollout note; the default server kept only
+      U with its pane ids/pids unchanged; `pm session list` showed one L row on the
+      private socket; start.err held only the expected non-tty attach and the debug
+      log no `still held after 10s`. Story 2: two simultaneous starts against a surviving
+      legacy session each printed the note exactly once and `Attaching to session
+      ...~1...`, neither created a session, no private socket appeared, TUI/window
+      set unchanged. Story 3: two simultaneous starts with no session converged on
+      exactly one private session (4/4 runs, both orderings). Story 4: one start attached
+      with the note once, legacy TUI and U untouched. Captures /pm-captures/scenarios/70
+      (per-story cast+mp4+manifest, per-round evidence).'
+    created_at: '2026-11-03T21:01:32Z'
+    last_edited: '2026-11-03T21:01:32Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
