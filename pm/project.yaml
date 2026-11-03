@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-02T19:36:32.318737+00:00'
+  updated_at: '2026-11-03T00:00:56.126837+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8530,6 +8530,24 @@ prs:
       Captures: /pm-captures/scenarios/50/run (README.md).'
     created_at: '2026-11-02T19:36:32Z'
     last_edited: '2026-11-02T19:36:32Z'
+  - id: note-afcae13
+    text: 'QA scenario 54 (Unicode line separators through the whole journey) PASS
+      5/5 on 5d8fc48b, plus one fix in bb80cd1a. (1) U+0085/U+2028/U+2029 dirs: tag
+      qa54-line_sep-<hash>, create/name/list/discovery/drive/respawn/kill all work;
+      pane cwd keeps the literal bytes; three sibling projects list and drive independently;
+      a legacy default-server session with the raw U+2028 name is left untouched while
+      the branch starts its own _-named private session beside it. (2) FIX: the after-kill-pane
+      hook ran `pm _pane-closed` with no argument, so handle_any_pane_closed resolved
+      the session from $TMUX_PANE. That variable can name a pane that is not on the
+      private server (the killed pane, or a pane id inherited when the server is started
+      from inside an ambient tmux); display-message -t then returns an empty name,
+      "no registry for " is logged and the killed TUI is never respawned. The hook
+      now passes #{q:session_name} (as after-split-window already does), _pane-closed
+      takes it and falls back to $TMUX_PANE when empty; test test_pane_closed_uses_the_hook_session_name_over_a_stale_tmux_pane;
+      full suite 5638 passed / 1 skipped. Captures /pm-captures/scenarios/54 (README.md;
+      pre-fix/ and post-fix/).'
+    created_at: '2026-11-03T00:00:56Z'
+    last_edited: '2026-11-03T00:00:56Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
