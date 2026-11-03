@@ -33039,7 +33039,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-11-03T22:09:34.322932+00:00'
+  updated_at: '2026-11-03T22:22:53.929971+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33351,6 +33351,29 @@ prs:
       (cast + mp4 + manifest each).'
     created_at: '2026-11-03T22:09:34Z'
     last_edited: '2026-11-03T22:09:34Z'
+  - id: note-8074a70
+    text: 'QA S23 refiner (single-instruction `pm qa run`): prereqs and findings.
+
+      (1) `pm qa run` stops at INPUT_REQUIRED (exit 0) unless the PR has a QA spec:
+      create `pm/specs/<pr-id>/qa.md` as a fixture (`pm pr spec <id> qa` uses print-mode
+      Claude, which fake-claude does not cover).
+
+      (2) Fake config set from the project dir (so the tag matches the pm session):
+      `pm fake-claude config set ''{"_all": {}, "qa_scenario": {"verdicts": ["PASS"]}}''`.
+      The `_all` catch-all also gives `qa_concretize` REFINED_STEPS and `qa_finalize`
+      FINALIZE_DONE; without it the refiner is a no-verdict mock and the run hangs.
+
+      (3) With a spec and fake, `pm qa run <id> --pr <id>` prints `Running QA: …`,
+      `  Workdir: …`, final `Result: PASS`, exit 0; the session gains `qa-<pr-id>`
+      (status pane `Overall: PASS`) and `qa-<pr-id>-s1`; `pm qa list` still lists
+      the instruction. The TUI QA view (`q`) is the instruction library, NOT a per-PR
+      verdict; the PR stays `in_review` (CLI run does not transition/write a QA note).
+
+      (4) Gap: with no pm session, `pm qa run` prints only `Result: ERROR` (no cause,
+      no `pm session`) and exits 1 — a dead end the scenario expects remedied; `pm
+      qa debug` does print `No pm session found. Start one with: pm session`.'
+    created_at: '2026-11-03T22:22:53Z'
+    last_edited: '2026-11-03T22:22:53Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
