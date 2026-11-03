@@ -960,7 +960,9 @@ def _run_command_sync(app, parts: list[str]) -> None:
             app.log_message(command_surface.escape_markup(
                 result.stdout.strip().split("\n")[-1]))
         if result.returncode != 0 and result.stderr.strip():
-            last_err = result.stderr.strip().split(chr(10))[-1]
+            # R35/E18: the bar shows one line, so surface the remedy even
+            # when trailing context ("Available PRs/notes: …") follows it.
+            last_err = command_surface.pick_error_line(result.stderr)
             app.log_message(f"Error: {command_surface.escape_markup(last_err)}")
     except Exception as e:
         _log.exception("command failed: %s", parts)
@@ -1013,7 +1015,8 @@ async def _run_command_async(app, cmd: str, parts: list[str], working_message: s
         elif proc.returncode == 0:
             app.log_message(f"✓ {working_message} done")
         if proc.returncode != 0 and stderr_text.strip():
-            last_err = stderr_text.strip().split(chr(10))[-1]
+            # Same one-line rule as the sync path (R35/E18).
+            last_err = command_surface.pick_error_line(stderr_text)
             app.log_message(f"Error: {command_surface.escape_markup(last_err)}")
 
     except asyncio.TimeoutError:

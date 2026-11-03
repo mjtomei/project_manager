@@ -2534,3 +2534,28 @@ def test_command_bar_help_flag_leaves_quoted_text_alone(monkeypatch, cmd):
 
     assert shown == [], shown
     assert ran == [cmd], ran
+
+
+@pytest.mark.parametrize("stderr_text, expected", [
+    # R35/E18: the remedy is printed first, trailing context after it.
+    ("Unknown PR IDs in --depends-on: bogus — run 'pm pr list' to see "
+     "every PR.\nAvailable PRs: pr-1, pr-2\n",
+     "Unknown PR IDs in --depends-on: bogus — run 'pm pr list' to see "
+     "every PR."),
+    ("Note 'bogus' not found on pr-1 — run 'pm pr note list pr-1' to see "
+     "them.\nAvailable notes:\n  note-1: First note\n",
+     "Note 'bogus' not found on pr-1 — run 'pm pr note list pr-1' to see "
+     "them."),
+    # Backticked and bare spellings are remedies too.
+    ("No PRs.\nRun `pm pr list` to see them.\n", "Run `pm pr list` to see them."),
+    # Click's usage block: the corrective line is the last one.
+    ("Usage: pm pr qa [OPTIONS]\nTry 'pm pr qa --help' for help.\n\n"
+     "Error: No such option: --nope\n", "Error: No such option: --nope"),
+    # A traceback's final line stays the last line.
+    ("Traceback (most recent call last):\n  ...\nValueError: boom\n",
+     "ValueError: boom"),
+    ("", ""),
+])
+def test_pick_error_line_prefers_the_remedy(stderr_text, expected):
+    """The bar shows one line, so a failure logs the corrective one."""
+    assert command_surface.pick_error_line(stderr_text) == expected

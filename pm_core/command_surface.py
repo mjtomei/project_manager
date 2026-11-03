@@ -27,6 +27,8 @@ both sides import it.
 
 from __future__ import annotations
 
+import re
+
 # (mode, command-bar form, TUI keys, description)
 QA_MODES: tuple[tuple[str, str, str, str], ...] = (
     ("run", "pr qa [PR_ID]", "t",
@@ -166,6 +168,35 @@ def escape_markup(text: str) -> str:
     """
     text = text.replace("[", "\\[")
     return text + " " if text.endswith("\\") else text
+
+
+# A corrective line names a command to run: ``run 'pm pr list'``,
+# ``run `pm pr note list <id>` `` or ``run pm pr list``.  The command bar
+# shows one line, so a failure must surface this line rather than the
+# trailing context (a list of available PRs/notes) printed after it.
+_REMEDY_RE = re.compile(r"\brun\s+[`'\x22]?pm\b", re.IGNORECASE)
+
+
+def pick_error_line(stderr_text: str) -> str:
+    """Choose the one stderr line the command bar logs for a failure.
+
+    R35/E18: a remedy printed *before* trailing context must not be the
+    line that is dropped — ``pr add X --depends-on bogus`` prints
+    ``Available PRs: …`` after its ``run 'pm pr list'`` remedy, and
+    ``pr note edit/delete`` prints ``Available notes:`` and the note rows
+    after theirs.  Prefer the first line that names a ``pm`` command to
+    run; otherwise keep the last line, which is the corrective one for
+    Click's usage errors (``Error: No such option: …`` follows its usage
+    block) and for a traceback's final exception line.
+    """
+    lines = [ln.strip() for ln in stderr_text.strip().splitlines()
+             if ln.strip()]
+    if not lines:
+        return ""
+    for line in lines:
+        if _REMEDY_RE.search(line):
+            return line
+    return lines[-1]
 
 
 def qa_mode_lines(*, indent: str = "  ") -> list[str]:
