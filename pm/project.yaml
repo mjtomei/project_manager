@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-03T12:44:30.083054+00:00'
+  updated_at: '2026-11-03T15:29:46.745854+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8739,6 +8739,40 @@ prs:
       include the recipe; all stories were smoke-tested live on this branch.'
     created_at: '2026-11-03T10:46:56Z'
     last_edited: '2026-11-03T10:46:56Z'
+  - id: note-8e84c87
+    text: 'QA S65 (wide, long and `~` names through session list, connect and grouping)
+      PASS 5/5 on a6969f12, no source changes. (1) 日本語 + ascii-alpha, one client each:
+      list from a plain shell and from a qa-shell pane are identical; header SESSION/CLIENTS/SOCKET,
+      two rows, own readable sockets, CLIENTS 1, no ~1/(default server) row. Column
+      sizing is display-width: SESSION field 23 cells, the 18-cell 日本語 row gets 5
+      pad spaces, SOCKET starts at display column 33 on every line, longest 73 cells.
+      (2) 30-CJK-char name (90 UTF-8 bytes; 102-byte session name): starts with no
+      "File name too long"; socket hashed to /tmp/pm-sessions/pm-d774e7c86512c83a7fd0556147e4790d
+      (52-byte path) and the same filename returns after kill+restart; list shows
+      the full name, hashed socket, CLIENTS 0, SESSION field 72 cells, SOCKET column
+      82, 134-cell line; --print-connect prints exactly the hashed `tmux -S ... attach`;
+      tui view prints [Session: ..., Pane: %0] + PR tree and send ''?'' reports Sent
+      keys and shows Keyboard Shortcuts; kill prints Killed session and removes the
+      socket (tmux list-sessions fails). The 3-char 日本語 socket stays readable, so
+      the limit is encoded bytes not characters. (3) my~repo with clients on base,
+      ~1 and the myview user view: list shows CLIENTS 2 while list-clients shows 3
+      (the view client is present but not counted, no row); my~other shows 1; full
+      names with ~, sockets are the full per-session paths, never /tmp/pm-sessions/pm-my.
+      (4) --disconnect-others from a real pty in my~repo: prints Attaching to session
+      ''...~2''... and Disconnected 3 other client(s).; only the invoking client remains
+      (on ~2), myview included, my~other untouched (same tty /dev/pts/8, same 120x39
+      windows/panes); list shows CLIENTS 1 while attached and 0 after the pty exits.
+      (5) 30 iterations from a plain shell and from a pane while 日本語-4 started mid-loop
+      and was killed: all rc=0, no Traceback, no duplicate/~N/myview/(default server)
+      rows, no partial names; the transient row is whole from iteration 12 through
+      26 and absent in 27-30 (iteration 11 plain run preceded creation by ~1 s while
+      the pane run 0.7 s later saw it); after the final kill the hashed socket file
+      is gone, survivors still listed, my~repo still drivable. Captures /pm-captures/scenarios/65
+      (README + cli/tui per story). Fixture trap: a driver-pane `pm session` needs
+      env -u TMUX (otherwise "sessions should be nested with care") and PYTHONPATH=/workspace
+      (the pane otherwise imports /opt/pm-src).'
+    created_at: '2026-11-03T15:29:46Z'
+    last_edited: '2026-11-03T15:29:46Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
