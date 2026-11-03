@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-03T12:16:09.175581+00:00'
+  updated_at: '2026-11-03T12:44:30.083054+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8711,6 +8711,25 @@ prs:
       cases.'
     created_at: '2026-11-03T12:16:09Z'
     last_edited: '2026-11-03T12:16:09Z'
+  - id: note-e5a5d2c
+    text: 'QA scenario 62 (non-git project: private fallback session and shared kill
+      scoping) NEEDS_WORK: one defect found and fixed in 50cbdef7; full suite 5668
+      passed / 1 skipped. Defect: in a non-git pm project, a plain `pm session` run
+      from a project subdirectory computed the fallback session name from the caller
+      cwd basename (`pm-sub-00000000`), so it started a second tmux server, a second
+      TUI and a second socket instead of attaching to the project session; `_get_session_name_for_cwd`
+      now anchors the fallback on the directory containing `pm/project.yaml` (cwd
+      fallback kept for non-pm dirs). Live on tmux 3.2a with a disposable HOME and
+      a throwaway project whose `.git` was removed: story 1 (list / `pm session --global`
+      refusal / `pm session kill --global`) PASS from inside the session pane and
+      from a plain shell, session+TUI+panes+client+socket untouched, no traceback;
+      story 2 PASS after the fix (subdirectory attach lands on the same session, one
+      socket, same TUI pid; plain kill from inside tears down and removes the socket);
+      story 3 PASS (concurrent kill --global + attach: kill reports no session, attach
+      completes, one TUI, socket remains). Captures: /pm-captures/scenarios/62 (pre-fix
+      + post-fix casts/mp4/manifests, suite/full-suite.log).'
+    created_at: '2026-11-03T12:44:29Z'
+    last_edited: '2026-11-03T12:44:29Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
