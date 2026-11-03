@@ -1099,6 +1099,21 @@ def session(ctx, share_global, share_group, start_dir, print_connect, disconnect
             # command names the session that would actually be attached —
             # including the share-mode check, so `--global --print-connect`
             # inside a private session prints the shared session.
+            #
+            # A shared print must also refuse where the start path refuses:
+            # in a non-git directory `get_session_tag` returns None, so
+            # `pm session --global` exits 1 and can never create the
+            # share-mode-hashed fallback name.  Printing a connect command
+            # for that name would advertise a session that cannot exist
+            # (QA scenario 64).  A plain print keeps working: its private
+            # fallback is exactly what a plain `pm session` creates.
+            if share_global or share_group:
+                from pm_core.paths import get_session_tag
+                if not get_session_tag():
+                    click.echo(
+                        "Cannot determine session tag (not in a git repo?).",
+                        err=True)
+                    raise SystemExit(1)
             session_name = _resolve_start_session_name(
                 bool(share_global or share_group))
         sp = tmux_mod.session_socket_for(session_name)

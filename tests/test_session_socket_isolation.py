@@ -5017,6 +5017,10 @@ class TestPrintConnect:
     def test_shared_print_connect_may_name_the_sharing_users_socket(
             self, monkeypatch, tmp_path):
         sock = str(tmp_path / "pm-repo-abc")
+        # A shared session exists only when a tag resolves; the ownership
+        # exemption is what this test is about, not the tag.
+        monkeypatch.setattr(paths, "get_session_tag",
+                            lambda *a, **k: "repo-abc")
         seen: list[bool] = []
         result = self._invoke(monkeypatch, tmp_path, (sock, True),
                               args=["--print-connect", "--global"],
@@ -5024,6 +5028,24 @@ class TestPrintConnect:
 
         assert result.exit_code == 0, result.output
         assert seen == [False]
+
+    def test_shared_print_connect_without_a_tag_is_refused(
+            self, monkeypatch, tmp_path):
+        """A shared print must not name a session pm cannot create.
+
+        In a non-git directory `pm session --global` exits 1 with "Cannot
+        determine session tag"; the share-mode-hashed fallback name it
+        would otherwise print can never be created (QA scenario 64).  The
+        refusal must come before any command is printed.
+        """
+        monkeypatch.setattr(paths, "get_session_tag",
+                            lambda *a, **k: None)
+        result = self._invoke(monkeypatch, tmp_path, (None, False),
+                              args=["--print-connect", "--global"])
+
+        assert result.exit_code == 1
+        assert "Cannot determine session tag" in result.output
+        assert "tmux " not in result.output
 
     def test_refuses_to_print_a_planted_symlink(self, monkeypatch, tmp_path):
         """A printed command is pasted: never point it through a link.
