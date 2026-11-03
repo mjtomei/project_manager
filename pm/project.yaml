@@ -33039,7 +33039,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-11-03T19:14:16.128328+00:00'
+  updated_at: '2026-11-03T21:42:44.777943+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33257,6 +33257,42 @@ prs:
       --json shape, and no autostart key written. Captures: /pm-captures/scenarios/18/{cli-autostart,click81,click85}.'
     created_at: '2026-11-03T19:14:16Z'
     last_edited: '2026-11-03T19:14:16Z'
+  - id: note-fb770fd
+    text: 'Refiner scenario 20 (E15/E16/R30): verified all commands/messages on this
+      branch. E15 caveat: the same-name scaffolder is check-then-write (exists() then
+      write_text, no O_EXCL/lock) — in 2/60 back-to-back concurrent trials both invocations
+      printed "Created:" and exited 0. The file was always complete (104 B instructions
+      template) with no traceback, and when a loser occurred it exited 1 naming "pm
+      qa edit <id>", so scenario 20 asserts the conditional ("any refusal names pm
+      qa edit") plus one complete file. E16 verified against a live TUI on an isolated
+      TMUX_TMPDIR: concurrent add A / add A B both exit 0, final set is A once + B
+      once (wait-for-merge), pm tui view still renders; with the session killed both
+      exit 2 naming "pm session", and a restarted session lists no targets.'
+    created_at: '2026-11-03T21:32:33Z'
+    last_edited: '2026-11-03T21:32:33Z'
+  - id: note-74efc06
+    text: 'QA scenario 20 (E15/E16/R30) PASS. Runtime-verified on an isolated project/TUI
+      (TMUX_TMPDIR=/scratch/pm-qa20/.tmux, session pm-pm-qa20-cde36e31): (1) qa add-instruction
+      first run Created + exit 0, second run exit 1 naming pm qa edit regression-reuse;
+      qa list/show match the template. (2) 5 same-name concurrent trials each left
+      exactly one 104-byte complete template (4 ## headings, no traceback); every
+      refusal exited 1 naming pm qa edit concurrent-item; distinct reg-one/art-one
+      pair both Created and listed once; sequential re-runs of all three scaffolders
+      exit 1 with the pm qa edit <id> remedy. (3) concurrent autostart add A / add
+      A B both exit 0 with added/unchanged + targets lines; list shows A once and
+      B once as wait-for-merge with titles; TUI tree still renders AUTO x2. (4) with
+      the session killed both concurrent adds exit 2 with owner_unavailable naming
+      pm session, tmux ls reports no server, and after restart list shows Auto-start:
+      off / No auto-start targets. Note: the E15 scaffolder is check-then-write, so
+      one complete file is the invariant, not who wins; in this run the loser was
+      refused on every trial. Captures: /pm-captures/scenarios/20/{story1-cli,story2-concurrency,story3-autostart-cli,story4-owner-unavailable,tui-library-and-autostart}.
+      Fixture note: agg is absent in this container; installed the aarch64 static
+      binary into the scratchpad for the mp4 renders. TUI capture shows the auto-start
+      owner logging "not committed on master yet" because the throwaway project.yaml
+      was not committed on master; that is a fixture limitation, not the asserted
+      outcome.'
+    created_at: '2026-11-03T21:42:44Z'
+    last_edited: '2026-11-03T21:42:44Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
