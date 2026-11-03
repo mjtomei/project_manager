@@ -40317,7 +40317,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-03T00:18:52.533633+00:00'
+  updated_at: '2026-11-03T00:34:05.882571+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42470,6 +42470,35 @@ prs:
       reads clean. agg is not installed: arm64 v1.9.0 download.'
     created_at: '2026-11-03T00:18:52Z'
     last_edited: '2026-11-03T00:18:52Z'
+  - id: note-af43fbe
+    text: 'QA S84 refiner (2026-11-03, head 6d1e8651): all 3 stories held live (S80
+      stories 1-3 re-run). Drivers + evidence: /pm-captures/pr-8020495/s84-refiner
+      (scripts/go.sh SB setup-a|setup-b|story1|story2|story3 ROOT; popup_pager in
+      common.sh compares the popup H pager with `pm pr history A | cat`, durations
+      normalised). Corrections: autostart status right after the add shows A as `[wait-for-merge
+      <- B]`, not "held by B" (that appears only once signed off); the stale router
+      opened <1 s after the commit this time (S80: 4.8 s), bound stays ~5 s (one poll).
+      Need fzf/less/faketime via sudo apt-get update first.'
+    created_at: '2026-11-03T00:19:48Z'
+    last_edited: '2026-11-03T00:19:48Z'
+  - id: note-ba0c3ba
+    text: 'QA S84 (2026-11-03) PASS on 68ad55ffd (app d2e0097e), no code edits: S80
+      stories 1-3 re-run with the refiner drivers (copied + re-pointed to /pm-captures/scenarios/84/scripts),
+      sandboxes /scratch/q84a + q84b (torn down); per-Then README + cli/tui casts/mp4
+      in /pm-captures/scenarios/84. (1) add -> `[wait-for-merge <- B] running/implementation`;
+      routers REVIEW (released) -> BLOCKED (hold, badge, paused status, throttle cancelled
+      (owner ended)) -> commit via pm pr cd -> stale router 0.2-1 s later re-arms
+      the id (BLOCKED hold gone from the first read) -> MERGE hold (null due), Recent
+      keeps cancelled/re-armed/released; 171/171 open-router reads have the throttle
+      active, max 59s left; 0 merge-hold rows before MERGE, 3 superseded clears before
+      the one arm; popup H pager = `| cat` words at all 5 checkpoints. (2) breadcrumb
+      restart 5.5 s into the router: 43 gap reads interrupted >6s (lower bound 5.55
+      s shown to the nearest second) + throttle lost, then the same id (adopted) done
+      SIGNOFF_MERGE, one id across 329 reads, hold armed. (3) restart while held:
+      3 lost-only reads +0.15..+0.42 s after return, then 127/127 re-armed. 0 Tracebacks,
+      every read rc 0.'
+    created_at: '2026-11-03T00:34:05Z'
+    last_edited: '2026-11-03T00:34:05Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
