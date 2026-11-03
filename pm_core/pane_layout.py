@@ -866,6 +866,15 @@ def handle_any_pane_closed(session: str = "") -> None:
     if not reg_path.exists():
         _logger.info("handle_any_pane_closed: no registry for %s", current_session)
         return
+    # The hooks are global on the server, so they also fire for a plain
+    # session a user created beside the pm one (a scratch shell).  Such a
+    # session is not pm's: a pane close in it must not reconcile a pm
+    # registry or respawn a TUI into it.  Checked after the registry probe
+    # so an unresolved session (empty name) still logs the same line.
+    if not current_session.startswith("pm-"):
+        _logger.info("handle_any_pane_closed: ignoring non-pm session %s",
+                     current_session)
+        return
 
     try:
         data = json.loads(reg_path.read_text())
@@ -880,10 +889,22 @@ def handle_pane_opened(session: str, window: str, pane_id: str) -> None:
     _logger.info("handle_pane_opened called: session=%s window=%s pane_id=%s",
                  session, window, pane_id)
 
-    from pm_core.pane_registry import locked_read_modify_write, _prepare_registry_data
+    from pm_core.pane_registry import (locked_read_modify_write,
+                                       pm_session_name,
+                                       _prepare_registry_data)
+
+    # A split in a plain session the user created on the same server must
+    # not create a registry: the after-kill-pane hook keys on that file, and
+    # with one present a later pane close there respawned a pm TUI into the
+    # user's scratch session (QA S58).  A view grouped with a pm session
+    # resolves through the group and shares that session's registry.
+    resolved = pm_session_name(session)
+    if not resolved.startswith("pm-"):
+        _logger.info("handle_pane_opened: ignoring non-pm session %s", session)
+        return
 
     def _mark_user_modified(raw):
-        data = _prepare_registry_data(raw, session)
+        data = _prepare_registry_data(raw, resolved)
         wdata = get_window_data(data, window)
         known_ids = {p["id"] for p in wdata["panes"]}
         if pane_id not in known_ids:
@@ -893,4 +914,4 @@ def handle_pane_opened(session: str, window: str, pane_id: str) -> None:
             return data
         return None  # pane already known, skip write
 
-    locked_read_modify_write(registry_path(session), _mark_user_modified)
+    locked_read_modify_write(registry_path(resolved), _mark_user_modified)

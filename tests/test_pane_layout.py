@@ -871,3 +871,57 @@ class TestTuiRespawnWindow:
         with patch("pm_core.tmux.find_window_by_name", return_value=None), \
                 patch("pm_core.tmux.list_windows", return_value=[]):
             assert tui_respawn_window("pm-x") is None
+
+
+class TestNonPmSessionIgnored:
+    """The global hooks must ignore a plain session on the same server (QA S58).
+
+    A user's scratch session lives on the pm server too, so it receives the
+    global ``after-split-window`` / ``after-kill-pane`` hooks.  It is not a
+    pm session: its splits must not create a registry, and a pane close in
+    it must not reconcile a pm registry or respawn a TUI into it.
+    """
+
+    def _reg_path(self, root):
+        return lambda session: root / f"{session}.json"
+
+    def test_pane_opened_does_not_create_registry(self, mock_registry):
+        with patch("pm_core.pane_layout.registry_path",
+                   side_effect=self._reg_path(mock_registry)), \
+                patch("pm_core.tmux.session_group", return_value=""):
+            handle_pane_opened("scratch-local", "@2", "%5")
+
+        assert not (mock_registry / "scratch-local.json").exists()
+
+    def test_pane_opened_still_registers_a_pm_session(self, mock_registry):
+        with patch("pm_core.pane_layout.registry_path",
+                   side_effect=self._reg_path(mock_registry)), \
+                patch("pm_core.tmux.session_group", return_value=""):
+            handle_pane_opened("pm-test", "@2", "%5")
+
+        data = load_registry("pm-test")
+        assert data["windows"]["@2"]["user_modified"] is True
+
+    def test_pane_closed_does_not_respawn_in_a_scratch_session(
+            self, mock_registry):
+        from pm_core.pane_layout import handle_any_pane_closed
+
+        # The shape handle_pane_opened used to leave behind for a plain
+        # session: a registry with the window but no panes.
+        _save_registry("scratch-local", {
+            "session": "scratch-local",
+            "windows": {"@2": {"panes": [], "user_modified": True}},
+            "generation": "",
+        })
+
+        with patch("pm_core.pane_layout.registry_path",
+                   side_effect=self._reg_path(mock_registry)), \
+                patch("pm_core.tmux.session_group", return_value=""), \
+                patch("pm_core.tmux.in_tmux", return_value=True), \
+                patch("pm_core.pane_layout._respawn_tui") as respawn, \
+                patch("pm_core.pane_layout._respawn_unlisted_tui") as unlisted:
+            handle_any_pane_closed("scratch-local")
+
+        respawn.assert_not_called()
+        unlisted.assert_not_called()
+        assert load_registry("scratch-local")["windows"]["@2"]["panes"] == []
