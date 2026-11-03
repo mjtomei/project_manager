@@ -33039,7 +33039,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-11-03T22:36:49.722462+00:00'
+  updated_at: '2026-11-03T22:39:59.957604+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33404,6 +33404,27 @@ prs:
       (cast + mp4 + manifest each).'
     created_at: '2026-11-03T22:36:49Z'
     last_edited: '2026-11-03T22:36:49Z'
+  - id: note-4ffc00d
+    text: 'QA scenario 22 capture correction (follow-up to note-7c21dbd): the scenario
+      was assigned both capture recipes and the first run only produced the CLI one.
+      Re-ran all five stories in a fresh throwaway project (/tmp/pm-test2-1793745303,
+      session pm-pm-test2-1793745303-b915c655) with both recipes recorded from the
+      same run: each story dir now holds cli-recording/ (drive-pane asciinema cast
+      + mp4 + manifest) and tmux-screen-recording/ (pipe-pane transcript.log of the
+      TUI pane, an asciinema cast of a separate recorder session attached to the pm
+      session, mp4, manifest). The TUI captures follow pm into the launched impl/review/sign-off
+      windows and end on the tree; verified frames show the status transitions (in_progress,
+      in_review, sign_off) and the tmux status line with exactly one window of each
+      name. Behavior re-verified unchanged at 81775f329: start IDs @4 -> @6 (plain
+      keeps @4, nwin 1, one record); concurrent fresh starts both rc 0, no Traceback,
+      kill/relaunch pair each, one window/record, no .tmp clone, single clean workdir;
+      review @11 -> @12 (plain keeps @11, status in_review); sign-off @15 -> @16 (plain
+      switches, no re-mark, status sign_off); merge --fresh rc 2 "No such option",
+      status unchanged, help rc 0 with "There is no --fresh option" + pm pr signoff
+      --fresh <id> / then merge again + g/G TUI forms, no --fresh in Options. Artifacts:
+      /pm-captures/scenarios/22/<story>/{cli-recording,tmux-screen-recording}/.'
+    created_at: '2026-11-03T22:39:59Z'
+    last_edited: '2026-11-03T22:39:59Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
