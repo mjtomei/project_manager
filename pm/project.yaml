@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-03T21:29:18.263099+00:00'
+  updated_at: '2026-11-03T21:46:39.343342+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8901,6 +8901,32 @@ prs:
       `pm session kill` removes the stale socket after scratch is killed.'
     created_at: '2026-11-03T21:29:18Z'
     last_edited: '2026-11-03T21:29:18Z'
+  - id: note-f01583e
+    text: 'QA S71 (a hand-made plain session beside the pm session on its private
+      server) PASS 5/5 on 671bbaae, no source changes. Driven live on tmux 3.5a with
+      a disposable HOME and projects /scratch/q71/{alpha,beta}. (1) scratch on A''s
+      server is ignored by all three hooks: no scratch.json, no pm _tui pane, logs
+      "handle_pane_opened: ignoring non-pm session scratch", "handle_any_pane_closed:
+      no registry for scratch", "_window-resized: ignoring non-pm session scratch",
+      no traceback; A concurrently reconciles the killed TUI (%0 -> %5), respawns,
+      rebalances and follows the client size. (2) A planted stale scratch.json is
+      never rewritten (identical sha256), no rebalance for scratch, A registry sha
+      and layout unchanged, while A''s own split/close still respawns and rebalances.
+      (3) "pm session kill" from a plain shell removes base + ~1 + grouped myview,
+      keeps scratch''s client and the socket, leaves B alone, and "pm session list"
+      shows B only; a later "pm session" recreates base + ~1 + TUI on the same socket.
+      (4) After "tmux -S $SA kill-session -t =A", "pm session kill" prints "No session
+      ... found." on stderr rc 1 with the socket kept; "pm session" attaches to ~2
+      and the same TUI pane (%10/pid 8373) survives - no new base. (5) Kill raced
+      with an attach: Killed session rc 0, racing attach rc 0, group gone, scratch''s
+      client kept, no traceback; simultaneous C-b x in A and scratch leaves scratch
+      intact with no registry while A respawns+rebalances; teardown removes the stale
+      socket (ls rc 2) and list shows no A row. Captures: /pm-captures/scenarios/71
+      (story1-5, cast+mp4+evidence per story). Traps: the story-2 planted registry
+      was removed before story 3; C-b x+y must be driven in an attached client, not
+      harness kill-pane.'
+    created_at: '2026-11-03T21:46:39Z'
+    last_edited: '2026-11-03T21:46:39Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
