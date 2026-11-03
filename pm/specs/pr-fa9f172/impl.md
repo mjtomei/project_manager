@@ -777,3 +777,25 @@ the routed form and `--fresh` so help is complete.
   sweep exists to remove).
   Full suite (minus the known markdown-module baseline): 5563 passed,
   1 skipped.
+
+- Review-loop 6a82 i2 (recorded here in i3; the i2 commit changed code and
+  tests but not this spec): the last command-bar paths that did not hand
+  focus back, and the last groups that did not accept the `help` alias.
+  (a) The `autostart` branch focused the hidden tech-tree unconditionally,
+  deadening the QA / plans pane keys until the view was re-entered, and the
+  review-loop / `edit` not-found paths returned with the bar still focused,
+  so the next keystroke was typed into it. All now use
+  `_refocus_active_view` (the helper added in e4f7 i3), which mirrors
+  `action_unfocus_command` for all three views. (b) `pm project` and
+  `pm model` were defined as plain `click.Group`s and attached with
+  `cli.add_command`, so they missed `HelpGroup` inheritance and answered
+  "No such command 'help'"; both now use `cls=HelpGroup`. Tests: the
+  QA-view focus hand-back for the autostart branch and both not-found
+  paths, and a walk of every group asserting `pm <group> help` exits 0.
+  Full suite (minus the known markdown-module baseline): 5567 passed,
+  1 skipped.
+
+- Review-loop 6a82 i3: documentation only. Recorded the i2 fixes above so
+  the spec matches the shipped code, and re-verified the whole tree on the
+  current checkout (see the count above). No source or test changes were
+  needed this iteration.
