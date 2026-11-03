@@ -33293,6 +33293,20 @@ prs:
       outcome.'
     created_at: '2026-11-03T21:42:44Z'
     last_edited: '2026-11-03T21:42:44Z'
+  - id: note-a05bffe
+    text: 'S21 refiner at HEAD e5faafbb1: R35/E18 are NOT met by the command bar.
+      `pr add X --depends-on bogus` prints the remedy (`... run ''pm pr list'' ...`)
+      first, then `Available PRs: ...`; `pr note edit <id> bogus ''x''` prints the
+      remedy first, then `Available notes:` + rows. The bar logs only the LAST stderr
+      line, so it shows `Error: Available PRs: ...` / `Error:   note-...: ...` and
+      drops the remedy. S21 will report NEEDS_WORK unless the TUI picks the remedy
+      line or the CLI prints the remedy last. Rest of S21 drivable: two PRs; `pm pr
+      start` (fake `_all`); `review-loop <id>` with `{"review":{"verdicts":[]}}` holds
+      the loop in iteration 1; stop/cancel refusal verified at 200x50 (same review
+      window id); `pm pr list` logs `Error: Error: No such command ''pm''.` and a
+      following `pr list` works.'
+    created_at: '2026-11-03T21:41:48Z'
+    last_edited: '2026-11-03T21:41:48Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
