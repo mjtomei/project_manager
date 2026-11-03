@@ -4369,3 +4369,36 @@ Verification: `tests/test_session_socket_isolation.py` 298 passed;
 208 passed; the changed test files also pass twice in one HOME (338
 each); full suite 5647 passed / 1 skipped, 437.8 s (log
 `/pm-captures/review-43f6-i2/full-suite-final.log`).
+
+## QA-driven fix (2026-11-03, commit fc99e992)
+
+The pane hooks are registered **globally on the session's server**
+(`set-hook -g after-kill-pane`, `-gw after-split-window`,
+`-gw window-resized`), so they also fire for a plain session a user
+creates beside the pm one on that server.  `pm _pane-opened` created a
+pane registry for it, and the next `pm _pane-closed` there found the
+registry and respawned a pm TUI into the user's scratch session (QA S58
+story 4), leaving a stale `~/.pm/pane-registry/<scratch>.json` behind.
+
+Every hook handler now resolves the hook's session through its tmux
+group (`pane_registry.pm_session_name`, so a user's own grouped view of a
+pm session still resolves to the base registry) and ignores it unless the
+resolved name is a pm one (`pm-*`):
+
+- `pane_layout.handle_pane_opened` — no registry is created for a
+  non-pm session.  The CLI wrapper passes the name through; the
+  resolution happens once, in the handler (S121's view resolution is
+  unchanged).
+- `pane_layout.handle_any_pane_closed` — a pane close in a non-pm
+  session reconciles nothing and respawns no TUI, even when a stale
+  registry from an older pm version still exists.  The check is after the
+  registry probe so an unresolved (empty) session keeps logging
+  `no registry for ` as before.
+- `cli.session.window_resized_cmd` — a resize in a non-pm session is not
+  rebalanced, even when a stale registry still lists panes in it.  (Before
+  the guard the empty-registry check happened to protect the normal case;
+  the guard makes the invariant explicit and covers the stale file.)
+
+Tests: `TestNonPmSessionIgnored` in `tests/test_pane_layout.py` (split,
+close and resize in a scratch session; a pm session still registers and
+still rebalances).

@@ -1510,9 +1510,13 @@ def pane_closed_cmd(session: str):
 @click.argument("window")
 @click.argument("pane_id")
 def pane_opened_cmd(session: str, window: str, pane_id: str):
-    """Internal: handle tmux after-split-window hook."""
-    pane_layout.handle_pane_opened(pane_registry.pm_session_name(session),
-                                   window, pane_id)
+    """Internal: handle tmux after-split-window hook.
+
+    The session name is passed through as tmux reported it; the handler
+    resolves a user's own grouped view to its pm session (S121) and skips
+    a non-pm session, so the resolution happens once, there.
+    """
+    pane_layout.handle_pane_opened(session, window, pane_id)
 
 
 def _pin_popup_body(body: str, session: str, window: str | None) -> str:
@@ -1613,6 +1617,14 @@ def window_resized_cmd(session: str, window: str):
     _log.info("_window-resized: ENTERED session=%s window=%s pid=%d", session, window, os.getpid())
 
     base = pane_registry.pm_session_name(session)
+    # window-resized is a global hook on the server, so it also fires for a
+    # plain session the user created beside the pm one (QA S58, the same
+    # class as the two pane hooks).  Such a session is not pm's: never
+    # rebalance it, even when a stale registry from an older pm version
+    # still lists panes in it.
+    if not base.startswith("pm-"):
+        _log.info("_window-resized: ignoring non-pm session %s", session)
+        return
     data = pane_registry.load_registry(base)
     wdata = pane_registry.get_window_data(data, window)
     if not wdata["panes"]:

@@ -877,9 +877,10 @@ class TestNonPmSessionIgnored:
     """The global hooks must ignore a plain session on the same server (QA S58).
 
     A user's scratch session lives on the pm server too, so it receives the
-    global ``after-split-window`` / ``after-kill-pane`` hooks.  It is not a
-    pm session: its splits must not create a registry, and a pane close in
-    it must not reconcile a pm registry or respawn a TUI into it.
+    global ``after-split-window`` / ``after-kill-pane`` / ``window-resized``
+    hooks.  It is not a pm session: its splits must not create a registry, a
+    pane close in it must not reconcile a pm registry or respawn a TUI into
+    it, and a resize there must not rebalance it.
     """
 
     def _reg_path(self, root):
@@ -925,3 +926,53 @@ class TestNonPmSessionIgnored:
         respawn.assert_not_called()
         unlisted.assert_not_called()
         assert load_registry("scratch-local")["windows"]["@2"]["panes"] == []
+
+    def test_window_resized_does_not_rebalance_a_scratch_session(
+            self, mock_registry):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+
+        # A stale registry from a pm version before the S58 fix: it lists
+        # panes in the user's plain session, so the old handler would have
+        # rebalanced that session on every resize.
+        _save_registry("scratch-local", {
+            "session": "scratch-local",
+            "windows": {"@2": {"panes": [
+                {"id": "%5", "role": "tui", "order": 0, "cmd": "tui"},
+            ], "user_modified": False}},
+            "generation": "",
+        })
+
+        with patch("pm_core.tmux.session_group", return_value=""), \
+                patch("pm_core.pane_registry.registry_dir",
+                      return_value=mock_registry), \
+                patch("pm_core.cli.session.pane_layout.rebalance") as rebalance:
+            r = CliRunner().invoke(cli, ["_window-resized",
+                                         "scratch-local", "@2"])
+
+        assert r.exit_code == 0, r.output
+        rebalance.assert_not_called()
+        assert not (mock_registry / "scratch-local.resize").exists()
+
+    def test_window_resized_still_rebalances_a_pm_session(self, mock_registry):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+
+        _save_registry("pm-test", {
+            "session": "pm-test",
+            "windows": {"@2": {"panes": [
+                {"id": "%5", "role": "tui", "order": 0, "cmd": "tui"},
+            ], "user_modified": False}},
+            "generation": "",
+        })
+
+        with patch("pm_core.tmux.session_group", return_value=""), \
+                patch("pm_core.pane_registry.registry_dir",
+                      return_value=mock_registry), \
+                patch("time.sleep"), \
+                patch("pm_core.tmux.unzoom_pane"), \
+                patch("pm_core.cli.session.pane_layout.rebalance") as rebalance:
+            r = CliRunner().invoke(cli, ["_window-resized", "pm-test", "@2"])
+
+        assert r.exit_code == 0, r.output
+        rebalance.assert_called_once()

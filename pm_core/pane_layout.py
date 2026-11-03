@@ -884,7 +884,13 @@ def handle_any_pane_closed(session: str = "") -> None:
 
 
 def handle_pane_opened(session: str, window: str, pane_id: str) -> None:
-    """Handle pane-opened event: if not in registry, mark per-window user_modified."""
+    """Handle pane-opened event: if not in registry, mark per-window user_modified.
+
+    *session* is the name tmux reported for the hook.  It is resolved
+    through its group first, so a user's own grouped view of a pm session
+    (any name, S121) marks that session's registry; a session that does
+    not resolve to a pm one is ignored (QA S58).
+    """
     _ensure_logging()
     _logger.info("handle_pane_opened called: session=%s window=%s pane_id=%s",
                  session, window, pane_id)
