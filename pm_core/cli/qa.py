@@ -734,7 +734,8 @@ def qa_launch(item_id: str, target_window: str | None):
 
     session = tmux_mod.get_session_name()
     if not session:
-        click.echo("No tmux session detected.", err=True)
+        click.echo("No tmux session detected — start one with: pm session",
+                   err=True)
         raise SystemExit(1)
 
     sess_label = os.environ.get("PM_SESSION") or session

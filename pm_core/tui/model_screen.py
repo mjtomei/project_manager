@@ -192,7 +192,8 @@ class ModelSettingsScreen(ModalScreen):
         from pm_core import model_settings
         rows = self._rows()
         if not rows:
-            return [f"[red]PR {escape(str(self._pr_id))} not found[/]"]
+            return [f"[red]PR {escape(str(self._pr_id))} not found — see "
+                    f"`pr list` (TUI: r to refresh)[/]"]
         lines = []
         pr = self._pr()
         offset = 0

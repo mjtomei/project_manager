@@ -289,10 +289,12 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]S[/]  Start PR with companion pane", classes="help-row")
                 yield Label("  [bold]G[/]  Merge with companion pane", classes="help-row")
             yield Label("Other", classes="help-section")
-            # `z` modifies the tree-view pane actions; in the plans and QA
-            # views `e`/`d` are intercepted by the focused pane (edit item,
-            # debug item) and the rest are blocked by `check_action`, so the
-            # chord would not restart the pane it names.
+            # `z` modifies the tree-view pane actions.  In the plans and QA
+            # views the PR chords are blocked by `check_action` and `e`/`d`
+            # are intercepted by the focused pane (edit item, debug item),
+            # so the row is shown only in the tree view.  (The notes / log /
+            # guide chords still work there, but they stay documented here
+            # rather than repeated per view.)
             if not (self._in_plans or self._in_qa):
                 yield Label("  [bold]z[/]  Prefix: restart the pane instead of focusing it (s S d t e v n L H c; zz d / zz t: loop)", classes="help-row")
             yield Label("  [bold]r[/]  Refresh / sync with GitHub", classes="help-row")

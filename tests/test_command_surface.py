@@ -1444,6 +1444,48 @@ def test_pr_qa_cli_rejects_a_command_bar_mode_with_a_hint(tmp_path, mode):
     assert command_surface.QA_MODE_KEYS[mode] in result.output
 
 
+def test_qa_launch_without_a_tmux_name_names_pm_session(tmp_path, monkeypatch):
+    """`pm qa launch`'s last must-be-in-the-TUI refusal must name `pm session`.
+
+    It said only "No tmux session detected." — a dead end, unlike the
+    `requires tmux` refusal immediately above it in the same command.
+    """
+    import pm_core.tmux as tmux_mod
+    from pm_core.cli import qa as qa_mod
+    import pm_core.qa_instructions as qa_instr
+
+    monkeypatch.setattr(qa_mod, "state_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        qa_instr, "get_instruction",
+        lambda root, iid, category=None: {"id": iid, "title": "T"})
+    monkeypatch.setattr(tmux_mod, "has_tmux", lambda: True)
+    monkeypatch.setattr(tmux_mod, "in_tmux", lambda: True)
+    monkeypatch.setattr(tmux_mod, "get_session_name", lambda: None)
+
+    result = CliRunner().invoke(cli, ["qa", "launch", "instruction:abc"])
+    assert result.exit_code == 1, result.output
+    assert "pm session" in result.output
+
+
+def test_model_screen_not_found_names_the_listing_command(tmp_path):
+    """The model modal's not-found line names `pr list`, like every other.
+
+    It is the last user-facing TUI not-found message without the listing
+    command (the spec review, plan file and QA item were fixed in the first
+    pass).  The modal can outlive its PR: a state reload while it is open
+    leaves ``_pr()`` empty.
+    """
+    from pm_core.tui.model_screen import ModelSettingsScreen
+
+    (tmp_path / "project.yaml").write_text(
+        "project:\n  backend: vanilla\n  base_branch: master\nprs: []\n")
+    screen = ModelSettingsScreen(tmp_path, "pr-999")
+    screen._load()
+    shown = " ".join(screen._table_lines())
+    assert "pr-999" in shown
+    assert "pr list" in shown
+
+
 # ---------------------------------------------------------------------------
 # Plan-name reconciliation
 # ---------------------------------------------------------------------------

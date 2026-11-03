@@ -685,3 +685,18 @@ the routed form and `--fresh` so help is complete.
   remaining occurrences in a `pm prompt <id>` output are this PR's own
   description, notes and spec, which section D deliberately excludes as
   historical records.
+
+- Review-loop e4f7 i1: the sweep's last un-remediated not-found refusals.
+  (a) The model-settings modal (`pm_core/tui/model_screen.py`) rendered a
+  bare "PR <id> not found" when its PR vanished from a reload while the
+  modal was open — the last user-facing TUI not-found message without the
+  listing command (spec review, plan file and QA item were fixed earlier).
+  It now names `pr list` / TUI `r`, with a test.
+  (b) `pm qa launch`'s "No tmux session detected." (reached when tmux is
+  present but its session name cannot be resolved) said nothing about the
+  command that creates one; it now names `pm session`, matching the
+  `requires tmux` refusal immediately above it. Test added.
+  (c) The `?` screen's `z` row comment claimed every alternate-view chord
+  was blocked by `check_action`; the notes / log / guide chords still work
+  there, so the comment (not the row — the row stays tree-only by design)
+  was corrected to say what is actually blocked or intercepted.
