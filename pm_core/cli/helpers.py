@@ -1256,8 +1256,22 @@ def _get_session_name_for_cwd() -> str:
     # `pm session kill --global` run inside that private session killed it
     # instead of reporting "no session" (review-loop 9d4c i4).  The private
     # name keeps the historical ``-00000000`` placeholder.
+    #
+    # Key it on the pm project's directory, not the caller's cwd: with no
+    # git root to anchor on, using ``Path.cwd().name`` made a plain
+    # `pm session` run from a project subdirectory compute a *different*
+    # name and start a second session and TUI on a second socket instead of
+    # attaching to the project's session (QA scenario 62).  Walk up to the
+    # directory holding ``pm/project.yaml`` — the same anchor pm's own
+    # project discovery uses — and fall back to the cwd for a directory
+    # that is not a pm project at all.
     from pm_core.paths import tmux_safe_name
-    name = f"pm-{tmux_safe_name(Path.cwd().name)}"
+    project_dir = Path.cwd()
+    for candidate in [project_dir, *project_dir.parents]:
+        if (candidate / "pm" / "project.yaml").exists():
+            project_dir = candidate
+            break
+    name = f"pm-{tmux_safe_name(project_dir.name)}"
     share_mode = os.environ.get("PM_SHARE_MODE")
     if share_mode:
         import hashlib

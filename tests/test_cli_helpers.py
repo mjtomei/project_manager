@@ -394,6 +394,30 @@ class TestGetSessionNameForCwd:
         grouped = _get_session_name_for_cwd()
         assert grouped not in (private, shared)
 
+    def test_non_git_fallback_uses_the_project_dir_from_a_subdirectory(
+            self, monkeypatch, tmp_path):
+        """A subdirectory of a pm project resolves to the project's session.
+
+        With no git root to anchor on, the fallback name came from the
+        caller's cwd basename, so a plain ``pm session`` run from a
+        subdirectory computed a different name and started a second
+        session/TUI on a second socket instead of attaching to the
+        project's session (QA scenario 62).
+        """
+        proj = tmp_path / "my-proj"
+        (proj / "pm").mkdir(parents=True)
+        (proj / "pm" / "project.yaml").write_text("project: {}\n")
+        sub = proj / "sub" / "deep"
+        sub.mkdir(parents=True)
+        monkeypatch.chdir(sub)
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        assert _get_session_name_for_cwd() == "pm-my-proj-00000000"
+
+        monkeypatch.setenv("PM_SHARE_MODE", "global")
+        shared = _get_session_name_for_cwd()
+        assert shared.startswith("pm-my-proj-")
+        assert shared != "pm-my-proj-00000000"
+
 
 class TestPmSessionOutsidePmTmux:
     """A process outside a pm tmux session (a QA driver spawned by
