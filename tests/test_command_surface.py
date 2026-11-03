@@ -1927,3 +1927,143 @@ def test_tui_ux_plan_is_not_rewritten():
     project = (root / "pm" / "project.yaml").read_text()
     assert "tui-ux" in project
     assert "plan=improvements" in (root / "pm_core" / "prompt_gen.py").read_text()
+
+
+# ---------------------------------------------------------------------------
+# The last un-remediated dead ends (review-loop 6a82 i5)
+# ---------------------------------------------------------------------------
+
+def test_view_plan_without_a_plan_names_the_assign_action():
+    """`v` on a standalone PR must not be a dead end.
+
+    ``view_plan`` answered only "No plan associated with this PR", so the
+    documented ``v View plan file`` key read as broken.  The plan is
+    assignable from the TUI (`M`) or the CLI (`pm pr edit <id> --plan`),
+    and the sibling plan-file dead ends already name their fix.
+    """
+    from types import SimpleNamespace
+
+    from pm_core.tui import pane_ops
+
+    logs = []
+    tree = SimpleNamespace(selected_pr_id="pr-001")
+    app = SimpleNamespace(
+        _root=Path("/nonexistent"),
+        _data={"prs": [{"id": "pr-001", "title": "T", "plan": None}],
+               "plans": []},
+        _consume_z=lambda: 0,
+        query_one=lambda selector, *rest: tree,
+        _get_plan_for_pr=lambda pr: None,
+        log_message=lambda msg, **kw: logs.append(msg),
+    )
+
+    pane_ops.view_plan(app)
+
+    assert "No plan associated with pr-001" in logs[-1]
+    assert "`M`" in logs[-1]
+    assert "pm pr edit pr-001 --plan" in logs[-1]
+
+
+def test_connect_key_names_how_to_start_a_shared_session(monkeypatch):
+    """`C` outside a shared session must name how to get one.
+
+    "Not a shared session" was a bare refusal: there is no connect command
+    to show, and nothing said how a session becomes shared.
+    """
+    from types import SimpleNamespace
+
+    from pm_core.tui import pane_ops
+
+    monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+    logs = []
+    app = SimpleNamespace(
+        log_message=lambda msg, **kw: logs.append(msg),
+        clear_log_message_later=lambda *a, **k: None,
+        push_screen=lambda *a, **k: None,
+    )
+
+    pane_ops.show_connect(app)
+
+    assert "Not a shared session" in logs[-1]
+    assert "pm session --global" in logs[-1]
+
+
+def test_stale_tui_pidfile_messages_name_pm_session(tmp_path, monkeypatch):
+    """A dead/absent TUI owner must name the command that starts one.
+
+    These messages surface from `pm autostart …` in a plain shell, where
+    "restart the TUI" is impossible — there is no TUI to press Ctrl+R in,
+    and the stale pidfile is removed.  `pm session` is the action.
+    """
+    from pm_core.cli import helpers
+
+    pidfile = tmp_path / "tui.pid"
+    monkeypatch.setattr(helpers, "_tui_pidfile_for_session",
+                        lambda session: pidfile)
+
+    # A dead owner: the legacy bare-pid format, pointing at no process.
+    # Far above /proc/sys/kernel/pid_max, so no live process can collide.
+    pidfile.write_text(str(2 ** 30 - 1))
+    _path, _raw, _desc, error = helpers._validate_tui_owner("pm-x")
+    assert error is not None and error.ok is False
+    assert "is not running" in error.message
+    assert "pm session" in error.message
+
+    # An unreadable file: no descriptor to trust at all.
+    pidfile.write_bytes(b"\xff\xfe\x00garbage")
+    _path, _raw, _desc, error = helpers._validate_tui_owner("pm-x")
+    assert error is not None and error.ok is False
+    assert "unreadable" in error.message
+    assert "pm session" in error.message
+
+
+def test_invalid_qa_item_id_names_the_library(tmp_path):
+    """A malformed QA item id must point at the listing command."""
+    from types import SimpleNamespace
+
+    from pm_core.tui import pane_ops
+
+    logs = []
+    app = SimpleNamespace(_root=tmp_path,
+                          log_message=lambda msg, **kw: logs.append(msg))
+
+    pane_ops.launch_qa_item(app, "not-a-qualified-id")
+
+    assert "Invalid QA item id" in logs[-1]
+    assert "pm qa list" in logs[-1]
+
+
+def test_qa_scaffold_already_exists_names_the_edit_command(tmp_path):
+    """`pm qa add-instruction` on an existing file must say how to edit it."""
+    from unittest import mock
+
+    from pm_core.cli import qa as qa_mod
+
+    existing = tmp_path / "qa" / "instructions" / "foo.md"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("# existing\n")
+
+    with mock.patch.object(qa_mod, "state_root", return_value=tmp_path):
+        result = CliRunner().invoke(qa_mod.qa, ["add-instruction", "foo"])
+
+    assert result.exit_code == 1, result.output
+    assert "Already exists" in result.output
+    assert "pm qa edit foo" in result.output
+
+
+def test_qa_mocks_add_existing_names_the_edit_command(tmp_path):
+    """The mock scaffolder's already-exists refusal names the editor."""
+    from unittest import mock
+
+    from pm_core.cli import qa as qa_mod
+
+    existing = tmp_path / "qa" / "mocks" / "foo.md"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("# existing\n")
+
+    with mock.patch.object(qa_mod, "state_root", return_value=tmp_path):
+        result = CliRunner().invoke(qa_mod.qa, ["mocks", "add", "foo"])
+
+    assert result.exit_code == 1, result.output
+    assert "Mock already exists" in result.output
+    assert "pm qa mocks edit foo" in result.output

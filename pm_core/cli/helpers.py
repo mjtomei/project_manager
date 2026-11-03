@@ -673,15 +673,22 @@ def _validate_tui_owner(
     if problem is not None:
         # Unreadable, dead, recycled, or not a TUI: stale.
         tui_pidfile.unlink_if_unchanged(pidfile, raw)
+        # The pidfile is about to be removed, so this session has no usable
+        # owner: "restart the TUI" alone is a dead end for a caller that has
+        # none open (these messages surface from `pm autostart …` in a plain
+        # shell).  Name both routes — Ctrl+R in a live TUI, `pm session` when
+        # there is none — as the capability messages above do.
+        restart = (f"restart the TUI (Ctrl+R in the TUI, or `pm session` "
+                   f"if none is running)")
         if desc is None:
             message = (f"The TUI pidfile for session {session} is "
-                       f"unreadable; restart the TUI.")
+                       f"unreadable; {restart}.")
         elif problem == "process is not running":
             message = (f"The TUI for session {session} is not running; "
-                       f"restart the TUI.")
+                       f"start it with `pm session`.")
         else:
             message = (f"The TUI for session {session} is not available "
-                       f"({problem}); restart the TUI.")
+                       f"({problem}); {restart}.")
         return pidfile, raw, desc, TuiIpcResult(
             False, "stale_pidfile", message)
     return pidfile, raw, desc, None

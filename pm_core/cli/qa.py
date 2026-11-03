@@ -150,7 +150,9 @@ def _qa_add(name: str, category: str) -> None:
     filepath = d / f"{file_id}.md"
 
     if filepath.exists():
-        click.echo(f"Already exists: {filepath}", err=True)
+        click.echo(
+            f"Already exists: {filepath}. Edit it with 'pm qa edit "
+            f"{file_id}' or choose another name.", err=True)
         raise SystemExit(1)
 
     title = name.replace("-", " ").title()
@@ -917,7 +919,9 @@ def qa_mocks_add(name: str):
     filepath = d / f"{file_id}.md"
 
     if filepath.exists():
-        click.echo(f"Mock already exists: {filepath}", err=True)
+        click.echo(
+            f"Mock already exists: {filepath}. Edit it with 'pm qa mocks "
+            f"edit {file_id}' or choose another name.", err=True)
         raise SystemExit(1)
 
     title = name.replace("-", " ").title()

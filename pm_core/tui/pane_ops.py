@@ -280,7 +280,12 @@ def view_plan(app) -> None:
     pr = store.get_pr(app._data, pr_id)
     plan = app._get_plan_for_pr(pr)
     if not plan:
-        app.log_message("No plan associated with this PR")
+        # Reachable from `v` on a standalone PR (or one whose plan entry was
+        # removed), and the key otherwise reads as broken.  Name the action
+        # that assigns a plan, like the plan-file dead ends below.
+        app.log_message(
+            f"No plan associated with {pr_id} — assign one with `M` "
+            f"(or `pm pr edit {pr_id} --plan <plan-id>`).")
         return
     plan_file = plan.get("file", "")
     if not plan_file or not app._root:
@@ -557,7 +562,8 @@ def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
 
     parts = item_id.split(":", 1)
     if len(parts) != 2:
-        app.log_message(f"Invalid QA item id: {item_id}")
+        app.log_message(f"Invalid QA item id: {item_id} — run `pm qa list` "
+                        f"to see the library")
         return
     category, qa_id = parts
 
@@ -787,7 +793,12 @@ def show_connect(app) -> None:
         command = f"tmux -S {socket_path} attach"
         app.push_screen(ConnectScreen(command))
     else:
-        app.log_message("Not a shared session")
+        # The `C` key shows the connect command for a shared session; when
+        # this one is not shared, name how to start one (there is no
+        # connect command to show).
+        app.log_message(
+            "Not a shared session — start one with `pm session --global` "
+            "(or `--group <group>`).")
         app.clear_log_message_later(2)
 
 

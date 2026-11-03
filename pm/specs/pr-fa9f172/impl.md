@@ -827,3 +827,28 @@ the routed form and `--fresh` so help is complete.
   Full suite: 5584 passed, 1 skipped (with `markdown` installed; the
   prior iterations' "minus the known markdown-module baseline" caveat
   does not apply in this container).
+
+- Review-loop 6a82 i5: the last dead-end refusals in the sweep's scope.
+  (a) `view_plan` (`v`) on a standalone PR said only "No plan associated
+  with this PR" — the documented key read as broken, the same class as the
+  plan-file dead ends fixed in e4f7 i3. It now names the assign action:
+  `M` (or `pm pr edit <id> --plan <plan-id>`).
+  (b) The `C` key's "Not a shared session" named nothing; it now says how a
+  session becomes shared (`pm session --global` / `--group <group>`), since
+  there is no connect command to show in that state.
+  (c) `_validate_tui_owner`'s stale-pidfile messages ("is not running",
+  "unreadable", "not available (…)") said "restart the TUI" to callers that
+  have no TUI — the pidfile is removed and these surface from `pm autostart
+  …` in a plain shell. The dead-owner case now says "start it with `pm
+  session`"; the two cases that can also be a live TUI with a clobbered
+  file name both routes ("Ctrl+R in the TUI, or `pm session` if none is
+  running"), matching `_missing_command_cap_result`'s wording.
+  (d) `launch_qa_item`'s malformed-id refusal now names `pm qa list`, like
+  its not-found sibling.
+  (e) The two scaffolding "already exists" refusals (`_qa_add`'s shared
+  implementation and `qa mocks add`) name the edit command (`pm qa edit
+  <id>` / `pm qa mocks edit <id>`) or "choose another name" instead of
+  stopping at the path. qa.py is in the spec's B list, and "already
+  exists" is one of the error classes it covers.
+  Tests added in `tests/test_command_surface.py` for all five; the
+  related pidfile/QA/autostart files pass.
