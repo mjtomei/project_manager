@@ -83,7 +83,11 @@ sessions today).
 
 1. `pm session` (attach) uses the deterministic socket for the target tag; no
    ambient-state guessing. `--print-connect` prints `tmux -S <socket> attach`
-   for private sessions too (not only shared ones).
+   for private sessions too (not only shared ones). A shared
+   (`--global`/`--group`) print refuses, like the start path, when no tag
+   resolves: the share-mode-hashed fallback name it would otherwise print
+   can never be created (QA scenario 64, `c6eaca27`). A plain print keeps
+   using its private fallback, which is what a plain `pm session` creates.
 2. `pm session kill` targets the server that hosts the session (private
    socket preferred, legacy default server as fallback), kills every session
    in the session *group* — the `base~N` grouped sessions and a user's own
@@ -4690,3 +4694,20 @@ Tests: `test_non_git_standalone_project_anchors_on_its_root` (fails on the
 pre-fix head with `pm-specs-00000000`) and
 `test_a_nested_pm_dir_wins_over_a_root_level_project_yaml` (the
 `pm/project.yaml` preference), both in `TestGetSessionNameForCwd`.
+
+## QA-driven fix (2026-11-03, commit c6eaca27)
+
+QA scenario 64 found one defect in `--print-connect`, fixed on the head:
+
+1. **A shared print advertised a session that cannot exist.**  In a non-git
+   project directory `pm session --global` exits 1 with "Cannot determine
+   session tag (not in a git repo?)", so the share-mode-hashed fallback
+   session (`pm-<dir>-<md5(mode)[:8]>`) is never created there.
+   `pm session --global --print-connect` nevertheless printed a
+   `tmux -S ... attach` command for that name (exit 0).  The print now
+   applies the same tag check the start path already performs, before any
+   command is printed; a plain `--print-connect` keeps using its private
+   fallback, which is exactly what a plain `pm session` creates.
+
+Test: `test_shared_print_connect_without_a_tag_is_refused`
+(`TestPrintConnect`, `tests/test_session_socket_isolation.py`).
