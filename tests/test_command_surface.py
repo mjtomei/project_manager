@@ -2067,3 +2067,98 @@ def test_qa_mocks_add_existing_names_the_edit_command(tmp_path):
     assert result.exit_code == 1, result.output
     assert "Mock already exists" in result.output
     assert "pm qa mocks edit foo" in result.output
+
+
+# ---------------------------------------------------------------------------
+# The sweep's last two dead ends (review-loop 6a82 i6)
+# ---------------------------------------------------------------------------
+
+def test_signal_stale_tui_names_pm_session(tmp_path, monkeypatch):
+    """A TUI that vanished between validation and the signal names `pm session`.
+
+    ``_signal_tui``'s stale-owner message said only "restart the TUI" — but
+    the process is gone and its pidfile is removed, so there is no TUI to
+    press Ctrl+R in.  This is the same dead end the ``_validate_tui_owner``
+    messages fixed in i5; the signal path was missed.
+    """
+    from pm_core import tui_pidfile
+    from pm_core.cli import helpers
+
+    pidfile = tmp_path / "tui.pid"
+    pidfile.write_text("descriptor")
+    desc = tui_pidfile.TuiPidfile(
+        pid=1234, caps=frozenset({tui_pidfile.CAP_COMMAND}), starttime=1)
+
+    monkeypatch.setattr(
+        helpers, "_validate_tui_owner",
+        lambda session: (pidfile, "descriptor", desc, None))
+    monkeypatch.setattr(
+        helpers, "_tui_command_queue_for_session",
+        lambda session: tmp_path / "queue")
+    monkeypatch.setattr(
+        helpers, "_signal_tui", lambda pid, sig, starttime=None: "process is not running")
+
+    result = helpers.submit_tui_command("pm-x", "pr list")
+
+    assert result.ok is False
+    assert result.reason == "stale_pidfile"
+    assert "pm session" in result.message
+    assert "restart the TUI" not in result.message
+
+
+def test_empty_tui_pidfile_names_both_restart_routes(tmp_path, monkeypatch):
+    """A permanently empty pidfile has no TUI to restart either.
+
+    The "still starting up" message named only Ctrl+R.  If the TUI was
+    killed between its O_EXCL create and its first write the file stays
+    empty forever, and the caller may have no TUI at all.
+    """
+    from pm_core.cli import helpers
+
+    pidfile = tmp_path / "tui.pid"
+    pidfile.write_text("")
+    monkeypatch.setattr(helpers, "_tui_pidfile_for_session",
+                        lambda session: pidfile)
+
+    _path, _raw, _desc, error = helpers._validate_tui_owner("pm-x")
+
+    assert error is not None and error.ok is False
+    assert "pm session" in error.message
+    assert "Ctrl+R" in error.message
+
+
+def test_qa_author_artifact_existing_names_the_edit_command(tmp_path):
+    """`pm qa author-artifact` on an existing recipe is not a dead end.
+
+    The other two scaffolders (`add-instruction`, `mocks add`) name the
+    editor in their already-exists refusal; this third site was missed.
+    """
+    from unittest import mock
+
+    from pm_core.cli import qa as qa_mod
+
+    existing = tmp_path / "qa" / "artifacts" / "foo.md"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("# existing\n")
+
+    with mock.patch.object(qa_mod, "state_root", return_value=tmp_path):
+        result = CliRunner().invoke(qa_mod.qa, ["author-artifact", "foo"])
+
+    assert result.exit_code == 1, result.output
+    assert "Already exists" in result.output
+    assert "pm qa edit foo" in result.output
+
+
+def test_qa_launch_invalid_item_id_names_the_library():
+    """The CLI's malformed-id refusal names the listing command.
+
+    Its TUI sibling (`launch_qa_item`) was fixed in i5; the CLI surface
+    gave only the expected format, which does not say which ids exist.
+    """
+    from pm_core.cli import qa as qa_mod
+
+    result = CliRunner().invoke(qa_mod.qa, ["launch", "not-a-qualified-id"])
+
+    assert result.exit_code == 1, result.output
+    assert "Invalid QA item id" in result.output
+    assert "pm qa list" in result.output

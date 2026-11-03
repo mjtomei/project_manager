@@ -852,3 +852,22 @@ the routed form and `--fresh` so help is complete.
   exists" is one of the error classes it covers.
   Tests added in `tests/test_command_surface.py` for all five; the
   related pidfile/QA/autostart files pass.
+
+- Review-loop 6a82 i6: three sites i5's own class left behind.
+  (a) `_signal_tui`'s stale-owner result — the race where the TUI was live
+  at validation and gone by the signal — still said "restart the TUI",
+  although the process is gone and its pidfile is removed. It now says
+  "start it with `pm session`", matching the `_validate_tui_owner` messages
+  i5 fixed on the other pidfile path.
+  (b) The "has not finished starting up" message for a zero-length pidfile
+  named only Ctrl+R; a file left empty by a TUI killed mid-claim stays that
+  way forever and the caller may have no TUI. It now names both routes
+  ("Ctrl+R in the TUI, or `pm session` if none is running"), like the
+  adjacent messages.
+  (c) `_qa_author` (`pm qa author-instruction|author-regression|
+  author-artifact`) was the third "Already exists" scaffolder and still
+  stopped at the path; it now names `pm qa edit <id>` or "choose another
+  name", like `_qa_add` and `qa mocks add` (i5). `pm qa launch`'s
+  malformed-id refusal gained `pm qa list`, matching the TUI sibling fixed
+  in i5.
+  Tests added in `tests/test_command_surface.py` for all four.

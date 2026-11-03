@@ -247,7 +247,11 @@ def _qa_author(name: str, category: str) -> None:
 
     target = _author_path(category, name)
     if target.exists():
-        click.echo(f"Already exists: {target}", err=True)
+        # Same remedy as the `_qa_add` / `qa mocks add` scaffolders: the
+        # refusal names the editor or the other way out, not just the path.
+        click.echo(
+            f"Already exists: {target}. Edit it with 'pm qa edit "
+            f"{target.stem}' or choose another name.", err=True)
         raise SystemExit(1)
 
     root = state_root()
@@ -720,7 +724,11 @@ def qa_launch(item_id: str, target_window: str | None):
 
     parts = item_id.split(":", 1)
     if len(parts) != 2:
-        click.echo(f"Invalid QA item id (expected 'category:id'): {item_id}", err=True)
+        # Name the listing command too: the expected format alone does not
+        # tell the operator which ids exist (the TUI sibling names it).
+        click.echo(
+            f"Invalid QA item id (expected 'category:id'): {item_id}. "
+            f"Run 'pm qa list' to see the library.", err=True)
         raise SystemExit(1)
     category, qa_id = parts
 

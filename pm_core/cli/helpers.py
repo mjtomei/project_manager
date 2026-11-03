@@ -665,11 +665,13 @@ def _validate_tui_owner(
         # alone so the starting TUI keeps its claim.  It can also be
         # *permanently* empty if a TUI was killed between its ``O_EXCL``
         # create and its first write, so name the restart fix as well —
-        # "try again in a moment" alone would be a dead end.
+        # "try again in a moment" alone would be a dead end.  Name both
+        # routes: with no TUI running there is nothing to press Ctrl+R in.
         return pidfile, raw, None, TuiIpcResult(
             False, "starting",
             f"The TUI for session {session} has not finished starting up; "
-            f"try again in a moment, otherwise restart the TUI (Ctrl+R).")
+            f"try again in a moment, otherwise restart the TUI (Ctrl+R in "
+            f"the TUI, or `pm session` if none is running).")
     if problem is not None:
         # Unreadable, dead, recycled, or not a TUI: stale.
         tui_pidfile.unlink_if_unchanged(pidfile, raw)
@@ -995,10 +997,14 @@ def submit_tui_command(session: str, cmd: str) -> TuiIpcResult:
         if problem in _STALE_SIGNAL_REASONS:
             _log.debug("TUI pid %d gone, removing stale pidfile", desc.pid)
             tui_pidfile.unlink_if_unchanged(pidfile, raw)
+            # The owner is gone and its pidfile is removed, so "restart the
+            # TUI" is a dead end for a caller with none open (this surfaces
+            # from `pm autostart …` in a plain shell) — same as the
+            # stale-pidfile messages in `_validate_tui_owner`.
             return TuiIpcResult(
                 False, "stale_pidfile",
                 f"The TUI for session {session} is not running "
-                f"(process disappeared); restart the TUI.")
+                f"(process disappeared); start it with `pm session`.")
         _log.debug("Cannot signal TUI pid %d: %s", desc.pid, problem)
         return TuiIpcResult(
             False, "signal_error",
