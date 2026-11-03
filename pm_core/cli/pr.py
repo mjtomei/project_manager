@@ -962,6 +962,35 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         )
         raise SystemExit(1)
 
+    # Serialize concurrent starts of the SAME PR.  Two `pm pr start`s that
+    # begin in the same instant both clone into the shared `.tmp-<id>` path
+    # and both target the same window name: one could delete the other's
+    # in-progress clone (`OSError: Directory not empty`) or the two could
+    # record the start twice and open duplicate windows.  The loser waits
+    # here, re-loads the record and takes the already-in_progress reuse
+    # path below (switching to the window the winner opened).  Lock order
+    # is start -> store (locked_update) -> publish; no other command takes
+    # a start lock, so this cannot deadlock.  Released on every exit path
+    # (return, SystemExit, exception) by the click context teardown.
+    import fcntl as _fcntl
+    from pm_core.paths import workdirs_base as _workdirs_base
+    _start_lock_path = (
+        _workdirs_base()
+        / f".start-{data['project'].get('repo_id', '')}-{pr_id}.lock")
+    _start_lock_path.parent.mkdir(parents=True, exist_ok=True)
+    _start_lock_f = open(_start_lock_path, "w")
+    _fcntl.flock(_start_lock_f.fileno(), _fcntl.LOCK_EX)
+    try:
+        click.get_current_context().call_on_close(_start_lock_f.close)
+    except RuntimeError:
+        # No active click context (e.g. a direct call) — release on GC.
+        pass
+
+    # Re-load under the lock: a start that began at the same instant may
+    # have recorded the PR (and opened its window) while we waited.
+    data = store.load(root)
+    pr_entry = store.get_pr(data, pr_id) or pr_entry
+
     if pr_entry.get("status") == "in_progress":
         # If already in_progress, reuse existing workdir if available
         existing_workdir = pr_entry.get("workdir")
@@ -1276,7 +1305,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 click.echo(f"Failed to create tmux window: {e}", err=True)
                 click.echo("Launching Claude in current terminal...")
 
-    # Fall through: launch interactively in current terminal
+    # Fall through: launch interactively in current terminal.  Release the
+    # per-PR start lock first: the interactive session runs until the user
+    # exits, and holding the lock that long would block a second start.
+    _start_lock_f.close()
     session_key = f"pr:start:{pr_id}"
     if fresh:
         clear_session(root, session_key)

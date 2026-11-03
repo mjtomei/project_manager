@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-571a13b
+  active_pr: pr-fc6c29e
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -51578,3 +51578,38 @@ prs:
     signoff: provider:claude-work-xhigh-249
     merge: provider:deepseek-flash
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-049649a-remove-all-pr-autostart-and-fail-clo-registered-20261027
+- id: pr-fc6c29e
+  plan: bugs
+  title: 'Bug: pm session name is unresolvable when the repo directory name contains
+    a dot'
+  branch: pm/pr-fc6c29e-bug-pm-session-name-is-unresolvable-when-the-repo-
+  status: pending
+  depends_on: []
+  description: "Location: pm_core/paths.py get_session_tag / pm_core/cli/helpers.py\
+    \ _get_session_name_for_cwd, consumed by pm_core/tmux.py session_exists.\n\nRepro:\n\
+    \  TEST_DIR=$(mktemp -d /tmp/demo.XXXXXX)   # basename contains a dot\n  cd \"\
+    $TEST_DIR\" && git init -q && git commit --allow-empty -qm seed\n  pm init --backend\
+    \ local --no-import\n  pm session                                # \"Creating\
+    \ tmux session 'pm-demo.abcd-<hash>'...\"\n  tmux ls                         \
+    \          # actual session: pm-demo_abcd-<hash> (tmux replaces . with _)\n  pm\
+    \ session name                           # pm-demo.abcd-<hash>\n  tmux has-session\
+    \ -t \"$(pm session name)\"  # rc 1: can't find pane: abcd-<hash>\n  pm pr start\
+    \ <id>                          # from a plain shell: session_exists() is false,\
+    \ so it falls back to an interactive launch instead of opening the pm window\n\
+    \nCause: tmux sanitizes \".\" to \"_\" when creating a session, but pm computes\
+    \ the session name from the repo directory name without sanitizing. Outside tmux\
+    \ every pm command that resolves the session from cwd (pr start/review/signoff,\
+    \ TUI routing) computes a name that does not exist. Directories containing dots\
+    \ are common (e.g. foo.js, versioned paths).\n\nExpected: the computed name and\
+    \ the tmux session name agree (sanitize \".\"/\":\" consistently at creation and\
+    \ lookup), and pm session re-attaches instead of reporting/creating a different\
+    \ name."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-03T00:47:04.527482+00:00'
+  updated_at: '2026-11-03T00:47:04.527482+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
