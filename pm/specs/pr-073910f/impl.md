@@ -286,7 +286,12 @@ must be left untouched:
    not enough, because with no `-S` the tmux binary follows `$TMUX`, which
    from inside another pm pane names that session's private server — the
    legacy session would look missing and the create path would duplicate it
-   on the wrong server (same failure mode as R4.3).
+   on the wrong server (same failure mode as R4.3).  The rollout decision is
+   a snapshot: if the legacy session vanishes before the attach (a
+   concurrent `pm session kill`, including while the TUI-respawn lock is
+   held), the create path re-resolves the socket and creates the
+   replacement on its deterministic private socket, never on the default
+   server (review-loop 8d4e i1; 60a8 i2 for the inner re-check).
 2. `pm session kill` is the only command that removes the legacy session, and
    only when the user explicitly runs it.
 3. Never call `kill-server`; use `kill-session` for the base/grouped sessions
@@ -4711,3 +4716,39 @@ QA scenario 64 found one defect in `--print-connect`, fixed on the head:
 
 Test: `test_shared_print_connect_without_a_tag_is_refused`
 (`TestPrintConnect`, `tests/test_session_socket_isolation.py`).
+
+## Review iteration (2026-11-03, review-loop 60a8 i2)
+
+Verification pass over the head after the 60a8 i1 spec update (no code
+change there).  The `origin/master...HEAD` diff was re-read against R1-R8,
+and the c6eaca27 `--print-connect` refusal — the only code change since
+review-loop 3d42 i1 — was checked against the start path's tag check (same
+`get_session_tag`, and `--dir` already had its own refusal).  One gap of
+the vanished-legacy class the 8d4e i1 fix closed remained:
+
+1. **A legacy session vanishing during the TUI check still created on the
+   default server.**  `_session_start()` takes the "is it running?" answer
+   once, then, under the TUI-respawn lock, calls `_ensure_tui_running()`,
+   and only afterwards re-checks `session_exists()`.  A concurrent
+   `pm session kill` in that window makes the re-check say "no" while
+   `socket_path` is still `None` and `PM_TMUX_SOCKET` names the *default*
+   server (the rollout decision is a snapshot), so the create path below
+   put the replacement there — outside the session's own server (R1) and
+   self-perpetuating as legacy, exactly the failure the earlier vanished
+   check closes for the first probe.  The create path now re-resolves the
+   socket when the rollout decision was "legacy"; once the session is
+   gone, that yields the deterministic private path.  The rollout note
+   moved with it: it now prints only inside the attach branch, after the
+   session is confirmed still there, so it can never describe a session
+   that is not being attached (the rule 8d4e i1 established for the first
+   probe).
+
+Test: `test_a_legacy_session_vanishing_during_the_tui_check_is_created_private`
+(`TestSessionStartAttachesToLegacySession`, `tests/test_session_socket_isolation.py`),
+verified to fail on the pre-fix head in a scratch worktree: it created
+with `socket_path=None` on the default server, after printing the rollout
+note for the vanished session.
+
+Verification: the 22 PR-affected test files pass twice in one HOME (1412
+each); full suite 5672 passed / 1 skipped (log
+`/pm-captures/review-60a8-i2/full-suite-final.log`).

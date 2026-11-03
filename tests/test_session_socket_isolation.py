@@ -6102,6 +6102,87 @@ class TestSessionStartAttachesToLegacySession:
             _tmux(private_sock, "kill-server")
             Path(private_sock).unlink(missing_ok=True)
 
+    def test_a_legacy_session_vanishing_during_the_tui_check_is_created_private(
+            self, short_sock_dir, tmp_path, monkeypatch):
+        """The inner existence re-check is a snapshot too.
+
+        ``_session_start`` attaches to a legacy session, confirms it is
+        running, and then (under the TUI-respawn lock) makes sure its TUI is
+        alive; only after that does it re-check the session.  A concurrent
+        ``pm session kill`` in that window left ``socket_path`` None and
+        ``PM_TMUX_SOCKET`` naming the default server, so the create path
+        put the replacement there — outside the session's own server (R1)
+        and self-perpetuating as legacy.  The vanished case re-resolves
+        before creating, so the new session lands on its deterministic
+        private socket (the same rule as the earlier check, review-loop
+        8d4e i1).
+        """
+        from pm_core.cli import session as session_mod
+        from pm_core import hook_install
+
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        for var in ("PM_TMUX_SOCKET", "PM_SHARE_MODE", "TMUX", "TMUX_PANE",
+                    "PM_IN_TMUX_SESSION", "PM_PROJECT"):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", short_sock_dir)
+        default_sock = short_sock_dir / "default"
+        monkeypatch.setattr(paths, "default_socket_path",
+                            lambda: default_sock)
+        monkeypatch.setattr(hook_install, "ensure_hooks_installed",
+                            lambda: None)
+        monkeypatch.setattr(session_mod, "state_root",
+                            MagicMock(side_effect=FileNotFoundError()))
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: "pm-iso-late")
+        monkeypatch.setattr(session_mod, "_schedule_rebalance",
+                            lambda name: None)
+
+        # A real legacy session on the disposable default server, so both
+        # the rollout lookup and the first existence check see it.
+        _make_server(default_sock, session="pm-iso-late")
+
+        def vanish(name):
+            """A concurrent `pm session kill` while the respawn lock is held."""
+            _tmux(default_sock, "kill-server")
+            return None
+
+        monkeypatch.setattr(session_mod, "_ensure_tui_running", vanish)
+
+        created: dict = {}
+        real_create = tmux.create_session
+
+        def fake_create(name, cwd, cmd, socket_path=None, env=None):
+            created.update(name=name, socket_path=socket_path)
+            real_create(name, cwd, "sleep 300", socket_path=socket_path,
+                        env=env)
+
+        monkeypatch.setattr(tmux, "create_session", fake_create)
+        attached: list[tuple[str, str | None]] = []
+        monkeypatch.setattr(
+            tmux, "attach",
+            lambda name, socket_path=None: attached.append(
+                (name, socket_path)))
+
+        private_sock = str(short_sock_dir / "pm-iso-late")
+        try:
+            session_mod._session_start()
+
+            # The create path ran on the private socket, not the default
+            # server the vanished legacy lookup had selected.
+            assert created == {"name": "pm-iso-late",
+                               "socket_path": private_sock}
+            assert os.environ["PM_TMUX_SOCKET"] == private_sock
+            assert attached == [("pm-iso-late~1", private_sock)]
+            # Nothing was created on the default server.
+            assert _tmux(default_sock, "has-session", "-t",
+                         "pm-iso-late").returncode != 0
+        finally:
+            _tmux(private_sock, "kill-server")
+            Path(private_sock).unlink(missing_ok=True)
+            Path(default_sock).unlink(missing_ok=True)
+
     def _start_against_unregistered_tui(self, short_sock_dir, tmp_path,
                                         monkeypatch, name, pane_cmd,
                                         dead=False, private=False):

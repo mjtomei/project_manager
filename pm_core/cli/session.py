@@ -857,16 +857,6 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         socket_path, legacy = _resolve_session_socket(session_name, is_shared)
         session_running = tmux_mod.session_exists(session_name,
                                                   socket_path=socket_path)
-    if legacy:
-        # Avoid the word "shared": in pm that means --global/--group, and
-        # this session is private — it is only on the default tmux server
-        # because it predates per-session servers.
-        click.echo(
-            f"Note: existing session '{session_name}' was started before "
-            "per-session tmux servers and still runs on the default tmux "
-            "server; attaching there. Run 'pm session kill' and start "
-            "again to move it to a private server."
-        )
 
     _log.info("checking if session exists: %s (socket=%s, running=%s)",
               session_name, socket_path, session_running)
@@ -881,6 +871,24 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
             pane_layout.rebalance(session_name, respawned_window)
 
         if tmux_mod.session_exists(session_name, socket_path=socket_path):
+            if legacy:
+                # Printed here, not from the rollout decision above: that
+                # decision is a snapshot, and the note must never describe a
+                # session that is not being attached (a concurrent
+                # `pm session kill` in the TUI check above takes the create
+                # path instead; review-loop 8d4e i1, 60a8 i2).
+                #
+                # Avoid the word "shared": in pm that means --global/
+                # --group, and this session is private — it is only on the
+                # default tmux server because it predates per-session
+                # servers.
+                click.echo(
+                    f"Note: existing session '{session_name}' was started "
+                    "before per-session tmux servers and still runs on the "
+                    "default tmux server; attaching there. Run "
+                    "'pm session kill' and start again to move it to a "
+                    "private server."
+                )
             _log.info("TUI present, finding/creating grouped session")
             _register_tmux_bindings(session_name)
             # Reuse an unattached grouped session, or create a new one
@@ -933,6 +941,20 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         click.echo(f"No shared session '{session_name}' found to join.", err=True)
         click.echo("The session owner must start it first.", err=True)
         raise SystemExit(1)
+
+    if legacy:
+        # A legacy session can also vanish *after* the existence check above
+        # — a concurrent `pm session kill` while the TUI-respawn lock was
+        # held, or between the rollout re-check's own two probes — and the
+        # create path below would then put the replacement on the default
+        # server: ``socket_path`` is None and ``PM_TMUX_SOCKET`` still names
+        # that server (R6.1).  That is outside the session's own server (R1)
+        # and every later `pm session` would see the new session as legacy
+        # again (the same failure the earlier vanished check closes).  The
+        # lookup now yields the deterministic private socket.
+        _log.info("legacy session %s vanished before the attach; using its "
+                  "private socket", session_name)
+        socket_path, legacy = _resolve_session_socket(session_name, is_shared)
 
     _log.info("session does not exist or was killed, creating new session")
     editor = find_editor()
