@@ -871,3 +871,31 @@ the routed form and `--fresh` so help is complete.
   malformed-id refusal gained `pm qa list`, matching the TUI sibling fixed
   in i5.
   Tests added in `tests/test_command_surface.py` for all four.
+
+- Review-loop 6a82 i7: the command bar's unhandled parse, a removed
+  spelling, and one more dead-end remedy.
+  (a) `handle_command_submitted` parsed the typed command with
+  `shlex.split` unguarded. An unmatched quote — the ordinary case is an
+  apostrophe in a note (`pr note add pr-001 don't forget`) — raised
+  `ValueError` out of the Textual message handler, which treats it as
+  fatal: the TUI crashed. The popup runner (`pm _popup-cmd`) already
+  answers "Invalid command syntax"; the command bar now does the same,
+  names the quoting fix, hands focus back, and clears the in-flight guard
+  the prefix loop may have set (otherwise every later PR action reports
+  "Busy"). Tests cover both the message and the cleared guard.
+  (b) `review-loop stop` (a spelling whose toggle was removed) fell
+  through to the PR-id path and answered "PR not found: stop — see
+  `pr list`", sending the operator to a listing command for a command
+  that does not exist. The branch now refuses `stop` / `cancel` / `off`
+  with the real cancel path (Ctrl+R, or Ctrl+C in the review pane) and
+  still accepts the optional `start` token the picker's `zz d` chord
+  queues. Tests cover both.
+  (c) `pm pr cd` on a merged or closed PR whose workdir was cleaned up
+  said "Create it with `pm pr start <id>`" — a command that refuses a
+  terminal PR ("already merged"), the same dead-end class as the
+  diagnostic-QA remedy removed earlier. The remedy is now status-aware:
+  terminal PRs name `pm pr show <id>`; startable PRs keep the start
+  remedy. Tests cover both.
+  Full suite: 5603 passed, 1 skipped after the i7 edits (5594 before
+  them; the nine new cases are the two quote tests, the three stop-token
+  cases, the start-token case, and the three `pr cd` cases).

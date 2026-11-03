@@ -509,7 +509,7 @@ def test_help_screen_lists_tree_only_actions_in_the_tree_view():
 
 @pytest.mark.parametrize("kwargs, kept", [
     ({"in_plans": True}, "Toggle plans view"),
-    ({"in_qa": True}, "Toggle QA instructions"),
+    ({"in_qa": True}, "Toggle QA library view"),
 ])
 def test_help_screen_omits_actions_blocked_in_that_view(kwargs, kept):
     """The `?` screen must not name keys the current view ignores.
@@ -778,6 +778,110 @@ def test_command_bar_unknown_id_hands_focus_back(cmd):
         pr_view.handle_command_submitted(app, cmd)
 
     assert focused == ["#qa-pane"], focused
+
+
+def _command_bar_app(logs):
+    """A minimal app double for command-bar paths that only log + refocus."""
+    from types import SimpleNamespace
+
+    focused = []
+
+    def query_one(selector, *rest):
+        return SimpleNamespace(focus=lambda: focused.append(selector),
+                               select_pr=lambda *a, **k: None)
+
+    app = SimpleNamespace(
+        _root=None, _inflight_pr_action=None, _plans_visible=False,
+        _qa_visible=False,
+        log_message=lambda m, **k: logs.append(m), query_one=query_one)
+    return app, focused
+
+
+def test_command_bar_unmatched_quote_is_a_message_not_a_crash():
+    """An apostrophe in a note is a typo, not a TUI crash.
+
+    ``shlex.split`` raises on an unmatched quote, and the exception escaped
+    the command-bar handler — Textual treats an exception in a message
+    handler as fatal, so `pr note add pr-001 don't forget` killed the TUI.
+    The popup runner already answers "Invalid command syntax"; the command
+    bar must do the same and name the fix.
+    """
+    from pm_core.tui import pr_view
+
+    logs: list[str] = []
+    app, focused = _command_bar_app(logs)
+
+    pr_view.handle_command_submitted(app, "pr note add pr-001 don't forget")
+
+    assert any("Invalid command syntax" in m for m in logs), logs
+    assert any("pr note add pr-001 'text'" in m for m in logs), logs
+    assert focused == ["#tech-tree"], focused
+
+
+def test_command_bar_unmatched_quote_clears_the_busy_guard():
+    """The guard the prefix loop set must not survive the parse failure.
+
+    ``pr start …`` is recorded as an in-flight action before the command is
+    parsed; if a quoting error returned without clearing it, every later PR
+    action would answer "Busy: pr start \"unclosed".
+    """
+    from pm_core.tui import pr_view
+
+    logs: list[str] = []
+    app, _focused = _command_bar_app(logs)
+
+    pr_view.handle_command_submitted(app, 'pr start "unclosed')
+
+    assert app._inflight_pr_action is None
+    assert any("Invalid command syntax" in m for m in logs), logs
+
+
+@pytest.mark.parametrize("token", ["stop", "cancel", "off"])
+def test_review_loop_stop_is_refused_with_the_cancel_path(token):
+    """`review-loop stop` is a removed spelling, not a missing PR id.
+
+    The toggle was removed (``zz d`` always starts a fresh loop).  Treating
+    the token as a PR id answered "PR not found: stop — see pr list", which
+    sends the operator to a listing command for a command that does not
+    exist.  It must name how a loop is actually cancelled.
+    """
+    from pm_core.tui import pr_view
+
+    logs: list[str] = []
+    app, focused = _command_bar_app(logs)
+
+    pr_view.handle_command_submitted(app, f"review-loop {token}")
+
+    assert any("no stop command" in m for m in logs), logs
+    assert any("Ctrl+R" in m for m in logs), logs
+    assert not any("PR not found" in m for m in logs), logs
+    assert focused == ["#tech-tree"], focused
+
+
+def test_review_loop_start_token_is_still_accepted():
+    """The picker's `zz d` chord queues `review-loop start <id>`.
+
+    The optional `start` token must keep working: it is skipped when the PR
+    id is taken, so the stop-token guard must not swallow it.
+    """
+    from unittest import mock
+
+    from pm_core.tui import pr_view, review_loop_ui
+
+    logs: list[str] = []
+    tree = mock.Mock()
+    app, _focused = _command_bar_app(logs)
+    app.query_one = lambda selector, *rest: tree
+    app._root = Path("/nonexistent")
+
+    with mock.patch.object(pr_view, "_resolve_command_bar_pr",
+                           return_value={"id": "pr-001"}), \
+         mock.patch.object(review_loop_ui, "start_or_stop_loop") as start:
+        pr_view.handle_command_submitted(app, "review-loop start pr-001")
+
+    tree.select_pr.assert_called_once_with("pr-001")
+    start.assert_called_once_with(app)
+    assert not logs, logs
 
 
 def test_non_github_backend_remedies_name_a_working_command(tmp_path,
@@ -1557,6 +1661,48 @@ def test_pr_qa_valid_pr_prints_the_command_bar_form(tmp_path):
     assert "pr qa pr-001" in result.output
     assert "z t" in result.output and "zz t" in result.output
     assert "pm session" in result.output
+
+
+@pytest.mark.parametrize("status", ["merged", "closed"])
+def test_pr_cd_terminal_pr_does_not_name_the_start_command(tmp_path, status):
+    """`pm pr start` refuses a terminal PR, so it cannot recreate its workdir.
+
+    `pm pr cd <merged-id>` on a PR whose workdir was cleaned up used to say
+    "Create it with 'pm pr start <id>'" — a command that answers "already
+    merged" and exits.  The remedy must name what can actually be done.
+    """
+    from unittest import mock
+
+    from pm_core.cli import pr as pr_mod
+
+    (tmp_path / "project.yaml").write_text(
+        "project:\n  backend: vanilla\n  base_branch: master\n"
+        f"prs:\n- id: pr-001\n  title: T\n  status: {status}\n"
+        "  workdir: /nonexistent/workdir\n")
+    with mock.patch.object(pr_mod, "state_root", return_value=tmp_path):
+        result = CliRunner().invoke(pr_mod.pr, ["cd", "pr-001"])
+
+    assert result.exit_code == 1, result.output
+    assert "pm pr start" not in result.output
+    assert "pm pr show pr-001" in result.output
+    assert status in result.output
+
+
+def test_pr_cd_missing_workdir_still_names_the_start_command(tmp_path):
+    """A PR that can still start keeps the start remedy."""
+    from unittest import mock
+
+    from pm_core.cli import pr as pr_mod
+
+    (tmp_path / "project.yaml").write_text(
+        "project:\n  backend: vanilla\n  base_branch: master\n"
+        "prs:\n- id: pr-001\n  title: T\n  status: in_progress\n"
+        "  workdir: /nonexistent/workdir\n")
+    with mock.patch.object(pr_mod, "state_root", return_value=tmp_path):
+        result = CliRunner().invoke(pr_mod.pr, ["cd", "pr-001"])
+
+    assert result.exit_code == 1, result.output
+    assert "pm pr start pr-001" in result.output
 
 
 def _lifecycle_refusal(tmp_path, args, *, status, skip_qa=False):

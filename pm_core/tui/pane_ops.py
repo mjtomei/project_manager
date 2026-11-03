@@ -457,7 +457,7 @@ Common keyboard shortcuts in the TUI:
 - ?: Show help (including command-bar forms)
 - /: Open command bar (type `help` there for the same screen)
 - b: Rebalance panes
-- q: Toggle QA instructions view
+- q: Toggle QA library view
 - t: Start QA on selected PR (z t: fresh, zz t: loop)
 - Y: Cleanup a PR workdir
 

@@ -281,7 +281,10 @@ class HelpScreen(ModalScreen):
             # blocks it in both the plans and QA views.
             if not (self._in_plans or self._in_qa):
                 yield Label("  [bold]t[/]  Start QA on selected PR", classes="help-row")
-            yield Label("  [bold]q[/]  Toggle QA instructions", classes="help-row")
+            # Same wording as `pm tui keys`: the pane is the QA library
+            # (instructions, regression tests and artifact recipes), so
+            # "instructions" alone described only one third of it.
+            yield Label("  [bold]q[/]  Toggle QA library view", classes="help-row")
             yield Label("  [bold]b[/]  Rebalance panes", classes="help-row")
             # S/G are start_pr_companion/merge_pr_companion, also blocked
             # outside the tree view.
@@ -298,7 +301,10 @@ class HelpScreen(ModalScreen):
             # rather than repeated per view.)
             if not (self._in_plans or self._in_qa):
                 yield Label("  [bold]z[/]  Prefix: restart the pane instead of focusing it (s S d t e v n L H c, wr; zz d / zz t: loop)", classes="help-row")
-            yield Label("  [bold]r[/]  Refresh / sync with GitHub", classes="help-row")
+            # `r` reloads state and syncs whatever backend the project uses;
+            # "with GitHub" was only true for one of them.  Same wording as
+            # `pm tui keys`.
+            yield Label("  [bold]r[/]  Refresh / sync", classes="help-row")
             yield Label("  [bold]R[/]  Reload state from disk (no sync)", classes="help-row")
             yield Label("  [bold]C[/]  Show shared connect command", classes="help-row")
             yield Label("  [bold]Ctrl+R[/]  Restart TUI", classes="help-row")

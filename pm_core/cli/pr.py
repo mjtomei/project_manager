@@ -511,10 +511,21 @@ def pr_cd(identifier: str):
         raise SystemExit(1)
     workdir = pr_entry.get("workdir")
     if not workdir or not Path(workdir).is_dir():
-        click.echo(
-            f"Workdir for {pr_entry['id']} does not exist: {workdir}. "
-            f"Create it with 'pm pr start {pr_entry['id']}' (TUI: s).",
-            err=True)
+        status = pr_entry.get("status")
+        if status in ("merged", "closed"):
+            # `pm pr start` refuses a terminal PR, so naming it here would
+            # send the operator in a circle — the same class of dead-end
+            # remedy as the diagnostic-QA command this sweep removed.
+            click.echo(
+                f"Workdir for {pr_entry['id']} does not exist: {workdir} — "
+                f"the PR is {status}; inspect it with 'pm pr show "
+                f"{pr_entry['id']}'.",
+                err=True)
+        else:
+            click.echo(
+                f"Workdir for {pr_entry['id']} does not exist: {workdir}. "
+                f"Create it with 'pm pr start {pr_entry['id']}' (TUI: s).",
+                err=True)
         raise SystemExit(1)
     shell = os.environ.get("SHELL", "/bin/sh")
     click.echo(f"Entering workdir for {pr_entry['id']} ({pr_entry.get('title', '???')})")

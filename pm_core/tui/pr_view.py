@@ -703,20 +703,47 @@ def handle_command_submitted(app, cmd: str) -> None:
             app._inflight_pr_action = action_key
             break
 
+    # Parse the command.  An unmatched quote is an ordinary typo — a note
+    # containing an apostrophe (`pr note add pr-001 don't forget`) is the
+    # common case — and ``shlex`` raises on it.  Letting that escape the
+    # command-bar handler crashed the TUI (the popup runner already answers
+    # "Invalid command syntax"); do the same here.  The guard loop above may
+    # have recorded an in-flight action, so clear it or every later PR
+    # action reports "Busy".
+    try:
+        parts = shlex.split(cmd)
+    except ValueError as e:
+        app._inflight_pr_action = None
+        app.log_message(
+            f"Invalid command syntax: {e} — check the quoting "
+            f"(e.g. pr note add pr-001 'text')")
+        _refocus_active_view(app)
+        return
+
     # Handle review loop commands
     # Accepts: review-loop [start] [PR_ID]
     # No subcommand or 'start' → always start a fresh loop, superseding
     # any running one for the same PR.  Cancelling a loop is via TUI
     # restart or Ctrl+C in the loop's pane, not via this command.
-    parts = shlex.split(cmd)
     _rl_base = cmd.replace("review loop", "review-loop")
     _rl_parts = _rl_base.split()
     if _rl_parts and _rl_parts[0] == "review-loop":
         from pm_core.tui import review_loop_ui
         _rl_rest = _rl_parts[1:]
+        # `review-loop stop` is a plausible guess (the toggle was removed),
+        # but "stop" is not a PR id: name the way to cancel instead of
+        # answering "PR not found: stop".  The command still starts a loop;
+        # this only refuses the spelling.
+        _stop_token = next(
+            (t for t in _rl_rest if t.lower() in ("stop", "cancel", "off")),
+            None)
+        if _stop_token:
+            app.log_message(
+                "review-loop has no stop command — cancel the loop with "
+                "Ctrl+R (restart the TUI) or Ctrl+C in its review pane.")
+            _refocus_active_view(app)
+            return
         # Tokens other than 'start' are treated as the optional PR id.
-        # 'stop' is no longer recognised — see start_or_stop_loop's
-        # docstring for the rationale.
         _rl_pr_id = next(
             (t for t in _rl_rest if t != "start"), None)
 
