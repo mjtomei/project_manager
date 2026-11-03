@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-03T11:34:23.813140+00:00'
+  updated_at: '2026-11-03T12:16:09.175581+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8698,6 +8698,19 @@ prs:
       shell clears the flag but does not unzoom (the unzoom loop is gated on in_tmux()).'
     created_at: '2026-11-03T11:34:23Z'
     last_edited: '2026-11-03T11:34:23Z'
+  - id: note-a33a3e0
+    text: 'QA S61 (awkward paths: pm-home PR list, QA dashboard, pm guide, pm cluster
+      explore --bridged) PASS 4/4 on 4c284b89, no source changes. Fixture notes for
+      the next refiner: (1) S2 Given creates only a QA instruction, but execution-only
+      `pm qa run` still enforces the QA spec gate — a pm/specs/<pr>/qa.md must exist
+      (create at `pm pr spec-path <id> qa` and commit pm/) or the run ends INPUT_REQUIRED
+      before any scenario window opens. (2) `pm cluster explore --bridged` splits
+      the bridge into the session''s *current window*, not the pane the command ran
+      in; when the grouped view ~1 has a different active window, the bridge lands
+      there (first drive: main; clean drive: same window). Quoting is correct in both
+      cases.'
+    created_at: '2026-11-03T12:16:09Z'
+    last_edited: '2026-11-03T12:16:09Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
