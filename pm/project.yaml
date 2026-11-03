@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-03T15:31:33.021926+00:00'
+  updated_at: '2026-11-03T16:00:26.874390+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8788,6 +8788,27 @@ prs:
       pid unchanged, one list row); the scenario text should say `~N`. Captures /pm-captures/scenarios/64/.'
     created_at: '2026-11-03T15:31:32Z'
     last_edited: '2026-11-03T15:31:32Z'
+  - id: note-91cfd6f
+    text: 'QA S65 follow-up (correction): the scenario has six stories, not five —
+      the earlier note skipped the `C-q` / differently-sized-clients triple (the scenario''s
+      story 4; --disconnect-others is story 5 and the 30-iteration race is story 6).
+      Story 4 is now executed live on a6969f12, no source changes, and holds. Given:
+      my~repo and my~other running with exactly one client each and no myview, my~repo''s
+      client from a 120x40 driver pane (window 120x39), my~other''s from a 70x20 pane
+      (window 70x19). `pm tui send C-q` from /scratch/q65/my~repo: only my~repo''s
+      client detaches (list-clients on my~repo empty; pm session list CLIENTS 0 on
+      pm-my~repo-eb6489bd) while my~other''s client stays (/dev/pts/5) and pm session
+      list shows CLIENTS 1; the session and TUI keep running (pm tui view still prints
+      the frame, TUI pane python3, pane_dead 0). Then `pm tui send b` plus a new qa-check
+      window: my~repo''s window list gains 1:qa-check while its size stays 120x39
+      (its own former large client, not my~other''s 70x19), and my~other''s list (0:main:70x19),
+      window size (70x19) and pane (0.0:70x19) are byte-for-byte unchanged — the shared
+      pm-my~ name prefix did not couple the two servers (membership is tmux''s session
+      group). Captures reorganised to six stories under /pm-captures/scenarios/65
+      (story4 = C-q detach and sizes; story5 = disconnect-others; story6 = 30-iteration
+      race); README updated.'
+    created_at: '2026-11-03T16:00:26Z'
+    last_edited: '2026-11-03T16:00:26Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
