@@ -5,14 +5,14 @@ import os
 
 import click
 
-from pm_core.cli.helpers import state_root
+from pm_core.cli.helpers import HelpGroup, state_root
 from pm_core.model_config import EFFORT_LEVELS, SESSION_TYPES
 
 # Single source of truth — kept in sync with model_config.SESSION_TYPES.
 _SESSION_TYPES = list(SESSION_TYPES)
 
 
-@click.group("model")
+@click.group("model", cls=HelpGroup)
 def model():
     """View and configure per-session-type model targeting."""
     pass

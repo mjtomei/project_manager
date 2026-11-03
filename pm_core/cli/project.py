@@ -2,7 +2,7 @@
 
 import click
 
-from pm_core.cli.helpers import state_root
+from pm_core.cli.helpers import HelpGroup, state_root
 
 # Project-level boolean settings: name → description
 _PROJECT_BOOLEAN_SETTINGS = {
@@ -19,7 +19,7 @@ _YAML_KEY = {
 }
 
 
-@click.group("project")
+@click.group("project", cls=HelpGroup)
 def project():
     """View and configure project-level settings."""
     pass

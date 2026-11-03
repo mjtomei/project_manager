@@ -729,6 +729,9 @@ def handle_command_submitted(app, cmd: str) -> None:
             if app._root:
                 _rl_pr = _resolve_command_bar_pr(app, _rl_pr_id)
                 if not _rl_pr:
+                    # The bar keeps focus across a command; hand it back so
+                    # a typo'd id does not leave the next key typed into it.
+                    _refocus_active_view(app)
                     return
                 _rl_pr_id = _rl_pr["id"]
             tree.select_pr(_rl_pr_id)
@@ -750,6 +753,10 @@ def handle_command_submitted(app, cmd: str) -> None:
             if app._root:
                 edit_pr = _resolve_command_bar_pr(app, edit_pr_id)
                 if not edit_pr:
+                    # Same focus hand-back as the review-loop branch: the
+                    # not-found remedy is logged, and the next key must
+                    # reach the view, not the command bar.
+                    _refocus_active_view(app)
                     return
                 edit_pr_id = edit_pr["id"]
             tree = app.query_one("#tech-tree", TechTree)
@@ -776,11 +783,14 @@ def handle_command_submitted(app, cmd: str) -> None:
             app.log_message(f"Auto-start: bad command: {e}")
         else:
             _auto_start.handle_command(app, _as_args)
-        # Unconditional: focus() targets the tree's own (base) screen, so
-        # when ``autostart status`` pushed the runs popup this doesn't
-        # steal focus from it — it makes Esc return to the tree instead
-        # of the command bar the popup was opened from.
-        app.query_one("#tech-tree", TechTree).focus()
+        # Unconditional: focus() targets the active view's widget on the
+        # base screen, so when ``autostart status`` pushed the runs popup
+        # this doesn't steal focus from it — it makes Esc return to that
+        # view instead of the command bar the popup was opened from.
+        # ``_refocus_active_view`` (not a bare tree focus) keeps the QA and
+        # plans views usable: focusing the hidden tree there left their
+        # panes' keys dead until the view was re-entered.
+        _refocus_active_view(app)
         return
 
     # Handle QA commands — route to qa_loop_ui instead of CLI.

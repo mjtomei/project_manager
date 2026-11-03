@@ -179,6 +179,27 @@ def test_pr_signoff_accepts_the_help_alias():
     assert "Sign-off: PR-level review" in result.output
 
 
+def test_every_group_accepts_the_help_alias():
+    """`pm <group> help` must work on every group, not just most.
+
+    ``HelpGroup`` is inherited by groups created with ``@<parent>.group``,
+    but a group defined standalone and attached with ``cli.add_command``
+    (``pm project``, ``pm model``) used the plain ``click.Group`` and
+    answered "No such command 'help'".  The alias is documented as working
+    everywhere, so this walks every group in the tree.
+    """
+    runner = CliRunner()
+    for path, _group in _groups(cli):
+        # The root group has a real `help` command (it prints HELP_TEXT,
+        # which has no "Usage:" line); every other group uses the alias.
+        if not path:
+            continue
+        result = runner.invoke(cli, [*path, "help"])
+        assert result.exit_code == 0, (
+            f"`pm {' '.join([*path, 'help'])}` failed: {result.output}")
+        assert "Usage:" in result.output
+
+
 def test_help_alias_does_not_depend_on_the_click_option_restart(monkeypatch):
     """The `help` alias renders help itself, on every supported Click.
 
@@ -642,6 +663,67 @@ def test_command_bar_returns_focus_to_the_qa_pane():
         log_message=lambda *a, **k: None, query_one=query_one)
 
     pr_view.handle_command_submitted(app, "pr qa --frosh")
+
+    assert focused == ["#qa-pane"], focused
+
+
+def test_command_bar_autostart_returns_focus_to_the_qa_pane():
+    """The autostart branch was the one command path still focusing the tree.
+
+    Every other command-bar branch was switched to the shared
+    ``_refocus_active_view`` helper, but ``autostart …`` kept a bare
+    ``#tech-tree`` focus — so in the QA view it deadened the QA pane's keys
+    (j/k, Enter, e, d, a) until the view was re-entered, exactly the bug the
+    helper fixes everywhere else.
+    """
+    from types import SimpleNamespace
+    from unittest import mock
+
+    from pm_core.tui import auto_start, pr_view
+
+    focused = []
+
+    def query_one(selector, *rest):
+        return SimpleNamespace(focus=lambda: focused.append(selector))
+
+    app = SimpleNamespace(
+        _root=None, _inflight_pr_action=None, _plans_visible=False,
+        _qa_visible=True,
+        log_message=lambda *a, **k: None, query_one=query_one)
+
+    with mock.patch.object(auto_start, "handle_command"):
+        pr_view.handle_command_submitted(app, "autostart status")
+
+    assert focused == ["#qa-pane"], focused
+
+
+@pytest.mark.parametrize("cmd", ["review-loop #999", "edit #999"])
+def test_command_bar_unknown_id_hands_focus_back(cmd):
+    """A typo'd id must not leave the next keystroke in the command bar.
+
+    The review-loop and edit branches returned on a failed id resolution
+    without the focus hand-back every other path performs, so after the
+    not-found remedy the tree/QA keys were still going into the bar's Input.
+    """
+    from types import SimpleNamespace
+    from unittest import mock
+
+    from pm_core.tui import pr_view
+
+    focused = []
+
+    def query_one(selector, *rest):
+        return SimpleNamespace(focus=lambda: focused.append(selector),
+                               select_pr=lambda *a, **k: None)
+
+    app = SimpleNamespace(
+        _root=Path("/nonexistent"), _inflight_pr_action=None,
+        _plans_visible=False, _qa_visible=True,
+        log_message=lambda *a, **k: None, query_one=query_one)
+
+    with mock.patch.object(pr_view, "_resolve_command_bar_pr",
+                           return_value=None):
+        pr_view.handle_command_submitted(app, cmd)
 
     assert focused == ["#qa-pane"], focused
 
