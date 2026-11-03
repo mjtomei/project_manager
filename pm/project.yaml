@@ -33039,7 +33039,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-11-03T08:01:55.053258+00:00'
+  updated_at: '2026-11-03T08:36:29.261574+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33204,6 +33204,19 @@ prs:
       Captures rewritten in /pm-captures/scenarios/13/story7-busy-guard/.'
     created_at: '2026-11-03T08:01:54Z'
     last_edited: '2026-11-03T08:01:54Z'
+  - id: note-4cf118a
+    text: 'QA scenario 15 (top-level help / Click compatibility / TUI launcher remedy):
+      NEEDS_WORK, fixed in 9e10f888. `pm pr signoff help` exited 2 with "Error: No
+      such command ''--help''." on Click 8.1.8 because HelpGroup rewrote `help` to
+      `--help` and relied on Click >= 8.2 re-parsing the rewritten args; HelpGroup
+      now renders the group help and exits directly. Verified on 8.1.8 and 8.4.1 (both
+      forms exit 0, byte-identical help; same group help as 8.4), with a regression
+      test using Click 8.1 resolve_command semantics. Stories 1 (pm help / getting-started),
+      2 (pm tui keys), 3 (? screen from plans view), 4 (signoff help on 8.4.1) and
+      6 (TUI launcher install remedy, no claude on PATH) all PASS. Full suite 5575
+      passed, 1 skipped. Captures: /pm-captures/scenarios/15/{cli-help,tui-keys,tui-help,signoff-help,click81,tui-launcher}.'
+    created_at: '2026-11-03T08:36:29Z'
+    last_edited: '2026-11-03T08:36:29Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
