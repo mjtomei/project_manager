@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-03T00:00:56.126837+00:00'
+  updated_at: '2026-11-03T00:29:51.814229+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8548,6 +8548,28 @@ prs:
       pre-fix/ and post-fix/).'
     created_at: '2026-11-03T00:00:56Z'
     last_edited: '2026-11-03T00:00:56Z'
+  - id: note-3d68051
+    text: 'QA S55 (hook respawn isolation across private/legacy/view/non-pm sessions)
+      PASS on head 4357307e, no source changes. Captures /pm-captures/scenarios/55
+      (README + per-story manifests, casts and mp4s). (1) SPEC CORRECTION for scenario
+      55: the hook-restore step says `set-hook -g after-kill-pane "run-shell ''pm
+      _pane-closed''"` — that is the pre-change form. On tmux 3.2a a global hook process
+      gets an EMPTY $TMUX_PANE (probe in story3/hook-env-probe.txt), so the bare form
+      resolves the server''s current session, not the one the hook fired in; driven
+      literally it resolved to the non-pm `scratch` session and respawned nothing.
+      The build installs `run-shell "pm _pane-closed #{q:session_name}"` (pm_core/cli/session.py:322,
+      the bb80cd1a S54 fix) and that is the form used for stories 3-4. Scenario 55
+      should be updated to restore that form. (2) Same class, legacy side, not a defect
+      of this PR: a legacy default-server session keeps the bare hook; killing its
+      TUI from a cwd in another project makes the legacy hook respawn pm _tui in that
+      cwd project (it crashed on gh sync there). Fixed for new sessions by the session-name
+      form; the upgrade path is scenario 13 territory. (3) Debug-log destination follows
+      the hook process cwd, so a respawn triggered from outside a project logs its
+      "already reconciled; respawning in window @0" line under the invoker''s tag
+      (here workspace-eab0d61a.log) rather than the session''s. Pre-existing logging
+      behaviour; noted, not filed.'
+    created_at: '2026-11-03T00:29:51Z'
+    last_edited: '2026-11-03T00:29:51Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
