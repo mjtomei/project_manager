@@ -4611,3 +4611,37 @@ deterministically, the new one passes.
 Verification: the 22 PR-affected test files pass twice in one HOME (1407
 each); full suite 5667 passed / 1 skipped, 426.9 s (log
 `/pm-captures/review-1346-i1/full-suite.log`).
+
+**Review loop 1346 i2** (no requirement changes; no code changes; full
+suite 5655 passed / 1 skipped plus the 12 `test_markdown_render` cases
+that need the `markdown` package, which this container's interpreter does
+not have; with it installed all 13 pass, i.e. the same 5667 passed / 1
+skipped baseline, log `/pm-captures/review-1346-i2/full-suite.log`; the
+22 PR-affected test files also pass twice in one HOME, 1407 each).
+Verification pass over the head after the 1346 i1 fixes.  The whole
+`origin/master...HEAD` source diff (28 modules) was re-read against
+R1-R8, and every new assumption the parsers rest on was probed live on
+tmux 3.2a:
+
+- `#{q:…}` shell-escapes a space and a single quote
+  (`pm-a\ b-c`, `pm-q\'x-1`), and an `after-kill-pane` hook registered
+  with `run-shell 'pm _pane-closed #{q:session_name}'` receives the name
+  verbatim; the binding gate, `_pane-opened`, `_window-resized` and
+  `_pane-switch` use the same modifier.
+- `#{session_path}` resolves to the session's creation directory, so a
+  respawned TUI (`_respawn_tui`'s `-c SESSION_START_DIR`) starts in the
+  project's repo, not the killing client's cwd.
+- The `:`-separated queries the new code parses round-trip a space-named
+  session: `list-sessions -F '#{session_name}:#{session_group}:#{session_attached}'`
+  gives `pm-a b-c::0`, and `list-panes -a -F
+  '#{pane_id}:#{session_name}:#{pane_start_command}'` gives
+  `%0:pm-a b-c:"sleep 30"` (the start command keeps its own colons under
+  `maxsplit=2`).
+
+Residual (unchanged, no regression): after a user renames a pm session
+with tmux itself, `#{session_group}` keeps the old group name, so the new
+`pm session list` treats the renamed base as a view and lists its `~N`
+under the old name.  pm never renames a session and every registry,
+pidfile and socket is keyed by the name, so a renamed session is already
+outside pm's management (there was no `pm session list` before this
+change, so nothing regressed); it is not renamed or re-keyed here.
