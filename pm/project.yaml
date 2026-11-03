@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-03T21:46:39.343342+00:00'
+  updated_at: '2026-11-03T22:06:58.696904+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -8927,6 +8927,31 @@ prs:
       harness kill-pane.'
     created_at: '2026-11-03T21:46:39Z'
     last_edited: '2026-11-03T21:46:39Z'
+  - id: note-f13b0e9
+    text: 'QA scenario 72 (two sessions’ popups and queued commands at the same moment)
+      PASS 6/6 on b41ddbc7, no source changes. Fixture: two throwaway projects in
+      a disposable HOME, one private session each (pm-qa72-a-a06c8696 / pm-qa72-b-81a27830),
+      a pr-<id> window per session, one asciinema-recorded attach client per base
+      plus a grouped user view myview on A with its own client. (1) Simultaneous C-b
+      P: each client rendered exactly one picker for its own PR; no cast/capture of
+      one side ever contained the other’s PR id or title; neither TUI pane saw the
+      prefix/P bytes. (2) Simultaneous e+Enter: spinner exit reason=edit_skip in both;
+      edit queued only to its own base (A log edit pr-538da58, B log edit pr-bb8dc59);
+      each main window gained a pr-edit pane for its own PR, recorded in its own registry;
+      queue files per-base and drained. (3) Simultaneous s+Enter: each select_window
+      targeted its own session’s @3 and only the pressing session switched; both clients
+      stayed attached. (4) C-b M both rounds (session name / pr list, then swapped):
+      each popup printed only its own result and closed on success; no window switch;
+      pr show pr-nope kept both popups up and q on A closed only A’s. (5) Base + myview
+      press together: one picker per client, closing the base’s left the view’s open;
+      the view’s edit queued to A’s base TUI with no tui-myview.* or pane-registry/myview.json
+      ever created; B untouched. (6) Burst of 3 edit rounds + interleaved prompts
+      + one view edit: every dispatch stayed in its own session, no client moved or
+      detached, no extra session, pm session list showed A and B once each, no Traceback
+      anywhere. Captures /pm-captures/scenarios/72 (README.md + per-story manifests,
+      casts and mp4s).'
+    created_at: '2026-11-03T22:06:58Z'
+    last_edited: '2026-11-03T22:06:58Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
