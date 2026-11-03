@@ -40317,7 +40317,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-11-03T00:34:05.882571+00:00'
+  updated_at: '2026-11-03T01:47:19.389944+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42499,6 +42499,41 @@ prs:
       every read rc 0.'
     created_at: '2026-11-03T00:34:05Z'
     last_edited: '2026-11-03T00:34:05Z'
+  - id: note-5377353
+    text: 'S85 refiner (6d1e8651, live, all 4 stories held; /pm-captures/pr-8020495/s85-refiner).
+      Draft fix: after the g merge of A, `pm pr merge D` exits 1 "merge refused —
+      master moved since sign-off"; the TUI then re-runs D (signoff router (stale)),
+      D first hold reads "superseded at <refusal>", the hold re-arms, and a second
+      pm pr merge D merges. History is then "released (PR merged) at <2nd merge>"
+      plus the superseded row. Switch B to --auto-merge before its QA ends: the refiner
+      switch landed 4 s before the router. A closed PR hold reads "released (PR closed)
+      at unknown": the query uses merged_at only and ignores closed_at; this matches
+      spec R8, not a defect. Arm-less merge-hold clears on B are not rendered.'
+    created_at: '2026-11-03T00:44:57Z'
+    last_edited: '2026-11-03T00:44:57Z'
+  - id: note-21a571c
+    text: 'QA S85 (2026-11-03) PASS on 130957ab9 (app d2e0097e), no code edits. Live
+      env -i runs; captures + per-Then README in /pm-captures/scenarios/85 (run4 =
+      primary run, every Then literal; runs 1-3 cross-checks; run5 = TUI L pane).
+      Every reader read (about 2300 JSON + 1200 text per full run, all rc 0, empty
+      stderr) held: merged A/D keep "released (PR merged) at <merge>" through autostart
+      remove, --auto-merge, auto-start turning itself off, autostart clear and pm
+      session kill; D also keeps "superseded at <refusal>"; neither merge path journals
+      a release; B (switched to --auto-merge before its router) never has a merge-hold
+      row; closed I reads "released (PR closed) at unknown" (resolved_at null) from
+      the first read after the close and is unchanged by the clear; F reads "released
+      at <clear>"; the restarted-session popup shows [4 runs] and the H pager matches
+      | cat. For planners: the TUI opens a new start row and relaunches a stale sign-off
+      router only on its 5 s impl-idle tick, whose phase follows pm autostart add
+      by about 5.26 s. So "E starts within about 1 s of D merge" and "superseded at
+      <refusal time>" (with "about 1 s later a running router") hold only for some
+      merge timings: untimed runs gave E +2.5/+3.7 s, and the superseded label came
+      1 s after the refusal in 2 of 3 runs. Run 4 timed g and both pm pr merge D against
+      the tick. Write such Thens as "within about 5 s (next impl-idle tick)". On the
+      80-col TUI log line, the auto-start OFF message replaces "PR <B> marked as merged."
+      in the same frame and is cut at the pane width; the L pane has both full lines.'
+    created_at: '2026-11-03T01:47:19Z'
+    last_edited: '2026-11-03T01:47:19Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
