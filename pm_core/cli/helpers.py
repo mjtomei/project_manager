@@ -1257,7 +1257,7 @@ def _clone_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
                 pr["workdir"] = workdir_str
                 break
 
-    store.locked_update(root, apply)
+    store.locked_update_cli(root, apply)
     click.echo(f"Workdir created at {work_path}")
     return workdir_str
 
@@ -1275,7 +1275,7 @@ def _resolve_repo_id(data: dict, workdir: Path, root: Path) -> None:
         def apply(d):
             d.setdefault("project", {})["repo_id"] = repo_id
 
-        store.locked_update(root, apply)
+        store.locked_update_cli(root, apply)
 
 
 def _infer_pr_id(data: dict, status_filter: tuple[str, ...] | None = None) -> str | None:

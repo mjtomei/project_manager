@@ -174,6 +174,35 @@ class TestStoreLockTimeout:
             fcntl.flock(fd, fcntl.LOCK_UN)
             fd.close()
 
+    def test_cli_timeout_waits_out_a_slow_registry_write(self, project_dir):
+        """A writer that holds the lock ~2.2 s (one read-modify-write of a
+        large merged registry) does not make a second CLI writer fail.
+
+        R16: two terminals run ``pm pr add`` / ``pm pr note add`` at the same
+        moment; the loser used to hit the 2 s deadline and drop its record.
+        """
+        import fcntl
+        import threading
+        import time
+
+        lock_path = project_dir / "project.yaml.lock"
+        fd = open(lock_path, "w")
+        fcntl.flock(fd, fcntl.LOCK_EX)
+
+        def release_after_the_old_deadline():
+            time.sleep(2.2)
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            fd.close()
+
+        holder = threading.Thread(target=release_after_the_old_deadline)
+        holder.start()
+        try:
+            # The CLI wait must outlast a slow read-modify-write by another
+            # writer (the TUI's own 2 s bound is unchanged).
+            store.locked_update_cli(project_dir, lambda d: None)
+        finally:
+            holder.join()
+
 
 def _worker_locked_update(root_str, pr_id, result_dict):
     """Worker function for multiprocessing tests."""

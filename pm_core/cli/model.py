@@ -252,7 +252,7 @@ def model_set(session_type: str, model_value: str, effort: str, use_project: boo
                 mc[block] = config_block(mc, block)
                 mc[block][session_type] = value
 
-        store.locked_update(root, apply)
+        store.locked_update_cli(root, apply)
         click.echo(f"Set project model for '{session_type}' to '{model_value}' (effort: {effort})")
     else:
         from pm_core.paths import set_global_setting_value
@@ -297,7 +297,7 @@ def model_unset(session_type: str, use_project: bool):
             if not mc and "model_config" in data.get("project", {}):
                 del data["project"]["model_config"]
 
-        store.locked_update(root, apply)
+        store.locked_update_cli(root, apply)
         if removed:
             click.echo(f"Removed project overrides for '{session_type}'")
         else:

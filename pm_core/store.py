@@ -264,13 +264,22 @@ def make_plan_entry(
 
 LOCK_TIMEOUT_SECONDS = 2.0
 
+# Foreground CLI commands may wait longer for a writer that is already
+# inside a read-modify-write: one pass over a large merged registry
+# (thousands of notes, ~4 MB) takes about 2 s, so two commands started
+# together can keep the lock past the 2 s default and the loser would drop
+# its record (R16: the second ``pm pr add`` / ``pm pr note add`` failed with
+# "Could not acquire lock").  The TUI keeps its short, non-blocking policy:
+# poll-timer writers pass NO_WAIT and the WriteQueue has its own bound.
+CLI_LOCK_TIMEOUT_SECONDS = 10.0
+
 
 class StoreLockTimeout(Exception):
     """Raised when the project.yaml lock cannot be acquired within the timeout."""
 
 
 # Writers retried on the TUI's poll timer pass ``timeout=NO_WAIT``: a single
-# non-blocking lock attempt.  Waiting the default 2 s on every tick while the
+# non-blocking lock attempt.  Waiting the default on every tick while the
 # user keeps ``pm edit`` open (lock held until the editor quits) blocked the
 # TUI for most of every tick (RQ38); such a caller keeps its write pending,
 # says once that it waits (``LOCK_BUSY_REASON``) and retries next tick.
@@ -399,13 +408,33 @@ def locked_update(
     ``locked_update`` and pass the results into ``fn`` via a closure.
 
     Raises ``StoreLockTimeout`` if the lock cannot be acquired within
-    *timeout* seconds (default 2); ``NO_WAIT`` tries exactly once.
+    *timeout* seconds (``LOCK_TIMEOUT_SECONDS``); ``NO_WAIT`` tries exactly
+    once.
     """
     with _lock(root, timeout):
         data = load(root, validate=validate)
         fn(data)
         save(data, root)
     return data
+
+
+def locked_update_cli(
+    root: Path,
+    fn: Callable[[dict], None],
+    validate: bool = True,
+) -> dict:
+    """``locked_update`` for a foreground CLI command.
+
+    Unlike the TUI's writers, a CLI command can afford to wait out another
+    writer: on a large merged registry a single read-modify-write takes
+    about 2 s, so the 2 s default is too short when two commands start
+    together — the loser hit the deadline and dropped its record (R16: the
+    second ``pm pr add`` / ``pm pr note add`` failed with "Could not acquire
+    lock ... within 2.0s").  ``CLI_LOCK_TIMEOUT_SECONDS`` leaves room for
+    several serialized writers.
+    """
+    return locked_update(root, fn, validate=validate,
+                         timeout=CLI_LOCK_TIMEOUT_SECONDS)
 
 
 class WriteQueue:

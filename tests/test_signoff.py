@@ -674,7 +674,7 @@ class TestMergeGateReportHash:
 
 
 def _patch_locked_update_fn(data: dict):
-    def _side(root, fn):
+    def _side(root, fn, **kwargs):
         fn(data)
         return data
     return _side

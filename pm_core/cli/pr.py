@@ -231,7 +231,7 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
         if changes:
             _record_status_timestamp(pr_entry)
 
-    store.locked_update(root, apply)
+    store.locked_update_cli(root, apply)
 
     if changes:
         trigger_tui_refresh()
@@ -301,7 +301,7 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
         result["entry"] = entry
         result["duplicate"] = False
 
-    store.locked_update(root, apply)
+    store.locked_update_cli(root, apply)
     entry = result["entry"]
     pr_id = entry["id"]
     branch = entry["branch"]
@@ -468,7 +468,7 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
                 pr["depends_on"] = [d.strip() for d in depends_on.split(",")]
         _record_status_timestamp(pr)
 
-    store.locked_update(root, apply)
+    store.locked_update_cli(root, apply)
     click.echo(f"Updated {pr_id}: {', '.join(changes)}")
     trigger_tui_refresh()
 
@@ -486,7 +486,7 @@ def pr_select(pr_id: str):
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
-    store.locked_update(root, lambda d: d["project"].__setitem__("active_pr", pr_id))
+    store.locked_update_cli(root, lambda d: d["project"].__setitem__("active_pr", pr_id))
     click.echo(f"Active PR: {pr_id} ({pr_entry.get('title', '???')})")
     trigger_tui_refresh()
 
@@ -1151,7 +1151,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             pr["gh_pr_number"] = gh_pr_info["number"]
         data["project"]["active_pr"] = pr_id
 
-    data = store.locked_update(root, apply)
+    data = store.locked_update_cli(root, apply)
     if blocked_at_lock:
         _report_launch_blocked(
             pr_id, blocked_at_lock, doing="starting",
@@ -1744,7 +1744,7 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         pr["status"] = "in_review"
         _record_status_timestamp(pr, "in_review")
 
-    store.locked_update(root, apply)
+    store.locked_update_cli(root, apply)
     if blocked_at_lock:
         _report_launch_blocked(
             pr_id, blocked_at_lock, doing="opening the review",
@@ -1857,7 +1857,7 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
             _record_status_timestamp(pr, "sign_off")
             transitioned = True
 
-    store.locked_update(root, apply)
+    store.locked_update_cli(root, apply)
     if blocked_at_lock:
         _report_launch_blocked(
             pr_id, blocked_at_lock, doing="opening the sign-off",
@@ -2035,7 +2035,7 @@ def _finalize_merge(root, pr_entry: dict, pr_id: str,
         pr["status"] = "merged"
         _record_status_timestamp(pr, "merged")
 
-    data = store.locked_update(root, apply)
+    data = store.locked_update_cli(root, apply)
     trigger_tui_refresh()
 
     # Kill tmux windows for the merged PR (they're inaccessible from the TUI)
@@ -2668,7 +2668,7 @@ def _verify_github_merge(root: Path, pr_entry: dict, workdir: str,
         if p is not None:
             merge_integrity.apply_to_pr(p, result)
 
-    store.locked_update(root, _apply)
+    store.locked_update_cli(root, _apply)
     click.echo(f"WARNING: {result.problem}.", err=True)
 
 
@@ -3016,7 +3016,7 @@ def pr_sync():
                     merge_integrity.apply_to_pr(
                         pr, integrity_by_pr.get(pr["id"]))
 
-        data = store.locked_update(root, apply)
+        data = store.locked_update_cli(root, apply)
         trigger_tui_refresh()
     else:
         click.echo("No new merges detected.")
@@ -3154,7 +3154,7 @@ def pr_import_github(gh_state: str):
                 if entry.get("branch") not in current_branches and entry.get("gh_pr_number") not in current_gh_numbers:
                     data["prs"].append(entry)
 
-        store.locked_update(root, apply)
+        store.locked_update_cli(root, apply)
         click.echo(f"\nImported {len(entries_to_import)} PR(s), skipped {skipped} already tracked.")
         trigger_tui_refresh()
     else:
@@ -3360,7 +3360,7 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
                     p["workdir"] = None
                     pruned += 1
 
-        store.locked_update(root, apply_prune)
+        store.locked_update_cli(root, apply_prune)
         if pruned:
             trigger_tui_refresh()
             click.echo(f"Pruned {pruned} stale workdir reference(s).")
@@ -3389,7 +3389,7 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
                     if pr["id"] in cleaned_ids:
                         pr["workdir"] = None
 
-            store.locked_update(root, apply_cleanup_all)
+            store.locked_update_cli(root, apply_cleanup_all)
             trigger_tui_refresh()
         click.echo(f"Cleaned {len(cleaned_ids)}/{len(with_workdir)} workdirs.")
         return
@@ -3433,7 +3433,7 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
 
     target_id = pr_entry["id"]
     if _cleanup_pr(pr_entry, root, force):
-        store.locked_update(root, lambda d: _clear_workdir(d, target_id))
+        store.locked_update_cli(root, lambda d: _clear_workdir(d, target_id))
         trigger_tui_refresh()
 
 
@@ -3524,7 +3524,7 @@ def pr_model_set(pr_id: str, value: str | None, effort: str | None,
             model_settings.set_pr_value(pr_entry, "effort", effort,
                                         list(roles))
 
-    store.locked_update(root, apply)
+    store.locked_update_cli(root, apply)
     scope = ", ".join(roles) if roles else "every role"
     what = " and ".join(x for x in (value and f"model {value}",
                                     effort and f"effort {effort}") if x)
@@ -3577,7 +3577,7 @@ def pr_model_unset(pr_id: str, roles: tuple, only_model: bool,
             else:
                 model_settings.set_pr_value(pr_entry, kind, None, list(roles))
 
-    store.locked_update(root, apply)
+    store.locked_update_cli(root, apply)
     scope = ("all settings" if everything else
              ", ".join(roles) if roles else "PR-wide setting")
     click.echo(f"{pr_id}: removed {' and '.join(kinds)} ({scope})")
@@ -3615,7 +3615,7 @@ def pr_note_add(pr_id: str, text: str):
         pr["notes"] = notes
         _record_status_timestamp(pr)
 
-    store.locked_update(root, apply)
+    store.locked_update_cli(root, apply)
     click.echo(f"Added note {note_id} to {_pr_display_id(pr_entry)}")
     trigger_tui_refresh()
 
@@ -3664,7 +3664,7 @@ def pr_note_edit(pr_id: str, note_id: str, text: str):
                 break
         _record_status_timestamp(pr)
 
-    store.locked_update(root, apply)
+    store.locked_update_cli(root, apply)
     click.echo(f"Updated note {note_id} → {new_id} on {_pr_display_id(pr_entry)}")
     trigger_tui_refresh()
 
@@ -3712,7 +3712,7 @@ def pr_note_delete(pr_id: str, note_id: str):
         pr["notes"] = [n for n in (pr.get("notes") or []) if n["id"] != note_id]
         _record_status_timestamp(pr)
 
-    store.locked_update(root, apply)
+    store.locked_update_cli(root, apply)
     click.echo(f"Deleted note {note_id} from {_pr_display_id(pr_entry)}")
     trigger_tui_refresh()
 
@@ -3858,7 +3858,7 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
             data["project"]["active_pr"] = (
                 remaining[0]["id"] if remaining else None)
 
-    updated = store.locked_update(root, apply)
+    updated = store.locked_update_cli(root, apply)
 
     if merged_concurrently:
         if remove:
@@ -4351,7 +4351,7 @@ def pr_auto_sequence(pr_id: str):
             loop_id = secrets.token_hex(8)
             write_launch_record(pr_id, loop_id, os.getpid())
             try:
-                store.locked_update(root, _to_qa)
+                store.locked_update_cli(root, _to_qa)
             except BaseException:
                 drop_launch_record(pr_id, loop_id)
                 raise
@@ -4422,7 +4422,7 @@ def pr_auto_sequence(pr_id: str):
                 if p and p.get("status") == "qa":
                     p["status"] = "sign_off"
                     _record_status_timestamp(p, "sign_off")
-            store.locked_update(root, _to_signoff)
+            store.locked_update_cli(root, _to_signoff)
             trigger_tui_refresh()
             signoff_transcript = tdir / f"signoff-{pr_id}.jsonl"
             ctx = click.get_current_context()
@@ -4444,7 +4444,7 @@ def pr_auto_sequence(pr_id: str):
                 if p and p.get("status") == "qa":
                     p["status"] = "in_review"
                     _record_status_timestamp(p, "in_review")
-            store.locked_update(root, _to_review)
+            store.locked_update_cli(root, _to_review)
             trigger_tui_refresh()
             _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
             next_iter = latest_iter + 1
