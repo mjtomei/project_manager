@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-04T06:58:01.526731+00:00'
+  updated_at: '2026-11-04T07:58:28.705474+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9497,6 +9497,23 @@ prs:
       -c ''...''` string breaks; use a helper script for the attach.'
     created_at: '2026-11-04T06:58:01Z'
     last_edited: '2026-11-04T06:58:01Z'
+  - id: note-507f661
+    text: 'Review loop 6cda i1 (no requirement changes; full suite 6164 passed / 1
+      skipped, 437.6 s, log /pm-captures/review-6cda-i1/full-suite-final.log). Reviewed
+      the post-merge head and the S78 resume fix (aab9d4e2) live on tmux 3.2a; the
+      merge conflict resolutions re-check clean. Four fixes, all in code this PR owns:
+      (1) the S78 dashboard guard is now per pane, not per window, so a dashboard
+      split that failed is retried on the next resume while a live one is left alone
+      (recognised by its qa_status.py start command in that window, new tmux.window_pane_start_commands);
+      (2) _respawn_tui returns None on failure instead of the window, which the after-kill-pane
+      hook and pm session treated as a running TUI; (3) create_window passes -d, so
+      a respawn no longer moves clients attached to the base session (select=False
+      was not honoured); (4) pm session kill reports a kill that failed while the
+      session or a grouped member survived, exits 1 and skips the container/proxy
+      cleanup and the socket unlink instead of printing Killed. Tests updated/added
+      in test_qa_execution_only_window, test_pane_layout, test_tmux and test_session_socket_isolation.'
+    created_at: '2026-11-04T07:58:28Z'
+    last_edited: '2026-11-04T07:58:28Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

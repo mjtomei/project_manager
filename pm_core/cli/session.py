@@ -1356,13 +1356,34 @@ def session_kill(start_dir):
         # (or a member) disappeared between the lookup and here (verified on
         # tmux 3.2a) — on the legacy default server that is another pm
         # session's TUI.
+        failed: list[str] = []
         for member in tmux_mod.sessions_in_group(session_name,
                                                  socket_path=hosting_socket):
-            if member != session_name:
-                tmux_mod.kill_session(member, socket_path=hosting_socket,
-                                      exact=True)
-        tmux_mod.kill_session(session_name, socket_path=hosting_socket,
-                              exact=True)
+            if member == session_name:
+                continue
+            if (not tmux_mod.kill_session(member, socket_path=hosting_socket,
+                                          exact=True)
+                    and tmux_mod.session_exists(f"={member}",
+                                                socket_path=hosting_socket)):
+                failed.append(member)
+        if (not tmux_mod.kill_session(session_name,
+                                      socket_path=hosting_socket, exact=True)
+                and tmux_mod.session_exists(f"={session_name}",
+                                            socket_path=hosting_socket)):
+            failed.append(session_name)
+        if failed:
+            # A failed kill that leaves the session (or a member of its
+            # group) running must not be reported as a teardown: the
+            # container/proxy cleanup below belongs to the session and
+            # would break the survivor, and unlinking a live server's
+            # socket would strand its clients.  Existence is re-checked
+            # only after a failure, because tmux also fails for a session
+            # that vanished concurrently — that one is already gone and
+            # the cleanup is still right.
+            click.echo(
+                f"Failed to kill session '{session_name}' (still running: "
+                f"{', '.join(failed)}); nothing was cleaned up.", err=True)
+            raise SystemExit(1)
 
         pane_layout.set_force_mobile(session_name, False)
 

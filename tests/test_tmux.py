@@ -21,6 +21,7 @@ from pm_core.tmux import (
     send_keys_literal,
     kill_window,
     kill_session,
+    create_window,
     apply_layout,
     get_pane_indices,
     get_pane_geometries,
@@ -459,6 +460,36 @@ class TestKillSession:
         kill_session("pm-x", socket_path="/tmp/s", exact=True)
         cmd = mock_run.call_args[0][0]
         assert cmd == ["tmux", "-S", "/tmp/s", "kill-session", "-t", "=pm-x"]
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_reports_whether_tmux_killed_it(self, mock_run):
+        """``pm session kill`` distinguishes a real failure from a session
+        that was already gone; tmux's return code is the signal."""
+        mock_run.return_value = MagicMock(returncode=0)
+        assert kill_session("pm-x") is True
+        mock_run.return_value = MagicMock(returncode=1)
+        assert kill_session("pm-x") is False
+
+
+# ---------------------------------------------------------------------------
+# create_window
+# ---------------------------------------------------------------------------
+
+class TestCreateWindow:
+    @patch("pm_core.tmux.subprocess.run")
+    def test_does_not_make_the_window_current(self, mock_run):
+        """``-d``: a respawn must not switch clients of the target session.
+
+        ``_respawn_tui``'s ``select=False`` (``pm session``'s attach)
+        relies on it, and its ``select=True`` path selects the window for
+        the caller's own client explicitly.
+        """
+        mock_run.return_value = MagicMock(returncode=0,
+                                          stdout="%5 @9")
+        pane_id, window_id = create_window("pm-x", "pm _tui")
+        cmd = mock_run.call_args[0][0]
+        assert "-d" in cmd
+        assert (pane_id, window_id) == ("%5", "@9")
 
 
 # ---------------------------------------------------------------------------

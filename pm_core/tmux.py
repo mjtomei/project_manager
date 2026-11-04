@@ -607,8 +607,8 @@ def attach(name: str, socket_path: str | None = None) -> None:
 
 
 def kill_session(name: str, socket_path: str | None = None, *,
-                 exact: bool = False) -> None:
-    """Kill a tmux session.
+                 exact: bool = False) -> bool:
+    """Kill a tmux session.  Returns whether tmux killed it.
 
     *exact* addresses the session with tmux's ``=name`` target, i.e. no
     prefix fallback.  ``pm session kill`` passes it for every session it
@@ -620,11 +620,15 @@ def kill_session(name: str, socket_path: str | None = None, *,
     session's TUI (verified on tmux 3.2a: with only ``pm-xyz`` running,
     ``kill-session -t pm-x`` kills ``pm-xyz``).  R8: tearing down a session
     affects only that session.
+
+    The return value lets the destructive path tell a real failure from a
+    session that was already gone (tmux answers "can't find session" for
+    both; the caller re-checks existence only when this is false).
     """
     target = f"={name}" if exact else name
-    _run(
+    return _run(
         _tmux_cmd("kill-session", "-t", target, socket_path=socket_path),
-    )
+    ).returncode == 0
 
 
 def kill_window(session: str, window: str) -> None:
@@ -735,8 +739,14 @@ def create_window(session: str, cmd: str,
     *env* is exported into the new pane through a private file (see
     ``_wrap_cmd_env``).  *start_dir_format* is the pane's start directory
     as a tmux format, as for ``split_pane``.
+
+    ``-d``: the new window does not become the target session's current
+    window.  Without it tmux switches every client attached to that
+    session — ``_respawn_tui``'s ``select=False`` (``pm session``'s
+    attach) must not move another client, and its ``select=True`` path
+    selects the window for the caller's own client explicitly.
     """
-    args = ["new-window", "-t", f"{session}:", "-P", "-F",
+    args = ["new-window", "-d", "-t", f"{session}:", "-P", "-F",
             "#{pane_id} #{window_id}"]
     if start_dir_format:
         args += ["-c", start_dir_format]
@@ -1358,6 +1368,22 @@ def pane_start_command(pane_id: str) -> str:
 def live_pane_start_commands(session: str) -> list[str]:
     """Start commands of the live (not dead) panes in *session*'s windows."""
     result = _run(_tmux_cmd("list-panes", "-s", "-t", session, "-F",
+                            "#{pane_dead} #{pane_start_command}"), text=True)
+    if result.returncode != 0:
+        return []
+    return [line[2:] for line in result.stdout.splitlines()
+            if line.startswith("0 ")]
+
+
+def window_pane_start_commands(session: str, window: str) -> list[str]:
+    """Start commands of the live (not dead) panes of one window.
+
+    Used to recognise a pane by the command it runs when the pane
+    registry may not list it (a split whose registration failed): the
+    QA status dashboard is identified this way, so a resume cannot split
+    a second one beside it.
+    """
+    result = _run(_tmux_cmd("list-panes", "-t", f"{session}:{window}", "-F",
                             "#{pane_dead} #{pane_start_command}"), text=True)
     if result.returncode != 0:
         return []

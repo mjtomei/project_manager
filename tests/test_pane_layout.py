@@ -873,6 +873,20 @@ class TestTuiRespawnWindow:
             assert tui_respawn_window("pm-x") is None
 
 
+class TestRespawnTuiOutcome:
+    """A failed respawn must not look like a started TUI."""
+
+    def test_failure_is_reported_as_none(self):
+        """The hook stops looking for a TUI when ``_respawn_tui`` returns a
+        window, and ``pm session`` selects it for its client — so a failed
+        split/create must return ``None``, not the window it tried."""
+        from pm_core import pane_layout
+
+        with patch("pm_core.tmux.get_pane_indices",
+                   side_effect=RuntimeError("tmux gone")):
+            assert pane_layout._respawn_tui("pm-x", "@1") is None
+
+
 class TestNonPmSessionIgnored:
     """The global hooks must ignore a plain session on the same server (QA S58).
 

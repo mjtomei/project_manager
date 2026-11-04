@@ -5491,10 +5491,29 @@ def _add_status_pane(session: str, planner_pane: str, status_path) -> None:
         _log.exception("Failed to create status pane")
 
 
+def _qa_status_pane_live(session: str, window_name: str) -> bool:
+    """True when *window_name* already has a live status dashboard pane.
+
+    The dashboard is recognised by the command it runs, not by its pane
+    registry entry: ``_add_status_pane`` swallows a failed split, but it
+    also swallows a failed *registration* of a split that did happen, and
+    a second dashboard must not be added beside that one.  Per window, not
+    per session: another PR's QA run in the same session has its own
+    dashboard in its own window.
+    """
+    from pm_core import tmux as tmux_mod
+
+    win = tmux_mod.find_window_by_name(session, window_name)
+    if not win:
+        return False
+    return any("qa_status.py" in cmd for cmd in
+               tmux_mod.window_pane_start_commands(session, win["index"]))
+
+
 def _recreate_qa_window_if_missing(session: str, window_name: str,
                                    workdir_path: str | None,
                                    status_path) -> None:
-    """Recreate a resumed run's main QA window when it is gone (QA S78).
+    """Restore a resumed run's main QA window and its dashboard (QA S78).
 
     A run is resumed in this session when the session that launched it is
     gone, so its windows went with that server.  ``_poll_tmux_verdicts``
@@ -5504,13 +5523,15 @@ def _recreate_qa_window_if_missing(session: str, window_name: str,
     recreated after the previous one was killed"), so create the window and
     split the dashboard beside its main pane.
 
-    An ordinary restart keeps the window; splitting the dashboard into it
-    again would leave two dashboards, so only a missing window is recreated.
+    An ordinary restart keeps both, and splitting the dashboard into a
+    window that already has one would leave two.  The check is therefore
+    per *pane*, not per window: a window whose dashboard split failed gets
+    one on the next resume, while a live dashboard is left alone.
     """
     from pm_core import tmux as tmux_mod
 
     try:
-        if tmux_mod.find_window_by_name(session, window_name):
+        if _qa_status_pane_live(session, window_name):
             return
         main_pane = _ensure_qa_main_pane(session, window_name, workdir_path)
         if main_pane:

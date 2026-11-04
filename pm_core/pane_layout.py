@@ -635,7 +635,7 @@ def tui_respawn_window(session: str, preferred: str | None = None) -> str | None
     return windows[0]["id"] if windows else None
 
 
-def _respawn_tui(session: str, window: str, *, select: bool = True) -> str:
+def _respawn_tui(session: str, window: str, *, select: bool = True) -> str | None:
     """Respawn the TUI pane in *window* after it was killed.
 
     If the window still exists (other panes remain), splits a new pane
@@ -652,7 +652,10 @@ def _respawn_tui(session: str, window: str, *, select: bool = True) -> str:
     grouped session it attaches instead.
 
     Returns the window ID the TUI was actually created in (may differ
-    from *window* when a new window had to be created).
+    from *window* when a new window had to be created), or ``None`` when
+    the respawn failed.  Callers treat a returned window as "a TUI is
+    running" (the hook stops looking for one, ``pm session`` selects it
+    for its client), so a failure must not be reported as success.
 
     The TUI starts in the directory the session was created in (the
     project's repo directory), not in tmux's default — the cwd of the
@@ -717,6 +720,7 @@ def _respawn_tui(session: str, window: str, *, select: bool = True) -> str:
         _logger.info("_respawn_tui: created pane %s in window %s", pane_id, window)
     except Exception:
         _logger.exception("_respawn_tui: failed to respawn TUI")
+        return None
     return window
 
 

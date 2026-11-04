@@ -4942,9 +4942,107 @@ One gap of the class review-loop b48f i20 closed, in the i1 fix itself:
    the i1 head (the probe recorded `owned_only=False`) and on the
    pre-i1 head (the planted name was yielded).
 
+## QA-driven fix (2026-11-04, commit aab9d4e2)
+
+QA S78 story 4 found that a QA run resumed in a clone because the session
+that hosted it was gone came back with only its scenario windows.  The
+verdict poll relaunches the dead scenario windows, but nothing recreated
+the run's main `qa-<pr>` window, so the resumed run had no planner slot
+and no status dashboard.  The gap is pre-existing on master (master also
+calls `_ensure_qa_main_pane` only from `_run_qa_sync`); it becomes
+reachable here because a run orphaned by an isolated session is resumed
+by another clone.
+
+`_execute_and_finalize` gains an `ensure_window` flag that only
+`_resume_qa_sync` sets.  It calls `_recreate_qa_window_if_missing`, which
+returns early when the window exists — an ordinary TUI restart keeps the
+window, and splitting the dashboard into it again would leave two — and
+otherwise creates it with `_ensure_qa_main_pane` (the existing
+window-killed path, whose `echo … exec sleep infinity` main pane anchors
+the status-pane split and the `qa-planner` registration) and splits the
+status dashboard beside it with `_add_status_pane`.  A failure is logged
+and never fatal: the verdict polling below still drives the run.
+
+Tests: `tests/test_qa_execution_only_window.py::TestResumedRunWindow`
+(a missing window is recreated with the dashboard; an existing one is
+left alone) and `tests/test_qa_resume.py::test_resume_asks_for_its_main_window_back`
+(only the resume path asks for it).  A live smoke on tmux 3.2a (a real
+private server, the function called twice) created the window with the
+main pane plus the dashboard and left the second call a no-op.
+
 Validation: the 24 PR-affected test files pass twice in one HOME (1541
 each); full suite 6156 passed / 1 skipped, 443 s (log
 `/pm-captures/review-879b-i2/full-suite-final.log`; an earlier run in
 that directory failed the twelve `test_markdown_render` tests because
 this container lacks the optional `markdown` package — with it installed
 they pass).
+
+## Review iteration (2026-11-04, review-loop 6cda i1)
+
+First review pass over the head after the post-merge QA sequence (S75-S80)
+and the S78 fix (`aab9d4e2`); no requirement changes.  The merge's
+conflict resolutions were re-checked and are clean (`cli/qa.py`,
+`regression_prompts.py`, `prompt_gen.py`, `qa_loop_ui.py`, `pane_ops.py`,
+`pr_view.py`).  Four gaps, all in code this PR owns:
+
+1. **A failed dashboard split was permanent (the S78 fix).**
+   `_recreate_qa_window_if_missing` returned as soon as the window
+   existed, so the dashboard was only ever split on the resume that
+   recreated the window.  A split that failed there (tmux "no space for
+   new pane" in a tiny terminal) was never retried on a later resume.
+   The guard is now per *pane*: `_qa_status_pane_live` recognises the
+   dashboard by the command it runs (`qa_status.py`) in that QA window
+   (new `tmux.window_pane_start_commands`), so a live dashboard is left
+   alone and a missing one is split again.  The command, not the registry
+   entry, is the evidence: a split whose registration failed is still a
+   dashboard, and the check is per window because another PR's QA run in
+   the same session has its own dashboard in its own window.
+
+2. **`_respawn_tui` reported success after a failure.**  It swallowed the
+   exception and returned the window anyway.  The after-kill-pane hook
+   (`_respawn_unlisted_tui` → `_process_registry_pane_closed`) treats a
+   returned window as "a TUI is running" and stops looking, and
+   `pm session` selects it for its client — a window that may not exist.
+   A failed split/create now returns `None`, which both callers already
+   handle (`if actual_window:` / `if respawned_window:`).
+
+3. **`create_window` made the new window current despite `select=False`.**
+   `new-window` without `-d` switches every client attached to the target
+   session, so `_respawn_tui(..., select=False)` — `pm session`'s attach —
+   moved a client attached to the base session to the respawned TUI
+   window: the class of disruption QA S45 removed.  `-d` keeps the
+   session's current window; the `select=True` path still selects the
+   window for the caller's own client explicitly.
+
+4. **`pm session kill` printed "Killed" when the kill had failed.**
+   `kill_session` ignored tmux's return code, and the teardown went on to
+   clean up the session's containers/proxies and unlink its socket even
+   when a grouped member or the base survived — breaking the survivor.
+   `kill_session` now reports tmux's result; the kill path treats a
+   failure as real only when the session still exists (tmux also fails
+   for one that vanished concurrently) and then reports it, exits 1 and
+   leaves the cleanup undone.
+
+Considered and not changed: `_find_tui_pane`'s registry scan can return a
+recorded pane id without re-checking which session it belongs to, but
+every caller that *drives* a pane uses `_find_live_tui_pane`, which does;
+and an implicit `owned_only` lookup still does not probe an absent socket
+path (probing an absent path makes tmux start a server there, so that is
+the rule, not a miss).
+
+Tests: `TestResumedRunWindow` (existing window with a dashboard left
+alone; without one, the dashboard is split), `TestRespawnTuiOutcome`
+(failure returns `None`), `TestCreateWindow::test_does_not_make_the_window_current`,
+`TestKillSession::test_reports_whether_tmux_killed_it`, and
+`test_a_failed_kill_is_not_reported_as_a_teardown` (a surviving grouped
+member: exit 1, no cleanup, socket kept).
+
+Live smoke on tmux 3.2a: the recreated window's dashboard is detected by
+its command, a second call adds no second dashboard, another window
+without one is not mistaken for it, and `create_window` leaves the
+session's current window unchanged.
+
+Validation: the seven PR-affected test files pass (707); full suite
+6164 passed / 1 skipped, 437.6 s (log
+`/pm-captures/review-6cda-i1/full-suite-final.log`; 6159 before the
+fixes, the five new tests accounting for the difference).

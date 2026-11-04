@@ -3379,10 +3379,11 @@ class TestSessionKillServerSelection:
             session_mod.tmux_mod, "sessions_in_group",
             lambda name, socket_path=None: (
                 list(members) if members is not None else [f"{name}~1", name]))
-        monkeypatch.setattr(
-            session_mod.tmux_mod, "kill_session",
-            lambda name, socket_path=None, exact=False:
-            killed.append((name, socket_path)))
+        def _kill(name, socket_path=None, exact=False):
+            killed.append((name, socket_path))
+            return True
+
+        monkeypatch.setattr(session_mod.tmux_mod, "kill_session", _kill)
         monkeypatch.setattr(session_mod.pane_layout, "set_force_mobile",
                             lambda *a, **k: None)
         monkeypatch.setattr(container, "cleanup_session_containers",
@@ -3579,7 +3580,7 @@ class TestSessionKillServerSelection:
         monkeypatch.setattr(
             session_mod.tmux_mod, "kill_session",
             lambda name, socket_path=None, exact=False:
-            killed.append((name, socket_path)))
+            killed.append((name, socket_path)) or True)
 
         result = CliRunner().invoke(session_mod.session, ["kill"])
 
@@ -3625,7 +3626,7 @@ class TestSessionKillServerSelection:
         monkeypatch.setattr(
             session_mod.tmux_mod, "kill_session",
             lambda name, socket_path=None, exact=False:
-            killed.append((name, socket_path, exact)))
+            killed.append((name, socket_path, exact)) or True)
         monkeypatch.setattr(session_mod.pane_layout, "set_force_mobile",
                             lambda *a, **k: None)
         monkeypatch.setattr(container, "cleanup_session_containers",
@@ -3638,6 +3639,61 @@ class TestSessionKillServerSelection:
         assert killed == [("myview", sock, True),
                           ("pm-repo-abc~1", sock, True),
                           ("pm-repo-abc", sock, True)]
+
+    def test_a_failed_kill_is_not_reported_as_a_teardown(self, monkeypatch,
+                                                         tmp_path):
+        """A surviving member must not get the teardown of a dead session.
+
+        ``kill-session`` fails both for a session that vanished and for a
+        real failure; only the second leaves something running.  Saying
+        "Killed" then would also run the container/proxy cleanup and
+        unlink the live server's socket out from under the survivor.
+        """
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+        from pm_core import container, push_proxy
+
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: True)
+        # A live server: its socket file is left alone (not under test).
+        monkeypatch.setattr(session_mod.tmux_mod, "server_alive",
+                            lambda sock: True)
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: "pm-repo-abc")
+        monkeypatch.setattr(session_mod, "_known_ambient_session",
+                            lambda: None)
+        sock_path = tmp_path / "pm-repo-abc"
+        sock_path.write_text("")
+        sock = str(sock_path)
+        monkeypatch.setattr(session_mod.tmux_mod,
+                            "find_exact_session_server",
+                            lambda name, owned_only=False: (sock, True))
+        monkeypatch.setattr(
+            session_mod.tmux_mod, "sessions_in_group",
+            lambda name, socket_path=None: [f"{name}~1", name])
+        # The grouped member's kill fails; the session is still there.
+        monkeypatch.setattr(
+            session_mod.tmux_mod, "kill_session",
+            lambda name, socket_path=None, exact=False:
+            name != "pm-repo-abc~1")
+        monkeypatch.setattr(
+            session_mod.tmux_mod, "session_exists",
+            lambda name, socket_path=None, use_env=True: True)
+        cleaned: list[str] = []
+        monkeypatch.setattr(container, "cleanup_session_containers",
+                            lambda tag: cleaned.append(tag) or 0)
+        monkeypatch.setattr(push_proxy, "stop_session_proxies",
+                            lambda tag: cleaned.append(tag) or 0)
+        monkeypatch.setattr(session_mod.pane_layout, "set_force_mobile",
+                            lambda *a, **k: None)
+
+        result = CliRunner().invoke(session_mod.session, ["kill"])
+
+        assert result.exit_code == 1
+        assert "Failed to kill session 'pm-repo-abc'" in result.output
+        assert "pm-repo-abc~1" in result.output
+        assert cleaned == []          # the survivor keeps its containers
+        assert sock_path.exists()     # and its live server's socket
 
     def test_missing_session_unlinks_stale_socket(self, monkeypatch, tmp_path):
         stale = tmp_path / "pm-repo-abc"

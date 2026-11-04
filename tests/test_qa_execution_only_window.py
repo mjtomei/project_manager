@@ -123,15 +123,36 @@ class TestResumedRunWindow:
 
     @patch("pm_core.qa_loop._add_status_pane")
     @patch("pm_core.qa_loop._ensure_qa_main_pane")
+    @patch("pm_core.tmux.window_pane_start_commands",
+           return_value=["python3 /workspace/pm_core/qa_status.py "
+                         "/qa/status.json pm-test"])
     @patch("pm_core.tmux.find_window_by_name",
            return_value={"id": "@5", "index": "3", "name": "qa-pr-001"})
-    def test_existing_window_is_left_alone(self, mock_find, mock_main,
-                                           mock_status):
-        """An ordinary TUI restart keeps the window; a second dashboard
-        split into it would be wrong."""
+    def test_existing_window_with_a_dashboard_is_left_alone(
+            self, mock_find, mock_commands, mock_main, mock_status):
+        """An ordinary TUI restart keeps the window and its dashboard; a
+        second dashboard split into it would be wrong."""
         qa_loop._recreate_qa_window_if_missing(
             "pm-test", "qa-pr-001", "/wd", "/qa/status.json")
 
         mock_main.assert_not_called()
         mock_status.assert_not_called()
+
+    @patch("pm_core.qa_loop._add_status_pane")
+    @patch("pm_core.qa_loop._ensure_qa_main_pane", return_value="%9")
+    @patch("pm_core.tmux.window_pane_start_commands",
+           return_value=["echo 'QA execution'; exec sleep infinity",
+                         "claude --session-id x"])
+    @patch("pm_core.tmux.find_window_by_name",
+           return_value={"id": "@5", "index": "3", "name": "qa-pr-001"})
+    def test_existing_window_without_a_dashboard_gets_one(
+            self, mock_find, mock_commands, mock_main, mock_status):
+        """A failed dashboard split must not be permanent: the window
+        survived, but its dashboard did not, so the next resume adds one."""
+        qa_loop._recreate_qa_window_if_missing(
+            "pm-test", "qa-pr-001", "/wd", "/qa/status.json")
+
+        mock_main.assert_called_once_with("pm-test", "qa-pr-001", "/wd")
+        mock_status.assert_called_once_with(
+            "pm-test", "%9", "/qa/status.json")
 
