@@ -543,18 +543,81 @@ def launch_watcher_review(app) -> None:
     launch_pane(app, cmd, "watcher-review", fresh=fresh, env=env)
 
 
+async def _launch_regression_item(app, qa_id: str,
+                                  target_window: str | None,
+                                  cmd: str | None = None) -> None:
+    """Run regression test *qa_id* in a pane, unless it cannot launch.
+
+    Same launcher as the CLI and ``pm qa launch``: ``pm qa regression`` runs
+    the test in an isolated QA workdir (a QA container when container mode
+    is enabled) against a disposable test project, never this TUI's session.
+    What would stop it is logged here instead of flashing by in a pane that
+    exits at once.  The check runs off the event loop: with container mode
+    enabled it asks the runtime (``<runtime> info``, up to 10 s).
+
+    *cmd* replaces the default ``pm qa regression <id> --file-prs`` command
+    (the command bar runs the options the user typed).
+    """
+    import asyncio
+    from pm_core.regression_prompts import (regression_launch_cmd,
+                                            regression_launch_problem)
+    problem = await asyncio.to_thread(regression_launch_problem,
+                                      app._root, qa_id)
+    if problem:
+        app.log_message(problem.splitlines()[0])
+        _log.warning("regression launch refused: %s", problem)
+        return
+    launch_pane(app, cmd or regression_launch_cmd(app._root, qa_id),
+                "qa-item", target_window=target_window)
+
+
+def launch_regression_command(app, args: list[str]) -> None:
+    """Run ``qa regression <args>`` typed in the command bar in a pane.
+
+    The command runs the test's interactive session in the foreground, so it
+    needs a pane: the command bar's captured subprocess would block the TUI
+    until its timeout, then kill the session before its container cleanup
+    trap runs.  Same pre-launch check as the QA pane's Enter.
+    """
+    import click
+    from pm_core.cli.qa import qa_regression
+    from pm_core.regression_prompts import regression_command
+
+    if not app._root:
+        app.log_message("No project root")
+        return
+    # Parsed by the command itself, so the test id is the one
+    # `pm qa regression` will run, and a malformed command (no test id, an
+    # unknown option, an option missing its value) is reported here instead
+    # of in a pane that exits at once.  Without a help option: `--help`
+    # would print to the TUI's own stdout.
+    try:
+        ctx = qa_regression.make_context("qa regression", list(args),
+                                         help_option_names=[])
+    except click.UsageError as exc:
+        app.log_message(
+            f"qa regression: {exc.format_message()} Usage: qa regression "
+            "<test-id> [--file-prs] [--branch <b>]")
+        return
+    app.run_worker(_launch_regression_item(
+        app, ctx.params["test_id"], None,
+        cmd=regression_command(app._root, list(args))), exclusive=False)
+
+
 def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
-    """Launch Claude with a QA instruction prompt.
+    """Launch Claude with a QA instruction prompt, or run a regression test.
 
     *item_id* has the form ``category:id`` (e.g. ``instructions:login-flow``
-    or ``regression:pane-layout``).
+    or ``regression:auth-flow``).  A regression item runs
+    ``pm qa regression <id> --file-prs`` in the pane (an isolated run, see
+    :mod:`pm_core.regression_prompts`).
 
     *target_window* optionally directs the launched pane into a specific
     tmux window. When omitted (e.g. the human Enter-key path from the QA
     pane), the pane opens in the TUI's current window.
     """
     from pm_core import qa_instructions
-    from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
+    from pm_core.claude_launcher import build_claude_shell_cmd
 
     if not app._root:
         app.log_message("No project root")
@@ -566,6 +629,11 @@ def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
                         f"to see the library")
         return
     category, qa_id = parts
+
+    if category == "regression":
+        app.run_worker(_launch_regression_item(app, qa_id, target_window),
+                       exclusive=False)
+        return
 
     item = qa_instructions.get_instruction(app._root, qa_id, category=category)
     if not item:
@@ -579,17 +647,7 @@ def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
     body = item.get("body", "")
     title = item.get("title", qa_id)
 
-    if category == "regression":
-        from pm_core.regression_prompts import build_regression_test_prompt
-        full_prompt = build_regression_test_prompt(
-            session=sess,
-            pane_id=pane_id or None,
-            title=title,
-            body=body,
-            file_findings=True,
-        )
-    else:
-        full_prompt = f"""\
+    full_prompt = f"""\
 ## Session Context
 
 You are running a QA instruction against tmux session: {sess}{pane_line}

@@ -617,6 +617,18 @@ def test_tui_keys_matches_the_shared_table():
     for token in ("pr qa fresh", "pr qa loop", "z t", "zz t", "pr merge",
                   "--fresh", "--loop"):
         assert token in out
+    # Master's #136/#284 surface is part of the command bar too.  These
+    # arrived with the base merge and were missing from the shared table and
+    # `pm tui keys` until the merge reconciliation added them (the parity
+    # test used a hand list, so nothing caught it).
+    for token in ("pr select <query>", "plan select <query>",
+                  "qa regression <test-id>", "] / [ cycle matches"):
+        assert token in out, token
+    assert "] / [            Cycle fuzzy match results" in out
+    # ... and the `?` screen renders the same rows from the shared table.
+    rows = " ".join(command_surface.command_bar_rows_textual())
+    for token in ("pr select", "plan select", "qa regression"):
+        assert token in rows, token
 
 
 def test_tui_keys_lists_every_binding_the_help_screen_shows():

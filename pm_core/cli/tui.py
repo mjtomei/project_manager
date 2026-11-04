@@ -274,6 +274,7 @@ Navigation:
   Up/Down, j/k     Navigate PR list
   Left/Right, h/l  Navigate tree columns
   J/K              Jump to next/prev plan
+  ] / [            Cycle fuzzy match results (pr select / plan select)
   Enter            Edit selected PR (plans view: view plan file;
                    QA view: run item)
   x                Hide/show plan group

@@ -20,9 +20,11 @@ _log = configure_logger("pm.tui")
 # a while with several targets.
 _STARTUP_QUEUE_MAX_AGE = 60
 
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Vertical
+from textual.css.query import NoMatches
 from textual.timer import Timer
 
 from pm_core import store, guide, tui_pidfile
@@ -254,7 +256,24 @@ class ProjectManagerApp(App):
         Binding("V", "review_spec", "Review Spec", show=False),
         Binding("Y", "cleanup_pr", "Cleanup", show=True),
         Binding("o", "model_settings", "Models", show=True),
+        Binding("right_square_bracket", "fuzzy_next", "Next Match", show=False),
+        Binding("left_square_bracket", "fuzzy_prev", "Prev Match", show=False),
     ]
+
+    def _command_bar(self) -> CommandBar | None:
+        """The command bar, or ``None`` when it isn't reachable.
+
+        Textual 2.0.1 (the declared floor) exposes only the active
+        screen's DOM to ``App.query_one``, so while a modal screen is
+        pushed the default screen's command bar is not found and the
+        query raises ``NoMatches``.  Treat that as "no command bar": the
+        bar is hidden under the modal, so it can't have focus and must
+        not crash app-level key handling or a background reload.
+        """
+        try:
+            return self.query_one("#command-bar", CommandBar)
+        except NoMatches:
+            return None
 
     def on_key(self, event) -> None:
         """Handle z and w modifier prefix keys.
@@ -265,8 +284,8 @@ class ProjectManagerApp(App):
         Also buffers keystrokes when / was pressed but the command bar
         hasn't received focus yet (race condition fix).
         """
-        cmd_bar = self.query_one("#command-bar", CommandBar)
-        if cmd_bar.has_focus:
+        cmd_bar = self._command_bar()
+        if cmd_bar is not None and cmd_bar.has_focus:
             return
         # When a modal/screen is on top of the default screen, let it handle
         # its own keys — App-level prefix keys (y/w/z) must not swallow them.
@@ -379,9 +398,9 @@ class ProjectManagerApp(App):
                        "toggle_plans", "toggle_qa", "start_qa_on_pr", "hide_plan", "move_to_plan", "toggle_merged",
                        "cycle_filter", "cycle_sort", "toggle_auto_start", "auto_sequence_pr", "focus_watcher",
                        "review_spec", "cleanup_pr", "show_auto_runs",
-                       "model_settings"):
-            cmd_bar = self.query_one("#command-bar", CommandBar)
-            if cmd_bar.has_focus or self._command_pending:
+                       "model_settings", "fuzzy_next", "fuzzy_prev"):
+            cmd_bar = self._command_bar()
+            if (cmd_bar is not None and cmd_bar.has_focus) or self._command_pending:
                 _log.debug("check_action: blocked %s (command bar focused/pending)", action)
                 return False
         # Block PR actions when in guide mode or plans view (can't see the PR tree)
@@ -495,6 +514,16 @@ class ProjectManagerApp(App):
         # Command-input race condition fix: buffer keystrokes between / and focus
         self._command_pending: bool = False
         self._command_buffer: list[str] = []
+        # Terminal keys that arrived while a command-bar Enter was still being
+        # handled; replayed in order afterwards (see on_event).  None = not
+        # holding.
+        self._held_keys: list | None = None
+        self._held_keys_timer: Timer | None = None
+        # Fuzzy select state: ranked result list and current index for ]/[
+        # cycling (local pm ids: PR ids for "pr", plan ids for "plan").
+        self._fuzzy_results: list[str] = []
+        self._fuzzy_index: int = 0
+        self._fuzzy_kind: str = ""  # "pr" or "plan"
 
     def _consume_z(self) -> int:
         """Atomically read and clear the z modifier count.
@@ -902,8 +931,9 @@ class ProjectManagerApp(App):
     def _command_bar_in_use(self) -> bool:
         """True while the user is typing a command (or has pressed ``/``
         and the command bar is about to take focus)."""
-        cmd_bar = self.query_one("#command-bar", CommandBar)
-        return bool(cmd_bar.has_focus or self._command_pending)
+        cmd_bar = self._command_bar()
+        return bool((cmd_bar is not None and cmd_bar.has_focus)
+                    or self._command_pending)
 
     def _show_normal_view(self) -> None:
         """Show the normal tech tree view."""
@@ -1225,7 +1255,66 @@ class ProjectManagerApp(App):
         pr_view.handle_pr_selected(self, message.pr_id)
 
     def on_command_submitted(self, message: CommandSubmitted) -> None:
-        pr_view.handle_command_submitted(self, message.command)
+        try:
+            if message.command:
+                pr_view.handle_command_submitted(self, message.command)
+        finally:
+            # Queued behind the command's own ``focus()`` (also call_later),
+            # so held keys go to whatever the command left focused.
+            self.call_later(self._release_held_keys)
+
+    # --- Key order behind a command-bar Enter ---
+
+    # Fallback: release held keys even if no CommandSubmitted arrives.
+    HELD_KEYS_TIMEOUT = 3.0
+
+    async def on_event(self, event: events.Event) -> None:
+        """Keep terminal keys typed after a command-bar Enter behind it.
+
+        Textual submits an Input only once the Enter key has bubbled back up
+        to the App (Input's ``enter`` binding), and the command then moves
+        focus with ``call_later``.  Under a stream of reloads (an outside
+        ``pm pr edit`` loop) that round trip can outlast the gap to the
+        user's next key, which the App meanwhile forwards to the still
+        focused bar: ``/pr select spec`` Enter ``]`` submitted
+        ``pr select spec]`` (QA pr-6aa74c6 s7).  Keys arriving from the
+        terminal while such an Enter is in flight are held here and
+        replayed, in order, after the command has been handled.
+        """
+        if isinstance(event, events.Key) and not event.is_forwarded:
+            if self._held_keys is not None:
+                self._held_keys.append(event)
+                return
+            await self._dispatch_terminal_key(event)
+            return
+        await App.on_event(self, event)
+
+    async def _dispatch_terminal_key(self, event: events.Key) -> None:
+        if event.key == "enter" and self._command_bar_focused():
+            self._held_keys = []
+            self._held_keys_timer = self.set_timer(
+                self.HELD_KEYS_TIMEOUT, self._release_held_keys)
+        await App.on_event(self, event)
+
+    async def _release_held_keys(self) -> None:
+        """Replay keys held behind a command-bar Enter (see on_event)."""
+        if self._held_keys_timer is not None:
+            self._held_keys_timer.stop()
+            self._held_keys_timer = None
+        held, self._held_keys = self._held_keys or [], None
+        while held:
+            await self._dispatch_terminal_key(held.pop(0))
+            if self._held_keys is not None:
+                # A replayed Enter went to the command bar again: the rest
+                # of the keys wait behind that one.
+                self._held_keys = held + self._held_keys
+                return
+
+    def _command_bar_focused(self) -> bool:
+        try:
+            return self.focused is self.query_one("#command-bar", CommandBar)
+        except Exception:
+            return False
 
     # --- PR action delegates (see tui/pr_view.py) ---
 
@@ -1465,6 +1554,16 @@ class ProjectManagerApp(App):
                              "spec-review", fresh=True)
         self.log_message(f"Reviewing {phase} spec for {pr_id}")
 
+    def action_fuzzy_next(self) -> None:
+        """Cycle forward through fuzzy match results (] key)."""
+        from pm_core.tui import fuzzy_select_cmd
+        fuzzy_select_cmd.cycle_fuzzy(self, direction=1)
+
+    def action_fuzzy_prev(self) -> None:
+        """Cycle backward through fuzzy match results ([ key)."""
+        from pm_core.tui import fuzzy_select_cmd
+        fuzzy_select_cmd.cycle_fuzzy(self, direction=-1)
+
     def action_quit(self) -> None:
         pane_ops.quit_app(self)
 
@@ -1642,7 +1741,9 @@ class ProjectManagerApp(App):
         if typing and content.strip():
             # focus() is deferred (call_later), so this lands after any
             # tree.focus() the dispatched commands queued.
-            self.query_one("#command-bar", CommandBar).focus()
+            cmd_bar = self._command_bar()
+            if cmd_bar is not None:
+                cmd_bar.focus()
 
     def on_unmount(self) -> None:
         """Clean up the reload pidfile and command queue on shutdown."""
@@ -1698,21 +1799,26 @@ class ProjectManagerApp(App):
         _log.debug("action: focus_command")
         self._command_pending = True
         self._command_buffer.clear()
-        cmd_bar = self.query_one("#command-bar", CommandBar)
-        cmd_bar.focus()
+        cmd_bar = self._command_bar()
+        if cmd_bar is not None:
+            cmd_bar.focus()
 
     def action_unfocus_command(self) -> None:
         self._command_pending = False
         self._command_buffer.clear()
-        cmd_bar = self.query_one("#command-bar", CommandBar)
-        if cmd_bar.has_focus:
+        cmd_bar = self._command_bar()
+        if cmd_bar is not None and cmd_bar.has_focus:
             cmd_bar.value = ""
-            if self._plans_visible:
-                self.query_one("#plans-pane", PlansPane).focus()
-            elif self._qa_visible:
-                self.query_one("#qa-pane", QAPane).focus()
-            else:
-                self.query_one("#tech-tree", TechTree).focus()
+            self._focus_current_view()
+
+    def _focus_current_view(self) -> None:
+        """Focus the visible view's main widget (plans pane, QA pane or
+        tree), e.g. when a command-bar command hands focus back.
+
+        Delegates to :func:`pm_core.tui.pr_view._refocus_active_view` so the
+        command bar and the Esc handler cannot drift apart.
+        """
+        pr_view._refocus_active_view(self)
 
     def action_show_help(self) -> None:
         _log.debug("action: show_help")

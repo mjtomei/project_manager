@@ -58,7 +58,7 @@ def model_choices(data: dict) -> list[str]:
 
 
 def next_effort(current: str | None) -> str | None:
-    """The effort after *current* in (none, low, medium, high)."""
+    """The effort after *current* in (none, low, medium, high, xhigh, max)."""
     try:
         i = _EFFORT_CYCLE.index(current)
     except ValueError:
@@ -210,7 +210,10 @@ class ModelSettingsScreen(ModalScreen):
             pointer = "▸ " if self._selected == i + offset else "  "
             lines.append(pointer + escape(line))
         for line in table[1 + len(rows):]:
-            lines.append("[red]" + escape(line) + "[/]")
+            # ``!`` lines are problems/notes (red, as before); the effort
+            # legend is informational (dim), not an error.
+            style = "[red]" if line.startswith("!") else "[dim]"
+            lines.append(style + escape(line) + "[/]")
         if self._project_view:
             if self._provider_cache is None:
                 self._provider_cache = self._provider_lines()
@@ -220,7 +223,7 @@ class ModelSettingsScreen(ModalScreen):
 
     def _provider_lines(self) -> list[str]:
         from pm_core import router_route
-        from pm_core.model_config import ModelResolution
+        from pm_core.model_config import ModelResolution, declared_efforts_text
         from pm_core.providers import (
             get_default_provider, invalid_provider_entries, list_providers,
             providers_file_problem,
@@ -235,6 +238,9 @@ class ModelSettingsScreen(ModalScreen):
                 desc += f"  model={p.model}"
             if p.effort:
                 desc += f"  effort={p.effort}"
+            if p.supported_efforts is not None:
+                desc += ("  supported_efforts="
+                         + declared_efforts_text(p))
             if p.launcher:
                 desc += f"  command={p.launcher}"
             if p.type == "router":

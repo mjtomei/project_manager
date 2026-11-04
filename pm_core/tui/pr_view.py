@@ -54,7 +54,16 @@ def handle_pr_selected(app, pr_id: str) -> None:
     _log.debug("PR selected: %s", pr_id)
     app.log_message(f"Selected: {pr_id}")
     app.call_after_refresh(app._capture_frame, f"pr_selected:{pr_id}")
+    persist_active_pr(app, pr_id)
 
+
+def persist_active_pr(app, pr_id: str) -> None:
+    """Record *pr_id* as ``project.active_pr`` (cursor selection).
+
+    Shared by keyboard navigation and programmatic selection (fuzzy
+    ``pr select`` / ``plan select`` and match cycling) so every way of
+    moving the cursor persists it the same way.
+    """
     # Persist selection so TUI restarts on this PR.  Update in-memory state
     # immediately (source of truth for the running TUI), then enqueue the
     # disk write so rapid navigation doesn't block the event loop on a full
@@ -660,15 +669,12 @@ def _refocus_active_view(app) -> None:
     ``ProjectManagerApp.action_unfocus_command``, which already handles all
     three views.
     """
-    from pm_core.tui.tech_tree import TechTree
-    from pm_core.tui.plans_pane import PlansPane
     if app._plans_visible:
-        app.query_one("#plans-pane", PlansPane).focus()
+        app.query_one("#plans-pane").focus()
     elif getattr(app, "_qa_visible", False):
-        from pm_core.tui.qa_pane import QAPane
-        app.query_one("#qa-pane", QAPane).focus()
+        app.query_one("#qa-pane").focus()
     else:
-        app.query_one("#tech-tree", TechTree).focus()
+        app.query_one("#tech-tree").focus()
 
 
 def handle_command_submitted(app, cmd: str) -> None:
@@ -723,6 +729,17 @@ def handle_command_submitted(app, cmd: str) -> None:
             app._inflight_pr_action = action_key
             break
 
+    # Fuzzy ``pr select`` / ``plan select``: handled in-process (cursor move
+    # + active_pr), parsed before the generic shlex split so a query such as
+    # ``user's`` cannot raise on an unbalanced quote.
+    from pm_core.tui import fuzzy_select_cmd
+    select_cmd = fuzzy_select_cmd.parse_select_command(cmd)
+    if select_cmd is not None:
+        kind, query = select_cmd
+        fuzzy_select_cmd.handle_select_command(app, kind, query)
+        _refocus_active_view(app)
+        return
+
     # Parse the command.  An unmatched quote is an ordinary typo — a note
     # containing an apostrophe (`pr note add pr-001 don't forget`) is the
     # common case — and ``shlex`` raises on it.  Letting that escape the
@@ -739,7 +756,6 @@ def handle_command_submitted(app, cmd: str) -> None:
             f"(e.g. pr note add pr-001 'text')")
         _refocus_active_view(app)
         return
-
     # Handle review loop commands
     # Accepts: review-loop [start] [PR_ID]
     # No subcommand or 'start' → always start a fresh loop, superseding
@@ -898,6 +914,8 @@ def handle_command_submitted(app, cmd: str) -> None:
     if len(parts) >= 3 and parts[0] == "plan" and parts[1] == "add":
         pane_ops.launch_pane(app, f"pm {cmd}", "plan-add")
         app._load_state()
+    elif len(parts) >= 2 and parts[0] == "qa" and parts[1] == "regression":
+        pane_ops.launch_regression_command(app, parts[2:])
     else:
         # Detect if this should run async (PR commands are long-running)
         working_message = None
