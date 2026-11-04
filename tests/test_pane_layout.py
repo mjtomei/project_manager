@@ -886,6 +886,37 @@ class TestRespawnTuiOutcome:
                    side_effect=RuntimeError("tmux gone")):
             assert pane_layout._respawn_tui("pm-x", "@1") is None
 
+    def test_a_pane_created_before_a_registry_failure_is_reported(self):
+        """A TUI exists once the split succeeded, whatever the bookkeeping.
+
+        ``locked_read_modify_write`` can time out on a stuck lock after
+        the pane was created.  The TUI registers itself once mounted, so
+        reporting ``None`` there would hide a running TUI from both
+        callers: the hook would not rebalance its window and ``pm session``
+        would not select it for the attaching client.
+        """
+        from pm_core import pane_layout
+
+        with patch("pm_core.tmux.get_pane_indices",
+                   return_value=[("%1", 80, 24)]), \
+                patch("pm_core.tmux.split_pane", return_value="%9"), \
+                patch("pm_core.pane_registry.locked_read_modify_write",
+                      side_effect=OSError("lock wait timed out")):
+            assert pane_layout._respawn_tui("pm-x", "@1") == "@1"
+
+    def test_a_new_window_is_reported_when_only_its_registration_fails(self):
+        """The created window is the one callers must select and rebalance."""
+        from pm_core import pane_layout
+
+        with patch("pm_core.tmux.get_pane_indices", return_value=[]), \
+                patch("pm_core.tmux.create_window",
+                      return_value=("%9", "@2")), \
+                patch("pm_core.tmux.set_shared_window_size"), \
+                patch("pm_core.tmux.select_window"), \
+                patch("pm_core.pane_registry.locked_read_modify_write",
+                      side_effect=OSError("lock wait timed out")):
+            assert pane_layout._respawn_tui("pm-x", "@1") == "@2"
+
 
 class TestNonPmSessionIgnored:
     """The global hooks must ignore a plain session on the same server (QA S58).

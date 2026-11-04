@@ -5096,3 +5096,43 @@ Validation: the 24 PR-affected test files pass twice in one HOME (1539
 each); full suite 6167 passed / 1 skipped, 439.2 s (log
 `/pm-captures/review-6cda-i2/full-suite-final.log`; 6164 before this
 iteration, the three new tests accounting for the difference).
+
+## Review iteration (2026-11-04, review-loop 6cda i3)
+
+Verification pass over the head after the 6cda i2 cleanups (`6bfdee3e`);
+no requirement changes.  i2's four items hold: the dead import is gone,
+`TestWindowPaneStartCommands` covers the window-scoped query / dead-pane
+filter / unqueryable window, the per-window rule is pinned in
+`TestResumedRunWindow`, and the vanished-mid-kill teardown is covered.
+
+One refinement in i1's `_respawn_tui` fix:
+
+1. **`None` conflated "no pane" with "pane created, bookkeeping failed".**
+   i1 returned `None` for any exception in the try block, but that block
+   also contains the registry write, which can raise
+   (`locked_read_modify_write` times out on a stuck lock) *after* the
+   split/create succeeded.  Callers act on "a returned window means a TUI
+   is running": the hook rebalances that window and `pm session` selects
+   it for the attaching client, and the TUI registers itself once
+   mounted.  Hiding it there left the attaching client on the old window
+   and skipped the rebalance.  `_respawn_tui` now tracks whether the pane
+   was created: a failed split/create still returns `None`, while a later
+   bookkeeping failure is logged and the window the TUI is in is
+   returned.
+
+Tests: `TestRespawnTuiOutcome`'s
+`test_a_pane_created_before_a_registry_failure_is_reported` and
+`test_a_new_window_is_reported_when_only_its_registration_fails`; both
+fail on the i2 head (returning `None`) and pass here.
+
+Also re-checked, no change needed: `split-window` does not switch the
+session's current window (verified on tmux 3.2a; only `new-window` did,
+which i1's `-d` fixes), a fresh run cannot duplicate the dashboard
+because `_cleanup_stale_scenario_windows(include_main=True)` kills the
+run's main window before Phase 2, and pyflakes reports no new dead
+imports versus master (the branch in fact removes one,
+`_iter_all_panes`).
+
+Validation: the 24 PR-affected test files pass twice in one HOME (1541
+each); full suite 6169 passed / 1 skipped, 445.6 s (log
+`/pm-captures/review-6cda-i3/full-suite-final.log`).

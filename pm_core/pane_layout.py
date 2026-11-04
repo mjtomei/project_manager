@@ -653,9 +653,12 @@ def _respawn_tui(session: str, window: str, *, select: bool = True) -> str | Non
 
     Returns the window ID the TUI was actually created in (may differ
     from *window* when a new window had to be created), or ``None`` when
-    the respawn failed.  Callers treat a returned window as "a TUI is
-    running" (the hook stops looking for one, ``pm session`` selects it
-    for its client), so a failure must not be reported as success.
+    no pane could be created.  Callers treat a returned window as "a TUI
+    is running" (the hook stops looking for one, ``pm session`` selects it
+    for its client), so a failed split/create must not be reported as
+    success.  A failure *after* the pane was created (the registry write
+    can time out on a stuck lock) is not that: the TUI is running, and it
+    records itself once mounted, so its window is still returned.
 
     The TUI starts in the directory the session was created in (the
     project's repo directory), not in tmux's default — the cwd of the
@@ -672,6 +675,11 @@ def _respawn_tui(session: str, window: str, *, select: bool = True) -> str | Non
     from pm_core import tmux as tmux_mod
 
     _logger.info("_respawn_tui: respawning TUI in %s:%s", session, window)
+    # Distinguishes "no pane was created" (the respawn really failed) from
+    # a failure after the pane exists: the registry write can raise
+    # (``locked_read_modify_write`` times out on a stuck lock) while the
+    # TUI it describes is already running.
+    pane_id: str | None = None
     try:
         # Check if the window still exists
         live_panes = tmux_mod.get_pane_indices(session, window)
@@ -719,8 +727,14 @@ def _respawn_tui(session: str, window: str, *, select: bool = True) -> str | Non
         locked_read_modify_write(registry_path(session), _insert_tui)
         _logger.info("_respawn_tui: created pane %s in window %s", pane_id, window)
     except Exception:
-        _logger.exception("_respawn_tui: failed to respawn TUI")
-        return None
+        if pane_id is None:
+            _logger.exception("_respawn_tui: failed to respawn TUI")
+            return None
+        # The pane exists; only the bookkeeping after it failed.  Report
+        # the window like any other respawn — the TUI registers itself
+        # once mounted, and callers act on "a window means a TUI".
+        _logger.exception("_respawn_tui: respawned pane %s but failed to "
+                          "record it in window %s", pane_id, window)
     return window
 
 

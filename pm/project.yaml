@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-04T08:48:36.435323+00:00'
+  updated_at: '2026-11-04T09:16:50.012994+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9533,6 +9533,23 @@ prs:
       session''s current window, with -d it does not.'
     created_at: '2026-11-04T08:48:36Z'
     last_edited: '2026-11-04T08:48:36Z'
+  - id: note-01c971b
+    text: 'Review loop 6cda i3 (no requirement changes; full suite 6169 passed / 1
+      skipped, 445.6 s, log /pm-captures/review-6cda-i3/full-suite-final.log; the
+      24 PR-affected test files pass twice in one HOME, 1541 each). Verification pass
+      over the head after the 6cda i2 cleanups (6bfdee3e); i2''s four items hold.
+      One refinement in i1''s _respawn_tui fix: it returned None for any exception
+      in the try block, including a failure after the pane was created (the registry
+      write can time out on a stuck lock). Callers act on "a returned window means
+      a TUI is running" and the TUI registers itself once mounted, so a created pane''s
+      window is now returned; only a failed split/create yields None. Tests: TestRespawnTuiOutcome
+      covers both branches (split and new window), failing on the i2 head and passing
+      here. Also re-checked, no change: split-window does not switch the session''s
+      current window (only new-window did, fixed by i1''s -d), a fresh run cannot
+      duplicate the dashboard (_cleanup_stale_scenario_windows include_main=True),
+      and pyflakes finds no new dead imports versus master.'
+    created_at: '2026-11-04T09:16:08Z'
+    last_edited: '2026-11-04T09:16:50Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
