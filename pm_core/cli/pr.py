@@ -955,8 +955,12 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             pr_id = ready[0]["id"]
             click.echo(f"Auto-selected {_pr_display_id(ready[0])}: {ready[0].get('title', '???')}")
         elif len(ready) == 0:
-            click.echo("No PRs are ready to start — add one with 'pm pr add <title>' "
-                       "or load a plan with 'pm plan load'.", err=True)
+            # "Add one" alone presumes there is no PR; a pending PR whose
+            # dependencies are unmerged is also "not ready", so name the
+            # graph that shows why before suggesting a new PR.
+            click.echo("No PRs are ready to start — run 'pm pr graph' to see "
+                       "blocking dependencies, or add one with "
+                       "'pm pr add <title>'.", err=True)
             raise SystemExit(1)
         else:
             click.echo("Multiple PRs are ready. Specify one:", err=True)
@@ -2945,7 +2949,8 @@ class _QaCommand(click.Command):
     (pr-001)`` / ``No such option '--fresh'`` before ``pr_qa`` can name the
     command-bar route and the TUI key — the same discoverability miss this
     PR fixes, one surface over.  Keep only the mode token so ``pr_qa``
-    prints its corrective hint; anything with ``--help`` is left to Click.
+    prints its corrective hint; ``--help`` is preserved so Click renders
+    the help, and it wins over either spelling.
 
     The mode may be on either side of the id (``pr qa fresh pr-001`` and
     ``pr qa pr-001 fresh`` are both command-bar spellings) and may use the
@@ -2955,27 +2960,32 @@ class _QaCommand(click.Command):
     """
 
     def parse_args(self, ctx, args):
-        if any(arg in ctx.help_option_names for arg in args):
-            # Help always wins: drop a QA flag so ``pm pr qa --fresh --help``
-            # shows the help (which says the CLI has no such flag) instead of
-            # Click's "No such option".
-            return super().parse_args(
-                ctx, [arg for arg in args
-                      if arg not in command_surface.QA_FLAG_MODES])
-        # A flag spelling (`--fresh` / `--loop`) is a command-bar form: keep
-        # the mode token so ``pr_qa`` prints its corrective hint instead of
-        # Click's "No such option", wherever the flag sits.
+        wants_help = any(arg in ctx.help_option_names for arg in args)
+        help_opts = [arg for arg in args if arg in ctx.help_option_names]
+        # A flag spelling (`--fresh` / `--loop`) is a command-bar form, not a
+        # CLI option.  Keep only the mode token so ``pr_qa`` prints its
+        # corrective hint instead of Click's "No such option"; with --help
+        # present keep the help option too so Click renders the help (which
+        # states outright that the CLI has no such flag).
         flag_modes = [command_surface.QA_FLAG_MODES[arg] for arg in args
                       if arg in command_surface.QA_FLAG_MODES]
         if flag_modes:
-            return super().parse_args(ctx, [flag_modes[0]])
-        # The other command-bar spelling is two plain positionals
-        # (`fresh pr-001` / `pr-001 fresh`): keep only the mode token.
-        if len(args) > 1 and not any(arg.startswith("-") for arg in args):
-            modes = [arg for arg in args
-                     if arg in command_surface.QA_MODIFIER_MODES]
-            if modes:
-                args = [modes[0]]
+            return super().parse_args(
+                ctx, [flag_modes[0], *help_opts] if wants_help
+                else [flag_modes[0]])
+        modes = [arg for arg in args
+                 if arg in command_surface.QA_MODIFIER_MODES]
+        if modes and wants_help:
+            # Help always wins, in either command-bar order:
+            # ``pm pr qa pr-001 fresh --help`` must render help, not Click's
+            # "Got unexpected extra argument (fresh)".
+            return super().parse_args(ctx, [modes[0], *help_opts])
+        if modes and len(args) > 1 and not any(arg.startswith("-")
+                                               for arg in args):
+            # The other command-bar spelling is two plain positionals
+            # (`fresh pr-001` / `pr-001 fresh`): keep only the mode token so
+            # ``pr_qa`` prints its corrective hint.
+            args = [modes[0]]
         return super().parse_args(ctx, args)
 
 
@@ -2992,10 +3002,14 @@ def pr_qa(pr_id: str | None):
             prs = data.get("prs") or []
             candidates = [p for p in prs if p.get("status") in ("in_review", "qa")]
             if len(candidates) == 0:
+                # "Start one" alone is wrong when the PR is already
+                # in_progress (it needs review) or past QA; name the stage
+                # QA follows instead of presuming where the PR sits.
                 click.echo(
-                    "No PRs in in_review or qa status — start one with "
-                    "'pm pr start' (TUI: s), then review with 'pm pr review' "
-                    "(TUI: d). Run 'pm pr list' to see every PR.", err=True)
+                    "No PRs in in_review or qa status — a PR reaches QA after "
+                    "review: start it with 'pm pr start' (TUI: s), then review "
+                    "it with 'pm pr review' (TUI: d). Run 'pm pr list' to see "
+                    "every PR.", err=True)
             else:
                 click.echo("Multiple PRs eligible for QA. Specify one:", err=True)
                 for p in candidates:

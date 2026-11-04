@@ -1028,3 +1028,39 @@ the routed form and `--fresh` so help is complete.
   `test_top_level_help_names_the_tui_driving_commands`.
   Full suite on the final tree: 5869 passed, 1 skipped, 0 failed;
   `tests/test_command_surface.py`: 178 passed.
+
+- Review-loop be37 i2: a non-hermetic test the i1 commit added, two
+  remedies that presumed the wrong starting state, one stale import, and
+  a `--help` tolerance gap in the `pr qa` command class.
+  (a) `test_cli_launchers_name_the_install_remedy` patched
+  `pm_core.claude_launcher.find_claude`, but `pm_core/cli/meta.py` binds
+  `find_claude` at import time (only `container.py` imports it inside the
+  function).  The patch was therefore ineffective for `pm meta`, and in a
+  container where `claude` is on PATH the test actually launched the real
+  binary ("Not logged in · Please run /login") and asserted on its output.
+  It now patches `meta_mod.find_claude` (the module-local name, the
+  convention every other launcher test uses), so it is hermetic.
+  (b) `pm pr start` with no id and no ready PR said only "add one with `pm
+  pr add`", which is wrong when a PR exists but its dependency is unmerged
+  (the same presumed-next-step class as the merge/QA no-candidate messages
+  fixed in i14/i15); it now names `pm pr graph` first.
+  (c) `pm pr qa` with no id and no in_review/qa candidate said "start one
+  with `pm pr start`", wrong for an in_progress PR (start would answer
+  "already in_progress"); it now names the stage QA follows (start *then*
+  review), true for every starting state.
+  (d) `pm_core/tui/fuzzy_select_cmd.py` still imported the escaper from
+  `pm_core.tui.model_screen` (where it lived before the sweep moved it to
+  `command_surface`); it imports the shared helper directly now.
+  (e) `_QaCommand.parse_args`' help branch did not reduce the two-token
+  command-bar form, so `pm pr qa pr-001 fresh --help` (either order) died
+  on Click's "Got unexpected extra argument (fresh)" instead of rendering
+  help — the same tolerance gap the hint branch already closed for the
+  non-help case.  Help now wins in both orders.
+  Tests added: `test_pr_start_no_ready_pr_names_the_graph`,
+  `test_pr_qa_no_candidate_names_the_review_stage`, and
+  `test_pr_qa_two_token_form_with_help_still_renders_help`.
+  Full suite: 5710 passed, 1 skipped, 0 failed excluding
+  `tests/test_push_proxy.py`, whose git/socket tests block under the full
+  run in this container (the file is untouched by this PR and its
+  `TestPushProxyBranchValidation` class passes 39/39 standalone on both
+  this branch and origin/master).

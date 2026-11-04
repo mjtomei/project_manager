@@ -1755,6 +1755,53 @@ def test_pr_qa_valid_pr_prints_the_command_bar_form(tmp_path):
     assert "pm session" in result.output
 
 
+def test_pr_start_no_ready_pr_names_the_graph(tmp_path):
+    """A pending PR blocked by dependencies is also "not ready".
+
+    ``pm pr start`` with no id said only "add one with `pm pr add`", which
+    is wrong when a PR exists but its dependency is unmerged — the same
+    presumed-next-step class the merge/QA no-candidate messages fixed.
+    """
+    from unittest import mock
+
+    from pm_core.cli import pr as pr_mod
+
+    (tmp_path / "project.yaml").write_text(
+        "project:\n  backend: vanilla\n  base_branch: master\n"
+        "prs:\n"
+        "- id: pr-001\n  title: Blocked\n  status: pending\n"
+        "  depends_on: [pr-002]\n"
+        "- id: pr-002\n  title: Running\n  status: in_progress\n")
+    with mock.patch.object(pr_mod, "state_root", return_value=tmp_path):
+        result = CliRunner().invoke(pr_mod.pr, ["start"])
+
+    assert result.exit_code == 1, result.output
+    assert "pm pr graph" in result.output
+    assert "pm pr add" in result.output
+
+
+def test_pr_qa_no_candidate_names_the_review_stage(tmp_path):
+    """`pm pr qa` with no id must not presume the PR needs starting.
+
+    With an in_progress PR there is nothing to start (``pm pr start`` would
+    answer "already in_progress"); the next step is review.  The message
+    names the stage QA follows, which is true for every starting state.
+    """
+    from unittest import mock
+
+    from pm_core.cli import pr as pr_mod
+
+    (tmp_path / "project.yaml").write_text(
+        "project:\n  backend: vanilla\n  base_branch: master\n"
+        "prs:\n- id: pr-001\n  title: T\n  status: in_progress\n")
+    with mock.patch.object(pr_mod, "state_root", return_value=tmp_path):
+        result = CliRunner().invoke(pr_mod.pr, ["qa"])
+
+    assert result.exit_code == 1, result.output
+    assert "pm pr review" in result.output
+    assert "pm pr list" in result.output
+
+
 @pytest.mark.parametrize("status", ["merged", "closed"])
 def test_pr_cd_terminal_pr_does_not_name_the_start_command(tmp_path, status):
     """`pm pr start` refuses a terminal PR, so it cannot recreate its workdir.
@@ -1904,6 +1951,22 @@ def test_pr_qa_mode_token_does_not_swallow_help():
     """The CLI-tolerance rewrite must leave option handling to Click."""
     out = _help("pr", "qa", "fresh")
     assert "QA modes" in out
+
+
+@pytest.mark.parametrize("args", [
+    ("pr", "qa", "pr-001", "fresh"),
+    ("pr", "qa", "fresh", "pr-001"),
+])
+def test_pr_qa_two_token_form_with_help_still_renders_help(args):
+    """`--help` wins even over the two-token command-bar spelling.
+
+    ``pm pr qa pr-001 fresh --help`` died on Click's "Got unexpected extra
+    argument (fresh)" because the help branch did not reduce the positional
+    form the way the hint branch does.  Help must render in either order.
+    """
+    out = _help(*args)
+    assert "QA modes" in out
+    assert "Got unexpected extra argument" not in out
 
 
 @pytest.mark.parametrize("mode", command_surface.QA_MODIFIER_MODES)
@@ -2102,6 +2165,9 @@ def test_cli_launchers_name_the_install_remedy(tmp_path):
     assert "install Claude Code first" in result.output
     assert "copy-paste this prompt" in result.output
 
+    # `meta` binds find_claude at import time (container imports it inside
+    # the function), so patch the module-local name or the real `claude`
+    # binary is launched.
     fake_git = mock.MagicMock(returncode=0, stdout="master\n")
     with mock.patch.object(meta_mod, "_get_session_name_for_cwd",
                            return_value="pm-proj-1234"), \
@@ -2114,8 +2180,7 @@ def test_cli_launchers_name_the_install_remedy(tmp_path):
          mock.patch.object(meta_mod, "_build_meta_prompt",
                            return_value="p"), \
          mock.patch.object(meta_mod, "_get_pm_session", return_value=None), \
-         mock.patch("pm_core.claude_launcher.find_claude",
-                    return_value=None):
+         mock.patch.object(meta_mod, "find_claude", return_value=None):
         result = CliRunner().invoke(meta_mod.meta_cmd, ["a task"])
 
     assert result.exit_code != 0
