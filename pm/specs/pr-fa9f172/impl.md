@@ -965,3 +965,47 @@ the routed form and `--fresh` so help is complete.
   editor (the TUI `e` / Enter path); the `HELP_TEXT` line repeated the
   shortened list. Both name every field now, with a test.
   Full suite: 5617 passed, 1 skipped.
+
+- Master integration (2026-11-04, SIGNOFF_IMPL r1 return): merged
+  `origin/master@c3bac6ce` (#296; merge base `c1fcecc5`) into the branch.
+  Conflicts resolved preserving both sides:
+  (a) `pm/project.yaml` — `store.merge_3way(base, ours=master,
+  theirs=branch)` over the index stages, then rebuilt as master's text with
+  the branch's changed blocks (`pr-fa9f172`, `pr-3d1055c`) swapped in and
+  its two new records (`pr-fc6c29e`, `pr-86152a8`) inserted after their
+  predecessors. This keeps master's block order and avoids the ~2000-line
+  rewrap `store.save` produces; content verified equal to the 3-way merge
+  by id (619 PRs, 22 plans, all branch notes present).
+  (b) `pm_core/cli/__init__.py` — kept master's "isolated QA run" wording
+  for `pm qa regression` and the branch's `pm qa debug` / `pm qa launch`
+  lines.
+  (c) `pm_core/prompt_gen.py` — took master's #284 isolated-run prose (it
+  supersedes the branch's older sentence, and names no plan) and kept the
+  branch's `improvements` plan name in the reconcile step, where master
+  still said `ux`.
+  (d) `pm_core/tui/pr_view.py` — the fuzzy `pr select` / `plan select`
+  dispatch runs *before* the branch's guarded `shlex.split` (so a query
+  like `user's` cannot raise), and both hand focus back through the one
+  helper.
+
+  Semantic reconciliation beyond the conflict picks:
+  - One focus helper: `ProjectManagerApp._focus_current_view` now delegates
+    to `pr_view._refocus_active_view`, so master's Esc path and the
+    command-bar branches cannot drift. The helper queries by id only (no
+    `expect_type`) so the `SimpleNamespace` app doubles keep working.
+  - Master's #136/#284 surface reached the shared table: `pr select
+    <query>`, `plan select <query>` and `qa regression <test-id>` rows were
+    added to `command_surface.COMMAND_BAR_COMMANDS` (so the `?` screen and
+    `pm tui keys` both document them), and `pm tui keys` gained the `]`/`[`
+    fuzzy-match cycle key. The parity test now asserts them, so the hand
+    list that missed them cannot regress silently.
+  - Two master tests asserted pre-sweep behavior and were updated to the
+    PR's documented contract while preserving their intent:
+    `test_fuzzy_select_tui.test_other_commands_keep_exact_resolution` now
+    asserts the id is still refused exactly *and* that the listing remedy
+    is named; `test_regression_launch`'s `--help` case became a dedicated
+    test that the command bar opens the HelpScreen (never a pane) instead
+    of pinning Click's "No such option".
+  Full suite on the merged tree: 5867 passed, 1 skipped, 0 failed (with
+  `markdown` installed); `tests/test_command_surface.py` re-run on the
+  final tree: 176 passed.
