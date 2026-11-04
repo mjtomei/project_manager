@@ -233,7 +233,7 @@ pane unless stated otherwise.
   a digit, a `~`, a `|` or multi-byte characters, or whose long name
   gives it a hashed socket,
   **WHEN** the pane registry no longer lists it and the user runs
-  `pm session`, `pm tui view`/`send`, or `pm qa regression`,
+  `pm session` or `pm tui view`/`send`,
   **THEN** the exact-match test still recognises that pane as the TUI:
   it is adopted (no "TUI pane missing — respawning...", no second TUI,
   same pid) and driven (QA planning 2026-11-02 pass 3: tmux reports such
@@ -625,9 +625,14 @@ pane unless stated otherwise.
   session-keyed command, **WHEN** the user runs `pm tui frames -s
   pm-x~2`, **THEN** it reads the base session's frames (the files the TUI
   actually wrote) rather than reporting nothing.
-- **GIVEN** a regression test exists and its session's TUI pane is gone,
-  **WHEN** the user runs `pm qa regression <id>`, **THEN** it refuses with
-  a "no TUI pane found" style message and launches nothing.
+- **GIVEN** a regression test exists in the project's QA library,
+  **WHEN** the user runs `pm qa regression <id>` while the project's pm
+  session runs on its own server (see R13), **THEN** it starts an
+  isolated clone run and never targets, drives or captures the user's
+  live session; `--session` is ignored with a note.  (Master's #284
+  regression-run rework, merged in `c3bac6ce`, supersedes the old
+  live-pane runner: the run has no session of its own to find, so the
+  "no TUI pane found" refusal is obsolete.)
 - **GIVEN** a user's own tmux view of session A, grouped with A under an
   arbitrary name (not `pm-A~N`, e.g. `myview`, or `pm-laptop` while a
   different session named `pm-laptop` also runs), **WHEN** the user runs
@@ -724,7 +729,7 @@ pane unless stated otherwise.
   session: the run is resumed here (review-loop b48f i20).
 - **GIVEN** a pm session whose name contains a space, **WHEN** pm starts
   an agent whose prompt tells it how to drive the TUI — a QA run
-  (`pm qa launch`, CLI or TUI), `pm qa regression`, `pm meta`, or any
+  (`pm qa launch`, CLI or TUI), `pm meta`, or any
   prompt carrying the TUI section — **THEN** every copyable command in
   that prompt (`pm tui view -s …`, `pm tui send … -s …`, the
   `~/.pm/pane-registry/<session>.json` path, the discovery watcher's
@@ -733,6 +738,13 @@ pane unless stated otherwise.
   unquoted (review-loop b48f i18/i19).  When the QA run is launched from
   a user's own view or a `~N` grouped session, the prompt names the base
   pm session, not the view (review-loop b48f i4).
+- **GIVEN** the same space-named project, **WHEN** the user runs
+  `pm qa regression <id>` from inside its pm session, **THEN** the run's
+  own prompt names only the run's isolated clone/scratch paths and its
+  own session (reachable through `pm session --print-connect`), never the
+  user's live session; every path in it is quoted as one shell word, and
+  the prompt file is written under the run's captures directory
+  (`…/regression/<test-id>/<run-id>/prompt.md`).
 
 ### R8 — Killing a session tears down only that session
 
@@ -1147,6 +1159,113 @@ pane unless stated otherwise.
   `pm session mobile`, `pm tui view`, or the TUI's quit key is pressed in an environment with
   `$TMUX` set but no tmux binary,
   **THEN** the command reports a clear message and does not traceback.
+
+### R13 — Regression runs are isolated from every live pm session
+
+Master's #284 regression runner supersedes the live-pane runner this
+branch started from (merge of `c3bac6ce`, 2026-11-04).  A regression run
+clones the base branch and drives a disposable project of its own; it
+never drives, captures or types into the user's session.  Because every
+pm session now has its own server, the run's environment scrubs
+`PM_TMUX_SOCKET` along with `TMUX`, `TMUX_PANE`, `PM_PROJECT`,
+`PM_SESSION` and `PM_SHARE_MODE` (`cli.qa._REGRESSION_SCRUBBED_ENV`):
+keeping the user's live socket would hand the run an ambient address for
+a session it must never reach.
+
+- **GIVEN** a pm project with a regression test in `pm/qa/regression/`
+  and its session running on its own socket, **WHEN** the user runs
+  `pm qa regression <id>` from a shell inside that session (or from a
+  plain shell in the project directory), **THEN** it prints
+  "Running regression: <title>", the base-branch target with its commit,
+  "Runs in: host (container mode is off)" (or the container name), and a
+  captures path under
+  `~/.pm/sessions/<tag>/captures/regression/<test-id>/<run-id>/`; the
+  run starts in a clone of the base branch and the user's panes, TUI and
+  registry are not touched by it.  `--session` is ignored with a note
+  ("a regression run never targets a pm session").
+- **GIVEN** the same run in host mode, **WHEN** the run's shell (or a
+  user reproducing it) runs a plain `tmux` command and a `pm` command
+  from the clone, **THEN** the plain `tmux` reaches the default server
+  (the run's `$TMUX` is unset and `PM_TMUX_SOCKET` is absent), the `pm`
+  command resolves the run's own session/socket, and the prompt says to
+  obtain that socket with `pm session --print-connect` rather than
+  naming the user's live socket.
+- **GIVEN** the run is started with `--file-prs`, **WHEN** it files a
+  finding with `pm -C <registry> pr add …` from the clone, **THEN** the
+  user's registry gains the PR and the user's TUI (and pm-home) reloads
+  — the run reaches the session that owns the registry, not another pm
+  session and not the disposable test project's own TUI.
+- **GIVEN** a repo path with a space or a single quote, **WHEN** the
+  user runs `pm qa regression` from inside its session, **THEN** the run
+  launches normally (no empty prompt, no shell parse error), the prompt
+  file is written under the run's captures dir, and the target paths in
+  the prompt are quoted as one shell word.
+- **GIVEN** two `pm qa regression` runs started at the same moment (the
+  same test twice, or two different tests), **WHEN** both are launched,
+  **THEN** each gets its own run id, workdir and captures directory,
+  neither run addresses the other's session, and findings filed by both
+  land in the registry without a lost update.
+
+### R14 — A command's project resolves across every pm server
+
+`-C <pm dir>` (or `PM_PROJECT`) names the project a command works on.
+Because each session has its own server, the lookup must resolve the
+project's session wherever it runs, and inside a pm session the ambient
+session stays the answer for TUI-driving commands.
+
+- **GIVEN** pm sessions A and B running on their own sockets and a plain
+  shell outside both projects, **WHEN** the user runs `pm tui view -C
+  <B's pm dir>`, `pm tui send <key> -C <B's pm dir>`, `pm pr list -C
+  <B's pm dir>` or `pm session home -C <B's pm dir>` (or the same with
+  `PM_PROJECT` set), **THEN** the command acts on B's session/server,
+  never A's, and it finds B even though the default server hosts no pm
+  session.
+- **GIVEN** the same setup with only B running, **WHEN** the user runs
+  `pm tui view -C <B>` from a PR workdir clone (a directory that names
+  no session), **THEN** it drives B's TUI.
+- **GIVEN** a shell inside A's pane, **WHEN** the user runs `pm tui view
+  -C <B>`, **THEN** the ambient session A is the answer: keys are not
+  redirected out of the session the user is in.
+- **GIVEN** another user planted a socket at B's deterministic name in
+  `/tmp/pm-sessions` and the user has no share context, **WHEN** the
+  user runs an implicit `-C` lookup for B, **THEN** the planted server is
+  never probed or adopted (the lookup falls back to the default server
+  and reports no TUI / lists only what it can reach), while a legacy
+  session of that name this user owns on the default server is still
+  found (review-loop 879b i2).
+- **GIVEN** `-C` naming a directory that is not a pm project, **WHEN**
+  the user runs a command, **THEN** it reports the usual no-project
+  message (or falls back to the cwd's project) without a traceback and
+  without adopting another user's socket.
+
+### R15 — QA launch and QA resume resolve the right session after the merge
+
+- **GIVEN** a pm session open through a user's own view (`myview`) or a
+  grouped `~1`, **WHEN** the user runs `pm qa launch <id>` (CLI or TUI)
+  from that client, **THEN** the prompt names the *base* pm session in
+  every copyable command and in the `~/.pm/pane-registry/<session>.json`
+  path, so pasting them drives the right session.
+- **GIVEN** a QA run started from another clone of the project whose
+  session is still alive on that clone's own server, **WHEN** this
+  clone's TUI restarts and scans for resumable runs, **THEN** it leaves
+  that run alone — no resume, no scenario relaunch, no bogus verdict —
+  and a run whose session is gone (or whose name is only a foreign
+  planted socket) is resumed here (R7).
+- **GIVEN** the QA status dashboard in a space-named session, **WHEN**
+  the run creates it, **THEN** it shows the scenario rows and status,
+  not the `qa_status` usage line (R11).
+
+### R16 — The merged registry keeps every PR, plan and note
+
+- **GIVEN** the project registry after the master merge, **WHEN** the
+  user runs `pm pr list`, `pm plan list`, `pm pr show pr-073910f` and
+  `pm pr note list pr-073910f`, **THEN** no PR id appears twice, every
+  PR that exists on master exists here, every plan id is intact, and
+  both master's notes and this branch's notes are still attached to
+  their PRs; the TUI tree lists the same set.
+- **GIVEN** two terminals running `pm pr add` / `pm pr note add` at the
+  same moment, **WHEN** both complete, **THEN** both records are present
+  (the store lock serialises them) and no note is lost.
 
 ## Setup (user steps)
 
@@ -1578,6 +1697,31 @@ Resolved by judgement (no **[UNRESOLVED]** items):
    `pm/project.yaml` outranks every root-level `project.yaml`, so a
    target repo's own `pm/` subdirectory is never mistaken for an outer
    standalone project.
+27. **`pm qa regression` no longer drives the live TUI** — added
+    2026-11-04 with the master integration (`c3bac6ce`).  Master's #284
+    regression runner (an isolated clone, optionally a container)
+    supersedes the live-pane runner this branch started from; the merge
+    keeps master's runner and the branch's session-name quoting in
+    `qa launch` and `pane_ops`.  Resolved by judgement: `--session` is
+    ignored with a note, and R7's old "no TUI pane found" refusal is
+    obsolete — the run has no session of its own to find, and a scenario
+    that expects the refusal is wrong.
+28. **`-C`/`PM_PROJECT` versus the ambient session** — added
+    2026-11-04.  Outside a pm session the project override names the
+    session a command works on (a PR workdir clone names no session by
+    cwd); inside a pm session the ambient session is the answer for
+    TUI-driving commands, so keys are never redirected out of the
+    session the user is in.  Resolved by judgement from the code order
+    (`_find_tui_pane`: in-tmux branch, then `_project_sessions`, then
+    cwd) and the ownership rule every implicit lookup passes.
+29. **A host-mode regression run's `PM_TMUX_SOCKET`** — added
+    2026-11-04.  The user's live socket is scrubbed from the run's
+    environment along with `TMUX`/`PM_PROJECT`/`PM_SESSION`/
+    `PM_SHARE_MODE`, because under per-session servers it names a server
+    the run must never drive.  Resolved by judgement: the run's own `pm`
+    resolves each session's socket, the prompt points at
+    `pm session --print-connect`, and filing (`pm -C <registry> pr add`)
+    still reaches the user's TUI through `_project_sessions`.
 
 ## Known pre-existing issues (not failures of this PR)
 
