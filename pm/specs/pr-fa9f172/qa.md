@@ -333,6 +333,73 @@ bar shows one line by design). The command-bar table already documents that
 the `pm` prefix is omitted; submitting `pm pr list` should leave the
 operator with a correction, not only Click's "No such command 'pm'".
 
+### Base-merge integration (master @ c3bac6ce)
+
+Master's fuzzy select (#136) and isolated regression runs (#284) joined
+this PR's command surface during the merge; these requirements cover the
+reconciled behaviour. Prior QA S1–S25 and review loops ran before the
+merge, so the integrated HEAD needs fresh evidence for them.
+
+R36. **Fuzzy find and match cycling.** GIVEN a project with several PRs
+and plans, WHEN the user submits `pr select <query>` or `plan select
+<query>` in the command bar, THEN the cursor moves to the best match, the
+log names what was selected (`Selected: …`, `Plan: … → …`), the active PR
+is persisted, and the next navigation key moves the selection (focus
+returned to the view). `]` / `[` cycle forward/back through the ranked
+matches (wrapping) with `Match n/total: …`; a new search replaces the list
+across kinds; no-match, all-filtered, and empty-query outcomes are
+explained (with the filter hint) and leave the cursor where it was. These
+rows and keys appear in `pm tui keys` and the `?` screen.
+
+R37. **Fuzzy resolution is confined to the select commands.** GIVEN a
+partial id, WHEN the user runs `edit <partial>` (or another PR command) in
+the command bar, THEN it is refused exactly with `PR not found: <id> — see
+pr list …` and the cursor does not move; the CLI `pm pr select <partial>`
+likewise refuses exactly (exact id only) and names `pm pr list`. The help
+table documents the distinction: command-bar `pr select` is fuzzy, CLI
+`pm pr select <PR_ID>` is exact.
+
+R38. **Regression runs are isolated and documented.** GIVEN a project,
+WHEN the user runs `pm qa regression <test-id>` or submits `qa regression
+<test-id>` in the command bar, THEN the run gets its own workdir, clone,
+run id and captures dir, prints `Running regression: …`, the target,
+`Runs in: host (container mode is off)` (or the container), and the
+captures path, and never touches the pm session, its PR records, or a live
+QA run. An empty library, unknown id, or unusable container runtime is
+refused before any workdir or pane exists, naming `pm qa add-regression` /
+`pm qa list` / `pm qa author-regression`; `pm qa launch regression:<id>`
+reports the same problem. The command-bar row `qa regression <test-id>`
+(TUI: q view Enter) and `pm help`'s `pm qa regression` line describe the
+isolated run.
+
+R39. **Merged help surfaces stay in sync.** GIVEN the installed checkout,
+WHEN the user runs `pm tui keys`, opens `?`, and reads `pm help` /
+`pm getting-started`, THEN the merged command-bar surface (`pr select`,
+`plan select`, `qa regression`, `] / [` cycle) appears in the shared
+`Command bar (press /):` section of both TUI help renderers and in the
+top-level help; the plans-view key row names `D=deps` and `Enter=view
+file` (no `v=view`); no retired command (`pm tui test`, `pm pr done`) is
+named. The `?` screen still wraps at a narrow width rather than clipping.
+
+R40. **The merged registry and plan names are intact.** GIVEN the
+checkout's `pm/project.yaml`, WHEN the user opens pm there, THEN
+`pm pr list`, `pm plan list` and `pm pr show <id>` render the merged
+records without error; `pm pr list --plan improvements` lists the
+improvements PRs; `pm watcher list` / `pm watcher start --help` /
+`pm prompt <id>` describe the improvement-fix watcher as
+`plan=improvements`; no live surface says `plan=ux`; a real `tui-ux` plan
+keeps its name.
+
+R41. **Concurrent actors share one coherent registry and stay isolated.**
+GIVEN two TUI clients on the grouped session and a plain shell, WHEN they
+move the cursor via `pr select` / `plan select` and `pm pr select` at
+nearly the same time, THEN no invocation prints a traceback, `pm pr list`
+keeps working, each client's cursor moved to its own target, and after a
+refresh all surfaces agree on one active PR. WHEN two regression runs (or
+a regression run and a live QA run) run at once, THEN each gets its own
+workdir, run id and captures dir, the live QA run is untouched, and
+neither corrupts `pm/qa/regression/`.
+
 ## Edge Cases
 
 E13. **Quoted help flag** — `pr note add <id> 'see --help'` must add the
@@ -449,9 +516,9 @@ and does not start a second action.
 
 No **[UNRESOLVED]** ambiguities remain.
 
-## Run history (as of 2026-11-03, updated by the scenario-24 planning pass)
+## Run history (as of 2026-11-04, updated by the scenario-26 planning pass)
 
-Scenarios 1–18 and 20–23 have run against this branch. Scenario titles and
+Scenarios 1–18 and 20–25 have run against this branch. Scenario titles and
 verdicts (see the PR notes for the detailed errata and captures):
 
 - 1–5: CLI help discoverability; wrong-state/not-found remedies; TUI QA
@@ -476,14 +543,28 @@ verdicts (see the PR notes for the detailed errata and captures):
   loop stop (PASS after efab1f4f8); fresh restart parity across start,
   review and sign-off (PASS); single-instruction `pm qa run` and its
   no-session / not-found / launch remedies (PASS after 162913959).
+- 24–25: plans-view file actions, standalone-PR remedy, help surfaces and
+  per-plan windows (PASS); the `pm pr qa` diagnostic contract — what a
+  valid run prints, mode-spelling tolerance, wrong-state refusals and the
+  narrow-terminal help (PASS).
 
-The next plan starts at scenario 24 and covers the two areas still without
-a verdict: the interrupted plans-view / standalone-PR plan remedies
-(R24/R33, including the plans-view keys and the corrected session /
-`pr edit` help summaries) and the `pm pr qa` diagnostic contract itself
-(R15/E1/E6/E8: what a valid run prints, the missing-session remedy, the
-mode-spelling tolerance, wrong-state refusals, and the narrow-terminal
-help). Concurrency is exercised through the per-plan tmux windows the
-plans-view actions share, and by leaving a live QA run untouched while
-diagnostics run beside it.
+### Master integration (2026-11-04)
+
+`origin/master@c3bac6ce` (#296) was merged into the branch as 6a6665e0e
+with four conflict resolutions (`pm/project.yaml`, `pm_core/cli/__init__.py`,
+`pm_core/prompt_gen.py`, `pm_core/tui/pr_view.py`) and a semantic
+reconciliation: one focus helper (`App._focus_current_view` delegates to
+`pr_view._refocus_active_view`); master's `pr select`, `plan select` and
+`qa regression` joined the shared command-bar table plus the `]`/`[`
+cycle key in `pm tui keys`; two master tests were updated to this PR's
+contracts. Full suite on the merged tree: 5867 passed, 1 skipped. All
+S1–S25 evidence is pre-merge; the integrated HEAD needs fresh review, QA
+and sign-off.
+
+The next plan starts at scenario 26 and covers the merged-in surface:
+fuzzy find / cycling (R36/R37, including focus return and the exact-only
+CLI `pm pr select`), isolated regression runs (R38, including the
+command-bar row and launch refusals), the merged help/plan-name/registry
+surfaces (R39/R40), and concurrent actors on the shared registry and
+isolated runs (R41).
 
