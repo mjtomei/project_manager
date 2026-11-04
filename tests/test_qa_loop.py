@@ -2243,6 +2243,19 @@ class TestScenarioWorkerPaneOwnership:
              patch("pm_core.tmux.pane_window_id", return_value=None):
             assert _scenario_worker_pane_alive("sess", sc, "%4") is True
 
+    def test_unresolvable_pane_window_with_the_scenario_window_present(self):
+        """The same fallback applies while the scenario's window is listed:
+        a transient failure to name the pane's window must not make a live
+        worker look dead (the window check is not evidence of that)."""
+        from pm_core.qa_loop import _scenario_worker_pane_alive
+        sc = self._scenario()
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.find_window_by_name",
+                   return_value={"id": "@9", "index": "1",
+                                 "name": "qa-pr-001-s1"}), \
+             patch("pm_core.tmux.pane_window_id", return_value=None):
+            assert _scenario_worker_pane_alive("sess", sc, "%4") is True
+
     def test_missing_pane_is_not_alive(self):
         from pm_core.qa_loop import _scenario_worker_pane_alive
         sc = self._scenario()

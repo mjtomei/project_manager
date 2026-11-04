@@ -5268,3 +5268,63 @@ each, 3090).  Full suite 6173 passed / 1 skipped, 439.8 s (log
 `/pm-captures/review-fddc-i1/full-suite-final.log`) — the i3 head's 6169
 plus the four new tests.  pyflakes reports no new warning versus
 `origin/master`.
+
+## QA-driven fix (2026-11-04, commit f0c8e7f7)
+
+QA S81 (two QA runs resumed in one scan) found that after the session that
+hosted both runs was killed and restarted, only one run's `qa-<pr>-s1`
+window was relaunched.  A restarted tmux server hands pane ids out again
+from `%0`, so the other run's recorded worker id (`%4`) named the recreated
+QA window's status dashboard; `pane_exists` believed the worker was alive
+and the resume never recreated its scenario window (the run then polled the
+dashboard for a verdict).
+
+`_scenario_worker_pane_alive` now requires a recorded worker id to still
+belong to the scenario's own window (`find_window_by_name` +
+`pane_window_id`), applied at the scenario retry path and the
+PASS-verification follow-up path.  When the pane's window cannot be
+resolved at all the historical existence rule is kept, so a fake-session
+caller or a transient tmux failure does not relaunch a live worker.
+
+Tests: `tests/test_qa_loop.py::TestScenarioWorkerPaneOwnership`.
+
+## Review iteration (2026-11-04, review-loop 4c94 i1)
+
+First review pass over the head after the S81 fix (`f0c8e7f7`).  No
+requirement changes.  Three gaps, all in the S81 fix's own area:
+
+1. **The waiting-for-input scan kept the stale-pane-id hazard.**  A held
+   run's waiting scenarios are skipped by the live poll and checked only by
+   `_scan_waiting_scenarios`, which used `pane_exists` alone.  A resumed
+   held run restores its recorded pane ids; after the restart a reused id
+   (the recreated QA window's dashboard) made a dead worker look alive, so
+   the attempt was never dropped and the hold waited forever for a
+   follow-up the dead worker could not produce.  The scan now takes the
+   run's session — both callers (`_poll_tmux_verdicts`'s `_poll_waiting`
+   and `_hold_for_follow_up`) have it — and applies the same
+   window-ownership rule.  Without a session (a direct caller) existence
+   remains the rule, as before.
+2. **A dead import left by the S81 fix.**  Replacing the last `tmux_mod`
+   use in `_poll_tmux_verdicts` left its local
+   `from pm_core import tmux as tmux_mod` unused; removed (pyflakes is back
+   to the master baseline).
+3. **The ownership check's transient-failure fallback was asymmetric.**
+   With the scenario window listed but the pane's window unresolvable (a
+   transient tmux failure), the helper called the worker dead, although its
+   own contract keeps the historical meaning when tmux cannot name the
+   pane's window.  It now resolves the pane's window first and keeps
+   existence as the answer when that fails.
+
+Tests: `TestScanWaitingScenarios` (a pane of another window is not the
+waiting worker; a pane in the scenario window keeps the wait; without a
+session the window lookup is not consulted), `TestHoldForFollowUp` (the
+hold hands the run's session to the scan), and
+`TestScenarioWorkerPaneOwnership` (the window-present/unresolvable case).
+All but the no-session fallback test fail on the pre-fix head.
+
+Validation: the PR-affected test files plus
+`tests/test_qa_input_required.py` pass (1742).  Full suite 6185 passed /
+1 skipped, 436.3 s (log
+`/pm-captures/review-4c94-i1/full-suite-final.log`) — the pre-fix head's
+6180 plus the five new tests.  pyflakes reports no new warning versus
+`origin/master`.

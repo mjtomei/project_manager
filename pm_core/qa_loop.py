@@ -3766,14 +3766,18 @@ def _scenario_worker_pane_alive(session: str, scenario: QAScenario,
         # No window to attribute it to; keep the historical meaning of a
         # recorded id (exists == alive).
         return True
+    pane_window = tmux_mod.pane_window_id(pane_id)
+    if pane_window is None:
+        # tmux cannot name the pane's window (no server reachable, or the
+        # query failed): fall back to the historical meaning rather than
+        # call a live worker dead and relaunch a duplicate.
+        return True
     win = tmux_mod.find_window_by_name(session, scenario.window_name)
     if win:
-        return tmux_mod.pane_window_id(pane_id) == win["id"]
-    # The scenario's window is gone.  The id still existing means the
-    # server handed it to some other window — but if tmux cannot even
-    # name the pane's window (no server reachable), fall back to the
-    # historical meaning rather than calling a live worker dead.
-    return tmux_mod.pane_window_id(pane_id) is None
+        return pane_window == win["id"]
+    # The scenario's window is gone and the id still names a pane of some
+    # other window: a restarted server handed the id out again.
+    return False
 
 
 def _relaunch_scenario_window(
@@ -4039,7 +4043,8 @@ class _WaitingScan:
     changed: bool = False
 
 
-def _scan_waiting_scenarios(state: QALoopState) -> _WaitingScan:
+def _scan_waiting_scenarios(state: QALoopState,
+                            session: str | None = None) -> _WaitingScan:
     """Poll scenarios whose worker emitted INPUT_REQUIRED for a follow-up.
 
     Only the scenario's own transcript is read, and only turns newer than
@@ -4048,6 +4053,16 @@ def _scan_waiting_scenarios(state: QALoopState) -> _WaitingScan:
     PASS/NEEDS_WORK is returned for the caller to record.  Superseded or
     unrecoverable attempts are dropped here (with their provisional verdict)
     so the caller can hand them back to the normal pending path.
+
+    *session* is the pm session the run's windows live in (the callers
+    inside the QA loop have it).  With it, a recorded worker pane must
+    still belong to the scenario's own window
+    (``_scenario_worker_pane_alive``): after a session restart tmux hands
+    the same pane ids out again, and a stale id can name the recreated QA
+    window's dashboard.  Existence alone then kept a held run waiting for
+    a worker that was gone — the same stale-id rule the retry and
+    verification paths apply (QA S81).  Without it (a direct caller that
+    has no session) existence remains the only evidence, as before.
     """
     from pm_core import tmux as tmux_mod
 
@@ -4075,14 +4090,21 @@ def _scan_waiting_scenarios(state: QALoopState) -> _WaitingScan:
             result.changed = True
             continue
 
-        # This attempt's worker pane: a recorded pane id that is gone means
-        # the attempt is over.  No recorded pane id means "unknown", not
-        # dead: relaunching here would duplicate a worker whose window may
-        # still be alive.
+        # This attempt's worker pane: a recorded pane id that is gone — or,
+        # with the run's session known, that now names a pane of another
+        # window (a restarted server reuses ids) — means the attempt is
+        # over.  No recorded pane id means "unknown", not dead: relaunching
+        # here would duplicate a worker whose window may still be alive.
         pane_alive = True
-        if scenario.pane_id and not tmux_mod.pane_exists(scenario.pane_id):
-            scenario.pane_id = None
-            pane_alive = False
+        if scenario.pane_id:
+            if session:
+                alive = _scenario_worker_pane_alive(
+                    session, scenario, scenario.pane_id)
+            else:
+                alive = tmux_mod.pane_exists(scenario.pane_id)
+            if not alive:
+                scenario.pane_id = None
+                pane_alive = False
 
         # A dead pane is re-checked every tick, so the stat cache (which
         # would skip the transcript read below) only applies while the
@@ -4157,7 +4179,8 @@ def _scan_waiting_scenarios(state: QALoopState) -> _WaitingScan:
 def _hold_for_follow_up(state: QALoopState, pm_root: Path | None,
                         status_path: Path,
                         use_containers: bool, concurrency_cap: int,
-                        queued_indices: set[int]) -> bool:
+                        queued_indices: set[int],
+                        session: str | None = None) -> bool:
     """Block while a finalized INPUT_REQUIRED run waits for a follow-up.
 
     Returns True when the caller should reopen the run (a follow-up arrived
@@ -4166,6 +4189,10 @@ def _hold_for_follow_up(state: QALoopState, pm_root: Path | None,
     True the state is published as a live run (``running`` set, ``held``
     kept) so the TUI's completion poll cannot mistake the reopen for a
     finished run.
+
+    *session* is the pm session the run's windows live in; the scan uses it
+    to tell a live worker from a stale pane id a restarted server handed to
+    another window (see :func:`_scan_waiting_scenarios`).
     """
     from pm_core import store
 
@@ -4184,7 +4211,7 @@ def _hold_for_follow_up(state: QALoopState, pm_root: Path | None,
                 _log.info("QA hold for %s ended: PR left qa (%s)",
                           state.pr_id, live.get("status"))
                 return False
-        scan = _scan_waiting_scenarios(state)
+        scan = _scan_waiting_scenarios(state, session)
         if scan.follow_ups or scan.dropped:
             # Reopening.  Publish ``running`` *before* clearing ``held``: the
             # TUI's completion poll reads (not running, not held,
@@ -4250,8 +4277,6 @@ def _poll_tmux_verdicts(
     If *queued_scenarios* is provided, queued scenarios are launched as
     running scenarios complete, respecting *concurrency_cap*.
     """
-    from pm_core import tmux as tmux_mod
-
     verify_enabled = _is_verification_enabled()
     state.verify_pass_enabled = verify_enabled
     verify_max_retries = _get_verification_max_retries()
@@ -4542,7 +4567,7 @@ def _poll_tmux_verdicts(
     def _poll_waiting() -> None:
         """Collect follow-ups from scenarios whose worker asked for input."""
         nonlocal verdicts_changed
-        scan = _scan_waiting_scenarios(state)
+        scan = _scan_waiting_scenarios(state, session)
         if scan.changed:
             verdicts_changed = True
         if scan.follow_ups or scan.dropped:
@@ -6444,7 +6469,8 @@ def _execute_and_finalize(
 
         if not _hold_for_follow_up(
                 state, pm_root, status_path,
-                use_containers, concurrency_cap, queued_indices):
+                use_containers, concurrency_cap, queued_indices,
+                session=session):
             # Stopped, the PR left qa, or nothing is waiting any more.
             # Persist the settled wait (e.g. the last attempt dropped) so a
             # restart does not re-adopt a hold that is already over.

@@ -351,6 +351,62 @@ class TestScanWaitingScenarios:
         # forever.
         assert state.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
 
+    def test_a_pane_of_another_window_is_not_the_waiting_worker(
+            self, tmp_path):
+        """A restarted tmux server reuses pane ids, so the recorded worker
+        id can name a new pane of another window — in practice the recreated
+        QA window's dashboard.  Existence alone then kept the hold waiting
+        for a worker that was gone; with the run's session the scan applies
+        the same window-ownership rule as the retry and verification paths
+        (QA S81)."""
+        path = _write(
+            tmp_path / "t.jsonl", PROMPT,
+            _assistant("Reason: need a decision\nINPUT_REQUIRED", "turn-ir",
+                       "2026-05-13T14:01:00.000Z"))
+        state = _waiting_state(path)
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.find_window_by_name", return_value=None), \
+             patch("pm_core.tmux.pane_window_id", return_value="@2"):
+            scan = _scan_waiting_scenarios(state, "pm-sess")
+        assert scan.dropped == {1}
+        assert state.scenarios[0].pane_id is None
+        assert 1 not in state.waiting_for_input
+
+    def test_a_pane_in_the_scenario_window_keeps_the_wait(self, tmp_path):
+        """The same recorded id is the live worker while it still belongs to
+        the scenario's own window."""
+        path = _write(
+            tmp_path / "t.jsonl", PROMPT,
+            _assistant("Reason: need a decision\nINPUT_REQUIRED", "turn-ir",
+                       "2026-05-13T14:01:00.000Z"))
+        state = _waiting_state(path)
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.find_window_by_name",
+                   return_value={"id": "@9", "index": "1",
+                                 "name": "qa-s1"}), \
+             patch("pm_core.tmux.pane_window_id", return_value="@9"):
+            scan = _scan_waiting_scenarios(state, "pm-sess")
+        assert scan.dropped == set()
+        assert 1 in state.waiting_for_input
+        assert state.scenarios[0].pane_id == "%1"
+
+    def test_without_a_session_existence_is_the_rule(self, tmp_path):
+        """Direct callers with no session keep the historical rule: the
+        window lookup is not consulted, so an existing id counts."""
+        path = _write(
+            tmp_path / "t.jsonl", PROMPT,
+            _assistant("Reason: need a decision\nINPUT_REQUIRED", "turn-ir",
+                       "2026-05-13T14:01:00.000Z"))
+        state = _waiting_state(path)
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.find_window_by_name") as finder, \
+             patch("pm_core.tmux.pane_window_id") as window_id:
+            scan = _scan_waiting_scenarios(state)
+        finder.assert_not_called()
+        window_id.assert_not_called()
+        assert scan.dropped == set()
+        assert 1 in state.waiting_for_input
+
     def test_waiting_source_identity_requires_the_same_attempt(self):
         state = _waiting_state("/tmp/x.jsonl")
         scenario = state.scenarios[0]
@@ -688,6 +744,27 @@ class TestHoldForFollowUp:
             assert qa_loop._hold_for_follow_up(
                 state, None, tmp_path / "status.json", False, 0, set()) is False
 
+    def test_the_hold_scan_is_given_the_runs_session(self, tmp_path):
+        """The stale-pane-id rule needs the run's session, and the hold has
+        it: the scan must not fall back to a bare existence check here."""
+        state = _waiting_state(self._ir_only(tmp_path))
+        state.held = True
+        state.latest_verdict = VERDICT_INPUT_REQUIRED
+        seen = []
+
+        def _scan_one_tick(s, session=None):
+            seen.append(session)
+            s.stop_requested = True
+            return qa_loop._WaitingScan()
+
+        with patch("pm_core.qa_loop._scan_waiting_scenarios",
+                   side_effect=_scan_one_tick), \
+             patch("pm_core.qa_loop.time.sleep"):
+            assert qa_loop._hold_for_follow_up(
+                state, None, tmp_path / "status.json", False, 0,
+                set(), session="pm-sess") is False
+        assert seen == ["pm-sess"]
+
     def test_hold_ends_when_the_pr_leaves_qa(self, tmp_path):
         from pm_core import store
 
@@ -746,8 +823,8 @@ class TestHoldForFollowUp:
 
         real_scan = qa_loop._scan_waiting_scenarios
 
-        def _scan_one_tick(s):
-            scan = real_scan(s)
+        def _scan_one_tick(s, session=None):
+            scan = real_scan(s, session)
             s.stop_requested = True   # exit the hold after this tick
             return scan
 
