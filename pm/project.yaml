@@ -33039,7 +33039,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-11-03T23:54:56.467560+00:00'
+  updated_at: '2026-11-04T00:08:21.136311+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33425,6 +33425,53 @@ prs:
       /pm-captures/scenarios/22/<story>/{cli-recording,tmux-screen-recording}/.'
     created_at: '2026-11-03T22:39:59Z'
     last_edited: '2026-11-03T22:39:59Z'
+  - id: note-e67016d
+    text: 'Refiner scenario 25 (QA diagnostic contract) — corrections and verified
+      fixture, at 7c8c3e233:
+
+      (1) Missing-session remedy is unreachable with tmux installed. `pm pr qa <id>`
+      from a plain shell with no pm session prints the session-present branch ("Open
+      the TUI command bar ... pr qa <id>" + "Or press ''t'' ... (z t = fresh restart,
+      zz t = loop)") and exits 1; it does NOT print "Start a session first with: pm
+      session". `_get_pm_session()` returns the computed cwd session name whenever
+      the tmux binary exists (has_tmux only checks the binary), so the no-session
+      branch fires only when tmux is absent. Pre-existing (blame f5539cf778) and accepted
+      per QA S1; the refined story accepts either branch and does not treat the absent
+      line as a failure.
+
+      (2) Runtime-verified verbatim: pending names `pm pr start <id>` (TUI: s); merged
+      says `Nothing to do` + `pm pr show <id>`; closed names `pm pr edit <id> --status
+      pending`; unknown prints `PR ''<id>'' not found.` + `pm pr list`; all exit 1.
+      All eight fresh/loop spellings print the mode hint (`''fresh'' ... pr qa fresh
+      <id> (TUI: z t)`) and exit 1, no Click errors; `pm pr qa fresh --help` and `--fresh
+      --help` both render identical full help and exit 0; `--frosh` exits 2 with `No
+      such option ''--frosh''`. No-id inference: single eligible -> `Auto-selected
+      <id>`; multiple -> `Multiple PRs eligible for QA. Specify one:` + rows; none
+      -> `No PRs in in_review or qa status` + `pm pr start` (TUI: s) + `pm pr list`;
+      all exit 1.
+
+      (3) No-id fixture: there is no CLI to clear active_pr, so make the active PR
+      an ineligible pending anchor (add eligible PRs first, add/select the anchor
+      last) and run from the project root, not a PR workdir; then the inference falls
+      through to the single/multi/none cases.
+
+      (4) 60-column help: COLUMNS=60 works; exit 0. The modes table lives in Click
+      `\b` blocks and its literal lines exceed 60 columns (soft-wrap only) — assert
+      tokens, not line width. The help says "This CLI form therefore does not launch
+      QA itself" and "It exits 1 even when the PR is valid: it performs no action."
+      (not the word "diagnostic"), and includes "If no pm session is running, start
+      one with `pm session`" plus the `pm qa run <instruction-id> --pr <pr-id>` pointer.
+
+      (5) Live-run fixture (verified): initial `git add -A && git commit` then `pm
+      push` (pr start refuses uncommitted project state); fake-claude `{"_all": {},
+      "qa_scenario": {"verdicts": [{"verdict": "PASS", "delay": 120}]}}` set from
+      the project dir; `pm pr start <id>` creates the workdir/branch and an impl window;
+      set `in_review`; `EDITOR=true pm qa add-instruction smoke`; `pm/specs/<id>/qa.md`
+      fixture; `pm qa run smoke --pr <id>` in a session pane creates `qa-<id>` and
+      `qa-<id>-s1`. Two concurrent `pm pr qa <id>` from session panes printed identical
+      diagnostics, exit 1, no traceback, same window ids, status unchanged.'
+    created_at: '2026-11-03T23:42:53Z'
+    last_edited: '2026-11-03T23:42:53Z'
   - id: note-69ef5d6
     text: 'QA S24 (plans-view file actions, standalone-PR remedy, help surfaces, per-plan
       windows) PASS 5/5 stories at 7c8c3e233. Runtime-verified in /scratch/pm-test24-1793749715
@@ -33460,6 +33507,26 @@ prs:
       (cast + mp4 + manifest each; plans-view also has transcript.log).'
     created_at: '2026-11-03T23:54:56Z'
     last_edited: '2026-11-03T23:54:56Z'
+  - id: note-5705191
+    text: 'QA scenario 25 (pm pr qa diagnostic contract) PASS, 11/11 stories runtime-verified
+      on a throwaway local project at 7c8c3e233. All refusals exit 1 with the named
+      remedies: command-bar form + t/z t/zz t keys; pending -> pm pr start (TUI: s);
+      merged -> Nothing to do + pm pr show; closed -> pm pr edit --status pending;
+      unknown -> PR not found + pm pr list; all eight fresh/loop CLI spellings ->
+      the mode hint naming pr qa fresh|loop <id> and z t/zz t (no Click error); fresh
+      --help and --fresh --help identical full help, exit 0; --frosh -> Click No such
+      option, exit 2; no-id inference single -> Auto-selected, multiple -> list both,
+      none -> No PRs in in_review or qa status + pm pr start/review/list; COLUMNS=60
+      help complete. Concurrent story: two panes ran the diagnostic during a live
+      pm qa run (qa-<id> @5, qa-<id>-s1 @6); both printed the same diagnostic and
+      exited 1, window ids and in_review unchanged, and the live run then finished
+      Result: PASS. Fixture notes for the next run: commit pm/project.yaml on master
+      before pm pr start (else it refuses); fake config must be set from the project
+      dir so the session tag matches; the QA spec fixture is required (pm/specs/<id>/qa.md);
+      the tmux status line truncates the long session name to 10 chars, which is cosmetic.
+      Captures: /pm-captures/scenarios/25/{story1..story10,story11-concurrent-live/{cli-recording,tmux-screen-recording}}.'
+    created_at: '2026-11-04T00:08:21Z'
+    last_edited: '2026-11-04T00:08:21Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
