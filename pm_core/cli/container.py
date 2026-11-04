@@ -152,7 +152,11 @@ def container_build(tag: str | None, base: str | None):
     )
 
     if not find_claude():
-        click.echo("Claude CLI not found.", err=True)
+        # Name the remedy, like the TUI pane launchers ("install Claude Code
+        # first") and `pm plan add` ("copy-paste this prompt into Claude
+        # Code"): a bare "not found" leaves the printed prompt unexplained.
+        click.echo("Claude CLI not found — install Claude Code first, or "
+                   "copy-paste this prompt into it.", err=True)
         click.echo("\nPrompt:")
         click.echo("-" * 60)
         click.echo(prompt)

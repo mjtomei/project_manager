@@ -66,8 +66,8 @@ def parse_qa_command(args: list[str]) -> tuple[str | None, str | None]:
 
     ``mode`` is ``None`` (plain one-shot run), ``"fresh"`` or ``"loop"``.
     Raises :class:`ValueError` with a corrective message for a conflicting
-    mode or an unknown option — a typo must not silently start the wrong
-    kind of run.
+    mode, an unknown option or a second positional — a typo must not
+    silently start the wrong kind of run.
 
     Lives here, not in the TUI, because the CLI's popup spinner parses the
     same queued command to decide whether to wait for a rebuilt window

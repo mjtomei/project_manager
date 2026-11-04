@@ -1009,3 +1009,22 @@ the routed form and `--fresh` so help is complete.
   Full suite on the merged tree: 5867 passed, 1 skipped, 0 failed (with
   `markdown` installed); `tests/test_command_surface.py` re-run on the
   final tree: 176 passed.
+
+- Review-loop be37 i1 (post-merge review): three gaps the sweep's own
+  class had left behind, and two doc/summary omissions.
+  (a) The two CLI launchers that print a copy-paste fallback — `pm
+  container build` and `pm meta` — still said only "Claude CLI not found."
+  above an unexplained prompt, while `pm plan add` says "copy-paste this
+  prompt into Claude Code" and the TUI pane launchers say "install Claude
+  Code first" (i5). Both now name the install and what the prompt is for.
+  (b) `HELP_TEXT`'s TUI section named `pm tui keys` but not `pm tui view` /
+  `pm tui send` — the two commands every injected prompt tells a driving
+  Claude session to act through, so the summary could not answer "how does
+  a session drive the TUI?". Both added.
+  (c) `parse_qa_command`'s docstring said it raises only for a conflicting
+  mode or an unknown option; it also rejects a second positional.
+  Tests: `test_cli_launchers_name_the_install_remedy` (both launchers,
+  end-to-end through CliRunner with the launcher path mocked) and
+  `test_top_level_help_names_the_tui_driving_commands`.
+  Full suite on the final tree: 5869 passed, 1 skipped, 0 failed;
+  `tests/test_command_surface.py`: 178 passed.

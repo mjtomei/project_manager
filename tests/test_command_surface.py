@@ -341,6 +341,17 @@ def test_top_level_help_lists_the_missing_lifecycle_commands():
         assert command in HELP_TEXT, f"{command!r} missing from HELP_TEXT"
 
 
+def test_top_level_help_names_the_tui_driving_commands():
+    """A driving session's own interface is in the summary, not only prompts.
+
+    The injected prompts tell a Claude session to act through `pm tui send`
+    (and read the screen with `pm tui view`), but `pm help` listed neither,
+    so the operator reading the summary could not find the mechanism.
+    """
+    for command in ("pm tui view", "pm tui send"):
+        assert command in HELP_TEXT, f"{command!r} missing from HELP_TEXT"
+
+
 def test_help_text_only_names_real_commands():
     """Every ``pm ...`` path in HELP_TEXT resolves in the Click tree.
 
@@ -2056,6 +2067,60 @@ def test_claude_not_found_names_the_install_remedy(launcher):
         getattr(pane_ops, launcher)(app)
     assert "Claude CLI not found" in logs[-1]
     assert "install" in logs[-1].lower()
+
+
+def test_cli_launchers_name_the_install_remedy(tmp_path):
+    """The two CLI launchers that print a fallback prompt say what to do.
+
+    `pm plan add` and the TUI pane launchers name the remedy ("copy-paste
+    this prompt into Claude Code" / "install Claude Code first").  `pm
+    container build` and `pm meta` printed a bare "Claude CLI not found"
+    followed by an unexplained prompt, so the fallback read as an error
+    rather than an instruction.
+    """
+    from unittest import mock
+
+    from pm_core.cli import container as container_mod
+    from pm_core.cli import meta as meta_mod
+
+    with mock.patch.object(container_mod, "_get_pm_session",
+                           return_value=None), \
+         mock.patch.object(container_mod, "state_root",
+                           return_value=tmp_path), \
+         mock.patch.object(container_mod, "_build_container_build_prompt",
+                           return_value="p"), \
+         mock.patch("pm_core.store.load",
+                    return_value={"project": {"name": "t"}}), \
+         mock.patch("pm_core.store.is_internal_pm_dir", return_value=True), \
+         mock.patch("pm_core.container.load_container_config",
+                    return_value=mock.MagicMock(image="pm-dev:latest")), \
+         mock.patch("pm_core.claude_launcher.find_claude",
+                    return_value=None):
+        result = CliRunner().invoke(container_mod.container_build, [])
+
+    assert result.exit_code != 0
+    assert "install Claude Code first" in result.output
+    assert "copy-paste this prompt" in result.output
+
+    fake_git = mock.MagicMock(returncode=0, stdout="master\n")
+    with mock.patch.object(meta_mod, "_get_session_name_for_cwd",
+                           return_value="pm-proj-1234"), \
+         mock.patch.object(meta_mod, "ensure_meta_workdir",
+                           return_value=tmp_path), \
+         mock.patch.object(meta_mod.git_ops, "run_git",
+                           return_value=fake_git), \
+         mock.patch.object(meta_mod.git_ops, "checkout_branch",
+                           return_value=None), \
+         mock.patch.object(meta_mod, "_build_meta_prompt",
+                           return_value="p"), \
+         mock.patch.object(meta_mod, "_get_pm_session", return_value=None), \
+         mock.patch("pm_core.claude_launcher.find_claude",
+                    return_value=None):
+        result = CliRunner().invoke(meta_mod.meta_cmd, ["a task"])
+
+    assert result.exit_code != 0
+    assert "install Claude Code first" in result.output
+    assert "copy-paste this prompt" in result.output
 
 
 def test_help_screen_uses_the_shared_command_bar_header():

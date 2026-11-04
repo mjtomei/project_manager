@@ -707,6 +707,8 @@ TUI / COMMAND BAR
   ?                             In the TUI: keyboard shortcuts + command-bar forms
   /                             In the TUI: command bar (type 'help' there for the same screen)
   pm tui keys                   Print keybindings and command-bar equivalents
+  pm tui view                   Capture the current TUI screen
+  pm tui send <keys>            Send keystrokes to the TUI (how a driving session acts)
   QA restart:  pr qa fresh <id>  = TUI z t      QA loop: pr qa loop <id> = TUI zz t
 
 OPTIONS
