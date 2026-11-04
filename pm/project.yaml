@@ -34547,7 +34547,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/295
   gh_pr_number: 295
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-11-04T04:53:26.219710+00:00'
+  updated_at: '2026-11-04T05:15:47.032555+00:00'
   started_at: '2026-11-02T02:25:01.682313+00:00'
   reviewed_at: null
   merged_at: null
@@ -35172,6 +35172,37 @@ prs:
       (cast + mp4 each; story2 also has transcript.log).'
     created_at: '2026-11-04T04:53:26Z'
     last_edited: '2026-11-04T04:53:26Z'
+  - id: note-6d5bc9c
+    text: 'QA S29 (concurrent actors on the shared registry + isolated regression
+      runs) PASS, 2/2 stories at dd94d148f. Runtime-verified in a throwaway project
+      (/scratch/pm-test-rec-1793768993, session pm-pm-test-rec-1793768993-25b08007)
+      with two real tmux clients on grouped views (~1, ~2) of one session sharing
+      a single TUI pane. (1) Fuzzy `pr select login` from the command bar submitted
+      while two CLI `pm pr select` writers (PR_B, PR_C) ran concurrently: log line
+      "Selected: pr-95325c4 Add login feature" with that row double-boxed, both CLI
+      writers exited 0 with their own Active PR lines, no traceback anywhere, and
+      after `R` exactly one `*` in `pm pr list` matching the double-boxed row (the
+      TUI write took the project.yaml lock last); a following command-bar `pr list`
+      rendered its row with no Busy guard. (2) Two regressions launched at once (command
+      bar + CLI pane): distinct run ids (…-c397 / …-0088), distinct clones and captures
+      dirs, each captures dir holding only its own prompt.md; pm/qa/regression git
+      status + sha256, pm/project.yaml and pm pr list unchanged (project.yaml byte-identical
+      to HEAD); two distinct ~/.pm/workdirs/qa/regression-*-<run>/s-0/{repo,scratch};
+      no tracebacks; command-bar pane dead=1 with output preserved, CLI pane back
+      at prompt, TUI still usable, final `pm pr select pr-d17fe55` rc 0. Fixture notes
+      for the next run: (a) `pm tui view`/`pm session name` resolve against ANY running
+      pm-* session, so kill leftover sessions before starting a fresh one or you will
+      bind the old one — run setup with exactly one pm session alive; (b) `tmux new-window
+      -t "$SESS"` (no -d) steals the grouped clients and the recorder to the new window,
+      so re-select window 0 right after sending the CLI-pane keys if you want the
+      TUI in the capture; (c) agg is absent in this container — installed the aarch64
+      v1.9.0 static binary (github release asset name is `agg-aarch64-unknown-linux-gnu`,
+      no `.tgz`) into /tmp/pm-tools for the mp4 renders; (d) `pm qa regression` needs
+      `pm/project.yaml` committed on master and the fake config set from the project
+      dir so the tag matches. No code changes needed. Captures: /pm-captures/scenarios/29/{story1-concurrent-select,story2-concurrent-regressions}/{tmux-screen-recording,cli-recording}
+      (cast + mp4 + manifest each; tmux captures also have transcript.log).'
+    created_at: '2026-11-04T05:15:46Z'
+    last_edited: '2026-11-04T05:15:46Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fa9f172-self-documenting-consistent-pm-comma-0c82d63b
   model: provider:deepseek-flash
   effort: high
