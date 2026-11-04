@@ -34547,7 +34547,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/295
   gh_pr_number: 295
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-11-04T04:22:42.091744+00:00'
+  updated_at: '2026-11-04T04:53:26.219710+00:00'
   started_at: '2026-11-02T02:25:01.682313+00:00'
   reviewed_at: null
   merged_at: null
@@ -35143,6 +35143,35 @@ prs:
       subdirs). No code changes needed.'
     created_at: '2026-11-04T04:22:41Z'
     last_edited: '2026-11-04T04:22:41Z'
+  - id: note-cf08a2b
+    text: 'QA scenario 28 (merged help, plan names, reconciled registry) PASS 4/4
+      stories at 96a001319. (1) pm help lists all nine named lifecycle commands and
+      the TUI / COMMAND BAR section (? / pm tui keys); pm getting-started plans line
+      is exactly "a=add  w=breakdown  c=review  l=load  e=edit  D=deps  Enter=view
+      file"; pm tui keys Plans view block has Enter/D and no v; pm pr qa --help exits
+      0 with the three modes and both flag spellings; none of the four outputs contains
+      "pm tui test" or "pm pr done". (2) TUI ? screens at 200x50 and 70x40: tree shows
+      the merged rows "]/[ Cycle fuzzy match results", "/pr select <query>", "/plan
+      select <query>" and, at "Command bar (press /):", pr qa fresh (TUI z t), pr
+      qa loop (TUI zz t) and qa regression (TUI q view: Enter). A full single-line
+      scroll of all three modals shows the identical 15-row shared command-bar table
+      (tree==plans==qa set-equal) and zero tree-only rows (Start QA on selected PR,
+      Launch Claude session, companion-pane, Start loop, Start QA loop, Prefix: restart
+      the pane) in plans/QA; at 70x40 the long CLI rows wrap inside the 50-col modal
+      instead of clipping. (3) pm watcher list and pm watcher start --help describe
+      improvement-fix-impl as plan=improvements (gated at QA PASS); pm prompt prints
+      Part of plan "" (improvements).; pm pr list --plan improvements lists only that
+      PR; no plan=ux anywhere. (4) In /workspace the merged registry: four read-only
+      commands exit 0, plan list keeps tui-ux: TUI and UX improvements [draft] and
+      improvements [active], pr show pr-f38005f prints Plan: plan-003 plus notes note-181f05d/note-60be829/note-23e1756,
+      pr list --plan improvements renders 59 rows vs 619 unfiltered, and md5sum is
+      unchanged (e14404ce4314526cfc11d24c3d21c8b5). No code changes needed. Fixture
+      note for the next run: the plans/QA ? modals are ~90 lines and page keys (J)
+      skip rows — sweep with single-line j (0.25 s apart) if you need to prove the
+      full shared table. Captures: /pm-captures/scenarios/28/{story1-cli-help,story2-tui-help,story3-plan-naming,story4-merged-registry}
+      (cast + mp4 each; story2 also has transcript.log).'
+    created_at: '2026-11-04T04:53:26Z'
+    last_edited: '2026-11-04T04:53:26Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fa9f172-self-documenting-consistent-pm-comma-0c82d63b
   model: provider:deepseek-flash
   effort: high
