@@ -1744,10 +1744,21 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
             # (project-derived) lookup in a private context never adopts
             # another user's socket; inside a shared/joiner context the
             # shared session is reachable.
-            if _select_session_socket(
-                    base,
-                    owned_only=_private_session_context()) is None:
+            project_server = _select_session_socket(
+                base, owned_only=_private_session_context())
+            if project_server is None:
                 continue
+            # The project's session *is* running: record it as the
+            # identified session even when its registry lists no live TUI
+            # pane.  Without this the cwd branch below would run and could
+            # return a *different* project's TUI — the cwd is exactly where
+            # a host-mode regression run's clone or disposable test project
+            # lives — and the last-resort scan would be left unscoped.  A
+            # session that is not running still falls through, as before
+            # (that is what makes the override a hint, not a hard failure).
+            if identified is None:
+                identified = base
+                identified_server = project_server
             pane_id = _registry_tui_pane(base)
             if pane_id:
                 return pane_id, base

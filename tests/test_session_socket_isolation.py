@@ -3672,10 +3672,14 @@ class TestSessionKillServerSelection:
             session_mod.tmux_mod, "sessions_in_group",
             lambda name, socket_path=None: [f"{name}~1", name])
         # The grouped member's kill fails; the session is still there.
+        killed: list[str] = []
+
+        def kill(name, socket_path=None, exact=False):
+            killed.append(name)
+            return name != "pm-repo-abc~1"
+
         monkeypatch.setattr(
-            session_mod.tmux_mod, "kill_session",
-            lambda name, socket_path=None, exact=False:
-            name != "pm-repo-abc~1")
+            session_mod.tmux_mod, "kill_session", kill)
         monkeypatch.setattr(
             session_mod.tmux_mod, "session_exists",
             lambda name, socket_path=None, use_env=True: True)
@@ -3692,6 +3696,11 @@ class TestSessionKillServerSelection:
         assert result.exit_code == 1
         assert "Failed to kill session 'pm-repo-abc'" in result.output
         assert "pm-repo-abc~1" in result.output
+        # The base was not killed after the member failed: killing it would
+        # leave a half-torn-down session no later `pm session kill` can
+        # find again (the exact lookup is on the base name), while the
+        # survivor keeps the windows, the server and its socket.
+        assert killed == ["pm-repo-abc~1"]
         assert cleaned == []          # the survivor keeps its containers
         assert sock_path.exists()     # and its live server's socket
 
@@ -4181,18 +4190,61 @@ class TestSessionMobileServerSelection:
                             lambda name: tmp_path / "pm-abc.mobile")
         seen: dict[str, str | None] = {}
 
-        def fake_session_exists(name, socket_path=None, use_env=True):
+        def fake_window_id(name):
             seen["env"] = os.environ.get("PM_TMUX_SOCKET")
-            return False
+            return "@0"
 
-        monkeypatch.setattr(session_mod.tmux_mod, "session_exists",
-                            fake_session_exists)
+        monkeypatch.setattr(session_mod.tmux_mod, "get_window_id",
+                            fake_window_id)
+        monkeypatch.setattr(session_mod.tmux_mod, "get_window_size",
+                            lambda name, window="0": (120, 40))
+        monkeypatch.setattr(session_mod.pane_layout, "is_mobile",
+                            lambda name, window: False)
 
         result = CliRunner().invoke(session_mod.session, ["mobile"])
 
         assert result.exit_code == 0, result.output
         assert seen["env"] == sock
-        assert "not running" in result.output
+        assert "Mobile active: False" in result.output
+
+    def test_a_missing_session_does_not_query_the_ambient_server(
+            self, monkeypatch, tmp_path):
+        """A session found on no server is "not running", not a prefix probe.
+
+        ``_select_session_socket`` leaves ``PM_TMUX_SOCKET`` untouched when
+        the target is not found, and a bare ``session_exists`` /
+        ``get_window_id`` then runs against whatever server this process is
+        on, where the session name is a *prefix* target: a user's view
+        named after the missing session would be zoomed and rebalanced.
+        """
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setattr(session_mod, "_resolve_target_session",
+                            lambda: "pm-abc")
+        monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
+                            lambda name, owned_only=False: (None, False))
+        # Inside a pane: the force path's tmux operations are what must not
+        # run against the ambient server.
+        monkeypatch.setattr(session_mod.tmux_mod, "in_tmux", lambda: True)
+        monkeypatch.setattr(session_mod.pane_layout, "set_force_mobile",
+                            lambda name, value: None)
+        calls: list[str] = []
+
+        def record(name, *a, **kw):
+            calls.append(name)
+            return False
+
+        monkeypatch.setattr(session_mod.tmux_mod, "session_exists", record)
+        monkeypatch.setattr(session_mod.tmux_mod, "get_window_id", record)
+        monkeypatch.setattr(session_mod.tmux_mod, "list_windows", record)
+
+        result = CliRunner().invoke(session_mod.session,
+                                    ["mobile", "--force"])
+
+        assert result.exit_code == 0, result.output
+        assert calls == []          # nothing queried on the ambient server
+        assert "Mobile mode force-enabled" in result.output
 
     def test_requires_tmux(self, monkeypatch):
         """Without tmux the status query has nothing to ask: say so, exit 1.
@@ -5191,6 +5243,40 @@ class TestPrintConnect:
         assert "owned by uid" in result.output
         assert "tmux -S" not in result.output
 
+    def test_refuses_to_print_through_a_symlinked_socket_directory(
+            self, monkeypatch, tmp_path):
+        """The directory itself is untrusted, so the path inside it is too.
+
+        /tmp is world-writable: another local user can plant
+        ``/tmp/pm-sessions`` as a symlink to a directory they own, run a
+        server there under this session's deterministic socket name, and
+        hand the printed command to a joiner.  ``find_session_server``
+        skips the probe for that state and ``_resolve_session_socket``
+        refuses it on the start path; a *shared* print has no ownership
+        check to fall back on, so the directory check is the only guard.
+        """
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+
+        target = tmp_path / "attacker-dir"
+        target.mkdir()
+        link = tmp_path / "pm-sessions"
+        link.symlink_to(target, target_is_directory=True)
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", link)
+        monkeypatch.setattr(paths, "get_session_tag",
+                            lambda *a, **k: "repo-abc")
+        monkeypatch.setattr(session_mod, "_resolve_start_session_name",
+                            lambda shared=False: "pm-repo-abc")
+        monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
+                            lambda name, owned_only=False: (None, False))
+
+        result = CliRunner().invoke(session_mod.session,
+                                    ["--print-connect", "--global"])
+
+        assert result.exit_code == 1
+        assert "is not a real directory" in result.output
+        assert "tmux " not in result.output
+
     def test_prints_the_command_for_a_not_yet_started_session(
             self, monkeypatch, tmp_path):
         """No entry at all is the normal before-the-first-start state."""
@@ -5420,11 +5506,16 @@ class TestSessionListCommand:
         assert "pm-repo-abc" in result.stdout
         assert "No pm sessions found." not in result.output
 
-    def test_unreadable_socket_dir_outside_a_project(self, monkeypatch):
+    def test_unreadable_socket_dir_outside_a_project(self, monkeypatch,
+                                                     tmp_path):
         """Outside a project nothing can be named: the warning says how to
         check a project's session, and the empty listing is not silent."""
         from click.testing import CliRunner
         from pm_core.cli import session as session_mod
+
+        # Outside any pm project: a directory that *is* one has a session
+        # name to offer even without a tag (see the non-git test below).
+        monkeypatch.chdir(tmp_path)
 
         def fake_list(*, extra_sockets=(), read_errors=None):
             assert list(extra_sockets) == []
@@ -5442,6 +5533,44 @@ class TestSessionListCommand:
         assert "Cannot read tmux socket directory" in result.stderr
         assert "run this from a project directory" in result.stderr
         assert result.stdout == "No pm sessions found.\n"
+
+    def test_unreadable_dir_probes_a_non_git_projects_session(
+            self, monkeypatch, tmp_path):
+        """A non-git pm project has no tag, but it does have a session.
+
+        ``pm session`` names it ``pm-<dir>-00000000`` on its own socket
+        (QA scenario 62).  When the socket directory cannot be read, naming
+        that socket is the only way the listing can still show it.
+        """
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+
+        project = tmp_path / "nongit-project"
+        (project / "pm").mkdir(parents=True)
+        (project / "pm" / "project.yaml").write_text("prs: []\n")
+        monkeypatch.chdir(project)
+        seen = {}
+
+        def fake_list(*, extra_sockets=(), read_errors=None):
+            seen["extra"] = list(extra_sockets)
+            read_errors.append(PermissionError(13, "Permission denied"))
+            return [{"name": "pm-nongit-project-00000000",
+                     "socket": str(paths.SHARED_SOCKET_DIR
+                                   / "pm-nongit-project-00000000"),
+                     "attached": 0, "shared": False}]
+
+        monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: True)
+        monkeypatch.setattr(session_mod.tmux_mod, "list_pm_sessions",
+                            fake_list)
+        monkeypatch.setattr(paths, "get_session_tag", lambda *a, **k: None)
+
+        result = CliRunner().invoke(session_mod.session, ["list"])
+
+        assert result.exit_code == 0, result.output
+        assert seen["extra"] == [paths.SHARED_SOCKET_DIR
+                                 / "pm-nongit-project-00000000"]
+        assert "pm-nongit-project-00000000" in result.stdout
+        assert "No pm sessions found." not in result.output
 
     def _list_unreadable(self, monkeypatch, tag):
         """Run `pm session list` on an unreadable socket dir with the cwd
@@ -5466,11 +5595,14 @@ class TestSessionListCommand:
 
     @pytest.mark.parametrize("var", ["TMUX", "PM_TMUX_SOCKET"])
     def test_unreadable_dir_probes_the_session_a_pane_belongs_to(
-            self, monkeypatch, var):
+            self, monkeypatch, var, tmp_path):
         """A pane of session A whose cwd is $HOME names no project, yet the
         listing must still show A (QA S40, qa.md ambiguity 12): the socket
         the pane runs on — ``$PM_TMUX_SOCKET``, else the one ``$TMUX``
         names — is probed too, and the warning says what was checked."""
+        # Really outside a project: a pm project in the cwd names its own
+        # session's socket even without a tag (non-git projects do).
+        monkeypatch.chdir(tmp_path)
         sock = paths.SHARED_SOCKET_DIR / "pm-alpha-f85ee837"
         monkeypatch.setenv(var, f"{sock},6851,1" if var == "TMUX"
                            else str(sock))
@@ -5517,9 +5649,11 @@ class TestSessionListCommand:
         {"PM_TMUX_SOCKET": "/tmp/tmux-1000/default"},
     ])
     def test_unreadable_dir_ignores_a_socket_outside_the_dir(
-            self, monkeypatch, env):
+            self, monkeypatch, env, tmp_path):
         """A legacy session's pane runs on the default server, which is
         always listed; its socket is not an extra one to probe."""
+        # Outside a pm project, so no project socket is named either.
+        monkeypatch.chdir(tmp_path)
         for var, value in env.items():
             monkeypatch.setenv(var, value)
 

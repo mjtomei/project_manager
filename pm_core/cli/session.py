@@ -1156,6 +1156,25 @@ def session(ctx, share_global, share_group, start_dir, print_connect, disconnect
         # socket — the sharing user's — reachable, and an absent or stale
         # entry is the normal before-the-first-start state.
         if hosting_socket is None:
+            # The directory itself must be a real directory first.  /tmp is
+            # world-writable, so another local user can plant
+            # ``/tmp/pm-sessions`` as a symlink to a directory they own and
+            # run a server there under our deterministic socket name; a
+            # path *inside* that directory follows the link even when the
+            # entry itself is a real socket, and the command is pasted into
+            # another shell — so the print must refuse exactly where
+            # ``find_session_server`` (which skipped the probe) and
+            # ``_resolve_session_socket`` refuse.  This applies to a shared
+            # print too, where no ownership check runs by design.
+            from pm_core.paths import (SHARED_SOCKET_DIR,
+                                       shared_socket_dir_is_usable)
+            if not shared_socket_dir_is_usable():
+                click.echo(
+                    f"Refusing to print a connect command for "
+                    f"'{session_name}': '{SHARED_SOCKET_DIR}' is not a real "
+                    "directory (a symbolic link, or another non-directory "
+                    "entry). Remove it if you created it.", err=True)
+                raise SystemExit(1)
             try:
                 entry = Path(sp).lstat()
             except OSError:
@@ -1240,7 +1259,23 @@ def session_list():
     # of the socket directory, so a legacy session's default-server
     # socket is not an extra one (the default server is always listed).
     tag = get_session_tag()
-    own_socket = session_socket_path(tag) if tag else None
+    if tag:
+        own_socket = session_socket_path(tag)
+    else:
+        # A non-git pm project has no tag but does get a session, named
+        # ``pm-<dir>-00000000`` (``_get_session_name_for_cwd``).  Name its
+        # socket the same way, so the one case the probe-by-name exists
+        # for — an unreadable socket directory, which the scan cannot
+        # enumerate — still lists the project's running session.  Outside
+        # a pm project there is no session to name, and the warning says
+        # how to check one.
+        try:
+            store.find_project_root()
+        except FileNotFoundError:
+            own_socket = None
+        else:
+            own_socket = Path(tmux_mod.session_socket_for(
+                _get_session_name_for_cwd()))
     ambient = tmux_mod.resolve_ambient_socket()
     ambient_socket = (Path(ambient) if ambient
                       and Path(ambient).parent == SHARED_SOCKET_DIR
@@ -1366,8 +1401,17 @@ def session_kill(start_dir):
                     and tmux_mod.session_exists(f"={member}",
                                                 socket_path=hosting_socket)):
                 failed.append(member)
-        if (not tmux_mod.kill_session(session_name,
-                                      socket_path=hosting_socket, exact=True)
+        # Do not kill the base while a member survives.  The member keeps
+        # the session's windows, the server and its socket, and the base is
+        # the name every later lookup is exact on (R8.1): once it is gone,
+        # `pm session kill` reports "No session ... found" and can never
+        # finish the teardown, leaving a session the user cannot retire
+        # with pm.  Stopping here leaves the session intact, so a retry
+        # works.
+        if not failed and (
+                not tmux_mod.kill_session(session_name,
+                                          socket_path=hosting_socket,
+                                          exact=True)
                 and tmux_mod.session_exists(f"={session_name}",
                                             socket_path=hosting_socket)):
             failed.append(session_name)
@@ -1466,16 +1510,21 @@ def session_mobile(force: bool | None):
     session_name = _resolve_target_session()
     # Target the server that actually hosts the session (private socket, or
     # the legacy default server).  An implicit target must resolve to a
-    # socket this user owns (see ``_owned_only_for_target``).
-    _select_session_socket(session_name,
-                           owned_only=_owned_only_for_target(session_name))
+    # socket this user owns (see ``_owned_only_for_target``).  None means
+    # no server hosts it: the ambient setting is left untouched, and the
+    # tmux operations below are skipped rather than run against whichever
+    # server this process happens to be on — a session name is a tmux
+    # *prefix* target there, so a user's view named after the missing
+    # session would be moved instead.
+    socket_path = _select_session_socket(
+        session_name, owned_only=_owned_only_for_target(session_name))
 
     if force is not None:
         pane_layout.set_force_mobile(session_name, force)
         state = "enabled" if force else "disabled"
         click.echo(f"Mobile mode force-{state} for '{session_name}'.")
         # Trigger rebalance if in tmux
-        if tmux_mod.in_tmux():
+        if tmux_mod.in_tmux() and socket_path is not None:
             window = tmux_mod.get_window_id(session_name)
             all_windows = tmux_mod.list_windows(session_name)
             if not force:
@@ -1501,9 +1550,11 @@ def session_mobile(force: bool | None):
                     if not tmux_mod.is_zoomed(session_name, w["index"]):
                         tmux_mod.zoom_pane(f"{session_name}:{w['index']}")
     else:
-        # Show status
+        # Show status.  "Running" is the server lookup above, not a prefix
+        # probe on the ambient server: a session that merely starts with
+        # this name is not this session.
         force_flag = pane_layout.mobile_flag_path(session_name).exists()
-        if tmux_mod.session_exists(session_name):
+        if socket_path is not None:
             window = tmux_mod.get_window_id(session_name)
             width, _ = tmux_mod.get_window_size(session_name, window)
             mobile = pane_layout.is_mobile(session_name, window)

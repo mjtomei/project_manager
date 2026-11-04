@@ -949,6 +949,45 @@ class TestFindTuiPaneProjectOverride:
                             tmp_path / "gone")
         assert env.helpers._find_tui_pane() == ("%3333", "pm-ztest-3333")
 
+    def test_a_running_project_session_without_a_registered_tui_is_still_it(
+            self, env, monkeypatch):
+        """The override wins even when the project's TUI is unregistered.
+
+        The project's session runs but its registry lists no live TUI pane
+        (a hand-started TUI before the first ``heal_registry`` pass, or an
+        entry healed away).  Falling through to the cwd branch would hand
+        the caller the *cwd* project's TUI — the cross-project damage this
+        branch exists to prevent — so the last-resort scan must be scoped
+        to the project's own server instead.
+        """
+        import os
+
+        monkeypatch.chdir(env.root / "ztest")
+        monkeypatch.setattr(env.helpers, "_project_override",
+                            env.root / "mproj" / "pm")
+
+        def registry(s):
+            if s == "pm-ztest-3333":
+                return {"session": s, "generation": "1", "windows": {
+                    "@0": {"panes": [{"id": "%3333", "role": "tui",
+                                      "order": 0, "cmd": "pm _tui"}]}}}
+            return {"session": s, "generation": "1", "windows": {}}
+
+        monkeypatch.setattr(env.helpers.pane_registry, "load_registry",
+                            registry)
+        seen_sockets: list[str | None] = []
+
+        def live():
+            seen_sockets.append(os.environ.get("PM_TMUX_SOCKET"))
+            return {}, [("%2222", "pm-mproj-2222")]
+
+        monkeypatch.setattr(env.helpers, "_live_panes_and_tuis", live)
+        monkeypatch.setattr(env.helpers, "_pm_session_of", lambda n: n)
+
+        assert env.helpers._find_tui_pane() == ("%2222", "pm-mproj-2222")
+        # Scoped to the project's server, not the cwd project's.
+        assert seen_sockets == ["/tmp/pm-sessions/pm-mproj-2222"]
+
     def _share_mode_session(self, env, monkeypatch):
         """Make mproj's live session a ``pm session --global`` one: its name
         carries the share-mode tag, which a run without PM_SHARE_MODE does

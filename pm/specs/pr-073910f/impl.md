@@ -5136,3 +5136,135 @@ imports versus master (the branch in fact removes one,
 Validation: the 24 PR-affected test files pass twice in one HOME (1541
 each); full suite 6169 passed / 1 skipped, 445.6 s (log
 `/pm-captures/review-6cda-i3/full-suite-final.log`).
+
+## Review iteration (2026-11-04, review-loop 6cda i4)
+
+Verification pass over the head after the 6cda i3 fix (`0b0be230`), plus a
+fresh-eyes read of the session-resolution code.  No requirement changes.
+Five gaps, all in code this PR owns:
+
+1. **`pm session --print-connect` did not apply the socket-directory
+   check.**  Every other read path refuses a symbolic link (or any other
+   non-directory) at `/tmp/pm-sessions` (`find_session_server`,
+   `list_pm_sessions`, `_removable_private_socket`, the start path's
+   `ensure_socket_dir`).  The print path, with no server found, went
+   straight to `lstat` of the path *inside* that directory — which follows
+   the planted link — and, in a shared context (`--global`/`--group`, where
+   no ownership check runs by design), printed a command naming a path the
+   attacker controls.  It now refuses that state first, for both contexts.
+
+2. **`pm session kill` killed the base after a member's kill failed.**  A
+   grouped member that survives keeps the session's windows, the server
+   and its socket; killing the base then leaves a half-torn-down session
+   that pm can never finish — the destructive lookup is exact on the base
+   name (R8.1), so a retry reports "No session ... found" while the
+   survivor keeps running.  The base kill is now skipped when a member
+   failed, leaving the session intact so a retry works.
+
+3. **`pm session list` named no socket for a non-git pm project.**  Such a
+   project has no tag but does get the fallback session
+   `pm-<dir>-00000000` on its own socket (QA scenario 62).  When the socket
+   directory cannot be read, the probe-by-name is the only way the listing
+   can still show it; without it the command printed "No pm sessions
+   found." while that session ran.  The socket is now named the way
+   `pm session` names it — only inside a pm project, so the "outside a
+   project" hint is unchanged.
+
+4. **`_find_tui_pane`'s `-C`/`PM_PROJECT` branch did not record the session
+   it found.**  When the project's session was running but its registry
+   listed no live TUI pane (a hand-started TUI before the first
+   `heal_registry` pass, or an entry healed away), the branch fell through
+   to the cwd lookup and could return the *cwd* project's TUI — the
+   cross-project key delivery this branch exists to prevent — and left the
+   last-resort scan unscoped.  The identified session and its server are
+   now recorded, so the cwd branch is skipped and the scan is scoped to
+   the project's server.  A project session that is not running still
+   falls through, as before.
+
+5. **`pm session mobile` fell back to the ambient server when the target
+   was not found.**  `_select_session_socket` deliberately leaves
+   `PM_TMUX_SOCKET` untouched then, and the force path still ran
+   `get_window_id`/`list_windows`/`unzoom_pane`/`rebalance` on whatever
+   server the process was on, where the session name is a *prefix* target:
+   a user's view named after the missing session would be zoomed and
+   rebalanced.  The tmux operations now run only when a server hosts the
+   session, and the status line reports "running" from that lookup instead
+   of a prefix probe.
+
+Incidental (outside this PR's scope, recorded on the PR): a pre-existing
+test-isolation bug in `tests/test_regression_launch.py` —
+`test_container_run_on_a_router_that_cannot_launch_creates_nothing` popped
+`"bridge"` from its *parametrized* argument, mutating the shared dict, so
+collecting the file twice in one process made the second collection expect
+exit 1 and get 0.  It now copies the dict first.
+
+Tests: `test_refuses_to_print_through_a_symlinked_socket_directory`,
+`test_a_failed_kill_is_not_reported_as_a_teardown` (now also asserts the
+base was not killed),
+`test_unreadable_dir_probes_a_non_git_projects_session`,
+`test_a_running_project_session_without_a_registered_tui_is_still_it`,
+`test_a_missing_session_does_not_query_the_ambient_server` (and the
+existing status test now pins the hosting-server query).  All five fail on
+the i3 head and pass here; three pre-existing session-list tests now chdir
+outside a project so their "nothing can be named" premise holds.
+
+Validation: the 24 PR-affected test files pass twice in one process/HOME
+(1545 each, 3090).  The full-suite run was interrupted — the container was
+removed at 10:08 UTC and
+`/pm-captures/review-6cda-i4/full-suite-final.log` stops at 85% with
+failure markers, so it is *not* a passing suite; the run was repeated in
+review-loop fddc i1 (below).  Live smoke on tmux 3.2a: with the registry
+lock held past its timeout, `_respawn_tui` still returns the window and
+the split pane exists (i3's fix), while a missing session returns `None`.
+
+## Review iteration (2026-11-04, review-loop fddc i1)
+
+Recovery of the interrupted 6cda i4 pass.  The container was removed while
+that iteration's full suite was running; its edits were preserved in the
+working tree.  They were inspected here, not re-derived, and kept:
+
+1. `pm session --print-connect` now applies the socket-directory check
+   (`paths.shared_socket_dir_is_usable`) before `lstat` of the path
+   *inside* it, for shared prints too.  Every other read path already
+   refused a planted `/tmp/pm-sessions`; this one followed it.
+2. `pm session kill` no longer kills the base after a grouped member's
+   kill failed: the survivor keeps the windows, the server and its socket,
+   and the exact lookup could never find the session again to finish the
+   teardown.
+3. `pm session list` names a non-git pm project's deterministic socket
+   (`pm-<dir>-00000000`) as an extra probe, so an unreadable socket
+   directory still lists that project's running session (QA scenario 62).
+4. `_find_tui_pane`'s `-C`/`PM_PROJECT` branch records the running project
+   session and its server even when its registry lists no TUI pane, so
+   the cwd branch cannot return a different project's TUI and the
+   last-resort scan is scoped to the project's own server.
+5. `pm session mobile` skips the tmux operations (and reports "not
+   running" from the server lookup) when no server hosts the target,
+   instead of running them against the ambient server, where the session
+   name is a *prefix* target.
+
+Verification of the five tests' claim: in a detached worktree at the 6cda
+i3 head (`0b0be230`) with the three changed test files copied in, all
+five new tests fail (5 failed in 0.48 s); on this head they pass.
+
+Incidental (outside this PR's scope, recorded on the PR): the
+router-cannot-launch regression test popped `"bridge"` from its
+*parametrized* dict, mutating the shared parameter; it now copies first.
+
+Correction: the interrupted pass's validation line claimed a 6174-passed
+full suite.  No such run exists; its log was cut off at 85% with failure
+markers.  The claim is replaced by the run below.
+
+Considered and not changed: `tests/test_session_socket_isolation.py` is
+now the repository's largest test module (6985 lines, versus 3724 for the
+next); it covers one feature coherently, and splitting it at this point
+would be a large mechanical change with merge-conflict risk just before
+sign-off.  A future change can split it along the classes' existing
+boundaries (paths / tmux / CLI / integration).
+
+Validation: the 24 files changed under `tests/` plus
+`tests/test_fuzzy_select_tui.py` pass twice in one process/HOME (1545
+each, 3090).  Full suite 6173 passed / 1 skipped, 439.8 s (log
+`/pm-captures/review-fddc-i1/full-suite-final.log`) — the i3 head's 6169
+plus the four new tests.  pyflakes reports no new warning versus
+`origin/master`.

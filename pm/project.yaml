@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-04T09:16:50.012994+00:00'
+  updated_at: '2026-11-04T11:23:16.322527+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9550,6 +9550,33 @@ prs:
       and pyflakes finds no new dead imports versus master.'
     created_at: '2026-11-04T09:16:08Z'
     last_edited: '2026-11-04T09:16:50Z'
+  - id: note-47461cd
+    text: 'Review loop fddc i1 (no requirement changes; full suite 6173 passed / 1
+      skipped, 439.8 s, log /pm-captures/review-fddc-i1/full-suite-final.log; the
+      24 files changed under tests/ plus test_fuzzy_select_tui.py pass twice in one
+      HOME, 1545 each). Recovery of the interrupted 6cda i4 pass: the container was
+      removed while its full suite ran; its working-tree edits (five fixes plus tests,
+      and one incidental test-isolation fix) were inspected and kept. (1) pm session
+      --print-connect now applies the socket-directory check before lstat of the path
+      inside it, for shared prints too — every other read path already refused a planted
+      /tmp/pm-sessions. (2) pm session kill no longer kills the base after a grouped
+      member''s kill failed: the survivor keeps the windows, server and socket, and
+      the exact lookup could never find the session again to finish the teardown.
+      (3) pm session list names a non-git pm project''s deterministic socket, so an
+      unreadable socket directory still lists that project''s running session. (4)
+      _find_tui_pane''s -C/PM_PROJECT branch records the running project session and
+      its server even when its registry lists no TUI pane, so the cwd branch cannot
+      return a different project''s TUI and the last-resort scan is scoped. (5) pm
+      session mobile skips the tmux operations (and reports ''not running'' from the
+      server lookup) when no server hosts the target, instead of running them against
+      the ambient server where the name is a prefix target. All five new tests fail
+      on the 6cda i3 head (detached worktree) and pass here. The interrupted pass''s
+      claimed 6174-passed suite is corrected in the spec: its log stops at 85% with
+      failure markers. Incidental: the router-cannot-launch regression test popped
+      ''bridge'' from its parametrized dict; it now copies first. pyflakes: no new
+      warning vs origin/master.'
+    created_at: '2026-11-04T11:23:16Z'
+    last_edited: '2026-11-04T11:23:16Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

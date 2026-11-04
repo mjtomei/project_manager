@@ -370,6 +370,11 @@ def test_container_run_on_a_router_that_cannot_launch_creates_nothing(
     """A router whose settings cannot launch, or whose host bridge cannot
     start, stops the run before any container exists (R42): the
     provider's error and remedy, exit 1, nothing left behind."""
+    # Copy before popping: a parametrized argument is the *same* dict object
+    # for every collection of this test, so popping from it would mutate the
+    # parameter — a second collection in one process (the suite run twice in
+    # one HOME) then saw no bridge error and expected exit 1 but got 0.
+    problem = dict(problem)
     bridge_error = problem.pop("bridge", None)
     _router_default(home, monkeypatch, **problem)
     sock = tmp_path / "route-bridge" / "r-ctr" / "router.sock"
