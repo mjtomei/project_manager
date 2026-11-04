@@ -59,14 +59,24 @@ def project_set(setting, value):
 
 
 def _set_project_bool(setting: str, enabled: bool) -> None:
-    """Write a boolean setting to project.yaml."""
+    """Write a boolean setting to project.yaml.
+
+    A locked read-modify-write like every other CLI mutation: an unlocked
+    ``load`` + ``save`` silently dropped whatever another writer (the TUI,
+    or a second ``pm project set``) committed between the two, and on a
+    large merged registry the write itself can take longer than the 2 s
+    lock default (R16, QA S91).  ``locked_update_cli`` waits out a writer
+    that is already inside one.
+    """
     from pm_core import store
 
     root = state_root()
-    data = store.load(root)
     key = _YAML_KEY[setting]
-    data.setdefault("project", {})[key] = enabled
-    store.save(data, root)
+
+    def apply(data: dict) -> None:
+        data.setdefault("project", {})[key] = enabled
+
+    store.locked_update_cli(root, apply)
 
 
 def _list_project_settings():

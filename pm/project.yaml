@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-04T23:07:48.688838+00:00'
+  updated_at: '2026-11-04T23:42:34.635893+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9759,6 +9759,16 @@ prs:
       skipped.'
     created_at: '2026-11-04T23:07:48Z'
     last_edited: '2026-11-04T23:07:48Z'
+  - id: note-d0b5029
+    text: 'Review loop 358c i1 (no requirement changes): verified the two QA fixes
+      since 4c94 i5 (e14cd565 held-run resume marker; 9e86ef4e CLI lock wait) and
+      fixed one gap in the same class — pm project set was the last unlocked foreground
+      CLI write (store.load+store.save), silently dropping a concurrent writer''s
+      change and able to outlast the 2 s lock default; it now uses store.locked_update_cli.
+      Test test_project_set_waits_out_a_slow_writer fails on the pre-fix head. Full
+      suite 6196 passed / 1 skipped.'
+    created_at: '2026-11-04T23:42:34Z'
+    last_edited: '2026-11-04T23:42:34Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

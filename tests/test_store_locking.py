@@ -204,6 +204,66 @@ class TestStoreLockTimeout:
             holder.join()
 
 
+def test_project_set_waits_out_a_slow_writer(tmp_path, monkeypatch):
+    """``pm project set`` is a locked read-modify-write like every other CLI
+    mutation.
+
+    It waits for a writer holding the lock past the 2 s default and applies
+    its change on top of that writer's, instead of overwriting it: the old
+    unlocked ``load`` + ``save`` read the file before the holder's write and
+    dropped it (the R16 lost-update class, QA S91).  ``skip_qa`` steers the
+    auto-start flow, so a silently dropped toggle changes what a later run
+    does.
+    """
+    import fcntl
+    import threading
+
+    from click.testing import CliRunner
+
+    from pm_core.cli import cli
+
+    project_dir = tmp_path / "pm"
+    project_dir.mkdir()
+    store.save({"project": {"name": "test", "repo": "/tmp/repo",
+                            "base_branch": "main"},
+                "plans": [], "prs": []}, project_dir)
+
+    lock_path = project_dir / "project.yaml.lock"
+    fd = open(lock_path, "w")
+    fcntl.flock(fd, fcntl.LOCK_EX)
+
+    read_done = threading.Event()
+
+    def slow_writer():
+        # One read-modify-write of a large merged registry takes ~2 s: read
+        # at the start, write at the end.  The write lands after the CLI's
+        # old 2 s deadline would have expired.
+        data = store.load(project_dir)
+        read_done.set()
+        time.sleep(2.2)
+        data["plans"].append({"id": "plan-1", "name": "held"})
+        store.save(data, project_dir)
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        fd.close()
+
+    holder = threading.Thread(target=slow_writer)
+    holder.start()
+    # The holder's read must precede the CLI's, or the unlocked version
+    # would read the CLI's write and the lost update would not happen.
+    read_done.wait()
+    try:
+        monkeypatch.setattr("pm_core.cli.project.state_root",
+                            lambda: project_dir)
+        result = CliRunner().invoke(cli, ["project", "set", "skip-qa", "on"])
+    finally:
+        holder.join()
+
+    assert result.exit_code == 0, result.output
+    data = store.load(project_dir)
+    assert data["project"]["skip_qa"] is True
+    assert [p["id"] for p in data["plans"]] == ["plan-1"]
+
+
 def _worker_locked_update(root_str, pr_id, result_dict):
     """Worker function for multiprocessing tests."""
     root = Path(root_str)

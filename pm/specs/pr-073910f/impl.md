@@ -5535,3 +5535,45 @@ included); `test_session_socket_isolation.py` passes twice in one HOME
 `/pm-captures/review-4c94-i5/full-suite-final.log`) — i4's 6193 plus the
 new test.  pyflakes reports no new warning versus `origin/master` (the
 four in `cli/session.py` are master's).
+
+## Review iteration (2026-11-04, review-loop 358c i1)
+
+First pass of a new loop over the head after 4c94 i5 (`1e1e4885`) and the
+two QA-driven fixes since it.  No requirement changes.
+
+Verified, both holding:
+
+1. **A held QA run re-adopted from disk logs the resume marker.**
+   `_resume_incomplete_qa`'s held branch logged only "Re-adopting held QA
+   run"; it now logs "Resuming incomplete QA from disk: <pr>" first — the
+   marker every other incomplete run carries (QA scenario 88, R15) — and
+   `test_resume_held_run_keeps_watching` asserts both lines (`e14cd565`).
+2. **Foreground CLI writes wait out a busy registry.**
+   `store.locked_update_cli` waits `CLI_LOCK_TIMEOUT_SECONDS` (10 s) for
+   `project.yaml`: one read-modify-write of the merged registry (~4 MB)
+   takes ~1.7 s, so the 2 s default dropped the loser of two simultaneous
+   `pm pr note add`s (R16, QA S91, `9e86ef4e`).  The TUI's NO_WAIT /
+   WriteQueue policy and the `pm pr qa-run-bg` default-then-retry bounce
+   are unchanged, as that commit describes.
+
+One gap in the same class, incidental to this PR's scope and fixed here:
+
+**`pm project set` was the last unlocked foreground CLI write.**
+`cli/project.py::_set_project_bool` did `store.load` + `store.save` with
+no lock, so a change another writer (the TUI, or a second
+`pm project set`) committed between the read and the write was silently
+dropped — and the write itself could outlast the 2 s default on a large
+registry.  It now goes through `store.locked_update_cli` like every other
+CLI mutation.  Test
+`test_project_set_waits_out_a_slow_writer`: a holder reads the file, waits
+2.2 s and writes; it fails on the pre-fix head (the setting is lost) and
+passes after.  A live smoke on a throwaway project confirmed the wait
+(2.75 s for a lock held 3 s) and the write.
+
+Validation: the 29 files changed under `tests/` pass twice in one HOME
+(1885 each); `tests/test_store_locking.py` passes twice (20 each); the new
+test passes 5/5 and fails 3/3 on the pre-fix head.  Full suite 6196 passed
+/ 1 skipped, 439.8 s (log `/pm-captures/review-358c-i1/full-suite-final.log`)
+— the pre-fix head's 6195 passed / 1 skipped, 435.6 s
+(`full-suite-pre-fix.log`) plus the new test.  pyflakes reports no new
+warning versus `origin/master`.
