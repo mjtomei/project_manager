@@ -5500,3 +5500,38 @@ missing (installed afterwards, the file passes, 13), i.e. 6179 + 12 =
 rule still keeps a running server's socket and removes a dead one's file.
 pyflakes reports no new warning versus `origin/master` (the four in
 `cli/session.py` are master's).
+
+## Review iteration (2026-11-04, review-loop 4c94 i5)
+
+Fifth pass over the head after 4c94 i4 (`5313ea66`).  No requirement
+changes; the i4 fix holds (a socket rebound between the liveness probe
+and the unlink is kept, and the control still removes a dead one).  One
+gap remained in the same destructive rule, one step earlier:
+
+**The inode baseline was taken after the ownership check, not from it.**
+`_removable_private_socket` validated one entry (not a symlink, ours, a
+socket or plain file) with its own `lstat`, and `_remove_stale_socket`
+then took a *second* `lstat` as the baseline for the comparison i4
+added.  An entry planted between the two — another user's socket, or
+anything pm never examined — became that baseline, was probed, and, when
+no server answered, was unlinked: the ownership checks never saw the
+file that was removed.  The helper now returns the entry it validated
+and the caller uses it as the baseline, so a replacement shows up as a
+changed inode and is kept.  This is the same check-what-you-act-on rule
+i4 applied to the probe, applied to the ownership check as well; the
+liveness window itself is unchanged (the probe-to-unlink gap stays, as
+Linux has no unlink-if-inode).
+
+Tests: `test_a_replacement_planted_after_the_ownership_check_is_kept`
+(fails on the pre-fix head: the planted entry is unlinked), plus the two
+i4 tests with their stat sequences adjusted to the two `lstat` calls the
+function now makes.  The i1-i3 stale-pane-id fixes and i4's rebound rule
+were re-verified; a fresh pass over the QA-loop resume paths and the
+session-resolution helpers found no further gap.
+
+Validation: the 26 files changed under `tests/` pass (1717; the new test
+included); `test_session_socket_isolation.py` passes twice in one HOME
+(310 each).  Full suite 6194 passed / 1 skipped, 435.2 s (log
+`/pm-captures/review-4c94-i5/full-suite-final.log`) — i4's 6193 plus the
+new test.  pyflakes reports no new warning versus `origin/master` (the
+four in `cli/session.py` are master's).

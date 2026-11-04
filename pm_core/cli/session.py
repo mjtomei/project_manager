@@ -538,8 +538,8 @@ def _owned_only_for_target(session_name: str) -> bool:
     return not _attached_to_session_socket(session_name)
 
 
-def _removable_private_socket(socket_path: str) -> bool:
-    """True when pm may probe or remove the file at *socket_path*.
+def _removable_private_socket(socket_path: str) -> os.stat_result | None:
+    """The ``lstat`` entry when pm may probe or remove *socket_path*.
 
     ``pm session kill`` is the only code that deletes a socket file, and
     the socket directory is world-writable, so the destructive path
@@ -562,21 +562,29 @@ def _removable_private_socket(socket_path: str) -> bool:
       remove (``owned_only`` in ``find_session_server``).
 
     The normal states pass: a stale socket we own (removed once no server
-    answers on it) and a live one (kept).  An absent entry returns False:
-    there is nothing to remove, and creating one between this check and
-    the unlink is exactly the race the ownership requirement closes.
+    answers on it) and a live one (kept).  An absent entry returns
+    ``None``: there is nothing to remove.
+
+    The validated entry itself is returned so the caller can compare the
+    file it actually probes and unlinks with the one these checks saw.  A
+    second ``lstat`` there would not do: an entry planted between the
+    checks would become the caller's baseline and be removed unexamined,
+    which is the same check-what-you-act-on rule the liveness probe
+    follows (review-loop 4c94 i5).
     """
     from pm_core.paths import shared_socket_dir_is_usable
 
     if not shared_socket_dir_is_usable():
-        return False
+        return None
     try:
         entry = Path(socket_path).lstat()
     except OSError:
-        return False
+        return None
     if stat.S_ISLNK(entry.st_mode) or entry.st_uid != os.getuid():
-        return False
-    return stat.S_ISSOCK(entry.st_mode) or stat.S_ISREG(entry.st_mode)
+        return None
+    if not (stat.S_ISSOCK(entry.st_mode) or stat.S_ISREG(entry.st_mode)):
+        return None
+    return entry
 
 
 def _remove_stale_socket(socket_path: str) -> None:
@@ -602,12 +610,15 @@ def _remove_stale_socket(socket_path: str) -> None:
     longer connect, and the next ``pm session`` would bind a second
     server beside the one still running.  A changed entry is therefore
     left alone; only the same file the probe found dead is removed.
+
+    The baseline is the entry ``_removable_private_socket`` validated,
+    not a fresh ``lstat``: a replacement planted between the ownership
+    check and the probe would otherwise be probed and unlinked without
+    ever being checked (the check-what-you-act-on rule, applied to the
+    ownership check as well as to the probe).
     """
-    if not _removable_private_socket(socket_path):
-        return
-    try:
-        before = Path(socket_path).lstat()
-    except OSError:
+    before = _removable_private_socket(socket_path)
+    if before is None:
         return
     if tmux_mod.server_alive(socket_path):
         return

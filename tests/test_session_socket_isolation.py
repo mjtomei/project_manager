@@ -3557,7 +3557,42 @@ class TestSessionKillServerSelection:
             (stat.S_IFREG | 0o600, 101, 7, 1, os.getuid(), 0, 0, 0, 0, 0))
         rebound = os.stat_result(
             (stat.S_IFREG | 0o600, 202, 7, 1, os.getuid(), 0, 0, 0, 0, 0))
-        stats = iter([stale, stale, rebound])
+        stats = iter([stale, rebound])
+        monkeypatch.setattr(paths, "shared_socket_dir_is_usable",
+                            lambda: True)
+        monkeypatch.setattr(Path, "lstat", lambda self: next(stats))
+        unlinked: list[str] = []
+        monkeypatch.setattr(Path, "unlink",
+                            lambda self, missing_ok=False:
+                            unlinked.append(str(self)))
+        monkeypatch.setattr(session_mod.tmux_mod, "server_alive",
+                            lambda p: False)
+
+        session_mod._remove_stale_socket(str(tmp_path / "pm-repo-abc"))
+
+        assert unlinked == []
+
+    def test_a_replacement_planted_after_the_ownership_check_is_kept(
+            self, monkeypatch, tmp_path):
+        """The baseline must be the entry the ownership checks saw.
+
+        ``_removable_private_socket`` validates an entry (not a symlink,
+        ours, a socket or plain file) and ``_remove_stale_socket`` then
+        probes and unlinks the path.  A second ``lstat`` for the baseline
+        would adopt an entry planted in between — another user's socket,
+        or one pm never examined — and remove it once the probe found no
+        server.  The validated entry itself is the baseline, so a
+        replacement shows up as a changed inode and is kept (review-loop
+        4c94 i5).  On the pre-fix head the planted entry is unlinked.
+        """
+        from pm_core.cli import session as session_mod
+
+        ours = os.stat_result(
+            (stat.S_IFSOCK | 0o600, 101, 7, 1, os.getuid(), 0, 0, 0, 0, 0))
+        theirs = os.stat_result(
+            (stat.S_IFSOCK | 0o777, 202, 7, 1, os.getuid() + 1, 0, 0, 0, 0,
+             0))
+        stats = iter([ours, theirs, theirs])
         monkeypatch.setattr(paths, "shared_socket_dir_is_usable",
                             lambda: True)
         monkeypatch.setattr(Path, "lstat", lambda self: next(stats))
@@ -3579,7 +3614,7 @@ class TestSessionKillServerSelection:
 
         dead = os.stat_result(
             (stat.S_IFREG | 0o600, 101, 7, 1, os.getuid(), 0, 0, 0, 0, 0))
-        stats = iter([dead, dead, dead])
+        stats = iter([dead, dead])
         monkeypatch.setattr(paths, "shared_socket_dir_is_usable",
                             lambda: True)
         monkeypatch.setattr(Path, "lstat", lambda self: next(stats))

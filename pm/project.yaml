@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-04T18:28:12.750242+00:00'
+  updated_at: '2026-11-04T18:49:20.065556+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9669,6 +9669,29 @@ prs:
       tests. pyflakes: no new warning vs origin/master.'
     created_at: '2026-11-04T18:18:51Z'
     last_edited: '2026-11-04T18:28:12Z'
+  - id: note-f20700b
+    text: 'Review loop 4c94 i5 (no requirement changes; full suite 6194 passed / 1
+      skipped, 435.2 s, log /pm-captures/review-4c94-i5/full-suite-final.log — i4''s
+      6193 plus the new test; the 26 changed test files pass, 1717, and test_session_socket_isolation
+      twice in one HOME, 310 each). Verification pass over the head after 4c94 i4
+      (5313ea66): the i4 fix holds (a socket rebound between the liveness probe and
+      the unlink is kept; the control still removes a dead one). One gap remained
+      in the same destructive rule, one step earlier: _removable_private_socket validated
+      an entry with its own lstat, and _remove_stale_socket then took a SECOND lstat
+      as the inode baseline, so an entry planted between the two (another user''s
+      socket, or anything pm never examined) became the baseline, was probed, and
+      was unlinked when no server answered — the ownership checks never saw the file
+      that was removed. The helper now returns the entry it validated and the caller
+      uses it as the baseline, so a replacement shows up as a changed inode and is
+      kept; the probe-to-unlink window is unchanged (Linux has no unlink-if-inode).
+      Test test_a_replacement_planted_after_the_ownership_check_is_kept fails on the
+      pre-fix head (the planted entry is unlinked); the two i4 tests'' stat sequences
+      were adjusted to the two lstat calls the function now makes. The i1-i3 stale-pane-id
+      fixes and i4''s rebound rule were re-verified; a fresh pass over the QA-loop
+      resume paths and the session-resolution helpers found no further gap. pyflakes:
+      no new warning vs origin/master (the four in cli/session.py are master''s).'
+    created_at: '2026-11-04T18:49:19Z'
+    last_edited: '2026-11-04T18:49:19Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
