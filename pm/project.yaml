@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-04T05:52:23.341541+00:00'
+  updated_at: '2026-11-04T06:58:01.526731+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9479,6 +9479,24 @@ prs:
       test_qa_resume.py. Stories 1-3 and 5 passed as written.'
     created_at: '2026-11-04T05:52:23Z'
     last_edited: '2026-11-04T05:52:23Z'
+  - id: note-3f3b5cb
+    text: 'QA S80 (command-bar parsing after the merge) PASS 5/5 on b3fddde2, no source
+      changes. Captures /pm-captures/scenarios/80 (README + per-story manifest/cast/mp4).
+      (1) Fuzzy `pr select user''s` -> `Selected: pr-1c6ea42 user''s login fix`, tree
+      cursor moved, active_pr written ~2 s later, no parse error. (2) Plain `pr note
+      add pr-1c6ea42 don''t forget` -> `Error: cannot parse command: No closing quotation`,
+      note not added; follow-up `pr qa pr-nope` -> `PR not found: pr-nope` (not Busy).
+      (3) PR-action `pr start pr-1c6ea42 "oops` -> same parse error, no Starting spinner,
+      window list stayed `main`; guard probe clean; `r` redraws. (4) prefix+M popup
+      through a real attached client -> `Invalid command syntax: No closing quotation`,
+      Enter -> `pm popup failed (exit 1).`, any key closes, TUI alive, windows only
+      `main`. (5) repo path with a single quote -> `s` launches: windows main+pr-1c6ea42,
+      log `Launched Claude in tmux window ''pr-1c6ea42'' (session: ...)`, debug `running
+      command:` has the transcript path as one list element, pane ran bin/fake-claude.
+      Recorder gotcha for a quote-containing session name: a single-quoted `asciinema
+      -c ''...''` string breaks; use a helper script for the attach.'
+    created_at: '2026-11-04T06:58:01Z'
+    last_edited: '2026-11-04T06:58:01Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
