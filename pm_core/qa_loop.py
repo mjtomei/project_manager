@@ -5528,8 +5528,6 @@ def _recreate_qa_window_if_missing(session: str, window_name: str,
     per *pane*, not per window: a window whose dashboard split failed gets
     one on the next resume, while a live dashboard is left alone.
     """
-    from pm_core import tmux as tmux_mod
-
     try:
         if _qa_status_pane_live(session, window_name):
             return

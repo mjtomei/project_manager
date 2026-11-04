@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-04T07:58:28.705474+00:00'
+  updated_at: '2026-11-04T08:48:36.435323+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9514,6 +9514,25 @@ prs:
       in test_qa_execution_only_window, test_pane_layout, test_tmux and test_session_socket_isolation.'
     created_at: '2026-11-04T07:58:28Z'
     last_edited: '2026-11-04T07:58:28Z'
+  - id: note-ed26867
+    text: 'Review loop 6cda i2 (no requirement changes; full suite 6167 passed / 1
+      skipped, 439.2 s, log /pm-captures/review-6cda-i2/full-suite-final.log; the
+      24 PR-affected test files pass twice in one HOME, 1539 each). Verification pass
+      over the head after the 6cda i1 fixes (5c23d12e): all four hold — the per-pane
+      QA dashboard check, _respawn_tui returning None on failure, create_window''s
+      -d, and the kill failure report. Cleanups and test gaps only: (1) removed the
+      pm_core.tmux import i1 left unused in _recreate_qa_window_if_missing; (2) added
+      TestWindowPaneStartCommands (window-scoped query, pane_dead panes dropped —
+      a dashboard kept dead by remain-on-exit is not live — unqueryable window returns
+      nothing); (3) pinned the per-window rule in TestResumedRunWindow (the dashboard
+      check is called with the found window''s index, so another PR''s dashboard in
+      another window cannot mask this one); (4) added test_a_session_that_vanished_mid_kill_is_still_cleaned_up
+      (a session that disappears between the exact lookup and the kill still gets
+      the normal teardown: exit 0, Killed, cleanup). Live on tmux 3.2a: remain-on-exit
+      panes report pane_dead=1 and are filtered; new-window without -d switches the
+      session''s current window, with -d it does not.'
+    created_at: '2026-11-04T08:48:36Z'
+    last_edited: '2026-11-04T08:48:36Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

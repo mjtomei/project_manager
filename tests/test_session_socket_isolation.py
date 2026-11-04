@@ -3695,6 +3695,61 @@ class TestSessionKillServerSelection:
         assert cleaned == []          # the survivor keeps its containers
         assert sock_path.exists()     # and its live server's socket
 
+    def test_a_session_that_vanished_mid_kill_is_still_cleaned_up(
+            self, monkeypatch, tmp_path):
+        """tmux fails for a session that vanished concurrently, too.
+
+        That one leaves nothing running, so the teardown is still right:
+        the failure check re-probes existence only after a failed kill,
+        and with the session gone the containers/proxies are cleaned and
+        "Killed" is printed.
+        """
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+        from pm_core import container, push_proxy
+
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: True)
+        # A live server: its socket file is left alone (not under test).
+        monkeypatch.setattr(session_mod.tmux_mod, "server_alive",
+                            lambda sock: True)
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: "pm-repo-abc")
+        monkeypatch.setattr(session_mod, "_known_ambient_session",
+                            lambda: None)
+        sock = str(tmp_path / "pm-repo-abc")
+        # Never probe a real tmux server: candidate selection
+        # (``_pick_existing_session``) and the exact destructive lookup
+        # both resolve through the fixture.
+        monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
+                            lambda name, owned_only=False: (sock, True))
+        monkeypatch.setattr(session_mod.tmux_mod,
+                            "find_exact_session_server",
+                            lambda name, owned_only=False: (sock, True))
+        monkeypatch.setattr(
+            session_mod.tmux_mod, "sessions_in_group",
+            lambda name, socket_path=None: [f"{name}~1", name])
+        # Every kill fails because the session is already gone.
+        monkeypatch.setattr(
+            session_mod.tmux_mod, "kill_session",
+            lambda name, socket_path=None, exact=False: False)
+        monkeypatch.setattr(
+            session_mod.tmux_mod, "session_exists",
+            lambda name, socket_path=None, use_env=True: False)
+        cleaned: list[str] = []
+        monkeypatch.setattr(container, "cleanup_session_containers",
+                            lambda tag: cleaned.append(tag) or 0)
+        monkeypatch.setattr(push_proxy, "stop_session_proxies",
+                            lambda tag: cleaned.append(tag) or 0)
+        monkeypatch.setattr(session_mod.pane_layout, "set_force_mobile",
+                            lambda *a, **k: None)
+
+        result = CliRunner().invoke(session_mod.session, ["kill"])
+
+        assert result.exit_code == 0, result.output
+        assert "Killed session 'pm-repo-abc'." in result.output
+        assert cleaned == ["repo-abc", "repo-abc"]
+
     def test_missing_session_unlinks_stale_socket(self, monkeypatch, tmp_path):
         stale = tmp_path / "pm-repo-abc"
         stale.write_text("")

@@ -5046,3 +5046,53 @@ Validation: the seven PR-affected test files pass (707); full suite
 6164 passed / 1 skipped, 437.6 s (log
 `/pm-captures/review-6cda-i1/full-suite-final.log`; 6159 before the
 fixes, the five new tests accounting for the difference).
+
+## Review iteration (2026-11-04, review-loop 6cda i2)
+
+Verification pass over the head after the 6cda i1 fixes (`5c23d12e`);
+no requirement changes.  All four i1 fixes hold, re-checked against the
+code and the tests:
+
+1. `_qa_status_pane_live` still recognises the dashboard by the
+   `qa_status.py` start command in the QA window only, so a window
+   without one gets the dashboard split and a live one is left alone.
+2. `_respawn_tui` returns `None` on failure, and both callers
+   (`_process_registry_pane_closed`/`_respawn_unlisted_tui` and
+   `_ensure_tui_running`) branch on the returned window.
+3. `create_window` passes `-d`; its only caller is `_respawn_tui`,
+   whose `select=True` path selects the window explicitly.
+4. `kill_session` reports tmux's result, and `session_kill` treats a
+   failure as real only when the session (or a member) still exists,
+   leaving the container/proxy cleanup and the socket unlink undone.
+
+Two cleanups and one test gap, no behaviour change:
+
+1. **A dead import left by i1.**  Moving the window lookup into
+   `_qa_status_pane_live` left `from pm_core import tmux as tmux_mod`
+   unused in `_recreate_qa_window_if_missing`.
+2. **The new helper had no unit test.**  `tmux.window_pane_start_commands`
+   is now covered by `TestWindowPaneStartCommands`: the query is scoped
+   to the given window (`session:index`), panes marked `pane_dead` are
+   dropped (a dashboard kept dead by `remain-on-exit` is not live), and
+   an unqueryable window reports nothing.
+3. **The per-window rule was not pinned.**  `TestResumedRunWindow`'s
+   "existing window without a dashboard" case now also asserts the
+   dashboard check was called with the found window's index — the rule
+   that keeps another PR's dashboard in another window from masking this
+   one.
+
+Also added: the vanished-concurrently branch of i1's kill fix.  tmux
+fails for a session that disappeared between the exact lookup and the
+kill as well; that one leaves nothing running, so the teardown is still
+right and must not be reported as a failure.
+`test_a_session_that_vanished_mid_kill_is_still_cleaned_up` pins exit 0,
+the "Killed" line and the container/proxy cleanup.
+
+Live check on tmux 3.2a: with `remain-on-exit on`, a pane whose process
+exited reports `#{pane_dead}` = `1`, which the helper filters; a live
+pane reports `0`.
+
+Validation: the 24 PR-affected test files pass twice in one HOME (1539
+each); full suite 6167 passed / 1 skipped, 439.2 s (log
+`/pm-captures/review-6cda-i2/full-suite-final.log`; 6164 before this
+iteration, the three new tests accounting for the difference).

@@ -152,6 +152,10 @@ class TestResumedRunWindow:
         qa_loop._recreate_qa_window_if_missing(
             "pm-test", "qa-pr-001", "/wd", "/qa/status.json")
 
+        # Scoped to the QA window: another PR's run has its own dashboard
+        # in its own window, so a window-wide (or session-wide) scan would
+        # see it and skip this window's missing dashboard.
+        mock_commands.assert_called_once_with("pm-test", "3")
         mock_main.assert_called_once_with("pm-test", "qa-pr-001", "/wd")
         mock_status.assert_called_once_with(
             "pm-test", "%9", "/qa/status.json")

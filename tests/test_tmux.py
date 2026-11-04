@@ -44,6 +44,7 @@ from pm_core.tmux import (
     create_grouped_session,
     switch_sessions_to_window,
     set_shared_window_size,
+    window_pane_start_commands,
 )
 
 
@@ -490,6 +491,35 @@ class TestCreateWindow:
         cmd = mock_run.call_args[0][0]
         assert "-d" in cmd
         assert (pane_id, window_id) == ("%5", "@9")
+
+
+# ---------------------------------------------------------------------------
+# window_pane_start_commands
+# ---------------------------------------------------------------------------
+
+class TestWindowPaneStartCommands:
+    @patch("pm_core.tmux._run")
+    def test_queries_the_window_and_skips_dead_panes(self, run):
+        """The QA dashboard check sees live panes of *this* window only.
+
+        ``_qa_status_pane_live`` recognises the dashboard by the command
+        it runs, so the query must be scoped to the QA window (another
+        PR's run has its own dashboard in its own window) and a pane kept
+        dead by ``remain-on-exit`` must not count as a live dashboard.
+        """
+        run.return_value = MagicMock(returncode=0, stdout=(
+            "0 python3 /pm_core/qa_status.py /qa/status.json pm-x\n"
+            "1 echo 'QA execution'; exec sleep infinity\n"))
+        cmds = window_pane_start_commands("pm-x", "3")
+        assert cmds == ["python3 /pm_core/qa_status.py /qa/status.json pm-x"]
+        cmd = run.call_args.args[0]
+        assert cmd[-5:] == ["list-panes", "-t", "pm-x:3", "-F",
+                            "#{pane_dead} #{pane_start_command}"]
+
+    @patch("pm_core.tmux._run")
+    def test_unqueryable_window_reports_nothing(self, run):
+        run.return_value = MagicMock(returncode=1, stdout="")
+        assert window_pane_start_commands("pm-x", "3") == []
 
 
 # ---------------------------------------------------------------------------
