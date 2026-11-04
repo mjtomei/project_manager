@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-04T04:08:38.185099+00:00'
+  updated_at: '2026-11-04T04:12:40.761904+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9445,6 +9445,28 @@ prs:
       in $HOME).'
     created_at: '2026-11-04T04:08:38Z'
     last_edited: '2026-11-04T04:08:38Z'
+  - id: note-b12b9f4
+    text: 'QA S76 (2026-11-04, head a030d1df): all four stories PASS, no source changes.
+      (1) `pm -C alpha pr add ''Regression finding'' --plan bugs` from a plain shell
+      with the regression-scrubbed env reloaded alpha''s TUI on its own socket (1
+      -> 2 PRs, seen on the first 0.5 s poll) and alpha''s pm-home; beta''s project.yaml
+      sha256, socket inode/mtime, list-panes and TUI were identical before and after.
+      (2) The same filing from a clone of zzz-target (its own name pm-clone-of-target-0c6bfd73
+      had no socket) reloaded zzz-target''s TUI, not aaa-decoy''s (the decoy''s socket
+      sorts first in /tmp/pm-sessions); decoy yaml/socket unchanged. (3) A real pre-isolation
+      session (PYTHONPATH=/opt/pm-src) on /tmp/tmux-1000/default reloaded while a
+      root-owned `tmux -vv` decoy at /tmp/pm-sessions/pm-legacy-proj-18de5600 kept
+      its -vv server log at exactly 14350 lines before and after the add, and `pm
+      session --print-connect` printed `tmux -S /tmp/tmux-1000/default attach -t pm-legacy-proj-18de5600`
+      and never the /tmp/pm-sessions path. (4) Two concurrent `pr add`s and two concurrent
+      `pr note add`s all exited 0, both titles appear exactly once, both notes are
+      listed, no parse/lock/traceback output. Fixture nuance: story 4''s baseline
+      `pm pr list | wc -l` is 1 on an empty project (the `No PRs.` placeholder) while
+      the PR-line count is 0, so "baseline + 2" holds in PR lines (0 -> 2). Captures
+      /pm-captures/scenarios/76 (README + per-story manifests, casts, mp4s; TUI stories
+      also have transcript.log).'
+    created_at: '2026-11-04T04:12:40Z'
+    last_edited: '2026-11-04T04:12:40Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
