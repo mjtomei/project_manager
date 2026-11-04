@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-04T04:12:40.761904+00:00'
+  updated_at: '2026-11-04T05:52:23.341541+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9467,6 +9467,18 @@ prs:
       also have transcript.log).'
     created_at: '2026-11-04T04:12:40Z'
     last_edited: '2026-11-04T04:12:40Z'
+  - id: note-283826e
+    text: 'QA S78 (story 4): a QA run resumed in this clone because the session that
+      hosted it was gone came back with only its scenario windows — the main qa-<pr>
+      window (planner slot + qa-status dashboard) was never recreated, so the dashboard
+      was lost. Fixed in aab9d4e2: _recreate_qa_window_if_missing calls the existing
+      _ensure_qa_main_pane and splits the dashboard, from the resume path only and
+      only when the window is missing (an ordinary restart keeps the window and must
+      not get two dashboards). Pre-existing on master (master also only calls _ensure_qa_main_pane
+      from _run_qa_sync); covered by tests in test_qa_execution_only_window.py and
+      test_qa_resume.py. Stories 1-3 and 5 passed as written.'
+    created_at: '2026-11-04T05:52:23Z'
+    last_edited: '2026-11-04T05:52:23Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
