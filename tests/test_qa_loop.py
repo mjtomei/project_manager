@@ -1549,6 +1549,98 @@ class TestVerifySingleScenario:
         assert (passed, reason, vpane) == (True, "", "%2")
         wait.assert_not_called()
 
+    def test_a_verifier_id_of_another_window_starts_a_new_verifier(
+            self, tmp_path):
+        """A restarted tmux server hands pane ids out again, so a resumed
+        run's recorded verifier id can name a pane of another window (in
+        practice the recreated QA dashboard).  Reusing it would type the
+        verification prompt into that pane and then wait on a dead
+        verifier's transcript, which has no time limit."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1",
+                              pane_id="%1")
+        scenario.verifier_pane_id = "%7"
+        scenario.verifier_cwd = str(tmp_path)
+        scenario.verifier_transcript = str(tmp_path / "v.jsonl")
+        mock_wid = MagicMock()
+        mock_wid.stdout = "@1"
+
+        def _window_of(pane_id, socket_path=None):
+            # The worker pane is still in the scenario window; the recorded
+            # verifier id now names a pane of another one.
+            return {"%1": "@9", "%7": "@2"}.get(pane_id)
+
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.find_window_by_name",
+                   return_value={"id": "@9", "index": "1",
+                                 "name": "qa-s1"}), \
+             patch("pm_core.tmux.pane_window_id",
+                   side_effect=_window_of), \
+             patch("pm_core.tmux.split_pane_at",
+                   return_value="%9") as split, \
+             patch("pm_core.tmux.send_keys") as send, \
+             patch("pm_core.qa_loop.poll_for_verdict",
+                   return_value="VERIFIED"), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value="VERIFIED"), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   return_value="claude ..."), \
+             patch("subprocess.run", return_value=mock_wid), \
+             patch("pm_core.tmux.set_shared_window_size"), \
+             patch("pm_core.pane_registry.register_pane"), \
+             patch("pm_core.pane_registry.load_registry",
+                   return_value={"windows": {}}), \
+             patch("pm_core.pane_registry.get_window_data",
+                   return_value={"user_modified": True}), \
+             patch("pm_core.pane_registry.locked_read_modify_write"), \
+             patch("pm_core.pane_layout.rebalance"):
+            passed, reason, vpane = _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+                session="pm-session", qa_workdir="/tmp/qa",
+                pr_workdir=str(tmp_path))
+        assert (passed, reason, vpane) == (True, "", "%9")
+        send.assert_not_called()
+        assert split.call_args.args[0] == "%1"
+
+    def test_a_stale_worker_id_does_not_take_the_verifier_with_it(
+            self, tmp_path):
+        """The recorded worker id may name another window's pane too; the
+        verifier is then split from the scenario's window, not into that
+        pane (whose split would fail and leave the scenario unverified)."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1",
+                              pane_id="%1")
+        mock_wid = MagicMock()
+        mock_wid.stdout = "@1"
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.find_window_by_name", return_value=None), \
+             patch("pm_core.tmux.pane_window_id", return_value="@2"), \
+             patch("pm_core.qa_loop._get_scenario_pane",
+                   return_value="%5"), \
+             patch("pm_core.tmux.split_pane_at",
+                   return_value="%9") as split, \
+             patch("pm_core.qa_loop.poll_for_verdict",
+                   return_value="VERIFIED"), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value="VERIFIED"), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   return_value="claude ..."), \
+             patch("subprocess.run", return_value=mock_wid), \
+             patch("pm_core.tmux.set_shared_window_size"), \
+             patch("pm_core.pane_registry.register_pane"), \
+             patch("pm_core.pane_registry.load_registry",
+                   return_value={"windows": {}}), \
+             patch("pm_core.pane_registry.get_window_data",
+                   return_value={"user_modified": True}), \
+             patch("pm_core.pane_registry.locked_read_modify_write"), \
+             patch("pm_core.pane_layout.rebalance"):
+            passed, reason, vpane = _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+                session="pm-session", qa_workdir="/tmp/qa",
+                pr_workdir=str(tmp_path))
+        assert (passed, reason, vpane) == (True, "", "%9")
+        assert split.call_args.args[0] == "%5"
+
     def test_reverify_waits_on_the_verifier_pane(self, tmp_path):
         """The follow-up wait watches the verifier pane itself: the worker
         pane sharing the window would keep a dead verifier's wait alive."""

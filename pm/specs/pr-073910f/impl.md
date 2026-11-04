@@ -5328,3 +5328,58 @@ Validation: the PR-affected test files plus
 `/pm-captures/review-4c94-i1/full-suite-final.log`) — the pre-fix head's
 6180 plus the five new tests.  pyflakes reports no new warning versus
 `origin/master`.
+
+## Review iteration (2026-11-04, review-loop 4c94 i2)
+
+Verification pass over the head after 4c94 i1 (`ce97598c`).  No
+requirement changes; the i1 fixes hold (the waiting scan takes the run's
+session, the dead import is gone, and the ownership helper keeps
+existence as its answer when tmux cannot name the pane's window).  Two
+gaps remain in the same stale-pane-id area:
+
+1. **The verifier pane was still reused on existence alone.**
+   `_verify_single_scenario` asked `pane_exists(scenario.verifier_pane_id)`.
+   A run resumed after its session was killed restores that id from
+   `qa_resume.json`, and the restarted server hands ids out again: the id
+   can name a pane of another window (in practice the recreated QA
+   window's dashboard).  The re-verification branch then types the
+   verification prompt into that pane and waits on the dead verifier's
+   transcript, which has no time limit.  The verifier is now checked with
+   the same window-ownership rule as the worker; a stale id starts a
+   fresh verifier pane.
+2. **The waiting scan cleared the dead worker's id.**  i1 applied the
+   ownership rule to the scan but kept `scenario.pane_id = None` on a
+   dead pane.  The retry path deliberately keeps a dead id precisely so
+   it does not fall back to the window's first pane — in host mode the
+   still-live refiner — and take that for the worker; with the id
+   cleared, that is what it did, so a worker that died while waiting was
+   never relaunched (the run re-entered the wait on the old transcript
+   and spent its relaunch budget until INPUT_REQUIRED).  The scan now
+   leaves the id recorded, and `_verify_single_scenario` validates the
+   scenario pane it splits from, so a dead id there falls back to the
+   window's first pane instead of failing the split.
+
+Tests: `TestScanWaitingScenarios` (the dead id is kept so the retry path
+can see it is dead; the other-window case keeps it too),
+`TestVerifySingleScenario` (a verifier id of another window starts a new
+verifier and nothing is sent to the stale pane; a stale worker id makes
+the verifier split from the window instead).  All four fail on the
+pre-fix head and pass here.
+
+Validation: the PR-affected test files pass (1710), and the two most
+affected files pass twice in one HOME (`test_qa_loop`,
+`test_qa_input_required`, `test_qa_resume`: 301 each).  Full suite 6175
+passed / 1 skipped, 443.3 s (log
+`/pm-captures/review-4c94-i2/full-suite-final.log`) — i1's 6185 less the
+12 `test_markdown_render` tests this review container cannot run (the
+`markdown` package is absent; they fail identically on the pre-change
+head) plus the two new tests.  pyflakes reports no new warning versus
+`origin/master`.
+
+Residual, not changed here: `poll_for_verdict` /
+`wait_for_follow_up_verdict` still trust the pane id they were given for
+the whole wait, so a verifier pane that died and whose id the server
+handed to another pane between two polls would keep the wait alive.  The
+waiters are shared with the review and sign-off loops and the realistic
+reuse point (the resume) is now covered; verification also has no time
+limit by design, so a stuck verifier already waits for the user.

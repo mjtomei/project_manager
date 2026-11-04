@@ -277,6 +277,10 @@ class TestScanWaitingScenarios:
         assert scan.dropped == {1}
         assert 1 not in state.waiting_for_input
         assert 1 not in state.scenario_verdicts
+        # The dead id stays recorded: the retry path must be able to tell
+        # that the worker is gone, not fall back to the window's first pane
+        # (the still-live refiner) and take it for the worker.
+        assert state.scenarios[0].pane_id == "%1"
 
     def test_superseded_attempt_is_dropped(self, tmp_path):
         path = _write(
@@ -369,7 +373,8 @@ class TestScanWaitingScenarios:
              patch("pm_core.tmux.pane_window_id", return_value="@2"):
             scan = _scan_waiting_scenarios(state, "pm-sess")
         assert scan.dropped == {1}
-        assert state.scenarios[0].pane_id is None
+        # Kept for the retry path's ownership check (see the dead-pane test).
+        assert state.scenarios[0].pane_id == "%1"
         assert 1 not in state.waiting_for_input
 
     def test_a_pane_in_the_scenario_window_keeps_the_wait(self, tmp_path):

@@ -3752,12 +3752,12 @@ def _scenario_worker_pane_alive(session: str, scenario: QAScenario,
                                 pane_id: str | None) -> bool:
     """True when *pane_id* is a live pane of this scenario's own window.
 
-    A recorded worker id outlives the session that owned it: a restarted
-    tmux server hands the same ids out again from ``%0``, so a stale id can
+    A recorded id outlives the session that owned it: a restarted tmux
+    server hands the same ids out again from ``%0``, so a stale id can
     name an unrelated new pane — in practice the QA window's status
     dashboard, which a resume splits before it checks the scenarios.
-    Existence alone therefore cannot prove the worker survived; the pane
-    must still live in the window this scenario owns.
+    Existence alone therefore cannot prove the worker (or its verifier)
+    survived; the pane must still live in the window this scenario owns.
     """
     from pm_core import tmux as tmux_mod
     if not pane_id or not tmux_mod.pane_exists(pane_id):
@@ -4063,6 +4063,10 @@ def _scan_waiting_scenarios(state: QALoopState,
     a worker that was gone — the same stale-id rule the retry and
     verification paths apply (QA S81).  Without it (a direct caller that
     has no session) existence remains the only evidence, as before.
+
+    A dead worker's id is left recorded, as the retry path expects: the
+    attempt is dropped, and that path must see the id is dead rather than
+    fall back to the window's first pane (the refiner) as the worker.
     """
     from pm_core import tmux as tmux_mod
 
@@ -4103,7 +4107,10 @@ def _scan_waiting_scenarios(state: QALoopState,
             else:
                 alive = tmux_mod.pane_exists(scenario.pane_id)
             if not alive:
-                scenario.pane_id = None
+                # Keep the dead id, as the retry path does: clearing it
+                # would make that path fall back to the window's first
+                # pane — in host mode the still-live refiner — and take
+                # it for the worker instead of relaunching one.
                 pane_alive = False
 
         # A dead pane is re-checked every tick, so the stat cache (which
@@ -5289,16 +5296,23 @@ def _verify_single_scenario(
         captures_scenario_dir=captures_scenario_dir,
     )
 
-    pane_alive = bool(scenario.verifier_pane_id) and tmux_mod.pane_exists(
-        scenario.verifier_pane_id)
-    if not pane_alive:
+    verifier_alive = _scenario_worker_pane_alive(session, scenario,
+                                                 scenario.verifier_pane_id)
+    if not verifier_alive:
         # First verification of this scenario — split its window and
         # start a Claude session with the verification prompt.
         scenario.verifier_pane_id = None
         scenario.verifier_session_id = None
         scenario.verifier_transcript = None
-        scenario_pane = scenario.pane_id or _get_scenario_pane(
-            session, scenario.window_name)
+        scenario_pane = scenario.pane_id
+        if scenario_pane and not _scenario_worker_pane_alive(
+                session, scenario, scenario_pane):
+            # A recorded worker id a restarted server handed to another
+            # window is not this scenario's pane: split from the window
+            # rather than into that one.
+            scenario_pane = None
+        if not scenario_pane:
+            scenario_pane = _get_scenario_pane(session, scenario.window_name)
         if not scenario_pane:
             _log.warning("Verification: cannot find scenario %d pane, "
                          "marking unverified", scenario.index)
