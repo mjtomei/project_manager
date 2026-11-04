@@ -34547,7 +34547,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/295
   gh_pr_number: 295
   created_at: '2026-05-25T23:07:46.493552+00:00'
-  updated_at: '2026-11-04T00:08:21.136311+00:00'
+  updated_at: '2026-11-04T00:57:53.796028+00:00'
   started_at: '2026-11-02T02:25:01.682313+00:00'
   reviewed_at: null
   merged_at: null
@@ -35080,6 +35080,28 @@ prs:
       Captures: /pm-captures/scenarios/25/{story1..story10,story11-concurrent-live/{cli-recording,tmux-screen-recording}}.'
     created_at: '2026-11-04T00:08:21Z'
     last_edited: '2026-11-04T00:08:21Z'
+  - id: note-7f477d5
+    text: 'Master integration 2026-11-04 (impl return from sign-off r1): origin/master@c3bac6ce
+      (#296; merge base c1fcecc5) merged into the branch as 6a6665e0e, spec updated
+      in d987e0628, pushed. Four conflicts resolved: pm/project.yaml (store.merge_3way
+      over index stages, rebuilt on master text with the branch records swapped in
+      and its two new records inserted — 619 PRs, 22 plans, branch notes intact);
+      pm_core/cli/__init__.py (master isolated-run wording for pm qa regression +
+      branch qa debug/launch lines); pm_core/prompt_gen.py (master #284 isolated-run
+      prose, branch improvements plan name kept where master still said ux); pm_core/tui/pr_view.py
+      (fuzzy pr select/plan select before the guarded shlex split, both hand focus
+      back). Semantic reconciliation: one focus helper (App._focus_current_view delegates
+      to pr_view._refocus_active_view, queried by id only); master #136/#284 pr select,
+      plan select and qa regression joined command_surface.COMMAND_BAR_COMMANDS plus
+      the ]/[ cycle key in pm tui keys, with the parity test now asserting them; two
+      master tests updated to this PR contracts (exact-id refusal still names the
+      listing remedy; command-bar --help opens the HelpScreen instead of pinning Click
+      No such option). Full suite on the merged tree: 5867 passed, 1 skipped, 0 failed;
+      tests/test_command_surface.py 176 passed on the final tree. Prior QA S1-S25
+      and review loops fcff/b8ed/e4f7/6a82 are pre-merge evidence; this integrated
+      HEAD needs fresh review/QA/sign-off. No user decisions were made; no PR merged.'
+    created_at: '2026-11-04T00:57:53Z'
+    last_edited: '2026-11-04T00:57:53Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fa9f172-self-documenting-consistent-pm-comma-0c82d63b
   model: provider:deepseek-flash
   effort: high
