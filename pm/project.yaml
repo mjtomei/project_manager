@@ -7101,6 +7101,23 @@ prs:
       host config was touched.'
     created_at: '2026-11-02T03:13:38Z'
     last_edited: '2026-11-02T03:13:38Z'
+  - id: note-d9cf2b6
+    text: 'QA planning pass (2026-11-01, commit e372706b): the QA spec had no bullets
+      for the post-S19 review fixes b48f i1/i4/i18-i21, so they were added (no requirement
+      changes, spec only): R5 gained another project''s grouped session pm-x~foo-<hash>~1
+      is not pm-x''s (i19), panes opened from a TUI viewed through a user view register
+      in the base registry with no duplicate (i1), and --disconnect-others detaches
+      a view''s client (i4); R7 gained agent prompts quoting a space-named session
+      plus the base name when launched from a view (i18/i4) and the QA-resume scan
+      ignoring a planted foreign server (i20); R8 gained kill --dir <non-git dir>
+      refuses (i1); R12 gained the bytes-not-characters socket length rule for multi-byte
+      repo names (i21), pm session mobile in the tmux-missing list, and the QA-resume
+      scan in the implicit-lookup list; Edge cases gained ~/space/backtick/quote names
+      and the pm-x vs pm-x~foo legacy pair. New scenarios 20-26 target these plus
+      the b48f i5-i17 fixes that were only verified in review loops, never in a QA
+      run.'
+    created_at: '2026-11-02T03:21:53Z'
+    last_edited: '2026-11-02T03:21:53Z'
   - id: note-bbaeef8
     text: 'QA S21 (legacy default server shared with pm-<tagX>~foo-<hash> + its ~1
       and a hand-made pm-<tagX>~²) PASS 4/4 on e372706b, no source changes. Story
@@ -7688,6 +7705,24 @@ prs:
       is for the master-integration step, not review.'
     created_at: '2026-11-02T09:37:28Z'
     last_edited: '2026-11-02T09:37:28Z'
+  - id: note-56d68b1
+    text: 'QA planning pass (2026-11-02, after review loop 68bd i4): the spec had
+      no bullets for the S28 fixes (tmux-safe tag, #-escaping, quoted --transcript,
+      registry prune), the S30 fix (kill from inside its own session) or 68bd i1-i4
+      (command-bar parse guard, wrapper share-mode tag for pm meta override / pm_root,
+      list using shared_socket_dir_is_usable, one stale-socket rule in kill). Added
+      them to R2/R3/R8/R9/R11, edge cases and ambiguities 9-10 (spec only, no requirement
+      changes to the implementation). One new expectation is unverified and may surface
+      a defect: with /tmp/pm-sessions a root-owned 1733 dir (writable+sticky, so pm
+      session accepts it, but not readable), pm session list globs nothing and would
+      print "No pm sessions found." while the user''s session runs (R3 bullet, ambiguity
+      9). New scenarios 32-36 target these. pm meta is offline-drivable by pre-seeding
+      ~/.pm/workdirs/meta-<tag> with a clone of /workspace on a local master branch
+      (ensure_meta_workdir only clones from GitHub when the dir is missing); find_claude
+      must still find a claude (fake config or stand-in), or pm meta exits before
+      writing the override.'
+    created_at: '2026-11-02T09:52:22Z'
+    last_edited: '2026-11-02T09:52:22Z'
   - id: note-e4f04ab
     text: 'QA S33 refiner (2026-11-02, c13abe72): all 4 stories smoke-run live on
       tmux 3.2a, all PASS. Traps: pm pr start refuses until the PR is on master (pm
@@ -7886,6 +7921,30 @@ prs:
       check showed each change is caught. Full suite 5579 passed / 1 skipped (/pm-captures/review-e661-i1/full-suite.log).'
     created_at: '2026-11-02T11:36:18Z'
     last_edited: '2026-11-02T11:36:18Z'
+  - id: note-92ae002
+    text: 'QA planning pass 2 (2026-11-02, head 585d6daa): spec updated for the code
+      since c13abe72 (S34 list fix 43b35445, S35 adopt 7a32e665, review e661 i1).
+      R2 gained three bullets: a running TUI the registry does not list is adopted
+      (registry removed, TUI outside window index 0 via base-index 1 or a respawn
+      into a new window, a joiner HOME with no registry; concurrent attaches + a TUI
+      restart record it once); a TUI that is really gone is respawned and no other
+      pane is recorded as the TUI; a held registry lock does not break the attach.
+      R3 1733 bullet now states the implemented output, plus one unverified expectation
+      (ambiguity 12): from inside a pm pane whose cwd is a PR workdir clone or outside
+      any repo, list should still show the session the pane belongs to. The implementation
+      probes only the cwd project socket, so this may surface a defect. R9 join: no
+      second TUI, even briefly. Suspected defect for S38: _live_panes_and_tuis (used
+      by _adopt_running_tui and the _find_live_tui_pane fallback) treats any pane
+      whose start command contains "_tui" as a TUI. Every pane pm launches is wrapped
+      in bash -c with trap "pm _pane-exited <session> ..." EXIT, so in a repo dir
+      like rich_tui (session pm-rich_tui-<h>) a notes or agent pane matches. When
+      the real TUI crashes, pm session would then adopt the notes pane instead of
+      respawning, and pm tui view/send would drive it. Ambiguity 11 resolves the S35
+      L3 open item: a fresh pm session prints only "Creating tmux session ...", the
+      same as master and S1, so S35 expecting "Attaching to session ...~1" was a drafting
+      error, not a defect. New scenarios 37-40.'
+    created_at: '2026-11-02T12:04:26Z'
+    last_edited: '2026-11-02T12:04:26Z'
   - id: note-88f2c09
     text: 'QA S37 refiner (2026-11-02, 6f24e3a1, tmux 3.2a): 4/4 stories held live.
       Adopt log line: "TUI pane %0 is running but was not registered; adopted it instead
@@ -8046,6 +8105,26 @@ prs:
       found the gap and 99deef53 fixed it.'
     created_at: '2026-11-02T13:38:52Z'
     last_edited: '2026-11-02T13:38:52Z'
+  - id: note-0231b4a
+    text: 'QA planning pass 3 (2026-11-02, head 24efdc86): spec only, no requirement
+      or code changes. R2: replaced the stale "recognise a TUI by _tui anywhere; not
+      yet verified live" text with the S38 exact pm _tui rule (a337a168). Added a
+      bullet saying that rule must hold for every TUI start path (fresh with a quoted
+      PM_TMUX_SOCKET= prefix, shared with PM_SHARE_MODE=, respawn split or new window,
+      after-kill-pane respawn, Ctrl+R, legacy) in sessions whose names have quotes,
+      $digit, ~, multi-byte characters or a hashed socket. A throwaway tmux 3.4 -L
+      probe round-tripped 16 such names through _start_command_is_tui, all True; tmux
+      3.2a still needs a live run. New R2 bullet: an after-kill-pane TUI respawn racing
+      a pm session attach must end with one live TUI and a consistent registry; report
+      any transient second TUI and compare with master. R3 1733: documented the 99deef53
+      ambient-socket probe (PM_TMUX_SOCKET else $TMUX, only entries of /tmp/pm-sessions,
+      lstat-checked, dead ones skipped, the warning names what was checked). New scenarios
+      41-43. Heads-up for whoever integrates next: origin/master is 209 commits past
+      the last merge (eaf3372e), touching 14 pm_core files this PR also changes (cli/session.py,
+      cli/helpers.py, cli/qa.py, qa_loop.py, qa_status.py, claude_launcher.py, ...).
+      QA on this head does not cover that merge.'
+    created_at: '2026-11-02T13:54:17Z'
+    last_edited: '2026-11-02T13:54:17Z'
   - id: note-0782464
     text: 'QA S41 refiner (2026-11-02, 24efdc86, tmux 3.2a): all 3 stories held live
       in 4 projects (rich_tui.v2 it''s, cost $5 "x"~日本, 37-char Japanese name -> hashed
@@ -8200,6 +8279,52 @@ prs:
       Captures /pm-captures/scenarios/44 (README.md).'
     created_at: '2026-11-02T15:29:32Z'
     last_edited: '2026-11-02T15:29:32Z'
+  - id: note-5bd8d1d
+    text: 'Review loop ad65 i1 (commit 8ea8a9a1; no requirement changes; full suite
+      5614 passed / 1 skipped, 433 s, log /pm-captures/review-ad65-i1/full-suite.log).
+      Reviewed the only code since 4c75: the QA S42 fix 698cbb97. Its design is sound.
+      The respawn lock is taken before the registry lock in both the hook and the
+      attach, nothing takes it re-entrantly, and _respawn_tui''s only two callers
+      both hold it. The -c ''#{session_path}'' start dir and the _insert_tui dedupe
+      are correct. (1) tui_respawn_lock now uses store.bounded_flock instead of its
+      own poll loop. The copy retried every OSError until the 10 s deadline, so on
+      a filesystem that cannot lock (ENOLCK) every pane close and every pm session
+      attach waited 10 s. Now only contention waits, and any other error goes ahead
+      at once, logged. New test fails on cd730ab7 and passes on the fix. (2) Documented,
+      not fixed: the lock is in the user''s own ~/.pm like the registry, so a shared-session
+      joiner''s attach is not serialised with the owner''s after-kill-pane hook. That
+      race still has only the TUI pidfile guard against a second TUI, as before the
+      lock. This is not verified live; a shared lock would need a world-writable file
+      in /tmp/pm-sessions. (3) For information: origin/master (5b352d16) is 209 commits
+      ahead. A read-only merge-tree conflicts only in pm/project.yaml (13 hunks) and
+      in one adjacent-edit hunk of pm_core/tui/qa_loop_ui.py, the session_tag skip
+      versus master''s qa_status re-read; keep both. Master integration stays a user-authorized
+      step.'
+    created_at: '2026-11-02T15:51:46Z'
+    last_edited: '2026-11-02T15:51:46Z'
+  - id: note-446c089
+    text: 'QA planning pass 4 (2026-11-02, head 8ea8a9a1): spec only, no requirement
+      or code changes. Brought qa.md up to date with the S42 fix 698cbb97 and review
+      ad65 i1. Shared resources: added the <session>.json.respawn.lock sidecar (it
+      is in each user''s own ~/.pm) and #{session_path}. R2: the hook-vs-attach race
+      bullet now requires no second TUI even briefly and no TuiPidfileConflict. New
+      R2 bullets: (a) a shared-session joiner''s attach racing the owner''s hook is
+      not serialised (the documented ad65 gap), so a transient pidfile-guarded second
+      TUI is reported, not failed, but lasting damage fails; (b) a respawned TUI starts
+      in the session''s own directory whoever kills it and from wherever (another
+      project, /tmp, a subdir or clone, a view created elsewhere, the new-window fallback,
+      a joiner''s --dir from home, a legacy session on this build, paths with quotes/$/#(cmd)/multi-byte);
+      (c) a held respawn lock delays each event by one wait at most, and an unusable
+      one does not delay at all. Ambiguities 13-15 added. 15 is a suspected defect:
+      _process_registry_pane_closed takes tui_respawn_lock once per registered window
+      inside the synchronous after-kill-pane run-shell, so with a stuck holder a pane
+      close may freeze the closing client for 10 s times the number of windows. Scenario
+      47 measures it. New scenarios 45-48: shared race and joiner respawn, respawn
+      start directory, stuck or unusable lock, and a TUI killed mid-QA run resuming
+      its own run. Note: the pass 3 qa.md edits were still uncommitted in the working
+      tree. This pass keeps them and adds to them, and does not commit.'
+    created_at: '2026-11-02T16:09:32Z'
+    last_edited: '2026-11-02T16:09:32Z'
   - id: note-20106e8
     text: 'QA S45 refiner (2026-11-02, 8ea8a9a1, tmux 3.2a): all 3 stories driven
       live. (1) Story 1 FAILS one Then: when userb (outside tmux) re-joins after a
@@ -8530,6 +8655,97 @@ prs:
       Captures: /pm-captures/scenarios/50/run (README.md).'
     created_at: '2026-11-02T19:36:32Z'
     last_edited: '2026-11-02T19:36:32Z'
+  - id: note-33d3631
+    text: 'Review loop f905 i1 (commit 7f5bcd51, spec only; no code or requirement
+      changes; full suite 5619 passed / 1 skipped, 423 s, /pm-captures/review-f905-i1/full-suite.log).
+      Reviewed the two code commits since ad65: f162a71c (S45 joiner attach selects
+      the respawned window only in its own grouped session) and b89aa9a4 (S47 hook
+      takes tui_respawn_lock once per event). Both sound; reverting either in a tree
+      copy fails its new tests. impl.md had no record of them, so items 9-10 were
+      added to "QA-driven fixes and reviews (2026-11-02)". Note on S45: the attach
+      now also selects a split respawn (old TUI window), which master never did, so
+      a reattach that respawns always lands on the TUI window (recorded as intended,
+      not changed). The uncommitted qa.md edit in this working tree still says the
+      hook takes the lock "once per registered window on every pane close"; after
+      b89aa9a4 it is once per event (the QA S47 note also asks for ambiguity 15 and
+      the S5 cannot-lock Then to say one per event).'
+    created_at: '2026-11-02T18:13:32Z'
+    last_edited: '2026-11-02T18:13:32Z'
+  - id: note-6de48b0
+    text: 'QA planning pass 5 (2026-11-02, head 7f5bcd51): spec only, no requirement
+      or code changes; qa.md left uncommitted like passes 3-4. Brought qa.md up to
+      date with f162a71c (S45) and b89aa9a4 (S47). Shared resource 6: the hook takes
+      the respawn lock once per pane-close event (was "once per registered window").
+      New shared resource 6b: each grouped session''s current window. R2: new bullet,
+      a pm session attach that respawns the TUI moves only its own client to the TUI
+      window (new window or the split-back old TUI window, which master never selected,
+      intended); other clients (another ~N, a user view, a shared owner) stay put;
+      an attach that finds the TUI running selects nothing. Shared-race bullet now
+      records the S45 live result (1 transient pidfile-guarded second TUI in 12 refiner
+      rounds, 0 in the run). Held-lock bullet: one wait per event, a wait growing
+      with windows fails, one "cannot lock" line per event. Ambiguity 15 marked confirmed
+      and fixed. New ambiguity 16 (unverified, possible pre-existing defect on the
+      hook path, which f162a71c left alone): a TUI alone in its window killed from
+      a plain shell has no killing client, so the hook''s new-window select goes through
+      current_or_base_session -> get_session_name with no TMUX_PANE, i.e. tmux''s
+      best/most-recent session, possibly a client typing in another window; resolved
+      by judgement that such a client must not be moved. Also: S41 confirmed the _tui
+      rule on tmux 3.2a; S46 verified the respawn start dir. New scenarios 49-51:
+      attach-time respawn selection (private multi-client, view, reused ~N, -d, two
+      attaches at once, plain-shell kill, shared joiner split path), concurrent pane
+      closes across several pm windows with and without a stuck lock, and an end-to-end
+      journey on the final head.'
+    created_at: '2026-11-02T18:27:44Z'
+    last_edited: '2026-11-02T18:27:44Z'
+  - id: note-689865f
+    text: 'Review loop 1237 i1 (no requirement changes; full suite 5631 passed / 1
+      skipped, 426.8 s, log /pm-captures/review-1237-i1/full-suite.log). Reviewed
+      the S50 fix 664df245 (under the respawn lock, the after-kill-pane hook starts
+      a TUI when the registry lists none and no pm _tui pane runs, because another
+      rebalance can reconcile the dead entry away before the hook reads the registry)
+      — sound; its new tests fail on the pre-fix tree. One cleanup: the ''where does
+      a missing TUI go back'' rule (the window the registry or the hook snapshot listed
+      it in, else main, else the first window) is now pane_layout.tui_respawn_window,
+      used by both _ensure_tui_running (the attach) and _respawn_unlisted_tui (the
+      hook), so the two cannot start a respawned TUI in different windows; tests in
+      TestTuiRespawnWindow. impl.md records S49-S51 and this iteration. S49 passed
+      on stories 1-3/5 (story 4 is the pre-existing master hook-select limitation,
+      pr-939ea27; the teardown traceback is pr-07541e7). S51 passed; its C-b & ''first
+      surviving window'' fallback is pre-existing and now filed as pr-48f359f (a design
+      choice: a new window, or remember the TUI''s window, instead of an arbitrary
+      surviving one). No code defect found.'
+    created_at: '2026-11-02T20:10:15Z'
+    last_edited: '2026-11-02T20:10:15Z'
+  - id: note-98d92c0
+    text: 'QA planning pass 6 (2026-11-02, head 5d8fc48b): spec only, no requirement
+      or code changes; qa.md left uncommitted like passes 3-5. Brought qa.md up to
+      date with the code since pass 5 (head 7f5bcd51): the S50 fix 664df245, review
+      1237 i1 (shared pane_layout.tui_respawn_window) and i2 (Unicode line separators
+      in tmux_safe_name). Shared resource 6: under the respawn lock the after-kill-pane
+      hook now also starts a TUI when the registry lists none and no pm _tui pane
+      runs, whoever dropped the entry. R2 gained three bullets: (a) a killed TUI whose
+      registry entry another rebalance already removed (the attach background rebalance,
+      window-resized, a pane EXIT trap) is still respawned by the hook — a round that
+      ends with no TUI fails; (b) the attach and the hook share one "where does a
+      missing TUI go back" rule (the window the registry/hook snapshot listed it in,
+      else main, else the first; never the active window); (c) repo dirs containing
+      U+0085/U+2028/U+2029 get a "_" name (tmux keeps them, but pm parses tmux listings
+      with splitlines) and must create/list/drive/kill normally, with a pre-existing
+      legacy/view name a documented residual. Edge cases: the reconciled-entry race
+      repeated, and under a stuck or unusable respawn lock; a TUI that lived outside
+      main. Ambiguities 17-19: the hook starts an unlisted TUI only while it really
+      holds the lock (with a stuck/unusable lock the session may wait for the next
+      pm session attach — accepted); a legacy/view name with a line separator is not
+      renamed (residual, not a failure); a TUI whose window record is gone comes back
+      in main even if it had lived elsewhere (accepted, the two paths must agree).
+      New "Known pre-existing issues" section lists pr-50e6077 (a repo name near NAME_MAX
+      crashes pm session; use a moderately long name for the hashed-socket rule),
+      pr-939ea27, pr-48f359f, pr-07541e7 and pr-3121cc8 so workers record, not fail,
+      them. New scenarios 52-55: the reconciled-entry respawn race and lock behaviour;
+      the shared window rule; Unicode line separators; and isolation of the hooks
+      respawn across private, legacy, view and non-pm sessions.'
+    created_at: '2026-11-02T21:59:24Z'
+    last_edited: '2026-11-02T21:59:24Z'
   - id: note-54be404
     text: 'QA S52 (reconciled-entry respawn race + stuck/unusable respawn lock) PASS
       on 5d8fc48be, no source changes; captures /pm-captures/scenarios/52. (1) Story
@@ -8616,6 +8832,50 @@ prs:
       behaviour; noted, not filed.'
     created_at: '2026-11-03T00:29:51Z'
     last_edited: '2026-11-03T00:29:51Z'
+  - id: note-67fb084
+    text: 'Review loop 43f6 i1 (no requirement changes; full suite 5640 passed / 1
+      skipped, log /pm-captures/review-43f6-i1/full-suite-final.log; the twelve PR-affected
+      test files pass twice in one HOME, 1034 each). One shared-session fix: a joiner''s
+      plain `pm session` inside a shared session was refused ("Refusing to use tmux
+      socket ... owned by uid N, not you"). `is_shared` is flag-derived and `_set_share_mode_env`
+      pops PM_SHARE_MODE for a plain invocation, so the ambient shared session is
+      adopted with is_shared false; `_resolve_session_socket`''s ownership check and
+      its `find_session_server` probe now use `_owned_only_for_target` (the same "not
+      the server I am attached to" rule kill/mobile apply). Tests: test_an_attached_shared_session_is_not_refused;
+      test_after_kill_pane_hook_passes_the_session_name (the bb80cd1a hook form was
+      only live-QA covered); the unattached refusal test now clears PM_SHARE_MODE/TMUX.
+      Residual: none new.'
+    created_at: '2026-11-03T01:27:29Z'
+    last_edited: '2026-11-03T01:27:29Z'
+  - id: note-450c9e5
+    text: 'Review loop 43f6 i2 (no requirement changes; full suite 5647 passed / 1
+      skipped, 437.8 s, log /pm-captures/review-43f6-i2/full-suite-final.log; the
+      changed test files pass twice in one HOME, 338 each; commit ed48339b). Two items:
+      (1) the i1 ownership exemption (`_attached_to_session_socket` feeding `_owned_only_for_target`)
+      had no direct test — its only test replaced the helper with a lambda, so dropping
+      either condition would still pass; new `TestOwnedOnlyForTarget` covers attached,
+      a legacy default-server ambient socket (never the session own socket, so a planted
+      one is still refused, b48f i15), a different ambient session, no ambient socket,
+      unqueryable tmux, and the shared-context exemption. (2) `pm session list` sized
+      its SESSION column with len() (code points): `tmux_safe_name` keeps non-ASCII
+      text, so a CJK-named project row shifted the CLIENTS/SOCKET columns right and
+      off the header; the home-window width rule is now `paths.char_width()`/`display_width()`,
+      `home_window/pr_list.py` imports it instead of keeping a copy, and the list
+      pads by cells; test `test_wide_names_keep_the_columns_aligned`. Residual: none
+      new.'
+    created_at: '2026-11-03T02:00:31Z'
+    last_edited: '2026-11-03T02:00:31Z'
+  - id: note-c714d87
+    text: 'Review loop 43f6 i3 (no code changes, no requirement changes; full suite
+      5647 passed / 1 skipped, 419.1 s, log /pm-captures/review-43f6-i3/full-suite.log).
+      Verification pass over the head after the 43f6 i2 changes: re-read the i1 attached-socket
+      exemption (session-start ownership check and probe) and the i2 cell-width padding,
+      their tests, and the session-start / legacy-rollout / kill / detach / TUI-discovery
+      paths. The exemption only skips ownership for the server the process is already
+      attached to, and the width change matches the renderer rule it replaced. No
+      new residuals.'
+    created_at: '2026-11-03T02:20:03Z'
+    last_edited: '2026-11-03T02:20:03Z'
   - id: note-533d42e
     text: 'QA scenario 56 (shared session, second Unix account; head ed48339b) PASS
       4/4, no source changes. (1) Joiner (uid 1001) plain `pm session` with the shared
@@ -8739,6 +8999,141 @@ prs:
       include the recipe; all stories were smoke-tested live on this branch.'
     created_at: '2026-11-03T10:46:56Z'
     last_edited: '2026-11-03T10:46:56Z'
+  - id: note-b86fe3a
+    text: 'Review loop 9d4c i1 (no requirement changes; full suite 5652 passed / 1
+      skipped, 429.6 s, log /pm-captures/review-9d4c-i1/full-suite-final.log; the
+      eight PR-affected test files pass twice in one HOME, 721 each). Verified the
+      S58 fix fc99e992 (both hook handlers resolve through the group and ignore non-pm
+      sessions) and completed it: (1) window-resized is a global hook on the same
+      server and had no explicit guard — it was protected only incidentally by non-pm
+      sessions having no registry, so a stale registry from an older pm (exactly the
+      file the S58 bug left) made a resize rebalance the user''s scratch session;
+      the handler now ignores a non-pm session. (2) pm _pane-opened resolved the session
+      through its group and handle_pane_opened resolved it again, so every split ran
+      the tmux group query twice; the wrapper passes the name through and the handler
+      (which must resolve for the guard anyway) does it once. Tests: TestNonPmSessionIgnored
+      gains a resize-in-a-scratch-session case (stale registry with panes) and a pm-session
+      control. impl.md records the S58 fix and this iteration.'
+    created_at: '2026-11-03T04:39:13Z'
+    last_edited: '2026-11-03T04:39:13Z'
+  - id: note-0118a7d
+    text: 'Review loop 9d4c i2 (no requirement changes; full suite 5654 passed / 1
+      skipped, 421.0 s, log /pm-captures/review-9d4c-i2/full-suite-final.log; the
+      PR-affected test files pass twice in one HOME, 1195 each). Verified the 9d4c
+      i1 resize guard live on tmux 3.2a: a scratch session on a pm server is ignored
+      (no .resize file, no rebalance) while a pm session still rebalances. Two more
+      awkward-name parsing gaps: (1) tmux.list_clients_in_group parsed list-clients
+      with a whitespace split (dropping a leading space) and stripped the whole output
+      (dropping a trailing one), so pm session --disconnect-others left a client of
+      such a session attached; fields are now colon-separated and rows split without
+      strip(), live-verified with sessions named ` lead x` and `trail x `. (2) qa_loop._add_status_pane
+      built the qa_status command unquoted for sh -c, so a space-named session made
+      the dashboard exit with its usage line; all three arguments are shlex-quoted
+      now. Tests added in test_shared_sessions.py and test_qa_execution_only_window.py.'
+    created_at: '2026-11-03T05:08:10Z'
+    last_edited: '2026-11-03T05:08:10Z'
+  - id: note-52f11e1
+    text: 'Review loop 9d4c i3 (no requirement changes; full suite 5658 passed / 1
+      skipped, 435.5 s, log /pm-captures/review-9d4c-i3/full-suite-final.log; the
+      eight PR-affected test files pass twice in one HOME, 654 each). Verification
+      pass over the 9d4c i2 head; four remaining session-name readbacks still trimmed
+      a name tmux stores as given (a user view may be named with a leading/trailing
+      space, S118/S121/S124). (1) tmux.get_session_name used .strip() on display-message
+      -p, dropping an edge space, so pm_session_name()s group query failed and the
+      pm session was not recognised from inside such a view; now rstrip("\n") (live-checked
+      on tmux 3.2a). (2) switch_sessions_to_window stripped its list-clients output,
+      trimming the first rows leading space, so its client was never switched to a
+      replacement window; rows now read with splitlines() and no strip(). (3) _detach_current_client
+      trimmed the panes session name, so Ctrl-Q from such a view detached nothing;
+      now rstrip("\n"). (4) qa_status._find_attached_session made the same two reads,
+      so the dashboards Enter switch targeted a nonexistent session; same fix. Tests:
+      test_keeps_an_edge_space_in_the_session_name and test_keeps_a_leading_space_in_the_session_name
+      (test_tmux.py), test_keeps_a_trailing_space_in_the_pane_session_name (test_session_socket_isolation.py),
+      tests/test_qa_status_attached_session.py; all four fail on the pre-fix code
+      (scratch worktree at the previous head).'
+    created_at: '2026-11-03T06:32:06Z'
+    last_edited: '2026-11-03T06:32:06Z'
+  - id: note-7e7b1ce
+    text: 'Review loop 1346 i1 (commit 6edb5861; no requirement changes; full suite
+      5667 passed / 1 skipped, 426.9 s, log /pm-captures/review-1346-i1/full-suite.log).
+      Recovery of the interrupted 9d4c i5 pass (stopped without a verdict while re-running
+      the affected tests; its uncommitted work kept and finished) plus the completion
+      of that pass: (1) the home-window pr-list command interpolated the session name
+      unquoted, so a space-named repo broke argparse and showed the usage line instead
+      of the PR list; interpreter and name are shlex.quote()d. (2) launch_bridge_in_tmux
+      interpolated --cwd as <cwd> in literal quotes, so a repo path with a quote closed
+      the string and the bridge pane died on a parse error; now shlex.quote()d. (3)
+      pm guide setup built pm _save-session/_clear-session with the root in literal
+      quotes, so a quote in the repo path broke the bash -c command; now shlex.quote()d
+      (incidental, same awkward-path class). (4) tmux.list_windows trimmed window-name
+      edge spaces and dropped a window with an empty name, so rebalance and name lookups
+      skipped it; rows now read with splitlines() and split on the explicit single-space
+      separator. (5) the respawn-race test read $HOME/stub-exit before the pm-other
+      stub had started, so on a loaded machine pm-other exited at once and the assertion
+      failed nondeterministically (observed once in a combined run); the test now
+      waits for the stub to run. All four behaviour tests fail on the pre-fix code
+      (scratch worktree); the respawn-race fix is verified against a deliberately
+      slow stub.'
+    created_at: '2026-11-03T09:32:17Z'
+    last_edited: '2026-11-03T09:32:17Z'
+  - id: note-3c959d8
+    text: 'QA planning pass 7 (2026-11-03, head 1332934b): spec only, no requirement
+      or code changes; qa.md left uncommitted like passes 3-6. Brought qa.md up to
+      date with the code since pass 6 (head 5d8fc48b): the S58 fix fc99e992 + review
+      9d4c i1 (all three global hooks ignore a non-pm session on the pm server, including
+      with a stale registry; _pane-opened resolves the session once), 9d4c i2/i3/i4
+      (edge-space session/view names round-trip: list-clients, get_session_name, switch_sessions_to_window,
+      Ctrl-Q detach, qa_status, list_grouped_sessions, review_step, popup cwd; a non-git
+      directory fallback name now carries the share mode) and 1346 i1 (pm-home pr-list
+      quoting, launch_bridge_in_tmux --cwd quoting, pm guide setup quoting, list_windows
+      verbatim edge/empty window names). New shared resource 10 (names tmux stores
+      as given); R2 gained the pm-home and non-git fallback bullets, R3/R5 the edge-space
+      view bullets, R7 the edge-space driving/guide/bridge bullets, R8/R9 the non-git
+      kill/start bullets, R11 the non-pm hook guard, window-name and QA dashboard
+      bullets. Ambiguities 22-25 added. New scenarios 59-63: non-pm sessions on a
+      pm server; edge-space view/window names; the remaining command builders (home
+      window, QA dashboard, guide, bridged cluster explore); a non-git project fallback
+      session and kill --global scoping; and a final-head end-to-end day with concurrent
+      actors.'
+    created_at: '2026-11-03T10:21:36Z'
+    last_edited: '2026-11-03T10:21:36Z'
+  - id: note-a8d0a3b
+    text: 'Review loop 3d42 i1 (commit a6969f12; no requirement changes; full suite
+      5670 passed / 1 skipped, 448.9 s, log /pm-captures/review-3d42-i1/full-suite-final.log;
+      the 22 PR-affected test files pass twice in one HOME, 1410 each). First pass
+      of this loop over the head after the S58-S62 QA fixes: the whole source diff
+      was re-read against R1-R8. One gap of the QA S62 class remained: the non-git
+      fallback name walked up to pm/project.yaml only, while pm project discovery
+      (store.find_project_root) also accepts a root-level project.yaml for backward
+      compatibility, so for a legacy standalone project a plain pm session from a
+      subdirectory still computed the subdirectory basename and started a second session/TUI
+      on a second socket. The walk-up now prefers the nearest ancestor with pm/project.yaml
+      and, only when there is none, the nearest with a root-level project.yaml; a
+      target repo own pm/ subdirectory is never mistaken for the project. Tests: test_non_git_standalone_project_anchors_on_its_root
+      (fails on the pre-fix head with pm-specs-00000000) and test_a_nested_pm_dir_wins_over_a_root_level_project_yaml,
+      both in TestGetSessionNameForCwd. impl.md now records the QA S62 fix (50cbdef7)
+      and this extension.'
+    created_at: '2026-11-03T13:57:06Z'
+    last_edited: '2026-11-03T13:57:06Z'
+  - id: note-04817eb
+    text: 'QA planning pass 8 (2026-11-03, head a6969f12): spec updated for review-loop
+      3d42 i1 (the non-git fallback name now anchors on the nearest ancestor with
+      pm/project.yaml, else the nearest root-level project.yaml, else the cwd) — R2
+      non-git bullet, ambiguity 26, edge cases. Also added a requirement from a live
+      probe: in a non-git directory a plain `pm session --print-connect` prints the
+      private fallback socket command, but `pm session --global --print-connect` printed
+      `tmux -S /tmp/pm-sessions/pm-<dir>-<md5(mode)[:8]> attach` while `pm session
+      --global` refuses with "Cannot determine session tag (not in a git repo?)" —
+      a command for a session that can never exist. R9/ambiguity 25 now require the
+      share-flag print to refuse the same way (the code comment already says a printed
+      command must name a session pm would use); a plain print keeps working. qa.md
+      left uncommitted like passes 3-7. New scenarios 64-66: non-git anchoring from
+      subdirectories (modern + standalone + nested, concurrent starts, kill/connect
+      scoping), wide/long/`~` names through session list/connect/grouping (CJK column
+      cells, byte-hashed sockets, `~` vs `~N`), and degraded environments (tmux missing
+      with $TMUX set, stale PM_TMUX_SOCKET, $TMUX-only shell).'
+    created_at: '2026-11-03T14:21:15Z'
+    last_edited: '2026-11-03T14:21:15Z'
   - id: note-8e84c87
     text: 'QA S65 (wide, long and `~` names through session list, connect and grouping)
       PASS 5/5 on a6969f12, no source changes. (1) 日本語 + ascii-alpha, one client each:
