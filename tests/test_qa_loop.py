@@ -1641,6 +1641,98 @@ class TestVerifySingleScenario:
         assert (passed, reason, vpane) == (True, "", "%9")
         assert split.call_args.args[0] == "%5"
 
+    def test_a_verifier_id_reused_by_the_worker_starts_a_new_verifier(
+            self, tmp_path):
+        """The window-ownership rule accepts any pane of the scenario's own
+        window.  After a restart the scenario window is recreated with one
+        pane (the relaunched worker), and the id a resumed run restored for
+        its verifier can name exactly that pane — the same arithmetic as
+        QA S81's two-run resume.  Reusing it would type the verification
+        follow-up into the worker and then wait on the dead verifier's
+        transcript, which has no time limit.  The verifier's session id is
+        in its pane's start command, so the pane must still run it."""
+        import uuid
+        verifier_sid = str(uuid.uuid4())
+        worker_sid = str(uuid.uuid4())
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1",
+                              pane_id="%1")
+        scenario.verifier_pane_id = "%5"
+        scenario.verifier_session_id = verifier_sid
+        scenario.verifier_cwd = str(tmp_path)
+        scenario.verifier_transcript = str(tmp_path / f"{verifier_sid}.jsonl")
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.find_window_by_name",
+                   return_value={"id": "@9", "index": "1",
+                                 "name": "qa-s1"}), \
+             patch("pm_core.tmux.pane_window_id", return_value="@9"), \
+             patch("pm_core.tmux.pane_start_command",
+                   return_value=(f"cd {tmp_path} && claude "
+                                 f"--session-id {worker_sid}")) as start_cmd, \
+             patch("pm_core.tmux.split_pane_at",
+                   return_value="%9") as split, \
+             patch("pm_core.tmux.send_keys") as send, \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.loop_shared.wait_for_follow_up_verdict",
+                   return_value=None), \
+             patch("pm_core.qa_loop.poll_for_verdict",
+                   return_value="VERIFIED"), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value="VERIFIED"), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   return_value="claude ..."), \
+             patch("pm_core.tmux.set_shared_window_size"), \
+             patch("pm_core.pane_registry.register_pane"), \
+             patch("pm_core.pane_registry.load_registry",
+                   return_value={"windows": {}}), \
+             patch("pm_core.pane_registry.get_window_data",
+                   return_value={"user_modified": True}), \
+             patch("pm_core.pane_registry.locked_read_modify_write"), \
+             patch("pm_core.pane_layout.rebalance"):
+            passed, reason, vpane = _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+                session="pm-session", qa_workdir="/tmp/qa",
+                pr_workdir=str(tmp_path))
+        assert (passed, reason, vpane) == (True, "", "%9")
+        start_cmd.assert_any_call("%5")
+        send.assert_not_called()
+        assert split.call_args.args[0] == "%1"
+        assert scenario.verifier_pane_id == "%9"
+
+    def test_the_verifiers_own_pane_is_still_reused(self, tmp_path):
+        """The identity check must not reject the real verifier: its pane's
+        start command names the session its transcript was written for."""
+        import uuid
+        verifier_sid = str(uuid.uuid4())
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1",
+                              pane_id="%1")
+        scenario.verifier_pane_id = "%5"
+        scenario.verifier_session_id = verifier_sid
+        scenario.verifier_cwd = str(tmp_path)
+        scenario.verifier_transcript = str(tmp_path / f"{verifier_sid}.jsonl")
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.find_window_by_name",
+                   return_value={"id": "@9", "index": "1",
+                                 "name": "qa-s1"}), \
+             patch("pm_core.tmux.pane_window_id", return_value="@9"), \
+             patch("pm_core.tmux.pane_start_command",
+                   return_value=(f"cd {tmp_path} && claude "
+                                 f"--session-id {verifier_sid}")), \
+             patch("pm_core.tmux.split_pane_at") as split, \
+             patch("pm_core.tmux.send_keys") as send, \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.loop_shared.wait_for_follow_up_verdict",
+                   return_value=None):
+            passed, reason, vpane = _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+                session="pm-session", qa_workdir=str(tmp_path),
+                pr_workdir=str(tmp_path))
+        split.assert_not_called()
+        assert send.call_args_list[0].args[0] == "%5"
+        assert (passed, reason, vpane) == (False, "verifier pane disappeared",
+                                           "%5")
+
     def test_reverify_waits_on_the_verifier_pane(self, tmp_path):
         """The follow-up wait watches the verifier pane itself: the worker
         pane sharing the window would keep a dead verifier's wait alive."""
@@ -2359,6 +2451,45 @@ class TestScenarioWorkerPaneOwnership:
         sc = self._scenario(window="")
         with patch("pm_core.tmux.pane_exists", return_value=True):
             assert _scenario_worker_pane_alive("sess", sc, "%4") is True
+
+    def test_a_verifier_pane_running_another_session_is_not_the_verifier(
+            self, tmp_path):
+        """The window rule alone accepts the worker relaunched into the
+        scenario's own window; the verifier's session id in the pane's
+        start command tells them apart."""
+        import uuid
+        from pm_core.qa_loop import _verifier_pane_alive
+        verifier_sid, worker_sid = str(uuid.uuid4()), str(uuid.uuid4())
+        sc = self._scenario()
+        sc.verifier_pane_id = "%5"
+        sc.verifier_cwd = str(tmp_path)
+        sc.verifier_transcript = str(tmp_path / f"{verifier_sid}.jsonl")
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.find_window_by_name",
+                   return_value={"id": "@9", "index": "1",
+                                 "name": "qa-pr-001-s1"}), \
+             patch("pm_core.tmux.pane_window_id", return_value="@9"), \
+             patch("pm_core.tmux.pane_start_command",
+                   return_value=(f"cd {tmp_path} && claude "
+                                 f"--session-id {worker_sid}")):
+            assert _verifier_pane_alive("sess", sc) is False
+
+    def test_a_verifier_without_a_recoverable_transcript_id_stays_alive(
+            self):
+        """A fake-session record (no UUID transcript) cannot be identified
+        by command; window ownership remains the evidence, as before."""
+        from pm_core.qa_loop import _verifier_pane_alive
+        sc = self._scenario()
+        sc.verifier_pane_id = "%5"
+        sc.verifier_transcript = "/tmp/v.jsonl"
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.find_window_by_name",
+                   return_value={"id": "@9", "index": "1",
+                                 "name": "qa-pr-001-s1"}), \
+             patch("pm_core.tmux.pane_window_id", return_value="@9"), \
+             patch("pm_core.tmux.pane_start_command") as start_cmd:
+            assert _verifier_pane_alive("sess", sc) is True
+        start_cmd.assert_not_called()
 
     def test_colliding_pane_id_triggers_relaunch(self, tmp_path):
         """The retry path must relaunch a scenario whose recorded pane id

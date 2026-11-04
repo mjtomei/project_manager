@@ -5383,3 +5383,56 @@ handed to another pane between two polls would keep the wait alive.  The
 waiters are shared with the review and sign-off loops and the realistic
 reuse point (the resume) is now covered; verification also has no time
 limit by design, so a stuck verifier already waits for the user.
+
+## Review iteration (2026-11-04, review-loop 4c94 i3)
+
+Third pass over the head after 4c94 i2 (`e32089d3`).  No requirement
+changes; the i1/i2 fixes hold.  One gap remained in the same
+stale-pane-id area:
+
+**The verifier's window rule accepted the worker.**  i2 made
+`_verify_single_scenario` reuse a recorded verifier pane only when it is
+live and belongs to the scenario's own window.  After a session restart
+that rule is not enough: the scenario window is recreated with a single
+pane — the relaunched worker — and tmux hands ids out again from `%0`,
+so the verifier id restored from `qa_resume.json` can name exactly that
+pane: the verifier's id was allocated after the worker's, and the
+relaunched worker takes the id right after the recreated dashboard's, so
+the two can coincide (the arithmetic of QA S81 itself, where a recorded
+worker id named the recreated QA dashboard).  The window rule accepts it,
+the verification follow-up is typed into the worker, and the run waits on
+the dead verifier's transcript — a wait with no time limit.
+
+The verifier's session id is in its pane's start command, so
+`_verifier_pane_alive` now also requires the pane to still run that
+session (`claude_launcher.pane_runs_transcript`, which the review loop
+already uses for the same question).  A pane whose command shows no
+session id, and a record whose transcript has no recoverable session id
+(a fake-session caller), keep the historical meaning: the verifier.
+Live on tmux 3.2a, a pane's `#{pane_start_command}` keeps the
+`--session-id <uuid>` verbatim and `pane_runs_transcript` answers True
+for that session and False for another.
+
+Considered and not changed: the worker check stays the window rule.  A
+false "dead" there relaunches a duplicate worker, while a false "dead"
+verifier only splits a fresh pane, so the identity check is applied
+where its failure is cheap.  i2's residual also stands: the waiters
+still trust the pane id they were given for the whole wait, but tmux
+does not reuse an id within one server's lifetime, and a restart ends
+the waiting process too.
+
+Tests: `TestVerifySingleScenario` (a verifier id naming the worker pane
+starts a new verifier and nothing is sent to it; the verifier's own
+pane is still reused), `TestScenarioWorkerPaneOwnership` (the helper's
+command check; a transcript without a session id is not consulted).
+The first fails on the pre-fix head — where it hangs on the follow-up
+wait, the defect itself — and the other three are guard tests.
+
+Validation: the three QA-loop files pass twice in one HOME (305 each).
+Full suite 6191 passed / 1 skipped, 437.3 s (log
+`/pm-captures/review-4c94-i3/full-suite-final.log`) — i2's 6175 plus
+this container's 12 `test_markdown_render` tests (the `markdown`
+package is installed here) plus the four new tests.  A docstring-only
+edit made after that run was followed by re-running the three QA-loop
+files (305 passed).  pyflakes reports no new warning versus
+`origin/master`.

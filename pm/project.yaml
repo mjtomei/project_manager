@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-04T14:32:36.536472+00:00'
+  updated_at: '2026-11-04T17:33:35.639386+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9613,6 +9613,32 @@ prs:
       both rows. Captures /pm-captures/scenarios/86 (README + per-story manifest/cast/mp4).'
     created_at: '2026-11-04T14:32:36Z'
     last_edited: '2026-11-04T14:32:36Z'
+  - id: note-a557587
+    text: 'Review loop 4c94 i3 (no requirement changes; full suite 6191 passed / 1
+      skipped, 437.3 s, log /pm-captures/review-4c94-i3/full-suite-final.log; the
+      three QA-loop test files pass twice in one HOME, 305 each). Verification pass
+      over the head after 4c94 i2 (e32089d3); i1/i2 hold. One gap in the same stale-pane-id
+      area: the verifier check i2 introduced uses the window-ownership rule, which
+      accepts ANY pane of the scenario window. After a session restart that window
+      is recreated with one pane (the relaunched worker) and tmux reuses ids from
+      %0, so the verifier id restored from qa_resume.json can name exactly that worker.
+      This is QA S81''s arithmetic one step further: the recorded verifier id was
+      allocated after the worker, and the relaunched worker gets the id right after
+      the recreated dashboard, so the two can coincide. The verification follow-up
+      would then be typed into the worker and the run would wait on the dead verifier
+      transcript (no time limit). New _verifier_pane_alive also requires the pane
+      to still run the verifier session, using claude_launcher.pane_runs_transcript
+      (the verifier session id is in the pane start command; live-checked on tmux
+      3.2a). Unknowns keep the historical meaning (fake-session callers). Worker check
+      deliberately left as the window rule: a false dead there duplicates a worker,
+      a false dead verifier only splits a fresh pane. Tests: TestVerifySingleScenario
+      (worker-named verifier id starts a new verifier, nothing sent to the worker;
+      the real verifier pane is still reused), TestScenarioWorkerPaneOwnership (command
+      check; no-session-id transcript not consulted). The first fails on the pre-fix
+      head (it hangs on the follow-up wait — the defect). pyflakes: no new warning
+      vs origin/master.'
+    created_at: '2026-11-04T17:32:49Z'
+    last_edited: '2026-11-04T17:33:35Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

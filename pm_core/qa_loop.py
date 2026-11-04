@@ -3780,6 +3780,39 @@ def _scenario_worker_pane_alive(session: str, scenario: QAScenario,
     return False
 
 
+def _verifier_pane_alive(session: str, scenario: QAScenario) -> bool:
+    """True when the recorded verifier pane is still this scenario's verifier.
+
+    The window-ownership rule alone accepts any pane of the scenario's own
+    window.  A restarted tmux server hands pane ids out again from ``%0``,
+    and the id a resumed run restored for its verifier can name the worker
+    that was relaunched into that window: the scenario window is recreated
+    with a single pane, and the verifier's id (allocated after the
+    worker's) can coincide with the id the relaunched worker gets — the
+    same arithmetic as QA S81's two-run resume, where a recorded worker id
+    named the recreated dashboard.  The verification follow-up would then
+    be typed into the worker while the run waits on the dead verifier's
+    transcript — a wait with no time limit.
+
+    The verifier's session id is in its pane's start command, so the pane
+    must still run that session (``pane_runs_transcript``).  A pane whose
+    command shows no session id, and a record whose transcript has no
+    recoverable session id (a fake-session caller), count as the verifier,
+    as they always did.
+    """
+    pane_id = scenario.verifier_pane_id
+    if not _scenario_worker_pane_alive(session, scenario, pane_id):
+        return False
+    from pm_core.claude_launcher import (
+        pane_runs_transcript, session_id_from_transcript,
+    )
+    if (not scenario.verifier_transcript
+            or not session_id_from_transcript(scenario.verifier_transcript)):
+        return True
+    return pane_runs_transcript(pane_id, scenario.verifier_cwd or None,
+                                scenario.verifier_transcript)
+
+
 def _relaunch_scenario_window(
     scenario: QAScenario,
     state: QALoopState,
@@ -5296,8 +5329,7 @@ def _verify_single_scenario(
         captures_scenario_dir=captures_scenario_dir,
     )
 
-    verifier_alive = _scenario_worker_pane_alive(session, scenario,
-                                                 scenario.verifier_pane_id)
+    verifier_alive = _verifier_pane_alive(session, scenario)
     if not verifier_alive:
         # First verification of this scenario — split its window and
         # start a Claude session with the verification prompt.
