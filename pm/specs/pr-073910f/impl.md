@@ -4752,3 +4752,125 @@ note for the vanished session.
 Verification: the 22 PR-affected test files pass twice in one HOME (1412
 each); full suite 5672 passed / 1 skipped (log
 `/pm-captures/review-60a8-i2/full-suite-final.log`).
+
+## Master integration (2026-11-04, origin/master c3bac6ce)
+
+Sign-off routed the PR back (`SIGNOFF_IMPL`) because `origin/master` @
+`c3bac6cee203` (merge of #296, 380 commits on top of the merge base
+`eaf3372e`) conflicted in nine files, and because master's #284
+regression-run rework — the isolated `pm qa regression` runner, the
+`-C`/`PM_PROJECT` TUI lookup (`_project_sessions`) and the host-mode
+`PM_TMUX_SOCKET` note — was written for one shared tmux server.  The merge
+needed code work, not just conflict picks.
+
+### Registry (`pm/project.yaml`)
+
+Resolved with pm's own `store.merge_3way` over the index stages, master as
+*ours* and the branch as *theirs* (theirs wins true conflicts, so the
+branch's own record and notes win where both changed while master's newer
+state is kept everywhere the branch left it alone).  The result was then
+reordered to master's record order with the branch-only records appended,
+so the merge does not move master's entries.  632 PR records (586 branch /
+617 master / 571 shared), 22 plans, no id lost, no duplicate; every branch
+and master note present; the one record both sides changed (`pr-e847a7a`)
+keeps the later `updated_at` and the union of its notes.  Verified with
+`store.load(validate=True)`.
+
+The branch's registry delta also carried twenty PR notes written on the
+base registry but never committed (QA planning passes 1-8 and review loops
+ad65, f905, 1237, 43f6, 9d4c, 1346, 3d42); they are the PR's own record
+and are committed first (`5c08c406`) so the merge carries them into
+master.
+
+### Code conflicts
+
+1. **`pm_core/regression_prompts.py`** — master's rewrite replaced the
+   "Session Context" prompt (the branch's only change there was quoting
+   the session name in its copyable `pm tui` examples).  The prompt no
+   longer names a live session at all.  Took master's file, then made the
+   host-mode note describe per-session servers (see the scrub below) and
+   dropped its now-dead `tmux_socket` parameter.
+2. **`pm_core/cli/qa.py`** — master's `qa_regression` (isolated workdir +
+   container, never the user's session) supersedes the branch's live-pane
+   runner; took master's side.  In `qa launch`'s instruction prompt the
+   branch's shell-quoting of the session name is kept alongside master's
+   `sess_label`/`title`/`body` definitions.
+3. **`pm_core/tui/pane_ops.py`** — kept master's early `regression`
+   dispatch (which removed the dead in-function branch) and the branch's
+   `q_sess = shlex.quote(sess)` for the instruction prompt's examples.
+4. **`pm_core/prompt_gen.py`** — combined both: the discovery watcher's
+   `tmux list-panes` example keeps the branch's quoted
+   `session:discovery` target and gains master's `#{pane_start_command}`
+   field.
+5. **`pm_core/tui/qa_loop_ui.py`** — master's `qa_status.json` re-read
+   (recovered "QA ERROR" cause) runs first, then the branch's
+   foreign-live-session skip; the re-read refines `overall`, so a
+   completed foreign run is still processed here rather than skipped.
+6. **`pm_core/cli/helpers.py`** — `_find_tui_pane` keeps the branch's
+   server-scoped structure and gains master's `-C`/`PM_PROJECT` branch
+   between the ambient and cwd branches; it selects the hosting server
+   with `_select_session_socket` before reading the registry, under the
+   branch's ownership rule (an implicit project-derived lookup in a
+   private context never adopts another user's socket; inside a
+   shared/joiner context the shared session stays reachable).
+   `_project_sessions` is server-aware: the tag session is resolved
+   through `find_session_server` and the fallback enumerates
+   `list_pm_sessions` (filtered to owned servers in a private context),
+   so it finds a private session from a plain shell (where
+   `PM_TMUX_SOCKET` names the default server) as well as a share-mode
+   session; its old `"~" in sess` filter is gone, because
+   `list_pm_sessions` already collapses groups and a repo directory may
+   put `~` in a session's own tag.
+
+### Semantic conflicts git auto-merged
+
+1. **The command-bar parse guard hid `pr select`.**  The branch added the
+   `shlex.split` guard at the top of `pr_view.handle_command_submitted`
+   (an unbalanced quote used to raise out of the message handler and exit
+   the TUI); master added the fuzzy `pr select` / `plan select` dispatch
+   before its own split, precisely so a query such as `user's` cannot
+   raise.  Auto-merged with the guard first, so `pr select user's` was
+   rejected as unparseable and never reached the fuzzy handler
+   (`test_fuzzy_select_tui.py::test_pr_select_quotes_and_markup_are_safe`).
+   The dispatch now runs first, then the guard (still before the in-flight
+   action guard it protects).
+2. **`PM_TMUX_SOCKET` in the regression run's environment.**  Master kept
+   it in `cli.qa._REGRESSION_SCRUBBED_ENV` ("host mode shares the user's
+   tmux server") and told the agent to run plain tmux with
+   `-S $PM_TMUX_SOCKET`.  Under this PR that socket is the user's *live
+   session's private server*: keeping it hands the isolated run an ambient
+   address for a session it must never drive.  It is now scrubbed like
+   `TMUX`/`PM_SESSION`, and the host-mode prompt says that pm resolves
+   each session's own server and that a plain `tmux` command must name the
+   run's session's socket (`pm session --print-connect` prints it).  The
+   filing path still reaches the user's TUI to reload it: `pm -C
+   <registry> pr add` resolves the project's session through
+   `_project_sessions`/`_select_session_socket`.
+
+### Tests
+
+- `tests/test_regression_prompts.py` — took master's suite, re-added
+  `test_discovery_prompt_quotes_the_session_window_target` (the branch's
+  prompt_gen quoting test, still valid), and replaced the ambient-socket
+  test with the per-session host-mode note test.
+- `tests/test_regression_launch.py` — the host-mode run now asserts
+  `PM_TMUX_SOCKET` is absent and the prompt does not name the user's
+  socket.
+- `tests/test_cli_helpers.py` — kept both imports
+  (`_get_session_name_for_cwd`, `LAUNCH_REMOVED_AT_LOCK`) and adapted
+  `TestFindTuiPaneProjectOverride`'s fixture to the server-scoped lookup
+  (`find_session_server`, `list_pm_sessions`, `pane_exists`, a known
+  ambient `PM_TMUX_SOCKET`); the old `subprocess.run` stub would now be
+  picked up by `pm_session_name`'s group query and corrupt the session
+  name.
+- `tests/test_cli_qa.py` — removed the three tests of the superseded
+  live-pane `qa_regression` behaviour (no session / dead pane / live
+  pane), which master's isolated runner replaces.
+
+Validation on the merged head:
+- the 23 PR-affected test files plus `test_fuzzy_select_tui.py` and
+  `test_regression_launch.py`: 1526 passed;
+- full suite: 6154 passed / 1 skipped (437.8 s).
+
+Every earlier QA PASS result (S69-S74 and before) predates this merge and
+is **stale**; this PR needs a fresh review/QA/sign-off sequence.

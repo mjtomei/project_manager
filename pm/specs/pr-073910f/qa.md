@@ -13,7 +13,10 @@ The user-visible consequences are:
   killing the session) may reach a pane, client or server belonging to a
   different pm session;
 - pre-existing sessions that still live on the default server keep
-  working, untouched, until the user kills them.
+  working, untouched, until the user kills them;
+- a user who has joined someone else's shared session can reattach to it
+  with a plain `pm session` from inside that session, while a plain shell
+  outside it still starts their own session (review-loop 43f6 i1).
 
 The implementation also tightens a second class of hazard in the same
 code: the socket directory is world-writable, so sockets owned by another
@@ -24,7 +27,20 @@ world-writable must fail closed rather than be used. Discovery with no
 session context of its own never auto-selects *another user's* server.
 A user's own tmux view grouped under a pm session — under any name, even
 one that looks like a different pm session — resolves to the pm session
-it is grouped with for discovery, driving and detaching.
+it is grouped with for discovery, driving and detaching.  A view may also
+be named with a leading or trailing space (tmux stores a session name as
+given), and a window may be named with edge spaces or with no name at
+all; every readback keeps such a name verbatim.
+
+The same "a name or path is data, never shell syntax" rule now extends to
+the remaining command builders a session runs: the `pm-home` PR-list
+window, the QA status dashboard pane, `pm guide`'s setup command, the
+`pm cluster explore --bridged` bridge pane, and the window listing a
+rebalance and a name lookup read (review-loop 1346 i1; the QA status
+command in 9d4c i2).  The global pane hooks fire on the whole server, so
+a plain (non-pm) session a user creates beside the pm one must be ignored
+by all of them, even when a stale registry from an older pm still lists
+panes there (QA S58, commit fc99e992; review-loop 9d4c i1).
 
 ## Shared resources touched by this change
 
@@ -51,15 +67,55 @@ simultaneously.
    per session, keyed by the *base* session name, guarded by a sidecar
    `.lock` file; written by the TUI (its heal on mount) and by
    `pm session` when it adopts a running TUI the registry does not list,
-   read by every discovery path.
+   read by every discovery path.  A second sidecar,
+   `<session>.json.respawn.lock`, is taken by the `after-kill-pane` hook
+   (`pm _pane-closed`, once per pane-close event, however many pm
+   windows the session has — QA S47, commit b89aa9a4) and by every
+   `pm session` attach to a running session, so only one of them starts
+   a missing TUI (QA S42, commit 698cbb97).  The hook is invoked with the
+   session it fired in (`run-shell 'pm _pane-closed #{q:session_name}'`,
+   QA S54, commit bb80cd1a): its `$TMUX_PANE` can be empty or name a pane
+   on another server, so the name, not the inherited pane id, selects the
+   registry.  Both files live
+   in the *user's own* `~/.pm`: a joiner of a shared session takes their
+   own lock, never the owner's (review ad65 i1).  Under that lock the
+   hook also starts a TUI when the registry lists none and no live
+   `pm _tui` pane runs, whoever dropped the entry (QA S50, commit
+   664df245), so the registry can be emptied by a reconcile the hook did
+   not do.
+6a. **The session's start directory (`#{session_path}`)** — the
+   directory the base session was created in.  Every TUI respawn (hook
+   split, new-window fallback, `pm session` attach) now starts there,
+   instead of in the cwd of whichever client ran the command.
+6b. **Each grouped session's current window** — every client of a pm
+   session (each `~N`, a user's own view, a joiner's `~N`) has its own
+   current window.  A `pm session` attach that respawns the TUI selects
+   the TUI's window only in the grouped session it attaches, never in
+   another client's (QA S45, commit f162a71c); the `after-kill-pane`
+   hook's new-window fallback still selects through
+   `current_or_base_session` (unchanged).
 7. **tmux pane ids (`%N`)** — now only unique *within* one server, while
    `pm tui send` delivers keys to a bare pane id.
 8. **Per-server tmux state** — hooks (`set-hook -g`), global environment,
    windows, grouped sessions. Two servers must never share any of it.
+   The hooks are global on the server, so they also fire for a plain
+   session a user creates there; each handler resolves the session
+   through its tmux group and ignores it unless the resolved name is a
+   pm one, so a non-pm session gets no registry, no rebalance and no
+   respawned TUI even when a stale registry from an older pm lists panes
+   in it (QA S58, commit fc99e992; review-loop 9d4c i1).
 9. **Session-keyed artifacts** — TUI pidfile and command queue,
    frame/history files, the home-window refresh sentinel, the mobile
    flag, containers and push proxies cleaned up by `pm session kill`.
    All are keyed by the *base* session name.
+10. **Verbatim names tmux stores as given** — a session name (a user's
+    own view, or a repo directory ending in a space) and a window name
+    (edge spaces, or empty) round-trip through every listing readback:
+    `display-message -p`, `list-sessions`, `list-clients`, `list-windows`
+    and the pane query.  A trimmed name no longer names the session or
+    window it came from, so group resolution, detaching, the pane-switch
+    gate, the dashboard switch and rebalance all miss it (review-loop
+    9d4c i2/i3/i4, 1346 i1).
 
 ## Requirements
 
@@ -104,6 +160,26 @@ pane unless stated otherwise.
   (pm_root, session override, fake-claude config), the pane registry, the
   mobile flag, `pm session list`, `--print-connect`, `pm tui -s` — uses
   that same tmux-safe name.
+- **GIVEN** a repo whose directory name contains a Unicode line separator
+  — `U+0085` (NEL), `U+2028` (LINE SEPARATOR) or `U+2029` (PARAGRAPH
+  SEPARATOR),
+  **WHEN** the user runs `pm session` from a plain shell, and then again,
+  **THEN** the first run creates a session whose printed name is exactly
+  the name tmux lists (the separator becomes `_`, e.g.
+  `pm-qa-line_sep-<hash>`), with no "Failed to detect TUI pane after
+  session creation."; the second run attaches to it; `pm session list`
+  shows exactly one row with that full name and its own socket, from a
+  plain shell and from inside its pane; `pm tui view`/`send` and
+  `pm session --print-connect` find it; panes open in the repo's real
+  path with its literal characters; `pm session kill` removes it and its
+  socket.  The `_` matters because tmux stores the separator unchanged
+  while pm reads every tmux listing back with `str.splitlines()`, which
+  treats it as a record boundary — before this fix a live session
+  vanished from `pm session list` and from the cross-server TUI scan
+  (review-loop 1237 i2, commit 9037574f).  A *legacy* session or a
+  user's own view created before this change with such a character in
+  its name is not renamed and still cannot be parsed back (documented
+  residual; ambiguity 18).
 - **GIVEN** such a dotted-name project for which an *older* pm (before
   this change) ran `pm session`: it printed "Failed to detect TUI pane
   after session creation." but left `pm-next_js-<hash>` running its TUI
@@ -140,15 +216,203 @@ pane unless stated otherwise.
   fresh TUI.  A notes, agent or shell pane, or a dead pane, is never
   recorded as the TUI, and `pm tui view`/`send` afterwards drive the new
   TUI.  Before the respawn, `pm tui view`/`send` report that no TUI pane
-  was found rather than capturing or typing into another pane (QA
-  planning 2026-11-02 pass 2: the adopt and the discovery fallback
-  recognise a TUI by `_tui` anywhere in a pane's start command; not yet
-  verified live).
+  was found rather than capturing or typing into another pane.  A pane
+  is the TUI only when its start command, split into shell words, runs a
+  pm entry point with the exact `_tui` argument — the same test the
+  pidfile applies to a TUI's argv; a substring `_tui` in a session name,
+  an EXIT-trap wrapper or a workdir path never counts (QA S38 found the
+  substring match adopting the notes and review-diff panes in `rich_tui`;
+  fixed in a337a168 and verified live post-fix).
+- **GIVEN** a TUI that pm started any of the ways it starts one — a
+  fresh `pm session` (the command carries a quoted `PM_TMUX_SOCKET=`
+  prefix, plus `PM_SHARE_MODE=` for a shared session), a respawn split
+  into the TUI's window or into a new window, a respawn by the
+  `after-kill-pane` hook, an in-place Ctrl+R restart, or a legacy session
+  an older pm started on the default server — in a session whose name
+  contains a space, a quote, a double quote, a backtick, a `$` followed by
+  a digit, a `~`, a `|` or multi-byte characters, or whose long name
+  gives it a hashed socket,
+  **WHEN** the pane registry no longer lists it and the user runs
+  `pm session`, `pm tui view`/`send`, or `pm qa regression`,
+  **THEN** the exact-match test still recognises that pane as the TUI:
+  it is adopted (no "TUI pane missing — respawning...", no second TUI,
+  same pid) and driven (QA planning 2026-11-02 pass 3: tmux reports such
+  a command as one double-quoted word with `\"` escapes; a throwaway
+  tmux 3.4 probe round-tripped all of these names, and QA S41 confirmed
+  them live on tmux 3.2a).
+- **GIVEN** a user kills the TUI pane with tmux (the `after-kill-pane`
+  hook, `pm _pane-closed`, respawns a registered TUI),
+  **WHEN** another terminal runs `pm session` for that session at the
+  same moment,
+  **THEN** the session ends with exactly one live TUI, the registry lists
+  that one pane once (no entry for a pane that has exited), and the
+  attach completes without a traceback.  No second TUI pane appears,
+  not even for a moment, and no TuiPidfileConflict is logged: the hook
+  and the attach decide and respawn under one per-session lock, the hook
+  leaves the session alone when a live `pm _tui` pane is already
+  running, and a pane already listed is not listed again (QA S42, commit
+  698cbb97; master gives two live TUIs for 0.1–0.6 s in every round of
+  this race, and the branch before the fix listed one TUI twice).  The
+  attach may print "TUI pane missing — respawning..." when it is the one
+  that starts the only TUI (ambiguity 13).
+- **GIVEN** a running session whose TUI was just killed and whose registry
+  entry for it is already gone — another `rebalance()` reconciled the dead
+  entry away before the `after-kill-pane` hook read the registry: the
+  background rebalance a `pm session` attach schedules about 0.6 s after
+  its Enter, the `window-resized` hook, or a pane's EXIT trap (so the
+  hook's own snapshot may not list the TUI either),
+  **WHEN** the user closes a pane of that session (which fires the
+  `after-kill-pane` hook),
+  **THEN** the hook starts exactly one TUI, in the window the registry
+  listed it in when the event was read, else `main`, else the first
+  window; the registry lists the new pane as its window's TUI once, and no
+  terminal shows a traceback.  A round that ends with no TUI at all is a
+  defect: every reconcile that can drop the entry runs without the
+  respawn lock, so the hook must not depend on its own reconcile having
+  removed the entry (QA S50, commit 664df245; before it, 2 of 4 rounds
+  with the attach's Enter 0.60–0.65 s before the kill, 5 of 8 for the
+  refiner, left the session with no TUI).  The hook does this only when it
+  actually holds the respawn lock, so two hooks that both went ahead past
+  a stuck holder cannot both start one; when the lock is stuck or
+  unusable, the session is recovered by the next `pm session` attach
+  (ambiguity 17).  Repeat the race several times and report each round.
+- **GIVEN** a session whose TUI is missing and whose registry does not
+  say which window it was in (the entry was removed, the registry file
+  was lost), or does say (the TUI lived in a review/notes window, not
+  `main`),
+  **WHEN** the TUI is started again — by a `pm session` attach, or by the
+  `after-kill-pane` hook after a pane close,
+  **THEN** both paths use one rule: the window the registry (or the
+  hook's snapshot of it) listed the TUI in, else the window named `main`,
+  else the first window — never the active window, which may be a QA or
+  work window.  A TUI that the registry still places in a non-`main`
+  window comes back in that window from either path; with no record of
+  its window it comes back in `main` from either path, so the two paths
+  never put a respawned TUI in different windows (review-loop 1237 i1,
+  `pane_layout.tui_respawn_window`).  If the hook's snapshot did not list
+  the TUI at all, `main` is the accepted answer even for a TUI that had
+  lived elsewhere (ambiguity 19).
+- **GIVEN** a *shared* session (`--global`/`--group`) with a joined
+  second user, **WHEN** the TUI pane is killed with tmux (by either
+  user's client) while the joiner runs `pm session --global --dir <the
+  owner's project>` at the same moment,
+  **THEN** the session ends with exactly one live TUI running the
+  owner's project, the joiner's attach completes, and no user's terminal
+  shows a traceback.  The joiner takes their own respawn lock, not the
+  owner's, so this race is *not* serialised; its only guard against a
+  second TUI is the TUI pidfile, as before the lock (documented in review
+  ad65 i1; verified live in QA S45: one TUI after every one of 12
+  rounds, and the refiner saw one round with a second TUI for a moment
+  that exited on the pidfile guard with a TuiPidfileConflict and settled
+  to one).  A second TUI that appears for a moment
+  and exits on the pidfile guard is that documented trade-off: report how
+  often it happens and what it leaves behind (ambiguity 14).  It fails
+  the scenario if two TUIs keep running, if a pane is left running
+  something other than the TUI (the pm guide, Claude), or if the owner's
+  registry still lists an exited pane, or lists the TUI twice, after the
+  next pane close or `pm session` attach has reconciled it.
+- **GIVEN** a running session whose TUI is killed or gone,
+  **WHEN** the TUI is respawned — by the `after-kill-pane` hook after a
+  `tmux kill-pane` typed in *another project's* directory, in `/tmp` or
+  `$HOME`, or in a subdirectory or PR workdir clone of this project; by
+  that hook from a client attached through a user's own view that was
+  created in another directory; by the hook's new-window fallback when
+  the TUI was the last pane of its window; or by a `pm session` attach
+  run from a subdirectory, or a joiner's `pm session --global --dir`
+  run from the joiner's own home —
+  **THEN** the new TUI starts in the directory the session was created
+  in (the project's repo directory) and shows *this* project.  It never
+  loads the other project (whose pidfile and registry it would take
+  over), never starts the pm guide or a Claude pane, and the other
+  project's session, TUI, registry and pidfile are untouched.  A repo
+  path with a space, a quote, a `$`, multi-byte characters or a
+  `#(cmd)` is used literally, and the `#(cmd)` is never run (QA S42,
+  commit 698cbb97: before it, the respawn split had no `-c`, so tmux
+  started the TUI in the cwd of the client that ran the command; this
+  was pre-existing on master; verified live from every one of these
+  places in QA S46).  The same holds for a legacy session on the default
+  server once the user runs this build: its hook then runs this build's
+  respawn.
+- **GIVEN** a running session with two or more clients — another
+  terminal of the same user on `~1`, a shared session's owner while a
+  joiner attaches, or a client on a user's own view — each looking at a
+  window of their own (a shell, notes or review window), and the TUI is
+  gone (its window was closed with `kill-window`/`C-b &`, or its process
+  crashed beside other panes),
+  **WHEN** a further terminal runs `pm session` (or a joiner runs
+  `pm session --global --dir …`), reusing an unattached `~N` or
+  creating a new one,
+  **THEN** the TUI is respawned once, and only the client of *this*
+  attach lands on the TUI's window — the new window, or the old TUI
+  window the TUI was split back into (a reattach that respawns always
+  shows the TUI; master never selected the split case, and the change is
+  intended).  Every other client stays on the window and pane it was
+  using, with what it was typing intact (QA S45, commit f162a71c: before
+  it, the respawn selected through the first *attached* grouped session,
+  so a shared session's owner was moved off its shell window while the
+  joiner reattached to that shell window; pre-existing on master).  A
+  `pm session` that finds the TUI running selects nothing.  The
+  `after-kill-pane` hook's new-window fallback is unchanged by this: it
+  still switches a client through `current_or_base_session` (the killing
+  client when one typed the kill; ambiguity 16 covers a kill typed with
+  no client).
 - **GIVEN** another pm process holds the session's pane-registry lock
   (a stuck command), **WHEN** the user runs `pm session` while the
   registry lacks the running TUI, **THEN** the attach still completes
   after the lock wait, with no traceback and no second TUI; a later
   attach records the entry once the lock is free (review e661 i1).
+- **GIVEN** another pm process holds the session's *TUI-respawn* lock (a
+  stuck command), **WHEN** the user closes a pane of the session (any
+  pane, in a session with one or several pm windows), kills the TUI
+  pane, or runs `pm session` from another terminal,
+  **THEN** each of them goes ahead after at most one lock wait (about
+  10 s), logging that the lock was still held: the TUI is respawned
+  exactly once, the attach completes, no terminal shows a traceback, and
+  the layout rebalances.  A pane close or TUI kill takes the lock once
+  per event, however many pm windows (main, review, QA) the session has,
+  and lays out the windows after releasing it, so the closing client is
+  frozen for one wait at most: a wait that grows with the number of the
+  session's windows fails (QA S47 measured 30.2 s with three windows,
+  one 10 s wait per window; fixed in b89aa9a4, verified live at
+  ~10.2 s; ambiguity 15).  Another session's pane closes and attaches do
+  not wait at all (the lock is per session).  When the lock cannot be
+  taken at all (its file cannot be opened or locked, as on a filesystem
+  without working locks, or a directory sits at the lock path), the hook
+  and the attach go ahead at once, with no wait, and log one "cannot
+  lock" line per event (review ad65 i1; before it, every pane close and
+  attach waited the full 10 s there).
+- **GIVEN** a running session whose repo directory name contains a space
+  (so the session name does), with the `pm-home` window beside the TUI,
+  **WHEN** the user adds a PR and looks at that window (it refreshes on
+  its own poll),
+  **THEN** it shows the PR list — the table of PRs with their status —
+  and not an argparse usage line, and the list includes the new PR.
+  The window's command quotes the interpreter path and the session name
+  as single shell words (review-loop 1346 i1: before it, the space split
+  the name into extra argv entries and the window showed its usage
+  line).
+- **GIVEN** a pm project directory that is not a git repository — its
+  `.git` was removed (or the project was copied without history) after
+  `pm init` — **WHEN** the user runs `pm session` there from a plain
+  shell, **THEN** it starts the private session under the directory's
+  fallback name (`pm-<dir>-00000000`) on its own socket, `pm session
+  list` shows it, and a later `pm session` attaches to it; `pm session
+  --global`/`--group` refuses ("Cannot determine session tag (not in a
+  git repo?)") and creates no server.  The fallback name carries a hash
+  of the share mode when one is set, so the private name and a shared
+  invocation's name differ (review-loop 9d4c i4).
+- **GIVEN** that non-git project, **WHEN** the user runs `pm session`,
+  `pm session name`, `pm session --print-connect` or `pm session kill`
+  from a *subdirectory* of it, **THEN** each resolves the project's own
+  fallback name (the directory holding `pm/project.yaml`, or the legacy
+  standalone layout's root-level `project.yaml`, not the subdirectory's
+  basename): `pm session` attaches to the project's session instead of
+  starting a second one on a second socket, and kill/list/connect name
+  that same session.  The walk-up prefers any ancestor with
+  `pm/project.yaml`; only when there is none does it use the nearest
+  ancestor with a root-level `project.yaml`, so a target repo's own
+  `pm/` subdirectory anchors on that repo rather than on an outer
+  standalone project (QA S62, commit 50cbdef7; review-loop 3d42 i1).
 
 ### R3 — `pm session list` enumerates every pm session across servers
 
@@ -178,7 +442,26 @@ pane unless stated otherwise.
   - two projects whose names contain `~` (e.g. `my~repo`, `my~other`)
     are listed as two rows, each under its own full name and its own
     socket.  `~N` is a *grouped-session* suffix only when it is numeric,
-    so a `~` in the tag must not be truncated (review-loop b48f i11).
+    so a `~` in the tag must not be truncated (review-loop b48f i11);
+  - a session whose name contains East-Asian wide characters (a repo
+    directory named `日本語`, which `tmux_safe_name` keeps as-is) is
+    listed with its full name and its own socket, and the SESSION,
+    CLIENTS and SOCKET columns line up with the header on every row:
+    the column is padded by terminal cells, not by code points, so a
+    wide name does not push the later columns right (review-loop 43f6
+    i2, commit ed48339b).
+- **GIVEN** a running pm session A also open through the user's own tmux
+  view named with a leading or trailing space (e.g. ` lead view`,
+  `trail view `), or through a view named like one of A's grouped
+  sessions (` pm-x~1`), with a client attached through it,
+  **WHEN** the user runs `pm session list` from a plain shell and from
+  inside that view,
+  **THEN** A appears exactly once with its own socket, the view gets no
+  row of its own, and a client on the view is not counted as one of A's
+  grouped-session clients (`tmux list-clients` is authoritative).  The
+  view named ` pm-x~1` is not reported as a real grouped session, and
+  running the list from inside it does not list it a second time
+  (review-loop 9d4c i2/i3/i4).
 - **GIVEN** `/tmp/pm-sessions` is a directory owned by another user
   (e.g. root) with mode `1733` — sticky and world-writable, so `pm
   session` accepts it and creates sockets there, but not readable by
@@ -195,7 +478,16 @@ pane unless stated otherwise.
   directory checks that project's session (QA S34, commit 43b35445).  Run
   from *inside* a pm pane, whose cwd may be a PR workdir clone, a
   subdirectory or a directory outside any repo, it also lists the session
-  the pane belongs to (the same-set rule above; ambiguity 12).  `pm
+  the pane belongs to (the same-set rule above; ambiguity 12; QA S40,
+  commit 99deef53).  That session is found through `$PM_TMUX_SOCKET`,
+  else the socket `$TMUX` names, and only when that socket is an entry of
+  `/tmp/pm-sessions`; it goes through the same `lstat` check as the scan
+  (a symlink or non-socket entry is skipped), and a dead or stale one is
+  not listed.  The stderr
+  warning names what was checked: this project's session, the session
+  this command runs in, or both.  A legacy pane's default server is
+  listed as always and is not probed a second time.  A plain shell's
+  output is unchanged by this.  `pm
   session`, `--print-connect`, `pm tui view` and `pm session kill` in the
   project's directory still find the session through its deterministic
   socket path (`list` applies `paths.shared_socket_dir_is_usable`,
@@ -276,7 +568,24 @@ pane unless stated otherwise.
   **WHEN** the user runs `pm session --disconnect-others` (`-d`) to take
   the session over, **THEN** every other client — including the view's —
   is detached, so none of them keeps constraining the shared window size
-  (review-loop b48f i4).
+  (review-loop b48f i4).  That holds when a grouped session's or a
+  view's name contains a leading or trailing space: the client listing
+  keeps the name verbatim, so the group match does not drop it
+  (review-loop 9d4c i2).
+- **GIVEN** the session is open through a view named with a leading or
+  trailing space (` lead view`, `trail view `), **WHEN** a client on
+  that view presses the quit key, **THEN** exactly that client detaches,
+  the TUI keeps running, and no other client of any pm session is
+  touched: the pane's session name is read verbatim, the group lookup
+  finds A, and the detach targets that client (review-loop 9d4c i3).
+- **GIVEN** a view whose name looks like a grouped session of A but has
+  an edge space (` pm-x~1`, `pm-x~1 `), **WHEN** the user runs
+  `pm session` for A, kills A, presses the quit key, or A sizes its
+  layout, **THEN** that view is not treated as one of A's grouped
+  sessions — the user is not attached to it, it is not counted, killed
+  or detached, and its client's size does not constrain A's window.
+  Only a name tmux reports verbatim, with an all-digit remainder after
+  `<base>~`, is a grouped session (review-loop 9d4c i4).
 
 ### R6 — Quitting a TUI never detaches anyone else
 
@@ -370,6 +679,28 @@ pane unless stated otherwise.
   a single quote still gets pm's mobile-aware switch (not the plain
   `select-pane` fallback), and a backtick in it runs nothing (QA S23,
   commit 87b2d1d1).
+- **GIVEN** a client attached through a view named with a leading or
+  trailing space, **WHEN** the user presses the pane-switch prefix keys,
+  runs `pm tui view`/`pm tui send` with no `--session`, opens a
+  plan-step review (its background pane opens beside the TUI), or opens
+  the prefix+M popup from a repo directory whose name ends with a space,
+  **THEN** each resolves the pm session it is grouped with and acts on
+  it: the mobile-aware switch runs, the TUI is driven, the review pane
+  opens, and the popup starts in the real repo directory — none of them
+  silently no-ops on a trimmed name (review-loop 9d4c i3/i4).
+- **GIVEN** a repo directory whose path contains a single quote, with a
+  pm project and no PRs (the guide's setup mode), **WHEN** the user runs
+  `pm guide` from inside the project's pm session, **THEN** the guide
+  starts in that pane (the fake or real Claude runs with the setup
+  prompt) and the guide session is recorded; there is no bash parse
+  error and no traceback (review-loop 1346 i1: the root was
+  interpolated in literal quotes).
+- **GIVEN** the same quoted path, **WHEN** the user runs `pm cluster
+  explore --bridged` from inside a pm session, **THEN** it prints
+  `Bridge socket: <path>`, the socket file appears, and the bridge pane
+  stays alive running the bridge with the repo as its cwd — it does not
+  die on a shell parse error (review-loop 1346 i1: `--cwd` was
+  interpolated in literal quotes).
 - **GIVEN** a pm project whose directory name contains a space, a quote,
   a backtick or a `$` (so the agent's working directory — the repo, its
   workdir clone under `~/.pm/workdirs/`, or the meta workdir — does too),
@@ -435,6 +766,14 @@ pane unless stated otherwise.
   inside another project, **THEN** it refuses with the same message as
   `pm session --print-connect --dir` and kills nothing — in particular
   not the cwd's session (review-loop b48f i1).
+- **GIVEN** a non-git project directory with its private session running
+  under the fallback name (`pm-<dir>-00000000`), **WHEN** the user runs
+  `pm session kill --global` (or `--group`) from inside that session or
+  from a plain shell there, **THEN** it reports no session and kills
+  nothing — in particular not the private session, its panes, clients or
+  socket; a plain `pm session kill` still kills it (review-loop 9d4c i4:
+  the fallback name ignored the share mode, so the shared name equalled
+  the private one).
 - **GIVEN** a stale socket file left behind by a dead server,
   **WHEN** the user runs `pm session kill`, **THEN** it reports no session
   and removes the stale file; a later `pm session` starts a fresh server
@@ -484,7 +823,21 @@ pane unless stated otherwise.
 - **GIVEN** a shared session and a private session are both running,
   **WHEN** the user lists sessions, **THEN** exactly the shared row
   carries the shared marker.
-- **GIVEN** a shared session, **WHEN** its owner runs a plain `pm session`
+- **GIVEN** a directory that is not a git repository, **WHEN** the user
+  runs `pm session --global`/`--group` there, **THEN** it refuses with
+  "Cannot determine session tag (not in a git repo?)" and creates no
+  server or socket; the private fallback session that directory may
+  have is not a shared target (review-loop 9d4c i4).
+- **GIVEN** that same non-git directory and a plain shell (not inside any
+  pm session), **WHEN** the user asks for the
+  connect command with the share flag (`pm session --global --print-connect`),
+  **THEN** it refuses the same way and prints no
+  attach command: the share-mode-hashed fallback name it would otherwise
+  advertise can never exist, because `pm session --global` refuses to
+  create it.  A plain `pm session --print-connect` (no share flag) still
+  prints the private fallback session's socket-addressed command (QA
+  planning 2026-11-03; the printed command must name a session
+  `pm session` would actually use).- **GIVEN** a shared session, **WHEN** its owner runs a plain `pm session`
   (no `--global`/`--group` flag) from a shell pane *inside* that session
   (the ambient session is adopted, and its recorded share mode is read
   from the session environment), **THEN** the reattach creates/uses a
@@ -497,6 +850,22 @@ pane unless stated otherwise.
   session to adopt, so it starts the directory's *private* session (a twin
   beside the shared one) rather than guessing the shared tag; re-joining
   needs the flag (see R9's join bullet and the README).
+- **GIVEN** a shared session owned by another user, which the joining
+  user has already attached to once with
+  `pm session --global --dir <the owner's project>` (so the joiner's own
+  `HOME` now has that session's pane registry),
+  **WHEN** the joiner runs a plain `pm session` (no `--global`/`--group`)
+  from a shell pane *inside* the shared session,
+  **THEN** it reattaches to the same shared session on the owner's
+  socket: no "Refusing to use tmux socket … owned by uid N, not you",
+  no second server, no second TUI, and the owner's client is not moved.
+  A grouped session it creates gets the shared `smallest` window size
+  (read from the session environment).  A plain invocation drops
+  `PM_SHARE_MODE` (`_set_share_mode_env`), so the private-socket
+  ownership check must exempt the server this process is already
+  attached to (R12; review-loop 43f6 i1, commit b36d5173).  The same
+  joiner from a *plain shell* outside tmux still starts their own
+  private twin on its own socket, as the previous bullet says.
 - **GIVEN** a shared session whose owner is attached through a grouped
   session (`~1`) and opens a shell pane *in that grouped session* (its
   *session* environment is empty — tmux copies no session environment
@@ -556,11 +925,18 @@ pane unless stated otherwise.
   default-server entry disappears from `pm session list`, while the
   private session and its server are untouched.
 - **GIVEN** a legacy session that disappears while `pm session` is
-  starting in its project (another terminal killed it between the lookup
-  and the create), **WHEN** the start completes, **THEN** the session is
-  created on the project's *private* socket — never as a second session on
-  the default server — and the rollout note is not printed for the session
-  that vanished (review-loop 8d4e i1).
+  starting in its project — another terminal killed it between the rollout
+  lookup and the first re-check, or later, after that re-check said "still
+  running", while the start waited on the TUI-respawn lock or ran its TUI
+  check, **WHEN** the start completes, **THEN** the session is created on
+  the project's *private* socket — never as a second session on the
+  default server, which the next `pm session` would keep treating as
+  legacy — and the rollout note is not printed for the session that
+  vanished.  The note is printed only inside the attach branch, after the
+  session is confirmed still there, so it never describes a session that
+  is not being attached (review-loop 8d4e i1; the TUI-check window and
+  the note placement in 60a8 i2).  A start whose legacy session survives
+  still attaches it and prints the note exactly once.
 - **GIVEN** `$TMUX_TMPDIR` set to a path that does not exist, or to a
   relative path that does not resolve to a directory, so tmux itself
   keeps its default server at `/tmp/tmux-<uid>/default`, **WHEN** the
@@ -601,6 +977,51 @@ pane unless stated otherwise.
   **WHEN** pm commands run inside it,
   **THEN** they are not redirected to any pm socket and that session is
   left alone.
+- **GIVEN** a pm session A running on its private server, and a plain
+  (non-pm) session the user creates beside it on that same server (a
+  scratch shell session),
+  **WHEN** the user splits a pane in the scratch session, closes one,
+  and resizes its client,
+  **THEN** nothing of pm's runs there: no pane registry file is created
+  for it, no layout is rebalanced, no `pm _tui` pane (or pm guide, or
+  Claude) is started, and A's panes, layout and registry are unchanged;
+  the close and resize print no traceback.  The same holds when a stale
+  registry file from an older pm still lists panes in the scratch
+  session — the resize hook ignores it too (QA S58, commit fc99e992;
+  review-loop 9d4c i1).  A pane split, close and resize in A still
+  register and rebalance.
+- **GIVEN** a session whose windows include one named with a leading or
+  trailing space and one with an empty name (tmux accepts both),
+  **WHEN** the user attaches, resizes, or opens/closes a pane (a
+  rebalance runs),
+  **THEN** those windows are included: their panes are laid out to the
+  session's shared size like every other window, and a name-based lookup
+  still finds them; no window is dropped or treated as unnamed because
+  its name was trimmed (review-loop 1346 i1).
+- **GIVEN** a QA run in a session whose repo directory name contains a
+  space,
+  **WHEN** the run creates its status pane (the dashboard beside the
+  planner),
+  **THEN** the pane shows the dashboard — scenario rows and status — and
+  not the `qa_status` usage line (review-loop 9d4c i2: the command's
+  arguments were not quoted).  When the dashboard is opened from a
+  client attached through a view named with an edge space, its Enter
+  switch moves that client to the pm session's window, not to a name
+  that does not exist (review-loop 9d4c i3).
+- **GIVEN** a pm session whose tmux server was started from a shell
+  inside another tmux session (a harness, or any ambient tmux), so the
+  server's environment carries that tmux's `$TMUX`/`$TMUX_PANE` — a pane
+  id that does not exist on the pm server, and `$TMUX_PANE` may be empty
+  for a `run-shell` hook,
+  **WHEN** the user kills a pane of the pm session (the
+  `after-kill-pane` hook fires),
+  **THEN** the hook handles the session it fired in: a killed TUI is
+  respawned in that session (in the window the registry listed it in,
+  else `main`), never reported as "no registry for " with an empty
+  session name, and nothing is respawned in the ambient session.  The
+  installed hook passes `#{q:session_name}` to `pm _pane-closed` and
+  falls back to `$TMUX_PANE` only when the name is empty (QA S54, commit
+  bb80cd1a).
 - **GIVEN** a running TUI (its pane is the session's lifeline: if the
   TUI exits, the window and possibly the session and server go with it),
   **WHEN** the user submits a command-bar line with an unbalanced quote —
@@ -687,6 +1108,17 @@ pane unless stated otherwise.
   **WHEN** the user runs `pm session` for that session,
   **THEN** it refuses with a message naming the socket and its owner, and
   creates no server.
+- **GIVEN** the session the command runs inside is attached to another
+  user's shared socket (a joiner), **WHEN** that user runs a plain
+  `pm session` from a pane of it, **THEN** the ownership check is
+  skipped for that server only, and the start reattaches (R9).  The same
+  user from a plain shell (not attached), or a pane of a *different*
+  session, still refuses another user's socket at the target's path.
+  The exemption is "the server this process is already attached to",
+  never "any socket that answers": a planted server under a project's
+  deterministic name is still refused when the command is not running on
+  it, and a legacy default-server socket never equals the deterministic
+  path, so it is never exempt (review-loop 43f6 i1/i2).
 - **GIVEN** a *real* socket at a private session's path owned by another
   user (a planted server — a real socket is not a symlink, so the entry
   check passes, and tmux < 3.3 has no `server-access` ACL, so a 0777
@@ -787,6 +1219,20 @@ them.
 - Repo directory names tmux rewrites in a session name (`.`, `:`, `#`,
   `\`, `$` + letter), including a leftover default-server session that an
   older pm half-started for such a name.
+- Repo directory names containing a Unicode line separator (`U+0085`,
+  `U+2028`, `U+2029`), which tmux keeps but `str.splitlines()` splits on
+  (two such projects side by side; the name with `_` everywhere the tag is
+  used), and a legacy session or user view created before this change
+  with one (not renamed; still unparsable — residual).
+- A killed TUI whose registry entry was already reconciled away by
+  another rebalance (the attach's background rebalance ~0.6 s after
+  Enter, the `window-resized` hook, a pane's EXIT trap) when the
+  `after-kill-pane` hook runs — repeated several times; also with the
+  respawn lock stuck or unusable, where the hook leaves the respawn to
+  the next `pm session`.
+- A TUI that lived in a non-`main` window and whose registry entry is
+  gone: both the attach and the hook must put it back in the same window
+  (the listed one, else `main`, else the first).
 - A socket directory pm can write but not read (`1733`, owned by another
   user).
 - `pm meta` run in a shared session and in its private twin at the same
@@ -804,6 +1250,73 @@ them.
   whose pane is dead under `remain-on-exit`.
 - `pm session list` on an unreadable socket directory, run from inside a
   pm pane whose cwd is a PR workdir clone or outside any repo.
+- The same, from a joiner's pane of another user's shared session, a
+  legacy session's pane, a non-pm tmux session's pane, the prefix+M
+  command prompt, a shell with only `$TMUX` (no `PM_TMUX_SOCKET`), and a
+  plain shell that still exports the `PM_TMUX_SOCKET` of a session that
+  has since been killed.
+- A TUI found only by its start command (registry lost) after each of
+  pm's start paths — fresh, shared, respawn split, respawn into a new
+  window, `after-kill-pane` respawn, Ctrl+R, legacy — in sessions whose
+  names contain quotes, `$`, `~`, multi-byte characters or `_tui`, or
+  that use a hashed socket.
+- Two legacy sessions on the default server, one with a crashed TUI
+  and a lost registry: recovery and `pm tui` discovery never pick the
+  other legacy session's TUI.
+- A legacy session killed while `pm session` is starting it, at each
+  point of the start: between the rollout lookup and the first re-check,
+  and after that re-check while the start holds or waits for the
+  TUI-respawn lock (a stuck holder widens that window).  The replacement
+  must land on the private socket, the rollout note must not print for
+  the vanished session, and two terminals starting the same legacy
+  project at once must converge on one private session (R10, review-loop
+  8d4e i1 / 60a8 i2).
+- An `after-kill-pane` TUI respawn racing a `pm session` attach — in a
+  private session, and in a shared session where the joiner's attach is
+  not serialised with the owner's hook.
+- A TUI pane killed from a shell in another project, in `/tmp`, in a
+  subdirectory or PR workdir clone, or from a user's view created
+  elsewhere; a killed TUI that was the last pane of its window; a repo
+  path with a space, a quote, `$`, multi-byte characters or `#(cmd)`.
+- The TUI-respawn lock held by a stuck process (one wait, not one per
+  window) or impossible to take (no wait at all); several pane closes in
+  different pm windows from different clients at the same moment,
+  with and without a stuck holder.
+- A `pm session` attach that respawns the TUI while other clients of
+  the same session (another terminal's `~N`, a user's own view, a shared
+  session's owner) are working in other windows; two such attaches at
+  once; a reused unattached `~N`; `--disconnect-others`.  Only the
+  attaching client is moved to the TUI window.
+- A TUI that was alone in its window killed from a plain shell (no
+  client typed it) while two clients look at different windows
+  (ambiguity 16).
+- A plain (non-pm) session created on a pm session's private server:
+  split, close and resize there must leave it untouched (no registry, no
+  rebalance, no TUI), including with a stale registry from an older pm,
+  while the pm session's own hooks still work — and with both firing at
+  once (QA S58, review-loop 9d4c i1).
+- A user's own view named with a leading or trailing space (and one
+  named like a grouped session, ` pm-x~1`): quit, pane switch, TUI
+  driving, `pm session list`, `--disconnect-others`, plan-step review and
+  dashboard Enter from it.
+- A repo directory ending with a space (the popup's start directory,
+  session name) and a repo path containing a single quote (`pm guide`,
+  `pm cluster explore --bridged`).
+- Windows named with leading/trailing spaces or with an empty name: a
+  rebalance and a name lookup must include them.
+- A space-named repo's `pm-home` window and QA status dashboard.
+- A non-git project directory: the private fallback session, the
+  `--global` refusal, and `pm session kill --global` not killing the
+  private session (review-loop 9d4c i4); the same project run from a
+  deep subdirectory, under both the modern (`pm/project.yaml`) and
+  legacy standalone (root-level `project.yaml`) layouts, and a target
+  repo's own `pm/project.yaml` beside an outer root-level
+  `project.yaml` (QA S62, review-loop 3d42 i1).
+- Two or more projects whose session names exercise `pm session list`'s
+  column sizing and group-suffix parsing: a short CJK name (readable
+  socket), a name long enough in *bytes* to hash the socket, and two
+  names containing `~` beside a genuine grouped `~1` (review-loop 43f6
+  i2, b48f i11/i21).
 
 ## Pass / fail criteria
 
@@ -839,13 +1352,16 @@ Resolved by judgement (no **[UNRESOLVED]** items):
    hardening, not part of this change; tests assert the failure modes
    (ownership refusal, symlink skipping, sticky-bit refusal) that make the
    shared directory safe.
-3. **A joining user's session is not re-adopted by a plain `pm session`**
-   — the documented, fail-safe trade-off (the joiner has no local pane
-   registry, so pm starts a separate private session rather than risk
-   touching the shared one). The joining path is exercised through the
-   documented forms: repeating `--global`/`--group`, or `--dir`. A plain
-   `pm session` from a joined session's directory starting a separate
-   private session is *expected* behaviour, not a failure.
+3. **A joining user's plain `pm session`** — from a *plain shell*
+   outside tmux, the joiner starts their own private session (a twin on
+   its own socket): there is no ambient session to adopt, and that is
+   the fail-safe trade-off, not a failure.  From a shell pane *inside*
+   the shared session, the ambient session is adopted; once the joiner
+   has attached with `--global --dir` their own `HOME` has that
+   session's registry, so a plain `pm session` reattaches to it and must
+   not be refused (review-loop 43f6 i1).  The joining path is exercised
+   through the documented forms: repeating `--global`/`--group`, or
+   `--dir`.
 4. **Which client detaches when two clients share one session** — the
    most recently active client viewing the TUI's window. The test asserts
    that exactly one detaches and the other stays, not which one.
@@ -892,3 +1408,198 @@ Resolved by judgement (no **[UNRESOLVED]** items):
    through the pane's own socket.  Resolved by judgement from R3's
    same-set rule: not listing the session the command runs in is a
    failure, even with the "cannot read" warning printed.
+13. **"TUI pane missing — respawning..." during a killed-TUI race** —
+   added by the 2026-11-02 fourth planning pass, from the QA S42 note.
+   After 698cbb97, an attach that takes the respawn lock before the hook
+   finds the TUI gone, prints the line and starts the only TUI; the hook
+   then sees it running and leaves the session alone (6 of 10 rounds in
+   S42).  Resolved by judgement: the line is truthful (the TUI was gone
+   when the attach looked), so it is allowed.  The requirement is one
+   TUI, listed once, with no second TUI even briefly.
+14. **A shared-session joiner's attach racing the owner's TUI-respawn
+   hook** — added by the 2026-11-02 fourth planning pass, from review
+   ad65 i1.  The lock is in each user's own `~/.pm`, and a lock both
+   users can take would need a world-writable file in `/tmp/pm-sessions`,
+   so the race is left to the TUI pidfile guard.  Resolved by judgement:
+   a second TUI that appears for a moment and exits on the pidfile guard
+   is the documented trade-off, reported but not failed by itself.
+   Lasting damage fails: two running TUIs, a non-TUI process started in
+   the session, a traceback on a user's terminal, or registries that
+   stay inconsistent after the next reconcile.
+15. **How long a held TUI-respawn lock may block a pane close** — added
+   by the 2026-11-02 fourth planning pass.  `tui_respawn_lock` gives up
+   after 10 s and goes ahead.  But the `after-kill-pane` hook takes it
+   once per registered window, in a synchronous `run-shell`, so the
+   client that closed the pane may stop responding for 10 s times the
+   number of the session's pm windows.  Resolved by judgement: the
+   documented bound is one wait per event.  A pane close that blocks
+   for one wait per window fails, and the scenario reports the measured
+   delay with one and with several windows.  Confirmed live by QA S47
+   on c326fb31 (a review-pane close froze its client 30.20 s and a TUI
+   kill 30.34 s with main + two review windows) and fixed in b89aa9a4:
+   the hook takes the lock once around the whole reconcile and respawn
+   pass and lays the windows out after releasing it (post-fix ~10.2 s,
+   one "still held" line; an unusable lock logs one "cannot lock" line
+   per event).  Several pane closes from different clients at the same
+   moment are separate events: each waits on its own, so a stuck holder
+   still freezes each closing client for one wait, not one per window
+   or one per queued event.
+16. **Which client the hook's new-window fallback switches when no
+   client typed the kill** — added by the 2026-11-02 fifth planning
+   pass, from QA S45 and commit f162a71c.  That commit stopped a
+   `pm session` attach from switching another client to a respawned TUI
+   window, but left the `after-kill-pane` hook's new-window fallback
+   alone: it still selects through `current_or_base_session`.  When a
+   client typed the kill (C-b x, a `tmux kill-pane` in a pane), that is
+   the killing client (QA S46, S48).  When nothing typed it (a
+   `tmux kill-pane` from a plain shell, a script), there is no killing
+   client: the hook's `run-shell` has no `$TMUX_PANE`, so the session it
+   resolves is whatever tmux reports for an unattached command (its best
+   or most recently active session), which may be the grouped session of
+   a client working in another window.  Resolved by
+   judgement: a client whose window vanished with the TUI may be shown
+   the new TUI window, but a client that was working in a *different*
+   window must not be moved off it: its next keystrokes would land in
+   the TUI, where single letters start PR actions.  A move of such a
+   client is a finding; report which client moved and whether master
+   does the same (the hook path is pre-existing).
+17. **A killed TUI whose registry entry another reconcile removed, under
+   a stuck or unusable respawn lock** — added by the 2026-11-02 sixth
+   planning pass, from the QA S50 fix 664df245.  Under the lock the
+   `after-kill-pane` hook starts a TUI when the registry lists none and no
+   `pm _tui` pane runs, so a reconcile the hook did not do cannot leave
+   the session without a TUI.  But it does so only when it really holds
+   the lock: when the lock is stuck (10 s wait) or cannot be taken at all
+   and the hook goes ahead anyway, it leaves the unlisted-TUI respawn
+   alone, because two hooks past the same stuck holder would both start
+   one.  Resolved by judgement: in that state the session may sit without
+   a TUI until the next `pm session` attach, which starts exactly one.
+   A scenario reports that outcome; the attach recovering it is what must
+   pass.  A hook that starts a second TUI beside a live one fails.
+18. **A legacy session or user view whose name contains a Unicode line
+   separator** — added by the 2026-11-02 sixth planning pass, from
+   review-loop 1237 i2 (commit 9037574f).  New sessions replace
+   `U+0085`/`U+2028`/`U+2029` with `_` because pm parses tmux listings
+   line by line, but a session or view created *before* this change keeps
+   the character: tmux stores it, pm reads it back as two records, and it
+   is not renamed (renaming a running session would break the user's
+   attachments and its grouped sessions).  Resolved by judgement: such a
+   pre-existing name staying unparsable is a documented residual, not a
+   failure of this PR; a *new* session whose name still contains one is a
+   failure.
+19. **Where a respawned TUI goes when the record of its window is gone** —
+   added by the 2026-11-02 sixth planning pass, from the QA S50 fix and
+   review-loop 1237 i1.  The shared rule is "the window the registry (or
+   the hook's snapshot) listed it in, else `main`, else the first
+   window".  When another reconcile removed the entry before the hook
+   read the registry, the hook's snapshot does not list it either, so a
+   TUI that had lived in a review window comes back in `main`.
+   Resolved by judgement: accepted — there is no record of where it was,
+   and `main` is the deliberate default (never the active window, which
+   may be a QA or work window).  The attach and the hook must agree, and
+   neither may use the active window.
+20. **The private-socket ownership check and the server a process is
+   already on** — added 2026-11-02 from review-loop 43f6 i1/i2.  A plain
+   `pm session` inside a shared session drops `PM_SHARE_MODE`, so
+   `is_shared` is false while the socket belongs to the sharing user.
+   Resolved by judgement: the ownership check and its probe are skipped
+   only for the socket this process is attached to
+   (`_attached_to_session_socket`), exactly as `kill`/`mobile` already
+   do; every other implicit target — a plain shell, a pane of a different
+   session, a legacy session on the default server — still requires
+   ownership.  Both sides are asserted, so the exemption cannot widen
+   into "adopt any socket that answers".
+21. **Column alignment in `pm session list`** — added 2026-11-02 from
+   review-loop 43f6 i2.  `tmux_safe_name` keeps valid non-ASCII text, so
+   the SESSION column must be measured in terminal cells
+   (`paths.display_width`), not code points.  Resolved by judgement: a
+   CJK-named project's row must line its CLIENTS/SOCKET columns up with
+   the header and every other row; padding by `len()` shifts them right
+   and fails.
+22. **Non-pm sessions on a pm server and the global hooks** — added
+   2026-11-03 from QA S58 (commit fc99e992) and review-loop 9d4c i1.
+   The pane hooks are global on the session's server, so they also fire
+   for a plain session a user creates beside the pm one.  Resolved by
+   judgement: every handler resolves the hook's session through its tmux
+   group and ignores it unless the resolved name is a pm one — no
+   registry, no rebalance, no respawned TUI — including when a stale
+   registry from an older pm (exactly the file the S58 bug left) still
+   lists panes there.  A user's own grouped view of a pm session still
+   resolves to the base and is handled.  An unresolved (empty) session
+   keeps logging `no registry for ` as before; a failure is a pm TUI
+   started in the scratch session, a registry created for it, or a
+   rebalance of it.
+23. **Edge spaces in view and window names** — added 2026-11-03 from
+   review-loop 9d4c i2/i3/i4 and 1346 i1.  tmux stores a session name
+   and a window name as given, so a user's own view may be named
+   ` lead view` / `trail view ` and a window may be named with edge
+   spaces or with no name at all.  Resolved by judgement: every readback
+   keeps such a name verbatim (`rstrip("\n")` on a single-line query,
+   `splitlines()` with no `strip()` on a listing), and a view named
+   ` pm-x~1` is a view, not a grouped session — only a verbatim name
+   with an all-digit remainder after `<base>~` is a grouped session.  A
+   repo directory ending with a space is a real path and is used
+   verbatim for the popup's start directory.
+24. **The remaining command builders are in scope** — added 2026-11-03
+   from review-loop 1346 i1 and 9d4c i2.  The `pm-home` PR-list command,
+   the QA status dashboard command, `pm guide`'s setup command and the
+   `pm cluster explore --bridged` bridge command each interpolate a
+   session name or a repo path into a shell command.  Resolved by
+   judgement: they are part of this PR's "a name or path is data" class
+   (1346 i1 item 3 records `guide.py` as incidental but fixed), and a
+   user hitting one in an awkward-named project must get the normal
+   surface — the PR list, the dashboard, the guide, a live bridge — not
+   a usage line or a shell parse error.
+25. **A non-git project directory's fallback name and the share mode** —
+   added 2026-11-03 from review-loop 9d4c i4.  A pm project directory
+   that is not a git repository gets the fallback session name
+   `pm-<dir>-00000000`; with a share mode set the fallback now ends in a
+   hash of the mode.  Resolved by judgement: the private session must
+   not be reachable as a shared target, so `pm session kill --global` in
+   that directory reports no session and kills nothing, and
+   `pm session --global` refuses (a shared session needs a git tag).  A
+   plain `pm session`/`pm session kill` still works there.
+   `pm session --global --print-connect` refuses too rather than
+   advertising the share-mode-hashed fallback name, which can never
+   exist (QA planning pass 8, 2026-11-03; the code's own stated contract
+   is that a printed command names a session `pm session` would use).
+26. **Which directory anchors a non-git project's fallback name** —
+   added 2026-11-03 from QA S62 (commit 50cbdef7) and review-loop 3d42
+   i1.  With no git root to hash, the name is taken from the project
+   directory found by walking up from the cwd: the nearest ancestor with
+   `pm/project.yaml`; only when there is none, the nearest with a
+   root-level `project.yaml` (pm's legacy standalone layout, which
+   `store.find_project_root` still accepts); only when neither exists,
+   the cwd itself.  Resolved by judgement: every session-keyed command
+   (`pm session`, `name`, `--print-connect`, `list`, `kill`, `mobile`,
+   TUI discovery) must agree on that anchored name, so running any of
+   them from a subdirectory reaches the project's session instead of
+   starting or targeting a second one.  Any ancestor with
+   `pm/project.yaml` outranks every root-level `project.yaml`, so a
+   target repo's own `pm/` subdirectory is never mistaken for an outer
+   standalone project.
+
+## Known pre-existing issues (not failures of this PR)
+
+These were found during QA and review on this branch, filed as separate
+bug PRs, and are deliberately out of scope here.  A scenario that meets
+one records it and continues; it does not fail the scenario.
+
+- **pr-50e6077** — a repo directory name near the 255-byte `NAME_MAX`
+  makes the tag push `~/.pm/pane-registry/<base>.json`, the pidfile, the
+  command queue and `~/.pm/sessions/<tag>/` past `NAME_MAX`, so
+  `pm session` dies with an uncaught `OSError` before creating anything.
+  Pre-existing on master; this PR hashes only the *socket* path.  Use a
+  moderately long name (tens of characters), not a ~240-character one,
+  when exercising the hashed-socket rule.
+- **pr-939ea27** — a TUI killed from outside tmux (no client typed the
+  kill) may have the `after-kill-pane` respawn switch a client that was
+  working in another window (ambiguity 16; the hook path is pre-existing).
+- **pr-48f359f** — after `C-b &` closes the TUI's window, the respawn's
+  new-window fallback picks the first surviving window rather than a new
+  one or the remembered TUI window.  Pre-existing; the choice needs a
+  design decision.
+- **pr-07541e7** — `pm session` prints a raw `TmuxCommandError` traceback
+  when its attached client's terminal goes away during the attach.
+- **pr-3121cc8** — the `after-kill-pane` hook's respawn log lines are
+  written to the wrong place under some conditions.
