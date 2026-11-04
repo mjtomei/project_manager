@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-03T22:54:31.774593+00:00'
+  updated_at: '2026-11-04T01:08:21.619620+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9385,6 +9385,28 @@ prs:
       (README + per-story manifests, casts and mp4s).'
     created_at: '2026-11-03T22:54:31Z'
     last_edited: '2026-11-03T22:54:31Z'
+  - id: note-fd3241f
+    text: 'Master integration (2026-11-04, origin/master c3bac6ce): merged #296 (380
+      commits, merge base eaf3372e) into the branch. Registry resolved with store.merge_3way
+      (master as ours, branch as theirs) and reordered to master''s record order:
+      632 PRs / 22 plans, no id lost, all branch and master notes kept; the twenty
+      base-only planning/review notes are committed first (5c08c406). Code: master''s
+      #284 isolated qa regression supersedes the live-pane runner (the branch''s session-name
+      quoting kept in qa launch and pane_ops); prompt_gen keeps the quoted discovery
+      target plus master''s pane_start_command; qa_loop_ui combines master''s qa_status
+      re-read with the branch''s foreign-live-session skip; _find_tui_pane gains master''s
+      -C/PM_PROJECT branch inside the server-scoped structure and _project_sessions
+      is server-aware (find_session_server + list_pm_sessions, no "~" filter); two
+      semantic conflicts git auto-merged were fixed: the fuzzy pr/plan select dispatch
+      now runs before the branch''s shlex parse guard (the merge had broken `pr select
+      user''s`), and PM_TMUX_SOCKET is scrubbed from a host-mode regression run (it
+      names the user''s live session''s server under per-session servers) with the
+      prompt explaining per-session sockets. Tests adapted: project-override fixture,
+      regression prompt/launch, three obsolete live-pane qa_regression tests removed.
+      Full suite 6154 passed / 1 skipped. Every earlier QA/review PASS predates this
+      merge and is stale; the PR needs a fresh review/QA/sign-off sequence.'
+    created_at: '2026-11-04T01:08:21Z'
+    last_edited: '2026-11-04T01:08:21Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
