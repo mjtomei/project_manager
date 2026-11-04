@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-04T18:49:20.065556+00:00'
+  updated_at: '2026-11-04T20:00:02.800996+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9692,6 +9692,29 @@ prs:
       no new warning vs origin/master (the four in cli/session.py are master''s).'
     created_at: '2026-11-04T18:49:19Z'
     last_edited: '2026-11-04T18:49:19Z'
+  - id: note-5cab398
+    text: 'QA S87 (R8/R12 destructive stale-socket rule) PASS 4/4 stories on head
+      1e1e4885. (1) SIGKILLed server leaves a stale socket; `pm session kill` prints
+      "No session ''pm-proj-850a5779'' found." (rc 1, no traceback) and removes only
+      that stale socket; pm session list empty; a later pty pm session binds the same
+      path and attaches on ~1. (2) Five rounds of a simultaneous kill x start (two
+      ptys, fresh stale socket planted each round): the kill lost the lookup every
+      round (No session found, rc 1); the start kept one base + ~1, socket present,
+      one tmux client attached, pm session list one row, no traceback. Kill-wins probe
+      (start lead ~0.8 s, 3 rounds): kill printed "Killed session", killed the whole
+      group (base and ~1 both gone, socket removed) — noted, not the stale-socket
+      path. A follow-up pty pm session made grouped ~2 rather than ~1 because ~1 was
+      already attached; still one base, never a second server. (3) Stand-in tmux intercepting
+      only the `-S SOCK list-sessions` liveness probe: removed the stale entry and
+      planted REPLACEMENT-PLANTED inside the probe window; pm kept it (inode differs)
+      and logged "socket ... was rebound while probing — keeping it"; real-server
+      variant kept the new live server. (4) Planted symlink survived (target never
+      created) and a nobody-owned live socket survived untouched (same uid, same server
+      pid 7846). Captures /pm-captures/scenarios/87 (story1..4, cast+mp4+manifest).
+      Filed pr-e9bd0d3 for a pre-existing traceback in the attached terminal when
+      the server is SIGKILLed mid-attach (attach code identical on origin/master).'
+    created_at: '2026-11-04T20:00:02Z'
+    last_edited: '2026-11-04T20:00:02Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
@@ -62010,6 +62033,33 @@ prs:
   gh_pr_number: null
   created_at: '2026-11-02T21:34:11.414748+00:00'
   updated_at: '2026-11-02T21:34:11.414748+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e9bd0d3
+  plan: bugs
+  title: 'Bug: SIGKILLing a pm session''s tmux server leaves a Python traceback in
+    the attached terminal'
+  branch: pm/pr-e9bd0d3-bug-sigkilling-a-pm-session-s-tmux-server-leaves-a
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/session.py (the attach path, tmux_mod.attach(...))
+    / pm_core/tmux.py attach(). Repro: in a real terminal run ''pm session'' so a
+    client attaches, then from another shell SIGKILL the server (''kill -9 $(tmux
+    -S /tmp/pm-sessions/<session> list-sessions -F "#{pid}" | head -1)''). The attached
+    ''pm session'' exits with a full Python traceback: pm_core.tmux.TmuxCommandError:
+    Command [''tmux'',''-S'',...,''attach-session'',''-t'',...] returned non-zero
+    exit status 1. A graceful ''pm session kill'' detaches cleanly (no traceback),
+    so only an abrupt server death (crash/OOM/manual SIGKILL) surfaces the stack trace.
+    Expected: a concise message such as ''tmux session ended'' and a non-zero exit,
+    no traceback. Found during QA scenario 87 on pr-073910f; the attach code is identical
+    on origin/master, so this predates the per-session-server PR.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-11-04T19:58:52.136036+00:00'
+  updated_at: '2026-11-04T19:58:52.136036+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
