@@ -1010,20 +1010,38 @@ class TestFindTuiPaneProjectOverride:
         planted one, so the lookup would find nothing at all).
         """
         self._share_mode_session(env, monkeypatch)
+        planted = "/tmp/pm-sessions/pm-mproj-2222"
+        probes = []
 
         def find(name, owned_only=False):
+            # ``owned_only`` is ``find_session_server``'s contract for an
+            # implicit lookup: a socket another user owns is not probed.
+            probes.append((name, owned_only))
             if name == "pm-mproj-2222":
-                return "/tmp/pm-sessions/pm-mproj-2222", True
+                return (None, False) if owned_only else (planted, True)
             if name in self.SESSIONS:
                 return f"/tmp/pm-sessions/{name}", True
             return None, False
 
         monkeypatch.setattr(env.helpers.tmux_mod, "find_session_server", find)
+        # The planted server is also visible to the cross-server scan; the
+        # fallback's ownership rule must drop its row.
+        monkeypatch.setattr(
+            env.helpers.tmux_mod, "list_pm_sessions",
+            lambda **kw: [
+                {"name": s, "socket": f"/tmp/pm-sessions/{s}",
+                 "attached": 0, "shared": False}
+                for s in (*self.SESSIONS, "pm-mproj-2222")])
         monkeypatch.setattr(
             env.helpers, "_server_owned_by_us",
             lambda sock: sock is None or "mproj-2222" not in str(sock))
         assert list(env.helpers._project_sessions(
             env.root / "mproj" / "pm")) == ["pm-mproj-5555"]
+        # The implicit tag lookup asked for an owned socket, like every
+        # other implicit caller (review-loop b48f i20): the planted server
+        # is never probed at all.
+        assert [owned for name, owned in probes if name == "pm-mproj-2222"] \
+            == [True]
 
     def test_reload_signals_the_registry_sessions_tui(self, env,
                                                       monkeypatch):

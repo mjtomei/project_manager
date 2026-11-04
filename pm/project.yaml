@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-04T01:08:21.619620+00:00'
+  updated_at: '2026-11-04T02:48:16.197096+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9407,6 +9407,22 @@ prs:
       merge and is stale; the PR needs a fresh review/QA/sign-off sequence.'
     created_at: '2026-11-04T01:08:21Z'
     last_edited: '2026-11-04T01:08:21Z'
+  - id: note-eb4063f
+    text: 'Review loop 879b i2 (no requirement changes; full suite 6156 passed / 1
+      skipped, 443 s, log /pm-captures/review-879b-i2/full-suite-final.log; the 24
+      PR-affected test files pass twice in one HOME, 1541 each). Verification pass
+      over the i1 head: both fixes hold (the planted-tag test fails on the pre-i1
+      head; pr select user''s still reaches the fuzzy handler). One gap of the b48f
+      i20 class in the i1 fix — _project_sessions'' tag branch called find_session_server
+      without owned_only and applied the ownership rule afterwards, so an implicit
+      lookup probed a planted socket at the plain tag and lost the default server''s
+      answer for a legacy session of that name. It now passes owned_only=_private_session_context()
+      (the planted socket is never probed, the default server is still checked); the
+      planted-socket test models that contract, adds the planted server to the cross-server
+      scan and asserts the tag lookup asked for an owned socket. Nothing else found
+      in the merge resolutions.'
+    created_at: '2026-11-04T02:48:16Z'
+    last_edited: '2026-11-04T02:48:16Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

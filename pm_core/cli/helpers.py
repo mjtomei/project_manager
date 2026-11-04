@@ -1587,16 +1587,19 @@ def _project_sessions(pm_root: Path):
     without it a planted server at the plain tag is yielded and the
     generator returns before the fallback that finds the project's real
     share-mode session (the caller rejects the planted name, so nothing
-    is found at all).
+    is found at all).  The lookup is implicit (the name is derived from
+    the project), so it passes ``find_session_server``'s *owned_only* like
+    every other implicit caller: the planted socket is never even probed,
+    and the default server is still checked — a legacy pre-isolation
+    session of that name is this user's.
     """
     from pm_core.paths import get_session_tag, sessions_dir
     tag = get_session_tag(start_path=pm_root)
     if tag:
         session = f"pm-{tag}"
-        hosting, _on_private = tmux_mod.find_session_server(session)
-        if hosting is not None and (
-                not _private_session_context()
-                or _server_owned_by_us(hosting)):
+        hosting, _on_private = tmux_mod.find_session_server(
+            session, owned_only=_private_session_context())
+        if hosting is not None:
             yield session
             return
     want = Path(pm_root).resolve()

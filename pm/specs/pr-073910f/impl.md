@@ -4904,3 +4904,47 @@ and `test_a_planted_plain_tag_socket_does_not_hide_the_fallback` fails
 before fix 1 and passes after.
 
 Validation: full suite 6156 passed / 1 skipped (438.1 s).
+
+## Review iteration (2026-11-04, review-loop 879b i2)
+
+Verification pass over the head after the 879b i1 fixes (`dfb5f630`);
+no requirement changes.  Both i1 fixes hold: the planted plain-tag
+socket no longer hides the share-mode fallback (the test fails on the
+pre-i1 head, yielding `pm-mproj-2222`), and the duplicate command parse
+is gone (`pr select user's` still reaches the fuzzy handler).  A sweep
+of the merge's other conflict resolutions (regression prompts, `qa
+launch`, the discovery prompt, the QA-resume foreign-session skip,
+`pane_ops`, `pr_view`) found nothing further.
+
+One gap of the class review-loop b48f i20 closed, in the i1 fix itself:
+
+3. **`_project_sessions`' tag branch still probed a planted socket.**
+   i1 applied the ownership rule *after* `find_session_server` answered,
+   so this implicit (project-derived) lookup connected to a server
+   another user planted at the plain tag and only then rejected it — the
+   one implicit caller left without the *owned_only* contract every
+   other implicit lookup passes.  The post-hoc check also dropped the
+   default server's answer: with a planted socket hosting `pm-<tag>`, a
+   legacy pre-isolation session of that name (this user's own) was no
+   longer yielded by the tag branch, only by the fallback scan, which
+   needs the persisted `pm_root`.  The tag branch now calls
+   `find_session_server(session, owned_only=_private_session_context())`:
+   the planted socket is never probed, the default server is still
+   checked, and the post-hoc ownership check is gone.  A shared/joiner
+   context keeps the default, as everywhere else (joining a shared
+   session is the documented flow).
+
+   Test: `test_a_planted_plain_tag_socket_does_not_hide_the_fallback`
+   now models `find_session_server`'s contract (a private lookup returns
+   `(None, False)` for a foreign socket), adds the planted server to the
+   cross-server scan so the fallback's own ownership rule is exercised,
+   and asserts the tag lookup asked for an owned socket.  It fails on
+   the i1 head (the probe recorded `owned_only=False`) and on the
+   pre-i1 head (the planted name was yielded).
+
+Validation: the 24 PR-affected test files pass twice in one HOME (1541
+each); full suite 6156 passed / 1 skipped, 443 s (log
+`/pm-captures/review-879b-i2/full-suite-final.log`; an earlier run in
+that directory failed the twelve `test_markdown_render` tests because
+this container lacks the optional `markdown` package — with it installed
+they pass).
