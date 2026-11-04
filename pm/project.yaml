@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-04T22:09:19.113897+00:00'
+  updated_at: '2026-11-04T23:07:48.688838+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9748,6 +9748,17 @@ prs:
       session recreation.'
     created_at: '2026-11-04T22:09:19Z'
     last_edited: '2026-11-04T22:09:19Z'
+  - id: note-80b0b58
+    text: 'QA S91 incidental fix (7b34e296): concurrent `pm pr note add` on the merged
+      registry (~4 MB, 1768 notes) lost a note — the second writer hit the 2 s project.yaml
+      lock timeout ("Could not acquire lock ... within 2.0s") because one read-modify-write
+      takes ~1.7 s and the TUI active_pr persist also contends. Foreground CLI mutations
+      now go through store.locked_update_cli and wait up to CLI_LOCK_TIMEOUT_SECONDS
+      (10 s); the TUI keeps NO_WAIT on the poll timer, the WriteQueue bound, and the
+      S111 pr qa run-bg default-then-retry. Full suite on the fix: 6195 passed / 1
+      skipped.'
+    created_at: '2026-11-04T23:07:48Z'
+    last_edited: '2026-11-04T23:07:48Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
