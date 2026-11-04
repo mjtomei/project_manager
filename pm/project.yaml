@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-04T02:48:16.197096+00:00'
+  updated_at: '2026-11-04T04:08:38.185099+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9423,6 +9423,28 @@ prs:
       in the merge resolutions.'
     created_at: '2026-11-04T02:48:16Z'
     last_edited: '2026-11-04T02:48:16Z'
+  - id: note-e41e360
+    text: 'QA S75 (regression-run isolation vs live per-session servers) PASS 5/5
+      on a030d1df, no source changes. (1) In-session run from a raw window: banner
+      exact (Target master commit 7a1ee374e2d9; Runs in: host; Captures /home/pm/.pm/sessions/pm-test-1793764696-a2fb12c9/captures/regression/capture-smoke/20261104T035935Z-4d0d),
+      clone+scratch under ~/.pm/workdirs/qa/regression-capture-smoke-<run-id>/s-0/,
+      prompt.md has no /tmp/pm-sessions path and no user-project path (only the tag
+      inside the captures path); registry byte-identical, tui %0 1689 / guide %2 1763
+      unchanged. (2) Scrubbed shell in the clone: tmux ls -> default server (no such
+      file), --print-connect -> pm-repo-91aba4b6, tag repo-91aba4b6; exporting the
+      live pane TMUX/TMUX_PANE flips it to the live socket. (3) --session ignored
+      with the stderr note, second distinct run-id. (4) Project pm-test-odd dir''s
+      (tag pm-test-odd dir''s-c083d2c1): banner, prompt.md and captures path keep
+      the space+quote; --print-connect emits one shell word tmux -S ''/tmp/pm-sessions/pm-pm-test-odd
+      dir''"''"''s-c083d2c1'' attach which fails only with "open terminal failed:
+      not a terminal". (5) Two simultaneous runs: ids 20261104T040337Z-c116 / -f120,
+      two workdirs, per-clone sockets pm-repo-6d249630 / pm-repo-090b90f4, no Traceback,
+      registry+pids unchanged. Captures /pm-captures/scenarios/75 (README + story1-5
+      + tui-untouched, each manifest + mp4). Fixture note: tmux 3.2a new-window -c
+      needs the dir passed as a real argument (an empty/unset var silently starts
+      in $HOME).'
+    created_at: '2026-11-04T04:08:38Z'
+    last_edited: '2026-11-04T04:08:38Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
