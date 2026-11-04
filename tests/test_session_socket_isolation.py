@@ -16,6 +16,7 @@ import os
 import shlex
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -3534,6 +3535,65 @@ class TestSessionKillServerSelection:
         assert result.exit_code == 0, result.output
         assert killed
         assert not sock.exists()
+
+    def test_a_socket_rebound_during_the_probe_is_kept(self, monkeypatch,
+                                                       tmp_path):
+        """A start racing this kill rebinds the path; the new socket stays.
+
+        The stale-socket rule decides "no server answers" from a probe and
+        then unlinks by path.  tmux unlinks a stale socket and binds a new
+        one at the same path, so a ``pm session`` that created this
+        session between the probe and the unlink leaves a different inode
+        there.  Removing it would strand the session the concurrent start
+        just made: its clients cannot connect by path, and the next
+        ``pm session`` binds a second server beside the running one.  The
+        entry is compared with itself across the probe (the same rule the
+        ``$TMUX`` fallbacks follow: address what was checked, not what
+        happens to be at the path).
+        """
+        from pm_core.cli import session as session_mod
+
+        stale = os.stat_result(
+            (stat.S_IFREG | 0o600, 101, 7, 1, os.getuid(), 0, 0, 0, 0, 0))
+        rebound = os.stat_result(
+            (stat.S_IFREG | 0o600, 202, 7, 1, os.getuid(), 0, 0, 0, 0, 0))
+        stats = iter([stale, stale, rebound])
+        monkeypatch.setattr(paths, "shared_socket_dir_is_usable",
+                            lambda: True)
+        monkeypatch.setattr(Path, "lstat", lambda self: next(stats))
+        unlinked: list[str] = []
+        monkeypatch.setattr(Path, "unlink",
+                            lambda self, missing_ok=False:
+                            unlinked.append(str(self)))
+        monkeypatch.setattr(session_mod.tmux_mod, "server_alive",
+                            lambda p: False)
+
+        session_mod._remove_stale_socket(str(tmp_path / "pm-repo-abc"))
+
+        assert unlinked == []
+
+    def test_the_same_dead_socket_is_still_removed(self, monkeypatch,
+                                                   tmp_path):
+        """The inode guard must not keep an ordinary stale socket."""
+        from pm_core.cli import session as session_mod
+
+        dead = os.stat_result(
+            (stat.S_IFREG | 0o600, 101, 7, 1, os.getuid(), 0, 0, 0, 0, 0))
+        stats = iter([dead, dead, dead])
+        monkeypatch.setattr(paths, "shared_socket_dir_is_usable",
+                            lambda: True)
+        monkeypatch.setattr(Path, "lstat", lambda self: next(stats))
+        unlinked: list[str] = []
+        monkeypatch.setattr(Path, "unlink",
+                            lambda self, missing_ok=False:
+                            unlinked.append(str(self)))
+        monkeypatch.setattr(session_mod.tmux_mod, "server_alive",
+                            lambda p: False)
+
+        sock = str(tmp_path / "pm-repo-abc")
+        session_mod._remove_stale_socket(sock)
+
+        assert unlinked == [sock]
 
     def test_legacy_session_kills_on_explicit_default_socket(
             self, monkeypatch, tmp_path):

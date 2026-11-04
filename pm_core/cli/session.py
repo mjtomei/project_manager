@@ -592,13 +592,38 @@ def _remove_stale_socket(socket_path: str) -> None:
     symlink, another user's socket), so nothing is probed or deleted
     through a path pm does not trust.  Both ``pm session kill`` branches
     (session not found, session killed) apply this one rule.
+
+    The entry is compared with itself across the liveness probe: tmux
+    unlinks a stale socket and binds a new one at the same path, so a
+    ``pm session`` that starts this session while the command probes (a
+    kill racing a start, which the concurrent-start rule treats as
+    normal) leaves a *different* inode at the path.  Unlinking by path
+    then would remove the new server's socket: its clients could no
+    longer connect, and the next ``pm session`` would bind a second
+    server beside the one still running.  A changed entry is therefore
+    left alone; only the same file the probe found dead is removed.
     """
-    if (_removable_private_socket(socket_path)
-            and not tmux_mod.server_alive(socket_path)):
-        try:
-            Path(socket_path).unlink(missing_ok=True)
-        except OSError:
-            pass
+    if not _removable_private_socket(socket_path):
+        return
+    try:
+        before = Path(socket_path).lstat()
+    except OSError:
+        return
+    if tmux_mod.server_alive(socket_path):
+        return
+    try:
+        after = Path(socket_path).lstat()
+    except OSError:
+        # The entry vanished while the probe ran: nothing left to remove.
+        return
+    if (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino):
+        _log.info("session kill: socket %s was rebound while probing — "
+                  "keeping it", socket_path)
+        return
+    try:
+        Path(socket_path).unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _pick_existing_session(candidates: list[str]) -> str:

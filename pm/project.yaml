@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-04T17:33:35.639386+00:00'
+  updated_at: '2026-11-04T18:28:12.750242+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9639,6 +9639,36 @@ prs:
       vs origin/master.'
     created_at: '2026-11-04T17:32:49Z'
     last_edited: '2026-11-04T17:33:35Z'
+  - id: note-7ef7eb0
+    text: 'Review loop 4c94 i4 (no requirement changes; full suite on the final head
+      6193 passed / 1 skipped, 433.5 s, log /pm-captures/review-4c94-i4/full-suite-final.log
+      — i3''s 6191 plus the two new tests; an earlier run on the pre-fix head was
+      6179 passed / 1 skipped / 12 failed, the 12 being test_markdown_render with
+      this container missing the markdown package — installed afterwards, so 6179
+      + 12 = 6191; the 26 changed test files pass, 1716, and test_session_socket_isolation
+      twice in one HOME, 309 each). Verification pass over the head after 4c94 i3
+      (3dafb96d): the i1-i3 stale-pane-id fixes hold, and a fourth pass over that
+      area found no further gap (worker window rule everywhere it acts, dead id kept
+      for the retry path, verifier pane must run the verifier session). One fix elsewhere:
+      pm session kill could unlink a socket a concurrent pm session had just bound
+      — the stale-socket rule probed server_alive() and then unlinked by path, while
+      tmux unlinks a stale socket and binds a new inode, so a start in that window
+      lost its socket (attach failed; the next start made a second server beside the
+      running one). _remove_stale_socket now compares st_dev/st_ino across the probe
+      and keeps a changed entry; the window shrinks from the whole list-sessions subprocess
+      to the gap between two lstat calls. Test test_a_socket_rebound_during_the_probe_is_kept
+      fails on the pre-fix head (the unlink is recorded); control test_the_same_dead_socket_is_still_removed.
+      A live smoke on a disposable socket confirmed a running server''s socket is
+      kept and a dead one''s file removed. Considered and not changed: ensure_socket_dir
+      accepting a non-owned 1777 directory (deliberate, d1c0 i12 — every user but
+      the creator hits a failed chmod and a second user must still create/join there;
+      the directory owner can unlink our sockets, which is the per-uid-directory hardening
+      residual in the spec''s ambiguity 2); _scenario_worker_pane_alive not testing
+      pane_dead (pm never sets remain-on-exit; the TUI/dashboard helpers do check
+      it); the verifier helper''s no-session-id branch covered by pane_runs_transcript
+      tests. pyflakes: no new warning vs origin/master.'
+    created_at: '2026-11-04T18:18:51Z'
+    last_edited: '2026-11-04T18:28:12Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

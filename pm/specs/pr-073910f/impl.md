@@ -5436,3 +5436,67 @@ package is installed here) plus the four new tests.  A docstring-only
 edit made after that run was followed by re-running the three QA-loop
 files (305 passed).  pyflakes reports no new warning versus
 `origin/master`.
+
+## Review iteration (2026-11-04, review-loop 4c94 i4)
+
+Fourth pass over the head after 4c94 i3 (`3dafb96d`).  No requirement
+changes.  The i1-i3 fixes hold, and a fresh pass over the stale-pane-id
+area found no further gap: the worker id is checked with the
+window-ownership rule on every path that acts on it (retry, PASS
+follow-up, waiting scan, the pane a verifier is split from), a dead id
+stays recorded so the retry path relaunches instead of taking the
+window's first pane, and the verifier id additionally requires its pane
+to run the verifier's session.  One gap found elsewhere, in a
+destructive path, and fixed:
+
+**`pm session kill` could unlink a socket a concurrent start had just
+bound.**  The stale-socket rule decides "no server answers" from
+`server_alive()` and then unlinks by path; tmux unlinks a stale socket
+and binds a new one at the same path, so a `pm session` that created the
+session between the probe and the unlink left a different inode there.
+The unlink then removed the new server's socket: its clients could no
+longer connect by path, the attach that had just succeeded failed, and
+the next `pm session` bound a second server beside the still-running one
+(whose panes were then unreachable).  `_remove_stale_socket` now
+compares the entry with itself across the probe (`st_dev`/`st_ino`) and
+removes only the file the probe found dead; a changed entry is kept.  The
+window shrinks from the whole `list-sessions` subprocess to the gap
+between two `lstat` calls (Linux has no unlink-if-inode).  Test:
+`test_a_socket_rebound_during_the_probe_is_kept` (fails on the pre-fix
+head: the unlink is recorded), plus the control
+`test_the_same_dead_socket_is_still_removed`.
+
+Considered and not changed:
+
+1. `ensure_socket_dir()` accepts a 1777 socket directory owned by another
+   user, whose owner can unlink our sockets even with the sticky bit.
+   Deliberate (d1c0 i12, `test_tolerates_a_sticky_dir_it_does_not_own`):
+   on a shared machine every user but the directory's creator hits a
+   failed `chmod`, and a second user must still be able to create a
+   session (and join a shared one) there.  The directory owner's unlink
+   power is the residual the spec's ambiguity 2 records — a per-uid
+   socket directory is the hardening option, not implemented here.  The
+   code refuses what it can distinguish (a symlink at the path, a
+   non-sticky or non-writable mode, a socket another user owns).
+2. `_scenario_worker_pane_alive` does not test `pane_dead`: a dead pane
+   kept by a user's `remain-on-exit` counts as alive.  pm never sets that
+   option, the existence rule predates the stale-id work, and
+   `_find_running_tui_pane`/`_qa_status_pane_live` apply the stricter rule
+   where a dead pane matters (the TUI and dashboard).
+3. The verifier helper's "pane start command shows no session id" branch
+   is covered by `pane_runs_transcript`'s own test rather than a second
+   test at the helper level.
+
+Validation: the 26 files changed under `tests/` pass (1716; the two new
+tests included); `test_session_socket_isolation.py` passes twice in one
+HOME (309 each).  Full suite on the final head 6193 passed / 1 skipped,
+433.5 s (log `/pm-captures/review-4c94-i4/full-suite-final.log`) — i3's
+6191 plus the two new tests.  An earlier run on the pre-fix head was 6179
+passed / 1 skipped / 12 failed, 444.9 s (log
+`/pm-captures/review-4c94-i4/full-suite.log`); all 12 failures were
+`tests/test_markdown_render.py` with this container's `markdown` package
+missing (installed afterwards, the file passes, 13), i.e. 6179 + 12 =
+6191.  A live smoke on a disposable socket confirmed the stale-socket
+rule still keeps a running server's socket and removes a dead one's file.
+pyflakes reports no new warning versus `origin/master` (the four in
+`cli/session.py` are master's).
