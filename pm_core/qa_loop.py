@@ -3748,6 +3748,34 @@ def _ensure_scenario_container(
                  scenario.index, cname)
 
 
+def _scenario_worker_pane_alive(session: str, scenario: QAScenario,
+                                pane_id: str | None) -> bool:
+    """True when *pane_id* is a live pane of this scenario's own window.
+
+    A recorded worker id outlives the session that owned it: a restarted
+    tmux server hands the same ids out again from ``%0``, so a stale id can
+    name an unrelated new pane — in practice the QA window's status
+    dashboard, which a resume splits before it checks the scenarios.
+    Existence alone therefore cannot prove the worker survived; the pane
+    must still live in the window this scenario owns.
+    """
+    from pm_core import tmux as tmux_mod
+    if not pane_id or not tmux_mod.pane_exists(pane_id):
+        return False
+    if not scenario.window_name:
+        # No window to attribute it to; keep the historical meaning of a
+        # recorded id (exists == alive).
+        return True
+    win = tmux_mod.find_window_by_name(session, scenario.window_name)
+    if win:
+        return tmux_mod.pane_window_id(pane_id) == win["id"]
+    # The scenario's window is gone.  The id still existing means the
+    # server handed it to some other window — but if tmux cannot even
+    # name the pane's window (no server reachable), fall back to the
+    # historical meaning rather than calling a live worker dead.
+    return tmux_mod.pane_window_id(pane_id) is None
+
+
 def _relaunch_scenario_window(
     scenario: QAScenario,
     state: QALoopState,
@@ -4654,7 +4682,8 @@ def _poll_tmux_verdicts(
                     pane_id = scenario.pane_id
                     if pane_id is None:
                         pane_id = _get_scenario_pane(session, scenario.window_name)
-                    elif not tmux_mod.pane_exists(pane_id):
+                    elif not _scenario_worker_pane_alive(
+                            session, scenario, pane_id):
                         pane_id = None
                     followup_sent = False
                     if pane_id:
@@ -4750,12 +4779,18 @@ def _poll_tmux_verdicts(
                 _launch_next_queued()
                 continue
 
-            pane_id = scenario.pane_id or _get_scenario_pane(session, scenario.window_name)
-            if pane_id and not tmux_mod.pane_exists(pane_id):
-                # Keep the dead id: clearing it would make the next tick
-                # fall back to the window's first pane, which in host mode
-                # is the still-live refiner, and take that for the worker.
-                pane_id = None
+            pane_id = scenario.pane_id
+            if pane_id:
+                if not _scenario_worker_pane_alive(session, scenario, pane_id):
+                    # Keep the dead id: clearing it would make the next
+                    # tick fall back to the window's first pane, which in
+                    # host mode is the still-live refiner, and take that
+                    # for the worker.  A restarted server reuses ids, so
+                    # the recorded id may name a new pane of another
+                    # window; that is not this scenario's worker either.
+                    pane_id = None
+            else:
+                pane_id = _get_scenario_pane(session, scenario.window_name)
             if pane_id is None:
                 if state.stop_requested:
                     # A stop (e.g. ``z t`` fresh start) killed the window

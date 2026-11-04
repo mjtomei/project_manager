@@ -2186,6 +2186,108 @@ class TestScenarioRetryLogic:
         assert _SCENARIO_MAX_RETRIES == 10
 
 
+class TestScenarioWorkerPaneOwnership:
+    """A recorded worker pane id must still belong to the scenario's window.
+
+    A restarted tmux server hands the same pane ids out again from ``%0``,
+    so after a session restart a stale worker id can name an unrelated new
+    pane — in practice the QA window's status dashboard, which the resume
+    splits before it checks the scenarios.  Existence alone must not count
+    as the worker surviving (QA S81: with two runs resumed in one pass,
+    one run's ``qa-<pr>-s1`` window was never relaunched because its
+    recorded id now named that run's dashboard).
+    """
+
+    def _scenario(self, window="qa-pr-001-s1"):
+        sc = QAScenario(index=1, title="T", focus="t")
+        sc.window_name = window
+        return sc
+
+    def test_same_window_counts_as_alive(self):
+        from pm_core.qa_loop import _scenario_worker_pane_alive
+        sc = self._scenario()
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.find_window_by_name",
+                   return_value={"id": "@9", "index": "1",
+                                 "name": "qa-pr-001-s1"}), \
+             patch("pm_core.tmux.pane_window_id", return_value="@9"):
+            assert _scenario_worker_pane_alive("sess", sc, "%4") is True
+
+    def test_pane_of_another_window_is_not_the_worker(self):
+        from pm_core.qa_loop import _scenario_worker_pane_alive
+        sc = self._scenario()
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.find_window_by_name",
+                   return_value={"id": "@9", "index": "1",
+                                 "name": "qa-pr-001-s1"}), \
+             patch("pm_core.tmux.pane_window_id", return_value="@2"):
+            assert _scenario_worker_pane_alive("sess", sc, "%4") is False
+
+    def test_vanished_scenario_window_with_reused_id_is_not_alive(self):
+        """The S81 collision: the window is gone, the id names the
+        recreated dashboard of another window."""
+        from pm_core.qa_loop import _scenario_worker_pane_alive
+        sc = self._scenario()
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.find_window_by_name", return_value=None), \
+             patch("pm_core.tmux.pane_window_id", return_value="@2"):
+            assert _scenario_worker_pane_alive("sess", sc, "%4") is False
+
+    def test_unresolvable_pane_window_keeps_historical_meaning(self):
+        """No tmux server to name the pane's window: an existing pane still
+        counts as alive, as it did before the ownership check."""
+        from pm_core.qa_loop import _scenario_worker_pane_alive
+        sc = self._scenario()
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.find_window_by_name", return_value=None), \
+             patch("pm_core.tmux.pane_window_id", return_value=None):
+            assert _scenario_worker_pane_alive("sess", sc, "%4") is True
+
+    def test_missing_pane_is_not_alive(self):
+        from pm_core.qa_loop import _scenario_worker_pane_alive
+        sc = self._scenario()
+        with patch("pm_core.tmux.pane_exists", return_value=False):
+            assert _scenario_worker_pane_alive("sess", sc, "%4") is False
+
+    def test_no_window_name_falls_back_to_existence(self):
+        from pm_core.qa_loop import _scenario_worker_pane_alive
+        sc = self._scenario(window="")
+        with patch("pm_core.tmux.pane_exists", return_value=True):
+            assert _scenario_worker_pane_alive("sess", sc, "%4") is True
+
+    def test_colliding_pane_id_triggers_relaunch(self, tmp_path):
+        """The retry path must relaunch a scenario whose recorded pane id
+        survived only as a new pane of another window."""
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        class Relaunched(Exception):
+            pass
+
+        scenario = self._scenario()
+        scenario.pane_id = "%4"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.find_window_by_name", return_value=None), \
+             patch("pm_core.tmux.pane_window_id", return_value="@2"), \
+             patch("pm_core.qa_loop._relaunch_scenario_window",
+                   side_effect=Relaunched) as mock_relaunch, \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", return_value=1000), \
+             patch("pm_core.qa_loop._is_verification_enabled",
+                   return_value=False), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             pytest.raises(Relaunched):
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work",
+                tmp_path / "status.json", lambda *a: None,
+            )
+
+        assert mock_relaunch.call_count == 1
+
+
 class TestPollVerdictsAfterLoopWakeup:
     """pr-8efa789: a /loop wakeup postscript must not hide the verdict."""
 
