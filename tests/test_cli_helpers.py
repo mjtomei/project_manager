@@ -980,6 +980,51 @@ class TestFindTuiPaneProjectOverride:
         # No session persisted that project: falls through to the cwd.
         assert env.helpers._find_tui_pane() == ("%3333", "pm-ztest-3333")
 
+    def test_share_mode_lookup_finds_a_tag_containing_a_tilde(
+            self, env, monkeypatch):
+        """Only a numeric ``~N`` is a grouped suffix (b48f i11).
+
+        A tag is derived from the repo directory name, which may contain
+        ``~``.  The fallback scan must not drop such a session — the
+        merge dropped the old ``"~" in sess`` filter for exactly this
+        case, and without a test the filter can come back with a
+        conflict pick.
+        """
+        self._share_mode_session(env, monkeypatch)
+        sd = env.root / "home" / ".pm" / "sessions"
+        (sd / "mproj-5555").rename(sd / "my~repo-5555")
+        monkeypatch.setattr(self, "SESSIONS", tuple(
+            s.replace("mproj-5555", "my~repo-5555") for s in self.SESSIONS))
+        monkeypatch.chdir(env.root / "ztest")
+        monkeypatch.setattr(env.helpers, "_project_override",
+                            env.root / "mproj" / "pm")
+        assert env.helpers._find_tui_pane() == ("%5555", "pm-my~repo-5555")
+
+    def test_a_planted_plain_tag_socket_does_not_hide_the_fallback(
+            self, env, monkeypatch):
+        """A socket another user planted at the plain tag is never adopted.
+
+        The tag branch must not *return* on it either: yielding the
+        planted name and stopping would skip the fallback scan that finds
+        the project's real share-mode session (the caller rejects the
+        planted one, so the lookup would find nothing at all).
+        """
+        self._share_mode_session(env, monkeypatch)
+
+        def find(name, owned_only=False):
+            if name == "pm-mproj-2222":
+                return "/tmp/pm-sessions/pm-mproj-2222", True
+            if name in self.SESSIONS:
+                return f"/tmp/pm-sessions/{name}", True
+            return None, False
+
+        monkeypatch.setattr(env.helpers.tmux_mod, "find_session_server", find)
+        monkeypatch.setattr(
+            env.helpers, "_server_owned_by_us",
+            lambda sock: sock is None or "mproj-2222" not in str(sock))
+        assert list(env.helpers._project_sessions(
+            env.root / "mproj" / "pm")) == ["pm-mproj-5555"]
+
     def test_reload_signals_the_registry_sessions_tui(self, env,
                                                       monkeypatch):
         monkeypatch.chdir(env.root / "clone")

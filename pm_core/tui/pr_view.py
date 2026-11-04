@@ -679,7 +679,7 @@ def handle_command_submitted(app, cmd: str) -> None:
             app._inflight_pr_action = action_key
             break
 
-    parts = shlex.split(cmd)
+    # ``parts`` was parsed above, before the guard; ``cmd`` has not changed.
 
     # Handle review loop commands
     # Accepts: review-loop [start] [PR_ID]

@@ -1580,12 +1580,23 @@ def _project_sessions(pm_root: Path):
     project's session runs on its private socket.  The tag session is
     resolved through :func:`tmux.find_session_server`; the fallback scans
     the sessions of every pm server (``list_pm_sessions``).
+
+    Both branches apply the same ownership rule: in a private context a
+    socket another user planted under the deterministic name is not the
+    project's session.  The tag branch needs it as much as the fallback —
+    without it a planted server at the plain tag is yielded and the
+    generator returns before the fallback that finds the project's real
+    share-mode session (the caller rejects the planted name, so nothing
+    is found at all).
     """
     from pm_core.paths import get_session_tag, sessions_dir
     tag = get_session_tag(start_path=pm_root)
     if tag:
         session = f"pm-{tag}"
-        if tmux_mod.find_session_server(session)[0] is not None:
+        hosting, _on_private = tmux_mod.find_session_server(session)
+        if hosting is not None and (
+                not _private_session_context()
+                or _server_owned_by_us(hosting)):
             yield session
             return
     want = Path(pm_root).resolve()

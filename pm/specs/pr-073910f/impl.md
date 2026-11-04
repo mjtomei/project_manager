@@ -4874,3 +4874,33 @@ Validation on the merged head:
 
 Every earlier QA PASS result (S69-S74 and before) predates this merge and
 is **stale**; this PR needs a fresh review/QA/sign-off sequence.
+
+## Review iteration (2026-11-04, review-loop 879b i1)
+
+First review pass over the master-integrated head (`25724555`).  Two
+merge-introduced issues, no requirement changes:
+
+1. **A planted socket at the plain tag hid the share-mode fallback.**
+   `cli.helpers._project_sessions` yielded the tag session whenever
+   `find_session_server` answered and then returned.  The caller
+   (`_find_tui_pane`'s project-override branch) rejects a socket this user
+   does not own in a private context, so a server another user planted at
+   `/tmp/pm-sessions/pm-<plain tag>` made the lookup yield that name,
+   stop, and never reach the `list_pm_sessions` fallback that finds the
+   project's real `--global`/`--group` session (whose tag mixes in
+   `PM_SHARE_MODE`, which a host-mode regression run does not compute).
+   The tag branch now applies the same ownership rule as the fallback;
+   a shared/joiner context stays exempt, as before.
+2. **Dead duplicate parse.**  `tui/pr_view.handle_command_submitted`
+   parsed the command a second time after the in-flight guard.  The merge
+   kept both the branch's early parse (the one that stops an unbalanced
+   quote from escaping and exiting the TUI) and master's later one; the
+   later assignment was removed, since `cmd` is unchanged between them.
+
+Tests (`tests/test_cli_helpers.py`):
+`test_share_mode_lookup_finds_a_tag_containing_a_tilde` pins the merge's
+removal of the old `"~" in sess` filter (it fails if the filter returns)
+and `test_a_planted_plain_tag_socket_does_not_hide_the_fallback` fails
+before fix 1 and passes after.
+
+Validation: full suite 6156 passed / 1 skipped (438.1 s).
