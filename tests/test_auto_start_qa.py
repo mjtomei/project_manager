@@ -34,8 +34,11 @@ def _make_app(tmp_path, *, prs=None, auto_start=True, target=None):
     app._root = pm_dir
     app._data = data
     app._auto_start = auto_start
-    app._auto_start_targets = {target: {}} if target else {}
-    app._auto_start_all = not target
+    # Explicit targets only (there is no all-PR mode).  Without an explicit
+    # target the fixture makes every listed PR a target, which is what the
+    # "starts all" tests now mean.
+    app._auto_start_targets = ({target: {}} if target
+                               else {p["id"]: {} for p in prs if p.get("id")})
     app._auto_start_run_id = None
     app._qa_loops = {}
     app._review_loops = {}
@@ -157,8 +160,8 @@ class TestAutoStartQATargetScoping:
         started_ids = {c.args[1] for c in mock_start.call_args_list}
         assert started_ids == {"pr-001", "pr-002"}
 
-    def test_without_target_starts_all_qa_prs(self, tmp_path):
-        """Without a target, all qa-status PRs are started."""
+    def test_all_prs_as_explicit_targets_start(self, tmp_path):
+        """Every explicitly targeted qa-status PR is started (no all-mode)."""
         from pm_core.tui.auto_start import _auto_start_qa_loops
 
         prs = [

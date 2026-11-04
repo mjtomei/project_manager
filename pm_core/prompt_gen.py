@@ -620,6 +620,13 @@ Review the code changes in this PR for quality, correctness, and architectural f
 _QA_SCENARIOS_PATH = "`$CAP/scenarios/<n>/verdict.md`"
 _QA_SCENARIOS_READER = f"{_QA_SCENARIOS_PATH} for all verdicts"
 
+# Fallback when the PR's newest qa_status.json cannot be used: missing,
+# unreadable, or valid JSON that is not an object (a hand-edited/corrupt
+# file).  Same wording for every cause so the sign-off session always gets
+# the same instruction.
+_QA_STATUS_UNREADABLE = (
+    "\n_qa_status.json unreadable — read the captures dir directly._\n")
+
 
 def _qa_scenarios_pointer() -> str:
     """Where a session reads the QA verdicts an abbreviated listing left out.
@@ -671,8 +678,13 @@ def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
     try:
         data = json.loads(latest.read_text())
     except (OSError, ValueError):
-        return ("\n_qa_status.json unreadable — read the captures dir directly._\n",
-                "")
+        return (_QA_STATUS_UNREADABLE, "")
+    # The file is written as an object by ``qa_loop._write_status_file``, but
+    # a hand-edited/corrupt one can hold any valid JSON; a non-object would
+    # raise AttributeError on ``.get()`` and abort the whole sign-off prompt.
+    # Same fallback as an unreadable file.
+    if not isinstance(data, dict):
+        return (_QA_STATUS_UNREADABLE, "")
     head_lines = [f"Overall QA verdict: **{data.get('overall') or '?'}**"]
     if data.get("error"):
         # Normalise whitespace but keep every character.  The error is
@@ -1323,7 +1335,7 @@ def _auto_cleanup_addendum() -> str:
 Auto-cleanup is enabled. After finishing your main work:
 - Check for old or dead tmux panes that are no longer needed
 - Suggest the user press `b` in the TUI to rebalance panes after closing panes
-- Remind them they can run `pm pr cleanup <pr-id>` to remove merged PR workdirs
+- Remind them they can run `pm pr cleanup <pr-id>` to remove merged or closed PR workdirs
 """
 
 
@@ -1436,7 +1448,12 @@ def generate_watcher_prompt(data: dict, session_name: str | None = None,
             where bugs.md and improvements.md live.
         auto_start_targets: The PRs auto-start is targeting. When set,
             the monitor should only intervene on PRs in the union of their
-            transitive dependency fan-ins.
+            transitive dependency fan-ins. An explicitly empty list (what
+            ``AutoStartWatcher`` passes when it owns no targets) is
+            fail-closed: the prompt forbids acting on any PR (observation
+            only) and says that restriction overrides the generic
+            fix-what-you-can sections. Omitting the argument keeps the
+            legacy unscoped prompt.
         auto_start_target: Legacy single-target alias for
             ``auto_start_targets``.
     """
@@ -1458,11 +1475,16 @@ def generate_watcher_prompt(data: dict, session_name: str | None = None,
     except FileNotFoundError:
         pass
 
-    # Compute auto-start scope (union of the targets' dependency fan-ins)
+    # Compute auto-start scope (union of the targets' dependency fan-ins).
+    # An explicitly provided but empty target set is fail-closed: the
+    # watcher may observe, but must not act on any PR.  (Omitting the
+    # argument entirely keeps the legacy unscoped prompt for callers that
+    # never had an auto-start scope.)
     auto_start_scope_block = ""
     targets = list(auto_start_targets or [])
     if auto_start_target and auto_start_target not in targets:
         targets.append(auto_start_target)
+    scope_provided = auto_start_targets is not None or auto_start_target is not None
     if targets:
         from pm_core.autostart_state import managed_ids as _managed_ids
         # Markers carry no leading space: bounded_join appends them after
@@ -1490,6 +1512,18 @@ Other PRs may have active tmux windows from manual user activity -- do NOT attem
 fix, restart, or interfere with those sessions. You may observe them for cross-session
 conflict detection (e.g. overlapping file edits), but take no corrective action on
 windows belonging to unmanaged PRs.
+"""
+    elif scope_provided:
+        auto_start_scope_block = """
+### Auto-Start Scope
+
+Auto-start has no targets: no PR is managed.
+
+**IMPORTANT**: Do not start, restart, fix, merge, or otherwise take corrective
+action on any PR or tmux window. Observation and reporting only; surface issues
+to the human instead of acting on them. This restriction overrides any general
+"fix what you can" or "take corrective actions" instruction elsewhere in this
+prompt.
 """
 
     id_label = f" [{loop_id}]" if loop_id else ""
@@ -1528,6 +1562,10 @@ mechanics will help you distinguish normal operation from genuine problems.
 - `qa` -- QA testing is running. QA scenarios execute in parallel; if they find
   issues and commit fixes, the PR returns to `in_review` for another review cycle.
 - `merged` -- PR merged to `{base_branch}`. Auto-start then checks for newly-unblocked dependents.
+- `closed` -- Retired without merging (`pm pr close` keeps the record as history).
+  Terminal like `merged`, but it never satisfies a dependency: its dependents stay
+  blocked until the PR is reopened (`pm pr edit <id> --status pending`) or dropped
+  from their `depends_on`. Do not merge it to unblock them.
 
 **How transitions work:**
 - **pending -> in_progress**: Auto-start detects all deps are merged and launches
@@ -1749,11 +1787,16 @@ re-launch a still-running test or re-file a duplicate bug.
 ### 1. Inventory regression tests
 
 ```
-ls {meta_pm_root}/qa/regression/*.md
+ls {meta_pm_root}/qa/regression/*.md 2>/dev/null
 ```
 
 Each file is a regression test definition. Cross-reference with the work log
 to see when each was last run.
+
+If the listing is empty, the regression library is empty and there is no
+test to schedule. Write `regression library empty, nothing scheduled` in this
+tick's work-log entry and skip to step 5. Never record a test as run or
+passing unless it was launched and finished.
 
 ### 2. Detect in-flight tests from prior ticks
 
@@ -1762,8 +1805,12 @@ launched from this watcher run as additional panes in that same window. List
 panes:
 
 ```
-tmux list-panes -t {discovery_target} -F "#{{pane_id}} #{{pane_current_command}}"
+tmux list-panes -t {discovery_target} -F "#{{pane_id}} #{{pane_current_command}} #{{pane_start_command}}"
 ```
+
+A regression-test pane's start command contains `qa regression <id>`, naming
+the test. Its current command may be `claude`, `bash` or the container
+runtime (`podman`/`docker`), depending on container mode.
 
 If a regression-test pane is still running, do **not** launch a new test this tick. Note the in-flight
 state in your work-log entry and reconcile after it finishes (next tick or
@@ -1785,14 +1832,37 @@ Use the headless launcher:
 pm qa launch regression:<id> --target-window discovery
 ```
 
-This spawns a Claude pane in the discovery window running the regression test.
-The test session itself files any bugs / improvements into the `bugs` / `ux`
-plans (see the regression filing addendum baked into its prompt).
+This spawns a pane in the discovery window running
+`pm qa regression <id> --file-prs`. The test runs in its own isolated QA
+workdir (a QA container when container mode is enabled) against a disposable
+test project it creates, not against this session or project. Its captures
+land under the session's `captures/regression/<id>/<run-id>/` directory.
+The test session itself files any bugs / improvements into the project's
+registry (see the regression filing addendum baked into its prompt).
+
+If the launch command exits non-zero (for example, container mode is enabled
+but the runtime is unusable), nothing ran. Record the error in the work log
+and do not count it as a run.
+
+The run can also fail after its pane opens, while it is being set up (the
+clone, or building/creating its container). The runner writes the run's
+`prompt.md` into its run dir just before the session starts; list a test's
+started runs newest first with:
+
+```
+ls -t ~/.pm/sessions/*/captures/regression/<id>/*/prompt.md 2>/dev/null
+```
+
+Run ids (the dir names) start with their UTC start time. If a test's pane has
+exited and none of these is newer than the launch, setup failed and the test
+never ran: record it as not run, never as a run with no findings, and leave
+its cadence unchanged.
 
 ### 5. Reconcile recently-filed PRs
 
 For tests that completed since the last tick (visible in the work log or by a
-pane that has since exited), inspect any new PRs in the `bugs` and `ux` plans:
+pane that has since exited after its run started, see step 4), inspect any
+new PRs in the `bugs` and `ux` plans:
 
 ```
 pm pr list --plan bugs

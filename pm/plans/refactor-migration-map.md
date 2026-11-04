@@ -1294,7 +1294,7 @@ Total files: 117.
 - **MOVES**: `pr cleanup + _cleanup_pr + _clear_workdir` → `pm_core/supervisors/pr_stream.py`
     - *pr_cleanup.py is deleted in v2; fans out to PRStreamSupervisor.teardown + ResourceLease release + WorkdirRegistry*
 - **MOVES**: `pr close` → `pm_core/supervisors/pr_stream.py`
-    - *Becomes PRStreamSupervisor.close (state transition + gh_ops + branch cleanup)*
+    - *Becomes PRStreamSupervisor.close (state transition + gh_ops). No branch or workdir cleanup: as of pr-62ad13d close retains the registry entry, the branch and the workdir — cleanup stays a separate, explicit operation*
 - **STAYS**: `pr sync / pr sync-github / pr import-github` → `pm_core/cli/pr.py`
     - *Delegates to pr_sync.py and gh_ops.py which stay*
 - **MOVES**: `pr note group (add/edit/list/delete)` → `pm_core/sensorium/artifact/notes.py`
@@ -3690,7 +3690,7 @@ Every NEW file in the proposed structure, with the existing code that contribute
 - from `pm_core/cli/pr.py` — **pr cleanup + _cleanup_pr + _clear_workdir**
     - *pr_cleanup.py is deleted in v2; fans out to PRStreamSupervisor.teardown + ResourceLease release + WorkdirRegistry*
 - from `pm_core/cli/pr.py` — **pr close**
-    - *Becomes PRStreamSupervisor.close (state transition + gh_ops + branch cleanup)*
+    - *Becomes PRStreamSupervisor.close (state transition + gh_ops). No branch or workdir cleanup: as of pr-62ad13d close retains the registry entry, the branch and the workdir — cleanup stays a separate, explicit operation*
 - from `pm_core/cli/pr.py` — **pr auto-sequence + _impl_window_pane + _review_window_pane + _signoff_window_pane + _check_review_verdict + _check_signoff_verdict + _check_impl_idle + _qa_status_for + _retire_signoff_window + _auto_seq_transcript_dir**
     - *Auto-sequencing impl->review->qa->signoff->merge is PRStreamSupervisor's job; verdict polling becomes CallbackRegistry.wait_for at pm_core/agent/callbacks.py; idle detection becomes runtime capability*
 - from `pm_core/tui/app.py` — **Stale merge-lock cleanup on startup**

@@ -260,6 +260,10 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]X[/]  Toggle merged PRs", classes="help-row")
                 yield Label("  [bold]f[/]  Cycle status filter", classes="help-row")
                 yield Label("  [bold]F[/]  Cycle sort field", classes="help-row")
+                # Textual markup: "]" is literal, "[" needs "\[" ("[[" is not an escape).
+                yield Label("  [bold]][/] / [bold]\\[[/]  Cycle fuzzy match results", classes="help-row")
+                yield Label("  [bold]/[/]pr select [dim]<query>[/]  Fuzzy-find PR", classes="help-row")
+                yield Label("  [bold]/[/]plan select [dim]<query>[/]  Fuzzy-find plan", classes="help-row")
                 yield Label("PR Actions", classes="help-section")
                 yield Label("  [bold]s[/]  Start selected PR", classes="help-row")
                 yield Label("  [bold]d[/]  Review (zz d: loop)", classes="help-row")
@@ -742,7 +746,7 @@ class AutoRunsScreen(ModalScreen):
             return None
         owner = None
         for r in rows[:idx + 1]:
-            if r["kind"] in ("target", "run"):
+            if r["kind"] == "target":
                 owner = r["pr_id"]
         return (owner, rows[idx]["pr_id"])
 
@@ -776,8 +780,6 @@ class AutoRunsScreen(ModalScreen):
         title = "Auto-start runs"
         if mode == "targets":
             title += f" — {len(st.get('targets') or [])} target(s)"
-        elif mode == "all":
-            title += " — all ready PRs (backlog mode)"
         if st.get("run_id"):
             title += f"  [dim]{st['run_id']}[/]"
         self.query_one("#runs-title", Label).update(title)

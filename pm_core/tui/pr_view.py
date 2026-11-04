@@ -46,7 +46,16 @@ def handle_pr_selected(app, pr_id: str) -> None:
     _log.debug("PR selected: %s", pr_id)
     app.log_message(f"Selected: {pr_id}")
     app.call_after_refresh(app._capture_frame, f"pr_selected:{pr_id}")
+    persist_active_pr(app, pr_id)
 
+
+def persist_active_pr(app, pr_id: str) -> None:
+    """Record *pr_id* as ``project.active_pr`` (cursor selection).
+
+    Shared by keyboard navigation and programmatic selection (fuzzy
+    ``pr select`` / ``plan select`` and match cycling) so every way of
+    moving the cursor persists it the same way.
+    """
     # Persist selection so TUI restarts on this PR.  Update in-memory state
     # immediately (source of truth for the running TUI), then enqueue the
     # disk write so rapid navigation doesn't block the event loop on a full
@@ -629,6 +638,17 @@ def handle_command_submitted(app, cmd: str) -> None:
     _log.info("command submitted: %s", cmd)
     cmd = cmd.strip()
 
+    # Fuzzy ``pr select`` / ``plan select``: handled in-process (cursor move
+    # + active_pr), parsed before the generic shlex split so a query such as
+    # ``user's`` cannot raise on an unbalanced quote.
+    from pm_core.tui import fuzzy_select_cmd
+    select_cmd = fuzzy_select_cmd.parse_select_command(cmd)
+    if select_cmd is not None:
+        kind, query = select_cmd
+        fuzzy_select_cmd.handle_select_command(app, kind, query)
+        app._focus_current_view()
+        return
+
     # Parse before the in-flight guard below is taken.  An unbalanced
     # quote ("pr note add pr-1 don't forget") raised ValueError out of this
     # message handler, which exits the TUI — and, as the window's only
@@ -658,6 +678,8 @@ def handle_command_submitted(app, cmd: str) -> None:
                 return
             app._inflight_pr_action = action_key
             break
+
+    parts = shlex.split(cmd)
 
     # Handle review loop commands
     # Accepts: review-loop [start] [PR_ID]
@@ -801,6 +823,8 @@ def handle_command_submitted(app, cmd: str) -> None:
     if len(parts) >= 3 and parts[0] == "plan" and parts[1] == "add":
         pane_ops.launch_pane(app, f"pm {cmd}", "plan-add")
         app._load_state()
+    elif len(parts) >= 2 and parts[0] == "qa" and parts[1] == "regression":
+        pane_ops.launch_regression_command(app, parts[2:])
     else:
         # Detect if this should run async (PR commands are long-running)
         working_message = None

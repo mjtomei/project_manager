@@ -12,7 +12,7 @@ Supports multiple provider types:
     answers and, in container mode, bridges it into containers.  Signing in
     and refreshing the router's credentials happen outside pm, as for
     plain claude.  See
-    pm_core/worker_route.py.
+    pm_core/router_route.py.
 
 Configuration is stored in ~/.pm/providers.yaml:
 
@@ -51,8 +51,10 @@ Provider resolution order:
   5. Falls back to "claude" (built-in, no config needed)
 """
 
+import errno
 import os
 import tempfile
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
@@ -174,7 +176,7 @@ def _configured_router_urls() -> set[str]:
     fields are broken (list_providers leaves it out) still names its
     address.
     """
-    from pm_core import worker_route
+    from pm_core import router_route
     urls = set()
     for name, entry in _provider_entries().items():
         if not isinstance(entry, dict) or entry.get("type") != "router":
@@ -184,7 +186,7 @@ def _configured_router_urls() -> set[str]:
             continue
         urls.add(base)
         try:
-            urls.add(worker_route.container_base_url(
+            urls.add(router_route.container_base_url(
                 ProviderConfig(name=str(name), type="router", api_base=base)))
         except ValueError:
             pass
@@ -274,12 +276,15 @@ class ProviderConfig:
         own credentials.  Uses ANTHROPIC_BASE_URL only.  The router-only
         fields (launcher, remedy, classifier_model, unset_env,
         probe_models) are consumed by
-        pm_core.worker_route and claude_launcher.
+        pm_core.router_route and claude_launcher.
 
     Every type may set ``effort`` (the default effort of the sessions it
     runs; a PR's own effort setting wins, see model_config) and ``env``
     (extra variables; for a router a null value drops one of its
     defaults).  ``alias_models`` is the older name for ``env``.
+    ``supported_efforts`` is optional, dated capability metadata: the
+    effort levels this provider's model accepts (see
+    model_config.accepted_efforts_of).  It is never passed to ``--effort``.
     """
     name: str
     type: str = "claude"  # "claude", "local", "openai", or "router"
@@ -296,6 +301,13 @@ class ProviderConfig:
     probe_models: list[str] = field(default_factory=list)
     # every type
     effort: str = ""
+    # Optional per-model capability metadata: the effort levels this
+    # provider's model/route accepts (see model_config.accepted_efforts_of).
+    # None means "not declared"; [] means "declares it accepts none".
+    # Provenance is kept so a dated list is shown as dated.
+    supported_efforts: list[str] | None = None
+    supported_efforts_source: str = ""
+    supported_efforts_checked_at: str = ""
     env: dict[str, str | None] = field(default_factory=dict)
 
     def _apply_env(self, env: dict[str, str]) -> dict[str, str]:
@@ -404,7 +416,9 @@ def _resolve_env_ref(value: str) -> str:
 
 
 _PROVIDER_STR_FIELDS = ("type", "api_base", "api_key", "model", "launcher",
-                        "remedy", "classifier_model", "effort")
+                        "remedy", "classifier_model", "effort",
+                        "supported_efforts_source",
+                        "supported_efforts_checked_at")
 # Keys earlier pm versions read (credential expiry checks and refresh).
 # Credentials are managed outside pm, so an entry that still has them works
 # as before; pm ignores them and 'pm provider list/show' says so.
@@ -418,7 +432,8 @@ def retired_keys(entry) -> list[str]:
     return [k for k in RETIRED_PROVIDER_KEYS if entry.get(k) is not None]
 
 
-_PROVIDER_LIST_FIELDS = ("capabilities", "unset_env", "probe_models")
+_PROVIDER_LIST_FIELDS = ("capabilities", "unset_env", "probe_models",
+                         "supported_efforts")
 
 
 def _entry_problem(entry) -> str | None:
@@ -438,6 +453,17 @@ def _entry_problem(entry) -> str | None:
                 isinstance(value, list)
                 and all(isinstance(c, str) for c in value)):
             return f"{key!r} must be a list of names"
+    efforts = entry.get("supported_efforts")
+    if efforts is not None and any(not c.strip() for c in efforts):
+        return "'supported_efforts' entries must be non-empty names"
+    checked = entry.get("supported_efforts_checked_at")
+    if checked:
+        from datetime import date
+        try:
+            date.fromisoformat(checked)
+        except ValueError:
+            return ("'supported_efforts_checked_at' must be an ISO date "
+                    "(YYYY-MM-DD)")
     aliases = entry.get("alias_models")
     if aliases is not None and not (
             isinstance(aliases, dict)
@@ -485,6 +511,12 @@ def _config_to_provider(name: str, entry: dict) -> ProviderConfig:
                    if entry.get("unset_env") is not None else None),
         probe_models=list(entry.get("probe_models") or []),
         effort=entry.get("effort") or "",
+        supported_efforts=(list(entry["supported_efforts"])
+                           if entry.get("supported_efforts") is not None
+                           else None),
+        supported_efforts_source=entry.get("supported_efforts_source") or "",
+        supported_efforts_checked_at=(
+            entry.get("supported_efforts_checked_at") or ""),
         env=dict(entry.get("env") or {}),
     )
 
@@ -550,6 +582,34 @@ class ProvidersFileError(ValueError):
     """providers.yaml cannot be changed: pm cannot read it as a mapping."""
 
 
+class ProvidersWriteError(ProvidersFileError):
+    """providers.yaml cannot be written: ``~/.pm`` is unwritable (a bad
+    permission or a full disk) or its lock file cannot be created.  The
+    message names the path and the OS reason; the CLI prints it as one
+    ``Error:`` line instead of a traceback."""
+
+
+class ProvidersLockTimeout(ProvidersFileError):
+    """Another process held the providers.yaml edit lock past the timeout.
+
+    A stuck ``pm provider`` process used to block every later edit forever;
+    the wait is now bounded so the caller can report the lock path and let
+    the user retry or stop the holder."""
+
+
+# How long an edit waits for the providers.yaml lock before giving up.
+# Edits hold it only for a re-read plus a write (connectivity checks happen
+# outside it), so this is generous; it bounds a stuck holder.
+PROVIDERS_LOCK_TIMEOUT = 5.0
+
+
+def _write_error(where: str, exc: OSError) -> ProvidersWriteError:
+    """A :class:`ProvidersWriteError` naming *where* and the OS reason."""
+    return ProvidersWriteError(
+        f"cannot write {where}: {exc.strerror or exc} (pm keeps "
+        "providers.yaml in ~/.pm; check that it is writable)")
+
+
 def load_providers_for_edit() -> dict[str, Any]:
     """providers.yaml to change and save back, its ``providers`` block a
     mapping (a blank block, e.g. every entry commented out, reads as empty).
@@ -570,20 +630,58 @@ def load_providers_for_edit() -> dict[str, Any]:
 
 
 @contextmanager
-def providers_lock():
+def providers_lock(timeout: float | None = None):
     """Hold the providers.yaml edit lock (an flock on a sidecar
     ``providers.yaml.lock``) across a read-modify-write, so concurrent
     ``pm provider`` edits never lose one another's changes.  Readers need
-    no lock: :func:`save_providers` replaces the file atomically."""
+    no lock: :func:`save_providers` replaces the file atomically.
+
+    Waits at most *timeout* seconds (default
+    :data:`PROVIDERS_LOCK_TIMEOUT`) for the lock; a stuck holder then
+    raises :class:`ProvidersLockTimeout` instead of blocking every edit
+    forever.  An unwritable ``~/.pm`` raises :class:`ProvidersWriteError`.
+    The lock is not reentrant: a second :func:`providers_lock` in the same
+    process opens a new file description, which flocks against the first.
+    """
     import fcntl
-    path = _providers_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path.with_name(PROVIDERS_FILE + ".lock"), "a") as f:
-        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+
+    if timeout is None:
+        timeout = PROVIDERS_LOCK_TIMEOUT
+    try:
+        path = _providers_path()
+        lock_path = path.with_name(PROVIDERS_FILE + ".lock")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock_file = open(lock_path, "a")
+    except OSError as exc:
+        where = getattr(exc, "filename", None) or "~/.pm"
+        raise _write_error(where, exc) from exc
+
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                if exc.errno not in (errno.EACCES, errno.EAGAIN):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise ProvidersLockTimeout(
+                        f"timed out after {timeout:g}s waiting for the "
+                        f"providers.yaml edit lock ({lock_path}); another "
+                        "'pm provider' command may still be running. Wait "
+                        "for it to finish, then retry."
+                    ) from None
+                time.sleep(0.05)
         try:
             yield
         finally:
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+    finally:
+        lock_file.close()
 
 
 def save_providers(data: dict[str, Any]) -> None:
@@ -599,22 +697,34 @@ def save_providers(data: dict[str, Any]) -> None:
     rather than written through — safer for a credentials file, and
     intentional.  Callers that read, change and save hold
     :func:`providers_lock`.
+
+    An ``OSError`` from the write is raised as :class:`ProvidersWriteError`
+    naming the target; the temp file is removed and the old file is left
+    untouched.
     """
     import yaml
 
-    path = _providers_path()
+    try:
+        path = _providers_path()
+    except OSError as exc:
+        raise _write_error("~/.pm", exc) from exc
     text = yaml.dump(data, default_flow_style=False, sort_keys=False)
-    fd, tmp = tempfile.mkstemp(prefix=".providers.yaml.pm-", dir=str(path.parent))
+    try:
+        fd, tmp = tempfile.mkstemp(prefix=".providers.yaml.pm-", dir=str(path.parent))
+    except OSError as exc:
+        raise _write_error(str(path), exc) from exc
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(text)
         os.chmod(tmp, 0o600)
         os.replace(tmp, path)
-    except BaseException:
+    except BaseException as exc:
         try:
             os.unlink(tmp)
         except OSError:
             pass
+        if isinstance(exc, OSError):
+            raise _write_error(str(path), exc) from exc
         raise
     _log.info("Saved provider config to %s", path)
 
@@ -722,10 +832,21 @@ def get_default_provider() -> str:
 def set_default_provider(name: str) -> None:
     """Set the default provider in providers.yaml.
 
-    Raises :class:`ProvidersFileError` when the file cannot be changed.
+    The name is re-checked against the config read *inside* the edit lock,
+    so a concurrent ``pm provider remove <name>`` cannot leave ``default``
+    pointing at a provider that no longer exists.  The built-in ``claude``
+    is always accepted.
+
+    Raises :class:`ProviderNotFoundError` for a name that is not
+    configured, and :class:`ProvidersFileError` when the file cannot be
+    read or written.
     """
     with providers_lock():
         config = load_providers_for_edit()
+        if name != BUILTIN_CLAUDE and name not in config["providers"]:
+            raise ProviderNotFoundError(
+                f"Provider '{name}' not found. Add it first with "
+                "'pm provider add'.")
         config["default"] = name
         save_providers(config)
 

@@ -1,9 +1,11 @@
 """Provider management CLI commands."""
 
+from contextlib import contextmanager
+
 import click
 
 from pm_core.cli import cli
-from pm_core.model_config import EFFORT_LEVELS
+from pm_core.model_config import EFFORT_LEVELS, declared_efforts_text
 
 
 @cli.group("provider")
@@ -32,14 +34,18 @@ def provider_list():
             click.echo(f"  {p.name}{marker}  [built-in]")
         elif p.type == "router":
             effort = f"  effort={p.effort}" if p.effort else ""
+            supported = ("  supported_efforts=" + declared_efforts_text(p)
+                         if p.supported_efforts is not None else "")
             click.echo(f"  {p.name}{marker}  type=router  api_base={p.api_base}"
-                       f"  model={p.model or '(unset)'}{effort}")
+                       f"  model={p.model or '(unset)'}{effort}{supported}")
             for line in _router_detail_lines(p):
                 click.echo(f"    {line}")
         else:
             model_str = f"  model={p.model}" if p.model else ""
             if p.effort:
                 model_str += f"  effort={p.effort}"
+            if p.supported_efforts is not None:
+                model_str += "  supported_efforts=" + declared_efforts_text(p)
             click.echo(f"  {p.name}{marker}  type={p.type}  api_base={p.api_base}{model_str}")
             if p.capabilities:
                 click.echo(f"    capabilities: {', '.join(p.capabilities)}")
@@ -119,6 +125,28 @@ def _load_for_edit() -> dict:
         raise SystemExit(1)
 
 
+@contextmanager
+def _write_errors():
+    """Turn a providers.yaml write failure into one ``Error:`` line.
+
+    Covers an unwritable ``~/.pm`` (including ``pm_home()`` itself), a lock
+    that stays held past its timeout, and a failed atomic save.  A
+    ``SystemExit`` from the checks inside the block passes through, so a
+    refusal is never printed twice.
+    """
+    from pm_core.providers import ProvidersFileError
+    try:
+        yield
+    except ProvidersFileError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+    except OSError as exc:
+        target = getattr(exc, "filename", None) or "~/.pm"
+        click.echo(f"Error: cannot write {target}: {exc.strerror or exc}",
+                   err=True)
+        raise SystemExit(1)
+
+
 # Options shared by ``add`` and ``edit``: every providers.yaml field except
 # type and name.  ``edit`` leaves a field alone when its option is absent.
 _FIELD_OPTIONS = [
@@ -132,6 +160,15 @@ _FIELD_OPTIONS = [
                  type=click.Choice(list(EFFORT_LEVELS)),
                  help="Default effort for sessions on this provider (a PR's "
                       "own effort setting wins)"),
+    click.option("--supported-efforts", default=None,
+                 help="Comma-separated effort levels this provider's model/"
+                      f"route accepts ({','.join(EFFORT_LEVELS)}); used to "
+                      "verify effort settings (never sent to --effort)"),
+    click.option("--supported-efforts-source", default=None,
+                 help="Where the supported-efforts list came from"),
+    click.option("--supported-efforts-checked-at", default=None,
+                 help="ISO date (YYYY-MM-DD) the supported-efforts list was "
+                      "checked"),
     click.option("--capabilities", default=None,
                  help="Comma-separated capability tags"),
     click.option("--launcher", default=None,
@@ -159,7 +196,8 @@ _FIELD_OPTIONS = [
 _LIST_FIELDS = {"capabilities", "unset_env", "probe_models"}
 _CLEARABLE = ("api_key", "model", "effort", "capabilities", "launcher",
               "remedy", "classifier_model", "env", "unset_env",
-              "probe_models", "alias_models",
+              "probe_models", "alias_models", "supported_efforts",
+              "supported_efforts_source", "supported_efforts_checked_at",
               # retired keys pm ignores (providers.RETIRED_PROVIDER_KEYS)
               "credentials_file", "refresh_command")
 
@@ -173,9 +211,14 @@ def _field_options(f):
 def _apply_fields(entry: dict, opts: dict) -> None:
     """Write the given option values into a providers.yaml *entry*."""
     for key in ("api_base", "api_key", "model", "effort", "launcher",
-                "remedy", "classifier_model"):
+                "remedy", "classifier_model", "supported_efforts_source",
+                "supported_efforts_checked_at"):
         if opts.get(key) is not None:
             entry[key] = opts[key]
+    if opts.get("supported_efforts") is not None:
+        entry["supported_efforts"] = [
+            e.strip() for e in opts["supported_efforts"].split(",")
+            if e.strip()]
     if opts.get("capabilities") is not None:
         entry["capabilities"] = [c.strip() for c in
                                  opts["capabilities"].split(",") if c.strip()]
@@ -256,7 +299,8 @@ def provider_add(name: str, ptype: str, skip_check: bool, **opts):
     if ptype == "router":
         skip_check = True  # checked by 'pm provider test' instead
 
-    config = _load_for_edit()  # before the check, which may prompt
+    with _write_errors():
+        config = _load_for_edit()  # before the check, which may prompt
 
     if not skip_check:
         click.echo(f"Checking provider '{name}'...")
@@ -272,8 +316,8 @@ def provider_add(name: str, ptype: str, skip_check: bool, **opts):
                 click.echo("Aborted.")
                 raise SystemExit(1)
 
-    with providers_lock():  # re-read: another edit may have saved meanwhile
-        config = _load_for_edit()
+    with _write_errors(), providers_lock():  # re-read: another edit may have
+        config = _load_for_edit()            # saved meanwhile
         config["providers"][name] = entry
         save_providers(config)
     click.echo(f"Added provider '{name}' ({ptype}: {entry['api_base']})")
@@ -301,7 +345,7 @@ def provider_edit(name: str, ptype: str | None, clear: tuple, **opts):
     """
     from pm_core.providers import providers_lock, save_providers
 
-    with providers_lock():
+    with _write_errors(), providers_lock():
         config = _load_for_edit()
         entry = config["providers"].get(name)
         if not isinstance(entry, dict):
@@ -309,6 +353,7 @@ def provider_edit(name: str, ptype: str | None, clear: tuple, **opts):
                        f"with 'pm provider add {name} ...')", err=True)
             raise SystemExit(1)
         entry = dict(entry)
+        previous_model = entry.get("model")
         for key in clear:
             entry.pop(key, None)
         if ptype:
@@ -318,6 +363,17 @@ def provider_edit(name: str, ptype: str | None, clear: tuple, **opts):
         config["providers"][name] = entry
         save_providers(config)
     click.echo(f"Updated provider '{name}'")
+    # supported_efforts describes the model it was checked against: keeping
+    # it across a model change would present the old model's levels as the
+    # new one's.  Still a warning, not a refusal (the list is advisory).
+    if (opts.get("model") is not None and previous_model != entry.get("model")
+            and entry.get("supported_efforts") is not None
+            and opts.get("supported_efforts") is None):
+        click.echo(
+            f"Warning: supported_efforts was checked against "
+            f"{previous_model or '(no model)'}; re-check it for "
+            f"{entry.get('model')!r} and update --supported-efforts and "
+            "--supported-efforts-checked-at", err=True)
     _echo_provider(name)
 
 
@@ -360,6 +416,43 @@ def provider_detail_lines(p, *, status: bool = False) -> list[str]:
                          ("probe_models", ", ".join(p.probe_models))):
         if value:
             lines.append(f"  {label}: {value}")
+    from pm_core.model_config import (
+        AMBIENT_EFFORT_ENV, accepted_efforts_of, classify_effort_env,
+        effort_env_of, metadata_age_of,
+    )
+    if p.supported_efforts is not None:
+        # The declared list minus anything outside the Claude vocabulary
+        # (kept in the file for provenance, never sent to --effort).
+        usable = list(accepted_efforts_of(p) or ())
+        ignored = [e for e in p.supported_efforts if e not in EFFORT_LEVELS]
+        accepted = ", ".join(usable) or "(none)"
+        lines.append(f"  accepted Claude levels: {accepted}")
+        if ignored:
+            lines.append(f"  non-Claude levels kept for provenance: "
+                         f"{', '.join(ignored)}")
+        if p.supported_efforts_source:
+            lines.append(f"  supported_efforts source: "
+                         f"{p.supported_efforts_source}")
+        if p.supported_efforts_checked_at:
+            age = metadata_age_of(p)
+            # A future date (a typo, or a clock that moved back) has no
+            # meaningful age: print the date alone rather than "(-3 days
+            # old)".
+            suffix = ("" if age is None or age < 0
+                      else f" ({age} day{'s' if age != 1 else ''} old)")
+            lines.append(f"  supported_efforts checked: "
+                         f"{p.supported_efforts_checked_at}{suffix}")
+    assigned = effort_env_of(p)
+    if assigned is not None:
+        # Say what the assignment does: a level overrides --effort, while
+        # "auto"/"unset" (and a blank, which is still an exported
+        # assignment) explicitly means "no override".
+        kind, _level = classify_effort_env(assigned)
+        effect = {
+            "no_override": "(no override; --effort applies)",
+            "unknown": "(not a Claude effort level pm knows)",
+        }.get(kind, "(overrides --effort for this provider's sessions)")
+        lines.append(f"  effort env: {AMBIENT_EFFORT_ENV}={assigned} {effect}")
     if p.type == "router":
         lines.extend(f"  {line}" for line in _router_detail_lines(p))
     assign, unset = launch_env(p, p.env_vars(), p.model_flag(), environ={})
@@ -372,9 +465,9 @@ def provider_detail_lines(p, *, status: bool = False) -> list[str]:
         lines.append(f"  launch unsets: {', '.join(unset)}")
     lines.extend(f"  warning: {line}" for line in _retired_key_lines(p.name))
     if status and p.type == "router":
-        from pm_core import worker_route
+        from pm_core import router_route
         from pm_core.model_config import ModelResolution
-        st = worker_route.check_route(ModelResolution(provider=p.name))
+        st = router_route.check_route(ModelResolution(provider=p.name))
         lines.append("  status: OK" if st.ok else f"  status: {st.message()}")
     return lines
 
@@ -389,7 +482,7 @@ def provider_remove(name: str):
         click.echo("Cannot remove the built-in 'claude' provider.", err=True)
         raise SystemExit(1)
 
-    with providers_lock():
+    with _write_errors(), providers_lock():
         config = _load_for_edit()
         providers = config["providers"]
         if name not in providers:
@@ -414,16 +507,14 @@ def provider_default(name: str):
       pm provider default ollama
       pm provider default claude
     """
-    from pm_core.providers import set_default_provider
+    from pm_core.providers import ProviderNotFoundError, set_default_provider
 
-    config = _load_for_edit()
-    if name != "claude":
-        if name not in config["providers"]:
-            click.echo(f"Provider '{name}' not found. Add it first with 'pm provider add'.",
-                        err=True)
+    with _write_errors():
+        try:
+            set_default_provider(name)
+        except ProviderNotFoundError as exc:
+            click.echo(f"Error: {exc}", err=True)
             raise SystemExit(1)
-
-    set_default_provider(name)
     click.echo(f"Default provider set to '{name}'")
 
 
@@ -443,9 +534,10 @@ def provider_test(name: str | None, quick: bool, in_container: bool,
     function calling (required for Claude Code's agentic workflows).
     If NAME is omitted, tests the default provider.
 
-    For a router provider, runs the same preflight QA runs before every
-    routed launch (router port, launcher, and with --container the bridge
-    into a container); --live sends one prompt.
+    For a router provider, checks its settings and the router's port and,
+    with --container, the bridge into a throwaway pm container.  A launch
+    does not wait on that check: a router that is down fails inside the
+    session like any other provider.  --live sends one prompt.
     """
     from pm_core.providers import (
         get_provider, check_provider, ProviderNotFoundError,
@@ -482,21 +574,21 @@ def provider_test(name: str | None, quick: bool, in_container: bool,
 
 
 def _test_router(provider, *, in_container: bool, live: bool) -> None:
-    from pm_core import worker_route
+    from pm_core import router_route
     from pm_core.model_config import ModelResolution
 
     click.echo(f"  Router: {provider.api_base}  model: {provider.model}")
     for line in _router_detail_lines(provider):
         click.echo(f"  {line}")
     res = ModelResolution(provider=provider.name)
-    st = worker_route.check_route(res, container=in_container)
+    st = router_route.check_route(res, container=in_container)
     if not st.ok:
         click.echo(f"  Preflight: FAILED — {st.message()}", err=True)
         raise SystemExit(1)
     click.echo("  Preflight (host): OK")
     if not in_container:
         if live:
-            _report_probe(worker_route.live_probe(provider), provider)
+            _report_probe(router_route.live_probe(provider), provider)
         return
 
     import secrets
@@ -511,17 +603,17 @@ def _test_router(provider, *, in_container: bool, live: bool) -> None:
         container_mod.create_container(
             name=name, config=container_mod.load_container_config(),
             workdir=workdir,
-            extra_rw_mounts=worker_route.container_mounts(res))
-        st = worker_route.check_route(res, container=True,
+            extra_rw_mounts=router_route.container_mounts(res))
+        st = router_route.check_route(res, container=True,
                                       container_name=name)
         if not st.ok:
             click.echo(f"  Container route: FAILED — {st.message()}", err=True)
             raise SystemExit(1)
         click.echo(f"  Container route: OK (127.0.0.1 in {name} -> "
-                   f"{worker_route.bridge_socket(provider.name)} -> "
+                   f"{router_route.bridge_socket(provider.name)} -> "
                    f"{provider.api_base})")
         if live:
-            _report_probe(worker_route.live_probe(provider,
+            _report_probe(router_route.live_probe(provider,
                                                   container_name=name),
                           provider)
     finally:
@@ -531,7 +623,7 @@ def _test_router(provider, *, in_container: bool, live: bool) -> None:
 
 def _probe_mismatch(out: dict, provider) -> str:
     """Why a probe that reported no error failed, naming the models."""
-    from pm_core.worker_route import model_on_route
+    from pm_core.router_route import model_on_route
     requested = out.get("models") or []
     if not requested:
         return f"no model requested; expected only {provider.model}"

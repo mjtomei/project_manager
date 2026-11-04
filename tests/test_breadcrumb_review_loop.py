@@ -47,11 +47,15 @@ def _make_app(
     app = MagicMock()
     app._auto_start = auto_start
     app._auto_start_targets = {target: {}} if target else {}
-    app._auto_start_all = False
     app._auto_start_run_id = run_id
     app._review_loops = review_loops or {}
     app._root = root or Path("/tmp/pm-test")
-    app._data = {"prs": prs or []}
+    # Saved targets are validated against loaded PRs; default to the
+    # fixture target so review-loop tests exercise the valid migration path.
+    if prs is None:
+        prs = ([{"id": target, "status": "in_review", "workdir": "/tmp/wd"}]
+               if target else [])
+    app._data = {"prs": prs}
     from pm_core.watcher_manager import WatcherManager
     app._watcher_manager = WatcherManager()
     app._review_loop_timer = None
@@ -292,7 +296,9 @@ class TestConsumeBreadcrumbReviewLoops:
             "review_loops": {"pr-002": {"iteration": 1, "history": []}},
         }
         (tmp_path / "autostart-resume.json").write_text(json.dumps(breadcrumb_data))
-        app = _make_app(auto_start=False, root=tmp_path)
+        app = _make_app(auto_start=False, root=tmp_path,
+                        prs=[{"id": "pr-001", "status": "pending"},
+                             {"id": "pr-002", "status": "in_review"}])
         app._update_display = MagicMock()
         app.log_message = MagicMock()
 
@@ -950,7 +956,8 @@ class TestBreadcrumbSessionOwnership:
             "session": "pm-alpha", "auto_start": True,
             "targets": [{"pr_id": "pr-alpha"}], "all_mode": False,
         })
-        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app = _make_app(auto_start=False, target=None, root=tmp_path,
+                        prs=[{"id": "pr-alpha", "status": "pending"}])
         app._session_name = "pm-alpha"
         app._update_display = MagicMock()
         app.log_message = MagicMock()
@@ -967,7 +974,8 @@ class TestBreadcrumbSessionOwnership:
             "auto_start": True, "targets": [{"pr_id": "pr-legacy"}],
             "all_mode": False,
         })
-        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app = _make_app(auto_start=False, target=None, root=tmp_path,
+                        prs=[{"id": "pr-legacy", "status": "pending"}])
         app._session_name = "pm-alpha"
         app._update_display = MagicMock()
         app.log_message = MagicMock()
@@ -1006,7 +1014,8 @@ class TestBreadcrumbSessionOwnership:
             "session": "pm-alpha~1", "auto_start": True,
             "targets": [{"pr_id": "pr-alpha"}], "all_mode": False,
         })
-        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app = _make_app(auto_start=False, target=None, root=tmp_path,
+                        prs=[{"id": "pr-alpha", "status": "pending"}])
         app._session_name = "pm-alpha"
         app._update_display = MagicMock()
         app.log_message = MagicMock()
@@ -1050,22 +1059,27 @@ class TestCorruptBreadcrumbShapes:
             _run_async(consume_breadcrumb(app))
         return app
 
-    def test_non_string_run_id_does_not_crash_the_mount(self, tmp_path):
-        """``run_id`` names a directory; ``Path / 5`` used to raise TypeError."""
+    def test_non_string_run_id_rejects_the_restore(self, tmp_path):
+        """``run_id`` names a directory; a wrong-typed value is malformed
+        saved state (``Path / 5`` used to raise TypeError).  Fail closed,
+        preserve the evidence, and restore nothing."""
         self._write(tmp_path, {
             "auto_start": True,
             "targets": [{"pr_id": "pr-001"}],
             "run_id": 123,
         })
-        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app = _make_app(auto_start=False, target=None, root=tmp_path,
+                        prs=[{"id": "pr-001", "status": "pending"}])
         app._update_display = MagicMock()
         app.log_message = MagicMock()
 
         self._consume(tmp_path, app)  # must not raise
 
         assert not (tmp_path / "autostart-resume.json").exists()
-        # The corrupt value is dropped, not restored; a fresh run id is made.
-        assert isinstance(app._auto_start_run_id, str)
+        assert list(tmp_path.glob("autostart-resume.rejected-*.json"))
+        assert app._auto_start is False
+        assert app._auto_start_targets == {}
+        assert app._auto_start_run_id is None
 
     def test_wrong_typed_sections_are_ignored(self, tmp_path):
         self._write(tmp_path, {

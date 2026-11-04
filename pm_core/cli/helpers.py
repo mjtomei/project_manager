@@ -23,6 +23,7 @@ from pm_core.paths import configure_logger
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core import pane_registry
+from pm_core.pr_utils import TERMINAL_PR_STATES
 
 _log = configure_logger("pm.cli")
 
@@ -447,7 +448,8 @@ def _make_pr_entry(
     }
 
 
-def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
+def _record_status_timestamp(pr_entry: dict, status: str | None = None, *,
+                             previous_status: str | None = None) -> None:
     """Record timestamps on *pr_entry*.
 
     Always sets ``updated_at``.  When *status* is provided, also sets
@@ -457,9 +459,21 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
     * ``reviewed_at`` — updated each time the PR enters ``in_review``.
     * ``signed_off_at`` — updated each time the PR enters ``sign_off``.
     * ``merged_at`` — set when the PR is ``merged``.
+    * ``closed_at`` — set when the PR is ``closed`` (a retained historical
+      record, not a deletion).
+
+    ``closed_at`` is maintained as history, not as a cache of the current
+    status: any transition to another status drops it, and only a *fresh*
+    closure records one — pass *previous_status* so a repeat close (or an
+    edit that re-states ``closed``) keeps the original closure time, and so
+    an entry closed before the field existed keeps none instead of inventing
+    one.  It is keyword-only: every caller passes a status it computed, and a
+    positional slip would silently look like a previous status.
     """
     now = datetime.now(timezone.utc).isoformat()
     pr_entry["updated_at"] = now
+    if status is not None and status != "closed":
+        pr_entry.pop("closed_at", None)
     if status == "in_progress" and not pr_entry.get("started_at"):
         pr_entry["started_at"] = now
     elif status == "in_review":
@@ -468,6 +482,85 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
         pr_entry["signed_off_at"] = now
     elif status == "merged":
         pr_entry["merged_at"] = now
+    elif status == "closed" and previous_status != "closed":
+        pr_entry["closed_at"] = now
+
+
+def _terminal_status_at_lock(pr: dict | None) -> str | None:
+    """Return *pr*'s status when a launch command must not record its work.
+
+    ``pm pr start`` and ``pm pr review`` guard against a merged/closed PR from
+    their pre-lock snapshot, but they clone/push/create a draft PR before
+    writing the transition under the store lock.  A ``pm pr close`` (or a
+    merge) landing in that window would otherwise be resurrected: the launch
+    writes ``in_progress``/``in_review`` over the terminal record, which also
+    erases ``closed_at`` and (for a start) re-activates the retired PR.
+
+    Re-checking inside the lock makes the concurrent close win.  The caller
+    no-ops on a non-None result and reports it instead of proceeding.
+    """
+    status = (pr or {}).get("status") or "pending"
+    return status if status in TERMINAL_PR_STATES else None
+
+
+#: Sentinel returned by :func:`_launch_blocked_at_lock` when the record was
+#: deleted (``pm pr close --remove``) between a launch's pre-lock snapshot and
+#: its apply — distinct from a terminal status because the launch's wording
+#: has to say the record is gone, not that it is retired.
+LAUNCH_REMOVED_AT_LOCK = "removed"
+
+
+def _launch_blocked_at_lock(pr: dict | None) -> str | None:
+    """Return why a launch command must not record its work, or ``None``.
+
+    A launch (start/review/sign-off) checks its pre-lock snapshot, then does
+    real work — clone/push/draft-PR create, workdir resolution, window setup —
+    before writing its transition under the store lock.  Anything that lands
+    in that window must win:
+
+    * a ``pm pr close``/merge turns the record terminal — reported as its
+      status (see :func:`_terminal_status_at_lock`);
+    * ``pm pr close --remove`` deletes the record outright — reported as
+      ``"removed"``.  ``store.get_pr`` answers ``None`` then, and a launch that
+      treated that as "nothing to update" still printed its success line and
+      opened its window against a PR the registry no longer has (pr-62ad13d).
+    """
+    if pr is None:
+        return LAUNCH_REMOVED_AT_LOCK
+    return _terminal_status_at_lock(pr)
+
+
+def _report_launch_blocked(pr_id: str, blocked: str, *, doing: str,
+                           consequence: str) -> None:
+    """Report a launch that lost the store lock to a close/merge/removal.
+
+    ``doing`` is the gerund phrase after "while" (``"starting"``,
+    ``"opening the review"``) and ``consequence`` the clause after the em
+    dash.  The state wording — "was removed" versus "became <status>" — is
+    derived here from :func:`_launch_blocked_at_lock`'s result, so start,
+    review and sign-off cannot drift apart in the one sentence a user reads
+    when their launch was beaten by a concurrent close (pr-62ad13d).  Echoes
+    and exits 1; the caller must not have printed a success line or opened a
+    window yet.
+    """
+    state = ("was removed" if blocked == LAUNCH_REMOVED_AT_LOCK
+             else f"became {blocked}")
+    click.echo(f"PR {pr_id} {state} while {doing} — {consequence}", err=True)
+    raise SystemExit(1)
+
+
+def _closed_reopen_hint(pr_id: str, purpose: str | None = None) -> str:
+    """The refusal sentence for a command run against a retained closed PR.
+
+    A closed record is terminal — ``pm pr close`` keeps it as history — so
+    every lifecycle command refuses and names the one way back: an explicit
+    status edit.  Shared so the wording cannot drift between start, review,
+    QA, sign-off and merge: a user reading any refusal gets the same concrete
+    command.  *purpose* adds the command-specific verb ("to merge it").
+    """
+    hint = (f"PR {pr_id} is closed — reopen it first with "
+            f"'pm pr edit {pr_id} --status pending'")
+    return f"{hint} {purpose}." if purpose else f"{hint}."
 
 
 def _canonical_session(session: str) -> str:
@@ -1470,6 +1563,55 @@ def _registry_tui_pane(session: str) -> str | None:
     return None
 
 
+def _project_sessions(pm_root: Path):
+    """Live pm sessions of the project whose pm dir is *pm_root*.
+
+    Yields the session its tag names (``pm-<tag>``), then, only if that one
+    is not running, any other session that persisted *pm_root* as its
+    project (``paths.set_session_pm_root``).  The second case is a
+    ``pm session --global``/``--group`` session: its tag mixes in
+    ``PM_SHARE_MODE``, so a command that lacks it (a host-mode regression
+    run drops it, ``cli.qa._REGRESSION_SCRUBBED_ENV``) computes the plain
+    tag, which names no session (QA S16 vs R35).
+
+    Every pm session runs on its own tmux server (pr-073910f), so the
+    lookup is not scoped to whichever server ``PM_TMUX_SOCKET``/``$TMUX``
+    happens to name: a plain shell names the default server while the
+    project's session runs on its private socket.  The tag session is
+    resolved through :func:`tmux.find_session_server`; the fallback scans
+    the sessions of every pm server (``list_pm_sessions``).
+    """
+    from pm_core.paths import get_session_tag, sessions_dir
+    tag = get_session_tag(start_path=pm_root)
+    if tag:
+        session = f"pm-{tag}"
+        if tmux_mod.find_session_server(session)[0] is not None:
+            yield session
+            return
+    want = Path(pm_root).resolve()
+    for info in tmux_mod.list_pm_sessions():
+        sess = info["name"]
+        # ``list_pm_sessions`` already collapses grouped sessions into
+        # their base and skips a user's own views (so no ``pm_session_name``
+        # resolution is needed here), and it is the one enumeration that
+        # spans every pm server.  Do not filter on ``~``: only a numeric
+        # ``~N`` suffix is grouped, and a repo directory may put ``~`` in a
+        # session's own tag.
+        if not sess.startswith("pm-"):
+            continue
+        # Same ownership rule as the unscoped scan: outside a shared
+        # context, another user's planted socket is never adopted.
+        if _private_session_context() and not _server_owned_by_us(
+                info["socket"]):
+            continue
+        try:
+            persisted = (sessions_dir() / sess[3:] / "pm_root").read_text()
+        except OSError:
+            continue
+        if persisted.strip() and Path(persisted.strip()).resolve() == want:
+            yield sess
+
+
 def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     """Find the TUI pane in a pm session.
 
@@ -1492,12 +1634,13 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     If session is provided, uses that. Otherwise:
     - If inside a pm session (including a user's own grouped view of one,
       whose name need not be ``pm-*``), uses that session
+    - Otherwise, the session of the ``-C``/``PM_PROJECT`` project, if any
     - Otherwise, tries to find session matching current directory (only
       when the process is not inside a pm session: there the ambient
       session wins, see the comment on the cwd branch)
     - Falls back to scanning pm servers for a live TUI pane; when one of the
-      two branches above identified a session, only *that* session's server
-      is scanned (see the note on ``identified`` below).  With no session
+      branches above identified a session, only *that* session's server is
+      scanned (see the note on ``identified`` below).  With no session
       identified, only *this user's* servers are scanned, so the lookup can
       never resolve to another user's TUI (see ``_server_owned_by_us``).
     """
@@ -1520,11 +1663,12 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     # *different* pm session's live ``pm _tui`` pane would drive the wrong
     # TUI — the cross-session damage this whole change exists to prevent.
     identified: str | None = None
-    # The server that hosts the identified session (the ambient one, or the
-    # cwd session's).  Used only by the scan below, which normally finds it
-    # through `list_pm_sessions`: that enumerates *socket files*, so a
-    # server whose socket was unlinked while it kept running (an old pm's
-    # kill, or a cleaned /tmp/pm-sessions) would be invisible to it.
+    # The server that hosts the identified session (the ambient one, the
+    # project-override one, or the cwd session's).  Used only by the scan
+    # below, which normally finds it through `list_pm_sessions`: that
+    # enumerates *socket files*, so a server whose socket was unlinked
+    # while it kept running (an old pm's kill, or a cleaned
+    # /tmp/pm-sessions) would be invisible to it.
     identified_server: str | None = None
 
     # If in a pm session, use current
@@ -1561,6 +1705,35 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
             # `$TMUX` names the server this pane is on (review-loop b48f
             # i6).
             identified_server = tmux_mod.resolve_ambient_socket(pm_only=False)
+            pane_id = _registry_tui_pane(base)
+            if pane_id:
+                return pane_id, base
+
+    # Outside a pm session, a ``-C``/``PM_PROJECT`` project names the
+    # registry this command works on, and the cwd may be anywhere else.  A
+    # host-mode regression run files with ``pm -C <registry> pr add`` from
+    # its clone or its disposable test project, with TMUX scrubbed: by cwd
+    # alone its reload went to the first pm session with a TUI, or to the
+    # test project's own TUI, never the user's (QA S14, R35).  Same order
+    # as ``_get_pm_session``.
+    #
+    # Only when nothing above identified a session: inside a pm session the
+    # ambient one is the answer (the same rule as the cwd branch below).
+    if identified is None and _project_override:
+        for sess in _project_sessions(_project_override):
+            base = pane_registry.base_session_name(sess)
+            # Select the server hosting this session before reading its
+            # registry: every pm session runs on its own socket, and the
+            # registry probe below (and the caller's later tmux calls) must
+            # address that server, not whichever one this process happens
+            # to name.  Ownership follows the branch's rule: an implicit
+            # (project-derived) lookup in a private context never adopts
+            # another user's socket; inside a shared/joiner context the
+            # shared session is reachable.
+            if _select_session_socket(
+                    base,
+                    owned_only=_private_session_context()) is None:
+                continue
             pane_id = _registry_tui_pane(base)
             if pane_id:
                 return pane_id, base

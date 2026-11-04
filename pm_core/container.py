@@ -311,17 +311,96 @@ def _invalidate_image_exists_cache(tag: str | None = None) -> None:
             _image_exists_cache.pop(tag, None)
 
 
-def _runtime_available() -> bool:
-    """Check if the configured container runtime is available."""
+def _runtime_status() -> tuple[bool, str]:
+    """Check the configured container runtime, keeping the failure cause.
+
+    Returns ``(available, problem)``.  ``problem`` is a short human
+    diagnostic when unavailable (missing binary, timeout, nonzero ``info``);
+    it is ``""`` when the runtime answers.
+
+    Callers that must fail closed when container mode is enabled use this
+    (via :func:`container_preflight_error`) instead of the boolean-only
+    :func:`_runtime_available`, so the launch error names the original cause
+    and the user gets an actionable remedy.
+    """
     runtime = _get_runtime()
     try:
         result = subprocess.run(
             [runtime, "info"],
             capture_output=True, timeout=10,
         )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
+    except FileNotFoundError:
+        return False, f"container runtime '{runtime}' was not found on PATH"
+    except subprocess.TimeoutExpired:
+        return False, f"'{runtime} info' timed out after 10s"
+    except OSError as exc:
+        return False, f"could not run '{runtime} info': {exc}"
+    if result.returncode != 0:
+        raw = result.stderr or result.stdout or ""
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", "replace")
+        detail = str(raw).strip().splitlines()
+        message = f"'{runtime} info' exited {result.returncode}"
+        if detail:
+            message += f": {detail[0][:300]}"
+        return False, message
+    return True, ""
+
+
+def _runtime_available() -> bool:
+    """Check if the configured container runtime is available."""
+    return _runtime_status()[0]
+
+
+def container_preflight_error() -> str | None:
+    """Return why a container-mode launch cannot proceed, or ``None``.
+
+    ``None`` when container mode is disabled (host execution is intended) or
+    the runtime answers ``info``.  Otherwise the diagnostic from
+    :func:`_runtime_status`.
+    """
+    if not is_container_mode_enabled():
+        return None
+    ok, problem = _runtime_status()
+    return None if ok else problem
+
+
+def container_retry_remedy(first_step: str) -> str:
+    """The shared ``To retry:`` block for container-mode launch errors.
+
+    Every fail-closed container launch offers the same two remedies: fix the
+    runtime and retry, or deliberately give up the isolation with
+    ``pm container disable``.  *first_step* is the situation-specific half of
+    the first bullet (which runtime check to fix).  Keeping this in one place
+    stops the messages on the different launch paths from drifting apart.
+    """
+    return (
+        "To retry:\n"
+        f"  - {first_step}; or\n"
+        "  - if host execution is intended, disable container mode "
+        "explicitly with 'pm container disable'."
+    )
+
+
+def container_unavailable_message(problem: str) -> str:
+    """Actionable error for a container-mode launch blocked by the runtime.
+
+    Container mode is an execution boundary, not a best-effort preference:
+    the message states that no agent was launched on the host, names the
+    original cause, and gives both remedies (fix the runtime, or deliberately
+    disable container mode).
+    """
+    runtime = _get_runtime()
+    return (
+        "Container mode is enabled, but the container runtime is unavailable, "
+        "so no agent was launched on the host.\n\n"
+        f"Cause: {problem}\n\n"
+        "Container mode is an execution boundary, not a best-effort "
+        "preference; pm will not silently run this agent on the host.\n\n"
+        + container_retry_remedy(
+            f"start or install the '{runtime}' container runtime and verify "
+            f"that '{runtime} info' succeeds, then retry this launch")
+    )
 
 
 def load_container_config() -> ContainerConfig:
@@ -1185,7 +1264,7 @@ def wrap_claude_cmd(
             workdir share one, a container on a different workdir (e.g. a
             QA scenario clone) gets its own.
         provider: The provider *claude_cmd* was built for.  In container
-            mode a router provider (pm_core.worker_route) gets its host
+            mode a router provider (pm_core.router_route) gets its host
             bridge started and its socket dir mounted; a bridge or
             container that cannot be set up raises ContainerError.  Whether
             the router answers is not checked: a router that is down is an
@@ -1208,11 +1287,11 @@ def wrap_claude_cmd(
     # workers.  Never fall back to another account when an explicitly
     # selected route cannot be set up.
     if provider:
-        from pm_core import worker_route
+        from pm_core import router_route
         from pm_core.model_config import ModelResolution
         from pm_core.providers import ProviderNotFoundError
         try:
-            route_mounts = worker_route.container_mounts(
+            route_mounts = router_route.container_mounts(
                 ModelResolution(provider=provider), strict=True)
         except ProviderNotFoundError as exc:
             raise ContainerError(str(exc)) from exc
@@ -1220,7 +1299,7 @@ def wrap_claude_cmd(
         # container created before the route was selected cannot gain the
         # mount: its in-container ensure step would refuse to start Claude.
         if (route_mounts and container_is_running(cname)
-                and worker_route.container_has_route_mount(cname) is False):
+                and router_route.container_has_route_mount(cname) is False):
             raise ContainerError(
                 f"provider '{provider}': container {cname} is running "
                 "without the route socket mount. Remedy: end the "
@@ -1313,15 +1392,26 @@ def create_qa_container(
     session_tag: str | None = None,
     pr_id: str | None = None,
     route_mounts: dict[Path, str] | None = None,
+    extra_rw_mounts: dict[Path, str] | None = None,
+    extra_ro_mounts: dict[Path, str] | None = None,
 ) -> str:
     """Create a detached container for a QA scenario.
 
     Convenience wrapper around create_container with QA-specific mounts:
       - workdir at /workspace (rw) — a standalone clone, not a worktree
       - scratch at /scratch (rw)
-      - *route_mounts* (rw): the worker-route bridge socket directory
-        (pm_core.worker_route.container_mounts) when QA sessions in this
+      - *route_mounts* (rw): the route bridge socket directory
+        (pm_core.router_route.container_mounts) when QA sessions in this
         container use a router provider
+      - *extra_rw_mounts* (rw): anything else the caller grants, e.g. the
+        project pm dir a regression run files findings into
+      - *extra_ro_mounts* (ro): read-only mounts, which may overlay paths
+        inside an rw mount (the runtime mounts parents first), e.g. every
+        entry of that pm dir except the registry
+
+    *pr_id* also names the captures dir mounted at /pm-captures
+    (``captures/<pr_id>/``).  A regression run passes
+    ``regression/<test-id>/<run-id>`` so only that run's dir is mounted.
 
     The container has no access to the parent repo's git directory.
     If *allowed_push_branch* is set, a push proxy is started so the
@@ -1332,7 +1422,9 @@ def create_qa_container(
         config=config,
         workdir=workdir,
         extra_rw_mounts={scratch_path: _CONTAINER_SCRATCH,
-                         **(route_mounts or {})},
+                         **(route_mounts or {}),
+                         **(extra_rw_mounts or {})},
+        extra_ro_mounts=extra_ro_mounts,
         allowed_push_branch=allowed_push_branch,
         session_tag=session_tag,
         pr_id=pr_id,

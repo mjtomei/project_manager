@@ -1,17 +1,21 @@
 """Tests for pm_core.cli.helpers — shared CLI utility functions."""
 
 from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from pm_core.cli.helpers import (
+    LAUNCH_REMOVED_AT_LOCK,
     _get_session_name_for_cwd,
     _infer_pr_id,
     _make_pr_entry,
     _pr_display_id,
     _pr_id_sort_key,
     _record_status_timestamp,
+    _report_launch_blocked,
     _resolve_pr_id,
 )
 
@@ -259,6 +263,86 @@ class TestRecordStatusTimestamp:
         assert entry["started_at"] == "2024-01-01T00:00:00+00:00"
         # But updated_at should be refreshed
         assert entry["updated_at"] != "2024-01-01T00:00:00+00:00"
+
+
+# ---------------------------------------------------------------------------
+# _record_status_timestamp — closed_at is history, not a status cache
+# ---------------------------------------------------------------------------
+
+
+class TestRecordStatusTimestampClosedAt:
+    """``_record_status_timestamp`` owns the ``closed_at`` invariant
+    (pr-62ad13d): a fresh closure stamps it, re-stating ``closed`` keeps the
+    original time, and any other transition drops it — so the field can never
+    describe a status the PR is not in.  The CLI-level paths are covered in
+    ``test_pr_close.py``; these pin the contract at its single owner."""
+
+    def test_fresh_closure_stamps_closed_at(self):
+        entry = {"status": "in_review"}
+        _record_status_timestamp(entry, "closed", previous_status="in_review")
+        assert entry["closed_at"] == entry["updated_at"]
+
+    def test_restating_closed_keeps_the_original_time(self):
+        entry = {"status": "closed", "closed_at": "2024-01-01T00:00:00+00:00"}
+        _record_status_timestamp(entry, "closed", previous_status="closed")
+        assert entry["closed_at"] == "2024-01-01T00:00:00+00:00"
+        # updated_at still moves — the repeat action is recorded.
+        assert entry["updated_at"] != "2024-01-01T00:00:00+00:00"
+
+    def test_reopen_drops_closed_at(self):
+        entry = {"status": "closed", "closed_at": "2024-01-01T00:00:00+00:00"}
+        _record_status_timestamp(entry, "pending", previous_status="closed")
+        assert "closed_at" not in entry
+
+    @pytest.mark.parametrize("status", ["in_progress", "in_review", "qa",
+                                        "sign_off", "merged"])
+    def test_every_other_transition_drops_closed_at(self, status):
+        entry = {"status": "closed", "closed_at": "2024-01-01T00:00:00+00:00"}
+        _record_status_timestamp(entry, status, previous_status="closed")
+        assert "closed_at" not in entry
+
+    def test_updated_at_only_call_leaves_closed_at_alone(self):
+        entry = {"status": "closed", "closed_at": "2024-01-01T00:00:00+00:00"}
+        _record_status_timestamp(entry)  # e.g. a note/plan edit, no status change
+        assert entry["closed_at"] == "2024-01-01T00:00:00+00:00"
+
+    def test_previous_status_is_keyword_only(self):
+        entry = {"status": "in_review"}
+        with pytest.raises(TypeError):
+            _record_status_timestamp(entry, "closed", "in_review")
+
+
+# ---------------------------------------------------------------------------
+# _report_launch_blocked — one wording for a launch that lost the lock
+# ---------------------------------------------------------------------------
+
+
+class TestReportLaunchBlocked:
+    """The three launch commands pass their own ``doing``/``consequence``
+    clauses; the state half ("was removed" vs "became <status>") is derived
+    from ``_launch_blocked_at_lock``'s result here, so the sentence a user
+    reads when a concurrent close beat their launch cannot drift apart
+    (pr-62ad13d)."""
+
+    def test_removed_record_reads_was_removed(self, capsys):
+        with pytest.raises(SystemExit) as exc:
+            _report_launch_blocked(
+                "pr-001", LAUNCH_REMOVED_AT_LOCK, doing="starting",
+                consequence="not recording the start.")
+        assert exc.value.code == 1
+        assert capsys.readouterr().err.strip() == (
+            "PR pr-001 was removed while starting — not recording the start.")
+
+    def test_terminal_status_reads_became(self, capsys):
+        with pytest.raises(SystemExit) as exc:
+            _report_launch_blocked(
+                "pr-001", "closed", doing="opening the review",
+                consequence="not marked in_review and no review window was "
+                            "opened.")
+        assert exc.value.code == 1
+        assert capsys.readouterr().err.strip() == (
+            "PR pr-001 became closed while opening the review — not marked "
+            "in_review and no review window was opened.")
 
 
 # ---------------------------------------------------------------------------
@@ -771,6 +855,145 @@ class TestFindLiveTuiPane:
                    return_value=empty), \
              self._panes("%3:pm-test:bash\n"):
             assert _find_live_tui_pane("pm-test") == (None, "pm-test")
+
+
+class TestFindTuiPaneProjectOverride:
+    """Outside a pm session, ``-C <registry>`` names the TUI to reload.
+
+    A host-mode regression run has TMUX scrubbed and files its findings with
+    ``pm -C <user project>/pm pr add`` from its clone or its disposable test
+    project.  Resolving by cwd alone reloaded the first pm session with a
+    TUI (another project's) or the test project's own TUI, so the user's
+    TUI never showed the filed PR until ``r`` (QA S14, R35).
+    """
+
+    SESSIONS = ("pm-aproj-1111", "pm-mproj-2222", "pm-ztest-3333")
+
+    @pytest.fixture
+    def env(self, monkeypatch, tmp_path):
+        from pm_core import paths
+        from pm_core.cli import helpers
+        tags = {str(tmp_path / "mproj" / "pm"): "mproj-2222",
+                str(tmp_path / "clone"): "repo-9999",
+                str(tmp_path / "ztest"): "ztest-3333"}
+        for d in ("mproj/pm", "clone", "ztest", "home"):
+            (tmp_path / d).mkdir(parents=True)
+        # Persisted session pm_roots live under ~/.pm/sessions/.
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        monkeypatch.setattr(
+            paths, "get_session_tag",
+            lambda start_path=None, use_github_name=True:
+                tags.get(str(start_path or Path.cwd())))
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: False)
+        # Every pm session runs on its own tmux server (pr-073910f): the
+        # lookup resolves the session's server (find_session_server) and the
+        # cross-server scan enumerates every pm server (list_pm_sessions),
+        # instead of trusting whichever server this process names.
+        monkeypatch.setattr(
+            helpers.tmux_mod, "find_session_server",
+            lambda name, owned_only=False: (
+                (f"/tmp/pm-sessions/{name}", True)
+                if name in self.SESSIONS else (None, False)))
+        monkeypatch.setattr(
+            helpers.tmux_mod, "list_pm_sessions",
+            lambda **kw: [{"name": s, "socket": f"/tmp/pm-sessions/{s}",
+                           "attached": 0, "shared": False}
+                          for s in self.SESSIONS])
+        # The scan attributes a recorded pane only while it is alive.
+        monkeypatch.setattr(helpers.tmux_mod, "pane_exists",
+                            lambda pane_id: True)
+        # The scan re-points PM_TMUX_SOCKET at each server it probes; give
+        # the test a known ambient value so monkeypatch restores the
+        # process's own setting at teardown.
+        monkeypatch.setenv("PM_TMUX_SOCKET", "/tmp/ambient-test.sock")
+        monkeypatch.setattr(
+            helpers.pane_registry, "load_registry",
+            lambda s: {"session": s, "generation": "1", "windows": {
+                "@0": {"panes": [{"id": f"%{s[-4:]}", "role": "tui",
+                                  "order": 0, "cmd": "pm _tui"}]}}})
+        monkeypatch.setattr(helpers, "_project_override", None)
+        return SimpleNamespace(helpers=helpers, root=tmp_path)
+
+    def test_filing_from_a_clone_reaches_the_registry_session(
+            self, env, monkeypatch):
+        monkeypatch.chdir(env.root / "clone")
+        # Without -C the clone matches no session: the scan picks the first
+        # pm session with a TUI, as before.
+        assert env.helpers._find_tui_pane() == ("%1111", "pm-aproj-1111")
+        monkeypatch.setattr(env.helpers, "_project_override",
+                            env.root / "mproj" / "pm")
+        assert env.helpers._find_tui_pane() == ("%2222", "pm-mproj-2222")
+
+    def test_filing_from_another_live_project_reaches_the_registry_session(
+            self, env, monkeypatch):
+        monkeypatch.chdir(env.root / "ztest")
+        assert env.helpers._find_tui_pane() == ("%3333", "pm-ztest-3333")
+        monkeypatch.setattr(env.helpers, "_project_override",
+                            env.root / "mproj" / "pm")
+        assert env.helpers._find_tui_pane() == ("%2222", "pm-mproj-2222")
+
+    def test_current_pm_session_still_wins(self, env, monkeypatch):
+        monkeypatch.chdir(env.root / "clone")
+        monkeypatch.setattr(env.helpers, "_project_override",
+                            env.root / "mproj" / "pm")
+        monkeypatch.setattr(env.helpers.tmux_mod, "in_tmux", lambda: True)
+        monkeypatch.setattr(env.helpers.tmux_mod, "get_session_name",
+                            lambda: "pm-ztest-3333")
+        assert env.helpers._find_tui_pane() == ("%3333", "pm-ztest-3333")
+
+    def test_override_without_a_live_session_falls_through_to_cwd(
+            self, env, monkeypatch, tmp_path):
+        monkeypatch.chdir(env.root / "ztest")
+        (tmp_path / "gone").mkdir()
+        monkeypatch.setattr(env.helpers, "_project_override",
+                            tmp_path / "gone")
+        assert env.helpers._find_tui_pane() == ("%3333", "pm-ztest-3333")
+
+    def _share_mode_session(self, env, monkeypatch):
+        """Make mproj's live session a ``pm session --global`` one: its name
+        carries the share-mode tag, which a run without PM_SHARE_MODE does
+        not compute, and it persisted mproj's pm dir as its project."""
+        sessions = ("pm-aproj-1111", "pm-mproj-5555", "pm-ztest-3333")
+        monkeypatch.setattr(self, "SESSIONS", sessions)
+        sd = env.root / "home" / ".pm" / "sessions"
+        for tag, root in (("mproj-5555", env.root / "mproj" / "pm"),
+                          ("aproj-1111", env.root / "aproj" / "pm")):
+            (sd / tag).mkdir(parents=True)
+            (sd / tag / "pm_root").write_text(f"{root}\n")
+
+    def test_filing_reaches_a_share_mode_registry_session(self, env,
+                                                          monkeypatch):
+        self._share_mode_session(env, monkeypatch)
+        monkeypatch.chdir(env.root / "ztest")
+        monkeypatch.setattr(env.helpers, "_project_override",
+                            env.root / "mproj" / "pm")
+        # Not the test project's own TUI (cwd), nor the first one listed.
+        assert env.helpers._find_tui_pane() == ("%5555", "pm-mproj-5555")
+
+    def test_share_mode_lookup_matches_only_the_registry_project(
+            self, env, monkeypatch, tmp_path):
+        self._share_mode_session(env, monkeypatch)
+        monkeypatch.chdir(env.root / "ztest")
+        (tmp_path / "other" / "pm").mkdir(parents=True)
+        monkeypatch.setattr(env.helpers, "_project_override",
+                            tmp_path / "other" / "pm")
+        # No session persisted that project: falls through to the cwd.
+        assert env.helpers._find_tui_pane() == ("%3333", "pm-ztest-3333")
+
+    def test_reload_signals_the_registry_sessions_tui(self, env,
+                                                      monkeypatch):
+        monkeypatch.chdir(env.root / "clone")
+        monkeypatch.setattr(env.helpers, "_project_override",
+                            env.root / "mproj" / "pm")
+        seen = []
+        monkeypatch.setattr(
+            env.helpers, "_validate_tui_owner",
+            lambda s: (seen.append(s), (None, None, None,
+                                        SimpleNamespace(message="stop")))[1])
+        with patch("pm_core.home_window.refresh_home") as home:
+            assert env.helpers.trigger_tui_reload() is False
+        assert seen == ["pm-mproj-2222"]
+        home.assert_called_once_with("pm-mproj-2222")
 
 
 # ---------------------------------------------------------------------------

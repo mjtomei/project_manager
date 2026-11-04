@@ -22,7 +22,9 @@ from rich.console import RenderableType
 
 from pm_core.pr_utils import usable_prs
 from pm_core.tui import item_message, perf
-from pm_core.tui.tree_layout import compute_tree_layout, SORT_FIELDS, SORT_FIELD_KEYS
+from pm_core.tui.tree_layout import (
+    compute_tree_layout, passes_status_filter, SORT_FIELDS, SORT_FIELD_KEYS,
+)
 
 
 STATUS_ICONS = {
@@ -856,6 +858,77 @@ class TechTree(Widget):
             self.refresh()
             self.call_after_refresh(self._scroll_selected_into_view)
 
+    # -- fuzzy-select support -----------------------------------------------
+
+    def passes_filters(self, pr: dict) -> bool:
+        """True if *pr* is shown under the current status/merged/closed
+        filters (plan collapsing aside — ``select_pr`` expands that)."""
+        return passes_status_filter(
+            pr, status_filter=self._status_filter,
+            hide_merged=self._hide_merged, hide_closed=self._hide_closed)
+
+    def is_navigable(self, pr_id: str) -> bool:
+        """True if ``select_pr(pr_id)`` can put the cursor on *pr_id*."""
+        pr = self._pr_map.get(pr_id)
+        return pr is not None and self.passes_filters(pr)
+
+    def pr_nav_positions(self) -> dict[str, int]:
+        """Map PR id -> index in navigation order, for proximity ranking.
+
+        PRs inside a collapsed plan group take the index of that group's
+        ``_hidden:<plan>`` label; PRs that are filtered out are absent.
+        """
+        positions = {pid: i for i, pid in enumerate(self._ordered_ids)
+                     if not pid.startswith("_hidden:")}
+        label_pos = {pid[len("_hidden:"):]: i
+                     for i, pid in enumerate(self._ordered_ids)
+                     if pid.startswith("_hidden:")}
+        if label_pos:
+            for pr in self._prs:
+                plan_id = pr.get("plan") or "_standalone"
+                if (pr["id"] not in positions and plan_id in label_pos
+                        and self.passes_filters(pr)):
+                    positions[pr["id"]] = label_pos[plan_id]
+        return positions
+
+    def plan_nav_positions(self) -> dict[str, int]:
+        """Map plan id -> navigation index of the plan's first shown PR
+        (where ``plan select`` lands), for proximity ranking in the same
+        index space as :meth:`pr_nav_positions`.  A collapsed plan takes its
+        ``_hidden:<plan>`` label's index; plans with nothing shown are
+        absent."""
+        positions: dict[str, int] = {}
+        for pr_id, pos in self.pr_nav_positions().items():
+            plan_id = self._pr_map[pr_id].get("plan") or "_standalone"
+            if plan_id not in positions or pos < positions[plan_id]:
+                positions[plan_id] = pos
+        return positions
+
+    def plan_pr_counts(self, plan_id: str) -> tuple[int, int]:
+        """(PRs in *plan_id*, of those shown under the current filters)."""
+        total = shown = 0
+        for pr in self._pr_map.values():
+            if (pr.get("plan") or "_standalone") == plan_id:
+                total += 1
+                shown += self.passes_filters(pr)
+        return total, shown
+
+    def first_pr_in_plan(self, plan_id: str) -> str | None:
+        """Expand *plan_id* if collapsed and return its first PR in
+        navigation order, or None if the plan has no PR shown under the
+        current filters (nothing is expanded then)."""
+        if not self.plan_pr_counts(plan_id)[1]:
+            return None
+        if plan_id in self._hidden_plans:
+            self._hidden_plans.discard(plan_id)
+            self._recompute()
+            self.refresh(layout=True)
+        for pid in self._ordered_ids:
+            pr = self._pr_map.get(pid)
+            if pr is not None and (pr.get("plan") or "_standalone") == plan_id:
+                return pid
+        return None
+
     def update_plans(self, plans: list[dict]) -> None:
         """Store plan name mapping for label rendering."""
         self._plan_map = {p["id"]: p for p in plans if p.get("id")}
@@ -1044,6 +1117,14 @@ class TechTree(Widget):
             return f"All PRs hidden ({hidden_count} plan(s)). Press x to show all."
         if not visible and self._status_filter:
             return f"No {self._status_filter} PRs. Press F to cycle filter."
+        if not visible:
+            # Every PR is hidden by the default hide-closed / hide-merged
+            # toggles with no status filter.  A closed PR now keeps its
+            # registry entry, so this is the ordinary state of a project whose
+            # work is all closed; without a message the tree mounts no
+            # children and Textual paints the widget's repr ("TechTree#…")
+            # in the grid.
+            return "No PRs to show. Press F to cycle filter."
         return None
 
     def _rebuild(self) -> None:

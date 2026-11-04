@@ -22,6 +22,7 @@ from pm_core import tmux as tmux_mod
 from pm_core.paths import char_width as _char_width
 from pm_core.paths import display_width as _display_width
 from pm_core.paths import pm_home
+from pm_core.pr_utils import TERMINAL_PR_STATES
 
 
 WINDOW_NAME = "pm-home"
@@ -149,7 +150,7 @@ def _render_content(width: int, height: int) -> str:
                          width)
 
     prs = data.get("prs") or []
-    prs = [p for p in prs if p.get("status") not in ("closed", "merged")]
+    prs = [p for p in prs if p.get("status") not in TERMINAL_PR_STATES]
     prs = sorted(
         prs,
         key=lambda p: p.get("updated_at") or p.get("created_at") or "",
