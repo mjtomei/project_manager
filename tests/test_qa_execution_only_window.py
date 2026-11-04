@@ -99,3 +99,39 @@ class TestExecutionOnlyMainPane:
             "/qa/status.json",
             session,
         ]
+
+
+class TestResumedRunWindow:
+    """QA S78: a run resumed because its session is gone gets its window back.
+
+    The scenario windows are relaunched by the verdict poll, but nothing
+    recreated the main QA window, so a resumed run had no planner slot and
+    no status dashboard.
+    """
+
+    @patch("pm_core.qa_loop._add_status_pane")
+    @patch("pm_core.qa_loop._ensure_qa_main_pane", return_value="%9")
+    @patch("pm_core.tmux.find_window_by_name", return_value=None)
+    def test_missing_window_is_recreated_with_the_dashboard(
+            self, mock_find, mock_main, mock_status):
+        qa_loop._recreate_qa_window_if_missing(
+            "pm-test", "qa-pr-001", "/wd", "/qa/status.json")
+
+        mock_main.assert_called_once_with("pm-test", "qa-pr-001", "/wd")
+        mock_status.assert_called_once_with(
+            "pm-test", "%9", "/qa/status.json")
+
+    @patch("pm_core.qa_loop._add_status_pane")
+    @patch("pm_core.qa_loop._ensure_qa_main_pane")
+    @patch("pm_core.tmux.find_window_by_name",
+           return_value={"id": "@5", "index": "3", "name": "qa-pr-001"})
+    def test_existing_window_is_left_alone(self, mock_find, mock_main,
+                                           mock_status):
+        """An ordinary TUI restart keeps the window; a second dashboard
+        split into it would be wrong."""
+        qa_loop._recreate_qa_window_if_missing(
+            "pm-test", "qa-pr-001", "/wd", "/qa/status.json")
+
+        mock_main.assert_not_called()
+        mock_status.assert_not_called()
+

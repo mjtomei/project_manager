@@ -1576,6 +1576,31 @@ def test_resumed_run_uses_own_session_when_its_session_is_gone(tmp_path):
     assert _resume_in(tmp_path, live_sessions={"pm-clone-a"}) == "pm-clone-a"
 
 
+def test_resume_asks_for_its_main_window_back(tmp_path):
+    """QA S78: a run resumed because its session is gone lost its windows.
+
+    The execution phase relaunches the scenario windows; the main QA window
+    (planner slot + status dashboard) has to be recreated too, and only the
+    resume path may do it (an ordinary restart keeps the window)."""
+    pm_dir = tmp_path / "pm"
+    pm_dir.mkdir()
+    wd = tmp_path / "wd"
+    wd.mkdir()
+    pr = {"id": "pr-001", "title": "T", "branch": "b", "status": "qa",
+          "workdir": str(wd), "notes": []}
+    store.save({"project": {"name": "test", "repo": "/tmp/r",
+                            "base_branch": "master"}, "prs": [pr]}, pm_dir)
+    state = _make_state(tmp_path / "qa")
+    state.session_tag = "clone-b"
+    with patch.object(qa_loop, "get_pm_session", return_value="pm-clone-a"), \
+         patch("pm_core.tmux.session_exists", return_value=False), \
+         patch.object(qa_loop, "_execute_and_finalize",
+                      return_value=state) as run:
+        qa_loop.resume_qa_sync(state, pm_dir, pr)
+
+    assert run.call_args.kwargs["ensure_window"] is True
+
+
 @pytest.mark.parametrize("stale_loop", ["aaa", "zzz"])
 @pytest.mark.parametrize("stale_mtime", [1_000_000, 4_000_000_000])
 def test_resume_prefers_live_snapshot_over_superseded_run(tmp_path,

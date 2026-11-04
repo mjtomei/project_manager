@@ -5491,6 +5491,37 @@ def _add_status_pane(session: str, planner_pane: str, status_path) -> None:
         _log.exception("Failed to create status pane")
 
 
+def _recreate_qa_window_if_missing(session: str, window_name: str,
+                                   workdir_path: str | None,
+                                   status_path) -> None:
+    """Recreate a resumed run's main QA window when it is gone (QA S78).
+
+    A run is resumed in this session when the session that launched it is
+    gone, so its windows went with that server.  ``_poll_tmux_verdicts``
+    relaunches the dead scenario windows, but nothing recreated the main QA
+    window: the run came back with no planner slot and no status dashboard.
+    ``_ensure_qa_main_pane`` already exists for exactly this ("windows
+    recreated after the previous one was killed"), so create the window and
+    split the dashboard beside its main pane.
+
+    An ordinary restart keeps the window; splitting the dashboard into it
+    again would leave two dashboards, so only a missing window is recreated.
+    """
+    from pm_core import tmux as tmux_mod
+
+    try:
+        if tmux_mod.find_window_by_name(session, window_name):
+            return
+        main_pane = _ensure_qa_main_pane(session, window_name, workdir_path)
+        if main_pane:
+            _add_status_pane(session, main_pane, status_path)
+    except Exception:
+        # Never fail the resumed run because its window could not be drawn;
+        # the verdict polling below still drives it.
+        _log.exception("Failed to recreate QA window %s for %s",
+                       window_name, session)
+
+
 def run_qa_sync(
     state: QALoopState,
     pm_root: Path,
@@ -6145,6 +6176,7 @@ def _execute_and_finalize(
     concurrency_cap: int,
     queued_scenarios: list[QAScenario],
     notify: Callable[[], None],
+    ensure_window: bool = False,
 ) -> QALoopState:
     """Poll scenarios for verdicts, aggregate, persist, and finalize.
 
@@ -6167,6 +6199,17 @@ def _execute_and_finalize(
     new result instead of leaving the run dead.
     """
     queued_indices = {s.index for s in queued_scenarios}
+
+    if ensure_window:
+        # A run is resumed here because the session that launched it is gone
+        # (its windows went with that server) or its window was killed: the
+        # main QA window is then missing, and nothing else recreates it —
+        # ``_poll_tmux_verdicts`` only relaunches the scenario windows — so
+        # the user loses the planner slot and the status dashboard.  An
+        # ordinary restart keeps the window, so this must not split a second
+        # dashboard into it.
+        _recreate_qa_window_if_missing(session, window_name, workdir_path,
+                                       status_path)
 
     # Snapshot resumable state before the blocking poll so an early
     # restart can pick the run back up.
@@ -6633,6 +6676,7 @@ def _resume_qa_sync(
         concurrency_cap=concurrency_cap,
         queued_scenarios=queued_scenarios,
         notify=_notify,
+        ensure_window=True,
     )
 
 
