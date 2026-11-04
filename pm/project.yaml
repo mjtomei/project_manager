@@ -4419,7 +4419,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-11-04T21:07:46.176102+00:00'
+  updated_at: '2026-11-04T22:09:19.113897+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -9733,6 +9733,21 @@ prs:
       the story 3 Then names.'
     created_at: '2026-11-04T21:07:46Z'
     last_edited: '2026-11-04T21:07:46Z'
+  - id: note-ddd2ef3
+    text: 'QA S90 (R14: -C/PM_PROJECT across servers) PASS 6/6 on 73ed2eb0, no source
+      changes; captures /pm-captures/scenarios/90. Fixture notes for the next run:
+      (1) /tmp/pm-sessions had leftovers from an earlier S90 run (pm-projA owned by
+      pm, pm-projB planted by qaother) — removed before building the Given, since
+      the fallback scan picks the first user-owned live TUI; (2) stories that use
+      the legacy default server must export TMUX_TMPDIR matching $DEFAULT_SOCK, else
+      the -C lookup falls back to another project (this broke the first story-5 take);
+      (3) a story-4 variant-(a) take recorded from inside a scaffold tmux pane (ambient
+      TMUX set, outside the plain-shell Given) once printed "No TUI pane found" right
+      after a session restart; not reproducible in 3 ambient rounds, 2 script reruns,
+      or the plain-shell recording — worth watching for a last-resort-scan flake after
+      session recreation.'
+    created_at: '2026-11-04T22:09:19Z'
+    last_edited: '2026-11-04T22:09:19Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
