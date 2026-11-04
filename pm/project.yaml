@@ -35203,6 +35203,20 @@ prs:
       (cast + mp4 + manifest each; tmux captures also have transcript.log).'
     created_at: '2026-11-04T05:15:46Z'
     last_edited: '2026-11-04T05:15:46Z'
+  - id: note-cbb7afa
+    text: 'QA S27 (regression isolation) PASS 4/4 at 41425435e. Fixture gotchas for
+      the next run: (1) story 1s Given (empty regression library) must use a FRESH
+      project — once story 2 scaffolds `anything`, `pm qa regression anything` runs
+      instead of refusing and `pm qa launch regression:anything` exits 0; (2) the
+      TUI command bar logs `Launched qa-item pane` (it does not name the regression)
+      and opens the run in a pane of the `qa-<id>` window, not the main window — capture
+      it within the fake `hold` or it closes; (3) this container HOME already held
+      `~/.pm/workdirs/qa/regression-anything-*` from another project (session regtest-1793763839-d196d640),
+      so the no-leftover assertion is a before/after diff, not an empty directory;
+      (4) `agg` is absent — installed the aarch64 static binary into the scratchpad
+      for the mp4 renders. Captures: /pm-captures/scenarios/27/.'
+    created_at: '2026-11-04T04:15:10Z'
+    last_edited: '2026-11-04T04:15:10Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-fa9f172-self-documenting-consistent-pm-comma-0c82d63b
   model: provider:deepseek-flash
   effort: high
